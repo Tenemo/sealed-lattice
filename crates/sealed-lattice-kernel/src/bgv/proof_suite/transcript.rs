@@ -1687,13 +1687,17 @@ impl CommonProofTranscriptSchedule {
     }
 
     /// Exact transcript-hash ceiling through the row-code successor handoff.
-    /// The returned state includes the opening-mask evaluation response that
-    /// consumes the final common-prefix challenge. It excludes the successor
-    /// protocol schedule and every later row-code or WHIR message.
+    /// The returned state includes the opening-mask evaluations as an
+    /// unchallenged typed prover round with its response-binding hash. It
+    /// excludes the successor protocol schedule and every later row-code or
+    /// WHIR message.
     #[cfg(test)]
     pub(crate) fn maximum_row_code_whir_handoff_hash_query_count(
         &self,
     ) -> Result<u64, TranscriptError> {
+        if self.privacy_mode != CommonProofPrivacyMode::SecretBearing {
+            return Err(TranscriptError::InvalidCommonProofSchedule);
+        }
         let mut counter = TranscriptHashQueryCounter::new();
 
         for _ in &self.ordered_base_tree_ordinals {
@@ -1725,16 +1729,10 @@ impl CommonProofTranscriptSchedule {
             )?)?;
         }
         counter.absorb_response()?;
-        if self.privacy_mode == CommonProofPrivacyMode::SecretBearing {
-            counter.absorb_response()?;
-        }
-        for _ in 0..self.opening_claim_count {
-            counter.begin_challenge(maximum_extension_challenge_hash_count(
-                self.maximum_candidate_draws_per_output,
-            )?)?;
-        }
-        // `RowCodeWhirTranscript::from_common_prefix` immediately absorbs the
-        // checked opening-mask evaluations and closes the last challenge.
+        counter.absorb_response()?;
+        // The row-code successor absorbs the checked opening-mask evaluations
+        // as an ordinary typed prover round. No opening-batch challenge is
+        // sampled or pending at this handoff.
         counter.absorb_response()?;
         counter.finish()
     }
@@ -1743,11 +1741,13 @@ impl CommonProofTranscriptSchedule {
     pub(crate) fn maximum_row_code_whir_handoff_logical_verifier_message_count(
         &self,
     ) -> Result<u64, TranscriptError> {
+        if self.privacy_mode != CommonProofPrivacyMode::SecretBearing {
+            return Err(TranscriptError::InvalidCommonProofSchedule);
+        }
         u64::try_from(self.ordered_application_challenge_groups.len())
             .map_err(|_| TranscriptError::ChallengeCounterOverflow)?
             .checked_add(u64::from(self.composition_challenge_count))
             .and_then(|count| count.checked_add(u64::from(self.deep_point_count)))
-            .and_then(|count| count.checked_add(u64::from(self.opening_claim_count)))
             .ok_or(TranscriptError::ChallengeCounterOverflow)
     }
 
@@ -2597,7 +2597,11 @@ impl CommonProofTranscript {
         self,
         opening_batch_mask_evaluations: &[ProofChallengeExtensionElement],
     ) -> Result<RowCodeWhirTranscript, TranscriptError> {
-        if self.progress != CommonProofProgress::FriFoldChallenge(0) {
+        if self.schedule.privacy_mode != CommonProofPrivacyMode::SecretBearing
+            || self.progress != CommonProofProgress::OpeningBatchChallenges(0)
+            || self.transcript.pending_common_challenge.is_some()
+            || self.hash_query_counter.pending_challenge
+        {
             return Err(TranscriptError::IncompleteCommonProofTranscript);
         }
         RowCodeWhirTranscript::from_common_prefix(
@@ -2722,8 +2726,8 @@ impl RowCodeWhirTranscriptSummary {
 
 /// The sole typed Fiat-Shamir state for the row-code construction. It consumes
 /// the live common-proof prefix instead of hashing a digest into a second
-/// challenger, so an accepted opening-batch challenge remains pending until the
-/// mask evaluations answer it.
+/// challenger. The checked mask evaluations enter as an ordinary typed prover
+/// round with no preceding opening-batch challenge.
 #[derive(Clone, Debug)]
 pub(crate) struct RowCodeWhirTranscript {
     transcript: CanonicalProofTranscript,
@@ -3579,7 +3583,7 @@ mod common_challenge_chain_tests {
 
     use super::{
         CanonicalProofTranscript, CommonChallengeStream, CommonProofApplicationChallengeGroup,
-        CommonProofChallenge, CommonProofPrivacyMode, CommonProofRound,
+        CommonProofChallenge, CommonProofPrivacyMode, CommonProofRound, CommonProofTranscript,
         CommonProofTranscriptSchedule, TRANSCRIPT_SQUEEZE_DOMAIN, TranscriptError,
         product_residue_candidate_byte_length, product_residue_candidate_xof_input, transcript_xof,
     };
@@ -3595,6 +3599,72 @@ mod common_challenge_chain_tests {
 
     fn alpha_challenge() -> CommonProofChallenge {
         CommonProofChallenge::Alpha { modulus_ordinal: 0 }
+    }
+
+    fn transcript_after_deep_values(privacy_mode: CommonProofPrivacyMode) -> CommonProofTranscript {
+        let schedule = CommonProofTranscriptSchedule::new(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            2,
+            128,
+            privacy_mode,
+        )
+        .expect("the minimal transcript schedule is valid");
+        let mut transcript = CommonProofTranscript::new(1, [0x5a; 64], 0x1211, b"header", schedule)
+            .expect("the minimal transcript starts");
+        transcript
+            .sample_composition_challenge(0)
+            .expect("the composition challenge samples");
+        transcript
+            .absorb_quotient_root(0, [0x31; 64])
+            .expect("the quotient root is absorbed");
+        transcript
+            .sample_deep_point(0, |_| false)
+            .expect("the nonzero deep point samples");
+        transcript
+            .absorb_deep_evaluations(&[ProofChallengeExtensionElement::ONE])
+            .expect("the deep evaluation list is absorbed");
+        transcript
+    }
+
+    #[test]
+    fn row_code_handoff_requires_the_unchallenged_secret_bearing_mask_round() {
+        let public_transcript = transcript_after_deep_values(CommonProofPrivacyMode::PublicOnly);
+        assert!(matches!(
+            public_transcript.into_row_code_whir_transcript(&[ProofChallengeExtensionElement::ONE]),
+            Err(TranscriptError::IncompleteCommonProofTranscript)
+        ));
+
+        let mut secret_transcript =
+            transcript_after_deep_values(CommonProofPrivacyMode::SecretBearing);
+        secret_transcript
+            .absorb_opening_batch_mask_root([0x42; 64])
+            .expect("the secret-bearing mask root is absorbed");
+
+        let mut challenged_transcript = secret_transcript.clone();
+        challenged_transcript
+            .sample_opening_batch_challenge(0)
+            .expect("the incumbent FRI opening challenge remains available");
+        assert!(matches!(
+            challenged_transcript
+                .into_row_code_whir_transcript(&[ProofChallengeExtensionElement::ONE]),
+            Err(TranscriptError::IncompleteCommonProofTranscript)
+        ));
+
+        let mut row_code_transcript = secret_transcript
+            .into_row_code_whir_transcript(&[ProofChallengeExtensionElement::ONE])
+            .expect("the row-code handoff consumes the unchallenged mask round");
+        row_code_transcript
+            .absorb_protocol_schedule(&[ProofChallengeExtensionElement::ONE])
+            .expect("the mask round leaves no pending challenge before the protocol schedule");
     }
 
     fn removed_theta_domain_polynomial(point: u64) -> u64 {

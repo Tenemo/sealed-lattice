@@ -684,14 +684,6 @@ fn finish_exact_transcript(
     transcript
         .absorb_opening_batch_mask_root(column_digest_bytes(quotient_root))
         .map_err(|error| format!("absorb exact opening-batch root: {error:?}"))?;
-    for claim_ordinal in 0..deep_evaluations.len() {
-        transcript
-            .sample_opening_batch_challenge(
-                u32::try_from(claim_ordinal)
-                    .map_err(|_| "opening-claim ordinal exceeds u32".to_owned())?,
-            )
-            .map_err(|error| format!("sample opening-batch challenge: {error:?}"))?;
-    }
     prefix
         .transcript
         .take()
@@ -2498,8 +2490,8 @@ mod construction_tests {
     const QROM_RANDOM_ORACLE_QUERY_BOUND_EXPONENT: usize = 80;
     const FIAT_SHAMIR_XOF_OUTPUT_BIT_LENGTH: usize = 512;
     const BOUND_CLEARED_IDENTITY_ROOT_PAIR_BOUND: u64 = 9_217;
-    const EXACT_TRANSCRIPT_HASH_QUERY_COUNT: u64 = 2_386_543;
-    const EXACT_LOGICAL_VERIFIER_MESSAGE_COUNT: u64 = 9_315;
+    const EXACT_TRANSCRIPT_HASH_QUERY_COUNT: u64 = 1_306_993;
+    const EXACT_LOGICAL_VERIFIER_MESSAGE_COUNT: u64 = 5_098;
 
     #[test]
     fn exact_challenge_field_reduction_polynomial_is_irreducible() {
@@ -2671,11 +2663,11 @@ mod construction_tests {
         let common_handoff_count = schedule
             .maximum_row_code_whir_handoff_hash_query_count()
             .expect("derive exact common-prefix hash-query ceiling");
-        assert_eq!(common_handoff_count, 2_208_153);
+        assert_eq!(common_handoff_count, 1_128_603);
         let common_logical_verifier_message_count = schedule
             .maximum_row_code_whir_handoff_logical_verifier_message_count()
             .expect("derive exact common-prefix verifier-message count");
-        assert_eq!(common_logical_verifier_message_count, 8_627);
+        assert_eq!(common_logical_verifier_message_count, 4_410);
 
         let base_layout = ExactBasePhaseLayout::for_tree_role(variant, ProofTreeRole::BaseOracle)
             .expect("derive exact base layout");
@@ -3035,7 +3027,7 @@ mod construction_tests {
         let (_, variant, relation_context) = production_same_secret_relation()
             .expect("compile the exact production same-secret relation");
         let accounting = exact_transcript_accounting(&variant, &relation_context);
-        assert_eq!(accounting.maximum_hash_query_count, 2_386_543);
+        assert_eq!(accounting.maximum_hash_query_count, 1_306_993);
         assert_eq!(
             accounting.logical_verifier_message_count,
             EXACT_LOGICAL_VERIFIER_MESSAGE_COUNT
@@ -3344,7 +3336,7 @@ mod construction_tests {
         // WHIR fold terms use the exact domain entering each fold. The
         // remaining terms cover query combination and final folding,
         // scalar-opening batching, production DEEP, both BCIKS exceptional
-        // sets, every relation constraint and claim, phase-row and bound-claim
+        // sets, every relation constraint, phase-row and bound-claim
         // batching, mask-chunk claims, degree-three selector batching, and all
         // three forbidden-suffix subcubes in each bound-reduction block.
         let intermediate_fold_domain_sizes = pcs
@@ -3376,7 +3368,6 @@ mod construction_tests {
             + scalar_opening_count as u64
             + variant.evaluation_domain_size()
             + variant.constraint_count() as u64
-            + shape.opening_claim_count as u64
             + shape.phase_row_counts().into_iter().sum::<usize>() as u64
             + EXACT_BOUND_COLUMN_COUNT as u64
             + (phase_proximity_gap_application_count * shape.encoded_column_count) as u64
@@ -3384,7 +3375,7 @@ mod construction_tests {
             + EXACT_OPENING_BATCH_MASK_CHUNK_COUNT as u64
             + (3 * shape.phase_row_counts().into_iter().sum::<usize>()) as u64
             + 72;
-        assert_eq!(algebraic_failure_numerator, 26_753_237);
+        assert_eq!(algebraic_failure_numerator, 26_749_020);
 
         let challenge_field_order = BigUint::from(GOLDILOCKS_MODULUS).pow(5);
         let aggregate_numerator = &challenge_field_order * binary_numerator
@@ -3421,8 +3412,8 @@ mod construction_tests {
         let accepting_database_equation_count_ceiling = EXACT_TRANSCRIPT_HASH_QUERY_COUNT
             + EXACT_VERIFIER_MERKLE_HASH_QUERY_COUNT
             + EXACT_VERIFIER_NON_MERKLE_DISTINCT_EQUATION_COUNT;
-        assert_eq!(verifier_hash_query_count, 2_447_809);
-        assert_eq!(accepting_database_equation_count_ceiling, 2_447_797);
+        assert_eq!(verifier_hash_query_count, 1_368_259);
+        assert_eq!(accepting_database_equation_count_ceiling, 1_368_247);
 
         let adversary_hash_query_bound =
             (BigUint::from(1_u8) << QROM_RANDOM_ORACLE_QUERY_BOUND_EXPONENT) - BigUint::from(1_u8);
@@ -4781,10 +4772,10 @@ mod native_prover {
         assert!(metrics.proof_byte_length < MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH);
         assert_eq!(metrics.opening_claim_count, 4_217);
         assert_eq!(metrics.query_count, EXACT_COLUMN_QUERY_COUNT);
-        assert_eq!(metrics.maximum_transcript_hash_query_count, 2_386_543);
-        assert_eq!(metrics.logical_verifier_message_count, 9_315);
-        assert_eq!(metrics.maximum_verifier_hash_query_count, 2_447_809);
-        assert_eq!(metrics.maximum_accepting_database_equation_count, 2_447_797);
+        assert_eq!(metrics.maximum_transcript_hash_query_count, 1_306_993);
+        assert_eq!(metrics.logical_verifier_message_count, 5_098);
+        assert_eq!(metrics.maximum_verifier_hash_query_count, 1_368_259);
+        assert_eq!(metrics.maximum_accepting_database_equation_count, 1_368_247);
     }
 }
 
@@ -4996,10 +4987,10 @@ mod persisted_verifier_tests {
         assert_eq!(metrics.public_input_byte_length, 2_461);
         assert_eq!(metrics.opening_claim_count, 4_217);
         assert_eq!(metrics.query_count, EXACT_COLUMN_QUERY_COUNT);
-        assert_eq!(metrics.maximum_transcript_hash_query_count, 2_386_543);
-        assert_eq!(metrics.logical_verifier_message_count, 9_315);
-        assert_eq!(metrics.maximum_verifier_hash_query_count, 2_447_809);
-        assert_eq!(metrics.maximum_accepting_database_equation_count, 2_447_797);
+        assert_eq!(metrics.maximum_transcript_hash_query_count, 1_306_993);
+        assert_eq!(metrics.logical_verifier_message_count, 5_098);
+        assert_eq!(metrics.maximum_verifier_hash_query_count, 1_368_259);
+        assert_eq!(metrics.maximum_accepting_database_equation_count, 1_368_247);
         assert!(metrics.proof_byte_length < MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH);
         println!(
             "persisted exact verifier: proof bytes {}, public input bytes {}, claims {}, queries {}",
