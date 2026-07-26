@@ -23,14 +23,16 @@ pub(crate) use exact_same_secret::{
 };
 pub(crate) const MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH: usize = 5_242_880;
 
-use core::{marker::PhantomData, mem::size_of};
+use core::mem::size_of;
 
 use p3_challenger::{
     CanObserve, CanSample, CanSampleBits, CanSampleUniformBits, FieldChallenger,
-    GrindingChallenger, HashChallenger, ResamplingError,
+    GrindingChallenger, ResamplingError,
 };
 use p3_dft::Radix2DFTSmallBatch;
-use p3_field::{PrimeCharacteristicRing, RawDataSerializable, extension::BinomialExtensionField};
+use p3_field::{
+    BasedVectorSpace, PrimeCharacteristicRing, PrimeField64, extension::BinomialExtensionField,
+};
 use p3_goldilocks::Goldilocks;
 use p3_merkle_tree::{MerkleCap, MerkleTreeMmcs};
 use p3_symmetric::{CompressionFunctionFromHasher, CryptographicHasher, SerializingHasher};
@@ -39,18 +41,23 @@ use sha3::{
     digest::{ExtendableOutput, Update, XofReader},
 };
 
+#[cfg(test)]
 use super::PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT;
+use super::{
+    ProofChallengeExtensionElement,
+    transcript::{
+        RowCodeWhirChallenge, RowCodeWhirTranscript, RowCodeWhirTranscriptSummary, TranscriptError,
+    },
+};
 
 const MERKLE_DIGEST_WORD_LENGTH: usize = 8;
 const MERKLE_DIGEST_BYTE_LENGTH: usize = MERKLE_DIGEST_WORD_LENGTH * size_of::<u64>();
-const CHALLENGER_OUTPUT_BYTE_LENGTH: usize = 64;
 const GOLDILOCKS_MODULUS: u64 = 0xffff_ffff_0000_0001;
 const PROTOCOL_SECURITY_LEVEL: usize = 260;
 const SHAKE256_PROTOCOL_DOMAIN: &[u8] = b"sealed-lattice/row-code-whir/shake256/v1";
 
 type ChallengeField = BinomialExtensionField<Goldilocks, 5>;
-type InnerChallenger = HashChallenger<u8, DomainSeparatedShake256, CHALLENGER_OUTPUT_BYTE_LENGTH>;
-type ExtensionFieldChallenger = ByteExtensionFieldChallenger<ChallengeField>;
+type ExtensionFieldChallenger = RowCodeWhirChallenger;
 type LeafHasher = SerializingHasher<DomainSeparatedShake256>;
 type NodeCompressor =
     CompressionFunctionFromHasher<DomainSeparatedShake256, 2, MERKLE_DIGEST_WORD_LENGTH>;
@@ -127,29 +134,65 @@ impl CryptographicHasher<u64, [u64; MERKLE_DIGEST_WORD_LENGTH]> for DomainSepara
 
 /// Byte-backed Fiat-Shamir challenger for the degree-five field.
 ///
-/// Plonky3's serializing challenger is restricted to prime fields, so every
-/// Goldilocks coefficient is sampled independently with rejection sampling.
+/// Plonky3's serializing challenger is restricted to prime fields, so the
+/// canonical transcript samples one degree-five extension element from one
+/// bounded 512-bit rejection-sampling stream.
 #[derive(Clone, Debug)]
-struct ByteExtensionFieldChallenger<FieldElement> {
-    inner: InnerChallenger,
+struct RowCodeWhirChallenger {
+    transcript: RowCodeWhirTranscript,
     sampling_failure: Option<ChallengerSamplingFailure>,
-    uniform_query_bit_length: Option<usize>,
-    uniform_query_indices: Vec<usize>,
-    marker: PhantomData<FieldElement>,
+    protocol_schedule_absorbed: bool,
+    query_schedule: Vec<WhirQueryEpoch>,
+    next_query_epoch: usize,
+    active_query_indices: Vec<usize>,
+    next_active_query_index: usize,
+    next_unscheduled_failure_query_index: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ChallengerSamplingFailure {
-    GoldilocksCandidateDrawsExhausted,
+    ExtensionChallengeCandidateDrawsExhausted,
     DistinctQueryCandidateDrawsExhausted,
+    TranscriptStateMismatch,
+    QueryScheduleMismatch,
 }
 
+fn extension_sampling_failure_for_transcript_error(
+    error: &TranscriptError,
+) -> ChallengerSamplingFailure {
+    match error {
+        TranscriptError::CommonChallengeDrawsExhausted => {
+            ChallengerSamplingFailure::ExtensionChallengeCandidateDrawsExhausted
+        }
+        _ => ChallengerSamplingFailure::TranscriptStateMismatch,
+    }
+}
+
+fn query_sampling_failure_for_transcript_error(
+    error: &TranscriptError,
+) -> ChallengerSamplingFailure {
+    match error {
+        TranscriptError::CommonChallengeDrawsExhausted => {
+            ChallengerSamplingFailure::DistinctQueryCandidateDrawsExhausted
+        }
+        _ => ChallengerSamplingFailure::TranscriptStateMismatch,
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct WhirQueryEpoch {
+    bit_length: usize,
+    query_count: usize,
+}
+
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum BoundedSamplingError {
     InvalidUpperBound,
     CandidateDrawsExhausted,
 }
 
+#[cfg(test)]
 fn sample_bounded_goldilocks_candidate(
     mut next_candidate: impl FnMut() -> u64,
 ) -> Result<Goldilocks, BoundedSamplingError> {
@@ -162,6 +205,7 @@ fn sample_bounded_goldilocks_candidate(
     Err(BoundedSamplingError::CandidateDrawsExhausted)
 }
 
+#[cfg(test)]
 fn sample_bounded_residue_index(
     upper_bound: usize,
     mut is_acceptable: impl FnMut(usize) -> bool,
@@ -186,66 +230,40 @@ fn sample_bounded_residue_index(
     Err(BoundedSamplingError::CandidateDrawsExhausted)
 }
 
-impl ByteExtensionFieldChallenger<ChallengeField> {
-    fn new(initial_state: Vec<u8>, domain: &'static [u8]) -> Self {
+impl RowCodeWhirChallenger {
+    fn new(transcript: RowCodeWhirTranscript, query_schedule: Vec<WhirQueryEpoch>) -> Self {
         Self {
-            inner: HashChallenger::new(initial_state, DomainSeparatedShake256 { domain }),
+            transcript,
             sampling_failure: None,
-            uniform_query_bit_length: None,
-            uniform_query_indices: Vec::new(),
-            marker: PhantomData,
+            protocol_schedule_absorbed: false,
+            query_schedule,
+            next_query_epoch: 0,
+            active_query_indices: Vec::new(),
+            next_active_query_index: 0,
+            next_unscheduled_failure_query_index: 0,
         }
     }
 
-    fn sample_goldilocks(&mut self) -> Goldilocks {
-        self.reset_uniform_query_epoch();
-        match sample_bounded_goldilocks_candidate(|| u64::from_le_bytes(self.inner.sample_array()))
-        {
-            Ok(candidate) => candidate,
-            Err(_) => {
-                self.record_sampling_failure(
-                    ChallengerSamplingFailure::GoldilocksCandidateDrawsExhausted,
-                );
-                Goldilocks::ZERO
-            }
-        }
+    fn sample_exact_challenge(
+        &mut self,
+        challenge: RowCodeWhirChallenge,
+    ) -> Result<ChallengeField, String> {
+        let sampled = self
+            .transcript
+            .sample_direct_extension(challenge)
+            .map_err(|error| format!("sample typed row-code challenge: {error:?}"))?;
+        Ok(challenge_from_production(sampled))
     }
 
-    fn sample_distinct_uniform_query_index(&mut self, bits: usize) -> usize {
-        if self.uniform_query_bit_length != Some(bits) {
-            self.uniform_query_bit_length = Some(bits);
-            self.uniform_query_indices.clear();
-        }
-        if bits == 0 {
-            if self.uniform_query_indices.is_empty() {
-                self.uniform_query_indices.push(0);
-            } else {
-                self.record_sampling_failure(
-                    ChallengerSamplingFailure::DistinctQueryCandidateDrawsExhausted,
-                );
-            }
-            return 0;
-        }
-        assert!(bits < usize::BITS as usize);
-        let domain_size = 1_usize << bits;
-        let sampled = sample_bounded_residue_index(
-            domain_size,
-            |candidate| !self.uniform_query_indices.contains(&candidate),
-            || u64::from_le_bytes(self.inner.sample_array()),
-        );
-        let index = match sampled {
-            Ok(index) => index,
-            Err(_) => {
-                self.record_sampling_failure(
-                    ChallengerSamplingFailure::DistinctQueryCandidateDrawsExhausted,
-                );
-                (0..domain_size)
-                    .find(|candidate| !self.uniform_query_indices.contains(candidate))
-                    .unwrap_or(0)
-            }
-        };
-        self.uniform_query_indices.push(index);
-        index
+    fn sample_exact_distinct_indices(
+        &mut self,
+        challenge: RowCodeWhirChallenge,
+        upper_bound: usize,
+        output_count: usize,
+    ) -> Result<Vec<usize>, String> {
+        self.transcript
+            .sample_direct_distinct_indices(challenge, upper_bound, output_count)
+            .map_err(|error| format!("sample typed row-code query vector: {error:?}"))
     }
 
     fn record_sampling_failure(&mut self, failure: ChallengerSamplingFailure) {
@@ -254,86 +272,247 @@ impl ByteExtensionFieldChallenger<ChallengeField> {
         }
     }
 
-    fn reset_uniform_query_epoch(&mut self) {
-        self.uniform_query_bit_length = None;
-        self.uniform_query_indices.clear();
+    fn record_transcript_failure(&mut self) {
+        self.record_sampling_failure(ChallengerSamplingFailure::TranscriptStateMismatch);
+    }
+
+    fn record_transcript_state_error(&mut self, _error: TranscriptError) {
+        self.record_transcript_failure();
+    }
+
+    fn record_extension_transcript_error(&mut self, error: TranscriptError) {
+        self.record_sampling_failure(extension_sampling_failure_for_transcript_error(&error));
+    }
+
+    fn record_query_transcript_error(&mut self, error: TranscriptError) {
+        self.record_sampling_failure(query_sampling_failure_for_transcript_error(&error));
+    }
+
+    fn observe_production_values(&mut self, values: &[ProofChallengeExtensionElement]) {
+        if values.is_empty() {
+            return;
+        }
+        let result = if self.protocol_schedule_absorbed {
+            self.transcript.observe_whir_values(values)
+        } else {
+            self.transcript.absorb_protocol_schedule(values)
+        };
+        match result {
+            Ok(()) => self.protocol_schedule_absorbed = true,
+            Err(error) => self.record_transcript_state_error(error),
+        }
+    }
+
+    fn install_scheduled_failure_query_epoch(&mut self, bits: usize) -> bool {
+        let Some(epoch) = self.query_schedule.get(self.next_query_epoch).copied() else {
+            return false;
+        };
+        let domain_size = 1_usize
+            .checked_shl(u32::try_from(bits).unwrap_or(u32::MAX))
+            .unwrap_or(1);
+        let placeholder_count = epoch.query_count.min(domain_size).max(1);
+        self.active_query_indices = (0..placeholder_count).collect();
+        self.next_active_query_index = 0;
+        self.next_query_epoch += 1;
+        true
+    }
+
+    fn next_unscheduled_failure_query_index(&mut self, bits: usize) -> usize {
+        let domain_size = 1_usize
+            .checked_shl(u32::try_from(bits).unwrap_or(u32::MAX))
+            .unwrap_or(1);
+        let sampled = self.next_unscheduled_failure_query_index % domain_size;
+        self.next_unscheduled_failure_query_index =
+            self.next_unscheduled_failure_query_index.wrapping_add(1);
+        sampled
     }
 
     fn ensure_sampling_succeeded(&self) -> Result<(), String> {
         match self.sampling_failure {
             None => Ok(()),
-            Some(ChallengerSamplingFailure::GoldilocksCandidateDrawsExhausted) => Err(
-                "plain WHIR Goldilocks challenge sampling exhausted its candidate ceiling"
+            Some(ChallengerSamplingFailure::ExtensionChallengeCandidateDrawsExhausted) => Err(
+                "plain WHIR extension challenge sampling exhausted its candidate ceiling"
                     .to_owned(),
             ),
             Some(ChallengerSamplingFailure::DistinctQueryCandidateDrawsExhausted) => {
                 Err("plain WHIR distinct query sampling exhausted its candidate ceiling".to_owned())
             }
+            Some(ChallengerSamplingFailure::TranscriptStateMismatch) => {
+                Err("plain WHIR transcript state did not match the typed protocol".to_owned())
+            }
+            Some(ChallengerSamplingFailure::QueryScheduleMismatch) => {
+                Err("plain WHIR query calls did not match the PCS-owned schedule".to_owned())
+            }
         }
+    }
+
+    fn finish(self, canonical_proof_bytes: &[u8]) -> Result<RowCodeWhirTranscriptSummary, String> {
+        self.ensure_sampling_succeeded()?;
+        if self.next_query_epoch != self.query_schedule.len()
+            || self.next_active_query_index != self.active_query_indices.len()
+        {
+            return Err("plain WHIR query schedule was not completely consumed".to_owned());
+        }
+        self.transcript
+            .finish(canonical_proof_bytes)
+            .map_err(|error| format!("finish typed row-code WHIR transcript: {error:?}"))
     }
 }
 
-impl CanObserve<ChallengeField> for ByteExtensionFieldChallenger<ChallengeField> {
+fn challenge_from_production(value: ProofChallengeExtensionElement) -> ChallengeField {
+    ChallengeField::new(value.canonical_coordinates().map(Goldilocks::from_u64))
+}
+
+fn challenge_to_production(value: ChallengeField) -> Result<ProofChallengeExtensionElement, ()> {
+    let basis_coefficients: &[Goldilocks; 5] =
+        <ChallengeField as BasedVectorSpace<Goldilocks>>::as_basis_coefficients_slice(&value)
+            .try_into()
+            .map_err(|_| ())?;
+    let coordinates = core::array::from_fn(|index| basis_coefficients[index].as_canonical_u64());
+    ProofChallengeExtensionElement::from_canonical_coordinates(coordinates).map_err(|_| ())
+}
+
+impl CanObserve<ChallengeField> for RowCodeWhirChallenger {
     fn observe(&mut self, value: ChallengeField) {
-        self.reset_uniform_query_epoch();
-        self.inner.observe_slice(
-            &<ChallengeField as RawDataSerializable>::into_bytes(value)
-                .into_iter()
-                .collect::<Vec<_>>(),
-        );
+        self.observe_slice(&[value]);
+    }
+
+    fn observe_slice(&mut self, values: &[ChallengeField]) {
+        if values.is_empty() {
+            return;
+        }
+        let converted = values
+            .iter()
+            .copied()
+            .map(challenge_to_production)
+            .collect::<Result<Vec<_>, _>>();
+        let Ok(converted) = converted else {
+            self.record_transcript_failure();
+            return;
+        };
+        self.observe_production_values(&converted);
     }
 }
 
 impl CanObserve<MerkleCap<ChallengeField, [u64; MERKLE_DIGEST_WORD_LENGTH]>>
-    for ByteExtensionFieldChallenger<ChallengeField>
+    for RowCodeWhirChallenger
 {
     fn observe(&mut self, commitment: MerkleCap<ChallengeField, [u64; MERKLE_DIGEST_WORD_LENGTH]>) {
-        self.reset_uniform_query_epoch();
+        let mut canonical_commitment_bytes = Vec::new();
         for digest in commitment.roots() {
             for word in digest {
-                self.inner.observe_slice(&word.to_le_bytes());
+                canonical_commitment_bytes.extend_from_slice(&word.to_le_bytes());
+            }
+        }
+        if let Err(error) = self
+            .transcript
+            .observe_commitment(&canonical_commitment_bytes)
+        {
+            self.record_transcript_state_error(error);
+        }
+    }
+}
+
+impl CanSample<ChallengeField> for RowCodeWhirChallenger {
+    fn sample(&mut self) -> ChallengeField {
+        match self.transcript.sample_whir_extension() {
+            Ok(sampled) => challenge_from_production(sampled),
+            Err(error) => {
+                self.record_extension_transcript_error(error);
+                ChallengeField::ZERO
             }
         }
     }
 }
 
-impl CanSample<ChallengeField> for ByteExtensionFieldChallenger<ChallengeField> {
-    fn sample(&mut self) -> ChallengeField {
-        ChallengeField::new(core::array::from_fn(|_| self.sample_goldilocks()))
-    }
-}
-
-impl CanSampleBits<usize> for ByteExtensionFieldChallenger<ChallengeField> {
+impl CanSampleBits<usize> for RowCodeWhirChallenger {
     fn sample_bits(&mut self, bits: usize) -> usize {
-        assert!(bits < usize::BITS as usize);
-        self.reset_uniform_query_epoch();
-        if bits == 0 {
-            return 0;
+        match self.transcript.sample_whir_bits(bits) {
+            Ok(sampled) => sampled,
+            Err(error) => {
+                self.record_transcript_state_error(error);
+                0
+            }
         }
-        let sampled = u64::from_le_bytes(self.inner.sample_array());
-        (sampled & ((1_u64 << bits) - 1)) as usize
     }
 }
 
-impl CanSampleUniformBits<ChallengeField> for ByteExtensionFieldChallenger<ChallengeField> {
+impl CanSampleUniformBits<ChallengeField> for RowCodeWhirChallenger {
     fn sample_uniform_bits<const RESAMPLE: bool>(
         &mut self,
         bits: usize,
     ) -> Result<usize, ResamplingError> {
-        Ok(self.sample_distinct_uniform_query_index(bits))
+        if self.sampling_failure.is_some()
+            && self.next_active_query_index == self.active_query_indices.len()
+            && !self.install_scheduled_failure_query_epoch(bits)
+        {
+            return Ok(self.next_unscheduled_failure_query_index(bits));
+        }
+        if self.next_active_query_index == self.active_query_indices.len() {
+            let Some(epoch) = self.query_schedule.get(self.next_query_epoch).copied() else {
+                self.record_sampling_failure(ChallengerSamplingFailure::QueryScheduleMismatch);
+                return Ok(self.next_unscheduled_failure_query_index(bits));
+            };
+            if epoch.bit_length != bits {
+                self.record_sampling_failure(ChallengerSamplingFailure::QueryScheduleMismatch);
+                let installed = self.install_scheduled_failure_query_epoch(bits);
+                debug_assert!(installed, "the mismatched epoch was just read");
+                let sampled = self.active_query_indices[self.next_active_query_index];
+                self.next_active_query_index += 1;
+                return Ok(sampled);
+            }
+            let sampled = u32::try_from(self.next_query_epoch)
+                .map_err(|_| TranscriptError::ChallengeCounterOverflow)
+                .and_then(|epoch_ordinal| {
+                    self.transcript
+                        .sample_whir_query_vector(bits, epoch_ordinal, epoch.query_count)
+                });
+            match sampled {
+                Ok(indices) => {
+                    self.active_query_indices = indices;
+                    self.next_active_query_index = 0;
+                    self.next_query_epoch += 1;
+                }
+                Err(error) => {
+                    self.record_query_transcript_error(error);
+                    let installed = self.install_scheduled_failure_query_epoch(bits);
+                    debug_assert!(installed, "the failed epoch was just read");
+                }
+            }
+        }
+        let sampled = self.active_query_indices[self.next_active_query_index];
+        self.next_active_query_index += 1;
+        Ok(sampled)
     }
 }
 
-impl GrindingChallenger for ByteExtensionFieldChallenger<ChallengeField> {
+impl GrindingChallenger for RowCodeWhirChallenger {
     type Witness = ChallengeField;
 
     fn grind(&mut self, bits: usize) -> Self::Witness {
-        assert_eq!(bits, 0, "the selected WHIR profile does not use grinding");
+        if bits != 0 {
+            self.record_transcript_failure();
+        }
         ChallengeField::ZERO
     }
 }
 
-impl FieldChallenger<ChallengeField> for ByteExtensionFieldChallenger<ChallengeField> {}
+impl FieldChallenger<ChallengeField> for RowCodeWhirChallenger {
+    fn observe_algebra_slice<AlgebraElement>(&mut self, algebra_elements: &[AlgebraElement])
+    where
+        AlgebraElement: BasedVectorSpace<ChallengeField> + Clone,
+    {
+        let converted = algebra_elements
+            .iter()
+            .flat_map(|element| element.as_basis_coefficients_slice().iter().copied())
+            .map(challenge_to_production)
+            .collect::<Result<Vec<_>, _>>();
+        match converted {
+            Ok(converted) => self.observe_production_values(&converted),
+            Err(()) => self.record_transcript_failure(),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -405,5 +584,82 @@ mod tests {
         .expect("the second candidate is uniform and accepted");
         assert_eq!(result, 9);
         assert!(candidates.next().is_none());
+    }
+
+    #[test]
+    fn transcript_errors_preserve_call_site_specific_exhaustion_classification() {
+        assert_eq!(
+            extension_sampling_failure_for_transcript_error(
+                &TranscriptError::CommonChallengeDrawsExhausted
+            ),
+            ChallengerSamplingFailure::ExtensionChallengeCandidateDrawsExhausted
+        );
+        assert_eq!(
+            query_sampling_failure_for_transcript_error(
+                &TranscriptError::CommonChallengeDrawsExhausted
+            ),
+            ChallengerSamplingFailure::DistinctQueryCandidateDrawsExhausted
+        );
+        assert_eq!(
+            query_sampling_failure_for_transcript_error(
+                &TranscriptError::UnexpectedRowCodeWhirChallenge
+            ),
+            ChallengerSamplingFailure::TranscriptStateMismatch
+        );
+    }
+
+    #[test]
+    fn missing_query_schedule_returns_a_bounded_distinct_placeholder_domain() {
+        let transcript = RowCodeWhirTranscript::new_for_test(b"missing-query-schedule")
+            .expect("the test transcript is valid");
+        let mut challenger = RowCodeWhirChallenger::new(transcript, Vec::new());
+        challenger.record_sampling_failure(ChallengerSamplingFailure::QueryScheduleMismatch);
+
+        let first_domain = (0..8)
+            .map(|_| {
+                challenger
+                    .sample_uniform_bits::<true>(3)
+                    .expect("failure placeholders never use field rejection")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(first_domain, (0..8).collect::<Vec<_>>());
+        assert_eq!(
+            challenger
+                .sample_uniform_bits::<true>(3)
+                .expect("the bounded placeholder sequence cycles after the full domain"),
+            0
+        );
+    }
+
+    #[test]
+    fn algebra_slices_are_absorbed_as_single_typed_rounds() {
+        let transcript = RowCodeWhirTranscript::new_for_test(b"algebra-slice-framing")
+            .expect("the test transcript is valid");
+        let mut challenger = RowCodeWhirChallenger::new(transcript, Vec::new());
+
+        <RowCodeWhirChallenger as FieldChallenger<ChallengeField>>::observe_algebra_slice(
+            &mut challenger,
+            &[ChallengeField::ONE, ChallengeField::TWO],
+        );
+        challenger.observe(
+            MerkleCap::<ChallengeField, [u64; MERKLE_DIGEST_WORD_LENGTH]>::new(vec![
+                [0_u64; MERKLE_DIGEST_WORD_LENGTH],
+            ]),
+        );
+        <RowCodeWhirChallenger as FieldChallenger<ChallengeField>>::observe_algebra_slice(
+            &mut challenger,
+            &[
+                ChallengeField::ZERO,
+                ChallengeField::ONE,
+                ChallengeField::NEG_ONE,
+            ],
+        );
+
+        let summary = challenger
+            .finish(&[1])
+            .expect("each algebra slice is one valid typed observation round");
+        // Initial state plus four response rounds with virtual challenge
+        // binding: 1 + 4 * 2.
+        assert_eq!(summary.maximum_hash_query_count(), 9);
     }
 }

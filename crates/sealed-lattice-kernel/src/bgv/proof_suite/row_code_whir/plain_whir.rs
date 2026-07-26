@@ -6,7 +6,9 @@
 //! exposes an explicit-point claim method that absorbs each point before its
 //! evaluation, preserving commitment-before-challenge ordering.
 
-use p3_challenger::{CanObserve, FieldChallenger};
+#[cfg(test)]
+use p3_challenger::CanObserve;
+use p3_challenger::FieldChallenger;
 use p3_commit::MultilinearPcs;
 use p3_field::PrimeCharacteristicRing;
 use p3_multilinear_util::point::Point;
@@ -89,20 +91,60 @@ pub(super) fn plain_aggregate_pcs_with_parameters(
     ))
 }
 
+pub(super) fn plain_aggregate_challenger_from_transcript(
+    pcs: &PlainAggregatePcs,
+    transcript: super::RowCodeWhirTranscript,
+) -> Result<ExtensionFieldChallenger, String> {
+    let mut query_schedule = Vec::with_capacity(pcs.n_rounds() + 1);
+    for round_index in 0..pcs.n_rounds() {
+        let round = &pcs.round_parameters[round_index];
+        let folded_domain_size = round
+            .domain_size
+            .checked_shr(
+                u32::try_from(pcs.round_folding_factor(round_index))
+                    .map_err(|_| "WHIR folding factor exceeds u32".to_owned())?,
+            )
+            .ok_or_else(|| "WHIR folded query domain overflowed".to_owned())?;
+        if folded_domain_size == 0 || !folded_domain_size.is_power_of_two() {
+            return Err("WHIR folded query domain is not a power of two".to_owned());
+        }
+        query_schedule.push(super::WhirQueryEpoch {
+            bit_length: folded_domain_size.ilog2() as usize,
+            query_count: round.num_queries.min(folded_domain_size),
+        });
+    }
+    let final_round = pcs.final_round_config();
+    let final_folded_domain_size = final_round
+        .domain_size
+        .checked_shr(
+            u32::try_from(pcs.round_folding_factor(pcs.n_rounds()))
+                .map_err(|_| "final WHIR folding factor exceeds u32".to_owned())?,
+        )
+        .ok_or_else(|| "final WHIR folded query domain overflowed".to_owned())?;
+    if final_folded_domain_size == 0 || !final_folded_domain_size.is_power_of_two() {
+        return Err("final WHIR folded query domain is not a power of two".to_owned());
+    }
+    query_schedule.push(super::WhirQueryEpoch {
+        bit_length: final_folded_domain_size.ilog2() as usize,
+        query_count: pcs.final_queries.min(final_folded_domain_size),
+    });
+    let mut challenger = ExtensionFieldChallenger::new(transcript, query_schedule);
+    let mut separator = DomainSeparator::<ChallengeField, ChallengeField>::new(Vec::new());
+    pcs.add_domain_separator::<{ super::MERKLE_DIGEST_WORD_LENGTH }>(&mut separator);
+    separator.observe_domain_separator(&mut challenger);
+    challenger.ensure_sampling_succeeded()?;
+    Ok(challenger)
+}
+
+#[cfg(test)]
 pub(super) fn plain_aggregate_challenger(
     pcs: &PlainAggregatePcs,
     statement: &[u8],
 ) -> ExtensionFieldChallenger {
-    let mut initial_state =
-        b"sealed-lattice/streaming-polynomial-commitment/plain-aggregate/v1".to_vec();
-    initial_state.extend_from_slice(&(statement.len() as u64).to_le_bytes());
-    initial_state.extend_from_slice(statement);
-    let mut challenger =
-        ExtensionFieldChallenger::new(initial_state, b"aggregate-plain-pcs/challenges/v1");
-    let mut separator = DomainSeparator::<ChallengeField, ChallengeField>::new(Vec::new());
-    pcs.add_domain_separator::<{ super::MERKLE_DIGEST_WORD_LENGTH }>(&mut separator);
-    separator.observe_domain_separator(&mut challenger);
-    challenger
+    let transcript = super::RowCodeWhirTranscript::new_for_test(statement)
+        .expect("construct canonical row-code WHIR test transcript");
+    plain_aggregate_challenger_from_transcript(pcs, transcript)
+        .expect("bind the plain WHIR protocol schedule")
 }
 
 pub(super) fn plain_aggregate_opening_protocol_for_requests(
@@ -226,7 +268,32 @@ pub(super) fn verify_plain_aggregate_at_points(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[cfg(test)]
 pub(super) fn verify_plain_aggregate_batches_at_points(
+    pcs: &PlainAggregatePcs,
+    commitment: &PlainAggregateCommitment,
+    proof: &PlainAggregateProof,
+    points: &[Point<ChallengeField>],
+    table_variable_count: usize,
+    table_width: usize,
+    requested_columns_by_point: &[Vec<usize>],
+    challenger: &mut ExtensionFieldChallenger,
+) -> Result<(), String> {
+    challenger.observe(commitment.clone());
+    verify_plain_aggregate_batches_at_points_after_commitment(
+        pcs,
+        commitment,
+        proof,
+        points,
+        table_variable_count,
+        table_width,
+        requested_columns_by_point,
+        challenger,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn verify_plain_aggregate_batches_at_points_after_commitment(
     pcs: &PlainAggregatePcs,
     commitment: &PlainAggregateCommitment,
     proof: &PlainAggregateProof,
@@ -250,7 +317,6 @@ pub(super) fn verify_plain_aggregate_batches_at_points(
     {
         return Err("plain WHIR opening requests do not match the committed table".to_owned());
     }
-    challenger.observe(commitment.clone());
     let protocol = plain_aggregate_opening_protocol_for_requests(
         table_variable_count,
         table_width,

@@ -6,32 +6,28 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use p3_challenger::CanObserve;
 use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField64};
 use p3_goldilocks::Goldilocks;
 use p3_multilinear_util::{point::Point, poly::Poly};
 use p3_symmetric::MerkleCap;
-use sha3::{
-    Shake256,
-    digest::{ExtendableOutput, Update, XofReader},
-};
 use zeroize::Zeroizing;
 
 use super::super::GOLDILOCKS_MODULUS;
 use super::super::column_commitment::verify_column_frontier;
 use super::super::{
-    AuthenticatedColumn, BoundedSamplingError, ChallengeField,
+    AuthenticatedColumn, ChallengeField, ExtensionFieldChallenger,
     MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH,
     algebra::{coset_point, polynomial_extension_opening_reduction, polynomial_opening_reduction},
     plain_whir::{
-        PlainAggregateCommitment, PlainAggregateProof, plain_aggregate_challenger,
-        plain_aggregate_pcs, verify_plain_aggregate_batches_at_points,
+        PlainAggregateCommitment, PlainAggregateProof, plain_aggregate_challenger_from_transcript,
+        plain_aggregate_pcs, verify_plain_aggregate_batches_at_points_after_commitment,
     },
     plain_whir_wire::{decode_plain_whir_batch_proof, encode_plain_whir_batch_proof},
-    sample_bounded_goldilocks_candidate, sample_bounded_residue_index,
 };
 #[cfg(all(test, not(target_arch = "wasm32")))]
 use super::super::{
-    plain_whir::AggregateLayout,
+    plain_whir::{AggregateLayout, plain_aggregate_challenger},
     plain_whir_wire::plain_whir_batch_wire_breakdown,
     protocol::{StreamingCommitment, aggregate_weighted_message, recompute_authenticated_columns},
     streaming_whir_prover::{
@@ -41,6 +37,9 @@ use super::super::{
 };
 use super::*;
 use crate::bgv::proof_suite::relation_plan::{RelationColumnOrigin, RelationOpeningSourceClass};
+use crate::bgv::proof_suite::transcript::{
+    RowCodeWhirChallenge, RowCodeWhirPhase, RowCodeWhirTranscript,
+};
 use crate::bgv::proof_suite::{
     BoundTreeConstructionKind, BoundTreeRootUse, COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH,
     DeepCompositionVerificationInput, ProofBaseFieldElement, ProofChallengeExtensionElement,
@@ -53,11 +52,8 @@ use crate::bgv::proof_suite::{
 const EXACT_PROOF_WIRE_MAGIC: &[u8; 8] = b"SLXPRF05";
 const EXACT_PUBLIC_INPUT_WIRE_MAGIC: &[u8; 8] = b"SLXPUB02";
 const EXACT_PUBLIC_INPUT_DIGEST_DOMAIN: &str = "sealed-lattice/exact-same-secret/public-input/v1";
-const EXACT_AGGREGATE_BINDING_DOMAIN: &[u8] =
-    b"sealed-lattice/exact-same-secret/aggregate-binding/v2";
-const EXACT_RANK_ONE_CHALLENGE_DOMAIN: &[u8] =
-    b"sealed-lattice/exact-same-secret/rank-one-challenges/v1";
-const EXACT_COLUMN_QUERY_DOMAIN: &[u8] = b"sealed-lattice/exact-same-secret/column-queries/v2";
+const EXACT_PUBLIC_INPUT_TRANSCRIPT_BINDING_DOMAIN: &[u8] =
+    b"sealed-lattice/exact-same-secret/public-input-transcript-binding/v1";
 const EXACT_PROOF_TABLE_WIDTH: usize = 4;
 const EXACT_COLUMN_QUERY_COUNT: usize = 387;
 const EXACT_TABLE_VARIABLE_COUNT: usize = 19;
@@ -84,11 +80,28 @@ const EXACT_BOUND_DEGREE_TEST_COUNT: usize =
     EXACT_BOUND_REDUCTION_BLOCK_COUNT * EXACT_BOUND_DEGREE_TESTS_PER_BLOCK;
 const EXACT_BOUND_DEGREE_SUFFIX_PREFIXES: [&[u8]; 3] =
     [&[1_u8, 1], &[1_u8, 0, 1], &[1_u8, 0, 0, 1]];
-const EXACT_BOUND_BATCHING_CHALLENGE_DOMAIN: &[u8] =
-    b"sealed-lattice/exact-same-secret/bound-batching/v2";
-const EXACT_BOUND_QUERY_DOMAIN: &[u8] = b"sealed-lattice/exact-same-secret/bound-queries/v2";
-const EXACT_BOUND_DEGREE_POINT_DOMAIN: &[u8] =
-    b"sealed-lattice/exact-same-secret/bound-degree-points/v2";
+const EXACT_VERIFIER_MERKLE_HASH_QUERY_COUNT: u64 = 61_241;
+const EXACT_RELATION_PLAN_HASH_QUERY_COUNT: u64 = 4;
+const EXACT_RELATION_PLAN_DISTINCT_EQUATION_COUNT: u64 = 1;
+const EXACT_VARIANT_HASH_QUERY_COUNT: u64 = 1;
+const EXACT_VARIANT_DISTINCT_EQUATION_COUNT: u64 = 1;
+const EXACT_TRANSCRIPT_HEADER_HASH_QUERY_COUNT: u64 = 1;
+const EXACT_TRANSCRIPT_HEADER_DISTINCT_EQUATION_COUNT: u64 = 1;
+const EXACT_PUBLIC_INPUT_HASH_QUERY_COUNT: u64 = 1;
+const EXACT_PUBLIC_INPUT_DISTINCT_EQUATION_COUNT: u64 = 1;
+const EXACT_PUBLIC_SETUP_SAMPLING_HASH_QUERY_COUNT: u64 = 18;
+const EXACT_PUBLIC_SETUP_SAMPLING_DISTINCT_EQUATION_COUNT: u64 = 9;
+const EXACT_VERIFIER_NON_MERKLE_HASH_QUERY_COUNT: u64 = EXACT_RELATION_PLAN_HASH_QUERY_COUNT
+    + EXACT_VARIANT_HASH_QUERY_COUNT
+    + EXACT_TRANSCRIPT_HEADER_HASH_QUERY_COUNT
+    + EXACT_PUBLIC_INPUT_HASH_QUERY_COUNT
+    + EXACT_PUBLIC_SETUP_SAMPLING_HASH_QUERY_COUNT;
+const EXACT_VERIFIER_NON_MERKLE_DISTINCT_EQUATION_COUNT: u64 =
+    EXACT_RELATION_PLAN_DISTINCT_EQUATION_COUNT
+        + EXACT_VARIANT_DISTINCT_EQUATION_COUNT
+        + EXACT_TRANSCRIPT_HEADER_DISTINCT_EQUATION_COUNT
+        + EXACT_PUBLIC_INPUT_DISTINCT_EQUATION_COUNT
+        + EXACT_PUBLIC_SETUP_SAMPLING_DISTINCT_EQUATION_COUNT;
 const MAXIMUM_EXACT_PUBLIC_INPUT_WIRE_BYTE_LENGTH: usize = 1_024 * 1_024;
 const MAXIMUM_EXACT_STATEMENT_BYTE_LENGTH: usize = 1_048_576;
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -126,6 +139,34 @@ struct ExactBoundLeafOpening {
 struct ExactBoundTreeAuthentication {
     opened_leaves: Vec<ExactBoundLeafOpening>,
     frontier: Vec<[u8; 64]>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ExactBoundQueryIndices {
+    input_root_indices: Vec<usize>,
+    output_root_indices: Vec<usize>,
+}
+
+impl ExactBoundQueryIndices {
+    fn has_exact_shape(&self) -> bool {
+        self.input_root_indices.len() == EXACT_INPUT_BOUND_QUERY_COUNT
+            && self.output_root_indices.len() == EXACT_OUTPUT_BOUND_QUERY_COUNT
+    }
+
+    fn for_root_use(&self, root_use: BoundTreeRootUse) -> &[usize] {
+        match root_use {
+            BoundTreeRootUse::Input => &self.input_root_indices,
+            BoundTreeRootUse::Output => &self.output_root_indices,
+        }
+    }
+
+    fn for_tree_ordinal(&self, bound_tree_ordinal: usize) -> Result<&[usize], String> {
+        match bound_tree_ordinal {
+            0..EXACT_INPUT_BOUND_TREE_COUNT => Ok(&self.input_root_indices),
+            EXACT_INPUT_BOUND_TREE_COUNT..EXACT_BOUND_TREE_COUNT => Ok(&self.output_root_indices),
+            _ => Err("bound tree ordinal is outside the exact relation".to_owned()),
+        }
+    }
 }
 
 pub(crate) struct ExactSameSecretProof {
@@ -470,7 +511,7 @@ fn exact_bound_tree_catalog_entries(
 }
 
 struct ExactTranscriptPrefix {
-    transcript: CommonProofTranscript,
+    transcript: Option<CommonProofTranscript>,
     application_challenges: Vec<crate::bgv::proof_suite::RelationApplicationChallengeAssignment>,
     composition_challenges: Vec<ProofChallengeExtensionElement>,
     deep_points: Vec<ProofChallengeExtensionElement>,
@@ -529,7 +570,7 @@ fn exact_transcript_prefix(
         .variant
         .common_proof_transcript_schedule(&verified_relation.context)
         .map_err(|error| format!("derive exact transcript schedule: {error:?}"))?;
-    let header = exact_transcript_header(
+    let mut header = exact_transcript_header(
         public_input.protocol_version,
         public_input.suite_identifier,
         public_input.statement_schema_identifier,
@@ -538,6 +579,11 @@ fn exact_transcript_prefix(
         prerequisite.binding_digest(),
         &public_input.canonical_application_statement_bytes,
     )?;
+    header.extend_from_slice(
+        &(EXACT_PUBLIC_INPUT_TRANSCRIPT_BINDING_DOMAIN.len() as u64).to_le_bytes(),
+    );
+    header.extend_from_slice(EXACT_PUBLIC_INPUT_TRANSCRIPT_BINDING_DOMAIN);
+    header.extend_from_slice(&public_input.digest()?);
     let mut transcript = CommonProofTranscript::new(
         public_input.protocol_version,
         public_input.suite_identifier,
@@ -613,7 +659,7 @@ fn exact_transcript_prefix(
         .derive_opening_points(&verified_relation.context, &deep_points)
         .map_err(|error| format!("derive exact opening points: {error:?}"))?;
     Ok(ExactTranscriptPrefix {
-        transcript,
+        transcript: Some(transcript),
         application_challenges,
         composition_challenges,
         deep_points,
@@ -625,28 +671,33 @@ fn finish_exact_transcript(
     prefix: &mut ExactTranscriptPrefix,
     deep_evaluations: &[ProofChallengeExtensionElement],
     quotient_root: ColumnDigest,
-) -> Result<Vec<ProofChallengeExtensionElement>, String> {
-    prefix
+    opening_batch_mask_chunk_evaluations: &[ProofChallengeExtensionElement;
+         EXACT_OPENING_BATCH_MASK_CHUNK_COUNT],
+) -> Result<RowCodeWhirTranscript, String> {
+    let transcript = prefix
         .transcript
+        .as_mut()
+        .ok_or_else(|| "exact common transcript was already consumed".to_owned())?;
+    transcript
         .absorb_deep_evaluations(deep_evaluations)
         .map_err(|error| format!("absorb exact deep evaluations: {error:?}"))?;
-    prefix
-        .transcript
+    transcript
         .absorb_opening_batch_mask_root(column_digest_bytes(quotient_root))
         .map_err(|error| format!("absorb exact opening-batch root: {error:?}"))?;
-    let mut opening_batch_challenges = Vec::with_capacity(deep_evaluations.len());
     for claim_ordinal in 0..deep_evaluations.len() {
-        opening_batch_challenges.push(
-            prefix
-                .transcript
-                .sample_opening_batch_challenge(
-                    u32::try_from(claim_ordinal)
-                        .map_err(|_| "opening-claim ordinal exceeds u32".to_owned())?,
-                )
-                .map_err(|error| format!("sample opening-batch challenge: {error:?}"))?,
-        );
+        transcript
+            .sample_opening_batch_challenge(
+                u32::try_from(claim_ordinal)
+                    .map_err(|_| "opening-claim ordinal exceeds u32".to_owned())?,
+            )
+            .map_err(|error| format!("sample opening-batch challenge: {error:?}"))?;
     }
-    Ok(opening_batch_challenges)
+    prefix
+        .transcript
+        .take()
+        .ok_or_else(|| "exact common transcript was already consumed".to_owned())?
+        .into_row_code_whir_transcript(opening_batch_mask_chunk_evaluations)
+        .map_err(|error| format!("handoff exact row-code WHIR transcript: {error:?}"))
 }
 
 fn verify_production_deep_composition(
@@ -674,51 +725,6 @@ fn verify_production_deep_composition(
         .map_err(|error| format!("verify exact production deep composition: {error:?}"))
 }
 
-fn aggregate_binding(
-    prerequisite: &VerifiedSameSecretLowDegreePrerequisite,
-    public_input: &ExactSameSecretPublicInput,
-    proof_roots: [ColumnDigest; 3],
-    transcript_prefix: &ExactTranscriptPrefix,
-    deep_evaluations: &[ProofChallengeExtensionElement],
-    opening_batch_mask_chunk_evaluations: &[ProofChallengeExtensionElement;
-         EXACT_OPENING_BATCH_MASK_CHUNK_COUNT],
-    opening_batch_challenges: &[ProofChallengeExtensionElement],
-) -> Result<Vec<u8>, String> {
-    let mut binding = Vec::new();
-    binding.extend_from_slice(EXACT_AGGREGATE_BINDING_DOMAIN);
-    binding.extend_from_slice(&prerequisite.binding_digest());
-    binding.extend_from_slice(&public_input.digest()?);
-    for root in proof_roots {
-        binding.extend_from_slice(&column_digest_bytes(root));
-    }
-    for point in &transcript_prefix.deep_points {
-        for coordinate in point.canonical_coordinates() {
-            binding.extend_from_slice(&coordinate.to_le_bytes());
-        }
-    }
-    for point in &transcript_prefix.opening_points {
-        for coordinate in point.canonical_coordinates() {
-            binding.extend_from_slice(&coordinate.to_le_bytes());
-        }
-    }
-    for value in deep_evaluations {
-        for coordinate in value.canonical_coordinates() {
-            binding.extend_from_slice(&coordinate.to_le_bytes());
-        }
-    }
-    for value in opening_batch_mask_chunk_evaluations {
-        for coordinate in value.canonical_coordinates() {
-            binding.extend_from_slice(&coordinate.to_le_bytes());
-        }
-    }
-    for challenge in opening_batch_challenges {
-        for coordinate in challenge.canonical_coordinates() {
-            binding.extend_from_slice(&coordinate.to_le_bytes());
-        }
-    }
-    Ok(binding)
-}
-
 #[derive(Clone, Copy)]
 struct ExactBoundOpeningClaim {
     column_ordinal: u32,
@@ -731,17 +737,11 @@ fn derive_bound_opening_claims(
     variant: &RelationPlanVariant,
     opening_points: &[ProofChallengeExtensionElement],
     deep_evaluations: &[ProofChallengeExtensionElement],
-    binding: &[u8],
+    challenger: &mut ExtensionFieldChallenger,
 ) -> Result<Vec<ExactBoundOpeningClaim>, String> {
     if variant.ordered_opening_claims().len() != deep_evaluations.len() {
         return Err("bound opening reduction has the wrong claim count".to_owned());
     }
-    let mut state = Shake256::default();
-    state.update(&(EXACT_BOUND_BATCHING_CHALLENGE_DOMAIN.len() as u64).to_le_bytes());
-    state.update(EXACT_BOUND_BATCHING_CHALLENGE_DOMAIN);
-    state.update(&(binding.len() as u64).to_le_bytes());
-    state.update(binding);
-    let mut reader = state.finalize_xof();
     let mut claims = Vec::new();
     for (claim, claimed_value) in variant
         .ordered_opening_claims()
@@ -775,7 +775,9 @@ fn derive_bound_opening_claims(
             column_ordinal,
             opening_point: challenge_from_production(opening_point),
             claimed_value: challenge_from_production(*claimed_value),
-            batching_weight: sample_challenge(&mut reader)?,
+            batching_weight: challenger.sample_exact_challenge(
+                RowCodeWhirChallenge::BoundOpeningWeight { column_ordinal },
+            )?,
         });
     }
     if claims.len() != EXACT_BOUND_COLUMN_COUNT {
@@ -787,63 +789,24 @@ fn derive_bound_opening_claims(
     Ok(claims)
 }
 
-fn derive_distinct_indices(
-    domain: &[u8],
-    binding: &[u8],
-    aggregate_commitment: &PlainAggregateCommitment,
-    upper_bound: usize,
-    count: usize,
-) -> Result<Vec<usize>, String> {
-    if upper_bound < count || !upper_bound.is_power_of_two() {
-        return Err("exact query domain has the wrong fixed shape".to_owned());
-    }
-    let aggregate_root = aggregate_commitment
-        .roots()
-        .first()
-        .copied()
-        .ok_or_else(|| "exact aggregate commitment has no root".to_owned())?;
-    let mut state = Shake256::default();
-    state.update(&(domain.len() as u64).to_le_bytes());
-    state.update(domain);
-    state.update(&(binding.len() as u64).to_le_bytes());
-    state.update(binding);
-    state.update(&column_digest_bytes(aggregate_root));
-    let mut reader = state.finalize_xof();
-    let mut indices = BTreeSet::new();
-    while indices.len() < count {
-        let index = sample_bounded_residue_index(
-            upper_bound,
-            |candidate| !indices.contains(&candidate),
-            || {
-                let mut bytes = [0_u8; 8];
-                reader.read(&mut bytes);
-                u64::from_le_bytes(bytes)
-            },
-        )
-        .map_err(|error| match error {
-            BoundedSamplingError::InvalidUpperBound => {
-                "exact query domain cannot be sampled canonically".to_owned()
-            }
-            BoundedSamplingError::CandidateDrawsExhausted => {
-                "exact distinct query sampling exhausted its candidate ceiling".to_owned()
-            }
-        })?;
-        indices.insert(index);
-    }
-    Ok(indices.into_iter().collect())
-}
-
 fn derive_bound_query_indices(
-    binding: &[u8],
-    aggregate_commitment: &PlainAggregateCommitment,
-) -> Result<Vec<usize>, String> {
-    derive_distinct_indices(
-        EXACT_BOUND_QUERY_DOMAIN,
-        binding,
-        aggregate_commitment,
+    challenger: &mut ExtensionFieldChallenger,
+) -> Result<ExactBoundQueryIndices, String> {
+    let mut accepted_indices = challenger.sample_exact_distinct_indices(
+        RowCodeWhirChallenge::BoundQueryVector,
         EXACT_BOUND_LEAF_COUNT,
         EXACT_OUTPUT_BOUND_QUERY_COUNT,
-    )
+    )?;
+    let mut input_root_indices = accepted_indices
+        .get(..EXACT_INPUT_BOUND_QUERY_COUNT)
+        .ok_or_else(|| "bound query sampler returned too few indices".to_owned())?
+        .to_vec();
+    input_root_indices.sort_unstable();
+    accepted_indices.sort_unstable();
+    Ok(ExactBoundQueryIndices {
+        input_root_indices,
+        output_root_indices: accepted_indices,
+    })
 }
 
 fn bound_reduction_block_coordinates(block_ordinal: usize) -> Result<Vec<ChallengeField>, String> {
@@ -865,21 +828,8 @@ fn bound_reduction_block_coordinates(block_ordinal: usize) -> Result<Vec<Challen
 }
 
 fn bound_degree_test_points(
-    binding: &[u8],
-    aggregate_commitment: &PlainAggregateCommitment,
+    challenger: &mut ExtensionFieldChallenger,
 ) -> Result<Vec<Point<ChallengeField>>, String> {
-    let aggregate_root = aggregate_commitment
-        .roots()
-        .first()
-        .copied()
-        .ok_or_else(|| "exact aggregate commitment has no root".to_owned())?;
-    let mut state = Shake256::default();
-    state.update(&(EXACT_BOUND_DEGREE_POINT_DOMAIN.len() as u64).to_le_bytes());
-    state.update(EXACT_BOUND_DEGREE_POINT_DOMAIN);
-    state.update(&(binding.len() as u64).to_le_bytes());
-    state.update(binding);
-    state.update(&column_digest_bytes(aggregate_root));
-    let mut reader = state.finalize_xof();
     let mut points = Vec::with_capacity(EXACT_BOUND_DEGREE_TEST_COUNT);
     for block_ordinal in 0..EXACT_BOUND_REDUCTION_BLOCK_COUNT {
         let mut boundary_coordinates = bound_reduction_block_coordinates(block_ordinal)?;
@@ -901,7 +851,9 @@ fn bound_degree_test_points(
         // boundary coefficient at 18,431 is checked above. The remaining
         // suffix [18,432, 32,768) is the disjoint union of these three
         // aligned subcubes.
-        for fixed_prefix in EXACT_BOUND_DEGREE_SUFFIX_PREFIXES {
+        for (suffix_ordinal, fixed_prefix) in
+            EXACT_BOUND_DEGREE_SUFFIX_PREFIXES.into_iter().enumerate()
+        {
             let mut coordinates = bound_reduction_block_coordinates(block_ordinal)?;
             coordinates.extend(fixed_prefix.iter().copied().map(|bit| {
                 if bit == 0 {
@@ -911,7 +863,18 @@ fn bound_degree_test_points(
                 }
             }));
             while coordinates.len() < EXACT_TABLE_VARIABLE_COUNT {
-                coordinates.push(sample_challenge(&mut reader)?);
+                coordinates.push(
+                    challenger.sample_exact_challenge(
+                        RowCodeWhirChallenge::BoundDegreeCoordinate {
+                            block_ordinal: u16::try_from(block_ordinal)
+                                .map_err(|_| "bound block ordinal exceeds u16".to_owned())?,
+                            degree_test_ordinal: u16::try_from(suffix_ordinal + 1)
+                                .map_err(|_| "bound degree-test ordinal exceeds u16".to_owned())?,
+                            coordinate_ordinal: u16::try_from(coordinates.len())
+                                .map_err(|_| "bound coordinate ordinal exceeds u16".to_owned())?,
+                        },
+                    )?,
+                );
             }
             points.push(Point::new(coordinates));
         }
@@ -982,23 +945,6 @@ struct ExactPointRowWeights {
     quotient: Vec<ChallengeField>,
 }
 
-fn sample_goldilocks(reader: &mut impl XofReader) -> Result<Goldilocks, String> {
-    sample_bounded_goldilocks_candidate(|| {
-        let mut bytes = [0_u8; 8];
-        reader.read(&mut bytes);
-        u64::from_le_bytes(bytes)
-    })
-    .map_err(|_| "exact Goldilocks challenge sampling exhausted its candidate ceiling".to_owned())
-}
-
-fn sample_challenge(reader: &mut impl XofReader) -> Result<ChallengeField, String> {
-    let mut coordinates = [Goldilocks::ZERO; 5];
-    for coordinate in &mut coordinates {
-        *coordinate = sample_goldilocks(reader)?;
-    }
-    Ok(ChallengeField::new(coordinates))
-}
-
 fn challenge_extension_basis(extension_coordinate: usize) -> ChallengeField {
     ChallengeField::new(core::array::from_fn(|coordinate| {
         if coordinate == extension_coordinate {
@@ -1033,17 +979,11 @@ fn divide_polynomial_opening(
 }
 
 fn derive_exact_point_row_weights(
-    binding: &[u8],
+    challenger: &mut ExtensionFieldChallenger,
     base_layout: &ExactBasePhaseLayout,
     auxiliary_layout: &ExactBasePhaseLayout,
     quotient_opening_point: ProofChallengeExtensionElement,
 ) -> Result<[ExactPointRowWeights; 3], String> {
-    let mut state = Shake256::default();
-    state.update(&(EXACT_RANK_ONE_CHALLENGE_DOMAIN.len() as u64).to_le_bytes());
-    state.update(EXACT_RANK_ONE_CHALLENGE_DOMAIN);
-    state.update(&(binding.len() as u64).to_le_bytes());
-    state.update(binding);
-    let mut reader = state.finalize_xof();
     let quotient_chunk_power = challenge_from_production(quotient_opening_point).exp_u64(
         u64::try_from(LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT)
             .map_err(|_| "logical polynomial coefficient count exceeds u64".to_owned())?,
@@ -1051,31 +991,50 @@ fn derive_exact_point_row_weights(
     let mut weights = Vec::with_capacity(3);
     for opening_point_ordinal in 0..3 {
         let selectors = [
-            sample_challenge(&mut reader)?,
-            sample_challenge(&mut reader)?,
-            sample_challenge(&mut reader)?,
+            challenger.sample_exact_challenge(RowCodeWhirChallenge::PointSelectorWeight {
+                opening_point_ordinal,
+                selector_ordinal: 0,
+            })?,
+            challenger.sample_exact_challenge(RowCodeWhirChallenge::PointSelectorWeight {
+                opening_point_ordinal,
+                selector_ordinal: 1,
+            })?,
+            challenger.sample_exact_challenge(RowCodeWhirChallenge::PointSelectorWeight {
+                opening_point_ordinal,
+                selector_ordinal: 2,
+            })?,
         ];
         let mut base = Vec::with_capacity(base_layout.rows.len());
-        for row in &base_layout.rows {
+        for (row_ordinal, row) in base_layout.rows.iter().enumerate() {
             base.push(
                 if row
                     .opening_point_ordinals
                     .contains(&(opening_point_ordinal as u32))
                 {
-                    sample_challenge(&mut reader)?
+                    challenger.sample_exact_challenge(RowCodeWhirChallenge::PhaseRowWeight {
+                        opening_point_ordinal,
+                        phase: RowCodeWhirPhase::Base,
+                        row_ordinal: u32::try_from(row_ordinal)
+                            .map_err(|_| "base row ordinal exceeds u32".to_owned())?,
+                    })?
                 } else {
                     ChallengeField::ZERO
                 },
             );
         }
         let mut auxiliary = Vec::with_capacity(auxiliary_layout.rows.len());
-        for row in &auxiliary_layout.rows {
+        for (row_ordinal, row) in auxiliary_layout.rows.iter().enumerate() {
             auxiliary.push(
                 if row
                     .opening_point_ordinals
                     .contains(&(opening_point_ordinal as u32))
                 {
-                    sample_challenge(&mut reader)?
+                    challenger.sample_exact_challenge(RowCodeWhirChallenge::PhaseRowWeight {
+                        opening_point_ordinal,
+                        phase: RowCodeWhirPhase::Auxiliary,
+                        row_ordinal: u32::try_from(row_ordinal)
+                            .map_err(|_| "auxiliary row ordinal exceeds u32".to_owned())?,
+                    })?
                 } else {
                     ChallengeField::ZERO
                 },
@@ -1083,8 +1042,10 @@ fn derive_exact_point_row_weights(
         }
         let mut quotient = vec![ChallengeField::ZERO; EXACT_QUOTIENT_PHASE_ROW_COUNT];
         if opening_point_ordinal == 0 {
-            let quotient_component_weight = sample_challenge(&mut reader)?;
-            let opening_batch_mask_weight = sample_challenge(&mut reader)?;
+            let quotient_component_weight =
+                challenger.sample_exact_challenge(RowCodeWhirChallenge::QuotientComponentWeight)?;
+            let opening_batch_mask_weight =
+                challenger.sample_exact_challenge(RowCodeWhirChallenge::OpeningBatchMaskWeight)?;
             for extension_coordinate in 0..5 {
                 let basis = challenge_extension_basis(extension_coordinate);
                 quotient[extension_coordinate] = quotient_component_weight * basis;
@@ -1355,13 +1316,13 @@ fn exact_whir_opening_points(
     point_row_weights: &[ExactPointRowWeights; 3],
     query_indices: &[usize],
     encoded_column_count: usize,
-    bound_query_indices: &[usize],
+    bound_query_indices: &ExactBoundQueryIndices,
     bound_evaluation_domain: ProofEvaluationDomain,
     degree_test_points: &[Point<ChallengeField>],
 ) -> Result<Vec<Point<ChallengeField>>, String> {
     if opening_points.len() < 3
         || query_indices.len() != EXACT_COLUMN_QUERY_COUNT
-        || bound_query_indices.len() != EXACT_OUTPUT_BOUND_QUERY_COUNT
+        || !bound_query_indices.has_exact_shape()
         || degree_test_points.len() != EXACT_BOUND_DEGREE_TEST_COUNT
         || bound_evaluation_domain.size() != EXACT_BOUND_LEAF_COUNT * 2
     {
@@ -1397,8 +1358,8 @@ fn exact_whir_opening_points(
         );
     }
     for (block_ordinal, block_query_indices) in [
-        (0, &bound_query_indices[..EXACT_INPUT_BOUND_QUERY_COUNT]),
-        (1, bound_query_indices),
+        (0, bound_query_indices.input_root_indices.as_slice()),
+        (1, bound_query_indices.output_root_indices.as_slice()),
     ] {
         for leaf_index in block_query_indices {
             for evaluation_position in [*leaf_index, *leaf_index + EXACT_BOUND_LEAF_COUNT] {
@@ -1482,17 +1443,16 @@ fn expected_deep_whir_evaluations(
 }
 
 fn derive_query_indices(
-    binding: &[u8],
-    aggregate_commitment: &PlainAggregateCommitment,
+    challenger: &mut ExtensionFieldChallenger,
     encoded_column_count: usize,
 ) -> Result<Vec<usize>, String> {
-    derive_distinct_indices(
-        EXACT_COLUMN_QUERY_DOMAIN,
-        binding,
-        aggregate_commitment,
+    let mut query_indices = challenger.sample_exact_distinct_indices(
+        RowCodeWhirChallenge::OuterQueryVector,
         encoded_column_count,
         EXACT_COLUMN_QUERY_COUNT,
-    )
+    )?;
+    query_indices.sort_unstable();
+    Ok(query_indices)
 }
 
 fn verify_phase_openings(
@@ -1584,11 +1544,11 @@ fn verify_materialized_frontier(
 fn verify_bound_tree_authentications(
     entries: &[ProofTreeCatalogEntry],
     proof: &ExactSameSecretProof,
-    bound_query_indices: &[usize],
+    bound_query_indices: &ExactBoundQueryIndices,
 ) -> Result<(), String> {
     if entries.len() != EXACT_BOUND_TREE_COUNT
         || proof.bound_tree_authentications.len() != EXACT_BOUND_TREE_COUNT
-        || bound_query_indices.len() != EXACT_OUTPUT_BOUND_QUERY_COUNT
+        || !bound_query_indices.has_exact_shape()
     {
         return Err("bound authentication catalog has the wrong fixed shape".to_owned());
     }
@@ -1597,14 +1557,14 @@ fn verify_bound_tree_authentications(
         .zip(&proof.bound_tree_authentications)
         .enumerate()
     {
-        let query_count = bound_tree_query_count(bound_tree_ordinal)?;
+        let tree_query_indices = bound_query_indices.for_tree_ordinal(bound_tree_ordinal)?;
+        let query_count = tree_query_indices.len();
         if authentication.opened_leaves.len() != query_count {
             return Err("bound authentication has the wrong leaf count".to_owned());
         }
         let mut opened_leaf_digests = Vec::with_capacity(query_count);
-        for (leaf_index, opening) in bound_query_indices
+        for (leaf_index, opening) in tree_query_indices
             .iter()
-            .take(query_count)
             .copied()
             .zip(&authentication.opened_leaves)
         {
@@ -1649,23 +1609,20 @@ fn verify_bound_tree_authentications(
 fn expected_bound_reduction_whir_evaluations(
     variant: &RelationPlanVariant,
     proof: &ExactSameSecretProof,
-    bound_query_indices: &[usize],
+    bound_query_indices: &ExactBoundQueryIndices,
     bound_evaluation_domain: ProofEvaluationDomain,
     bound_claims: &[ExactBoundOpeningClaim],
 ) -> Result<Vec<ChallengeField>, String> {
     let locations = bound_column_locations(variant)?;
-    if bound_query_indices.len() != EXACT_OUTPUT_BOUND_QUERY_COUNT {
+    if !bound_query_indices.has_exact_shape() {
         return Err("bound reduction query schedule has the wrong count".to_owned());
     }
     let mut expected =
         Vec::with_capacity((EXACT_INPUT_BOUND_QUERY_COUNT + EXACT_OUTPUT_BOUND_QUERY_COUNT) * 2);
-    for (root_use, query_count) in [
-        (BoundTreeRootUse::Input, EXACT_INPUT_BOUND_QUERY_COUNT),
-        (BoundTreeRootUse::Output, EXACT_OUTPUT_BOUND_QUERY_COUNT),
-    ] {
+    for root_use in [BoundTreeRootUse::Input, BoundTreeRootUse::Output] {
         for (query_ordinal, leaf_index) in bound_query_indices
+            .for_root_use(root_use)
             .iter()
-            .take(query_count)
             .copied()
             .enumerate()
         {
@@ -1837,6 +1794,10 @@ pub(crate) struct ExactSameSecretVerificationMetrics {
     pub(crate) public_input_byte_length: usize,
     pub(crate) opening_claim_count: usize,
     pub(crate) query_count: usize,
+    pub(crate) maximum_transcript_hash_query_count: u64,
+    pub(crate) logical_verifier_message_count: u64,
+    pub(crate) maximum_verifier_hash_query_count: u64,
+    pub(crate) maximum_accepting_database_equation_count: u64,
 }
 
 pub(crate) fn verify_exact_same_secret_proof_bytes(
@@ -1875,22 +1836,17 @@ pub(crate) fn verify_exact_same_secret_proof_bytes(
         &proof.deep_evaluations,
         &proof.opening_batch_mask_chunk_evaluations,
     )?;
-    let opening_batch_challenges = finish_exact_transcript(
+    let row_code_whir_transcript = finish_exact_transcript(
         &mut transcript_prefix,
         &proof.deep_evaluations,
         proof.quotient_root,
-    )?;
-    let binding = aggregate_binding(
-        prerequisite,
-        &public_input,
-        [proof.base_root, proof.auxiliary_root, proof.quotient_root],
-        &transcript_prefix,
-        &proof.deep_evaluations,
         &proof.opening_batch_mask_chunk_evaluations,
-        &opening_batch_challenges,
     )?;
+    let pcs = plain_aggregate_pcs(EXACT_PCS_VARIABLE_COUNT)?;
+    let mut challenger =
+        plain_aggregate_challenger_from_transcript(&pcs, row_code_whir_transcript)?;
     let point_row_weights = derive_exact_point_row_weights(
-        &binding,
+        &mut challenger,
         &base_layout,
         &auxiliary_layout,
         transcript_prefix.opening_points[0],
@@ -1899,20 +1855,17 @@ pub(crate) fn verify_exact_same_secret_proof_bytes(
         &verified_relation.variant,
         &transcript_prefix.opening_points,
         &proof.deep_evaluations,
-        &binding,
+        &mut challenger,
     )?;
     ensure_bound_opening_points_are_outside_evaluation_domain(
         &bound_claims,
         verified_relation.variant.evaluation_domain_size(),
         verified_relation.context.evaluation_coset_offset,
     )?;
-    let query_indices = derive_query_indices(
-        &binding,
-        &proof.aggregate_commitment,
-        shape.encoded_column_count,
-    )?;
-    let bound_query_indices = derive_bound_query_indices(&binding, &proof.aggregate_commitment)?;
-    let degree_test_points = bound_degree_test_points(&binding, &proof.aggregate_commitment)?;
+    challenger.observe(proof.aggregate_commitment.clone());
+    let query_indices = derive_query_indices(&mut challenger, shape.encoded_column_count)?;
+    let bound_query_indices = derive_bound_query_indices(&mut challenger)?;
+    let degree_test_points = bound_degree_test_points(&mut challenger)?;
     let bound_evaluation_domain = ProofEvaluationDomain::new(
         usize::try_from(verified_relation.variant.evaluation_domain_size())
             .map_err(|_| "bound evaluation domain exceeds usize".to_owned())?,
@@ -1959,9 +1912,7 @@ pub(crate) fn verify_exact_same_secret_proof_bytes(
         &expected_queries,
         &expected_bound_reduction,
     )?;
-    let pcs = plain_aggregate_pcs(EXACT_PCS_VARIABLE_COUNT)?;
-    let mut challenger = plain_aggregate_challenger(&pcs, &binding);
-    verify_plain_aggregate_batches_at_points(
+    verify_plain_aggregate_batches_at_points_after_commitment(
         &pcs,
         &proof.aggregate_commitment,
         &proof.aggregate_opening_proof,
@@ -1975,11 +1926,27 @@ pub(crate) fn verify_exact_same_secret_proof_bytes(
     if reencoded != canonical_proof {
         return Err("exact same-secret proof is not canonically encoded".to_owned());
     }
+    drop(reencoded);
+    let transcript_summary = challenger.finish(canonical_proof)?;
+    let maximum_transcript_hash_query_count = transcript_summary.maximum_hash_query_count();
+    let logical_verifier_message_count = transcript_summary.logical_verifier_message_count();
+    let maximum_verifier_hash_query_count = maximum_transcript_hash_query_count
+        .checked_add(EXACT_VERIFIER_MERKLE_HASH_QUERY_COUNT)
+        .and_then(|count| count.checked_add(EXACT_VERIFIER_NON_MERKLE_HASH_QUERY_COUNT))
+        .ok_or_else(|| "exact verifier hash-query accounting overflowed".to_owned())?;
+    let maximum_accepting_database_equation_count = maximum_transcript_hash_query_count
+        .checked_add(EXACT_VERIFIER_MERKLE_HASH_QUERY_COUNT)
+        .and_then(|count| count.checked_add(EXACT_VERIFIER_NON_MERKLE_DISTINCT_EQUATION_COUNT))
+        .ok_or_else(|| "exact accepting-database accounting overflowed".to_owned())?;
     Ok(ExactSameSecretVerificationMetrics {
         proof_byte_length: canonical_proof.len(),
         public_input_byte_length: canonical_public_input.len(),
         opening_claim_count: shape.opening_claim_count,
         query_count: EXACT_COLUMN_QUERY_COUNT,
+        maximum_transcript_hash_query_count,
+        logical_verifier_message_count,
+        maximum_verifier_hash_query_count,
+        maximum_accepting_database_equation_count,
     })
 }
 
@@ -2528,9 +2495,11 @@ mod construction_tests {
     use super::*;
 
     const STRICT_ROUND_BY_ROUND_SOUNDNESS_BITS: usize = 258;
-    const CLASSICAL_RANDOM_ORACLE_QUERY_BOUND_EXPONENT: usize = 128;
+    const QROM_RANDOM_ORACLE_QUERY_BOUND_EXPONENT: usize = 80;
     const FIAT_SHAMIR_XOF_OUTPUT_BIT_LENGTH: usize = 512;
     const BOUND_CLEARED_IDENTITY_ROOT_PAIR_BOUND: u64 = 9_217;
+    const EXACT_TRANSCRIPT_HASH_QUERY_COUNT: u64 = 2_386_543;
+    const EXACT_LOGICAL_VERIFIER_MESSAGE_COUNT: u64 = 9_315;
 
     #[test]
     fn exact_challenge_field_reduction_polynomial_is_irreducible() {
@@ -2567,6 +2536,235 @@ mod construction_tests {
         assert!(denominator_exponent <= common_denominator_exponent);
         *accumulator += BigUint::from(numerator_base).pow(numerator_exponent)
             << (common_denominator_exponent - denominator_exponent);
+    }
+
+    fn assert_without_replacement_probability_is_bounded_by_power(
+        accepting_population: u64,
+        complete_population: u64,
+        query_count: u32,
+    ) {
+        assert!(u64::from(query_count) <= accepting_population);
+        assert!(accepting_population <= complete_population);
+        let accepting_falling_factorial = (0..u64::from(query_count))
+            .fold(BigUint::from(1_u8), |product, query_ordinal| {
+                product * (accepting_population - query_ordinal)
+            });
+        let complete_falling_factorial = (0..u64::from(query_count))
+            .fold(BigUint::from(1_u8), |product, query_ordinal| {
+                product * (complete_population - query_ordinal)
+            });
+        assert!(
+            accepting_falling_factorial * BigUint::from(complete_population).pow(query_count)
+                <= BigUint::from(accepting_population).pow(query_count)
+                    * complete_falling_factorial
+        );
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    struct StaticTranscriptCounter {
+        hash_query_count: u64,
+        logical_verifier_message_count: u64,
+        pending_challenge: bool,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct StaticTranscriptAccounting {
+        maximum_hash_query_count: u64,
+        logical_verifier_message_count: u64,
+    }
+
+    impl StaticTranscriptCounter {
+        const fn after_common_handoff(
+            hash_query_count: u64,
+            logical_verifier_message_count: u64,
+        ) -> Self {
+            Self {
+                hash_query_count,
+                logical_verifier_message_count,
+                pending_challenge: false,
+            }
+        }
+
+        fn challenge(&mut self, hash_query_count: u64) {
+            assert!(hash_query_count > 0);
+            if self.pending_challenge {
+                self.hash_query_count += 1;
+            }
+            self.hash_query_count += hash_query_count;
+            self.logical_verifier_message_count += 1;
+            self.pending_challenge = true;
+        }
+
+        fn response(&mut self) {
+            self.hash_query_count += if self.pending_challenge { 1 } else { 2 };
+            self.pending_challenge = false;
+        }
+
+        fn finish(self) -> StaticTranscriptAccounting {
+            assert!(!self.pending_challenge);
+            StaticTranscriptAccounting {
+                maximum_hash_query_count: self.hash_query_count,
+                logical_verifier_message_count: self.logical_verifier_message_count,
+            }
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    struct NestedParentHashCounts {
+        input_query_tree_count: usize,
+        output_query_tree_count: usize,
+    }
+
+    impl NestedParentHashCounts {
+        const fn weighted_count(self) -> usize {
+            EXACT_INPUT_BOUND_TREE_COUNT * self.input_query_tree_count
+                + EXACT_OUTPUT_BOUND_TREE_COUNT * self.output_query_tree_count
+        }
+    }
+
+    fn nested_bit_reversed_parent_hash_counts(
+        tree_height: usize,
+        input_query_count: usize,
+        output_query_count: usize,
+    ) -> NestedParentHashCounts {
+        assert!(input_query_count <= output_query_count);
+        assert!(output_query_count <= 1_usize << tree_height);
+        let reverse_shift = usize::BITS as usize - tree_height;
+        let output_indices = (0..output_query_count)
+            .map(|ordinal| ordinal.reverse_bits() >> reverse_shift)
+            .collect::<BTreeSet<_>>();
+        let input_indices = (0..input_query_count)
+            .map(|ordinal| ordinal.reverse_bits() >> reverse_shift)
+            .collect::<BTreeSet<_>>();
+        assert!(input_indices.is_subset(&output_indices));
+
+        let parent_hash_count = |indices: &BTreeSet<usize>| {
+            (1..=tree_height)
+                .map(|level| {
+                    indices
+                        .iter()
+                        .map(|index| index >> level)
+                        .collect::<BTreeSet<_>>()
+                        .len()
+                })
+                .sum()
+        };
+        NestedParentHashCounts {
+            input_query_tree_count: parent_hash_count(&input_indices),
+            output_query_tree_count: parent_hash_count(&output_indices),
+        }
+    }
+
+    fn maximum_parent_hash_count(tree_height: usize, query_count: usize) -> usize {
+        (0..tree_height)
+            .map(|depth| query_count.min(1_usize << depth))
+            .sum()
+    }
+
+    fn exact_transcript_accounting(
+        variant: &RelationPlanVariant,
+        relation_context: &crate::bgv::proof_suite::RelationPlanCheckContext,
+    ) -> StaticTranscriptAccounting {
+        let schedule = variant
+            .common_proof_transcript_schedule(relation_context)
+            .expect("derive exact transcript schedule");
+        let common_handoff_count = schedule
+            .maximum_row_code_whir_handoff_hash_query_count()
+            .expect("derive exact common-prefix hash-query ceiling");
+        assert_eq!(common_handoff_count, 2_208_153);
+        let common_logical_verifier_message_count = schedule
+            .maximum_row_code_whir_handoff_logical_verifier_message_count()
+            .expect("derive exact common-prefix verifier-message count");
+        assert_eq!(common_logical_verifier_message_count, 8_627);
+
+        let base_layout = ExactBasePhaseLayout::for_tree_role(variant, ProofTreeRole::BaseOracle)
+            .expect("derive exact base layout");
+        let auxiliary_layout =
+            ExactBasePhaseLayout::for_tree_role(variant, ProofTreeRole::AuxiliaryOracle)
+                .expect("derive exact auxiliary layout");
+        let phase_row_challenge_count = base_layout
+            .rows
+            .iter()
+            .chain(&auxiliary_layout.rows)
+            .map(|row| row.opening_point_ordinals.len())
+            .sum::<usize>();
+        assert_eq!(phase_row_challenge_count, 524);
+        let maximum_extension_hash_query_count = 2 * u64::from(
+            crate::bgv::proof_suite::PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
+        ) - 1;
+
+        let mut counter = StaticTranscriptCounter::after_common_handoff(
+            common_handoff_count,
+            common_logical_verifier_message_count,
+        );
+        // The pinned WHIR domain separator is one typed response.
+        counter.response();
+
+        let point_row_challenge_count = 9 + phase_row_challenge_count + 2;
+        let precommit_challenge_count = point_row_challenge_count + EXACT_BOUND_COLUMN_COUNT;
+        for _ in 0..precommit_challenge_count {
+            counter.challenge(maximum_extension_hash_query_count);
+        }
+        counter.response();
+
+        // The outer and bound query vectors are one extended XOF message each.
+        counter.challenge(1);
+        counter.challenge(1);
+        let block_selector_variable_count =
+            EXACT_TABLE_VARIABLE_COUNT - EXACT_BOUND_POLYNOMIAL_VARIABLE_COUNT;
+        let bound_degree_random_coordinate_count = EXACT_BOUND_REDUCTION_BLOCK_COUNT
+            * EXACT_BOUND_DEGREE_SUFFIX_PREFIXES
+                .iter()
+                .map(|prefix| {
+                    EXACT_TABLE_VARIABLE_COUNT - block_selector_variable_count - prefix.len()
+                })
+                .sum::<usize>();
+        assert_eq!(bound_degree_random_coordinate_count, 72);
+        for _ in 0..bound_degree_random_coordinate_count {
+            counter.challenge(maximum_extension_hash_query_count);
+        }
+
+        let pcs = plain_aggregate_pcs(EXACT_PCS_VARIABLE_COUNT)
+            .expect("construct exact plain WHIR configuration");
+        for _ in 0..pcs.commitment_ood_samples {
+            counter.challenge(maximum_extension_hash_query_count);
+            counter.response();
+        }
+        let explicit_point_count = expected_opening_widths().len();
+        assert_eq!(explicit_point_count, 1_010);
+        for _ in 0..explicit_point_count {
+            counter.response();
+            counter.response();
+        }
+        counter.challenge(maximum_extension_hash_query_count);
+
+        for _ in 0..pcs.round_folding_factor(0) {
+            counter.response();
+            counter.challenge(maximum_extension_hash_query_count);
+        }
+        for round_index in 0..pcs.n_rounds() {
+            let round = &pcs.round_parameters[round_index];
+            counter.response();
+            for _ in 0..round.ood_samples {
+                counter.challenge(maximum_extension_hash_query_count);
+                counter.response();
+            }
+            counter.challenge(maximum_extension_hash_query_count);
+            counter.challenge(1);
+            counter.challenge(maximum_extension_hash_query_count);
+            for _ in 0..pcs.round_folding_factor(round_index + 1) {
+                counter.response();
+                counter.challenge(maximum_extension_hash_query_count);
+            }
+        }
+        counter.response();
+        counter.challenge(1);
+        for _ in 0..pcs.final_sumcheck_rounds {
+            counter.response();
+            counter.challenge(maximum_extension_hash_query_count);
+        }
+        counter.response();
+        counter.finish()
     }
 
     fn index_has_prefix(index: usize, variable_count: usize, prefix: &[u8]) -> bool {
@@ -2833,24 +3031,170 @@ mod construction_tests {
     }
 
     #[test]
-    fn exact_construction_has_a_machine_checked_soundness_ledger() {
+    fn exact_transcript_hash_query_ceiling_is_source_derived() {
+        let (_, variant, relation_context) = production_same_secret_relation()
+            .expect("compile the exact production same-secret relation");
+        let accounting = exact_transcript_accounting(&variant, &relation_context);
+        assert_eq!(accounting.maximum_hash_query_count, 2_386_543);
+        assert_eq!(
+            accounting.logical_verifier_message_count,
+            EXACT_LOGICAL_VERIFIER_MESSAGE_COUNT
+        );
+    }
+
+    #[test]
+    fn exact_non_merkle_hash_query_ceiling_is_catalogued() {
+        let (_, variant, _) = production_same_secret_relation()
+            .expect("compile the exact production same-secret relation");
+        let verifier_source_ordinals = variant
+            .ordered_columns()
+            .iter()
+            .filter_map(|column| match column.origin() {
+                RelationColumnOrigin::VerifierSequence {
+                    verifier_source_ordinal,
+                    ..
+                } => Some(*verifier_source_ordinal),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let distinct_verifier_source_ordinals = verifier_source_ordinals
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            verifier_source_ordinals.len() as u64,
+            EXACT_PUBLIC_SETUP_SAMPLING_HASH_QUERY_COUNT
+        );
+        assert_eq!(
+            distinct_verifier_source_ordinals.len() as u64,
+            EXACT_PUBLIC_SETUP_SAMPLING_DISTINCT_EQUATION_COUNT
+        );
+
+        let hash_query_components = [
+            EXACT_RELATION_PLAN_HASH_QUERY_COUNT,
+            EXACT_VARIANT_HASH_QUERY_COUNT,
+            EXACT_TRANSCRIPT_HEADER_HASH_QUERY_COUNT,
+            EXACT_PUBLIC_INPUT_HASH_QUERY_COUNT,
+            EXACT_PUBLIC_SETUP_SAMPLING_HASH_QUERY_COUNT,
+        ];
+        let distinct_equation_components = [
+            EXACT_RELATION_PLAN_DISTINCT_EQUATION_COUNT,
+            EXACT_VARIANT_DISTINCT_EQUATION_COUNT,
+            EXACT_TRANSCRIPT_HEADER_DISTINCT_EQUATION_COUNT,
+            EXACT_PUBLIC_INPUT_DISTINCT_EQUATION_COUNT,
+            EXACT_PUBLIC_SETUP_SAMPLING_DISTINCT_EQUATION_COUNT,
+        ];
+        assert_eq!(hash_query_components.into_iter().sum::<u64>(), 25);
+        assert_eq!(distinct_equation_components.into_iter().sum::<u64>(), 13);
+        assert_eq!(EXACT_VERIFIER_NON_MERKLE_HASH_QUERY_COUNT, 25);
+        assert_eq!(EXACT_VERIFIER_NON_MERKLE_DISTINCT_EQUATION_COUNT, 13);
+    }
+
+    #[test]
+    fn exact_merkle_hash_query_ceiling_is_source_derived() {
+        let (_, variant, _) = production_same_secret_relation()
+            .expect("compile the exact production same-secret relation");
+        let shape = ExactProofShape::from_variant(&variant).expect("derive exact proof shape");
+        let outer_tree_height = shape.encoded_column_count.ilog2() as usize;
+        let outer_parent_count =
+            maximum_parent_hash_count(outer_tree_height, EXACT_COLUMN_QUERY_COUNT);
+        assert_eq!(outer_tree_height, 21);
+        assert_eq!(outer_parent_count, 5_155);
+        let outer_hash_query_count = 3 * (EXACT_COLUMN_QUERY_COUNT + outer_parent_count);
+        assert_eq!(outer_hash_query_count, 16_626);
+
+        let bound_tree_height = EXACT_BOUND_LEAF_COUNT.ilog2() as usize;
+        let bound_parent_counts = nested_bit_reversed_parent_hash_counts(
+            bound_tree_height,
+            EXACT_INPUT_BOUND_QUERY_COUNT,
+            EXACT_OUTPUT_BOUND_QUERY_COUNT,
+        );
+        assert_eq!(
+            bound_parent_counts.input_query_tree_count,
+            maximum_parent_hash_count(bound_tree_height, EXACT_INPUT_BOUND_QUERY_COUNT)
+        );
+        assert_eq!(
+            bound_parent_counts.output_query_tree_count,
+            maximum_parent_hash_count(bound_tree_height, EXACT_OUTPUT_BOUND_QUERY_COUNT)
+        );
+        assert_eq!(
+            bound_parent_counts,
+            NestedParentHashCounts {
+                input_query_tree_count: 623,
+                output_query_tree_count: 3_437,
+            }
+        );
+        assert_eq!(bound_parent_counts.weighted_count(), 15_295);
+        let bound_leaf_hash_query_count = EXACT_INPUT_BOUND_TREE_COUNT
+            * EXACT_INPUT_BOUND_QUERY_COUNT
+            + EXACT_OUTPUT_BOUND_TREE_COUNT * EXACT_OUTPUT_BOUND_QUERY_COUNT;
+        assert_eq!(bound_leaf_hash_query_count, 1_118);
+        let bound_hash_query_count =
+            bound_parent_counts.weighted_count() + bound_leaf_hash_query_count;
+        assert_eq!(bound_hash_query_count, 16_413);
+
+        let pcs = plain_aggregate_pcs(EXACT_PCS_VARIABLE_COUNT)
+            .expect("construct exact plain WHIR configuration");
+        let mut whir_hash_query_count = 0_usize;
+        for round_index in 0..pcs.n_rounds() {
+            let round = &pcs.round_parameters[round_index];
+            let folded_domain_size = round.domain_size >> pcs.round_folding_factor(round_index);
+            whir_hash_query_count += round.num_queries * (folded_domain_size.ilog2() as usize + 1);
+        }
+        let final_round = pcs.final_round_config();
+        let final_folded_domain_size =
+            final_round.domain_size >> pcs.round_folding_factor(pcs.n_rounds());
+        whir_hash_query_count +=
+            pcs.final_queries * (final_folded_domain_size.ilog2() as usize + 1);
+        assert_eq!(whir_hash_query_count, 28_202);
+
+        assert_eq!(
+            u64::try_from(outer_hash_query_count + bound_hash_query_count + whir_hash_query_count)
+                .expect("exact Merkle hash-query count fits u64"),
+            EXACT_VERIFIER_MERKLE_HASH_QUERY_COUNT
+        );
+    }
+
+    #[test]
+    fn exact_construction_has_a_conditional_machine_checked_qrom_ledger() {
         let pcs = plain_aggregate_pcs(EXACT_PCS_VARIABLE_COUNT)
             .expect("construct the exact plain WHIR configuration");
+        let (_, variant, relation_context) = production_same_secret_relation()
+            .expect("compile the exact production same-secret relation");
+        let shape = ExactProofShape::from_variant(&variant).expect("derive exact proof shape");
         let mut query_branches = Vec::new();
         let mut current_log_inverse_rate = pcs.params.starting_log_inv_rate;
-        for round in &pcs.round_parameters {
-            query_branches.push((current_log_inverse_rate, round.num_queries));
+        for (round_index, round) in pcs.round_parameters.iter().enumerate() {
+            let folded_domain_size = round.domain_size >> pcs.round_folding_factor(round_index);
+            query_branches.push((
+                current_log_inverse_rate,
+                round.num_queries,
+                folded_domain_size,
+            ));
             current_log_inverse_rate = round.log_inv_rate;
         }
-        query_branches.push((current_log_inverse_rate, pcs.final_queries));
+        let final_round = pcs.final_round_config();
+        let final_folded_domain_size =
+            final_round.domain_size >> pcs.round_folding_factor(pcs.n_rounds());
+        query_branches.push((
+            current_log_inverse_rate,
+            pcs.final_queries,
+            final_folded_domain_size,
+        ));
         assert_eq!(
             query_branches,
-            [(2, 387), (4, 288), (6, 268), (8, 264), (10, 263)]
+            [
+                (2, 387, 1 << 20),
+                (4, 288, 1 << 19),
+                (6, 268, 1 << 18),
+                (8, 264, 1 << 17),
+                (10, 263, 1 << 16),
+            ]
         );
 
         let common_binary_denominator_exponent = query_branches
             .iter()
-            .map(|(log_inverse_rate, query_count)| (log_inverse_rate + 1) * query_count)
+            .map(|(log_inverse_rate, query_count, _)| (log_inverse_rate + 1) * query_count)
             .chain([
                 3 * EXACT_COLUMN_QUERY_COUNT,
                 EXACT_BOUND_LEAF_COUNT.ilog2() as usize * EXACT_INPUT_BOUND_QUERY_COUNT,
@@ -2859,14 +3203,31 @@ mod construction_tests {
             .max()
             .expect("the exact WHIR configuration has query branches");
         let mut binary_numerator = BigUint::from(0_u8);
-        for (log_inverse_rate, query_count) in query_branches {
+        let mut binary_event_terms = Vec::new();
+        for &(log_inverse_rate, query_count, complete_population) in &query_branches {
+            let ratio_denominator = 1_u64 << (log_inverse_rate + 1);
+            let ratio_numerator = (1_u64 << log_inverse_rate) + 1;
+            let accepting_population = u64::try_from(complete_population)
+                .expect("WHIR query population fits u64")
+                / ratio_denominator
+                * ratio_numerator;
+            assert_without_replacement_probability_is_bounded_by_power(
+                accepting_population,
+                u64::try_from(complete_population).expect("WHIR query population fits u64"),
+                u32::try_from(query_count).expect("query count fits u32"),
+            );
             add_binary_failure_term(
                 &mut binary_numerator,
-                (1_u64 << log_inverse_rate) + 1,
+                ratio_numerator,
                 u32::try_from(query_count).expect("query count fits u32"),
                 (log_inverse_rate + 1) * query_count,
                 common_binary_denominator_exponent,
             );
+            binary_event_terms.push((
+                BigUint::from(ratio_numerator)
+                    .pow(u32::try_from(query_count).expect("query count fits u32")),
+                BigUint::from(1_u8) << ((log_inverse_rate + 1) * query_count),
+            ));
         }
 
         // A rate-one-quarter row word outside its 3/8 unique-decoding
@@ -2878,7 +3239,17 @@ mod construction_tests {
             3 * EXACT_COLUMN_QUERY_COUNT,
             common_binary_denominator_exponent,
         );
+        assert_without_replacement_probability_is_bounded_by_power(
+            u64::try_from(shape.encoded_column_count).expect("encoded column count fits u64") / 8
+                * 5,
+            u64::try_from(shape.encoded_column_count).expect("encoded column count fits u64"),
+            EXACT_COLUMN_QUERY_COUNT as u32,
+        );
         let outer_query_term = BigUint::from(5_u8).pow(EXACT_COLUMN_QUERY_COUNT as u32);
+        binary_event_terms.push((
+            outer_query_term.clone(),
+            BigUint::from(1_u8) << (3 * EXACT_COLUMN_QUERY_COUNT),
+        ));
         assert!(
             (&outer_query_term << 262) < (BigUint::from(1_u8) << (3 * EXACT_COLUMN_QUERY_COUNT))
         );
@@ -2897,8 +3268,22 @@ mod construction_tests {
             EXACT_BOUND_LEAF_COUNT.ilog2() as usize * EXACT_INPUT_BOUND_QUERY_COUNT,
             common_binary_denominator_exponent,
         );
+        // The sampler binds all 266 accepted draws in order. The first 40
+        // draws select a uniform subset without replacement; sorting that
+        // subset afterward only canonicalizes Merkle traversal and does not
+        // change the sampled event.
+        assert_without_replacement_probability_is_bounded_by_power(
+            BOUND_CLEARED_IDENTITY_ROOT_PAIR_BOUND,
+            EXACT_BOUND_LEAF_COUNT as u64,
+            EXACT_INPUT_BOUND_QUERY_COUNT as u32,
+        );
         let bound_query_term = BigUint::from(BOUND_CLEARED_IDENTITY_ROOT_PAIR_BOUND)
             .pow(EXACT_INPUT_BOUND_QUERY_COUNT as u32);
+        binary_event_terms.push((
+            bound_query_term.clone(),
+            BigUint::from(1_u8)
+                << (EXACT_BOUND_LEAF_COUNT.ilog2() as usize * EXACT_INPUT_BOUND_QUERY_COUNT),
+        ));
         assert!(
             (&bound_query_term << 273)
                 < (BigUint::from(1_u8)
@@ -2911,15 +3296,19 @@ mod construction_tests {
             7 * EXACT_OUTPUT_BOUND_QUERY_COUNT,
             common_binary_denominator_exponent,
         );
+        assert_without_replacement_probability_is_bounded_by_power(
+            EXACT_BOUND_LEAF_COUNT as u64 / 128 * 65,
+            EXACT_BOUND_LEAF_COUNT as u64,
+            EXACT_OUTPUT_BOUND_QUERY_COUNT as u32,
+        );
         let output_query_term = BigUint::from(65_u8).pow(EXACT_OUTPUT_BOUND_QUERY_COUNT as u32);
+        let output_query_denominator = BigUint::from(1_u8) << (7 * EXACT_OUTPUT_BOUND_QUERY_COUNT);
+        binary_event_terms.push((output_query_term.clone(), output_query_denominator.clone()));
         assert!(
             (&output_query_term << 260)
                 < (BigUint::from(1_u8) << (7 * EXACT_OUTPUT_BOUND_QUERY_COUNT))
         );
 
-        let (_, variant, _) = production_same_secret_relation()
-            .expect("compile the exact production same-secret relation");
-        let shape = ExactProofShape::from_variant(&variant).expect("derive exact proof shape");
         assert_eq!(shape.opening_claim_count, 4_217);
         assert_eq!(shape.phase_row_counts(), [247, 136, 15]);
         let base_layout = ExactBasePhaseLayout::for_tree_role(&variant, ProofTreeRole::BaseOracle)
@@ -3008,20 +3397,139 @@ mod construction_tests {
             (&aggregate_numerator << (STRICT_ROUND_BY_ROUND_SOUNDNESS_BITS + 1))
                 >= aggregate_denominator
         );
-
-        // BCS/BT24 classical-ROM compilation at Q <= 2^128 and kappa = 512.
-        let random_oracle_query_bound =
-            BigUint::from(1_u8) << CLASSICAL_RANDOM_ORACLE_QUERY_BOUND_EXPONENT;
-        let conservative_round_by_round_numerator = BigUint::from(1_u8)
-            << (FIAT_SHAMIR_XOF_OUTPUT_BIT_LENGTH - STRICT_ROUND_BY_ROUND_SOUNDNESS_BITS);
-        let compiler_numerator = BigUint::from(3_u8)
-            * (&random_oracle_query_bound * &random_oracle_query_bound + BigUint::from(1_u8));
-        let target_numerator = BigUint::from(1_u8)
-            << (FIAT_SHAMIR_XOF_OUTPUT_BIT_LENGTH - CLASSICAL_RANDOM_ORACLE_QUERY_BOUND_EXPONENT);
+        for (event_numerator, event_denominator) in &binary_event_terms {
+            assert!(
+                event_numerator * &output_query_denominator
+                    <= &output_query_term * event_denominator
+            );
+        }
         assert!(
-            random_oracle_query_bound * conservative_round_by_round_numerator + compiler_numerator
-                < target_numerator
+            BigUint::from(algebraic_failure_numerator) * &output_query_denominator
+                <= &output_query_term * &challenge_field_order
         );
+
+        // Conditional multi-round QROM arithmetic. The state-function, RBR
+        // extractor, list-decoder, and typed ideal-XOF correspondence remain
+        // separate theorem obligations. The `2k/2^512` term is the simulated
+        // oracle/database penalty from CMS19 Lemma 4.9. The transcript counter
+        // is reconciled with the accepted verifier in the persisted-proof gate;
+        // all other verifier-owned SHAKE calls are enumerated by the Merkle and
+        // fixed-hash ledgers above.
+        let verifier_hash_query_count = EXACT_TRANSCRIPT_HASH_QUERY_COUNT
+            + EXACT_VERIFIER_MERKLE_HASH_QUERY_COUNT
+            + EXACT_VERIFIER_NON_MERKLE_HASH_QUERY_COUNT;
+        let accepting_database_equation_count_ceiling = EXACT_TRANSCRIPT_HASH_QUERY_COUNT
+            + EXACT_VERIFIER_MERKLE_HASH_QUERY_COUNT
+            + EXACT_VERIFIER_NON_MERKLE_DISTINCT_EQUATION_COUNT;
+        assert_eq!(verifier_hash_query_count, 2_447_809);
+        assert_eq!(accepting_database_equation_count_ceiling, 2_447_797);
+
+        let adversary_hash_query_bound =
+            (BigUint::from(1_u8) << QROM_RANDOM_ORACLE_QUERY_BOUND_EXPONENT) - BigUint::from(1_u8);
+        let compiler_query_bound =
+            &adversary_hash_query_bound + BigUint::from(verifier_hash_query_count);
+        let compiler_numerator = BigUint::from(12_u8)
+            * &compiler_query_bound
+            * &compiler_query_bound
+            * &aggregate_numerator
+            * (BigUint::from(1_u8) << FIAT_SHAMIR_XOF_OUTPUT_BIT_LENGTH)
+            + (BigUint::from(48_u8)
+                * &compiler_query_bound
+                * &compiler_query_bound
+                * &compiler_query_bound
+                + BigUint::from(2_u8) * BigUint::from(accepting_database_equation_count_ceiling))
+                * &aggregate_denominator;
+        let compiler_denominator = &aggregate_denominator << FIAT_SHAMIR_XOF_OUTPUT_BIT_LENGTH;
+
+        let relinearization_position_count = u32::try_from(
+            crate::bgv::proof_suite::selected_evaluator_relinearization_entry_positions()
+                .expect("derive selected relinearization positions")
+                .len(),
+        )
+        .expect("selected relinearization position count fits u32");
+        let galois_batch_count = u32::try_from(
+            crate::bgv::proof_suite::selected_galois_key_share_batch_schedule().len(),
+        )
+        .expect("selected Galois batch count fits u32");
+        let application_slot_ceilings = crate::foundation::ProofApplicationSlotCeilings::derive(
+            crate::foundation::FOUNDATION_PROFILE.participant_count,
+            relinearization_position_count,
+            galois_batch_count,
+            crate::foundation::SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION,
+        )
+        .expect("derive selected proof-application ceilings");
+        let same_secret_application_ceiling = application_slot_ceilings
+            .family_ceiling(
+                crate::foundation::ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+            )
+            .expect("same-secret family has an application ceiling");
+        assert_eq!(
+            same_secret_application_ceiling,
+            u32::from(crate::foundation::FOUNDATION_PROFILE.participant_count)
+        );
+        let transcript_accounting = exact_transcript_accounting(&variant, &relation_context);
+        assert_eq!(
+            transcript_accounting.logical_verifier_message_count,
+            EXACT_LOGICAL_VERIFIER_MESSAGE_COUNT
+        );
+        // The ordinary family union uses the already-summed per-proof
+        // aggregate. Individual event bounds above are diagnostics only: one
+        // typed verifier message can drive more than one bad event, so they
+        // are not multiplied by the logical message count.
+        assert!(
+            BigUint::from(same_secret_application_ceiling)
+                * &aggregate_numerator
+                * (BigUint::from(1_u8) << 80)
+                <= aggregate_denominator
+        );
+        assert!(
+            BigUint::from(4_u8)
+                * BigUint::from(same_secret_application_ceiling)
+                * &compiler_numerator
+                <= compiler_denominator
+        );
+
+        // Since Q_H + h < 2^81, this stronger integer check also rules out
+        // an initial-search term consuming the family budget.
+        assert!(
+            BigUint::from(same_secret_application_ceiling)
+                * BigUint::from(12_u8)
+                * &aggregate_numerator
+                * (BigUint::from(1_u8) << 176)
+                <= aggregate_denominator
+        );
+        let transcript_schedule = variant
+            .common_proof_transcript_schedule(&relation_context)
+            .expect("derive exact transcript schedule");
+        let common_prefix_xof_output_byte_length = transcript_schedule
+            .ordered_application_challenge_sampler_accounting()
+            .expect("derive exact application samplers")
+            .into_iter()
+            .map(|sampler| {
+                usize::try_from(sampler.maximum_xof_output_byte_length())
+                    .expect("application sampler output length fits usize")
+            })
+            .max()
+            .unwrap_or(Hash512::BYTE_LENGTH)
+            .max(Hash512::BYTE_LENGTH);
+        let maximum_successor_query_count = pcs
+            .round_parameters
+            .iter()
+            .map(|round| round.num_queries)
+            .chain([pcs.final_queries])
+            .chain([EXACT_COLUMN_QUERY_COUNT, EXACT_OUTPUT_BOUND_QUERY_COUNT])
+            .max()
+            .expect("the exact successor has a query vector");
+        let successor_query_xof_output_byte_length = Hash512::BYTE_LENGTH
+            + maximum_successor_query_count
+                * usize::try_from(transcript_schedule.maximum_candidate_draws_per_output())
+                    .expect("candidate ceiling fits usize")
+                * std::mem::size_of::<u64>();
+        let maximum_typed_xof_call_byte_length = common_prefix_xof_output_byte_length
+            .max(Hash512::BYTE_LENGTH + std::mem::size_of::<u64>())
+            .max(successor_query_xof_output_byte_length);
+        assert_eq!(maximum_typed_xof_call_byte_length, 396_352);
+        assert_eq!(maximum_typed_xof_call_byte_length * 8, 3_170_816);
     }
 
     #[test]
@@ -3038,8 +3546,11 @@ mod construction_tests {
         let auxiliary_layout =
             ExactBasePhaseLayout::for_tree_role(&variant, ProofTreeRole::AuxiliaryOracle)
                 .expect("derive auxiliary layout");
+        let pcs = plain_aggregate_pcs(EXACT_PCS_VARIABLE_COUNT)
+            .expect("construct the exact plain WHIR configuration");
+        let mut challenger = plain_aggregate_challenger(&pcs, b"exact masking view certificate");
         let point_row_weights = derive_exact_point_row_weights(
-            b"exact masking view certificate",
+            &mut challenger,
             &base_layout,
             &auxiliary_layout,
             ProofChallengeExtensionElement::from_canonical_coordinates([17, 1, 0, 0, 0])
@@ -3058,8 +3569,6 @@ mod construction_tests {
         assert_eq!(row_geometry.encoded_column_count, 1 << 21);
         assert!(EXACT_COLUMN_QUERY_COUNT < row_geometry.pad_value_count());
 
-        let pcs = plain_aggregate_pcs(EXACT_PCS_VARIABLE_COUNT)
-            .expect("construct the exact plain WHIR configuration");
         let first_oracle_opening_count = pcs.round_parameters[0]
             .num_queries
             .checked_mul(1_usize << pcs.round_folding_factor(0))
@@ -3541,12 +4050,12 @@ mod native_prover {
         prover_sources: &[ExactBoundTreeProverSource],
         store: &ExactPolynomialStore,
         entries: &[ProofTreeCatalogEntry],
-        bound_query_indices: &[usize],
+        bound_query_indices: &ExactBoundQueryIndices,
         evaluation_domain: ProofEvaluationDomain,
     ) -> Result<Vec<ExactBoundTreeAuthentication>, String> {
         if entries.len() != EXACT_BOUND_TREE_COUNT
             || prover_sources.len() != EXACT_BOUND_TREE_COUNT
-            || bound_query_indices.len() != EXACT_OUTPUT_BOUND_QUERY_COUNT
+            || !bound_query_indices.has_exact_shape()
             || evaluation_domain.size() != EXACT_BOUND_LEAF_COUNT * 2
         {
             return Err("bound authentication prover has the wrong fixed shape".to_owned());
@@ -3559,8 +4068,8 @@ mod native_prover {
             {
                 return Err("bound tree has the wrong persistent material source".to_owned());
             }
-            let query_count = bound_tree_query_count(bound_tree_ordinal)?;
-            let tree_query_indices = &bound_query_indices[..query_count];
+            let tree_query_indices = bound_query_indices.for_tree_ordinal(bound_tree_ordinal)?;
+            let query_count = tree_query_indices.len();
             let query_positions = tree_query_indices
                 .iter()
                 .copied()
@@ -3989,19 +4498,17 @@ mod native_prover {
             &deep_evaluations,
             &opening_batch_mask_chunk_evaluations,
         )?;
-        let opening_batch_challenges =
-            finish_exact_transcript(&mut transcript_prefix, &deep_evaluations, quotient_root)?;
-        let binding = aggregate_binding(
-            &prerequisite,
-            &public_input,
-            [base_root, auxiliary_root, quotient_root],
-            &transcript_prefix,
+        let row_code_whir_transcript = finish_exact_transcript(
+            &mut transcript_prefix,
             &deep_evaluations,
+            quotient_root,
             &opening_batch_mask_chunk_evaluations,
-            &opening_batch_challenges,
         )?;
+        let pcs = plain_aggregate_pcs(EXACT_PCS_VARIABLE_COUNT)?;
+        let mut prover_challenger =
+            plain_aggregate_challenger_from_transcript(&pcs, row_code_whir_transcript)?;
         let point_row_weights = derive_exact_point_row_weights(
-            &binding,
+            &mut prover_challenger,
             &base_layout,
             &auxiliary_layout,
             transcript_prefix.opening_points[0],
@@ -4010,7 +4517,7 @@ mod native_prover {
             &verified_relation.variant,
             &transcript_prefix.opening_points,
             &deep_evaluations,
-            &binding,
+            &mut prover_challenger,
         )?;
         ensure_bound_opening_points_are_outside_evaluation_domain(
             &bound_claims,
@@ -4021,7 +4528,6 @@ mod native_prover {
             usize::try_from(verified_relation.context.quotient_component_count)
                 .map_err(|_| "quotient component count exceeds usize".to_owned())?;
         let row_pad_seeds = source_manifest.row_pad_seeds()?;
-        let pcs = plain_aggregate_pcs(EXACT_PCS_VARIABLE_COUNT)?;
         let witness = exact_aggregate_witness(
             &store,
             &base_layout,
@@ -4033,14 +4539,13 @@ mod native_prover {
             &bound_claims,
             pcs.round_folding_factor(0),
         )?;
-        let mut prover_challenger = plain_aggregate_challenger(&pcs, &binding);
         let (aggregate_commitment, committed_prover_data) =
             commit_streaming_plain_aggregate(&pcs, witness, &mut prover_challenger)?;
         drop(committed_prover_data);
         let query_indices =
-            derive_query_indices(&binding, &aggregate_commitment, shape.encoded_column_count)?;
-        let bound_query_indices = derive_bound_query_indices(&binding, &aggregate_commitment)?;
-        let degree_test_points = bound_degree_test_points(&binding, &aggregate_commitment)?;
+            derive_query_indices(&mut prover_challenger, shape.encoded_column_count)?;
+        let bound_query_indices = derive_bound_query_indices(&mut prover_challenger)?;
+        let degree_test_points = bound_degree_test_points(&mut prover_challenger)?;
         let bound_evaluation_domain = ProofEvaluationDomain::new(
             usize::try_from(verified_relation.variant.evaluation_domain_size())
                 .map_err(|_| "bound evaluation domain exceeds usize".to_owned())?,
@@ -4236,6 +4741,7 @@ mod native_prover {
                 proof_wire.len()
             ));
         }
+        let _transcript_summary = prover_challenger.finish(&proof_wire)?;
         verify_exact_same_secret_proof_bytes(&prerequisite, &public_input_wire, &proof_wire)?;
         write_artifact(
             &store.root().join(EXACT_PUBLIC_INPUT_ARTIFACT_NAME),
@@ -4275,6 +4781,10 @@ mod native_prover {
         assert!(metrics.proof_byte_length < MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH);
         assert_eq!(metrics.opening_claim_count, 4_217);
         assert_eq!(metrics.query_count, EXACT_COLUMN_QUERY_COUNT);
+        assert_eq!(metrics.maximum_transcript_hash_query_count, 2_386_543);
+        assert_eq!(metrics.logical_verifier_message_count, 9_315);
+        assert_eq!(metrics.maximum_verifier_hash_query_count, 2_447_809);
+        assert_eq!(metrics.maximum_accepting_database_equation_count, 2_447_797);
     }
 }
 
@@ -4486,6 +4996,10 @@ mod persisted_verifier_tests {
         assert_eq!(metrics.public_input_byte_length, 2_461);
         assert_eq!(metrics.opening_claim_count, 4_217);
         assert_eq!(metrics.query_count, EXACT_COLUMN_QUERY_COUNT);
+        assert_eq!(metrics.maximum_transcript_hash_query_count, 2_386_543);
+        assert_eq!(metrics.logical_verifier_message_count, 9_315);
+        assert_eq!(metrics.maximum_verifier_hash_query_count, 2_447_809);
+        assert_eq!(metrics.maximum_accepting_database_equation_count, 2_447_797);
         assert!(metrics.proof_byte_length < MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH);
         println!(
             "persisted exact verifier: proof bytes {}, public input bytes {}, claims {}, queries {}",
