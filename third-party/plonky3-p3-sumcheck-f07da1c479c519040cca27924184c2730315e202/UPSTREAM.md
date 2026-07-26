@@ -6,7 +6,8 @@ This directory contains `p3-sumcheck` from
 `Cargo.toml.orig`, changelog, benchmark, test sources, and MIT and Apache 2.0
 license files are retained. `Cargo.toml` expands inherited workspace metadata
 and dependencies so this single modified crate can be used as a local Cargo
-patch.
+patch. The vendored manifest contains neither a nested patch table nor a
+lockfile; the repository root is the sole dependency-graph authority.
 
 The production dependency graph remains pinned to that exact upstream
 revision. The repository root contains the authoritative Cargo patch table and
@@ -42,10 +43,11 @@ The changes are confined to:
 - `src/product_polynomial.rs`
 - `src/strategy.rs`
 
+Each retained modified Rust source file carries a local-modification notice
+that identifies its deviation and points back to this provenance record.
+
 Focused local tests require explicit-point prover and verifier transcript
 agreement for both layout strategies, reject a changed point, and reject an
 opening-shape mismatch. They also exercise deterministic cancellation attempts
 against two fresh constraints and require scalar, packed, running-verifier, and
-final-verifier batching agreement. Production integration additionally tests
-the valid-Boolean-openings and false-non-Boolean-terminal forgery at the
-complete proof boundary.
+final-verifier batching agreement.

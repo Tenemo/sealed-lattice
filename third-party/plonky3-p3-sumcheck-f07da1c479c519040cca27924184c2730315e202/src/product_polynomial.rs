@@ -1,5 +1,9 @@
 //! SIMD-aware polynomial pair for quadratic sumcheck.
 //!
+//! Local modification: constraint combination preserves the chronological
+//! query-restoration batching recurrence used by the enclosing WHIR reduction.
+//! See `UPSTREAM.md`.
+//!
 //! This module implements a data structure that manages two multilinear polynomials.
 //!
 //! Evaluations and weights—whose pointwise product is required for the sumcheck protocol.

@@ -5,10 +5,10 @@ This directory contains `p3-util` from
 `f07da1c479c519040cca27924184c2730315e202`. The original source,
 `Cargo.toml.orig`, changelog, benchmarks, and MIT and Apache 2.0 license files
 are retained. `Cargo.toml` expands inherited workspace metadata and
-dependencies so the isolated crate can be used as a local Cargo patch. Its
-standalone test graph also redirects the exact upstream source back to this
-local crate, ensuring the compatibility substitution is exercised there too.
-The local `Cargo.toml` and `src/lib.rs` carry explicit modification notices as
+dependencies so the repository-root Cargo patch can select this isolated
+crate. The vendored manifest contains neither a nested patch table nor a
+lockfile; the repository root is the sole dependency-graph authority. The
+local `Cargo.toml` and `src/lib.rs` carry explicit modification notices as
 required when redistributing the modified source under Apache 2.0.
 
 The repository-root `Cargo.lock` and kernel dependency declarations are the

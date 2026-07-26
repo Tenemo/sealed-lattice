@@ -37,6 +37,3 @@ harness = false
 [[bench]]
 name = "transpose"
 harness = false
-
-[patch."https://github.com/Plonky3/Plonky3.git"]
-p3-util = { path = "." }

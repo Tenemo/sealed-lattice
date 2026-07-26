@@ -5,6 +5,10 @@
 //! - `sumcheck_coefficients_{prefix,suffix}`: the two round-coefficient routines.
 //! - `VariableOrder`: tag enum carrying inherent methods that dispatch to either routine.
 //! - `SumcheckProver`: drives rounds over a paired product polynomial.
+//!
+//! Local modification: final verifier evaluation follows the same chronological
+//! query-restoration batching recurrence as the scalar and packed prover paths.
+//! See `UPSTREAM.md`.
 
 use p3_challenger::{FieldChallenger, GrindingChallenger};
 use p3_field::{Algebra, ExtensionField, Field, PrimeCharacteristicRing, dot_product};

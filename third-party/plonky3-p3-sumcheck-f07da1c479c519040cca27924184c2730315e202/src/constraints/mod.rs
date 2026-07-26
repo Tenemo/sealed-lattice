@@ -1,3 +1,9 @@
+//! Constraint construction and chronological challenge-power batching.
+//!
+//! Local modification: incremental batching reserves the carried claim's
+//! challenge power and uses the same recurrence in scalar and packed paths.
+//! See `UPSTREAM.md`.
+
 use alloc::vec::Vec;
 
 use p3_field::{ExtensionField, Field, PackedValue};
