@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
     clearCommonProofExternalMemoryRequest,
     encodeCommonProofExternalMemoryResponseInto,
+    maximumWorkerPayloadByteLength,
 } from '../../../src/common-proof-worker-runtime/external-memory.js';
 import {
     CommonProofWorkerRuntimeError,
@@ -170,7 +171,11 @@ describe('common-proof external-memory runtime', () => {
     });
 
     it('reuses one bounded response buffer without retaining request or read bytes', () => {
-        const reusableResponseBuffer = new Uint8Array(49_340);
+        const maximumSingleReadResponseByteLength =
+            Number(maximumWorkerPayloadByteLength) + 80 + 88;
+        const reusableResponseBuffer = new Uint8Array(
+            maximumSingleReadResponseByteLength,
+        );
         const responseBuffer = reusableResponseBuffer.buffer;
         const readRequest = decodeCommonProofExternalMemoryRequest(
             fourByteReadRequest(runtimeBinding(0x39), 1n),
@@ -367,15 +372,15 @@ describe('common-proof external-memory runtime', () => {
         expect(decodedView.operations).toHaveLength(1);
         clearCommonProofExternalMemoryRequest(decodedView);
 
-        const appendPayload = new Uint8Array(49_152).fill(0x5a);
+        const appendPayload = new Uint8Array(1_048_576).fill(0x5a);
         const maximumRequest = encodeRequest({
-            maximumPayloadByteLength: 49_152n,
+            maximumPayloadByteLength: 1_048_576n,
             operations: [
                 {
                     kind: 2,
                     objectOrdinal: 9,
                     payload: appendPayload,
-                    payloadByteLength: 49_152n,
+                    payloadByteLength: 1_048_576n,
                     position: 0n,
                     protection: 0,
                 },
@@ -389,22 +394,22 @@ describe('common-proof external-memory runtime', () => {
         if (appendOperation?.operationKind !== 'append') {
             throw new Error('The maximum append operation was not decoded.');
         }
-        expect(appendOperation.bytes.byteLength).toBe(49_152);
+        expect(appendOperation.bytes.byteLength).toBe(1_048_576);
         expect(appendOperation.bytes.buffer).not.toBe(maximumRequest.buffer);
         expect(maximumRequest.byteLength).toBe(0);
         clearCommonProofExternalMemoryRequest(decoded);
         expect(appendOperation.bytes[0]).toBe(0);
         expect(appendOperation.bytes[appendOperation.bytes.length - 1]).toBe(0);
 
-        const overlongAppendPayload = new Uint8Array(49_153).fill(0x6b);
+        const overlongAppendPayload = new Uint8Array(1_048_577).fill(0x6b);
         const overlongAppendRequest = encodeRequest({
-            maximumPayloadByteLength: 49_153n,
+            maximumPayloadByteLength: 1_048_577n,
             operations: [
                 {
                     kind: 2,
                     objectOrdinal: 9,
                     payload: overlongAppendPayload,
-                    payloadByteLength: 49_153n,
+                    payloadByteLength: 1_048_577n,
                     position: 0n,
                     protection: 0,
                 },
@@ -414,7 +419,7 @@ describe('common-proof external-memory runtime', () => {
         });
         expect(() =>
             decodeCommonProofExternalMemoryRequest(overlongAppendRequest),
-        ).toThrowError(expect.objectContaining({ code: 'MalformedRequest' }));
+        ).toThrowError(expect.objectContaining({ code: 'ResourceLimit' }));
     });
 
     it('clears transferred append custody after response success and refusal', () => {

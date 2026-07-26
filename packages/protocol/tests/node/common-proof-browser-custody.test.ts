@@ -17,6 +17,7 @@ import {
     openCommonProofBrowserCustody,
     type CommonProofBrowserCustody,
 } from '#packages/protocol/src/runtime/common-proof-browser-custody';
+import { maximumCanonicalDataChunkByteLength } from '#packages/protocol/src/runtime/common-proof-browser-custody/records';
 import type {
     UntrustedStorageExclusiveCapacityReservation,
     UntrustedStorageTransactionStore,
@@ -148,7 +149,10 @@ const canonicalAppendRequests = (
     const requests: CommonProofExternalMemoryRequest[] = [];
     let byteOffset = 0;
     while (byteOffset < bytes.byteLength) {
-        const chunkByteLength = Math.min(49_152, bytes.byteLength - byteOffset);
+        const chunkByteLength = Math.min(
+            maximumCanonicalDataChunkByteLength,
+            bytes.byteLength - byteOffset,
+        );
         requests.push(
             request(
                 [
@@ -779,10 +783,18 @@ describe('Common-proof browser custody', () => {
             { length: 100_003 },
             (_unused, index) => (index * 13 + 17) & 0xff,
         );
+        const replayAppendRequests = canonicalAppendRequests(
+            8,
+            replayBytes,
+            2n,
+        );
         const replayRequests = [
             request([createOperation(8, BigInt(replayBytes.byteLength))], 1n),
-            ...canonicalAppendRequests(8, replayBytes, 2n),
-            request([sealOperation(8)], 5n),
+            ...replayAppendRequests,
+            request(
+                [sealOperation(8)],
+                2n + BigInt(replayAppendRequests.length),
+            ),
         ] as const;
         for (const replayRequest of replayRequests) {
             await first.custody.externalMemory.executeTransaction(
@@ -1462,6 +1474,12 @@ describe('Common-proof browser custody', () => {
     });
 
     it('requires the exact installed scratch-record capacity at every store boundary', () => {
+        expect(
+            commonProofStorageCapacityProfile.maximumLeaseByteLength,
+        ).toBeGreaterThan(maximumCanonicalDataChunkByteLength);
+        expect(
+            commonProofStorageCapacityProfile.maximumTransactionByteLength,
+        ).toBe(commonProofStorageCapacityProfile.maximumLeaseByteLength);
         const boundaryLimits = {
             maximumActiveTransactionCount: 1,
             maximumLeaseByteLength:
@@ -1497,5 +1515,44 @@ describe('Common-proof browser custody', () => {
                 }),
             ).toThrowError(expect.objectContaining({ code: 'OpenFailed' }));
         }
+    });
+
+    it('stores one canonical authenticated scratch chunk under the exact lease ceiling', async () => {
+        const adapter = new InMemoryRuntimeStorageAdapter();
+        const openedStore = await openRuntimeTestStore({
+            adapter,
+            limits: {
+                maximumLeaseByteLength:
+                    commonProofStorageCapacityProfile.maximumLeaseByteLength,
+                maximumTransactionByteLength:
+                    commonProofStorageCapacityProfile.maximumTransactionByteLength,
+            },
+            namespace: 'common-proof-exact-secret-chunk-test',
+        });
+        const { custody } = await openFixture({
+            adapter,
+            store: openedStore.store,
+        });
+        const chunkBytes = Uint8Array.from(
+            { length: maximumCanonicalDataChunkByteLength },
+            (_unused, byteIndex) => (byteIndex * 37 + 11) & 0xff,
+        );
+
+        await custody.externalMemory.executeTransaction(
+            request([createOperation(31, BigInt(chunkBytes.byteLength))]),
+        );
+        await custody.externalMemory.executeTransaction(
+            request([appendOperation(31, chunkBytes)]),
+        );
+        await custody.externalMemory.executeTransaction(
+            request([sealOperation(31)]),
+        );
+        const readResults = await custody.externalMemory.executeTransaction(
+            request([
+                readOperation(31, BigInt(chunkBytes.byteLength - 97), 97),
+            ]),
+        );
+
+        expect(readResults[0]?.bytes).toEqual(chunkBytes.slice(-97));
     });
 });

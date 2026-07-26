@@ -386,7 +386,7 @@ mod custody_requirement_tests {
     fn secret_seal_custody_requirement_uses_canonical_record_geometry() {
         assert_eq!(
             MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
-            49_152
+            1_048_576
         );
         assert_eq!(
             COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_HEADER_PLAINTEXT_BYTE_LENGTH,

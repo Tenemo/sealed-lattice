@@ -1,6 +1,7 @@
 import { shake256 } from '@noble/hashes/sha3.js';
 import {
     BrowserActionStorageCustodyError,
+    foundationProfile,
     type BrowserActionStorageWorkerKernel,
 } from '@sealed-lattice/types';
 import type {
@@ -25,7 +26,8 @@ import type {
 
 export const foundationHashByteLength = 64;
 export const identifierByteLength = 32;
-export const maximumCanonicalDataChunkByteLength = 49_152;
+export const maximumCanonicalDataChunkByteLength =
+    foundationProfile.streamChunkByteLength;
 export const maximumDeletionBatchRecordCount = 64;
 export const canonicalCommonProofOutputChunkByteLength = 1_048_576;
 export const maximumCommonProofOutputChunkCount = 256;

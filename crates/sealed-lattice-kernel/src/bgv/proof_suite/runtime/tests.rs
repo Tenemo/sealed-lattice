@@ -512,7 +512,12 @@ fn runtime_limits_bind_absolute_safety_bounds_and_reject_overruns() {
     assert_eq!(MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH, 1_048_576);
     assert_eq!(
         MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
-        49_152
+        1_048_576
+    );
+    assert_eq!(
+        usize::try_from(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH)
+            .expect("the external-memory chunk length fits usize"),
+        FOUNDATION_PROFILE.stream_chunk_byte_length
     );
     let exact_limits = CommonProofRuntimeLimits::new(
         MAXIMUM_COMMON_PROOF_BYTE_LENGTH,

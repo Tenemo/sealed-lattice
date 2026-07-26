@@ -1,11 +1,16 @@
 import { shake256 } from '@noble/hashes/sha3.js';
+import { foundationProfile } from '@sealed-lattice/types';
 
 import { byteArraysEqual } from '../byte-array.js';
 
 const hashByteLength = 64;
 export const maximumWorkerOperationCount = 4_096;
-export const maximumWorkerPayloadByteLength = 1_048_576n;
-const maximumExternalMemoryAppendByteLength = 49_152;
+export const maximumWorkerPayloadByteLength = BigInt(
+    foundationProfile.streamChunkByteLength,
+);
+const maximumExternalMemoryAppendByteLength = Number(
+    maximumWorkerPayloadByteLength,
+);
 const operationHeaderByteLength = 32;
 const readResultHeaderByteLength = 88;
 export const requestHeaderByteLength = 156;

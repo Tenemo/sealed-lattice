@@ -36,7 +36,9 @@ const generationPollAuthenticatedSourceReadReady = 8;
 const authenticatedSourceRequestByteLength = 160;
 const generationExternalMemoryAccountingByteLength = 20 * 8;
 const verificationReadbackAccountingByteLength = 4 * 8;
-const maximumExternalMemoryChunkByteLength = 49_152;
+const maximumExternalMemoryChunkByteLength = Number(
+    maximumWorkerPayloadByteLength,
+);
 const maximumExternalScratchByteLength = 1_073_741_824n;
 const firstGenerationStage = 1;
 const finalGenerationStage = 14;

@@ -40,7 +40,9 @@ import type {
 // separately and do not participate in proof or suite validity.
 export const commonProofScratchByteLength = 1_073_741_824n;
 export const commonProofLiveObjectCount = 4_096;
-const commonProofDataChunkByteLength = 49_152n;
+const commonProofDataChunkByteLength = BigInt(
+    foundationProfile.streamChunkByteLength,
+);
 const commonProofSecretRecordOverheadByteLength = 968n;
 const commonProofObjectHeaderPayloadByteLength = 9n;
 const commonProofCanonicalOutputChunkByteLength = 1_048_576n;
@@ -128,9 +130,16 @@ const commonProofMaximumAdditionalAuthenticatedRepairHeadPlaintextByteLengthBigI
     commonProofMaximumIndexValueByteLength;
 const commonProofMaximumAdditionalOwnedRecordCountBigInt =
     (commonProofLogicalRecordCountBigInt + 1n) * 2n + 1n;
-const commonProofMaximumRecordStorageByteLengthBigInt =
+const commonProofMaximumSecretRecordStorageByteLength =
+    commonProofDataChunkByteLength + commonProofSecretRecordOverheadByteLength;
+const commonProofMaximumPublicRecordStorageByteLength =
     commonProofCanonicalOutputChunkByteLength +
     commonProofPublicRecordOverheadByteLength;
+const commonProofMaximumRecordStorageByteLengthBigInt =
+    commonProofMaximumSecretRecordStorageByteLength >
+    commonProofMaximumPublicRecordStorageByteLength
+        ? commonProofMaximumSecretRecordStorageByteLength
+        : commonProofMaximumPublicRecordStorageByteLength;
 const commonProofMaximumTransactionChangeCountBigInt = BigInt(
     commonProofDeletionBatchRecordCount,
 );

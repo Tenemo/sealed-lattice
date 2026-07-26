@@ -95,10 +95,12 @@ pub(crate) const MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH: usize = 1_048_576;
 
 /// Fixed format capacity of one external-memory record.
 /// Every non-final object append has this exact byte length and the final
-/// append has the smaller remaining object extent. This is independent of the
-/// larger canonical proof transport chunk because IndexedDB custody accounts
-/// and authenticates each append as one durable record.
-pub(crate) const MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH: u32 = 49_152;
+/// append has the smaller remaining object extent. External-memory records use
+/// the same canonical chunk size as foundation streams and local-record
+/// plaintexts.
+const _: () = assert!(FOUNDATION_PROFILE.stream_chunk_byte_length <= u32::MAX as usize);
+pub(crate) const MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH: u32 =
+    FOUNDATION_PROFILE.stream_chunk_byte_length as u32;
 
 /// At most two authenticated input chunks may be resident around an
 /// incremental decoder call.

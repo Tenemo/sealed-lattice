@@ -817,10 +817,10 @@ fn maximum_worker_transaction_buffers_match_static_boundary_accounting() {
         .encode_test_worker_response(&[vec![0xa5; maximum_payload_byte_length]])
         .expect("maximum read response encodes");
 
-    assert_eq!(encoded_append_request.len(), 49_340);
+    assert_eq!(encoded_append_request.len(), 1_048_764);
     assert_eq!(encoded_empty_response.len(), 80);
     assert_eq!(encoded_read_request.len(), 188);
-    assert_eq!(encoded_read_response.len(), 49_320);
+    assert_eq!(encoded_read_response.len(), 1_048_744);
     assert_eq!(
         MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_APPEND_REQUEST_BYTE_LENGTH,
         u64::try_from(encoded_append_request.len()).expect("append request length fits u64")
@@ -839,11 +839,11 @@ fn maximum_worker_transaction_buffers_match_static_boundary_accounting() {
     );
     assert_eq!(
         MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_COPIED_BUFFER_BYTE_LENGTH,
-        49_340
+        1_048_764
     );
     assert_eq!(
         MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_BOUNDARY_TRANSFER_LIVE_BYTE_LENGTH,
-        49_508
+        1_048_932
     );
 }
 

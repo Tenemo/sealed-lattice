@@ -554,16 +554,16 @@ mod selected_ballot_resource_cap_tests {
         );
         assert_eq!(
             requirement.maximum_transaction_payload_byte_length(),
-            49_152
+            1_048_576
         );
         assert_eq!(requirement.distinct_physical_object_count(), 7_291);
         assert_eq!(requirement.object_lifecycle_count(), 79_889);
-        assert_eq!(requirement.peak_stored_byte_length(), 115_999_258_752);
-        assert_eq!(requirement.total_written_byte_length(), 1_341_247_396_696);
-        assert_eq!(requirement.total_read_byte_length(), 2_882_491_465_056);
-        assert_eq!(requirement.transaction_count(), 22_691_664_673);
+        assert_eq!(requirement.peak_stored_byte_length(), 116_002_042_944);
+        assert_eq!(requirement.total_written_byte_length(), 1_341_250_234_008);
+        assert_eq!(requirement.total_read_byte_length(), 2_882_507_499_616);
+        assert_eq!(requirement.transaction_count(), 22_648_300_420);
         assert_eq!(object_count_variance, 3_195);
-        assert_eq!(peak_stored_byte_length_variance, 114_925_516_928);
+        assert_eq!(peak_stored_byte_length_variance, 114_928_301_120);
         assert!(requirement.local_record_seal_invocation_count() > 0);
         assert!(requirement.local_record_sealed_plaintext_byte_length() > 0);
         assert_eq!(

@@ -20,8 +20,8 @@ const encodeUnsigned64Words = (
 
 const generationAccountingWords = Object.freeze([
     12n,
-    49_152n,
-    49_152n,
+    1_048_576n,
+    1_048_576n,
     4n,
     6n,
     1_000n,
@@ -83,8 +83,8 @@ describe('Common-proof manual accounting boundaries', () => {
                 transactionCount: 35n,
             },
             compiledRequirement: {
-                maximumChunkByteLength: 49_152,
-                maximumTransactionPayloadByteLength: 49_152n,
+                maximumChunkByteLength: 1_048_576,
+                maximumTransactionPayloadByteLength: 1_048_576n,
                 distinctPhysicalObjectCount: 4,
                 objectLifecycleCount: 6,
                 peakStoredByteLength: 1_000n,
