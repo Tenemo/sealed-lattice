@@ -25,7 +25,7 @@ use crate::{
         FOUNDATION_PROFILE, MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH,
         MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT,
         MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT, ProofApplicationSlotCeilings,
-        SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT,
+        ProofFamilyApplicationInventory, SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT,
         SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION, selected_evaluator_resource_accounting,
     },
 };
@@ -588,6 +588,7 @@ pub(crate) use resource_accounting::{
     SelectedProofExternalMemoryDiagnosticRequirement, SelectedProofExternalMemoryDiagnosticRow,
     SelectedProofQueryTreeResourceAccounting, SelectedProofResidentPhaseResourceAccounting,
     derive_selected_complete_action_material_resource_accounting,
+    derive_selected_proof_family_application_inventory,
     selected_complete_proof_resource_accounting, selected_proof_external_memory_diagnostic_report,
 };
 
@@ -1485,8 +1486,7 @@ mod resource_accounting {
         let key_positions = selected_evaluator_program_set()
             .and_then(|program| program.key_positions())
             .map_err(|_| SelectedProofAccountingError::InvalidProfile);
-        let application_slot_ceilings = selected_proof_application_slot_ceilings()
-            .map_err(|_| SelectedProofAccountingError::InvalidProfile);
+        let proof_family_inventory = derive_selected_proof_family_application_inventory();
         let variant_count =
             proof_profile
                 .relation_plans()
@@ -1616,7 +1616,7 @@ mod resource_accounting {
                         selected_complete_action_variant_multiplicity(
                             application_statement_schema_identifier,
                             variant,
-                            application_slot_ceilings.as_ref().map_err(|error| {
+                            proof_family_inventory.as_ref().map_err(|error| {
                                 SelectedProofExternalMemoryDiagnosticError::CompleteActionMultiplicity(
                                     *error,
                                 )
@@ -1632,7 +1632,9 @@ mod resource_accounting {
                         )?;
                     let logical_entry_count = selected_variant_logical_entry_count(
                         application_statement_schema_identifier,
-                        variant,
+                        proof_family_inventory.as_ref().map_err(|error| {
+                            SelectedProofExternalMemoryDiagnosticError::LogicalEntryCount(*error)
+                        })?,
                     )
                     .map_err(SelectedProofExternalMemoryDiagnosticError::LogicalEntryCount)?;
                     let opening_claim_count = u32::try_from(variant.ordered_opening_claims().len())
@@ -1794,8 +1796,7 @@ mod resource_accounting {
         let key_positions = selected_evaluator_program_set()
             .and_then(|program| program.key_positions())
             .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
-        let application_slot_ceilings = selected_proof_application_slot_ceilings()
-            .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+        let proof_family_inventory = derive_selected_proof_family_application_inventory()?;
         if key_positions.streams().len() != usize::from(FOUNDATION_PROFILE.option_count) {
             return Err(SelectedProofAccountingError::InvalidProfile);
         }
@@ -1853,12 +1854,12 @@ mod resource_accounting {
                     selected_complete_action_variant_multiplicity(
                         application_statement_schema_identifier,
                         variant,
-                        &application_slot_ceilings,
+                        &proof_family_inventory,
                         &key_positions,
                     )?;
                 let logical_entry_count = selected_variant_logical_entry_count(
                     application_statement_schema_identifier,
-                    variant,
+                    &proof_family_inventory,
                 )?;
                 let proof_component_byte_accounting =
                     selected_proof_component_byte_accounting(&transport_sizing.ceiling)?;
@@ -1961,7 +1962,7 @@ mod resource_accounting {
         require_selected_variant_selector_inventory(
             &compiler_ceilings,
             &key_positions,
-            &application_slot_ceilings,
+            &proof_family_inventory,
         )?;
         Ok(compiler_ceilings.into_boxed_slice())
     }
@@ -1969,7 +1970,7 @@ mod resource_accounting {
     fn require_selected_variant_selector_inventory(
         compiler_ceilings: &[SelectedProofVariantResourceAccounting],
         key_positions: &EvaluatorProgramKeyPositions,
-        application_slot_ceilings: &ProofApplicationSlotCeilings,
+        proof_family_inventory: &ProofFamilyApplicationInventory,
     ) -> Result<(), SelectedProofAccountingError> {
         require_selected_global_proof_backend_geometry(compiler_ceilings)?;
         let mut observed_selectors =
@@ -2050,19 +2051,35 @@ mod resource_accounting {
             return Err(SelectedProofAccountingError::InvalidProfile);
         }
         require_selected_evaluator_variant_resource_ceiling_equality(compiler_ceilings)?;
-        for family in application_slot_ceilings.ordered_family_ceilings() {
+        for family in proof_family_inventory.ordered_family_entries() {
             let observed_application_multiplicity = compiler_ceilings
                 .iter()
                 .filter(|variant| {
                     variant.application_statement_schema_identifier()
-                        == family.application_statement_schema_identifier
+                        == family.application_statement_schema_identifier()
                 })
                 .try_fold(0_u32, |total, variant| {
                     total
                         .checked_add(variant.complete_action_application_multiplicity())
                         .ok_or(SelectedProofAccountingError::CountOverflow)
                 })?;
-            if observed_application_multiplicity != family.application_slot_ceiling {
+            let observed_logical_relation_instance_count = compiler_ceilings
+                .iter()
+                .filter(|variant| {
+                    variant.application_statement_schema_identifier()
+                        == family.application_statement_schema_identifier()
+                })
+                .try_fold(0_u32, |total, variant| {
+                    variant
+                        .logical_entry_count()
+                        .checked_mul(variant.complete_action_application_multiplicity())
+                        .and_then(|count| total.checked_add(count))
+                        .ok_or(SelectedProofAccountingError::CountOverflow)
+                })?;
+            if observed_application_multiplicity != family.physical_proof_application_count()
+                || observed_logical_relation_instance_count
+                    != family.logical_relation_instance_count()
+            {
                 return Err(SelectedProofAccountingError::InvalidProfile);
             }
         }
@@ -2289,56 +2306,33 @@ mod resource_accounting {
 
     fn selected_variant_logical_entry_count(
         application_statement_schema_identifier: u16,
-        variant: &RelationPlanVariant,
+        proof_family_inventory: &ProofFamilyApplicationInventory,
     ) -> Result<u32, SelectedProofAccountingError> {
-        match application_statement_schema_identifier {
-            ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER => {
-                u32::try_from(
-                    selected_galois_key_share_relation_plan_input()
-                        .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
-                        .ordered_entries
-                        .len(),
-                )
-                .map_err(|_| SelectedProofAccountingError::CountOverflow)
-                .and_then(|count| {
-                    if count == 0 {
-                        Err(SelectedProofAccountingError::InvalidProfile)
-                    } else {
-                        Ok(count)
-                    }
-                })
-            }
-            ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => {
-                let top_count = variant
-                    .top_count()
-                    .ok_or(SelectedProofAccountingError::InvalidProfile)?;
-                u32::try_from(
-                    selected_evaluator_entry_positions(top_count)
-                        .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
-                        .len(),
-                )
-                .map_err(|_| SelectedProofAccountingError::CountOverflow)
-                .and_then(|count| {
-                    if count == 0 {
-                        Err(SelectedProofAccountingError::InvalidProfile)
-                    } else {
-                        Ok(count)
-                    }
-                })
-            }
-            _ => Ok(1),
+        let family_inventory_entry = proof_family_inventory
+            .family_entry(application_statement_schema_identifier)
+            .ok_or(SelectedProofAccountingError::InvalidProfile)?;
+        let physical_proof_application_count =
+            family_inventory_entry.physical_proof_application_count();
+        let logical_relation_instance_count =
+            family_inventory_entry.logical_relation_instance_count();
+        if physical_proof_application_count == 0
+            || logical_relation_instance_count % physical_proof_application_count != 0
+        {
+            return Err(SelectedProofAccountingError::InvalidProfile);
         }
+        Ok(logical_relation_instance_count / physical_proof_application_count)
     }
 
     fn selected_complete_action_variant_multiplicity(
         application_statement_schema_identifier: u16,
         variant: &RelationPlanVariant,
-        application_slot_ceilings: &ProofApplicationSlotCeilings,
+        proof_family_inventory: &ProofFamilyApplicationInventory,
         key_positions: &EvaluatorProgramKeyPositions,
     ) -> Result<u32, SelectedProofAccountingError> {
-        let family_slot_count = application_slot_ceilings
-            .family_ceiling(application_statement_schema_identifier)
-            .ok_or(SelectedProofAccountingError::InvalidProfile)?;
+        let family_physical_proof_application_count = proof_family_inventory
+            .family_entry(application_statement_schema_identifier)
+            .ok_or(SelectedProofAccountingError::InvalidProfile)?
+            .physical_proof_application_count();
         match application_statement_schema_identifier {
             ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER
             | ProofApplicationSlotCeilings::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
@@ -2349,11 +2343,11 @@ mod resource_accounting {
                         .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
                 if schedule_count == 0
                     || variant.schedule_position().is_none()
-                    || family_slot_count % schedule_count != 0
+                    || family_physical_proof_application_count % schedule_count != 0
                 {
                     return Err(SelectedProofAccountingError::InvalidProfile);
                 }
-                Ok(family_slot_count / schedule_count)
+                Ok(family_physical_proof_application_count / schedule_count)
             }
             ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER => {
                 let schedule_count =
@@ -2361,14 +2355,16 @@ mod resource_accounting {
                         .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
                 if schedule_count == 0
                     || variant.schedule_position().is_none()
-                    || family_slot_count % schedule_count != 0
+                    || family_physical_proof_application_count % schedule_count != 0
                 {
                     return Err(SelectedProofAccountingError::InvalidProfile);
                 }
-                Ok(family_slot_count / schedule_count)
+                Ok(family_physical_proof_application_count / schedule_count)
             }
             ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => {
-                if variant.schedule_position().is_some() || family_slot_count != 1 {
+                if variant.schedule_position().is_some()
+                    || family_physical_proof_application_count != 1
+                {
                     return Err(SelectedProofAccountingError::InvalidProfile);
                 }
                 Ok(u32::from(
@@ -2379,7 +2375,7 @@ mod resource_accounting {
                 if variant.schedule_position().is_some() || variant.top_count().is_some() {
                     return Err(SelectedProofAccountingError::InvalidProfile);
                 }
-                Ok(family_slot_count)
+                Ok(family_physical_proof_application_count)
             }
         }
     }
@@ -3524,19 +3520,49 @@ mod resource_accounting {
             .map_err(|error| *error)
     }
 
+    pub(crate) fn derive_selected_proof_family_application_inventory()
+    -> Result<ProofFamilyApplicationInventory, SelectedProofAccountingError> {
+        let application_slot_ceilings = selected_proof_application_slot_ceilings()
+            .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+        let galois_key_share_relation_instance_count_per_batch = u32::try_from(
+            selected_galois_key_share_relation_plan_input()
+                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
+                .ordered_entries
+                .len(),
+        )
+        .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
+        let evaluator_key_aggregate_relation_instance_count_per_proof = u32::try_from(
+            selected_evaluator_entry_positions(FOUNDATION_PROFILE.option_count)
+                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
+                .len(),
+        )
+        .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
+        application_slot_ceilings
+            .derive_proof_family_application_inventory(
+                galois_key_share_relation_instance_count_per_batch,
+                evaluator_key_aggregate_relation_instance_count_per_proof,
+            )
+            .map_err(|_| SelectedProofAccountingError::InvalidProfile)
+    }
+
     fn derive_selected_complete_proof_resource_accounting()
     -> Result<SelectedCompleteProofResourceAccounting, SelectedProofAccountingError> {
         let variants = selected_proof_variant_resource_inventory()?;
         let material_resources = derive_selected_complete_action_material_resource_accounting()?;
-        let slot_ceilings = selected_proof_application_slot_ceilings()
-            .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+        let proof_family_inventory = derive_selected_proof_family_application_inventory()?;
+        let physical_proof_count = proof_family_inventory
+            .total_physical_proof_application_count()
+            .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
+        let complete_action_logical_entry_count = u64::from(
+            proof_family_inventory
+                .total_logical_relation_instance_count()
+                .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+        );
         let mut ordered_families = Vec::new();
         ordered_families
-            .try_reserve_exact(slot_ceilings.ordered_family_ceilings().len())
+            .try_reserve_exact(proof_family_inventory.ordered_family_entries().len())
             .map_err(|_| SelectedProofAccountingError::AllocationLimitExceeded)?;
         let mut observed_variant_schema_identifiers = BTreeSet::new();
-        let mut physical_proof_count = 0_u32;
-        let mut complete_action_logical_entry_count = 0_u64;
         let mut complete_action_proof_byte_ceiling = 0_u64;
         let mut setup_physical_proof_count = 0_u32;
         let mut setup_proof_byte_ceiling = 0_u64;
@@ -3546,8 +3572,9 @@ mod resource_accounting {
         let mut target_release_proof_byte_ceiling = 0_u64;
         let mut maximum_one_browser_wasm_resident_byte_length = 0_u64;
 
-        for family_ceiling in slot_ceilings.ordered_family_ceilings() {
-            let schema_identifier = family_ceiling.application_statement_schema_identifier;
+        for family_inventory_entry in proof_family_inventory.ordered_family_entries() {
+            let schema_identifier =
+                family_inventory_entry.application_statement_schema_identifier();
             let family_variants = variants
                 .iter()
                 .filter(|variant| {
@@ -3566,17 +3593,13 @@ mod resource_accounting {
             if selected_family_variants.is_empty() {
                 return Err(SelectedProofAccountingError::InvalidProfile);
             }
-            let physical_count =
-                selected_family_variants
-                    .iter()
-                    .try_fold(0_u32, |total, variant| {
-                        total
-                            .checked_add(variant.complete_action_application_multiplicity())
-                            .ok_or(SelectedProofAccountingError::CountOverflow)
-                    })?;
-            if physical_count != family_ceiling.application_slot_ceiling {
-                return Err(SelectedProofAccountingError::InvalidProfile);
-            }
+            let observed_physical_proof_application_count = selected_family_variants
+                .iter()
+                .try_fold(0_u32, |total, variant| {
+                    total
+                        .checked_add(variant.complete_action_application_multiplicity())
+                        .ok_or(SelectedProofAccountingError::CountOverflow)
+                })?;
             let compiler_variant_count = u32::try_from(family_variants.len())
                 .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
             let selected_variant_count = u32::try_from(selected_family_variants.len())
@@ -3600,17 +3623,27 @@ mod resource_accounting {
                 .max()
                 .filter(|count| *count != 0)
                 .ok_or(SelectedProofAccountingError::InvalidProfile)?;
-            let family_logical_entry_count =
-                selected_family_variants
-                    .iter()
-                    .try_fold(0_u64, |total, variant| {
-                        u64::from(variant.logical_entry_count())
-                            .checked_mul(u64::from(
-                                variant.complete_action_application_multiplicity(),
-                            ))
-                            .and_then(|count| total.checked_add(count))
-                            .ok_or(SelectedProofAccountingError::CountOverflow)
-                    })?;
+            let observed_logical_relation_instance_count = selected_family_variants
+                .iter()
+                .try_fold(0_u64, |total, variant| {
+                    u64::from(variant.logical_entry_count())
+                        .checked_mul(u64::from(
+                            variant.complete_action_application_multiplicity(),
+                        ))
+                        .and_then(|count| total.checked_add(count))
+                        .ok_or(SelectedProofAccountingError::CountOverflow)
+                })?;
+            if observed_physical_proof_application_count
+                != family_inventory_entry.physical_proof_application_count()
+                || observed_logical_relation_instance_count
+                    != u64::from(family_inventory_entry.logical_relation_instance_count())
+            {
+                return Err(SelectedProofAccountingError::InvalidProfile);
+            }
+            let physical_proof_application_count =
+                family_inventory_entry.physical_proof_application_count();
+            let family_logical_relation_instance_count =
+                u64::from(family_inventory_entry.logical_relation_instance_count());
             let family_proof_byte_ceiling =
                 selected_family_variants
                     .iter()
@@ -3625,19 +3658,13 @@ mod resource_accounting {
                             .and_then(|length| total.checked_add(length))
                             .ok_or(SelectedProofAccountingError::CountOverflow)
                     })?;
-            physical_proof_count = physical_proof_count
-                .checked_add(physical_count)
-                .ok_or(SelectedProofAccountingError::CountOverflow)?;
-            complete_action_logical_entry_count = complete_action_logical_entry_count
-                .checked_add(family_logical_entry_count)
-                .ok_or(SelectedProofAccountingError::CountOverflow)?;
             complete_action_proof_byte_ceiling = complete_action_proof_byte_ceiling
                 .checked_add(family_proof_byte_ceiling)
                 .ok_or(SelectedProofAccountingError::CountOverflow)?;
             match schema_identifier {
                 ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER => {
                     ballot_physical_proof_count = ballot_physical_proof_count
-                        .checked_add(physical_count)
+                        .checked_add(physical_proof_application_count)
                         .ok_or(SelectedProofAccountingError::CountOverflow)?;
                     ballot_proof_byte_ceiling = ballot_proof_byte_ceiling
                         .checked_add(family_proof_byte_ceiling)
@@ -3645,7 +3672,7 @@ mod resource_accounting {
                 }
                 ProofApplicationSlotCeilings::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER => {
                     target_release_physical_proof_count = target_release_physical_proof_count
-                        .checked_add(physical_count)
+                        .checked_add(physical_proof_application_count)
                         .ok_or(SelectedProofAccountingError::CountOverflow)?;
                     target_release_proof_byte_ceiling = target_release_proof_byte_ceiling
                         .checked_add(family_proof_byte_ceiling)
@@ -3653,7 +3680,7 @@ mod resource_accounting {
                 }
                 _ => {
                     setup_physical_proof_count = setup_physical_proof_count
-                        .checked_add(physical_count)
+                        .checked_add(physical_proof_application_count)
                         .ok_or(SelectedProofAccountingError::CountOverflow)?;
                     setup_proof_byte_ceiling = setup_proof_byte_ceiling
                         .checked_add(family_proof_byte_ceiling)
@@ -3665,11 +3692,11 @@ mod resource_accounting {
                     .max(maximum_wasm_resident_byte_length);
             ordered_families.push(SelectedPhysicalProofFamilyResourceAccounting {
                 application_statement_schema_identifier: schema_identifier,
-                physical_proof_count: physical_count,
+                physical_proof_count: physical_proof_application_count,
                 compiler_variant_count,
                 selected_variant_count,
                 maximum_logical_entry_count_per_proof,
-                complete_action_logical_entry_count: family_logical_entry_count,
+                complete_action_logical_entry_count: family_logical_relation_instance_count,
                 maximum_proof_byte_length,
             });
         }
@@ -3679,7 +3706,6 @@ mod resource_accounting {
             .map(|variant| variant.application_statement_schema_identifier())
             .collect::<BTreeSet<_>>();
         if observed_variant_schema_identifiers != expected_variant_schema_identifiers
-            || physical_proof_count != slot_ceilings.total_application_slot_ceiling()
             || setup_physical_proof_count
                 .checked_add(ballot_physical_proof_count)
                 .and_then(|count| count.checked_add(target_release_physical_proof_count))
@@ -3712,9 +3738,44 @@ mod resource_accounting {
     #[cfg(test)]
     mod tests {
         use super::*;
-        use std::collections::BTreeMap;
 
         use crate::foundation::{CanonicalItem, CanonicalItemType, CanonicalTuple};
+
+        #[test]
+        fn selected_proof_family_inventory_uses_the_production_relation_catalogs() {
+            let inventory = derive_selected_proof_family_application_inventory()
+                .expect("the selected proof-family inventory derives");
+            assert_eq!(
+                inventory
+                    .total_physical_proof_application_count()
+                    .expect("the selected physical proof-application count derives"),
+                103
+            );
+            assert_eq!(
+                inventory
+                    .total_logical_relation_instance_count()
+                    .expect("the selected logical relation-instance count derives"),
+                159
+            );
+            assert_eq!(
+                inventory
+                    .family_entry(
+                        ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+                    )
+                    .expect("the Galois proof family is present")
+                    .logical_relation_instance_count(),
+                60
+            );
+            assert_eq!(
+                inventory
+                    .family_entry(
+                        ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+                    )
+                    .expect("the evaluator-key aggregate proof family is present")
+                    .logical_relation_instance_count(),
+                7
+            );
+        }
 
         #[test]
         fn selected_target_share_cap_neutral_proof_requirement_derives() {
@@ -4347,8 +4408,22 @@ mod resource_accounting {
                 derivation_error_count, 0,
                 "every selected family and selector must have one complete cap-neutral requirement row",
             );
-            assert_eq!(complete_action_physical_proof_slot_count, 103);
-            assert_eq!(complete_action_logical_entry_count, 159);
+            let proof_family_inventory = derive_selected_proof_family_application_inventory()
+                .expect("the selected proof-family inventory derives");
+            assert_eq!(
+                complete_action_physical_proof_slot_count,
+                proof_family_inventory
+                    .total_physical_proof_application_count()
+                    .expect("the selected physical proof-application count derives")
+            );
+            assert_eq!(
+                complete_action_logical_entry_count,
+                u64::from(
+                    proof_family_inventory
+                        .total_logical_relation_instance_count()
+                        .expect("the selected logical relation-instance count derives")
+                )
+            );
             require_selected_evaluator_diagnostic_variant_ceiling_equality(&diagnostic_rows)
                 .expect("all twenty evaluator selectors must have one exact resource ceiling");
             let mut inconsistent_diagnostic_rows = diagnostic_rows.to_vec();
@@ -4608,87 +4683,61 @@ mod resource_accounting {
         fn complete_action_accounting_derives_all_physical_proof_slots() {
             let accounting = selected_complete_proof_resource_accounting()
                 .expect("the complete selected accounting derives");
-            let application_slot_ceilings = selected_proof_application_slot_ceilings()
-                .expect("the selected application slot ceilings derive");
-            let expected_physical_counts = application_slot_ceilings
-                .ordered_family_ceilings()
+            let proof_family_inventory = derive_selected_proof_family_application_inventory()
+                .expect("the selected proof-family inventory derives");
+            let expected_family_counts = proof_family_inventory
+                .ordered_family_entries()
                 .iter()
                 .map(|family| {
                     (
-                        family.application_statement_schema_identifier,
-                        family.application_slot_ceiling,
+                        family.application_statement_schema_identifier(),
+                        family.physical_proof_application_count(),
+                        u64::from(family.logical_relation_instance_count()),
                     )
                 })
-                .collect::<BTreeMap<_, _>>();
-            let observed_physical_counts = accounting
+                .collect::<Vec<_>>();
+            let observed_family_counts = accounting
                 .ordered_families()
                 .iter()
                 .map(|family| {
                     (
                         family.application_statement_schema_identifier(),
                         family.physical_proof_count(),
+                        family.complete_action_logical_entry_count(),
                     )
                 })
-                .collect::<BTreeMap<_, _>>();
+                .collect::<Vec<_>>();
 
-            assert_eq!(observed_physical_counts, expected_physical_counts);
+            assert_eq!(observed_family_counts, expected_family_counts);
             assert_eq!(
                 accounting.physical_proof_count(),
-                application_slot_ceilings.total_application_slot_ceiling()
+                proof_family_inventory
+                    .total_physical_proof_application_count()
+                    .expect("the selected physical proof-application count derives")
             );
-            let galois_physical_proof_count = application_slot_ceilings
-                .family_ceiling(
-                    ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
-                )
-                .expect("the selected Galois family has an application ceiling");
-            let galois_logical_entry_count_per_proof = u64::try_from(
-                selected_galois_key_share_relation_plan_input()
-                    .expect("the selected Galois relation input derives")
-                    .ordered_entries
-                    .len(),
-            )
-            .expect("the Galois logical entry count fits u64");
-            let evaluator_physical_proof_count = application_slot_ceilings
-            .family_ceiling(
-                ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
-            )
-            .expect("the selected evaluator family has an application ceiling");
-            let evaluator_logical_entry_count_per_proof = u64::try_from(
-                selected_evaluator_entry_positions(FOUNDATION_PROFILE.option_count)
-                    .expect("the selected complete evaluator entry positions derive")
-                    .len(),
-            )
-            .expect("the evaluator logical entry count fits u64");
-            let expected_logical_entry_count =
-                u64::from(application_slot_ceilings.total_application_slot_ceiling())
-                    .checked_add(
-                        u64::from(galois_physical_proof_count)
-                            .checked_mul(galois_logical_entry_count_per_proof - 1)
-                            .expect("the Galois logical entry count fits u64"),
-                    )
-                    .and_then(|count| {
-                        count.checked_add(
-                            u64::from(evaluator_physical_proof_count)
-                                .checked_mul(evaluator_logical_entry_count_per_proof - 1)?,
-                        )
-                    })
-                    .expect("the complete logical entry count fits u64");
             assert_eq!(
                 accounting.complete_action_logical_entry_count(),
-                expected_logical_entry_count
+                u64::from(
+                    proof_family_inventory
+                        .total_logical_relation_instance_count()
+                        .expect("the selected logical relation-instance count derives")
+                )
             );
-            let expected_ballot_physical_proof_count = application_slot_ceilings
-                .family_ceiling(
+            let expected_ballot_physical_proof_count = proof_family_inventory
+                .family_entry(
                     ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
                 )
-                .expect("the selected ballot family has an application ceiling");
-            let expected_target_release_physical_proof_count = application_slot_ceilings
-                .family_ceiling(
+                .expect("the selected ballot family is present")
+                .physical_proof_application_count();
+            let expected_target_release_physical_proof_count = proof_family_inventory
+                .family_entry(
                     ProofApplicationSlotCeilings::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER,
                 )
-                .expect("the selected target release family has an application ceiling");
-            let expected_setup_physical_proof_count = application_slot_ceilings
-                .total_application_slot_ceiling()
+                .expect("the selected target-release family is present")
+                .physical_proof_application_count();
+            let expected_setup_physical_proof_count = proof_family_inventory
+                .total_physical_proof_application_count()
+                .expect("the selected physical proof-application count derives")
                 .checked_sub(expected_ballot_physical_proof_count)
                 .and_then(|count| count.checked_sub(expected_target_release_physical_proof_count))
                 .expect("the selected setup proof count fits u32");

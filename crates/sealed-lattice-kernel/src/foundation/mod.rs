@@ -157,7 +157,8 @@ pub(crate) use private_randomness_runtime::{
 pub use proof_application::{
     PROOF_APPLICATION_BINDING_SCHEMA_IDENTIFIER, PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER,
     PROOF_OBJECT_HEADER_SCHEMA_VERSION, ProofApplicationBinding, ProofApplicationSlotCeilings,
-    ProofFamilyApplicationCeiling, ProofObjectHeader,
+    ProofFamilyApplicationCeiling, ProofFamilyApplicationInventory,
+    ProofFamilyApplicationInventoryEntry, ProofObjectHeader,
 };
 pub use refusal::{RefusalReason, VerificationResult};
 pub(crate) use schemas::{

@@ -45,9 +45,7 @@ use crate::{
 use super::{
     FIRST_PROFILE_APPLICATION_FAMILIES, MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
     MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
-    MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
-    selected_evaluator_relinearization_entry_positions, selected_galois_key_share_batch_schedule,
-    selected_proof_profile_set,
+    MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, selected_proof_profile_set,
 };
 use super::{
     external_memory::{
@@ -64,6 +62,7 @@ use super::{
         SelectedProofExternalMemoryDiagnosticRequirement, SelectedProofQueryTreeResourceAccounting,
         SelectedProofResidentPhaseResourceAccounting,
         derive_selected_complete_action_material_resource_accounting,
+        derive_selected_proof_family_application_inventory,
         selected_proof_external_memory_diagnostic_report,
     },
     selected_material_transport_accounting::{
@@ -1514,45 +1513,43 @@ fn derive_caps() -> Result<StaticResourceCaps, String> {
 }
 
 fn derive_physical_proof_topology() -> Result<PhysicalProofTopology, String> {
-    let relinearization_position_count = u32::try_from(
-        selected_evaluator_relinearization_entry_positions()
-            .map_err(|error| format!("relinearization positions do not derive: {error:?}"))?
-            .len(),
-    )
-    .map_err(|_| "relinearization position count does not fit u32".to_owned())?;
-    let galois_batch_count = u32::try_from(selected_galois_key_share_batch_schedule().len())
-        .map_err(|_| "Galois batch count does not fit u32".to_owned())?;
-    let ceilings = ProofApplicationSlotCeilings::derive(
-        FOUNDATION_PROFILE.participant_count,
-        relinearization_position_count,
-        galois_batch_count,
-        SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION,
-    )
-    .map_err(|error| format!("proof application slot ceilings do not derive: {error}"))?;
-    let ordered_families = ceilings
-        .ordered_family_ceilings()
+    let proof_family_inventory =
+        derive_selected_proof_family_application_inventory().map_err(|error| {
+            format!("proof-family application inventory does not derive: {error:?}")
+        })?;
+    let ordered_families = proof_family_inventory
+        .ordered_family_entries()
         .iter()
         .map(|family| PhysicalProofFamily {
-            application_statement_schema_identifier: family.application_statement_schema_identifier,
-            physical_proof_count: family.application_slot_ceiling,
+            application_statement_schema_identifier: family
+                .application_statement_schema_identifier(),
+            physical_proof_count: family.physical_proof_application_count(),
         })
         .collect::<Vec<_>>();
-    if ordered_families.len() != 12 || ceilings.total_application_slot_ceiling() != 103 {
-        return Err(format!(
-            "selected topology derived {} families and {} physical proofs",
-            ordered_families.len(),
-            ceilings.total_application_slot_ceiling()
-        ));
-    }
+    let total_physical_proof_count = proof_family_inventory
+        .total_physical_proof_application_count()
+        .map_err(|error| format!("physical proof-application total does not derive: {error}"))?;
     Ok(PhysicalProofTopology {
         ordered_families,
-        total_physical_proof_count: ceilings.total_application_slot_ceiling(),
+        total_physical_proof_count,
     })
 }
 
 fn derive_proof_variant_accounting(
     derivation_errors: &mut Vec<DerivationErrorRow>,
 ) -> Result<ProofVariantAccounting, String> {
+    let proof_family_inventory =
+        derive_selected_proof_family_application_inventory().map_err(|error| {
+            format!("proof-family application inventory does not derive: {error:?}")
+        })?;
+    let expected_physical_proof_application_count = proof_family_inventory
+        .total_physical_proof_application_count()
+        .map_err(|error| format!("physical proof-application total does not derive: {error}"))?;
+    let expected_logical_relation_instance_count = u64::from(
+        proof_family_inventory
+            .total_logical_relation_instance_count()
+            .map_err(|error| format!("logical relation-instance total does not derive: {error}"))?,
+    );
     let diagnostic_rows = selected_proof_external_memory_diagnostic_report()
         .map_err(|error| format!("cap-neutral proof diagnostic does not derive: {error:?}"))?;
     let mut ordered_variants = Vec::with_capacity(diagnostic_rows.len());
@@ -1618,7 +1615,32 @@ fn derive_proof_variant_accounting(
             .ok_or_else(|| {
                 format!("proof family 0x{schema_identifier:04x} has no successful diagnostic row")
             })?;
-        ordered_family_totals.push(accumulator.family_totals(schema_identifier));
+        let family_totals = accumulator.family_totals(schema_identifier);
+        let expected_family = proof_family_inventory
+            .family_entry(schema_identifier)
+            .ok_or_else(|| {
+                format!(
+                    "proof-family application inventory has no schema 0x{schema_identifier:04x}"
+                )
+            })?;
+        if family_totals.physical_proof_count != expected_family.physical_proof_application_count()
+            || family_totals.logical_entry_count
+                != u64::from(expected_family.logical_relation_instance_count())
+        {
+            derivation_errors.push(derivation_error(
+                format!("proof-family-0x{schema_identifier:04x}-totals"),
+                "unexpected-proof-family-count",
+                format!(
+                    "proof-family inventory requires {} physical applications and {} logical relation instances, observed {} and {}",
+                    expected_family.physical_proof_application_count(),
+                    expected_family.logical_relation_instance_count(),
+                    family_totals.physical_proof_count,
+                    family_totals.logical_entry_count,
+                ),
+            ));
+            has_variant_error = true;
+        }
+        ordered_family_totals.push(family_totals);
     }
     if !family_accumulators.is_empty() {
         return Err("proof diagnostics contain an unknown family".to_owned());
@@ -1627,13 +1649,18 @@ fn derive_proof_variant_accounting(
         None
     } else {
         let totals = complete_action_accumulator.complete_action_totals();
-        if totals.physical_proof_count != 103 || totals.logical_entry_count != 159 {
+        if totals.physical_proof_count != expected_physical_proof_application_count
+            || totals.logical_entry_count != expected_logical_relation_instance_count
+        {
             let error = derivation_error(
                 "proof-complete-action-totals",
                 "unexpected-proof-complete-action-count",
                 format!(
-                    "selected proof totals must contain 103 physical proofs and 159 logical entries, observed {} and {}",
-                    totals.physical_proof_count, totals.logical_entry_count
+                    "proof-family inventory requires {} physical applications and {} logical relation instances, observed {} and {}",
+                    expected_physical_proof_application_count,
+                    expected_logical_relation_instance_count,
+                    totals.physical_proof_count,
+                    totals.logical_entry_count,
                 ),
             );
             derivation_errors.push(error);
@@ -2786,6 +2813,30 @@ mod tests {
                 .iter()
                 .all(|error| !error.required_carrier.is_empty()),
             "every deferred missing carrier identifies its required production carrier"
+        );
+    }
+
+    #[test]
+    fn physical_proof_topology_preserves_the_proof_family_inventory() {
+        let proof_family_inventory = derive_selected_proof_family_application_inventory()
+            .expect("the selected proof-family inventory derives");
+        let physical_proof_topology =
+            derive_physical_proof_topology().expect("the physical proof topology derives");
+        let expected_families = proof_family_inventory
+            .ordered_family_entries()
+            .iter()
+            .map(|family| PhysicalProofFamily {
+                application_statement_schema_identifier: family
+                    .application_statement_schema_identifier(),
+                physical_proof_count: family.physical_proof_application_count(),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(physical_proof_topology.ordered_families, expected_families);
+        assert_eq!(
+            physical_proof_topology.total_physical_proof_count,
+            proof_family_inventory
+                .total_physical_proof_application_count()
+                .expect("the selected physical proof-application count derives")
         );
     }
 
