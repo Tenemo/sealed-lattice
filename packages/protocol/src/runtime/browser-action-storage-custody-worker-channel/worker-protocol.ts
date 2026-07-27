@@ -185,7 +185,7 @@ export const destroyCommonProofCheckpointResumeDescriptor = (
     }
     descriptor.checkpointLineageIdentifier.fill(0);
     descriptor.commonProofEnvironmentIdentifier.fill(0);
-    descriptor.privateRandomCursorManifestBytes.fill(0);
+    descriptor.generationCursorManifestBytes.fill(0);
     descriptor.privateRandomnessStreamAttemptIdentifier?.fill(0);
     descriptor.stableAttemptBindingHash.fill(0);
 };
@@ -194,8 +194,9 @@ export const copyCommonProofCheckpointResumeDescriptorForWorker = (
     descriptor: CommonProofCheckpointResumeDescriptor,
 ): CommonProofCheckpointResumeDescriptor => {
     if (
-        !(descriptor.privateRandomCursorManifestBytes instanceof Uint8Array) ||
-        descriptor.privateRandomCursorManifestBytes.byteLength >
+        !(descriptor.generationCursorManifestBytes instanceof Uint8Array) ||
+        descriptor.generationCursorManifestBytes.byteLength === 0 ||
+        descriptor.generationCursorManifestBytes.byteLength >
             maximumCheckpointDescriptorByteLength ||
         !Number.isSafeInteger(descriptor.safeBoundaryOrdinal) ||
         descriptor.safeBoundaryOrdinal < 0 ||
@@ -208,7 +209,7 @@ export const copyCommonProofCheckpointResumeDescriptorForWorker = (
     }
     let checkpointLineageIdentifier = new Uint8Array(0);
     let commonProofEnvironmentIdentifier = new Uint8Array(0);
-    let privateRandomCursorManifestBytes = new Uint8Array(0);
+    let generationCursorManifestBytes = new Uint8Array(0);
     let privateRandomnessStreamAttemptIdentifier:
         | Uint8Array<ArrayBuffer>
         | undefined;
@@ -228,9 +229,9 @@ export const copyCommonProofCheckpointResumeDescriptorForWorker = (
                 'Checkpoint common-proof environment identifier',
             ),
         );
-        privateRandomCursorManifestBytes = Uint8Array.from(
+        generationCursorManifestBytes = Uint8Array.from(
             copyBoundedBytes(
-                descriptor.privateRandomCursorManifestBytes,
+                descriptor.generationCursorManifestBytes,
                 maximumCheckpointDescriptorByteLength,
                 'Common-proof checkpoint cursor manifest',
             ),
@@ -255,7 +256,7 @@ export const copyCommonProofCheckpointResumeDescriptorForWorker = (
         return Object.freeze({
             checkpointLineageIdentifier,
             commonProofEnvironmentIdentifier,
-            privateRandomCursorManifestBytes,
+            generationCursorManifestBytes,
             ...(privateRandomnessStreamAttemptIdentifier === undefined
                 ? {}
                 : { privateRandomnessStreamAttemptIdentifier }),
@@ -265,7 +266,7 @@ export const copyCommonProofCheckpointResumeDescriptorForWorker = (
     } catch (error) {
         checkpointLineageIdentifier.fill(0);
         commonProofEnvironmentIdentifier.fill(0);
-        privateRandomCursorManifestBytes.fill(0);
+        generationCursorManifestBytes.fill(0);
         privateRandomnessStreamAttemptIdentifier?.fill(0);
         stableAttemptBindingHash.fill(0);
         throw error;

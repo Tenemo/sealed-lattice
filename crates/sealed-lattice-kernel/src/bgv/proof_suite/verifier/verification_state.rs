@@ -30,6 +30,7 @@ pub(crate) struct CommonProofVerificationInput<'input, Source: ProofByteSource +
     pub(crate) relation_context: &'input RelationPlanCheckContext,
     pub(crate) schedule_position: Option<u32>,
     pub(crate) top_count: Option<u16>,
+    pub(crate) row_code_whir_construction_plan_identity_hash: [u8; 64],
     pub(crate) statement_owned_trees: &'input [VerifiedStatementOwnedTree],
     pub(crate) evaluator_auxiliary_roots: &'input [VerifiedEvaluatorAuxiliaryRoot],
     pub(crate) proof_source: &'input Source,
@@ -45,6 +46,7 @@ pub(crate) struct PollableCommonProofVerificationInput<'input> {
     pub(crate) relation_context: &'input RelationPlanCheckContext,
     pub(crate) schedule_position: Option<u32>,
     pub(crate) top_count: Option<u16>,
+    pub(crate) row_code_whir_construction_plan_identity_hash: [u8; 64],
     pub(crate) statement_owned_trees: &'input [VerifiedStatementOwnedTree],
     pub(crate) evaluator_auxiliary_roots: &'input [VerifiedEvaluatorAuxiliaryRoot],
     pub(crate) declared_proof_byte_length: usize,
@@ -109,6 +111,7 @@ pub(crate) struct CommonProofVerificationStateMachine {
     variant: RelationPlanVariant,
     schedule_position: Option<u32>,
     top_count: Option<u16>,
+    row_code_whir_construction_plan_identity_hash: [u8; 64],
     declared_proof_byte_length: usize,
     proof_byte_ceiling: usize,
     maximum_resident_window_byte_length: usize,
@@ -163,7 +166,7 @@ fn verifier_vector_payload_byte_length<Value>(
     )
 }
 
-pub(super) struct ProofBodyByteSource<'source, Source: ProofByteSource + ?Sized> {
+pub(crate) struct ProofBodyByteSource<'source, Source: ProofByteSource + ?Sized> {
     source: &'source Source,
     body_offset: usize,
     body_byte_length: usize,
@@ -185,6 +188,120 @@ impl<Source: ProofByteSource + ?Sized> ProofByteSource for ProofBodyByteSource<'
             return false;
         };
         self.source.copy_bytes(absolute_offset, destination)
+    }
+}
+
+/// Progressively compares a transported proof-object prefix with the exact
+/// canonical header derived from the authenticated application. The expected
+/// header length is local authority; proof bytes never supply a length to
+/// parse or allocate from.
+#[derive(Debug)]
+pub(crate) struct IncrementalExpectedProofObjectHeaderComparator {
+    expected_header_bytes: Box<[u8]>,
+    declared_complete_proof_byte_length: usize,
+    family_body_byte_length: usize,
+    compared_header_byte_length: usize,
+}
+
+impl IncrementalExpectedProofObjectHeaderComparator {
+    pub(crate) fn new(
+        expected_header_bytes: Vec<u8>,
+        declared_complete_proof_byte_length: usize,
+        proof_byte_ceiling: usize,
+    ) -> Result<Self, CommonProofVerifierError> {
+        let family_body_byte_length = validate_expected_proof_object_layout(
+            declared_complete_proof_byte_length,
+            proof_byte_ceiling,
+            &expected_header_bytes,
+        )?;
+        Ok(Self {
+            expected_header_bytes: expected_header_bytes.into_boxed_slice(),
+            declared_complete_proof_byte_length,
+            family_body_byte_length,
+            compared_header_byte_length: 0,
+        })
+    }
+
+    pub(crate) const fn expected_header_byte_length(&self) -> usize {
+        self.expected_header_bytes.len()
+    }
+
+    pub(crate) const fn declared_complete_proof_byte_length(&self) -> usize {
+        self.declared_complete_proof_byte_length
+    }
+
+    pub(crate) const fn family_body_byte_length(&self) -> usize {
+        self.family_body_byte_length
+    }
+
+    pub(crate) const fn compared_header_byte_length(&self) -> usize {
+        self.compared_header_byte_length
+    }
+
+    pub(crate) fn is_complete(&self) -> bool {
+        self.compared_header_byte_length == self.expected_header_bytes.len()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn required_byte_range(
+        &self,
+        maximum_byte_length: usize,
+    ) -> Result<Option<CommonProofRequiredByteRange>, CommonProofVerifierError> {
+        if maximum_byte_length == 0 {
+            return Err(CommonProofVerifierError::InvalidProofHeader);
+        }
+        let remaining_byte_length = self
+            .expected_header_bytes
+            .len()
+            .checked_sub(self.compared_header_byte_length)
+            .ok_or(CommonProofVerifierError::InvalidProofHeader)?;
+        if remaining_byte_length == 0 {
+            return Ok(None);
+        }
+        CommonProofRequiredByteRange::new(
+            self.compared_header_byte_length,
+            remaining_byte_length.min(maximum_byte_length),
+        )
+        .map(Some)
+        .ok_or(CommonProofVerifierError::InvalidProofHeader)
+    }
+
+    pub(crate) fn compare_available<Source: ProofByteSource + ?Sized>(
+        &mut self,
+        source: &Source,
+        available_end_offset: usize,
+    ) -> Result<(), CommonProofVerifierError> {
+        if source.byte_length() != self.declared_complete_proof_byte_length {
+            return Err(ProofBodyError::Decode(ProofDecodeError::DeclaredLengthMismatch).into());
+        }
+        if available_end_offset < self.compared_header_byte_length
+            || available_end_offset > self.declared_complete_proof_byte_length
+        {
+            return Err(CommonProofVerifierError::InvalidProofHeader);
+        }
+        let comparison_end_offset = available_end_offset.min(self.expected_header_bytes.len());
+        compare_expected_proof_object_header_range(
+            source,
+            &self.expected_header_bytes,
+            self.compared_header_byte_length,
+            comparison_end_offset,
+        )?;
+        self.compared_header_byte_length = comparison_end_offset;
+        Ok(())
+    }
+
+    pub(crate) fn body_source<'source, Source: ProofByteSource + ?Sized>(
+        &self,
+        source: &'source Source,
+    ) -> Result<ProofBodyByteSource<'source, Source>, CommonProofVerifierError> {
+        if !self.is_complete() || source.byte_length() != self.declared_complete_proof_byte_length {
+            return Err(CommonProofVerifierError::InvalidProofHeader);
+        }
+        Ok(ProofBodyByteSource {
+            source,
+            body_offset: self.expected_header_bytes.len(),
+            body_byte_length: self.family_body_byte_length,
+        })
     }
 }
 
@@ -317,6 +434,8 @@ impl CommonProofVerificationStateMachine {
             variant: variant.clone(),
             schedule_position: input.schedule_position,
             top_count: input.top_count,
+            row_code_whir_construction_plan_identity_hash: input
+                .row_code_whir_construction_plan_identity_hash,
             declared_proof_byte_length: input.declared_proof_byte_length,
             proof_byte_ceiling: input.proof_byte_ceiling,
             maximum_resident_window_byte_length: input.maximum_resident_window_byte_length,
@@ -1014,6 +1133,8 @@ impl CommonProofVerificationStateMachine {
             proof_byte_length: u64::try_from(self.declared_proof_byte_length)
                 .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
             verified_query_count: self.transcript_schedule.unique_query_count(),
+            row_code_whir_construction_plan_identity_hash: self
+                .row_code_whir_construction_plan_identity_hash,
             relation_plan_variant_hash: self.variant.canonical_hash()?,
             schedule_position: self.schedule_position,
             top_count: self.top_count,
@@ -1066,6 +1187,29 @@ pub(super) fn verify_and_slice_proof_header<'source, Source: ProofByteSource + ?
     proof_byte_ceiling: usize,
     expected_header: &[u8],
 ) -> Result<ProofBodyByteSource<'source, Source>, CommonProofVerifierError> {
+    let body_byte_length = validate_expected_proof_object_layout(
+        declared_proof_byte_length,
+        proof_byte_ceiling,
+        expected_header,
+    )?;
+    if source.byte_length() != declared_proof_byte_length {
+        return Err(
+            ProofBodyError::Decode(super::super::ProofDecodeError::DeclaredLengthMismatch).into(),
+        );
+    }
+    compare_expected_proof_object_header_range(source, expected_header, 0, expected_header.len())?;
+    Ok(ProofBodyByteSource {
+        source,
+        body_offset: expected_header.len(),
+        body_byte_length,
+    })
+}
+
+fn validate_expected_proof_object_layout(
+    declared_proof_byte_length: usize,
+    proof_byte_ceiling: usize,
+    expected_header: &[u8],
+) -> Result<usize, CommonProofVerifierError> {
     if declared_proof_byte_length == 0 {
         return Err(ProofBodyError::Decode(super::super::ProofDecodeError::EmptyProof).into());
     }
@@ -1075,21 +1219,32 @@ pub(super) fn verify_and_slice_proof_header<'source, Source: ProofByteSource + ?
         )
         .into());
     }
-    if source.byte_length() != declared_proof_byte_length {
-        return Err(
-            ProofBodyError::Decode(super::super::ProofDecodeError::DeclaredLengthMismatch).into(),
-        );
+    if expected_header.is_empty() {
+        return Err(CommonProofVerifierError::InvalidProofHeader);
     }
-    let body_byte_length = declared_proof_byte_length
+    declared_proof_byte_length
         .checked_sub(expected_header.len())
         .filter(|length| *length > 0)
-        .ok_or(CommonProofVerifierError::InvalidProofHeader)?;
-    let mut compared_byte_length = 0_usize;
+        .ok_or(CommonProofVerifierError::InvalidProofHeader)
+}
+
+fn compare_expected_proof_object_header_range<Source: ProofByteSource + ?Sized>(
+    source: &Source,
+    expected_header: &[u8],
+    comparison_start_offset: usize,
+    comparison_end_offset: usize,
+) -> Result<(), CommonProofVerifierError> {
+    if comparison_start_offset > comparison_end_offset
+        || comparison_end_offset > expected_header.len()
+    {
+        return Err(CommonProofVerifierError::InvalidProofHeader);
+    }
+    let mut compared_byte_length = comparison_start_offset;
     let mut scratch = [0_u8; 256];
-    while compared_byte_length < expected_header.len() {
+    while compared_byte_length < comparison_end_offset {
         let chunk_byte_length = scratch
             .len()
-            .min(expected_header.len() - compared_byte_length);
+            .min(comparison_end_offset - compared_byte_length);
         let chunk = &mut scratch[..chunk_byte_length];
         if !source.copy_bytes(compared_byte_length, chunk) {
             return Err(ProofBodyError::Decode(super::super::ProofDecodeError::Truncated).into());
@@ -1103,9 +1258,5 @@ pub(super) fn verify_and_slice_proof_header<'source, Source: ProofByteSource + ?
         }
         compared_byte_length += chunk_byte_length;
     }
-    Ok(ProofBodyByteSource {
-        source,
-        body_offset: expected_header.len(),
-        body_byte_length,
-    })
+    Ok(())
 }

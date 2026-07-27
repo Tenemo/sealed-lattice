@@ -15,9 +15,9 @@ lockfile. The patch redirects only `p3-sumcheck` and the already-vendored
 Rust-1.90 compatibility copy of `p3-util`; every other Plonky3 crate continues
 to come from the exact upstream revision.
 
-The source modifications add the explicit-point opening hooks and the
-query-restoration batching recurrence needed by the sealed-lattice WHIR
-reduction:
+The source modifications add the explicit-point opening hooks, bounded prover
+operations, and query-restoration batching recurrence needed by the
+sealed-lattice WHIR reduction:
 
 - `Layout::eval_at_point` records a prover opening at a caller-derived
   multilinear point, absorbs the point before its evaluations, and retains the
@@ -32,14 +32,39 @@ reduction:
   from cancelling the carried claim deterministically.
 - The scalar prover, packed prover, running verifier claim, and final
   constraint-polynomial evaluation all use that same chronological recurrence.
+- `PrefixProver::begin_initial_sumcheck` transfers the complete initial-prefix
+  state into an owned value. Each `advance_round` call emits exactly one
+  transcript-bound round, so the production worker can cancel or yield between
+  rounds without exposing partial proof output. The original synchronous API
+  delegates to the same state transition.
+- `Witness::from_interleaved_poly` accepts one already materialized stacked
+  polynomial plus its checked table shapes and folding depth. Prefix mode
+  retains shape and placement metadata, reconstructs at most one temporary
+  source column while recording an explicit opening, and does not retain a
+  duplicate set of source tables. `Witness`, its owned parts, and
+  `PrefixProver` are deliberately non-cloneable so this move-only production
+  handoff cannot accidentally duplicate the selected 80 MiB stacked
+  polynomial.
+- `PolyView::copy_logical_range_into` copies a checked scalar or packed logical
+  range without allocating or unpacking the complete polynomial. It rejects
+  destination-length mismatches, arithmetic overflow, and out-of-bounds ranges.
+- The upstream zero-knowledge module and its `rand` and `p3-zk-codes`
+  dependencies are behind a default-off `zk` feature. The sealed-lattice
+  production WHIR path does not enable that feature; test and benchmark random
+  generation continues to use the retained development dependency on `rand`.
 
 The changes are confined to:
 
+- `Cargo.toml`
 - `src/constraints/mod.rs`
+- `src/lib.rs`
+- `src/layout/mod.rs`
+- `src/layout/prover/claims.rs`
 - `src/layout/prover/mod.rs`
 - `src/layout/prover/prefix.rs`
 - `src/layout/prover/suffix.rs`
 - `src/layout/verifier.rs`
+- `src/layout/witness.rs`
 - `src/product_polynomial.rs`
 - `src/strategy.rs`
 

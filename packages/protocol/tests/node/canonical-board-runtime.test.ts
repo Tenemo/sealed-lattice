@@ -79,6 +79,10 @@ const createFakeSession = (
         close,
         copyCachedCarrier,
         describe: describeObject,
+        produceBallotCandidateListCarrier: vi.fn(() => ({
+            isValid: false as const,
+            refusalReason: 'wrongContext' as const,
+        })),
         release: vi.fn(),
         state: () => state,
         verifyUnorderedCarriers,

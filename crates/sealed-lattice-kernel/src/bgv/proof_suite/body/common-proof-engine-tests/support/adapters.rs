@@ -63,6 +63,8 @@ fn wasm_family_adapters_derive_bindings_and_discard_unstarted_preparations_once(
             generation_adapter_handle,
             core::ptr::null(),
             0,
+            core::ptr::null(),
+            0,
             &mut status,
         )
     };
@@ -166,12 +168,15 @@ fn resume_family_adapter_authenticates_checkpoint_before_invoking_family_prepara
         super::super::runtime_ffi::retain_common_proof_generation_family_adapter(refused_adapter)
             .expect("the malformed-checkpoint adapter is retained");
     let malformed_checkpoint_state = [0x91_u8; 7];
+    let malformed_generation_cursor_manifest = [0x92_u8; 7];
     let mut status = u32::MAX;
     let prepared_handle = unsafe {
         super::super::runtime_ffi::sealed_lattice_common_proof_prepare_generation_family_adapter(
             refused_adapter_handle,
             malformed_checkpoint_state.as_ptr(),
             malformed_checkpoint_state.len(),
+            malformed_generation_cursor_manifest.as_ptr(),
+            malformed_generation_cursor_manifest.len(),
             &mut status,
         )
     };
@@ -183,7 +188,8 @@ fn resume_family_adapter_authenticates_checkpoint_before_invoking_family_prepara
         "canonical checkpoint decoding precedes exact-family continuation authority"
     );
 
-    let (authenticated_checkpoint_state, _, _, _) = capture_first_generation_checkpoint();
+    let (authenticated_checkpoint_state, generation_cursor_manifest_bytes, _, _) =
+        capture_first_generation_checkpoint();
     let (prepared, _) =
         prepared_generation_worker_fixture_for_checkpoint(Some(&authenticated_checkpoint_state), 0)
             .expect("the authenticated checkpoint prepares the exact resumed attempt");
@@ -226,6 +232,8 @@ fn resume_family_adapter_authenticates_checkpoint_before_invoking_family_prepara
             wrong_binding_adapter_handle,
             wrong_binding_checkpoint_state.as_ptr(),
             wrong_binding_checkpoint_state.len(),
+            generation_cursor_manifest_bytes.as_ptr(),
+            generation_cursor_manifest_bytes.len(),
             &mut status,
         )
     };
@@ -298,6 +306,8 @@ fn resume_family_adapter_authenticates_checkpoint_before_invoking_family_prepara
                 mismatch_adapter_handle,
                 authenticated_checkpoint_state.as_ptr(),
                 authenticated_checkpoint_state.len(),
+                generation_cursor_manifest_bytes.as_ptr(),
+                generation_cursor_manifest_bytes.len(),
                 &mut status,
             )
         };
@@ -350,6 +360,8 @@ fn resume_family_adapter_authenticates_checkpoint_before_invoking_family_prepara
             schema_mismatch_adapter_handle,
             authenticated_checkpoint_state.as_ptr(),
             authenticated_checkpoint_state.len(),
+            generation_cursor_manifest_bytes.as_ptr(),
+            generation_cursor_manifest_bytes.len(),
             &mut status,
         )
     };
@@ -394,6 +406,8 @@ fn resume_family_adapter_authenticates_checkpoint_before_invoking_family_prepara
             adapter_handle,
             authenticated_checkpoint_state.as_ptr(),
             authenticated_checkpoint_state.len(),
+            generation_cursor_manifest_bytes.as_ptr(),
+            generation_cursor_manifest_bytes.len(),
             &mut status,
         )
     };

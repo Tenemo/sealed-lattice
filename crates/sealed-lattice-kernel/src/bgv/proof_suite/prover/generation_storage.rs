@@ -909,6 +909,23 @@ pub(crate) struct CommonProofExternalMemoryRequirement {
 }
 
 impl CommonProofExternalMemoryRequirement {
+    pub(crate) fn from_external_memory_plan(
+        plan: &ProofExternalMemoryPlan,
+    ) -> Result<Self, ProofExternalMemoryError> {
+        Ok(Self {
+            step_count: plan.step_count(),
+            maximum_chunk_byte_length: plan.maximum_chunk_byte_length(),
+            maximum_transaction_payload_byte_length: plan.maximum_transaction_payload_byte_length(),
+            distinct_physical_object_count: plan.physical_object_count()?,
+            object_lifecycle_count: plan.object_lifecycle_count()?,
+            peak_stored_byte_length: plan.maximum_stored_byte_length(),
+            total_written_byte_length: plan.maximum_total_written_byte_length(),
+            total_read_byte_length: plan.maximum_total_read_byte_length(),
+            transaction_count: plan.maximum_transaction_count(),
+            secret_seal_custody_requirement: plan.secret_seal_custody_requirement()?,
+        })
+    }
+
     pub(crate) const fn step_count(self) -> u32 {
         self.step_count
     }
@@ -945,13 +962,11 @@ impl CommonProofExternalMemoryRequirement {
         self.transaction_count
     }
 
-    #[cfg(test)]
     pub(crate) const fn local_record_seal_invocation_count(self) -> u64 {
         self.secret_seal_custody_requirement
             .local_record_seal_invocation_count()
     }
 
-    #[cfg(test)]
     pub(crate) const fn local_record_sealed_plaintext_byte_length(self) -> u64 {
         self.secret_seal_custody_requirement
             .local_record_sealed_plaintext_byte_length()
@@ -1033,14 +1048,52 @@ fn include_common_proof_replay_use(
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct CommonProofReplayPolynomialPlan {
+pub(crate) struct CommonProofReplayPolynomialPlan {
     pub(super) object: ProofExternalMemoryObject,
     pub(super) value_type: RelationColumnValueType,
     pub(super) coefficient_count: usize,
     pub(super) exact_byte_length: u64,
 }
 
-pub(super) enum CommonProofReplayPolynomialRef<'polynomial> {
+impl CommonProofReplayPolynomialPlan {
+    pub(crate) fn new(
+        object: ProofExternalMemoryObject,
+        value_type: RelationColumnValueType,
+        coefficient_count: usize,
+    ) -> Result<Self, CommonProofProverError> {
+        if coefficient_count == 0 {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        let exact_byte_length = u64::try_from(coefficient_count)
+            .map_err(|_| CommonProofProverError::CountOverflow)?
+            .checked_mul(resident_value_byte_length(value_type))
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        Ok(Self {
+            object,
+            value_type,
+            coefficient_count,
+            exact_byte_length,
+        })
+    }
+
+    pub(crate) const fn exact_byte_length(self) -> u64 {
+        self.exact_byte_length
+    }
+
+    pub(crate) const fn object(self) -> ProofExternalMemoryObject {
+        self.object
+    }
+
+    pub(crate) const fn value_type(self) -> RelationColumnValueType {
+        self.value_type
+    }
+
+    pub(crate) const fn coefficient_count(self) -> usize {
+        self.coefficient_count
+    }
+}
+
+pub(crate) enum CommonProofReplayPolynomialRef<'polynomial> {
     Source(&'polynomial CommonProofSourcePolynomial),
     Extension(&'polynomial [ProofChallengeExtensionElement]),
 }
@@ -1109,17 +1162,16 @@ enum CommonProofReplayPolynomialWriterPhase {
     Complete,
 }
 
-pub(super) struct CommonProofReplayPolynomialWriter {
+pub(crate) struct CommonProofReplayPolynomialWriter {
     plan: CommonProofReplayPolynomialPlan,
     phase: CommonProofReplayPolynomialWriterPhase,
-    next_coefficient_index: usize,
-    pending_coefficient_bytes: Zeroizing<Vec<u8>>,
-    pending_coefficient_byte_offset: usize,
+    committed_byte_offset: usize,
+    coefficient_bytes: Zeroizing<Vec<u8>>,
     write_chunk: Zeroizing<Vec<u8>>,
 }
 
 impl CommonProofReplayPolynomialWriter {
-    pub(super) fn new(
+    pub(crate) fn new(
         plan: CommonProofReplayPolynomialPlan,
         polynomial: CommonProofReplayPolynomialRef<'_>,
     ) -> Result<Self, CommonProofProverError> {
@@ -1137,14 +1189,72 @@ impl CommonProofReplayPolynomialWriter {
         Ok(Self {
             plan,
             phase: CommonProofReplayPolynomialWriterPhase::Begin,
-            next_coefficient_index: 0,
-            pending_coefficient_bytes: Zeroizing::new(Vec::new()),
-            pending_coefficient_byte_offset: 0,
+            committed_byte_offset: 0,
+            coefficient_bytes: Zeroizing::new(Vec::new()),
             write_chunk: Zeroizing::new(Vec::new()),
         })
     }
 
-    pub(super) fn advance<Storage: ProofExternalMemory>(
+    fn prepare_next_write_chunk(
+        &mut self,
+        polynomial: CommonProofReplayPolynomialRef<'_>,
+        maximum_chunk_byte_length: usize,
+    ) -> Result<usize, ProofExternalMemoryError> {
+        let value_byte_length = usize::try_from(resident_value_byte_length(self.plan.value_type))
+            .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)?;
+        let exact_byte_length = usize::try_from(self.plan.exact_byte_length)
+            .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)?;
+        if maximum_chunk_byte_length == 0
+            || value_byte_length == 0
+            || self.committed_byte_offset >= exact_byte_length
+        {
+            return Err(ProofExternalMemoryError::InvalidLifecycle);
+        }
+        let prepared_byte_offset = self
+            .committed_byte_offset
+            .checked_add(maximum_chunk_byte_length)
+            .map_or(exact_byte_length, |offset| offset.min(exact_byte_length));
+        let prepared_byte_length = prepared_byte_offset
+            .checked_sub(self.committed_byte_offset)
+            .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
+
+        self.write_chunk.zeroize();
+        self.write_chunk
+            .try_reserve_exact(prepared_byte_length)
+            .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)?;
+        let mut source_byte_offset = self.committed_byte_offset;
+        while source_byte_offset < prepared_byte_offset {
+            let coefficient_index = source_byte_offset / value_byte_length;
+            let coefficient_byte_offset = source_byte_offset % value_byte_length;
+            self.coefficient_bytes.zeroize();
+            self.coefficient_bytes
+                .try_reserve_exact(value_byte_length)
+                .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)?;
+            polynomial
+                .append_coefficient_bytes(coefficient_index, &mut self.coefficient_bytes)
+                .map_err(|_| ProofExternalMemoryError::InvalidLifecycle)?;
+            if self.coefficient_bytes.len() != value_byte_length {
+                return Err(ProofExternalMemoryError::InvalidLifecycle);
+            }
+            let copied_byte_length = (value_byte_length - coefficient_byte_offset)
+                .min(prepared_byte_offset - source_byte_offset);
+            let coefficient_end = coefficient_byte_offset
+                .checked_add(copied_byte_length)
+                .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
+            self.write_chunk.extend_from_slice(
+                &self.coefficient_bytes[coefficient_byte_offset..coefficient_end],
+            );
+            source_byte_offset = source_byte_offset
+                .checked_add(copied_byte_length)
+                .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
+        }
+        if self.write_chunk.len() != prepared_byte_length {
+            return Err(ProofExternalMemoryError::InvalidLifecycle);
+        }
+        Ok(prepared_byte_offset)
+    }
+
+    pub(crate) fn advance<Storage: ProofExternalMemory>(
         &mut self,
         executor: &mut ProofExternalMemoryExecutor,
         storage: &mut Storage,
@@ -1163,100 +1273,25 @@ impl CommonProofReplayPolynomialWriter {
                 Ok(false)
             }
             CommonProofReplayPolynomialWriterPhase::Append => {
-                let value_byte_length =
-                    usize::try_from(resident_value_byte_length(self.plan.value_type))
-                        .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)?;
                 let maximum_chunk_byte_length =
                     usize::try_from(executor.maximum_chunk_byte_length())
                         .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)?;
-                if maximum_chunk_byte_length == 0 {
-                    return Err(ProofExternalMemoryError::ResourceLimitExceeded.into());
+                let prepared_byte_offset =
+                    self.prepare_next_write_chunk(polynomial, maximum_chunk_byte_length)?;
+                executor.append_owned_object_bytes(
+                    storage,
+                    self.plan.object,
+                    &mut self.write_chunk,
+                )?;
+                self.write_chunk.zeroize();
+                self.committed_byte_offset = prepared_byte_offset;
+                if u64::try_from(self.committed_byte_offset)
+                    .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)?
+                    == self.plan.exact_byte_length
+                {
+                    self.phase = CommonProofReplayPolynomialWriterPhase::Seal;
                 }
-                loop {
-                    if self.write_chunk.len() == maximum_chunk_byte_length {
-                        executor.append_object_bytes(
-                            storage,
-                            self.plan.object,
-                            &self.write_chunk,
-                        )?;
-                        self.write_chunk.zeroize();
-                        if !self.pending_coefficient_bytes.is_empty()
-                            && self.pending_coefficient_byte_offset
-                                == self.pending_coefficient_bytes.len()
-                        {
-                            self.pending_coefficient_bytes.zeroize();
-                            self.pending_coefficient_byte_offset = 0;
-                            self.next_coefficient_index = self
-                                .next_coefficient_index
-                                .checked_add(1)
-                                .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
-                        }
-                        return Ok(false);
-                    }
-                    if self.pending_coefficient_bytes.is_empty() {
-                        if self.next_coefficient_index == self.plan.coefficient_count {
-                            if self.write_chunk.is_empty() {
-                                executor.seal_object(storage, self.plan.object)?;
-                                self.phase = CommonProofReplayPolynomialWriterPhase::Complete;
-                                return Ok(true);
-                            }
-                            executor.append_object_bytes(
-                                storage,
-                                self.plan.object,
-                                &self.write_chunk,
-                            )?;
-                            self.write_chunk.zeroize();
-                            self.phase = CommonProofReplayPolynomialWriterPhase::Seal;
-                            return Ok(false);
-                        }
-                        self.pending_coefficient_bytes
-                            .try_reserve_exact(value_byte_length)
-                            .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)?;
-                        polynomial
-                            .append_coefficient_bytes(
-                                self.next_coefficient_index,
-                                &mut self.pending_coefficient_bytes,
-                            )
-                            .map_err(|_| ProofExternalMemoryError::InvalidLifecycle)?;
-                        if self.pending_coefficient_bytes.len() != value_byte_length {
-                            return Err(ProofExternalMemoryError::InvalidLifecycle.into());
-                        }
-                        self.pending_coefficient_byte_offset = 0;
-                    }
-                    if self.pending_coefficient_byte_offset >= self.pending_coefficient_bytes.len()
-                        || self.write_chunk.len() > maximum_chunk_byte_length
-                    {
-                        return Err(ProofExternalMemoryError::InvalidLifecycle.into());
-                    }
-                    let remaining_chunk_capacity =
-                        maximum_chunk_byte_length - self.write_chunk.len();
-                    self.write_chunk
-                        .try_reserve_exact(remaining_chunk_capacity)
-                        .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)?;
-                    let copied_byte_length = remaining_chunk_capacity.min(
-                        self.pending_coefficient_bytes.len() - self.pending_coefficient_byte_offset,
-                    );
-                    let pending_coefficient_end = self
-                        .pending_coefficient_byte_offset
-                        .checked_add(copied_byte_length)
-                        .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
-                    self.write_chunk.extend_from_slice(
-                        &self.pending_coefficient_bytes
-                            [self.pending_coefficient_byte_offset..pending_coefficient_end],
-                    );
-                    self.pending_coefficient_byte_offset = pending_coefficient_end;
-                    if self.write_chunk.len() < maximum_chunk_byte_length
-                        && self.pending_coefficient_byte_offset
-                            == self.pending_coefficient_bytes.len()
-                    {
-                        self.pending_coefficient_bytes.zeroize();
-                        self.pending_coefficient_byte_offset = 0;
-                        self.next_coefficient_index = self
-                            .next_coefficient_index
-                            .checked_add(1)
-                            .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
-                    }
-                }
+                Ok(false)
             }
             CommonProofReplayPolynomialWriterPhase::Seal => {
                 executor.seal_object(storage, self.plan.object)?;
@@ -1273,23 +1308,214 @@ enum CommonProofReplayPolynomialCoefficients {
     Extension(Zeroizing<Vec<ProofChallengeExtensionElement>>),
 }
 
-pub(super) struct CommonProofReplayPolynomialReader {
-    plan: CommonProofReplayPolynomialPlan,
-    next_coefficient_index: usize,
-    coefficients: CommonProofReplayPolynomialCoefficients,
+pub(crate) enum CommonProofReplayPolynomialRangeDestination<'destination> {
+    Base(&'destination mut [ProofBaseFieldElement]),
+    Extension(&'destination mut [ProofChallengeExtensionElement]),
 }
 
-impl CommonProofReplayPolynomialReader {
-    pub(super) fn new(
+impl CommonProofReplayPolynomialRangeDestination<'_> {
+    const fn value_type(&self) -> RelationColumnValueType {
+        match self {
+            Self::Base(_) => RelationColumnValueType::BaseField,
+            Self::Extension(_) => RelationColumnValueType::ChallengeExtension,
+        }
+    }
+
+    const fn coefficient_count(&self) -> usize {
+        match self {
+            Self::Base(coefficients) => coefficients.len(),
+            Self::Extension(coefficients) => coefficients.len(),
+        }
+    }
+
+    fn decode_canonical_chunk(
+        &mut self,
+        destination_coefficient_offset: usize,
+        coefficient_count: usize,
+        encoded: &[u8],
+    ) -> Result<(), ProofExternalMemoryError> {
+        let destination_coefficient_end = destination_coefficient_offset
+            .checked_add(coefficient_count)
+            .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
+        match self {
+            Self::Base(coefficients) => {
+                let destination = coefficients
+                    .get_mut(destination_coefficient_offset..destination_coefficient_end)
+                    .ok_or(ProofExternalMemoryError::WrongOffsetOrLength)?;
+                let expected_byte_length = coefficient_count
+                    .checked_mul(core::mem::size_of::<u64>())
+                    .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
+                if encoded.len() != expected_byte_length {
+                    return Err(ProofExternalMemoryError::WrongOffsetOrLength);
+                }
+                for (destination, canonical) in destination.iter_mut().zip(encoded.chunks_exact(8))
+                {
+                    let canonical: [u8; 8] = canonical
+                        .try_into()
+                        .map_err(|_| ProofExternalMemoryError::WrongOffsetOrLength)?;
+                    *destination =
+                        ProofBaseFieldElement::from_canonical(u64::from_le_bytes(canonical))
+                            .map_err(|_| ProofExternalMemoryError::InvalidLifecycle)?;
+                }
+            }
+            Self::Extension(coefficients) => {
+                let destination = coefficients
+                    .get_mut(destination_coefficient_offset..destination_coefficient_end)
+                    .ok_or(ProofExternalMemoryError::WrongOffsetOrLength)?;
+                let value_byte_length = PROOF_CHALLENGE_EXTENSION_DEGREE
+                    .checked_mul(core::mem::size_of::<u64>())
+                    .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
+                let expected_byte_length = coefficient_count
+                    .checked_mul(value_byte_length)
+                    .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
+                if encoded.len() != expected_byte_length {
+                    return Err(ProofExternalMemoryError::WrongOffsetOrLength);
+                }
+                for (destination, encoded_coefficient) in destination
+                    .iter_mut()
+                    .zip(encoded.chunks_exact(value_byte_length))
+                {
+                    let mut coordinates = [0_u64; PROOF_CHALLENGE_EXTENSION_DEGREE];
+                    for (coordinate, canonical) in coordinates
+                        .iter_mut()
+                        .zip(encoded_coefficient.chunks_exact(8))
+                    {
+                        let canonical: [u8; 8] = canonical
+                            .try_into()
+                            .map_err(|_| ProofExternalMemoryError::WrongOffsetOrLength)?;
+                        *coordinate = u64::from_le_bytes(canonical);
+                    }
+                    *destination =
+                        ProofChallengeExtensionElement::from_canonical_coordinates(coordinates)
+                            .map_err(|_| ProofExternalMemoryError::InvalidLifecycle)?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Pollable reader for one checked coefficient range of a replay polynomial.
+///
+/// The caller owns an exactly sized typed destination and may therefore bound
+/// resident memory independently of the complete polynomial. Each successful
+/// nonterminal poll authenticates and decodes at most one external-memory
+/// chunk. The destination must be discarded if a later poll returns an error.
+pub(crate) struct CommonProofReplayPolynomialRangeReader {
+    plan: CommonProofReplayPolynomialPlan,
+    coefficient_range: core::ops::Range<usize>,
+    next_coefficient_index: usize,
+}
+
+impl CommonProofReplayPolynomialRangeReader {
+    pub(crate) fn new(
         plan: CommonProofReplayPolynomialPlan,
+        coefficient_range: core::ops::Range<usize>,
     ) -> Result<Self, CommonProofProverError> {
         let expected_byte_length = u64::try_from(plan.coefficient_count)
             .map_err(|_| CommonProofProverError::CountOverflow)?
             .checked_mul(resident_value_byte_length(plan.value_type))
             .ok_or(CommonProofProverError::CountOverflow)?;
-        if plan.coefficient_count == 0 || expected_byte_length != plan.exact_byte_length {
+        if plan.coefficient_count == 0
+            || expected_byte_length != plan.exact_byte_length
+            || coefficient_range.start > coefficient_range.end
+            || coefficient_range.end > plan.coefficient_count
+        {
             return Err(CommonProofProverError::InvalidColumn);
         }
+        let next_coefficient_index = coefficient_range.start;
+        Ok(Self {
+            plan,
+            coefficient_range,
+            next_coefficient_index,
+        })
+    }
+
+    pub(crate) const fn requested_coefficient_count(&self) -> usize {
+        self.coefficient_range.end - self.coefficient_range.start
+    }
+
+    pub(crate) const fn is_complete(&self) -> bool {
+        self.next_coefficient_index == self.coefficient_range.end
+    }
+
+    pub(crate) fn advance<Storage: ProofExternalMemory>(
+        &mut self,
+        executor: &mut ProofExternalMemoryExecutor,
+        storage: &mut Storage,
+        mut destination: CommonProofReplayPolynomialRangeDestination<'_>,
+    ) -> Result<bool, ProofExternalMemoryExecutorError<Storage::Error>> {
+        if destination.value_type() != self.plan.value_type {
+            return Err(ProofExternalMemoryError::InvalidLifecycle.into());
+        }
+        if destination.coefficient_count() != self.requested_coefficient_count() {
+            return Err(ProofExternalMemoryError::WrongOffsetOrLength.into());
+        }
+        if self.is_complete() {
+            return Ok(true);
+        }
+
+        let value_byte_length = usize::try_from(resident_value_byte_length(self.plan.value_type))
+            .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)?;
+        let maximum_coefficient_count = usize::try_from(executor.maximum_chunk_byte_length())
+            .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)?
+            .checked_div(value_byte_length)
+            .filter(|count| *count != 0)
+            .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
+        let coefficient_count =
+            maximum_coefficient_count.min(self.coefficient_range.end - self.next_coefficient_index);
+        let byte_length = coefficient_count
+            .checked_mul(value_byte_length)
+            .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
+        let mut encoded = Zeroizing::new(Vec::new());
+        encoded
+            .try_reserve_exact(byte_length)
+            .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)?;
+        encoded.resize(byte_length, 0);
+        let object_byte_offset = self
+            .next_coefficient_index
+            .checked_mul(value_byte_length)
+            .and_then(|offset| u64::try_from(offset).ok())
+            .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
+        let object_byte_end = object_byte_offset
+            .checked_add(
+                u64::try_from(byte_length)
+                    .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)?,
+            )
+            .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
+        if object_byte_end > self.plan.exact_byte_length {
+            return Err(ProofExternalMemoryError::WrongOffsetOrLength.into());
+        }
+        executor.read_object_bytes(storage, self.plan.object, object_byte_offset, &mut encoded)?;
+
+        let destination_coefficient_offset = self
+            .next_coefficient_index
+            .checked_sub(self.coefficient_range.start)
+            .ok_or(ProofExternalMemoryError::InvalidLifecycle)?;
+        destination.decode_canonical_chunk(
+            destination_coefficient_offset,
+            coefficient_count,
+            &encoded,
+        )?;
+        self.next_coefficient_index = self
+            .next_coefficient_index
+            .checked_add(coefficient_count)
+            .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
+        Ok(self.is_complete())
+    }
+}
+
+pub(crate) struct CommonProofReplayPolynomialReader {
+    range_reader: CommonProofReplayPolynomialRangeReader,
+    coefficients: CommonProofReplayPolynomialCoefficients,
+}
+
+impl CommonProofReplayPolynomialReader {
+    pub(crate) fn new(
+        plan: CommonProofReplayPolynomialPlan,
+    ) -> Result<Self, CommonProofProverError> {
+        let range_reader =
+            CommonProofReplayPolynomialRangeReader::new(plan, 0..plan.coefficient_count)?;
         let coefficients = match plan.value_type {
             RelationColumnValueType::BaseField => {
                 CommonProofReplayPolynomialCoefficients::Base(Zeroizing::new(Vec::new()))
@@ -1299,83 +1525,54 @@ impl CommonProofReplayPolynomialReader {
             }
         };
         Ok(Self {
-            plan,
-            next_coefficient_index: 0,
+            range_reader,
             coefficients,
         })
     }
 
-    pub(super) fn advance<Storage: ProofExternalMemory>(
+    pub(crate) fn advance<Storage: ProofExternalMemory>(
         &mut self,
         executor: &mut ProofExternalMemoryExecutor,
         storage: &mut Storage,
     ) -> Result<bool, ProofExternalMemoryExecutorError<Storage::Error>> {
-        if self.next_coefficient_index >= self.plan.coefficient_count {
-            return Ok(true);
-        }
-        let value_byte_length = usize::try_from(resident_value_byte_length(self.plan.value_type))
-            .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)?;
-        let maximum_coefficient_count = usize::try_from(executor.maximum_chunk_byte_length())
-            .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)?
-            .checked_div(value_byte_length)
-            .filter(|count| *count != 0)
-            .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
-        let coefficient_count = maximum_coefficient_count
-            .min(self.plan.coefficient_count - self.next_coefficient_index);
-        let byte_length = coefficient_count
-            .checked_mul(value_byte_length)
-            .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
-        let mut bytes = Zeroizing::new(Vec::new());
-        bytes
-            .try_reserve_exact(byte_length)
-            .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)?;
-        bytes.resize(byte_length, 0);
-        let offset = self
-            .next_coefficient_index
-            .checked_mul(value_byte_length)
-            .and_then(|offset| u64::try_from(offset).ok())
-            .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
-        executor.read_object_bytes(storage, self.plan.object, offset, &mut bytes)?;
         match &mut self.coefficients {
             CommonProofReplayPolynomialCoefficients::Base(coefficients) => {
-                coefficients
-                    .try_reserve_exact(coefficient_count)
-                    .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)?;
-                for encoded in bytes.chunks_exact(8) {
-                    let mut value = [0_u8; 8];
-                    value.copy_from_slice(encoded);
-                    coefficients.push(
-                        ProofBaseFieldElement::from_canonical(u64::from_le_bytes(value))
-                            .map_err(|_| ProofExternalMemoryError::InvalidLifecycle)?,
+                if coefficients.is_empty() {
+                    coefficients
+                        .try_reserve_exact(self.range_reader.requested_coefficient_count())
+                        .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)?;
+                    coefficients.resize(
+                        self.range_reader.requested_coefficient_count(),
+                        ProofBaseFieldElement::ZERO,
                     );
                 }
+                self.range_reader.advance(
+                    executor,
+                    storage,
+                    CommonProofReplayPolynomialRangeDestination::Base(coefficients),
+                )
             }
             CommonProofReplayPolynomialCoefficients::Extension(coefficients) => {
-                coefficients
-                    .try_reserve_exact(coefficient_count)
-                    .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)?;
-                for encoded in bytes.chunks_exact(value_byte_length) {
-                    let mut coordinates = [0_u64; PROOF_CHALLENGE_EXTENSION_DEGREE];
-                    for (coordinate, coordinate_bytes) in
-                        coordinates.iter_mut().zip(encoded.chunks_exact(8))
-                    {
-                        let mut value = [0_u8; 8];
-                        value.copy_from_slice(coordinate_bytes);
-                        *coordinate = u64::from_le_bytes(value);
-                    }
-                    coefficients.push(
-                        ProofChallengeExtensionElement::from_canonical_coordinates(coordinates)
-                            .map_err(|_| ProofExternalMemoryError::InvalidLifecycle)?,
+                if coefficients.is_empty() {
+                    coefficients
+                        .try_reserve_exact(self.range_reader.requested_coefficient_count())
+                        .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)?;
+                    coefficients.resize(
+                        self.range_reader.requested_coefficient_count(),
+                        ProofChallengeExtensionElement::ZERO,
                     );
                 }
+                self.range_reader.advance(
+                    executor,
+                    storage,
+                    CommonProofReplayPolynomialRangeDestination::Extension(coefficients),
+                )
             }
         }
-        self.next_coefficient_index += coefficient_count;
-        Ok(self.next_coefficient_index == self.plan.coefficient_count)
     }
 
-    pub(super) fn finish(self) -> Result<CommonProofSourcePolynomial, CommonProofProverError> {
-        if self.next_coefficient_index != self.plan.coefficient_count {
+    pub(crate) fn finish(self) -> Result<CommonProofSourcePolynomial, CommonProofProverError> {
+        if !self.range_reader.is_complete() {
             return Err(CommonProofProverError::InvalidColumn);
         }
         Ok(match self.coefficients {
@@ -1392,6 +1589,659 @@ impl CommonProofReplayPolynomialReader {
                 CommonProofSourcePolynomial::Extension(coefficients)
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod replay_polynomial_range_reader_tests {
+    use super::*;
+    use crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum RangeTestStorageError {
+        TransactionAlreadyActive,
+        TransactionMissing,
+        ObjectAlreadyExists,
+        ObjectMissing,
+        WrongLifecycle,
+        WrongRange,
+    }
+
+    #[derive(Clone)]
+    struct RangeTestObject {
+        bytes: Vec<u8>,
+        exact_byte_length: usize,
+        sealed: bool,
+    }
+
+    #[derive(Default)]
+    struct RangeTestStorage {
+        committed: BTreeMap<ProofExternalMemoryObject, RangeTestObject>,
+        transaction: Option<BTreeMap<ProofExternalMemoryObject, RangeTestObject>>,
+        read_invocation_count: usize,
+    }
+
+    impl ProofExternalMemory for RangeTestStorage {
+        type Error = RangeTestStorageError;
+
+        fn begin_transaction(&mut self, _: u64, _: u32) -> Result<(), Self::Error> {
+            if self.transaction.is_some() {
+                return Err(RangeTestStorageError::TransactionAlreadyActive);
+            }
+            self.transaction = Some(self.committed.clone());
+            Ok(())
+        }
+
+        fn create_object(
+            &mut self,
+            object: ProofExternalMemoryObject,
+            _: ProofExternalMemoryProtection,
+            exact_byte_length: u64,
+        ) -> Result<(), Self::Error> {
+            let transaction = self
+                .transaction
+                .as_mut()
+                .ok_or(RangeTestStorageError::TransactionMissing)?;
+            if transaction.contains_key(&object) {
+                return Err(RangeTestStorageError::ObjectAlreadyExists);
+            }
+            transaction.insert(
+                object,
+                RangeTestObject {
+                    bytes: Vec::new(),
+                    exact_byte_length: usize::try_from(exact_byte_length)
+                        .map_err(|_| RangeTestStorageError::WrongRange)?,
+                    sealed: false,
+                },
+            );
+            Ok(())
+        }
+
+        fn append_object_bytes(
+            &mut self,
+            object: ProofExternalMemoryObject,
+            expected_offset: u64,
+            bytes: &[u8],
+        ) -> Result<(), Self::Error> {
+            let stored = self
+                .transaction
+                .as_mut()
+                .ok_or(RangeTestStorageError::TransactionMissing)?
+                .get_mut(&object)
+                .ok_or(RangeTestStorageError::ObjectMissing)?;
+            let expected_offset =
+                usize::try_from(expected_offset).map_err(|_| RangeTestStorageError::WrongRange)?;
+            let next_byte_length = stored
+                .bytes
+                .len()
+                .checked_add(bytes.len())
+                .ok_or(RangeTestStorageError::WrongRange)?;
+            if stored.sealed
+                || stored.bytes.len() != expected_offset
+                || next_byte_length > stored.exact_byte_length
+            {
+                return Err(RangeTestStorageError::WrongLifecycle);
+            }
+            stored.bytes.extend_from_slice(bytes);
+            Ok(())
+        }
+
+        fn seal_object(&mut self, object: ProofExternalMemoryObject) -> Result<(), Self::Error> {
+            let stored = self
+                .transaction
+                .as_mut()
+                .ok_or(RangeTestStorageError::TransactionMissing)?
+                .get_mut(&object)
+                .ok_or(RangeTestStorageError::ObjectMissing)?;
+            if stored.sealed || stored.bytes.len() != stored.exact_byte_length {
+                return Err(RangeTestStorageError::WrongLifecycle);
+            }
+            stored.sealed = true;
+            Ok(())
+        }
+
+        fn read_object_bytes(
+            &mut self,
+            object: ProofExternalMemoryObject,
+            offset: u64,
+            destination: &mut [u8],
+        ) -> Result<(), Self::Error> {
+            self.read_invocation_count += 1;
+            let stored = self
+                .transaction
+                .as_ref()
+                .ok_or(RangeTestStorageError::TransactionMissing)?
+                .get(&object)
+                .ok_or(RangeTestStorageError::ObjectMissing)?;
+            if !stored.sealed {
+                return Err(RangeTestStorageError::WrongLifecycle);
+            }
+            let offset = usize::try_from(offset).map_err(|_| RangeTestStorageError::WrongRange)?;
+            let end = offset
+                .checked_add(destination.len())
+                .ok_or(RangeTestStorageError::WrongRange)?;
+            let source = stored
+                .bytes
+                .get(offset..end)
+                .ok_or(RangeTestStorageError::WrongRange)?;
+            destination.copy_from_slice(source);
+            Ok(())
+        }
+
+        fn delete_object(&mut self, object: ProofExternalMemoryObject) -> Result<(), Self::Error> {
+            self.transaction
+                .as_mut()
+                .ok_or(RangeTestStorageError::TransactionMissing)?
+                .remove(&object)
+                .ok_or(RangeTestStorageError::ObjectMissing)?;
+            Ok(())
+        }
+
+        fn commit_transaction(&mut self) -> Result<(), Self::Error> {
+            self.committed = self
+                .transaction
+                .take()
+                .ok_or(RangeTestStorageError::TransactionMissing)?;
+            Ok(())
+        }
+
+        fn abort_transaction(&mut self) -> Result<(), Self::Error> {
+            self.transaction
+                .take()
+                .ok_or(RangeTestStorageError::TransactionMissing)?;
+            Ok(())
+        }
+    }
+
+    fn encode_base_values(values: &[ProofBaseFieldElement]) -> Vec<u8> {
+        values
+            .iter()
+            .flat_map(|value| value.canonical().to_le_bytes())
+            .collect()
+    }
+
+    fn encode_extension_values(values: &[ProofChallengeExtensionElement]) -> Vec<u8> {
+        values
+            .iter()
+            .flat_map(|value| {
+                value
+                    .canonical_coordinates()
+                    .into_iter()
+                    .flat_map(u64::to_le_bytes)
+            })
+            .collect()
+    }
+
+    fn prepared_range_storage(
+        object: ProofExternalMemoryObject,
+        value_type: RelationColumnValueType,
+        coefficient_count: usize,
+        encoded: &[u8],
+        maximum_chunk_byte_length: u32,
+    ) -> (
+        CommonProofReplayPolynomialPlan,
+        ProofExternalMemoryExecutor,
+        RangeTestStorage,
+    ) {
+        let replay_plan =
+            CommonProofReplayPolynomialPlan::new(object, value_type, coefficient_count)
+                .expect("the focused replay plan is valid");
+        assert_eq!(
+            usize::try_from(replay_plan.exact_byte_length())
+                .expect("the focused byte length fits usize"),
+            encoded.len(),
+        );
+        let exact_byte_length = replay_plan.exact_byte_length();
+        let external_memory_plan = ProofExternalMemoryPlan::new(
+            1,
+            maximum_chunk_byte_length,
+            u64::from(maximum_chunk_byte_length),
+            1,
+            exact_byte_length,
+            exact_byte_length,
+            exact_byte_length
+                .checked_mul(16)
+                .expect("the focused read budget fits u64"),
+            256,
+            vec![ProofExternalMemoryObjectPlan::new(
+                object,
+                ProofExternalMemoryProtection::PublicIntegrity,
+                exact_byte_length,
+                0,
+                0,
+                0,
+            )],
+        )
+        .expect("the focused external-memory plan is valid");
+        let mut executor = ProofExternalMemoryExecutor::new(external_memory_plan);
+        let mut storage = RangeTestStorage::default();
+        executor
+            .begin_object(&mut storage, object)
+            .expect("the focused replay object begins");
+        for chunk in encoded.chunks(
+            usize::try_from(maximum_chunk_byte_length)
+                .expect("the focused chunk length fits usize"),
+        ) {
+            executor
+                .append_object_bytes(&mut storage, object, chunk)
+                .expect("the focused replay bytes append");
+        }
+        executor
+            .seal_object(&mut storage, object)
+            .expect("the focused replay object seals");
+        (replay_plan, executor, storage)
+    }
+
+    fn base_values() -> Vec<ProofBaseFieldElement> {
+        [
+            0,
+            1,
+            2,
+            17,
+            65_537,
+            PROOF_BASE_FIELD_MODULUS / 2,
+            PROOF_BASE_FIELD_MODULUS - 5,
+            PROOF_BASE_FIELD_MODULUS - 3,
+            PROOF_BASE_FIELD_MODULUS - 2,
+            PROOF_BASE_FIELD_MODULUS - 1,
+            42,
+        ]
+        .into_iter()
+        .map(|value| ProofBaseFieldElement::from_canonical(value).expect("canonical test value"))
+        .collect()
+    }
+
+    fn extension_values() -> Vec<ProofChallengeExtensionElement> {
+        (0_u64..5)
+            .map(|value| {
+                ProofChallengeExtensionElement::from_canonical_coordinates([
+                    value,
+                    value + 11,
+                    value + 101,
+                    PROOF_BASE_FIELD_MODULUS - 1 - value,
+                    value * value + 7,
+                ])
+                .expect("canonical extension test value")
+            })
+            .collect()
+    }
+
+    #[test]
+    fn base_range_reader_handles_unaligned_chunks_exact_final_and_empty_ranges() {
+        let values = base_values();
+        let encoded = encode_base_values(&values);
+        let (plan, mut executor, mut storage) = prepared_range_storage(
+            ProofExternalMemoryObject::new(41),
+            RelationColumnValueType::BaseField,
+            values.len(),
+            &encoded,
+            17,
+        );
+
+        let mut destination = vec![ProofBaseFieldElement::ZERO; 7];
+        let mut reader = CommonProofReplayPolynomialRangeReader::new(plan, 2..9)
+            .expect("the interior range is valid");
+        let initial_read_count = storage.read_invocation_count;
+        let mut poll_count = 0;
+        loop {
+            poll_count += 1;
+            if reader
+                .advance(
+                    &mut executor,
+                    &mut storage,
+                    CommonProofReplayPolynomialRangeDestination::Base(&mut destination),
+                )
+                .expect("the interior range reads canonically")
+            {
+                break;
+            }
+        }
+        assert_eq!(poll_count, 4, "two aligned values fit in each poll");
+        assert_eq!(destination, values[2..9]);
+        assert_eq!(storage.read_invocation_count - initial_read_count, 4);
+
+        assert!(
+            reader
+                .advance(
+                    &mut executor,
+                    &mut storage,
+                    CommonProofReplayPolynomialRangeDestination::Base(&mut destination),
+                )
+                .expect("a completed range remains complete")
+        );
+        assert_eq!(storage.read_invocation_count - initial_read_count, 4);
+
+        let mut final_destination = vec![ProofBaseFieldElement::ZERO; 2];
+        let mut final_reader = CommonProofReplayPolynomialRangeReader::new(plan, 9..11)
+            .expect("the exact final range is valid");
+        assert!(
+            final_reader
+                .advance(
+                    &mut executor,
+                    &mut storage,
+                    CommonProofReplayPolynomialRangeDestination::Base(&mut final_destination),
+                )
+                .expect("the exact final range reads in one poll")
+        );
+        assert_eq!(final_destination, values[9..11]);
+
+        let read_count_before_empty_range = storage.read_invocation_count;
+        let mut empty_destination = Vec::new();
+        let mut empty_reader =
+            CommonProofReplayPolynomialRangeReader::new(plan, values.len()..values.len())
+                .expect("an empty final range is valid");
+        assert!(
+            empty_reader
+                .advance(
+                    &mut executor,
+                    &mut storage,
+                    CommonProofReplayPolynomialRangeDestination::Base(&mut empty_destination),
+                )
+                .expect("an empty range completes without storage")
+        );
+        assert_eq!(storage.read_invocation_count, read_count_before_empty_range);
+    }
+
+    #[test]
+    fn extension_range_reader_decodes_multiple_coordinates_across_a_short_final_poll() {
+        let values = extension_values();
+        let encoded = encode_extension_values(&values);
+        let (plan, mut executor, mut storage) = prepared_range_storage(
+            ProofExternalMemoryObject::new(42),
+            RelationColumnValueType::ChallengeExtension,
+            values.len(),
+            &encoded,
+            85,
+        );
+        let mut destination = vec![ProofChallengeExtensionElement::ZERO; values.len()];
+        let mut reader = CommonProofReplayPolynomialRangeReader::new(plan, 0..values.len())
+            .expect("the complete extension range is valid");
+        let initial_read_count = storage.read_invocation_count;
+
+        assert!(
+            !reader
+                .advance(
+                    &mut executor,
+                    &mut storage,
+                    CommonProofReplayPolynomialRangeDestination::Extension(&mut destination),
+                )
+                .expect("the first pair of extensions reads")
+        );
+        assert!(
+            !reader
+                .advance(
+                    &mut executor,
+                    &mut storage,
+                    CommonProofReplayPolynomialRangeDestination::Extension(&mut destination),
+                )
+                .expect("the second pair of extensions reads")
+        );
+        assert!(
+            reader
+                .advance(
+                    &mut executor,
+                    &mut storage,
+                    CommonProofReplayPolynomialRangeDestination::Extension(&mut destination),
+                )
+                .expect("the short final extension reads")
+        );
+        assert_eq!(destination, values);
+        assert_eq!(storage.read_invocation_count - initial_read_count, 3);
+    }
+
+    #[test]
+    fn range_reader_rejects_wrong_destination_shape_without_consuming_storage() {
+        let values = base_values();
+        let encoded = encode_base_values(&values);
+        let (plan, mut executor, mut storage) = prepared_range_storage(
+            ProofExternalMemoryObject::new(43),
+            RelationColumnValueType::BaseField,
+            values.len(),
+            &encoded,
+            32,
+        );
+        let initial_read_count = storage.read_invocation_count;
+        let mut reader = CommonProofReplayPolynomialRangeReader::new(plan, 3..7)
+            .expect("the focused range is valid");
+        let mut wrong_type = vec![ProofChallengeExtensionElement::ZERO; 4];
+        assert_eq!(
+            reader.advance(
+                &mut executor,
+                &mut storage,
+                CommonProofReplayPolynomialRangeDestination::Extension(&mut wrong_type),
+            ),
+            Err(ProofExternalMemoryExecutorError::Execution(
+                ProofExternalMemoryError::InvalidLifecycle,
+            )),
+        );
+        let mut short_destination = vec![ProofBaseFieldElement::ZERO; 3];
+        assert_eq!(
+            reader.advance(
+                &mut executor,
+                &mut storage,
+                CommonProofReplayPolynomialRangeDestination::Base(&mut short_destination),
+            ),
+            Err(ProofExternalMemoryExecutorError::Execution(
+                ProofExternalMemoryError::WrongOffsetOrLength,
+            )),
+        );
+        let mut long_destination = vec![ProofBaseFieldElement::ZERO; 5];
+        assert_eq!(
+            reader.advance(
+                &mut executor,
+                &mut storage,
+                CommonProofReplayPolynomialRangeDestination::Base(&mut long_destination),
+            ),
+            Err(ProofExternalMemoryExecutorError::Execution(
+                ProofExternalMemoryError::WrongOffsetOrLength,
+            )),
+        );
+        assert_eq!(storage.read_invocation_count, initial_read_count);
+
+        let mut destination = vec![ProofBaseFieldElement::ZERO; 4];
+        assert!(
+            reader
+                .advance(
+                    &mut executor,
+                    &mut storage,
+                    CommonProofReplayPolynomialRangeDestination::Base(&mut destination),
+                )
+                .expect("destination validation failures do not move the cursor")
+        );
+        assert_eq!(destination, values[3..7]);
+    }
+
+    #[test]
+    fn range_reader_rejects_wrong_object_binding_and_truncated_storage() {
+        let values = base_values();
+        let encoded = encode_base_values(&values);
+        let object = ProofExternalMemoryObject::new(44);
+        let (plan, mut executor, mut storage) = prepared_range_storage(
+            object,
+            RelationColumnValueType::BaseField,
+            values.len(),
+            &encoded,
+            32,
+        );
+        let wrong_object_plan = CommonProofReplayPolynomialPlan::new(
+            ProofExternalMemoryObject::new(45),
+            RelationColumnValueType::BaseField,
+            values.len(),
+        )
+        .expect("the wrong-object replay geometry is otherwise valid");
+        let mut wrong_object_reader =
+            CommonProofReplayPolynomialRangeReader::new(wrong_object_plan, 0..2)
+                .expect("the wrong-object range is structurally valid");
+        let mut wrong_object_destination = vec![ProofBaseFieldElement::ZERO; 2];
+        assert_eq!(
+            wrong_object_reader.advance(
+                &mut executor,
+                &mut storage,
+                CommonProofReplayPolynomialRangeDestination::Base(&mut wrong_object_destination),
+            ),
+            Err(ProofExternalMemoryExecutorError::Execution(
+                ProofExternalMemoryError::UnknownObject,
+            )),
+        );
+
+        storage
+            .committed
+            .get_mut(&object)
+            .expect("the committed focused object exists")
+            .bytes
+            .truncate(encoded.len() - 1);
+        let mut truncated_reader = CommonProofReplayPolynomialRangeReader::new(plan, 7..11)
+            .expect("the final range is structurally valid");
+        let mut destination = vec![ProofBaseFieldElement::ZERO; 4];
+        assert_eq!(
+            truncated_reader.advance(
+                &mut executor,
+                &mut storage,
+                CommonProofReplayPolynomialRangeDestination::Base(&mut destination),
+            ),
+            Err(ProofExternalMemoryExecutorError::Storage(
+                RangeTestStorageError::WrongRange,
+            )),
+        );
+        assert_eq!(executor.usage().total_read_byte_length(), 0);
+
+        storage
+            .committed
+            .get_mut(&object)
+            .expect("the committed focused object exists")
+            .bytes
+            .clone_from(&encoded);
+        assert!(
+            truncated_reader
+                .advance(
+                    &mut executor,
+                    &mut storage,
+                    CommonProofReplayPolynomialRangeDestination::Base(&mut destination),
+                )
+                .expect("a failed storage read does not move the range cursor")
+        );
+        assert_eq!(destination, values[7..11]);
+    }
+
+    #[test]
+    fn range_reader_refuses_noncanonical_base_and_extension_values() {
+        let base_values = base_values();
+        let mut base_encoded = encode_base_values(&base_values[..3]);
+        base_encoded[8..16].copy_from_slice(&PROOF_BASE_FIELD_MODULUS.to_le_bytes());
+        let (base_plan, mut base_executor, mut base_storage) = prepared_range_storage(
+            ProofExternalMemoryObject::new(46),
+            RelationColumnValueType::BaseField,
+            3,
+            &base_encoded,
+            24,
+        );
+        let mut base_reader = CommonProofReplayPolynomialRangeReader::new(base_plan, 0..3)
+            .expect("the malformed base range is structurally valid");
+        let mut base_destination = vec![ProofBaseFieldElement::ZERO; 3];
+        assert_eq!(
+            base_reader.advance(
+                &mut base_executor,
+                &mut base_storage,
+                CommonProofReplayPolynomialRangeDestination::Base(&mut base_destination),
+            ),
+            Err(ProofExternalMemoryExecutorError::Execution(
+                ProofExternalMemoryError::InvalidLifecycle,
+            )),
+        );
+
+        let extension_values = extension_values();
+        let mut extension_encoded = encode_extension_values(&extension_values[..2]);
+        extension_encoded[48..56].copy_from_slice(&PROOF_BASE_FIELD_MODULUS.to_le_bytes());
+        let (extension_plan, mut extension_executor, mut extension_storage) =
+            prepared_range_storage(
+                ProofExternalMemoryObject::new(47),
+                RelationColumnValueType::ChallengeExtension,
+                2,
+                &extension_encoded,
+                80,
+            );
+        let mut extension_reader =
+            CommonProofReplayPolynomialRangeReader::new(extension_plan, 0..2)
+                .expect("the malformed extension range is structurally valid");
+        let mut extension_destination = vec![ProofChallengeExtensionElement::ZERO; 2];
+        assert_eq!(
+            extension_reader.advance(
+                &mut extension_executor,
+                &mut extension_storage,
+                CommonProofReplayPolynomialRangeDestination::Extension(&mut extension_destination),
+            ),
+            Err(ProofExternalMemoryExecutorError::Execution(
+                ProofExternalMemoryError::InvalidLifecycle,
+            )),
+        );
+    }
+
+    #[test]
+    fn range_reader_rejects_invalid_geometry_overflow_and_subvalue_chunks() {
+        let values = base_values();
+        let encoded = encode_base_values(&values);
+        let (plan, _, _) = prepared_range_storage(
+            ProofExternalMemoryObject::new(48),
+            RelationColumnValueType::BaseField,
+            values.len(),
+            &encoded,
+            32,
+        );
+        assert!(matches!(
+            CommonProofReplayPolynomialRangeReader::new(plan, 7..6),
+            Err(CommonProofProverError::InvalidColumn),
+        ));
+        assert!(matches!(
+            CommonProofReplayPolynomialRangeReader::new(plan, 0..values.len() + 1),
+            Err(CommonProofProverError::InvalidColumn),
+        ));
+        assert!(matches!(
+            CommonProofReplayPolynomialRangeReader::new(
+                CommonProofReplayPolynomialPlan {
+                    exact_byte_length: plan.exact_byte_length() + 1,
+                    ..plan
+                },
+                0..1,
+            ),
+            Err(CommonProofProverError::InvalidColumn),
+        ));
+
+        #[cfg(target_pointer_width = "64")]
+        assert!(matches!(
+            CommonProofReplayPolynomialRangeReader::new(
+                CommonProofReplayPolynomialPlan {
+                    object: ProofExternalMemoryObject::new(49),
+                    value_type: RelationColumnValueType::BaseField,
+                    coefficient_count: usize::MAX,
+                    exact_byte_length: u64::MAX,
+                },
+                0..1,
+            ),
+            Err(CommonProofProverError::CountOverflow),
+        ));
+
+        let (small_chunk_plan, mut small_chunk_executor, mut small_chunk_storage) =
+            prepared_range_storage(
+                ProofExternalMemoryObject::new(50),
+                RelationColumnValueType::BaseField,
+                values.len(),
+                &encoded,
+                7,
+            );
+        let mut small_chunk_reader =
+            CommonProofReplayPolynomialRangeReader::new(small_chunk_plan, 0..1)
+                .expect("the requested range is valid independently of implementation chunks");
+        let mut destination = vec![ProofBaseFieldElement::ZERO; 1];
+        assert_eq!(
+            small_chunk_reader.advance(
+                &mut small_chunk_executor,
+                &mut small_chunk_storage,
+                CommonProofReplayPolynomialRangeDestination::Base(&mut destination),
+            ),
+            Err(ProofExternalMemoryExecutorError::Execution(
+                ProofExternalMemoryError::ResourceLimitExceeded,
+            )),
+        );
     }
 }
 
@@ -1742,8 +2592,10 @@ pub(super) fn common_tree_materialization_write_transaction_count(
             CommonProofProverError::InvalidInput,
         ));
     }
-    let leaf_object_byte_length = checked_multiply_u64(leaf_count, canonical_leaf_byte_length)?;
-    ceiling_division_u64(leaf_object_byte_length, chunk_byte_length)
+    checked_multiply_u64(
+        leaf_count,
+        ceiling_division_u64(canonical_leaf_byte_length, chunk_byte_length)?,
+    )
 }
 
 fn common_tree_materialization_phase(source: ProofTreeCatalogSource) -> Option<u8> {
@@ -2486,9 +3338,9 @@ fn derive_generated_common_proof_storage_geometry(
                 chunk_byte_length,
             )?,
         )?;
-        // The query scanner bounds every read within one canonical leaf, so
-        // transaction rounding restarts at each leaf rather than spanning the
-        // object as it does for materialization appends.
+        // Materialization and query replay both restart transaction rounding
+        // at each canonical leaf so a yielded chunk can be regenerated from
+        // the current leaf without retaining a second payload-sized source.
         let query_leaf_read_transaction_count = checked_multiply_u64(
             leaf_count,
             ceiling_division_u64(canonical_leaf_byte_length, chunk_byte_length)?,
@@ -3411,7 +4263,7 @@ const fn common_proof_external_memory_requirement_from_geometry(
     }
 }
 
-pub(super) fn validate_generation_relation_trees(
+pub(crate) fn validate_generation_relation_trees(
     variant: &RelationPlanVariant,
     relation_trees: &[RelationProofTreeInput],
 ) -> Result<(), CommonProofProverError> {

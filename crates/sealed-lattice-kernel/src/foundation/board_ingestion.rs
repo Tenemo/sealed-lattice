@@ -4,12 +4,17 @@ use std::{
     sync::Arc,
 };
 
-use super::schemas::{AGGREGATE_PAYLOAD_SCHEMA_VERSION, AggregatePayload, EvaluatorReplayPayload};
+use super::schemas::{
+    AGGREGATE_PAYLOAD_SCHEMA_VERSION, AggregatePayload, BallotPackagePayload,
+    EvaluatorReplayPayload, PrivateShareAcceptancePayload,
+};
 use super::{
-    CanonicalCodecError, CanonicalCodecErrorKind, CanonicalDecodeLimits, CanonicalItem,
-    CanonicalItemType, CanonicalTuple, FINALITY_SIGNATURE_PAYLOAD_SCHEMA_IDENTIFIER,
-    FOUNDATION_PROFILE, FoundationObjectType, FoundationSchemaError, Hash512, ObjectEnvelope,
-    ParticipantIdentity, RefusalReason, Roster, SignedCarrier, StateCapabilityKind, StateError,
+    AuthenticatedBallotCandidateView, BallotCandidateAuthenticationContext,
+    BallotCandidateListPayload, BallotCandidateViewInput, CanonicalCodecError,
+    CanonicalCodecErrorKind, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType,
+    CanonicalTuple, FINALITY_SIGNATURE_PAYLOAD_SCHEMA_IDENTIFIER, FOUNDATION_PROFILE,
+    FoundationObjectType, FoundationSchemaError, Hash512, ObjectEnvelope, ParticipantIdentity,
+    RefusalReason, Roster, SignedCarrier, StateCapabilityKind, StateError,
     StateOutputIntentPayload, StateReservationIntentPayload, StateWitnessVoteKind,
     StateWitnessVotePayload, StorageRootCommitmentPayload, StreamDescriptor, VerificationResult,
     derive_state_key, derive_state_witness_vote_sequence,
@@ -19,10 +24,8 @@ pub(crate) const FOUNDATION_SCHEMA_VERSION: u16 = 1;
 pub(crate) const SETUP_INTENT_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1200;
 pub(crate) const PUBLIC_RANDOMNESS_COMMITMENT_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1201;
 pub(crate) const PUBLIC_RANDOMNESS_REVEAL_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1202;
-pub(crate) const PRIVATE_SHARE_ACCEPTANCE_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1203;
 const COMPLAINT_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1204;
 pub(crate) const DEALER_PUBLIC_RECORD_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x2100;
-pub(super) const BALLOT_PACKAGE_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1301;
 const TARGET_DECRYPTION_SHARE_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1620;
 pub(crate) const MAXIMUM_CANONICAL_BOARD_BATCH_CARRIER_COUNT: u32 = 4_096;
 
@@ -30,6 +33,7 @@ pub(crate) const MAXIMUM_CANONICAL_BOARD_BATCH_CARRIER_COUNT: u32 = 4_096;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CanonicalBoardLimits {
     pub maximum_ballot_attempts_per_participant: u64,
+    pub maximum_candidate_packages_per_action: u32,
     pub maximum_retained_canonical_carrier_byte_length: u64,
     pub maximum_unordered_carriers_per_batch: u32,
     pub maximum_retained_transcript_objects: u32,
@@ -38,6 +42,7 @@ pub struct CanonicalBoardLimits {
 impl CanonicalBoardLimits {
     fn validate(self) -> BoardResult<()> {
         if self.maximum_ballot_attempts_per_participant == 0
+            || self.maximum_candidate_packages_per_action == 0
             || self.maximum_retained_canonical_carrier_byte_length == 0
             || self.maximum_unordered_carriers_per_batch == 0
             || self.maximum_retained_transcript_objects == 0
@@ -245,6 +250,10 @@ enum TypedPayload {
         dealer_roster_position: u16,
     },
     BallotPackage,
+    BallotCandidateList {
+        submission_cutoff_hash: Hash512,
+        entry_count: usize,
+    },
     Aggregate {
         selected_ballot_object_hashes: Vec<Hash512>,
     },
@@ -285,6 +294,7 @@ pub struct CanonicalBoardVerifier {
     roster_hash: Hash512,
     roster_positions: HashMap<ParticipantIdentity, u16>,
     limits: CanonicalBoardLimits,
+    submission_cutoff_hash: Option<Hash512>,
     canonical_decode_limits: CanonicalDecodeLimits,
     objects_by_hash: HashMap<Hash512, Arc<VerifiedTranscriptObjectData>>,
     object_hashes_by_producer_slot: HashMap<ProducerSlot, Hash512>,
@@ -304,6 +314,29 @@ impl CanonicalBoardVerifier {
         roster.validate()?;
         let canonical_roster = roster.clone();
         canonical_roster.require_selected_profile_size()?;
+        let maximum_candidate_packages = u64::from(limits.maximum_candidate_packages_per_action);
+        let roster_size = u64::try_from(canonical_roster.entries.len()).map_err(|_| {
+            CanonicalBoardError::new(
+                RefusalReason::OutsideSupportedProfile,
+                "roster size does not fit the candidate-package limit",
+            )
+        })?;
+        let maximum_attempt_product = roster_size
+            .checked_mul(limits.maximum_ballot_attempts_per_participant)
+            .ok_or_else(|| {
+                CanonicalBoardError::new(
+                    RefusalReason::OutsideSupportedProfile,
+                    "candidate-package limit product overflows",
+                )
+            })?;
+        if maximum_candidate_packages < roster_size
+            || maximum_candidate_packages > maximum_attempt_product
+        {
+            return Err(CanonicalBoardError::new(
+                RefusalReason::OutsideSupportedProfile,
+                "candidate-package limit is inconsistent with the roster and attempt maximum",
+            ));
+        }
         let roster_hash = canonical_roster.roster_hash()?;
         let mut roster_positions = HashMap::with_capacity(canonical_roster.entries.len());
         for (roster_position, entry) in canonical_roster.entries.iter().enumerate() {
@@ -323,6 +356,7 @@ impl CanonicalBoardVerifier {
             roster_hash,
             roster_positions,
             limits,
+            submission_cutoff_hash: None,
             canonical_decode_limits,
             objects_by_hash: HashMap::new(),
             object_hashes_by_producer_slot: HashMap::new(),
@@ -344,6 +378,56 @@ impl CanonicalBoardVerifier {
 
     pub(crate) const fn roster_hash(&self) -> Hash512 {
         self.roster_hash
+    }
+
+    /// Authenticates the complete candidate transport against this verifier's
+    /// exact suite, action, roster, and suite-owned multiplicity limits. The
+    /// result deliberately carries no ballot-proof acceptance claim.
+    pub fn authenticate_ballot_candidate_view(
+        &self,
+        input: &BallotCandidateViewInput,
+    ) -> VerificationResult<AuthenticatedBallotCandidateView> {
+        let Some(submission_cutoff_hash) = self.submission_cutoff_hash else {
+            return VerificationResult::refused(RefusalReason::MissingPrerequisite);
+        };
+        match super::authenticate_ballot_candidate_view(
+            input,
+            BallotCandidateAuthenticationContext {
+                suite_identifier: self.suite_id,
+                ceremony_context_hash: self.ceremony_context_hash,
+                action_context_hash: self.action_context_hash,
+                submission_cutoff_hash,
+                roster: &self.roster,
+                maximum_ballot_attempts_per_participant: self
+                    .limits
+                    .maximum_ballot_attempts_per_participant,
+                maximum_candidate_packages_per_action: self
+                    .limits
+                    .maximum_candidate_packages_per_action,
+            },
+        ) {
+            Ok(view) => VerificationResult::valid(view),
+            Err(error) => VerificationResult::refused(error.refusal_reason),
+        }
+    }
+
+    /// Binds the action-derived cutoff once. Runtime construction always calls
+    /// this immediately after deriving the canonical action context.
+    pub(crate) fn bind_submission_cutoff_hash(
+        &mut self,
+        submission_cutoff_hash: Hash512,
+    ) -> Result<(), CanonicalBoardError> {
+        if self
+            .submission_cutoff_hash
+            .replace(submission_cutoff_hash)
+            .is_some()
+        {
+            return Err(CanonicalBoardError::new(
+                RefusalReason::ConsumedState,
+                "canonical-board submission cutoff is already bound",
+            ));
+        }
+        Ok(())
     }
 
     /// Returns the exact frozen-roster VSS response catalog only when every
@@ -759,6 +843,34 @@ impl CanonicalBoardVerifier {
                     return Err(CanonicalBoardError::new(
                         RefusalReason::OutsideSupportedProfile,
                         "ballot producer sequence exceeds the suite candidate bound",
+                    )
+                    .into());
+                }
+                Ok(participant_slot(producer))
+            }
+            TypedPayload::BallotCandidateList {
+                submission_cutoff_hash,
+                entry_count,
+            } => {
+                let producer = self.require_signed_envelope(envelope, 0)?;
+                require_sequence(envelope, 0)?;
+                if self.submission_cutoff_hash != Some(*submission_cutoff_hash) {
+                    return Err(CanonicalBoardError::new(
+                        RefusalReason::WrongHashOrRoot,
+                        "candidate list does not bind the action submission cutoff",
+                    )
+                    .into());
+                }
+                if u64::try_from(*entry_count).map_err(|_| {
+                    CanonicalBoardError::new(
+                        RefusalReason::OutsideSupportedProfile,
+                        "candidate-list entry count does not fit the suite limit",
+                    )
+                })? > self.limits.maximum_ballot_attempts_per_participant
+                {
+                    return Err(CanonicalBoardError::new(
+                        RefusalReason::OutsideSupportedProfile,
+                        "candidate-list entry count exceeds the per-participant suite limit",
                     )
                     .into());
                 }
@@ -1186,17 +1298,7 @@ fn decode_typed_payload(
             })
         }
         FoundationObjectType::PrivateShareAcceptance => {
-            require_payload_header(
-                &tuple,
-                PRIVATE_SHARE_ACCEPTANCE_PAYLOAD_SCHEMA_IDENTIFIER,
-                3,
-            )?;
-            read_hash(&tuple.items[0])?;
-            require_nonempty_hash_list(
-                &tuple.items[1],
-                "private-share acceptance has no aggregate material roots",
-            )?;
-            read_stream_descriptor(&tuple.items[2], limits)?;
+            PrivateShareAcceptancePayload::from_tuple(&tuple, limits)?;
             Ok(TypedPayload::PrivateShareAcceptance)
         }
         FoundationObjectType::Complaint => {
@@ -1247,10 +1349,15 @@ fn decode_typed_payload(
             })
         }
         FoundationObjectType::BallotPackage => {
-            require_payload_header(&tuple, BALLOT_PACKAGE_PAYLOAD_SCHEMA_IDENTIFIER, 2)?;
-            read_stream_descriptor(&tuple.items[0], limits)?;
-            read_stream_descriptor(&tuple.items[1], limits)?;
+            BallotPackagePayload::from_tuple(&tuple, limits)?;
             Ok(TypedPayload::BallotPackage)
+        }
+        FoundationObjectType::BallotCandidateList => {
+            let payload = BallotCandidateListPayload::decode(payload_bytes, limits)?;
+            Ok(TypedPayload::BallotCandidateList {
+                submission_cutoff_hash: payload.submission_cutoff_hash(),
+                entry_count: payload.entries().len(),
+            })
         }
         FoundationObjectType::Aggregate => {
             let aggregate_payload = AggregatePayload::from_tuple(&tuple, limits)?;

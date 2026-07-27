@@ -130,7 +130,7 @@ describe('common-proof generation runtime', () => {
         }
     });
 
-    it('drives storage, commit, exact readback, and opaque generation authority in order', async () => {
+    it('drives authenticated transcript authority, storage, commit, and exact readback in order', async () => {
         class SliceObservingBytes extends Uint8Array {
             public sliceCount = 0;
 
@@ -147,6 +147,7 @@ describe('common-proof generation runtime', () => {
         const request = fourByteReadRequest(binding, 1n);
         const outputBytes = Uint8Array.from([7, 3, 9, 1, 4]);
         let phase = 0;
+        let authenticatedTranscriptPrefixSupplyCount = 0;
         let releasedCapabilityCount = 0;
         let suppliedResponseByteLength = 0;
         const runtime = createMockKernelRuntime((memory) => ({
@@ -192,11 +193,15 @@ describe('common-proof generation runtime', () => {
                 adapterHandle,
                 checkpointStatePointer,
                 checkpointStateByteLength,
+                generationCursorManifestPointer,
+                generationCursorManifestByteLength,
                 statusPointer,
             ) => {
                 expect(adapterHandle).toBe(31);
                 expect(checkpointStatePointer).toBe(0);
                 expect(checkpointStateByteLength).toBe(0);
+                expect(generationCursorManifestPointer).toBe(0);
+                expect(generationCursorManifestByteLength).toBe(0);
                 writeUnsigned32(memory, statusPointer, 0);
                 return 41;
             },
@@ -233,12 +238,23 @@ describe('common-proof generation runtime', () => {
                         pollKindPointer,
                         primaryValuePointer,
                         secondaryValuePointer,
+                        9,
+                        0,
+                        noSecondPollValue,
+                    );
+                }
+                if (phase === 2) {
+                    return writeGenerationPoll(
+                        memory,
+                        pollKindPointer,
+                        primaryValuePointer,
+                        secondaryValuePointer,
                         2,
                         request.byteLength,
                         noSecondPollValue,
                     );
                 }
-                if (phase === 2) {
+                if (phase === 3) {
                     return writeGenerationPoll(
                         memory,
                         pollKindPointer,
@@ -249,7 +265,7 @@ describe('common-proof generation runtime', () => {
                         outputBytes.byteLength,
                     );
                 }
-                if (phase === 3) {
+                if (phase === 4) {
                     return writeGenerationPoll(
                         memory,
                         pollKindPointer,
@@ -276,7 +292,7 @@ describe('common-proof generation runtime', () => {
                 outputLength,
             ) => {
                 expect(operationHandle).toBe(51);
-                expect(phase).toBe(1);
+                expect(phase).toBe(2);
                 expect(outputLength).toBe(request.byteLength);
                 memoryBytes(memory, outputPointer, outputLength).set(request);
                 return 0;
@@ -287,7 +303,7 @@ describe('common-proof generation runtime', () => {
                 responseLength,
             ) => {
                 expect(operationHandle).toBe(51);
-                expect(phase).toBe(1);
+                expect(phase).toBe(2);
                 suppliedResponseByteLength = responseLength;
                 const response = memoryBytes(
                     memory,
@@ -300,7 +316,7 @@ describe('common-proof generation runtime', () => {
                         response.byteOffset,
                     ).getUint16(2, true),
                 ).toBe(2);
-                phase = 2;
+                phase = 3;
                 return 0;
             },
             sealed_lattice_common_proof_generation_copy_output_chunk: (
@@ -311,7 +327,7 @@ describe('common-proof generation runtime', () => {
             ) => {
                 expect(operationHandle).toBe(51);
                 expect(expectedChunkIndex).toBe(0);
-                expect(phase).toBe(2);
+                expect(phase).toBe(3);
                 expect(outputLength).toBe(outputBytes.byteLength);
                 memoryBytes(memory, outputPointer, outputLength).set(
                     outputBytes,
@@ -324,8 +340,8 @@ describe('common-proof generation runtime', () => {
             ) => {
                 expect(operationHandle).toBe(51);
                 expect(expectedChunkIndex).toBe(0);
-                expect(phase).toBe(2);
-                phase = 3;
+                expect(phase).toBe(3);
+                phase = 4;
                 return 0;
             },
             sealed_lattice_common_proof_generation_confirm_output_readback: (
@@ -336,11 +352,11 @@ describe('common-proof generation runtime', () => {
             ) => {
                 expect(operationHandle).toBe(51);
                 expect(chunkIndex).toBe(0);
-                expect(phase).toBe(3);
+                expect(phase).toBe(4);
                 expect([
                     ...memoryBytes(memory, readbackPointer, readbackLength),
                 ]).toEqual([...outputBytes]);
-                phase = 4;
+                phase = 5;
                 return 0;
             },
             sealed_lattice_common_proof_generation_finish: (
@@ -348,16 +364,16 @@ describe('common-proof generation runtime', () => {
                 statusPointer,
             ) => {
                 expect(operationHandle).toBe(51);
-                expect(phase).toBe(4);
+                expect(phase).toBe(5);
                 writeUnsigned32(memory, statusPointer, 0);
-                phase = 5;
+                phase = 6;
                 return 61;
             },
             sealed_lattice_common_proof_release_generated_proof: (
                 capabilityHandle,
             ) => {
                 expect(capabilityHandle).toBe(61);
-                expect(phase).toBe(5);
+                expect(phase).toBe(6);
                 releasedCapabilityCount += 1;
                 return 0;
             },
@@ -431,6 +447,14 @@ describe('common-proof generation runtime', () => {
                         outputStore,
                     };
                 },
+                {
+                    supply: (operationHandle) => {
+                        expect(operationHandle).toBe(51);
+                        expect(phase).toBe(1);
+                        authenticatedTranscriptPrefixSupplyCount += 1;
+                        phase = 2;
+                    },
+                },
             );
 
         expect(execution.externalMemoryAccounting.browserStorage).toEqual(
@@ -449,6 +473,7 @@ describe('common-proof generation runtime', () => {
         ]);
 
         expect(yieldCount).toBe(1);
+        expect(authenticatedTranscriptPrefixSupplyCount).toBe(1);
         expect([...(committedOutput ?? [])]).toEqual([...outputBytes]);
         expect([...(committedArgument ?? [])]).toEqual(
             Array(outputBytes.byteLength).fill(0),
@@ -462,6 +487,62 @@ describe('common-proof generation runtime', () => {
         expect(() => execution.generatedCapability.release()).toThrowError(
             expect.objectContaining({ code: 'KernelFailure' }),
         );
+    });
+
+    it('retires generation when authenticated transcript-prefix authority is unavailable', async () => {
+        let retiredOperationCount = 0;
+        const runtime = createMockKernelRuntime((memory) => ({
+            sealed_lattice_common_proof_begin_generation: (
+                preparedGenerationHandle,
+                statusPointer,
+            ) => {
+                expect(preparedGenerationHandle).toBe(42);
+                writeUnsigned32(memory, statusPointer, 0);
+                return 52;
+            },
+            sealed_lattice_common_proof_generation_poll: (
+                operationHandle,
+                pollKindPointer,
+                primaryValuePointer,
+                secondaryValuePointer,
+            ) => {
+                expect(operationHandle).toBe(52);
+                return writeGenerationPoll(
+                    memory,
+                    pollKindPointer,
+                    primaryValuePointer,
+                    secondaryValuePointer,
+                    9,
+                    0,
+                    noSecondPollValue,
+                );
+            },
+            sealed_lattice_common_proof_generation_retire_failed: (
+                operationHandle,
+            ) => {
+                expect(operationHandle).toBe(52);
+                retiredOperationCount += 1;
+                return 0;
+            },
+        }));
+
+        await expect(
+            runPreparedCommonProofGenerationWorker(
+                runtime,
+                42,
+                { executeTransaction: () => Promise.resolve([]) },
+                {
+                    commitChunk: () => Promise.resolve(),
+                    readChunk: () => Promise.resolve(new Uint8Array()),
+                },
+            ),
+        ).rejects.toMatchObject({
+            code: 'KernelFailure',
+            message:
+                'The common-proof kernel requested unavailable or repeated authenticated transcript-prefix authority.',
+            permanentRetirementRequired: true,
+        });
+        expect(retiredOperationCount).toBe(1);
     });
 
     it('services one exact Rust-authenticated source range and clears every transferred view', async () => {
@@ -1157,14 +1238,14 @@ describe('common-proof generation runtime', () => {
                         committedStateBytes =
                             checkpoint.canonicalStateBytes.slice();
                         committedCursorBytes =
-                            checkpoint.privateRandomCursorManifestBytes.slice();
+                            checkpoint.generationCursorManifestBytes.slice();
                         committedStreamAttemptIdentifier =
                             checkpoint.privateRandomnessStreamAttemptIdentifier.slice();
                         committedStableAttemptBindingHash =
                             checkpoint.stableAttemptBindingHash.slice();
                         return Promise.resolve();
                     },
-                    restoreAuthenticatedCheckpointState: () =>
+                    restoreAuthenticatedCheckpoint: () =>
                         Promise.reject(
                             new Error(
                                 'Fresh generation does not restore state.',
@@ -1197,9 +1278,9 @@ describe('common-proof generation runtime', () => {
         expect([...publishedCheckpoint.canonicalStateBytes]).toEqual(
             Array(fixture.canonicalStateBytes.byteLength).fill(0),
         );
-        expect([
-            ...publishedCheckpoint.privateRandomCursorManifestBytes,
-        ]).toEqual(Array(fixture.cursorManifestBytes.byteLength).fill(0));
+        expect([...publishedCheckpoint.generationCursorManifestBytes]).toEqual(
+            Array(fixture.cursorManifestBytes.byteLength).fill(0),
+        );
         expect([...publishedCheckpoint.stableAttemptBindingHash]).toEqual(
             Array(hashByteLength).fill(0),
         );
@@ -1235,7 +1316,7 @@ describe('common-proof generation runtime', () => {
                             publicationAttempted = true;
                             return Promise.resolve();
                         },
-                        restoreAuthenticatedCheckpointState: () =>
+                        restoreAuthenticatedCheckpoint: () =>
                             Promise.reject(
                                 new Error('A fresh operation cannot restore.'),
                             ),
@@ -1456,7 +1537,7 @@ describe('common-proof generation runtime', () => {
                             attemptedCheckpoint = checkpoint;
                             return Promise.reject(publicationError);
                         },
-                        restoreAuthenticatedCheckpointState: () =>
+                        restoreAuthenticatedCheckpoint: () =>
                             Promise.reject(
                                 new Error(
                                     'Fresh generation does not restore state.',
@@ -1507,7 +1588,7 @@ describe('common-proof generation runtime', () => {
                             publicationAttempted = true;
                             return Promise.resolve();
                         },
-                        restoreAuthenticatedCheckpointState: () =>
+                        restoreAuthenticatedCheckpoint: () =>
                             Promise.reject(
                                 new Error('A fresh operation cannot restore.'),
                             ),
@@ -1544,6 +1625,8 @@ describe('common-proof generation runtime', () => {
         const authenticatedCheckpointState = Uint8Array.from([
             11, 7, 5, 3, 2, 13, 17, 19,
         ]);
+        const authenticatedGenerationCursorManifest =
+            createResetSafeCommonProofCursorManifest();
         const expectedOutputBytes = Uint8Array.from([8, 6, 7, 5, 3, 0, 9]);
         let phase = 0;
         let releasedCapabilityCount = 0;
@@ -1590,6 +1673,8 @@ describe('common-proof generation runtime', () => {
                 adapterHandle,
                 checkpointPointer,
                 checkpointByteLength,
+                generationCursorManifestPointer,
+                generationCursorManifestByteLength,
                 statusPointer,
             ) => {
                 expect(adapterHandle).toBe(72);
@@ -1600,6 +1685,13 @@ describe('common-proof generation runtime', () => {
                         checkpointByteLength,
                     ),
                 ]).toEqual([...authenticatedCheckpointState]);
+                expect([
+                    ...memoryBytes(
+                        memory,
+                        generationCursorManifestPointer,
+                        generationCursorManifestByteLength,
+                    ),
+                ]).toEqual([...authenticatedGenerationCursorManifest]);
                 writeUnsigned32(memory, statusPointer, 0);
                 return 82;
             },
@@ -1614,6 +1706,8 @@ describe('common-proof generation runtime', () => {
                 preparedGenerationHandle,
                 checkpointPointer,
                 checkpointByteLength,
+                generationCursorManifestPointer,
+                generationCursorManifestByteLength,
                 statusPointer,
             ) => {
                 expect(preparedGenerationHandle).toBe(82);
@@ -1624,6 +1718,13 @@ describe('common-proof generation runtime', () => {
                         checkpointByteLength,
                     ),
                 ]).toEqual([...authenticatedCheckpointState]);
+                expect([
+                    ...memoryBytes(
+                        memory,
+                        generationCursorManifestPointer,
+                        generationCursorManifestByteLength,
+                    ),
+                ]).toEqual([...authenticatedGenerationCursorManifest]);
                 writeUnsigned32(memory, statusPointer, 0);
                 return 92;
             },
@@ -1821,9 +1922,14 @@ describe('common-proof generation runtime', () => {
                                     'The fixture emits no later checkpoint.',
                                 ),
                             ),
-                        restoreAuthenticatedCheckpointState: () =>
+                        restoreAuthenticatedCheckpoint: () =>
                             Promise.resolve(
-                                authenticatedCheckpointState.slice(),
+                                Object.freeze({
+                                    canonicalStateBytes:
+                                        authenticatedCheckpointState.slice(),
+                                    generationCursorManifestBytes:
+                                        authenticatedGenerationCursorManifest.slice(),
+                                }),
                             ),
                     },
                     prefixReplayExternalMemory: {
@@ -1936,7 +2042,7 @@ describe('common-proof generation runtime', () => {
                         checkpointCustody: {
                             publishAuthenticatedCheckpoint: () =>
                                 Promise.resolve(),
-                            restoreAuthenticatedCheckpointState: () =>
+                            restoreAuthenticatedCheckpoint: () =>
                                 Promise.reject(restorationError),
                         },
                         prefixReplayExternalMemory: {
@@ -2199,11 +2305,15 @@ describe('common-proof generation runtime', () => {
                 adapterHandle,
                 checkpointPointer,
                 checkpointByteLength,
+                generationCursorManifestPointer,
+                generationCursorManifestByteLength,
                 statusPointer,
             ) => {
                 expect(adapterHandle).toBe(76);
                 expect(checkpointPointer).toBe(0);
                 expect(checkpointByteLength).toBe(0);
+                expect(generationCursorManifestPointer).toBe(0);
+                expect(generationCursorManifestByteLength).toBe(0);
                 writeUnsigned32(memory, statusPointer, 0);
                 return 86;
             },

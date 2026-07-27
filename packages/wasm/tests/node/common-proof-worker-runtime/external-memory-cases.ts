@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
     clearCommonProofExternalMemoryRequest,
     encodeCommonProofExternalMemoryResponseInto,
-    maximumWorkerPayloadByteLength,
+    maximumEncodedResponseByteLength,
 } from '../../../src/common-proof-worker-runtime/external-memory.js';
 import {
     CommonProofWorkerRuntimeError,
@@ -171,10 +171,8 @@ describe('common-proof external-memory runtime', () => {
     });
 
     it('reuses one bounded response buffer without retaining request or read bytes', () => {
-        const maximumSingleReadResponseByteLength =
-            Number(maximumWorkerPayloadByteLength) + 80 + 88;
         const reusableResponseBuffer = new Uint8Array(
-            maximumSingleReadResponseByteLength,
+            maximumEncodedResponseByteLength,
         );
         const responseBuffer = reusableResponseBuffer.buffer;
         const readRequest = decodeCommonProofExternalMemoryRequest(

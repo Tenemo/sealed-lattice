@@ -1,5 +1,8 @@
 use super::super::RelationTreeDescriptor;
-use super::super::row_code_whir::VerifiedSameSecretLowDegreePrerequisite;
+use super::super::row_code_whir::{
+    VerifiedSameSecretLowDegreePrerequisite,
+    exact_same_secret_verification_resident_memory_accounting,
+};
 use super::{
     BTreeMap, BTreeSet, CommonProofApplicationInputCapabilityHandle,
     CommonProofApplicationInputEntry, CommonProofEvaluatorAuxiliaryRootCapabilityHandle,
@@ -41,6 +44,18 @@ fn checked_verification_operation_memory_multiply(
 
 fn common_proof_verification_operation_resident_byte_length(
     verifier_accounting: CommonProofVerificationResidentMemoryAccounting,
+    evaluator_accounting: super::VerifiedRelationColumnEvaluatorMemoryAccounting,
+    proof_chunk_count: usize,
+) -> Result<u64, CommonProofRuntimeError> {
+    common_proof_verification_operation_resident_byte_length_for_verifier(
+        verifier_accounting.maximum_resident_byte_length(),
+        evaluator_accounting,
+        proof_chunk_count,
+    )
+}
+
+fn common_proof_verification_operation_resident_byte_length_for_verifier(
+    verifier_resident_byte_length: u64,
     evaluator_accounting: super::VerifiedRelationColumnEvaluatorMemoryAccounting,
     proof_chunk_count: usize,
 ) -> Result<u64, CommonProofRuntimeError> {
@@ -92,7 +107,7 @@ fn common_proof_verification_operation_resident_byte_length(
     [
         u64::try_from(core::mem::size_of::<super::CommonProofVerificationWorker>())
             .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?,
-        verifier_accounting.maximum_resident_byte_length(),
+        verifier_resident_byte_length,
         evaluator_accounting.maximum_resident_byte_length(),
         ingest_phase_payload_byte_length.max(readback_phase_payload_byte_length),
     ]
@@ -273,6 +288,7 @@ impl CommonProofUpstreamInputRegistry {
                 > FOUNDATION_PROFILE.maximum_copied_buffer_byte_length
             || proof_byte_length == 0
             || proof_byte_length > MAXIMUM_COMMON_PROOF_BYTE_LENGTH
+            || proof_byte_length > statement_source.limits.maximum_proof_byte_length()
             || application_slot.suite_identifier().into_bytes()
                 != suite.capability.suite_identifier()
             || statement_source.protocol_version != suite.capability.protocol_version()
@@ -424,6 +440,51 @@ impl CommonProofUpstreamInputRegistry {
         }
     }
 
+    fn preflight_same_secret_row_code_whir_verification(
+        &self,
+        application_handle: &CommonProofApplicationInputCapabilityHandle,
+        evaluator_handle: &CommonProofVerifiedColumnEvaluatorCapabilityHandle,
+    ) -> Result<(), CommonProofRuntimeError> {
+        let application = self
+            .applications
+            .get(&application_handle.0)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
+        let evaluator = self
+            .verified_column_evaluators
+            .get(&evaluator_handle.0)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
+        if evaluator.application_handle != application_handle.0 {
+            return Err(CommonProofRuntimeError::WrongVerificationBinding);
+        }
+
+        let verifier_accounting = exact_same_secret_verification_resident_memory_accounting(
+            application.statement_source.relation_plan(),
+            application
+                .statement_source
+                .proof_stream_descriptor()
+                .total_byte_length,
+            application
+                .statement_source
+                .canonical_application_statement_bytes(),
+        )?;
+        let evaluator_accounting = evaluator
+            .evaluator
+            .memory_accounting()
+            .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?;
+        let proof_chunk_count = application
+            .statement_source
+            .proof_stream_descriptor()
+            .ordered_chunk_digests
+            .len();
+        require_common_proof_verification_operation_resident_bound(
+            common_proof_verification_operation_resident_byte_length_for_verifier(
+                verifier_accounting.maximum_resident_byte_length(),
+                evaluator_accounting,
+                proof_chunk_count,
+            )?,
+        )
+    }
+
     /// Atomically consumes one exact-family source into a verifier whose
     /// checked relation has no verifier-sequence columns. Statement-bound and
     /// proof-created tree roots remain owned by the relation plan and proof;
@@ -520,6 +581,16 @@ impl CommonProofUpstreamInputRegistry {
         let maximum_resident_window_byte_length = MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH
             .checked_mul(MAXIMUM_RESIDENT_COMMON_PROOF_INPUT_CHUNKS)
             .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
+        let declared_proof_byte_length = usize::try_from(
+            statement_source
+                .proof_application_binding()
+                .proof_stream_descriptor()
+                .total_byte_length,
+        )
+        .map_err(|_| CommonProofRuntimeError::InvalidLimits)?;
+        if declared_proof_byte_length > statement_source.limits.maximum_proof_byte_length() {
+            return Err(CommonProofRuntimeError::WrongVerificationBinding);
+        }
         let validation_state =
             CommonProofVerificationStateMachine::new(PollableCommonProofVerificationInput {
                 protocol_version: statement_source.protocol_version,
@@ -530,10 +601,13 @@ impl CommonProofUpstreamInputRegistry {
                 relation_context: &statement_source.relation_plan.relation_context,
                 schedule_position: statement_source.relation_plan.schedule_position,
                 top_count: statement_source.relation_plan.top_count,
+                row_code_whir_construction_plan_identity_hash: statement_source
+                    .relation_plan
+                    .row_code_whir_construction_plan_identity_hash(),
                 statement_owned_trees: statement_trees,
                 evaluator_auxiliary_roots: auxiliary_roots,
-                declared_proof_byte_length: statement_source.limits.proof_byte_length(),
-                proof_byte_ceiling: MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
+                declared_proof_byte_length,
+                proof_byte_ceiling: statement_source.limits.maximum_proof_byte_length(),
                 maximum_resident_window_byte_length,
             })
             .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
@@ -668,6 +742,13 @@ impl CommonProofUpstreamInputRegistry {
                 return Err(error);
             }
         };
+        if let Err(error) = self.preflight_same_secret_row_code_whir_verification(
+            &application_handle,
+            &evaluator_handle,
+        ) {
+            self.cancel_application(&application_handle)?;
+            return Err(error);
+        }
         match self.consume_verification_inputs(&application_handle, &[], Some(&evaluator_handle)) {
             Ok(inputs) => inputs.prepare_exact_same_secret(prerequisite),
             Err(error) => {
@@ -815,6 +896,21 @@ impl CommonProofUpstreamInputRegistry {
             .collect::<Result<Vec<_>, _>>()?;
         let relation_plan = application.statement_source.relation_plan();
         let verification_binding = application.statement_source.verification_binding();
+        let declared_proof_byte_length = usize::try_from(
+            application
+                .statement_source
+                .proof_stream_descriptor()
+                .total_byte_length,
+        )
+        .map_err(|_| CommonProofRuntimeError::InvalidLimits)?;
+        if declared_proof_byte_length
+            > application
+                .statement_source
+                .limits()
+                .maximum_proof_byte_length()
+        {
+            return Err(CommonProofRuntimeError::WrongVerificationBinding);
+        }
         let verification_input = PollableCommonProofVerificationInput {
             protocol_version: application.statement_source.protocol_version(),
             suite_identifier: verification_binding.suite_identifier,
@@ -825,10 +921,15 @@ impl CommonProofUpstreamInputRegistry {
             relation_context: &relation_plan.relation_context,
             schedule_position: relation_plan.schedule_position,
             top_count: relation_plan.top_count,
+            row_code_whir_construction_plan_identity_hash: relation_plan
+                .row_code_whir_construction_plan_identity_hash(),
             statement_owned_trees,
             evaluator_auxiliary_roots: &evaluator_auxiliary_roots,
-            declared_proof_byte_length: application.statement_source.limits().proof_byte_length(),
-            proof_byte_ceiling: MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
+            declared_proof_byte_length,
+            proof_byte_ceiling: application
+                .statement_source
+                .limits()
+                .maximum_proof_byte_length(),
             maximum_resident_window_byte_length: MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH
                 .checked_mul(MAXIMUM_RESIDENT_COMMON_PROOF_INPUT_CHUNKS)
                 .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?,
@@ -919,6 +1020,10 @@ impl CommonProofUpstreamInputRegistry {
         limits: CommonProofRuntimeLimits,
     ) -> Result<CommonProofApplicationInputCapabilityHandle, CommonProofRuntimeError> {
         if verification_binding.relation_plan_hash != relation_plan.relation_plan_hash()
+            || verification_binding
+                .proof_application
+                .row_code_whir_construction_plan_identity_hash
+                != relation_plan.row_code_whir_construction_plan_identity_hash()
             || canonical_application_statement_bytes.is_empty()
             || proof_stream_descriptor.total_byte_length
                 != verification_binding.proof_application.proof_byte_length
@@ -957,6 +1062,41 @@ impl CommonProofUpstreamInputRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn empty_evaluator_memory_accounting()
+    -> super::super::VerifiedRelationColumnEvaluatorMemoryAccounting {
+        super::super::VerifiedRelationColumnEvaluatorMemoryAccounting::new(0, 0, 0)
+            .expect("zero-length evaluator accounting is valid")
+    }
+
+    #[test]
+    fn successor_verifier_resident_accounting_includes_two_transport_chunks() {
+        let resident_byte_length =
+            common_proof_verification_operation_resident_byte_length_for_verifier(
+                0,
+                empty_evaluator_memory_accounting(),
+                0,
+            )
+            .expect("account the bounded successor verifier operation");
+        let two_chunk_payload_byte_length = u64::try_from(
+            MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH * MAXIMUM_RESIDENT_COMMON_PROOF_INPUT_CHUNKS,
+        )
+        .expect("the two-chunk payload length fits u64");
+
+        assert!(resident_byte_length >= two_chunk_payload_byte_length);
+    }
+
+    #[test]
+    fn successor_verifier_resident_accounting_refuses_overflow() {
+        assert_eq!(
+            common_proof_verification_operation_resident_byte_length_for_verifier(
+                u64::MAX,
+                empty_evaluator_memory_accounting(),
+                0,
+            ),
+            Err(CommonProofRuntimeError::AllocationLimitExceeded)
+        );
+    }
 
     #[test]
     fn verifier_resident_bound_accepts_the_limit_and_rejects_one_byte_above_it() {

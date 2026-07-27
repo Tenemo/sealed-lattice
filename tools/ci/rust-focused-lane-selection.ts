@@ -1,12 +1,14 @@
 import type { ActiveLocalRunLog } from './local-run-log.js';
 import { heavyRustKernelTestNamePrefix } from './rust-kernel-test-arguments.js';
 import {
-    collectFocusedRustKernelTestInventory,
+    collectRustKernelTestInventory,
     type RustTestInventoryEntry,
 } from './rust-test-inventory.js';
 
 export const fullProfileEvidenceRustTests = [
     'bgv::evaluator::program::executor::semantic_tests::encrypted_evaluator_matches_direct_stable_top_k_across_covering_matrix',
+    'bgv::evaluator::program::executor::semantic_tests::production_evaluator_execution_releases_four_threshold_shares',
+    'bgv::setup::collective_setup_security_evidence::print_collective_setup_security_production_authority',
     'foundation::selected_suite::tests::candidate_suite_gate_derives_one_complete_canonical_record',
 ] as const;
 
@@ -65,6 +67,29 @@ const lanesForTest = (test: RustTestInventoryEntry): FocusedRustLane[] => {
     return lanes;
 };
 
+export const validateCompleteRustLaneOwnership = (
+    tests: readonly RustTestInventoryEntry[],
+): void => {
+    if (tests.length === 0) {
+        throw new Error('The complete Rust kernel test inventory is empty.');
+    }
+
+    for (const test of tests) {
+        const lanes = lanesForTest(test);
+        if (lanes.length === 1) {
+            continue;
+        }
+        if (lanes.length === 0) {
+            throw new Error(
+                `Ignored Rust test ${test.testName} belongs to no guarded Rust lane.`,
+            );
+        }
+        throw new Error(
+            `Rust test ${test.testName} belongs to multiple Rust lanes: ${lanes.map((lane) => focusedRustLaneScripts[lane]).join(', ')}.`,
+        );
+    }
+};
+
 export const validateFocusedRustLaneSelection = (input: {
     readonly lane: FocusedRustLane;
     readonly testFilter: string;
@@ -103,13 +128,25 @@ export const verifyFocusedRustLaneSelection = async (input: {
     readonly runLog?: ActiveLocalRunLog;
     readonly testFilter: string;
 }): Promise<void> => {
+    const completeTestInventory = await collectRustKernelTestInventory({
+        environment: input.environment,
+        runLog: input.runLog,
+    });
+    validateCompleteRustLaneOwnership(completeTestInventory);
     validateFocusedRustLaneSelection({
         lane: input.lane,
         testFilter: input.testFilter,
-        tests: await collectFocusedRustKernelTestInventory({
-            environment: input.environment,
-            runLog: input.runLog,
-            testFilter: input.testFilter,
-        }),
+        tests: completeTestInventory.filter((test) =>
+            test.testName.includes(input.testFilter),
+        ),
     });
+};
+
+export const verifyCompleteRustLaneOwnership = async (input: {
+    readonly environment?: NodeJS.ProcessEnv;
+    readonly runLog?: ActiveLocalRunLog;
+}): Promise<void> => {
+    validateCompleteRustLaneOwnership(
+        await collectRustKernelTestInventory(input),
+    );
 };

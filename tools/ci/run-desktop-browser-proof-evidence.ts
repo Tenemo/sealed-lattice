@@ -1,14 +1,42 @@
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { normalizeTranscriptCoreKernelBytesForHash } from '../../packages/wasm/src/transcript-core-bridge.js';
 import {
+    parseDesktopBrowserProofDeterministicParityBinding,
+    readDesktopBrowserProofTransportManifest,
+    requireDesktopBrowserProofGenerationSessionIdentifier,
+    serializeDesktopBrowserProofTransportManifestAuthenticationBindings,
+    type DesktopBrowserProofGenerationSessionIdentifier,
+} from '../../packages/wasm/tests/support/selected-proof-runtime-evidence-transport.js';
+import {
+    desktopBrowserProofCancellationCoverageRequirement,
+    desktopBrowserProofDeterministicParityCaseIdentifier,
+    desktopBrowserProofEvidenceCaseExecutionKinds as requiredCaseExecutionKinds,
+    desktopBrowserProofEvidenceCaseIdentifiers as requiredCaseIdentifiers,
+    desktopBrowserProofEvidenceCaseIdentifiersByOwnershipRole as requiredCaseIdentifiersByOwnershipRole,
+    desktopBrowserProofGenerationRepetitionRequirement,
+    desktopBrowserProofRefusalReuseRequirement,
+    desktopBrowserProofTransportCasePairs as transportedProofCasePairs,
+} from '../../tests/support/desktop-browser-proof-evidence-catalog.js';
+import {
     parseDesktopBrowserProofMeasurementRecord,
+    type DesktopBrowserProofCancellationBoundaryKind,
     type DesktopBrowserProofExecutionKind,
     type DesktopBrowserProofMeasurementRecord,
 } from '../../tests/support/desktop-browser-proof-measurement.js';
 
+import {
+    desktopBrowserProofEvidenceSessionDefinitions,
+    type DesktopBrowserProofEvidenceSessionDefinition,
+} from './browser-test-project-selection.js';
+import {
+    desktopBrowserProductionNetworkAccountingAuthorityEvent,
+    parseDesktopBrowserProductionNetworkAccountingAuthority,
+    projectDesktopBrowserNetworkEvidence,
+    type DesktopBrowserNetworkProjection,
+} from './desktop-browser-network-projection.js';
 import { withLocalHeavyLaneLease } from './heavy-lane-lease.js';
 import { runWithLocalRunLog, type ActiveLocalRunLog } from './local-run-log.js';
 import { resolvePackageManagerRunner } from './package-manager-runner.js';
@@ -18,12 +46,9 @@ import {
     runCommandsInSeries,
 } from './run-command.js';
 
-const laneLabel = 'Desktop Chromium proof evidence';
-const testProjectLabel = 'desktop-browser-proof-evidence';
+const laneLabel = 'Desktop-browser proof evidence';
 const browserEvidenceTestFile =
     'packages/wasm/tests/browser/selected-proof-runtime-evidence.manual.browser.test.ts';
-const processMemoryGuardDiagnosticFileName =
-    'process-memory-guard-desktop-browser-proof-evidence.jsonl';
 const processedWasmKernelPath = path.resolve(
     'packages',
     'wasm',
@@ -38,43 +63,116 @@ const publicSdkWasmKernelPath = path.resolve(
 );
 const expectedWasmSha256EnvironmentVariable =
     'VITE_SEALED_LATTICE_DESKTOP_PROOF_EXPECTED_WASM_SHA256_HEX';
+const evidenceOwnershipRoleEnvironmentVariable =
+    'VITE_SEALED_LATTICE_DESKTOP_PROOF_EVIDENCE_ROLE';
+const evidenceTransportDirectoryEnvironmentVariable =
+    'VITE_SEALED_LATTICE_DESKTOP_PROOF_EVIDENCE_TRANSPORT_DIRECTORY';
+const evidenceSessionIdentifierEnvironmentVariable =
+    'VITE_SEALED_LATTICE_DESKTOP_PROOF_EVIDENCE_SESSION_IDENTIFIER';
+const evidenceManifestAuthenticationEnvironmentVariable =
+    'VITE_SEALED_LATTICE_DESKTOP_PROOF_EVIDENCE_MANIFEST_AUTHENTICATION';
 
 const absoluteResourceBounds = Object.freeze({
     copiedBufferByteLength: 8_388_608,
     externalScratchByteLength: 1_073_741_824,
+    liveBufferByteLength: 2_097_152,
+    liveBufferCount: 2,
     proofByteLength: 268_435_456,
     transportStreamByteLength: 4_294_967_291,
     wasmLinearMemoryByteLength: 671_088_640,
+});
+
+const selectedProofEvidenceGate = Object.freeze({
+    proofByteLength: 5_242_880,
 });
 
 const softPlanningTargets = Object.freeze({
     browserProcessIncreaseByteLength: 671_088_640,
     copiedBufferByteLength: 1_572_864,
     externalScratchByteLength: 268_435_456,
-    proofByteLength: 5_242_880,
     wasmLinearMemoryByteLength: 402_653_184,
 });
 
-const requiredCaseExecutionKinds = Object.freeze({
-    'aggregate-threshold-share-generation': 'fresh-generation',
-    'aggregate-threshold-share-verification': 'verification',
-    'ballot-validity-generation': 'fresh-generation',
-    'ballot-validity-verification': 'verification',
-    'evaluator-key-aggregate-generation': 'fresh-generation',
-    'evaluator-key-aggregate-verification': 'verification',
-    'evaluator-replay-maximum-stream': 'replay',
-    'galois-key-share-batch-generation-fresh': 'fresh-generation',
-    'galois-key-share-batch-generation-resumed': 'resumed-generation',
-    'galois-key-share-batch-verification': 'verification',
-    'vss-share-linkage-generation-fresh': 'fresh-generation',
-    'vss-share-linkage-generation-resumed': 'resumed-generation',
-    'vss-share-linkage-verification': 'verification',
-} satisfies Readonly<Record<string, DesktopBrowserProofExecutionKind>>);
-const requiredCaseIdentifiers = Object.freeze(
-    Object.keys(requiredCaseExecutionKinds),
-);
-
 type JsonRecord = Readonly<Record<string, unknown>>;
+
+const requireProductionNetworkAccountingAuthority = (
+    testEvents: readonly JsonRecord[],
+) => {
+    const authorityEvents = testEvents.filter(
+        (event) =>
+            event.event ===
+            desktopBrowserProductionNetworkAccountingAuthorityEvent,
+    );
+    if (authorityEvents.length !== 1) {
+        throw new Error(
+            `Desktop-browser network evidence requires exactly one ${desktopBrowserProductionNetworkAccountingAuthorityEvent} record.`,
+        );
+    }
+    return parseDesktopBrowserProductionNetworkAccountingAuthority(
+        authorityEvents[0],
+    );
+};
+
+type DesktopBrowserProofCancellationBoundary = Readonly<{
+    boundaryIdentifier: string;
+    boundaryKind: DesktopBrowserProofCancellationBoundaryKind;
+    boundaryOrdinal: number;
+}>;
+
+export const deriveDesktopBrowserProofCancellationBoundaryCatalogSha512Hex = (
+    boundaries: readonly DesktopBrowserProofCancellationBoundary[],
+): string => {
+    const canonicalBoundaries = boundaries.map((boundary) => {
+        if (
+            !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(boundary.boundaryIdentifier) ||
+            !['safe-boundary', 'storage-yield'].includes(
+                boundary.boundaryKind,
+            ) ||
+            !Number.isSafeInteger(boundary.boundaryOrdinal) ||
+            boundary.boundaryOrdinal <= 0
+        ) {
+            throw new TypeError(
+                'The cancellation boundary catalog contains a malformed entry.',
+            );
+        }
+        return {
+            boundaryIdentifier: boundary.boundaryIdentifier,
+            boundaryKind: boundary.boundaryKind,
+            boundaryOrdinal: boundary.boundaryOrdinal,
+        };
+    });
+    if (
+        canonicalBoundaries.length === 0 ||
+        new Set(
+            canonicalBoundaries.map(
+                ({ boundaryIdentifier }) => boundaryIdentifier,
+            ),
+        ).size !== canonicalBoundaries.length
+    ) {
+        throw new TypeError(
+            'The cancellation boundary catalog must be nonempty and use unique identifiers.',
+        );
+    }
+    return createHash('sha512')
+        .update(JSON.stringify(canonicalBoundaries))
+        .digest('hex');
+};
+
+export type DesktopBrowserProofEvidenceSessionEvents = Readonly<{
+    sessionIdentifier: string;
+    testEvents: readonly JsonRecord[];
+}>;
+
+type ValidatedDesktopBrowserProofEvidenceSession = Readonly<{
+    measurements: readonly DesktopBrowserProofMeasurementRecord[];
+    session: DesktopBrowserProofEvidenceSessionDefinition;
+}>;
+
+export type DesktopBrowserProofEvidenceNetworkSessionProjection = Readonly<{
+    browserEngine: DesktopBrowserProofEvidenceSessionDefinition['browserEngine'];
+    projection: DesktopBrowserNetworkProjection;
+    sessionIdentifier: string;
+}>;
 
 const requirePositiveMeasuredBytes = (
     value: number,
@@ -83,7 +181,7 @@ const requirePositiveMeasuredBytes = (
 ): void => {
     if (value === 0) {
         throw new Error(
-            `Desktop Chromium proof evidence reported zero ${fieldName} for ${caseIdentifier}.`,
+            `Desktop-browser proof evidence reported zero ${fieldName} for ${caseIdentifier}.`,
         );
     }
 };
@@ -96,7 +194,18 @@ const requireAtMostAbsoluteBound = (
 ): void => {
     if (value > bound) {
         throw new Error(
-            `Desktop Chromium proof evidence exceeded the absolute ${fieldName} bound for ${caseIdentifier}: ${String(value)} > ${String(bound)} bytes.`,
+            `Desktop-browser proof evidence exceeded the absolute ${fieldName} bound for ${caseIdentifier}: ${String(value)} > ${String(bound)} bytes.`,
+        );
+    }
+};
+
+const requireSelectedProofWithinEvidenceGate = (
+    proofByteLength: number,
+    caseIdentifier: string,
+): void => {
+    if (proofByteLength > selectedProofEvidenceGate.proofByteLength) {
+        throw new Error(
+            `Desktop-browser proof evidence exceeded the selected proof evidence-selection bound for ${caseIdentifier}: ${String(proofByteLength)} > ${String(selectedProofEvidenceGate.proofByteLength)} bytes.`,
         );
     }
 };
@@ -127,10 +236,26 @@ const validateMeasurementResourceBounds = (
         'WebAssembly linear-memory peak',
         measurement.caseIdentifier,
     );
+    requireAtMostAbsoluteBound(
+        measurement.resourceAccounting.simultaneousLiveBufferPeakByteLength,
+        absoluteResourceBounds.liveBufferByteLength,
+        'simultaneous live-buffer peak',
+        measurement.caseIdentifier,
+    );
+    if (
+        measurement.resourceAccounting.simultaneousLiveBufferPeakCount >
+        absoluteResourceBounds.liveBufferCount
+    ) {
+        throw new Error(
+            `Desktop-browser proof evidence exceeded the absolute simultaneous live-buffer count for ${measurement.caseIdentifier}: ${String(measurement.resourceAccounting.simultaneousLiveBufferPeakCount)} > ${String(absoluteResourceBounds.liveBufferCount)}.`,
+        );
+    }
 
     if (
         measurement.executionKind === 'fresh-generation' ||
-        measurement.executionKind === 'resumed-generation'
+        measurement.executionKind === 'resumed-generation' ||
+        measurement.executionKind === 'worker-reuse-generation' ||
+        measurement.executionKind === 'deterministic-parity'
     ) {
         requirePositiveMeasuredBytes(
             measurement.canonicalOutputByteLength,
@@ -143,18 +268,37 @@ const validateMeasurementResourceBounds = (
             'proof-stream',
             measurement.caseIdentifier,
         );
+        requireSelectedProofWithinEvidenceGate(
+            measurement.canonicalOutputByteLength,
+            measurement.caseIdentifier,
+        );
+        return;
+    }
+    if (
+        measurement.executionKind === 'cancelled-generation' ||
+        measurement.executionKind === 'refused-generation'
+    ) {
+        if (measurement.canonicalOutputByteLength !== 0) {
+            throw new Error(
+                `Desktop-browser ${measurement.executionKind} evidence emitted a canonical proof for ${measurement.caseIdentifier}.`,
+            );
+        }
         return;
     }
     if (measurement.executionKind === 'verification') {
         if (measurement.canonicalOutputByteLength !== 0) {
             throw new Error(
-                `Desktop Chromium proof verification reported a canonical output artifact for ${measurement.caseIdentifier}.`,
+                `Desktop-browser proof verification reported a canonical output artifact for ${measurement.caseIdentifier}.`,
             );
         }
         requireAtMostAbsoluteBound(
             measurement.canonicalInputByteLength,
             absoluteResourceBounds.proofByteLength,
             'proof-stream',
+            measurement.caseIdentifier,
+        );
+        requireSelectedProofWithinEvidenceGate(
+            measurement.canonicalInputByteLength,
             measurement.caseIdentifier,
         );
         return;
@@ -259,19 +403,23 @@ const planningVariance = (value: number, target: number) =>
         valueByteLength: value,
     });
 
-export const validateDesktopBrowserProofMeasurementEvents = (
+const validateDesktopBrowserProofMeasurementEventsForRequiredCases = (
     testEvents: readonly JsonRecord[],
+    requiredCaseIdentifiersForSession: readonly string[],
     expectedBindings?: Readonly<{
         wasmSha256Hex: string;
     }>,
 ): readonly DesktopBrowserProofMeasurementRecord[] => {
+    const requiredCaseIdentifierSet = new Set(
+        requiredCaseIdentifiersForSession,
+    );
     const measurementEvents = testEvents.filter(
         (event) => event.event === 'desktop-browser-proof-measurement',
     );
     for (const measurementEvent of measurementEvents) {
         if (measurementEvent.browser !== true) {
             throw new Error(
-                'Desktop Chromium proof evidence included a non-browser measurement.',
+                'Desktop-browser proof evidence included a non-browser measurement.',
             );
         }
     }
@@ -288,9 +436,12 @@ export const validateDesktopBrowserProofMeasurementEvents = (
                 Partial<Record<string, DesktopBrowserProofExecutionKind>>
             >
         )[measurement.caseIdentifier];
-        if (expectedExecutionKind === undefined) {
+        if (
+            expectedExecutionKind === undefined ||
+            !requiredCaseIdentifierSet.has(measurement.caseIdentifier)
+        ) {
             throw new Error(
-                `Desktop Chromium proof evidence reported an unexpected case: ${measurement.caseIdentifier}.`,
+                `Desktop-browser proof evidence reported an unexpected case: ${measurement.caseIdentifier}.`,
             );
         }
         let caseMeasurements = measurementsByCaseIdentifier.get(
@@ -305,23 +456,23 @@ export const validateDesktopBrowserProofMeasurementEvents = (
         }
         if (caseMeasurements.has(measurement.runOrdinal)) {
             throw new Error(
-                `Desktop Chromium proof evidence reported the same run ordinal more than once for ${measurement.caseIdentifier}: ${String(measurement.runOrdinal)}.`,
+                `Desktop-browser proof evidence reported the same run ordinal more than once for ${measurement.caseIdentifier}: ${String(measurement.runOrdinal)}.`,
             );
         }
         if (measurement.executionKind !== expectedExecutionKind) {
             throw new Error(
-                `Desktop Chromium proof evidence reported ${measurement.caseIdentifier} as ${measurement.executionKind}, expected ${expectedExecutionKind}.`,
+                `Desktop-browser proof evidence reported ${measurement.caseIdentifier} as ${measurement.executionKind}, expected ${expectedExecutionKind}.`,
             );
         }
         validateMeasurementResourceBounds(measurement);
         caseMeasurements.set(measurement.runOrdinal, measurement);
     }
-    const missingCaseIdentifiers = requiredCaseIdentifiers.filter(
+    const missingCaseIdentifiers = requiredCaseIdentifiersForSession.filter(
         (caseIdentifier) => !measurementsByCaseIdentifier.has(caseIdentifier),
     );
     if (missingCaseIdentifiers.length > 0) {
         throw new Error(
-            `Desktop Chromium proof evidence omitted required cases: ${missingCaseIdentifiers.join(', ')}.`,
+            `Desktop-browser proof evidence omitted required cases: ${missingCaseIdentifiers.join(', ')}.`,
         );
     }
     for (const [
@@ -337,7 +488,7 @@ export const validateDesktopBrowserProofMeasurementEvents = (
             )
         ) {
             throw new Error(
-                `Desktop Chromium proof-evidence run ordinals must be contiguous from one for ${caseIdentifier}.`,
+                `Desktop-browser proof-evidence run ordinals must be contiguous from one for ${caseIdentifier}.`,
             );
         }
     }
@@ -349,7 +500,7 @@ export const validateDesktopBrowserProofMeasurementEvents = (
     );
     if (observedSuiteIdentifiers.size !== 1 || observedWasmHashes.size !== 1) {
         throw new Error(
-            'Desktop Chromium proof evidence did not use one exact suite and one exact processed WebAssembly module.',
+            'Desktop-browser proof evidence did not use one exact suite and one exact processed WebAssembly module.',
         );
     }
     if (
@@ -357,10 +508,556 @@ export const validateDesktopBrowserProofMeasurementEvents = (
         !observedWasmHashes.has(expectedBindings.wasmSha256Hex)
     ) {
         throw new Error(
-            'Desktop Chromium proof evidence did not use the normalized processed WebAssembly module produced by this build.',
+            'Desktop-browser proof evidence did not use the normalized processed WebAssembly module produced by this build.',
         );
     }
     return measurements;
+};
+
+export const validateDesktopBrowserProofMeasurementEvents = (
+    testEvents: readonly JsonRecord[],
+    expectedBindings?: Readonly<{
+        wasmSha256Hex: string;
+    }>,
+): readonly DesktopBrowserProofMeasurementRecord[] => {
+    const measurements =
+        validateDesktopBrowserProofMeasurementEventsForRequiredCases(
+            testEvents,
+            requiredCaseIdentifiers,
+            expectedBindings,
+        );
+    validateGenerationSessionContract(
+        measurements.filter(
+            ({ executionKind }) => executionKind !== 'verification',
+        ),
+    );
+    validateFreshVerificationWorkers(
+        measurements.filter(
+            ({ executionKind }) => executionKind === 'verification',
+        ),
+    );
+    return measurements;
+};
+
+const proofStreamFingerprint = (
+    byteLength: number,
+    sha512Hex: string,
+): string => `${String(byteLength)}:${sha512Hex}`;
+
+const generatedProofFingerprints = (
+    measurements: readonly DesktopBrowserProofMeasurementRecord[],
+    caseIdentifier: string,
+): readonly string[] =>
+    measurements
+        .filter((measurement) => measurement.caseIdentifier === caseIdentifier)
+        .map((measurement) =>
+            proofStreamFingerprint(
+                measurement.canonicalOutputByteLength,
+                measurement.outputSha512Hex,
+            ),
+        )
+        .sort();
+
+const verifiedProofFingerprints = (
+    measurements: readonly DesktopBrowserProofMeasurementRecord[],
+    caseIdentifier: string,
+): readonly string[] =>
+    measurements
+        .filter((measurement) => measurement.caseIdentifier === caseIdentifier)
+        .map((measurement) =>
+            proofStreamFingerprint(
+                measurement.canonicalInputByteLength,
+                measurement.canonicalInputSha512Hex,
+            ),
+        )
+        .sort();
+
+const equalFingerprintLists = (
+    left: readonly string[],
+    right: readonly string[],
+): boolean =>
+    left.length === right.length &&
+    left.every((value, valueIndex) => value === right[valueIndex]);
+
+const measurementsForCase = (
+    measurements: readonly DesktopBrowserProofMeasurementRecord[],
+    caseIdentifier: string,
+): readonly DesktopBrowserProofMeasurementRecord[] =>
+    measurements.filter(
+        (measurement) => measurement.caseIdentifier === caseIdentifier,
+    );
+
+const requireExactlyOneMeasurement = (
+    measurements: readonly DesktopBrowserProofMeasurementRecord[],
+    caseIdentifier: string,
+): DesktopBrowserProofMeasurementRecord => {
+    const matchingMeasurements = measurementsForCase(
+        measurements,
+        caseIdentifier,
+    );
+    if (matchingMeasurements.length !== 1) {
+        throw new Error(
+            `Desktop-browser proof evidence requires exactly one ${caseIdentifier} measurement.`,
+        );
+    }
+    const measurement = matchingMeasurements[0];
+    if (measurement === undefined) {
+        throw new Error(
+            `Desktop-browser proof evidence omitted ${caseIdentifier}.`,
+        );
+    }
+    return measurement;
+};
+
+const requireCancellationDeclaration = (
+    measurement: DesktopBrowserProofMeasurementRecord,
+): Readonly<{
+    catalogSha512Hex: string;
+    safeBoundaryCount: number;
+    storageYieldBoundaryCount: number;
+}> => {
+    if (
+        measurement.cancellationBoundaryCatalogSha512Hex === undefined ||
+        measurement.declaredSafeBoundaryCount === undefined ||
+        measurement.declaredStorageYieldBoundaryCount === undefined
+    ) {
+        throw new Error(
+            `Desktop-browser proof evidence omitted the cancellation boundary declaration for ${measurement.caseIdentifier}.`,
+        );
+    }
+    return Object.freeze({
+        catalogSha512Hex: measurement.cancellationBoundaryCatalogSha512Hex,
+        safeBoundaryCount: measurement.declaredSafeBoundaryCount,
+        storageYieldBoundaryCount:
+            measurement.declaredStorageYieldBoundaryCount,
+    });
+};
+
+const validateGenerationSessionContract = (
+    measurements: readonly DesktopBrowserProofMeasurementRecord[],
+): void => {
+    const repetitionRequirement =
+        desktopBrowserProofGenerationRepetitionRequirement;
+    const cancellationRequirement =
+        desktopBrowserProofCancellationCoverageRequirement;
+    if (
+        cancellationRequirement.declarationCaseIdentifier !==
+        repetitionRequirement.caseIdentifier
+    ) {
+        throw new Error(
+            'The proof-evidence catalog assigned cancellation declarations to a different generation case.',
+        );
+    }
+    const repeatedMeasurements = measurementsForCase(
+        measurements,
+        repetitionRequirement.caseIdentifier,
+    );
+    const coldRunCount = repeatedMeasurements.filter(
+        ({ browserCacheState }) => browserCacheState === 'cold',
+    ).length;
+    const warmRunCount = repeatedMeasurements.filter(
+        ({ browserCacheState }) => browserCacheState === 'warm',
+    ).length;
+    if (
+        coldRunCount < repetitionRequirement.minimumColdRunCount ||
+        warmRunCount < repetitionRequirement.minimumWarmRunCount
+    ) {
+        throw new Error(
+            `Desktop-browser proof evidence requires at least ${String(repetitionRequirement.minimumColdRunCount)} cold and ${String(repetitionRequirement.minimumWarmRunCount)} warm ${repetitionRequirement.caseIdentifier} runs.`,
+        );
+    }
+    const declarations = repeatedMeasurements.map(
+        requireCancellationDeclaration,
+    );
+    const declarationFingerprints = new Set(
+        declarations.map(
+            (declaration) =>
+                `${declaration.catalogSha512Hex}:${String(declaration.safeBoundaryCount)}:${String(declaration.storageYieldBoundaryCount)}`,
+        ),
+    );
+    if (declarationFingerprints.size !== 1) {
+        throw new Error(
+            'Desktop-browser proof generation runs declared different cancellation boundary catalogs.',
+        );
+    }
+    const declaration = declarations[0];
+    if (declaration === undefined) {
+        throw new Error(
+            'Desktop-browser proof evidence omitted its cancellation boundary declaration source.',
+        );
+    }
+    const cancellationMeasurements = measurementsForCase(
+        measurements,
+        cancellationRequirement.cancellationCaseIdentifier,
+    );
+    const declaredBoundaryCount =
+        declaration.safeBoundaryCount + declaration.storageYieldBoundaryCount;
+    if (
+        declaredBoundaryCount === 0 ||
+        cancellationMeasurements.length !== declaredBoundaryCount
+    ) {
+        throw new Error(
+            'Desktop-browser proof evidence did not cancel at every declared storage yield and safe boundary.',
+        );
+    }
+    const cancellationBoundaries = [...cancellationMeasurements]
+        .sort((left, right) => left.runOrdinal - right.runOrdinal)
+        .map((measurement) => {
+            const measurementDeclaration =
+                requireCancellationDeclaration(measurement);
+            if (
+                measurementDeclaration.catalogSha512Hex !==
+                    declaration.catalogSha512Hex ||
+                measurementDeclaration.safeBoundaryCount !==
+                    declaration.safeBoundaryCount ||
+                measurementDeclaration.storageYieldBoundaryCount !==
+                    declaration.storageYieldBoundaryCount ||
+                measurement.cancellationBoundaryIdentifier === undefined ||
+                measurement.cancellationBoundaryKind === undefined ||
+                measurement.cancellationBoundaryOrdinal === undefined
+            ) {
+                throw new Error(
+                    'Desktop-browser proof cancellation evidence does not match its declared boundary catalog.',
+                );
+            }
+            return Object.freeze({
+                boundaryIdentifier: measurement.cancellationBoundaryIdentifier,
+                boundaryKind: measurement.cancellationBoundaryKind,
+                boundaryOrdinal: measurement.cancellationBoundaryOrdinal,
+            });
+        });
+    for (const [boundaryKind, expectedCount] of [
+        ['safe-boundary', declaration.safeBoundaryCount],
+        ['storage-yield', declaration.storageYieldBoundaryCount],
+    ] as const) {
+        const observedOrdinals = cancellationBoundaries
+            .filter((boundary) => boundary.boundaryKind === boundaryKind)
+            .map((boundary) => boundary.boundaryOrdinal)
+            .sort((left, right) => left - right);
+        if (
+            observedOrdinals.length !== expectedCount ||
+            observedOrdinals.some(
+                (ordinal, ordinalIndex) => ordinal !== ordinalIndex + 1,
+            )
+        ) {
+            throw new Error(
+                `Desktop-browser proof evidence omitted or repeated a ${boundaryKind} cancellation ordinal.`,
+            );
+        }
+    }
+    if (
+        deriveDesktopBrowserProofCancellationBoundaryCatalogSha512Hex(
+            cancellationBoundaries,
+        ) !== declaration.catalogSha512Hex
+    ) {
+        throw new Error(
+            'Desktop-browser proof cancellation evidence does not match its catalog digest.',
+        );
+    }
+
+    const cancellationReuseMeasurement = requireExactlyOneMeasurement(
+        measurements,
+        cancellationRequirement.reuseCaseIdentifier,
+    );
+    const reusedCancellationMeasurement = cancellationMeasurements.find(
+        (measurement) =>
+            measurement.runOrdinal === cancellationReuseMeasurement.runOrdinal,
+    );
+    if (
+        reusedCancellationMeasurement === undefined ||
+        cancellationReuseMeasurement.workerInstanceIdentifier !==
+            reusedCancellationMeasurement.workerInstanceIdentifier ||
+        cancellationReuseMeasurement.workerOperationOrdinal !==
+            reusedCancellationMeasurement.workerOperationOrdinal + 1
+    ) {
+        throw new Error(
+            'Desktop-browser proof evidence did not reuse the same worker immediately after cancellation.',
+        );
+    }
+
+    const refusalRequirement = desktopBrowserProofRefusalReuseRequirement;
+    const refusalMeasurement = requireExactlyOneMeasurement(
+        measurements,
+        refusalRequirement.refusalCaseIdentifier,
+    );
+    const refusalReuseMeasurement = requireExactlyOneMeasurement(
+        measurements,
+        refusalRequirement.reuseCaseIdentifier,
+    );
+    if (
+        refusalMeasurement.refusalReasonIdentifier === undefined ||
+        refusalReuseMeasurement.workerInstanceIdentifier !==
+            refusalMeasurement.workerInstanceIdentifier ||
+        refusalReuseMeasurement.workerOperationOrdinal !==
+            refusalMeasurement.workerOperationOrdinal + 1
+    ) {
+        throw new Error(
+            'Desktop-browser proof evidence did not reuse the same worker immediately after refusal.',
+        );
+    }
+
+    const parityMeasurement = requireExactlyOneMeasurement(
+        measurements,
+        desktopBrowserProofDeterministicParityCaseIdentifier,
+    );
+    parseDesktopBrowserProofDeterministicParityBinding({
+        deterministicCoinBindingSha512Hex:
+            parityMeasurement.deterministicCoinBindingSha512Hex,
+        nativeProofByteLength: parityMeasurement.nativeReferenceByteLength,
+        nativeProofSha512Hex: parityMeasurement.nativeReferenceSha512Hex,
+        wasmProofByteLength: parityMeasurement.canonicalOutputByteLength,
+        wasmProofSha512Hex: parityMeasurement.outputSha512Hex,
+    });
+};
+
+const validateFreshVerificationWorkers = (
+    measurements: readonly DesktopBrowserProofMeasurementRecord[],
+): void => {
+    const workerInstanceIdentifiers = measurements.map(
+        ({ workerInstanceIdentifier }) => workerInstanceIdentifier,
+    );
+    if (
+        new Set(workerInstanceIdentifiers).size !==
+            workerInstanceIdentifiers.length ||
+        measurements.some(
+            ({ workerOperationOrdinal }) => workerOperationOrdinal !== 1,
+        )
+    ) {
+        throw new Error(
+            'Desktop-browser proof verification did not use one fresh worker instance per transported proof.',
+        );
+    }
+};
+
+export const validateDesktopBrowserProofEvidenceOwnershipMatrix = (
+    sessionEventSets: readonly DesktopBrowserProofEvidenceSessionEvents[],
+    expectedBindings?: Readonly<{
+        wasmSha256Hex: string;
+    }>,
+): readonly ValidatedDesktopBrowserProofEvidenceSession[] => {
+    const sessionDefinitionsByIdentifier = new Map(
+        desktopBrowserProofEvidenceSessionDefinitions.map((session) => [
+            session.sessionIdentifier,
+            session,
+        ]),
+    );
+    const validatedSessionsByIdentifier = new Map<
+        string,
+        ValidatedDesktopBrowserProofEvidenceSession
+    >();
+
+    for (const sessionEventSet of sessionEventSets) {
+        const session = sessionDefinitionsByIdentifier.get(
+            sessionEventSet.sessionIdentifier,
+        );
+        if (session === undefined) {
+            throw new Error(
+                `Desktop-browser proof evidence reported an unexpected ownership session: ${sessionEventSet.sessionIdentifier}.`,
+            );
+        }
+        if (validatedSessionsByIdentifier.has(session.sessionIdentifier)) {
+            throw new Error(
+                `Desktop-browser proof evidence repeated ownership session ${session.sessionIdentifier}.`,
+            );
+        }
+        const measurements =
+            validateDesktopBrowserProofMeasurementEventsForRequiredCases(
+                sessionEventSet.testEvents,
+                requiredCaseIdentifiersByOwnershipRole[session.ownershipRole],
+                expectedBindings,
+            );
+        if (session.ownershipRole === 'generation') {
+            validateGenerationSessionContract(measurements);
+        } else {
+            validateFreshVerificationWorkers(measurements);
+        }
+        validatedSessionsByIdentifier.set(session.sessionIdentifier, {
+            measurements,
+            session,
+        });
+    }
+
+    const missingSessionIdentifiers =
+        desktopBrowserProofEvidenceSessionDefinitions
+            .map((session) => session.sessionIdentifier)
+            .filter(
+                (sessionIdentifier) =>
+                    !validatedSessionsByIdentifier.has(sessionIdentifier),
+            );
+    if (missingSessionIdentifiers.length > 0) {
+        throw new Error(
+            `Desktop-browser proof evidence omitted required ownership sessions: ${missingSessionIdentifiers.join(', ')}.`,
+        );
+    }
+
+    const validatedSessions = desktopBrowserProofEvidenceSessionDefinitions.map(
+        (session) => {
+            const validatedSession = validatedSessionsByIdentifier.get(
+                session.sessionIdentifier,
+            );
+            if (validatedSession === undefined) {
+                throw new Error(
+                    `Desktop-browser proof evidence did not validate ownership session ${session.sessionIdentifier}.`,
+                );
+            }
+            return validatedSession;
+        },
+    );
+    const observedSuiteIdentifiers = new Set(
+        validatedSessions.flatMap(({ measurements }) =>
+            measurements.map((measurement) => measurement.suiteId),
+        ),
+    );
+    const observedWasmHashes = new Set(
+        validatedSessions.flatMap(({ measurements }) =>
+            measurements.map((measurement) => measurement.wasmSha256Hex),
+        ),
+    );
+    if (observedSuiteIdentifiers.size !== 1 || observedWasmHashes.size !== 1) {
+        throw new Error(
+            'Desktop-browser proof-evidence ownership sessions did not use one exact suite and one exact processed WebAssembly module.',
+        );
+    }
+
+    const generationSessions = validatedSessions.filter(
+        ({ session }) => session.ownershipRole === 'generation',
+    );
+    const verificationSessions = validatedSessions.filter(
+        ({ session }) => session.ownershipRole === 'verification',
+    );
+    const deterministicParityFingerprints = new Set(
+        generationSessions.map(({ measurements }) => {
+            const parityMeasurement = requireExactlyOneMeasurement(
+                measurements,
+                desktopBrowserProofDeterministicParityCaseIdentifier,
+            );
+            return [
+                parityMeasurement.deterministicCoinBindingSha512Hex,
+                parityMeasurement.nativeReferenceByteLength,
+                parityMeasurement.nativeReferenceSha512Hex,
+                parityMeasurement.canonicalOutputByteLength,
+                parityMeasurement.outputSha512Hex,
+            ].join(':');
+        }),
+    );
+    if (deterministicParityFingerprints.size !== 1) {
+        throw new Error(
+            'Chromium and Firefox did not reproduce the same native-bound deterministic proof bytes.',
+        );
+    }
+    for (const [
+        generationCaseIdentifier,
+        verificationCaseIdentifier,
+    ] of transportedProofCasePairs) {
+        const transportedFingerprints = generationSessions
+            .flatMap(({ measurements }) =>
+                generatedProofFingerprints(
+                    measurements,
+                    generationCaseIdentifier,
+                ),
+            )
+            .sort();
+        for (const verificationSession of verificationSessions) {
+            const observedVerificationFingerprints = verifiedProofFingerprints(
+                verificationSession.measurements,
+                verificationCaseIdentifier,
+            );
+            if (
+                !equalFingerprintLists(
+                    observedVerificationFingerprints,
+                    transportedFingerprints,
+                )
+            ) {
+                throw new Error(
+                    `Desktop-browser proof-evidence ownership session ${verificationSession.session.sessionIdentifier} did not freshly verify exactly the transported bytes for ${generationCaseIdentifier}.`,
+                );
+            }
+        }
+    }
+
+    return validatedSessions;
+};
+
+export const projectDesktopBrowserProofEvidenceNetworkSessions = (
+    sessionEventSets: readonly DesktopBrowserProofEvidenceSessionEvents[],
+    expectedBindings?: Readonly<{
+        wasmSha256Hex: string;
+    }>,
+): readonly DesktopBrowserProofEvidenceNetworkSessionProjection[] => {
+    const validatedSessions =
+        validateDesktopBrowserProofEvidenceOwnershipMatrix(
+            sessionEventSets,
+            expectedBindings,
+        );
+    const eventSetsBySessionIdentifier = new Map(
+        sessionEventSets.map((sessionEventSet) => [
+            sessionEventSet.sessionIdentifier,
+            sessionEventSet,
+        ]),
+    );
+    const networkSessionProjections = validatedSessions
+        .filter(({ session }) => session.ownershipRole === 'generation')
+        .map(({ measurements, session }) => {
+            const sessionEventSet = eventSetsBySessionIdentifier.get(
+                session.sessionIdentifier,
+            );
+            if (sessionEventSet === undefined) {
+                throw new Error(
+                    `Desktop-browser network projection lost ownership session ${session.sessionIdentifier}.`,
+                );
+            }
+            return Object.freeze({
+                browserEngine: session.browserEngine,
+                projection: projectDesktopBrowserNetworkEvidence({
+                    evidenceEvents: sessionEventSet.testEvents,
+                    measurements,
+                    productionAccountingAuthority:
+                        requireProductionNetworkAccountingAuthority(
+                            sessionEventSet.testEvents,
+                        ),
+                }),
+                sessionIdentifier: session.sessionIdentifier,
+            });
+        });
+    const exactIdentityFingerprints = new Set(
+        networkSessionProjections.map(({ projection }) =>
+            [
+                projection.identity.sourceSha512Hex,
+                projection.identity.buildSha512Hex,
+                projection.identity.suiteId,
+                projection.identity.wasmSha256Hex,
+            ].join(':'),
+        ),
+    );
+    const protocolCarrierHashes = new Set(
+        networkSessionProjections.map(
+            ({ projection }) =>
+                projection.canonicalLedgerSha512Hex.protocolCarrier,
+        ),
+    );
+    const durableCheckpointCatalogHashes = new Set(
+        networkSessionProjections.map(
+            ({ projection }) => projection.durableCheckpointCatalogSha512Hex,
+        ),
+    );
+    const productionAccountingAuthorityHashes = new Set(
+        networkSessionProjections.map(
+            ({ projection }) =>
+                projection.canonicalLedgerSha512Hex
+                    .productionAccountingAuthority,
+        ),
+    );
+    if (
+        exactIdentityFingerprints.size !== 1 ||
+        protocolCarrierHashes.size !== 1 ||
+        durableCheckpointCatalogHashes.size !== 1 ||
+        productionAccountingAuthorityHashes.size !== 1
+    ) {
+        throw new Error(
+            'Chromium and Firefox network evidence did not use one source, build, suite, WebAssembly module, production accounting authority, protocol carrier ledger, and durable checkpoint catalog.',
+        );
+    }
+    return Object.freeze(networkSessionProjections);
 };
 
 const deriveProcessedWasmSha256Hex = async (): Promise<string> => {
@@ -382,16 +1079,19 @@ const recordResourceWindows = async (input: {
     expectedWasmSha256Hex: string;
     processMemoryDiagnosticPath: string;
     runLog: ActiveLocalRunLog;
+    session: DesktopBrowserProofEvidenceSessionDefinition;
     testEventPath: string;
-}): Promise<void> => {
+}): Promise<readonly JsonRecord[]> => {
     const [testEvents, memoryEvents] = await Promise.all([
         readJsonLines(input.testEventPath),
         readJsonLines(input.processMemoryDiagnosticPath),
     ]);
-    const measurements = validateDesktopBrowserProofMeasurementEvents(
-        testEvents,
-        { wasmSha256Hex: input.expectedWasmSha256Hex },
-    );
+    const measurements =
+        validateDesktopBrowserProofMeasurementEventsForRequiredCases(
+            testEvents,
+            requiredCaseIdentifiersByOwnershipRole[input.session.ownershipRole],
+            { wasmSha256Hex: input.expectedWasmSha256Hex },
+        );
 
     for (const measurement of measurements) {
         const windowSamples = memoryEvents.filter((event) => {
@@ -441,9 +1141,33 @@ const recordResourceWindows = async (input: {
                   : undefined;
         input.runLog.writeEvent({
             details: {
+                browserEngine: input.session.browserEngine,
                 caseIdentifier: measurement.caseIdentifier,
                 executionKind: measurement.executionKind,
+                ownershipRole: input.session.ownershipRole,
+                physicalBrowserMeasurements: {
+                    browserProcessResidentMemoryEndByteLength:
+                        measurement.browserProcessResidentMemoryEndByteLength,
+                    browserProcessResidentMemoryPeakByteLength:
+                        measurement.browserProcessResidentMemoryPeakByteLength,
+                    browserProcessResidentMemoryStartByteLength:
+                        measurement.browserProcessResidentMemoryStartByteLength,
+                    javascriptHeapEndByteLength:
+                        measurement.javascriptHeapEndByteLength,
+                    javascriptHeapPeakByteLength:
+                        measurement.javascriptHeapPeakByteLength,
+                    javascriptHeapStartByteLength:
+                        measurement.javascriptHeapStartByteLength,
+                    resourceAccounting: measurement.resourceAccounting,
+                    wasmLinearMemoryEndPageCount:
+                        measurement.wasmLinearMemoryEndPageCount,
+                    wasmLinearMemoryPeakPageCount:
+                        measurement.wasmLinearMemoryPeakPageCount,
+                    wasmLinearMemoryStartPageCount:
+                        measurement.wasmLinearMemoryStartPageCount,
+                },
                 resourceSampleCount: windowSamples.length,
+                sessionIdentifier: input.session.sessionIdentifier,
                 softPlanningVariances: {
                     copiedBuffer: planningVariance(
                         measurement.copiedBufferPeakByteLength,
@@ -457,14 +1181,6 @@ const recordResourceWindows = async (input: {
                         measurement.wasmLinearMemoryPeakByteLength,
                         softPlanningTargets.wasmLinearMemoryByteLength,
                     ),
-                    ...(measuredProofByteLength === undefined
-                        ? {}
-                        : {
-                              proof: planningVariance(
-                                  measuredProofByteLength,
-                                  softPlanningTargets.proofByteLength,
-                              ),
-                          }),
                     ...(processTreePeakIncreaseByteLength === undefined
                         ? {}
                         : {
@@ -474,6 +1190,15 @@ const recordResourceWindows = async (input: {
                               ),
                           }),
                 },
+                ...(measuredProofByteLength === undefined
+                    ? {}
+                    : {
+                          selectedProofEvidenceGate: {
+                              maximumProofByteLength:
+                                  selectedProofEvidenceGate.proofByteLength,
+                              measuredProofByteLength,
+                          },
+                      }),
                 suiteId: measurement.suiteId,
                 wasmSha256Hex: measurement.wasmSha256Hex,
                 ...(backendBaselineByteLength === undefined
@@ -508,6 +1233,7 @@ const recordResourceWindows = async (input: {
             eventType: 'desktop-browser-proof-resource-window',
         });
     }
+    return testEvents;
 };
 
 export const runDesktopBrowserProofEvidence = async (): Promise<void> => {
@@ -516,7 +1242,7 @@ export const runDesktopBrowserProofEvidence = async (): Promise<void> => {
         .filter((argument) => argument !== '--');
     if (rawArguments.length > 0) {
         throw new Error(
-            'The desktop Chromium proof-evidence runner accepts no arguments.',
+            'The desktop-browser proof-evidence runner accepts no arguments.',
         );
     }
     await runWithLocalRunLog(
@@ -529,12 +1255,17 @@ export const runDesktopBrowserProofEvidence = async (): Promise<void> => {
             const packageManagerRunner = resolvePackageManagerRunner();
             const processMemoryGuard = createProcessMemoryGuard({
                 insufficientFreeMemoryRunDescription:
-                    'Desktop Chromium proof evidence',
+                    'Desktop-browser proof evidence',
             });
-            const commandEnvironment: NodeJS.ProcessEnv = {
-                ...process.env,
-                SEALED_LATTICE_TEST_PROJECT_LABEL: testProjectLabel,
-            };
+            const commandEnvironment: NodeJS.ProcessEnv = { ...process.env };
+            for (const laneOwnedEnvironmentVariable of [
+                evidenceOwnershipRoleEnvironmentVariable,
+                evidenceTransportDirectoryEnvironmentVariable,
+                evidenceSessionIdentifierEnvironmentVariable,
+                evidenceManifestAuthenticationEnvironmentVariable,
+            ]) {
+                delete commandEnvironment[laneOwnedEnvironmentVariable];
+            }
             const buildCommand = createPackageManagerCommand(
                 'build the processed release WebAssembly workspace',
                 ['run', 'build'],
@@ -556,6 +1287,12 @@ export const runDesktopBrowserProofEvidence = async (): Promise<void> => {
             const expectedWasmSha256Hex = await deriveProcessedWasmSha256Hex();
             commandEnvironment[expectedWasmSha256EnvironmentVariable] =
                 expectedWasmSha256Hex;
+            const transportDirectoryPath = path.join(
+                runLog.runDirectoryPath,
+                'attachments',
+                'desktop-browser-proof-evidence-transport',
+            );
+            await mkdir(transportDirectoryPath, { recursive: true });
 
             await withLocalHeavyLaneLease({
                 action: async () => {
@@ -566,50 +1303,160 @@ export const runDesktopBrowserProofEvidence = async (): Promise<void> => {
                     if (exitCode !== 0) {
                         return;
                     }
-                    const processMemoryDiagnosticPath = path.join(
-                        runLog.runDirectoryPath,
-                        'resources',
-                        processMemoryGuardDiagnosticFileName,
-                    );
-                    const testEventPath = path.join(
-                        runLog.runDirectoryPath,
-                        'tests',
-                        `${testProjectLabel}.jsonl`,
-                    );
-                    const browserCommand = createPackageManagerCommand(
-                        'run the manual desktop Chromium proof evidence',
-                        [
-                            'exec',
-                            'vitest',
-                            '--project',
-                            'chromium-desktop-proof-evidence',
-                            '--run',
-                            browserEvidenceTestFile,
-                        ],
-                        {
-                            env: commandEnvironment,
-                            logFileSlug:
-                                'vitest-desktop-browser-proof-evidence',
-                            packageManagerRunner,
-                        },
-                    );
-                    exitCode = await runCommandsInSeries(
-                        [
-                            processMemoryGuard.guardCommand(browserCommand, {
-                                diagnosticsPath: processMemoryDiagnosticPath,
-                            }),
-                        ],
-                        { outputMode: 'inherit', runLog },
-                    );
-                    if (exitCode !== 0) {
-                        return;
+                    const sessionEventSets: DesktopBrowserProofEvidenceSessionEvents[] =
+                        [];
+                    const authenticatedGenerationManifestDigests = new Map<
+                        DesktopBrowserProofGenerationSessionIdentifier,
+                        string
+                    >();
+                    for (const session of desktopBrowserProofEvidenceSessionDefinitions) {
+                        const manifestAuthentication =
+                            session.ownershipRole === 'verification'
+                                ? serializeDesktopBrowserProofTransportManifestAuthenticationBindings(
+                                      {
+                                          'chromium-generation': (() => {
+                                              const digest =
+                                                  authenticatedGenerationManifestDigests.get(
+                                                      'chromium-generation',
+                                                  );
+                                              if (digest === undefined) {
+                                                  throw new Error(
+                                                      'The Chromium generation session did not authenticate its transport manifest.',
+                                                  );
+                                              }
+                                              return digest;
+                                          })(),
+                                          'firefox-generation': (() => {
+                                              const digest =
+                                                  authenticatedGenerationManifestDigests.get(
+                                                      'firefox-generation',
+                                                  );
+                                              if (digest === undefined) {
+                                                  throw new Error(
+                                                      'The Firefox generation session did not authenticate its transport manifest.',
+                                                  );
+                                              }
+                                              return digest;
+                                          })(),
+                                      },
+                                  )
+                                : undefined;
+                        const sessionCommandEnvironment: NodeJS.ProcessEnv = {
+                            ...commandEnvironment,
+                            [evidenceOwnershipRoleEnvironmentVariable]:
+                                session.ownershipRole,
+                            [evidenceSessionIdentifierEnvironmentVariable]:
+                                session.sessionIdentifier,
+                            [evidenceTransportDirectoryEnvironmentVariable]:
+                                transportDirectoryPath,
+                            ...(manifestAuthentication === undefined
+                                ? {}
+                                : {
+                                      [evidenceManifestAuthenticationEnvironmentVariable]:
+                                          manifestAuthentication,
+                                  }),
+                            SEALED_LATTICE_TEST_PROJECT_LABEL:
+                                session.testProjectLabel,
+                        };
+                        const processMemoryDiagnosticPath = path.join(
+                            runLog.runDirectoryPath,
+                            'resources',
+                            `process-memory-guard-desktop-browser-proof-evidence-${session.sessionIdentifier}.jsonl`,
+                        );
+                        const testEventPath = path.join(
+                            runLog.runDirectoryPath,
+                            'tests',
+                            `${session.testProjectLabel}.jsonl`,
+                        );
+                        const browserCommand = createPackageManagerCommand(
+                            `run the manual desktop ${session.browserEngine} proof-evidence ${session.ownershipRole} session`,
+                            [
+                                'exec',
+                                'vitest',
+                                '--project',
+                                session.vitestProjectName,
+                                '--run',
+                                browserEvidenceTestFile,
+                            ],
+                            {
+                                env: sessionCommandEnvironment,
+                                logFileSlug: `vitest-desktop-browser-proof-evidence-${session.sessionIdentifier}`,
+                                packageManagerRunner,
+                            },
+                        );
+                        exitCode = await runCommandsInSeries(
+                            [
+                                processMemoryGuard.guardCommand(
+                                    browserCommand,
+                                    {
+                                        diagnosticsPath:
+                                            processMemoryDiagnosticPath,
+                                    },
+                                ),
+                            ],
+                            { outputMode: 'inherit', runLog },
+                        );
+                        if (exitCode !== 0) {
+                            return;
+                        }
+                        const testEvents = await recordResourceWindows({
+                            expectedWasmSha256Hex,
+                            processMemoryDiagnosticPath,
+                            runLog,
+                            session,
+                            testEventPath,
+                        });
+                        sessionEventSets.push({
+                            sessionIdentifier: session.sessionIdentifier,
+                            testEvents,
+                        });
+                        if (session.ownershipRole === 'generation') {
+                            const generationSessionIdentifier =
+                                requireDesktopBrowserProofGenerationSessionIdentifier(
+                                    session.sessionIdentifier,
+                                );
+                            const generationMeasurements =
+                                validateDesktopBrowserProofMeasurementEventsForRequiredCases(
+                                    testEvents,
+                                    requiredCaseIdentifiersByOwnershipRole.generation,
+                                    {
+                                        wasmSha256Hex: expectedWasmSha256Hex,
+                                    },
+                                );
+                            const generationSuiteId =
+                                generationMeasurements[0]?.suiteId;
+                            if (generationSuiteId === undefined) {
+                                throw new Error(
+                                    `The ${session.browserEngine} generation session produced no suite-bound measurements.`,
+                                );
+                            }
+                            const authenticatedManifest =
+                                await readDesktopBrowserProofTransportManifest({
+                                    expectedSuiteId: generationSuiteId,
+                                    expectedWasmSha256Hex,
+                                    generationSessionIdentifier,
+                                    readFile: async (filePath, encoding) =>
+                                        readFile(filePath, encoding),
+                                    transportDirectoryPath,
+                                });
+                            authenticatedGenerationManifestDigests.set(
+                                generationSessionIdentifier,
+                                authenticatedManifest.manifestSha512Hex,
+                            );
+                        }
                     }
-                    await recordResourceWindows({
-                        expectedWasmSha256Hex,
-                        processMemoryDiagnosticPath,
-                        runLog,
-                        testEventPath,
-                    });
+                    const networkSessionProjections =
+                        projectDesktopBrowserProofEvidenceNetworkSessions(
+                            sessionEventSets,
+                            { wasmSha256Hex: expectedWasmSha256Hex },
+                        );
+                    for (const networkSessionProjection of networkSessionProjections) {
+                        runLog.writeEvent({
+                            details: networkSessionProjection,
+                            eventType:
+                                'desktop-browser-proof-network-projection',
+                        });
+                    }
                 },
                 laneLabel,
                 runLog,

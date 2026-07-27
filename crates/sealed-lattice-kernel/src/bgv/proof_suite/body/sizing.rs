@@ -67,10 +67,12 @@ impl ProofQueryTreeByteLengthCeiling {
         self.source
     }
 
+    #[cfg(test)]
     pub(crate) const fn tree_height(&self) -> u32 {
         self.tree_height
     }
 
+    #[cfg(test)]
     pub(crate) const fn leaf_count(&self) -> usize {
         self.leaf_count
     }
@@ -84,6 +86,7 @@ impl ProofQueryTreeByteLengthCeiling {
         self.minimum_opened_leaf_count
     }
 
+    #[cfg(test)]
     pub(crate) const fn maximum_opened_leaf_count(&self) -> usize {
         self.maximum_opened_leaf_count
     }
@@ -96,10 +99,12 @@ impl ProofQueryTreeByteLengthCeiling {
         self.authentication_frontier_node_count_at_ceiling
     }
 
+    #[cfg(test)]
     pub(crate) const fn opened_leaf_payload_byte_length(&self) -> usize {
         self.opened_leaf_payload_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn authentication_frontier_digest_byte_length(&self) -> usize {
         self.authentication_frontier_digest_byte_length
     }
@@ -109,6 +114,7 @@ impl ProofQueryTreeByteLengthCeiling {
         self.canonical_framing_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn byte_length(&self) -> usize {
         self.byte_length
     }
@@ -193,6 +199,7 @@ impl CommonProofByteLengthCeiling {
         self.query_section_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn proof_byte_length(&self) -> usize {
         self.proof_byte_length
     }

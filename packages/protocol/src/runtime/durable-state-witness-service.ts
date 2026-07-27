@@ -59,7 +59,7 @@ const intentLockRecordByteLength = 262;
 const signedVoteCarrierRecordHeaderByteLength = 214;
 const exactOutputRecordHeaderByteLength = 204;
 const proofApplicationSlotHashByteLength = 64;
-const commonProofAuthorizationFrameByteLength = 746;
+const commonProofAuthorizationFrameByteLength = 742;
 const textEncoder = new TextEncoder();
 const validStateCapabilityKinds = new Set<number>(
     Object.values(stateCapabilityKinds),

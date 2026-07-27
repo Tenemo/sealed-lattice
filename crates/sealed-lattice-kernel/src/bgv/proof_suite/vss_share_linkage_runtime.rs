@@ -13,11 +13,11 @@ use std::{
 
 use crate::{
     bgv::setup::{
-        SetupGenerationAuthorityHandle, SetupGenerationVssApplication,
-        SetupGenerationVssPreparationSource, SetupVssGenerationPreparationError,
-        VerifiedPublicRandomness, VerifiedVssShareLinkageTerminal,
-        resolve_setup_generation_vss_preparation_source, verify_public_randomness_board_sources,
-        with_setup_generation_vss_material,
+        SetupGenerationAuthorityHandle, SetupGenerationKeyRelationPreparationSource,
+        SetupGenerationVssApplication, SetupGenerationVssPreparationSource,
+        SetupVssGenerationPreparationError, VerifiedPublicRandomness,
+        VerifiedVssShareLinkageTerminal, resolve_setup_generation_vss_preparation_source,
+        verify_public_randomness_board_sources, with_setup_generation_vss_material,
     },
     foundation::{
         BOARD_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, CanonicalDecodeLimits, FOUNDATION_PROFILE,
@@ -42,10 +42,10 @@ use super::{
     CommonProofRelationPlanCapabilityError, CommonProofRuntimeError, CommonProofRuntimeLimits,
     CommonProofSelectedSuiteCapabilityHandle, PreparedCommonProofGeneration, ProofProfileError,
     RelationPlanError, SelectedApplicationStatementContext, SelectedProofAccountingError,
-    canonical_selected_vss_share_linkage_statement, compile_vss_share_linkage_relation_plan,
-    decode_selected_vss_share_linkage_statement, selected_committed_material_relation_plan_input,
-    selected_proof_runtime_limits, selected_relation_plan_check_context,
-    verified_application_statement_hash,
+    VerifiedSameSecretLowDegreePrerequisite, canonical_selected_vss_share_linkage_statement,
+    compile_vss_share_linkage_relation_plan, decode_selected_vss_share_linkage_statement,
+    selected_committed_material_relation_plan_input, selected_proof_runtime_limits,
+    selected_relation_plan_check_context, verified_application_statement_hash,
 };
 
 const ATTEMPT_IDENTIFIER_BYTE_LENGTH: usize = 32;
@@ -247,6 +247,19 @@ impl<Output> BoundedVssOutputRegistry<Output> {
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
     }
 
+    fn restore_consumed(
+        &mut self,
+        handle: u32,
+        output: Output,
+    ) -> Result<(), CommonProofRuntimeError> {
+        if handle == 0 || self.reserved_handle == Some(handle) || self.outputs.contains_key(&handle)
+        {
+            return Err(CommonProofRuntimeError::AllocationLimitExceeded);
+        }
+        self.outputs.insert(handle, output);
+        Ok(())
+    }
+
     fn consume_ordered_exact(
         &mut self,
         ordered_handles: &[u32],
@@ -288,6 +301,14 @@ struct VssVerificationTerminalSource {
     verified_public_randomness: VerifiedPublicRandomness,
 }
 
+enum VerifiedVssLowDegreeEvidenceState {
+    Available(VerifiedSameSecretLowDegreePrerequisite),
+    AttachedToSameSecretGeneration {
+        evidence: VerifiedSameSecretLowDegreePrerequisite,
+        generation_binding_hash: [u8; Hash512::BYTE_LENGTH],
+    },
+}
+
 thread_local! {
     static VSS_GENERATION_BOARD_BINDING_SOURCE_REGISTRY:
         RefCell<SingleActiveVssSourceRegistry<VssGenerationBoardBindingSource>> =
@@ -298,6 +319,128 @@ thread_local! {
     static VERIFIED_VSS_SHARE_LINKAGE_TERMINAL_REGISTRY:
         RefCell<BoundedVssOutputRegistry<VerifiedVssShareLinkageTerminal>> =
         RefCell::new(BoundedVssOutputRegistry::default());
+    static VERIFIED_VSS_LOW_DEGREE_EVIDENCE_REGISTRY:
+        RefCell<BoundedVssOutputRegistry<VerifiedVssLowDegreeEvidenceState>> =
+        RefCell::new(BoundedVssOutputRegistry::default());
+}
+
+pub(in crate::bgv) fn consume_verified_vss_low_degree_evidence(
+    handle: u32,
+) -> Result<VerifiedSameSecretLowDegreePrerequisite, CommonProofRuntimeError> {
+    VERIFIED_VSS_LOW_DEGREE_EVIDENCE_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        match registry.consume(handle)? {
+            VerifiedVssLowDegreeEvidenceState::Available(evidence) => Ok(evidence),
+            attached @ VerifiedVssLowDegreeEvidenceState::AttachedToSameSecretGeneration {
+                ..
+            } => {
+                registry.restore_consumed(handle, attached)?;
+                Err(CommonProofRuntimeError::WrongOperationPhase)
+            }
+        }
+    })
+}
+
+pub(in crate::bgv) fn attach_verified_vss_low_degree_evidence_to_same_secret_generation(
+    handle: u32,
+    generation_binding_hash: [u8; Hash512::BYTE_LENGTH],
+    generation_source: &SetupGenerationKeyRelationPreparationSource,
+    ordered_degree_zero_roots: &[[u8; Hash512::BYTE_LENGTH]],
+) -> Result<(), CommonProofRuntimeError> {
+    if generation_binding_hash == [0_u8; Hash512::BYTE_LENGTH] {
+        return Err(CommonProofRuntimeError::WrongVerificationBinding);
+    }
+    VERIFIED_VSS_LOW_DEGREE_EVIDENCE_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let state = registry.consume(handle)?;
+        let evidence = match state {
+            VerifiedVssLowDegreeEvidenceState::Available(evidence) => evidence,
+            attached @ VerifiedVssLowDegreeEvidenceState::AttachedToSameSecretGeneration {
+                ..
+            } => {
+                registry.restore_consumed(handle, attached)?;
+                return Err(CommonProofRuntimeError::WrongOperationPhase);
+            }
+        };
+        if !evidence
+            .matches_same_secret_generation_source(generation_source, ordered_degree_zero_roots)
+        {
+            registry.restore_consumed(
+                handle,
+                VerifiedVssLowDegreeEvidenceState::Available(evidence),
+            )?;
+            return Err(CommonProofRuntimeError::WrongVerificationBinding);
+        }
+        registry.restore_consumed(
+            handle,
+            VerifiedVssLowDegreeEvidenceState::AttachedToSameSecretGeneration {
+                evidence,
+                generation_binding_hash,
+            },
+        )
+    })
+}
+
+pub(in crate::bgv) fn detach_verified_vss_low_degree_evidence_from_same_secret_generation(
+    handle: u32,
+    generation_binding_hash: [u8; Hash512::BYTE_LENGTH],
+) -> Result<(), CommonProofRuntimeError> {
+    VERIFIED_VSS_LOW_DEGREE_EVIDENCE_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let state = registry.consume(handle)?;
+        match state {
+            VerifiedVssLowDegreeEvidenceState::AttachedToSameSecretGeneration {
+                evidence,
+                generation_binding_hash: retained_binding_hash,
+            } if retained_binding_hash == generation_binding_hash => registry.restore_consumed(
+                handle,
+                VerifiedVssLowDegreeEvidenceState::Available(evidence),
+            ),
+            other => {
+                registry.restore_consumed(handle, other)?;
+                Err(CommonProofRuntimeError::WrongVerificationBinding)
+            }
+        }
+    })
+}
+
+pub(in crate::bgv) fn consume_attached_verified_vss_low_degree_evidence(
+    handle: u32,
+    generation_binding_hash: [u8; Hash512::BYTE_LENGTH],
+) -> Result<VerifiedSameSecretLowDegreePrerequisite, CommonProofRuntimeError> {
+    VERIFIED_VSS_LOW_DEGREE_EVIDENCE_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let state = registry.consume(handle)?;
+        match state {
+            VerifiedVssLowDegreeEvidenceState::AttachedToSameSecretGeneration {
+                evidence,
+                generation_binding_hash: retained_binding_hash,
+            } if retained_binding_hash == generation_binding_hash => Ok(evidence),
+            other => {
+                registry.restore_consumed(handle, other)?;
+                Err(CommonProofRuntimeError::WrongVerificationBinding)
+            }
+        }
+    })
+}
+
+pub(in crate::bgv) fn with_attached_verified_vss_low_degree_evidence<ResultValue>(
+    handle: u32,
+    generation_binding_hash: [u8; Hash512::BYTE_LENGTH],
+    inspect: impl FnOnce(
+        &VerifiedSameSecretLowDegreePrerequisite,
+    ) -> Result<ResultValue, CommonProofRuntimeError>,
+) -> Result<ResultValue, CommonProofRuntimeError> {
+    VERIFIED_VSS_LOW_DEGREE_EVIDENCE_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        match registry.source(handle)? {
+            VerifiedVssLowDegreeEvidenceState::AttachedToSameSecretGeneration {
+                evidence,
+                generation_binding_hash: retained_binding_hash,
+            } if *retained_binding_hash == generation_binding_hash => inspect(evidence),
+            _ => Err(CommonProofRuntimeError::WrongVerificationBinding),
+        }
+    })
 }
 
 pub(in crate::bgv) fn consume_verified_vss_share_linkage_terminal(
@@ -305,16 +448,6 @@ pub(in crate::bgv) fn consume_verified_vss_share_linkage_terminal(
 ) -> Result<VerifiedVssShareLinkageTerminal, CommonProofRuntimeError> {
     VERIFIED_VSS_SHARE_LINKAGE_TERMINAL_REGISTRY
         .with(|registry| registry.borrow_mut().consume(handle))
-}
-
-pub(in crate::bgv) fn with_verified_vss_share_linkage_terminal<Output>(
-    handle: u32,
-    inspect: impl FnOnce(&VerifiedVssShareLinkageTerminal) -> Output,
-) -> Result<Output, CommonProofRuntimeError> {
-    VERIFIED_VSS_SHARE_LINKAGE_TERMINAL_REGISTRY.with(|registry| {
-        let registry = registry.borrow();
-        registry.source(handle).map(inspect)
-    })
 }
 
 pub(in crate::bgv) fn consume_ordered_verified_vss_share_linkage_terminals(
@@ -331,7 +464,6 @@ pub(in crate::bgv) fn consume_ordered_verified_vss_share_linkage_terminals(
 struct SelectedVssProofRuntimePlan {
     relation_plan: CommonProofRelationPlanCapability,
     limits: CommonProofRuntimeLimits,
-    proof_query_count: u32,
 }
 
 fn selected_vss_proof_runtime_plan(
@@ -358,11 +490,9 @@ fn selected_vss_proof_runtime_plan(
         None,
         None,
     )?;
-    let proof_query_count = relation_plan.proof_query_count()?;
     Ok(SelectedVssProofRuntimePlan {
         relation_plan,
         limits,
-        proof_query_count,
     })
 }
 
@@ -461,7 +591,6 @@ fn resolve_vss_prepared_attempt(
     verified_reservation_binding: VerifiedStateReservationRuntimeBinding,
     board_source: &VerifiedBoardApplicationSource,
     source: &SetupGenerationVssPreparationSource,
-    runtime_plan: &SelectedVssProofRuntimePlan,
     checkpoint_continuation: crate::foundation::AuthenticatedCheckpointContinuationSource,
 ) -> Result<PreparedActionProofAttemptSource, VssShareLinkageRuntimeError> {
     let application_slot = ProofApplicationSlot::new(
@@ -479,16 +608,12 @@ fn resolve_vss_prepared_attempt(
         ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
         source.canonical_application_statement_bytes(),
     ));
-    let proof_byte_length = u64::try_from(runtime_plan.limits.proof_byte_length())
-        .map_err(|_| VssShareLinkageRuntimeError::InvalidInput)?;
     resolve_prepared_action_proof_attempt_source(
         action_randomness_handle,
         verified_reservation_binding,
         board_source,
         application_slot,
         application_statement_hash,
-        proof_byte_length,
-        runtime_plan.proof_query_count,
         checkpoint_continuation,
     )
     .map_err(VssShareLinkageRuntimeError::ActionRandomnessRuntime)
@@ -590,9 +715,7 @@ fn prepare_vss_generation(
     let runtime_plan = selected_vss_proof_runtime_plan(
         preparation_source.canonical_application_statement_bytes(),
     )?;
-    let checkpoint_schedule_digest = runtime_plan
-        .relation_plan
-        .checkpoint_schedule_digest(runtime_plan.limits)?;
+    let checkpoint_schedule_digest = runtime_plan.relation_plan.checkpoint_schedule_digest()?;
     let fresh_continuation =
         crate::foundation::AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
             checkpoint_lineage_identifier,
@@ -603,7 +726,6 @@ fn prepare_vss_generation(
         verified_reservation_binding,
         &board_source,
         &preparation_source,
-        &runtime_plan,
         fresh_continuation,
     )?;
     let generation_family_adapter = match generation_mode {
@@ -647,7 +769,6 @@ fn prepare_vss_generation(
                         verified_reservation_binding,
                         &board_source,
                         &resumed_preparation_source,
-                        &resumed_runtime_plan,
                         authenticated_continuation,
                     )
                     .map_err(resumed_generation_preparation_error)?;
@@ -1064,6 +1185,88 @@ fn finish_vss_verification(
                 registry
                     .borrow_mut()
                     .release_reservation(reserved_terminal_handle)
+            });
+        let source_restore_result = if let Some(terminal_source) = terminal_source_cell.into_inner()
+        {
+            VSS_VERIFICATION_TERMINAL_SOURCE_REGISTRY.with(|registry| {
+                registry
+                    .borrow_mut()
+                    .restore(terminal_source_handle, terminal_source)
+            })
+        } else {
+            Ok(())
+        };
+        reservation_release_result?;
+        source_restore_result?;
+    }
+    result
+}
+
+fn finish_vss_low_degree_evidence(
+    verified_common_proof_handle: u32,
+    terminal_source_handle: u32,
+) -> Result<u32, CommonProofRuntimeError> {
+    let terminal_source = VSS_VERIFICATION_TERMINAL_SOURCE_REGISTRY
+        .with(|registry| registry.borrow_mut().take(terminal_source_handle))?;
+    let reserved_evidence_handle = match VERIFIED_VSS_LOW_DEGREE_EVIDENCE_REGISTRY
+        .with(|registry| registry.borrow_mut().reserve())
+    {
+        Ok(handle) => handle,
+        Err(error) => {
+            VSS_VERIFICATION_TERMINAL_SOURCE_REGISTRY.with(|registry| {
+                registry
+                    .borrow_mut()
+                    .restore(terminal_source_handle, terminal_source)
+            })?;
+            return Err(error);
+        }
+    };
+    let terminal_source_cell = RefCell::new(Some(terminal_source));
+    let result = super::preflight_and_consume_verified_common_proof_with_family_terminal(
+        &super::VerifiedCommonProofCapabilityHandle::from_identifier(verified_common_proof_handle),
+        |verified_common_proof| {
+            let terminal_source = terminal_source_cell.borrow();
+            let terminal_source = terminal_source
+                .as_ref()
+                .ok_or(CommonProofRuntimeError::WrongVerificationBinding)?;
+            let terminal_preflight =
+                VerifiedVssShareLinkageTerminal::preflight_from_borrowed_common_proof(
+                    verified_common_proof,
+                    &terminal_source.canonical_application_statement_bytes,
+                    &terminal_source.board_source,
+                    &terminal_source.verified_public_randomness,
+                )
+                .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+            let runtime_plan = selected_vss_proof_runtime_plan(
+                &terminal_source.canonical_application_statement_bytes,
+            )
+            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+            VerifiedSameSecretLowDegreePrerequisite::from_positive_verified_vss_share_linkage(
+                terminal_preflight.terminal(),
+                verified_common_proof,
+                &runtime_plan.relation_plan,
+            )
+            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)
+        },
+        |_verified_common_proof, evidence| {
+            let _terminal_source = terminal_source_cell
+                .borrow_mut()
+                .take()
+                .expect("VSS low-degree evidence preflight retained the exact source");
+            VERIFIED_VSS_LOW_DEGREE_EVIDENCE_REGISTRY.with(|registry| {
+                registry.borrow_mut().commit_preflighted(
+                    reserved_evidence_handle,
+                    VerifiedVssLowDegreeEvidenceState::Available(evidence),
+                )
+            })
+        },
+    );
+    if result.is_err() {
+        let reservation_release_result =
+            VERIFIED_VSS_LOW_DEGREE_EVIDENCE_REGISTRY.with(|registry| {
+                registry
+                    .borrow_mut()
+                    .release_reservation(reserved_evidence_handle)
             });
         let source_restore_result = if let Some(terminal_source) = terminal_source_cell.into_inner()
         {
@@ -1502,6 +1705,37 @@ pub unsafe extern "C" fn sealed_lattice_vss_share_linkage_finish_verification(
     }
 }
 
+/// Consumes one positive generic VSS proof capability and its exact board
+/// source into the opaque, one-shot low-degree evidence required by the
+/// same-secret construction. This path does not retain a broad VSS terminal
+/// and does not mint any accepted-setup authority.
+///
+/// # Safety
+///
+/// A non-null status pointer must name one writable `u32`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_vss_share_linkage_finish_low_degree_evidence(
+    verified_common_proof_handle: u32,
+    terminal_source_handle: u32,
+    status_pointer: *mut u32,
+) -> u32 {
+    match finish_vss_low_degree_evidence(verified_common_proof_handle, terminal_source_handle) {
+        Ok(output_handle) => {
+            unsafe { write_status(status_pointer, 0) };
+            output_handle
+        }
+        Err(error) => {
+            unsafe {
+                write_status(
+                    status_pointer,
+                    super::runtime_ffi::runtime_error_status(error),
+                )
+            };
+            0
+        }
+    }
+}
+
 /// Discards a VSS terminal source after its generic verifier operation is
 /// cancelled or reset.
 #[unsafe(no_mangle)]
@@ -1523,6 +1757,15 @@ pub extern "C" fn sealed_lattice_vss_share_linkage_discard_verified_terminal(
     terminal_handle: u32,
 ) -> u32 {
     consume_verified_vss_share_linkage_terminal(terminal_handle)
+        .map_or_else(super::runtime_ffi::runtime_error_status, |_| 0)
+}
+
+/// Permanently drops an unused one-shot VSS low-degree evidence token.
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_vss_share_linkage_discard_low_degree_evidence(
+    evidence_handle: u32,
+) -> u32 {
+    consume_verified_vss_low_degree_evidence(evidence_handle)
         .map_or_else(super::runtime_ffi::runtime_error_status, |_| 0)
 }
 
@@ -1621,7 +1864,11 @@ mod tests {
         .expect("selected VSS statement is canonical");
         let runtime_plan = selected_vss_proof_runtime_plan(&canonical_application_statement_bytes)
             .expect("selected VSS runtime plan");
-        let proof_byte_length = runtime_plan.limits.proof_byte_length();
+        let proof_byte_length = runtime_plan
+            .limits
+            .maximum_proof_byte_length()
+            .checked_sub(1)
+            .expect("the test proof is smaller than the absolute proof bound");
         let statement_source =
             VerifiedCommonProofStatementSource::from_test_verified_vss_statement_source(
                 &verified_public_randomness,
@@ -1675,6 +1922,15 @@ mod tests {
             expected_roots,
             "the selected tree order remains limb-major with coefficient roots before recipient roots",
         );
+        let row_code_whir_construction_plan_identity_hash =
+            CommonProofRelationPlanCapability::from_compiled_plan(
+                &compiled_relation_plan,
+                &relation_context,
+                None,
+                None,
+            )
+            .expect("the selected VSS relation mints one row-code WHIR construction plan")
+            .row_code_whir_construction_plan_identity_hash();
 
         CommonProofVerificationStateMachine::new(PollableCommonProofVerificationInput {
             protocol_version: FOUNDATION_PROFILE.protocol_version,
@@ -1684,10 +1940,11 @@ mod tests {
             relation_context: &relation_context,
             schedule_position: None,
             top_count: None,
+            row_code_whir_construction_plan_identity_hash,
             statement_owned_trees: &statement_trees,
             evaluator_auxiliary_roots: &[],
             declared_proof_byte_length: proof_byte_length,
-            proof_byte_ceiling: proof_byte_length,
+            proof_byte_ceiling: runtime_plan.limits.maximum_proof_byte_length(),
             maximum_resident_window_byte_length: proof_byte_length,
         })
         .expect("the exact selected VSS catalog initializes the current verifier");
@@ -1703,10 +1960,11 @@ mod tests {
                 relation_context: &relation_context,
                 schedule_position: None,
                 top_count: None,
+                row_code_whir_construction_plan_identity_hash,
                 statement_owned_trees: &wrong_root_trees,
                 evaluator_auxiliary_roots: &[],
                 declared_proof_byte_length: proof_byte_length,
-                proof_byte_ceiling: proof_byte_length,
+                proof_byte_ceiling: runtime_plan.limits.maximum_proof_byte_length(),
                 maximum_resident_window_byte_length: proof_byte_length,
             })
             .err(),
@@ -1734,7 +1992,7 @@ mod tests {
             VerifiedCommonProofStatementSource::from_test_verified_vss_statement_source(
                 &verified_public_randomness,
                 wrong_context_statement_bytes,
-                test_proof_stream_descriptor(wrong_context_runtime_plan.limits.proof_byte_length(),),
+                test_proof_stream_descriptor(proof_byte_length),
                 wrong_context_runtime_plan.relation_plan,
                 wrong_context_runtime_plan.limits,
             ),

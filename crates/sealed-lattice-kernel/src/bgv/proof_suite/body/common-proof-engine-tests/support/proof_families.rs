@@ -496,6 +496,8 @@ fn verify_compact_vss_proof(
             relation_context: &fixture.engine.relation_context,
             schedule_position: None,
             top_count: None,
+            row_code_whir_construction_plan_identity_hash:
+                fixture_row_code_whir_construction_plan_identity_hash(&fixture.engine),
             statement_owned_trees,
             evaluator_auxiliary_roots: &[],
             proof_source: proof_bytes,
@@ -1245,6 +1247,8 @@ fn verify_compact_aggregate_threshold_share_proof(
             relation_context: &fixture.engine.relation_context,
             schedule_position: None,
             top_count: None,
+            row_code_whir_construction_plan_identity_hash:
+                fixture_row_code_whir_construction_plan_identity_hash(&fixture.engine),
             statement_owned_trees,
             evaluator_auxiliary_roots: &[],
             proof_source: proof_bytes,

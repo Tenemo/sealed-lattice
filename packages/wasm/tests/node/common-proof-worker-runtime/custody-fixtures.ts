@@ -46,7 +46,10 @@ import {
     createCanonicalCarrierSigningKeyPairFixtures,
     signCanonicalCarrierFixtureMessage,
 } from '#packages/crypto/tests/support/canonical-carrier-signature-fixtures';
-import { openAuthenticatedCheckpointStore } from '#packages/protocol/src/runtime/authenticated-checkpoint-store';
+import {
+    openAuthenticatedCheckpointStore,
+    type AuthenticatedCheckpointPhysicalAccountingScope,
+} from '#packages/protocol/src/runtime/authenticated-checkpoint-store';
 import type {
     BrowserActionStorageCustody,
     BrowserActionStorageRootBinding,
@@ -819,10 +822,42 @@ export const openSameRealmCommonProofApplicationHost = async (input?: {
                     maximumDeletionBatchRecordCount:
                         commonProofStorageCapacityProfile.maximumLeaseCountPerTransaction,
                 });
+            let checkpointPhysicalAccountingScope:
+                | AuthenticatedCheckpointPhysicalAccountingScope
+                | undefined;
             try {
+                if (commonProofInput.checkpoint !== undefined) {
+                    const checkpointLineageIdentifier =
+                        'operationIdentity' in commonProofInput.checkpoint
+                            ? commonProofInput.checkpoint.operationIdentity
+                                  .checkpointLineageIdentifier
+                            : commonProofInput.checkpoint.resumeDescriptor.checkpointLineageIdentifier.slice();
+                    try {
+                        checkpointPhysicalAccountingScope =
+                            await commonProofInput.checkpoint.store.openPhysicalAccountingScope(
+                                checkpointLineageIdentifier,
+                            );
+                    } finally {
+                        checkpointLineageIdentifier.fill(0);
+                    }
+                }
+                const {
+                    checkpoint: configuredCheckpoint,
+                    ...commonProofInputWithoutCheckpoint
+                } = commonProofInput;
                 const commonProofCustody = openCommonProofBrowserCustody({
-                    ...commonProofInput,
+                    ...commonProofInputWithoutCheckpoint,
                     capacityReservation,
+                    ...(configuredCheckpoint === undefined ||
+                    checkpointPhysicalAccountingScope === undefined
+                        ? {}
+                        : {
+                              checkpoint: {
+                                  ...configuredCheckpoint,
+                                  physicalAccountingScope:
+                                      checkpointPhysicalAccountingScope,
+                              },
+                          }),
                     limits: {
                         maximumExternalMemoryByteLength: 1_073_741_824n,
                         maximumExternalMemoryObjectCount: 4_096,
@@ -837,6 +872,14 @@ export const openSameRealmCommonProofApplicationHost = async (input?: {
                     commonProofCustody
                 );
             } catch (error) {
+                if (
+                    commonProofInput.checkpoint !== undefined &&
+                    checkpointPhysicalAccountingScope !== undefined
+                ) {
+                    await commonProofInput.checkpoint.store.releasePhysicalAccountingScope(
+                        checkpointPhysicalAccountingScope,
+                    );
+                }
                 await capacityReservation.release();
                 throw error;
             }
@@ -1276,11 +1319,15 @@ export const createInstalledCommonProofGenerationFixture = (
             adapterHandle,
             checkpointPointer,
             checkpointByteLength,
+            generationCursorManifestPointer,
+            generationCursorManifestByteLength,
             statusPointer,
         ) => {
             expect([101, 103]).toContain(adapterHandle);
             expect(checkpointPointer).toBe(0);
             expect(checkpointByteLength).toBe(0);
+            expect(generationCursorManifestPointer).toBe(0);
+            expect(generationCursorManifestByteLength).toBe(0);
             writeUnsigned32(memory, statusPointer, 0);
             return adapterHandle === 101 ? 201 : 203;
         },
@@ -1531,6 +1578,8 @@ export const createInstalledCommonProofGenerationFixture = (
             adapterHandle,
             checkpointPointer,
             checkpointByteLength,
+            generationCursorManifestPointer,
+            generationCursorManifestByteLength,
             statusPointer,
         ) => {
             expect(adapterHandle).toBe(102);
@@ -1538,6 +1587,13 @@ export const createInstalledCommonProofGenerationFixture = (
             expect([
                 ...memoryBytes(memory, checkpointPointer, checkpointByteLength),
             ]).toEqual([...checkpointStateBytes]);
+            expect([
+                ...memoryBytes(
+                    memory,
+                    generationCursorManifestPointer,
+                    generationCursorManifestByteLength,
+                ),
+            ]).toEqual([...checkpointCursorBytes]);
             writeUnsigned32(memory, statusPointer, 0);
             return 202;
         },
@@ -1555,12 +1611,21 @@ export const createInstalledCommonProofGenerationFixture = (
             preparedGenerationHandle,
             checkpointPointer,
             checkpointByteLength,
+            generationCursorManifestPointer,
+            generationCursorManifestByteLength,
             statusPointer,
         ) => {
             expect(preparedGenerationHandle).toBe(202);
             expect([
                 ...memoryBytes(memory, checkpointPointer, checkpointByteLength),
             ]).toEqual([...checkpointStateBytes]);
+            expect([
+                ...memoryBytes(
+                    memory,
+                    generationCursorManifestPointer,
+                    generationCursorManifestByteLength,
+                ),
+            ]).toEqual([...checkpointCursorBytes]);
             writeUnsigned32(memory, statusPointer, 0);
             return 302;
         },
@@ -1921,7 +1986,7 @@ export const openReadyCommonProofApplication = async (): Promise<
             } finally {
                 resumeDescriptor.checkpointLineageIdentifier.fill(0);
                 resumeDescriptor.commonProofEnvironmentIdentifier.fill(0);
-                resumeDescriptor.privateRandomCursorManifestBytes.fill(0);
+                resumeDescriptor.generationCursorManifestBytes.fill(0);
                 resumeDescriptor.privateRandomnessStreamAttemptIdentifier?.fill(
                     0,
                 );

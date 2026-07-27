@@ -234,9 +234,15 @@ fn executor_enforces_chunked_writes_random_reads_and_exact_last_use() {
     executor
         .begin_object(&mut storage, second)
         .expect("second starts");
+    let mut second_object_bytes = Zeroizing::new(vec![9, 10, 11, 12]);
     executor
-        .append_object_bytes(&mut storage, second, &[9, 10, 11, 12])
-        .expect("second writes");
+        .append_owned_object_bytes(&mut storage, second, &mut second_object_bytes)
+        .expect("second writes through the optional owned path");
+    assert_eq!(
+        second_object_bytes.as_slice(),
+        &[9, 10, 11, 12],
+        "storage without an owned fast path keeps the producer allocation"
+    );
     executor
         .seal_object(&mut storage, second)
         .expect("second seals");
@@ -883,11 +889,8 @@ fn encode_worker_test_response(
     request: &ProofExternalMemoryTransactionRequest,
     ordered_results: &[(u32, ProofExternalMemoryObject, u64, &[u8])],
 ) -> Vec<u8> {
-    let operation_bytes = request
-        .encode_operation_bytes()
-        .expect("test request operations encode");
     let request_digest = request
-        .request_digest(&operation_bytes)
+        .request_digest()
         .expect("test request digest derives");
     let mut encoded = Vec::new();
     encoded.extend_from_slice(&EXTERNAL_MEMORY_REQUEST_SCHEMA_VERSION.to_le_bytes());

@@ -129,7 +129,7 @@ impl DistributionPurpose {
         self as u16
     }
 
-    fn from_canonical_code(code: u16) -> SchemaResult<Self> {
+    pub(super) fn from_canonical_code(code: u16) -> SchemaResult<Self> {
         Self::ALL
             .into_iter()
             .find(|purpose| purpose.canonical_code() == code)
@@ -315,7 +315,7 @@ impl ArtifactKind {
         }
     }
 
-    fn from_canonical_code(code: u16) -> SchemaResult<Self> {
+    pub(super) fn from_canonical_code(code: u16) -> SchemaResult<Self> {
         Self::ALL
             .into_iter()
             .find(|kind| kind.canonical_code() == code)

@@ -85,10 +85,10 @@ impl CommonProofSourcePolynomialRequest<'_> {
 
     pub(crate) const fn request_context(&self) -> CommonProofSourcePolynomialRequestContext {
         CommonProofSourcePolynomialRequestContext::new(
-            self.protocol_version,
-            self.suite_identifier,
-            self.application_statement_schema_identifier,
-            self.application_statement_hash,
+            self.protocol_version(),
+            self.suite_identifier(),
+            self.application_statement_schema_identifier(),
+            self.application_statement_hash(),
             self.relation_plan_hash,
             self.relation_plan_variant_hash,
             self.schedule_position,
@@ -137,19 +137,20 @@ impl CommonProofSourcePolynomialRequestContext {
         self.relation_plan_hash
     }
 
-    #[cfg(test)]
     pub(crate) const fn protocol_version(self) -> u16 {
         self.protocol_version
     }
 
-    #[cfg(test)]
     pub(crate) const fn suite_identifier(self) -> [u8; 64] {
         self.suite_identifier
     }
 
-    #[cfg(test)]
     pub(crate) const fn application_statement_schema_identifier(self) -> u16 {
         self.application_statement_schema_identifier
+    }
+
+    pub(crate) const fn application_statement_hash(self) -> [u8; 64] {
+        self.application_statement_hash
     }
 
     pub(crate) const fn relation_plan_variant_hash(self) -> [u8; 64] {
@@ -172,10 +173,10 @@ impl CommonProofSourcePolynomialRequestContext {
         crate::hashing::hash_framed_parts_512(
             SOURCE_GENERATION_BINDING_DOMAIN,
             &[
-                &self.protocol_version.to_le_bytes(),
-                &self.suite_identifier,
-                &self.application_statement_schema_identifier.to_le_bytes(),
-                &self.application_statement_hash,
+                &self.protocol_version().to_le_bytes(),
+                &self.suite_identifier(),
+                &self.application_statement_schema_identifier().to_le_bytes(),
+                &self.application_statement_hash(),
                 &self.relation_plan_hash,
                 &self.relation_plan_variant_hash,
                 &schedule_position_presence,
@@ -871,6 +872,13 @@ impl CommonProofPreChallengeSourceCursor {
     }
 }
 
+pub(crate) fn relation_reversed_column_bindings(
+    variant: &RelationPlanVariant,
+) -> Result<Vec<(u32, u32)>, CommonProofProverError> {
+    let (reversed_columns_by_source, _) = integer_lift_derived_columns(variant)?;
+    Ok(reversed_columns_by_source.into_iter().collect())
+}
+
 pub(crate) fn construct_reversed_relation_column<Coins>(
     variant: &RelationPlanVariant,
     source_column_ordinal: u32,
@@ -1039,6 +1047,44 @@ where
         );
     }
     Ok(coefficients)
+}
+
+/// Samples the separately committed opening-batch polynomial in secret mode.
+pub(crate) fn construct_opening_batch_mask<Coins>(
+    variant: &RelationPlanVariant,
+    coins: &mut Coins,
+    maximum_candidate_draws_per_output: u32,
+) -> Result<
+    Option<Zeroizing<Vec<ProofChallengeExtensionElement>>>,
+    CommonProofPrivateCoinError<Coins::Error>,
+>
+where
+    Coins: CommonProofPrivateCoinSource,
+{
+    if variant.proof_privacy_mode() == ProofPrivacyMode::PublicOnly {
+        return Ok(None);
+    }
+    let mut descriptors = variant.ordered_masks().iter().copied().filter(|mask| {
+        mask.mask_kind() == RelationMaskKind::OpeningBatch
+            && mask.target_class() == RelationMaskTargetClass::Batch
+            && mask.target_ordinal() == 0
+    });
+    let descriptor = descriptors
+        .next()
+        .ok_or(CommonProofPrivateCoinError::Prover(
+            CommonProofProverError::InvalidMask,
+        ))?;
+    if descriptors.next().is_some() {
+        return Err(CommonProofPrivateCoinError::Prover(
+            CommonProofProverError::InvalidMask,
+        ));
+    }
+    Ok(Some(sample_private_extension_polynomial(
+        coins,
+        CommonProofPrivateCoinCoordinate::from_mask(descriptor.mask_coordinate()),
+        descriptor.mask_degree_bound_exclusive(),
+        maximum_candidate_draws_per_output,
+    )?))
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1463,6 +1509,102 @@ fn trace_masks_by_column(
         }
     }
     Ok(masks)
+}
+
+/// Returns the maximum authenticated coefficient-position count supplied for
+/// every genuine pre-challenge source column.
+///
+/// A relation descriptor owns an admissible degree ceiling, not necessarily
+/// the number of coefficients produced by its authenticated source. Verifier
+/// sequences and unmasked prover rows are interpolated over the trace domain;
+/// committed-material sources already carry their persistent trace mask.
+/// Keeping this derivation beside the production source cursor prevents source
+/// manifests and accounting from silently treating every degree ceiling as
+/// authenticated source data.
+pub(crate) fn authenticated_pre_challenge_source_coefficient_position_counts(
+    variant: &RelationPlanVariant,
+) -> Result<BTreeMap<u32, u64>, CommonProofProverError> {
+    let requested_column_ordinals = requested_pre_challenge_source_column_ordinals(variant)?;
+    let mut counts = BTreeMap::new();
+
+    for column_ordinal in requested_column_ordinals {
+        let descriptor = variant
+            .ordered_columns()
+            .get(
+                usize::try_from(column_ordinal)
+                    .map_err(|_| CommonProofProverError::CountOverflow)?,
+            )
+            .ok_or(CommonProofProverError::InvalidColumn)?;
+        let coefficient_position_count = match descriptor.origin() {
+            RelationColumnOrigin::BoundTree { .. } => descriptor.source_degree_bound_exclusive(),
+            RelationColumnOrigin::VerifierSequence { .. } | RelationColumnOrigin::Prover => {
+                descriptor
+                    .source_degree_bound_exclusive()
+                    .min(variant.trace_domain_size())
+            }
+        };
+        if coefficient_position_count == 0
+            || coefficient_position_count > descriptor.source_degree_bound_exclusive()
+            || counts
+                .insert(column_ordinal, coefficient_position_count)
+                .is_some()
+        {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+    }
+    Ok(counts)
+}
+
+/// Returns the maximum coefficient-position count persisted after applying
+/// every proof-owned pre-challenge trace mask.
+pub(crate) fn persisted_pre_challenge_column_coefficient_position_counts(
+    variant: &RelationPlanVariant,
+) -> Result<BTreeMap<u32, u64>, CommonProofProverError> {
+    let proof_tree_roles = proof_created_tree_roles_by_column(variant)?;
+    let trace_masks = trace_masks_by_column(variant)?;
+    let source_counts = authenticated_pre_challenge_source_coefficient_position_counts(variant)?;
+    let mut counts = BTreeMap::new();
+
+    for (column_ordinal, source_count) in source_counts {
+        let descriptor = variant
+            .ordered_columns()
+            .get(
+                usize::try_from(column_ordinal)
+                    .map_err(|_| CommonProofProverError::CountOverflow)?,
+            )
+            .ok_or(CommonProofProverError::InvalidColumn)?;
+        let persisted_position_count = match proof_tree_roles.get(&column_ordinal) {
+            Some(ProofTreeRole::BaseOracle) => match (
+                descriptor.origin(),
+                trace_masks.get(&column_ordinal).copied(),
+            ) {
+                (RelationColumnOrigin::Prover, Some(mask))
+                    if variant.proof_privacy_mode() == ProofPrivacyMode::SecretBearing =>
+                {
+                    variant
+                        .trace_domain_size()
+                        .checked_add(mask.mask_degree_bound_exclusive())
+                        .ok_or(CommonProofProverError::CountOverflow)?
+                }
+                (RelationColumnOrigin::Prover, _) => {
+                    return Err(CommonProofProverError::InvalidMask);
+                }
+                (_, None) => source_count,
+                (_, Some(_)) => return Err(CommonProofProverError::InvalidMask),
+            },
+            Some(_) => return Err(CommonProofProverError::InvalidColumn),
+            None => source_count,
+        };
+        if persisted_position_count == 0
+            || persisted_position_count > descriptor.source_degree_bound_exclusive()
+            || counts
+                .insert(column_ordinal, persisted_position_count)
+                .is_some()
+        {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+    }
+    Ok(counts)
 }
 
 fn validate_source_column(
@@ -2515,6 +2657,16 @@ pub(crate) struct RelationColumnReplayRequirement {
     pub(super) auxiliary_synthesis_read_count: u64,
 }
 
+impl RelationColumnReplayRequirement {
+    pub(crate) const fn pre_challenge_read_count(self) -> u64 {
+        self.pre_challenge_read_count
+    }
+
+    pub(crate) const fn auxiliary_synthesis_read_count(self) -> u64 {
+        self.auxiliary_synthesis_read_count
+    }
+}
+
 #[derive(Clone, Copy)]
 enum RelationColumnReplayUse {
     PreChallenge,
@@ -2632,8 +2784,9 @@ mod requested_pre_challenge_source_column_tests {
     };
 
     use super::{
-        integer_lift_derived_columns, proof_created_tree_roles_by_column,
-        requested_pre_challenge_source_column_ordinals,
+        authenticated_pre_challenge_source_coefficient_position_counts,
+        integer_lift_derived_columns, persisted_pre_challenge_column_coefficient_position_counts,
+        proof_created_tree_roles_by_column, requested_pre_challenge_source_column_ordinals,
     };
 
     fn expected_requested_source_column_count(schema_identifier: u16) -> usize {
@@ -2695,6 +2848,33 @@ mod requested_pre_challenge_source_column_tests {
                         .all(|pair| pair[0] < pair[1]),
                     "requested source columns remain in strict physical-column order",
                 );
+                let source_coefficient_position_counts =
+                    authenticated_pre_challenge_source_coefficient_position_counts(variant)
+                        .expect("selected source coefficient-position counts derive");
+                assert!(
+                    source_coefficient_position_counts
+                        .keys()
+                        .copied()
+                        .eq(requested_column_ordinals.iter().copied()),
+                    "source position counts own exactly the requested source catalog",
+                );
+                if schema_identifier
+                    == ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER
+                {
+                    assert_eq!(
+                        source_coefficient_position_counts.values().sum::<u64>(),
+                        33_128_448,
+                        "the raw authenticated same-secret source position census is exact",
+                    );
+                    assert_eq!(
+                        persisted_pre_challenge_column_coefficient_position_counts(variant)
+                            .expect("selected persisted source position counts derive")
+                            .values()
+                            .sum::<u64>(),
+                        34_462_440,
+                        "proof-owned masks restore the normative persisted census",
+                    );
+                }
 
                 let proof_tree_roles = proof_created_tree_roles_by_column(variant)
                     .expect("selected proof tree roles derive");

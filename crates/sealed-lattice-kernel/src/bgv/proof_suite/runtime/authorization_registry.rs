@@ -1,6 +1,7 @@
-use super::super::CommonProofAuthenticatedSourceReadRequest;
-#[cfg(test)]
-use super::ProofExternalMemoryTransactionRequest;
+use super::super::{
+    CommonProofAuthenticatedSourceReadRequest, ExactSameSecretAuthenticatedTranscriptPrefixRequest,
+    PreparedExactSameSecretTranscriptPrefix,
+};
 use super::{
     BTreeMap, BrowserWorkerAuthenticatedStorageHeadSource,
     BrowserWorkerAuthenticatedStorageTransitionSource, CanonicalStreamDomain,
@@ -20,6 +21,8 @@ use super::{
     VerifiedCommonProofStatementSource, Zeroizing, common_proof_registry_entry_count,
     hash_framed_parts_512, require_common_proof_registry_entry_capacity,
 };
+#[cfg(test)]
+use super::{CommonProofGenerationAuthorization, ProofExternalMemoryTransactionRequest};
 use crate::foundation::{StreamDescriptor, VerifiedBoardApplicationSource};
 
 /// Exact durable application reservation consumed by one proof attempt.
@@ -27,12 +30,12 @@ use crate::foundation::{StreamDescriptor, VerifiedBoardApplicationSource};
 pub(crate) struct CommonProofApplicationBinding {
     pub(super) proof_application_slot_hash: [u8; HASH_BYTE_LENGTH],
     pub(super) canonical_proof_application_binding_hash: [u8; HASH_BYTE_LENGTH],
+    pub(super) row_code_whir_construction_plan_identity_hash: [u8; HASH_BYTE_LENGTH],
     pub(super) application_statement_schema_identifier: u16,
     pub(super) proof_header_hash: [u8; HASH_BYTE_LENGTH],
     pub(super) proof_stream_domain: CanonicalStreamDomain,
     pub(super) proof_stream_full_object_digest: [u8; HASH_BYTE_LENGTH],
     pub(super) proof_byte_length: u64,
-    pub(super) proof_query_count: u32,
 }
 
 impl CommonProofApplicationBinding {
@@ -40,29 +43,28 @@ impl CommonProofApplicationBinding {
     pub(crate) fn new(
         proof_application_slot_hash: [u8; HASH_BYTE_LENGTH],
         canonical_proof_application_binding_hash: [u8; HASH_BYTE_LENGTH],
+        row_code_whir_construction_plan_identity_hash: [u8; HASH_BYTE_LENGTH],
         application_statement_schema_identifier: u16,
         proof_header_hash: [u8; HASH_BYTE_LENGTH],
         proof_stream_domain: CanonicalStreamDomain,
         proof_stream_full_object_digest: [u8; HASH_BYTE_LENGTH],
         proof_byte_length: u64,
-        proof_query_count: u32,
     ) -> Result<Self, CommonProofRuntimeError> {
         if application_statement_schema_identifier == 0
             || proof_byte_length == 0
             || proof_byte_length > MAXIMUM_COMMON_PROOF_BYTE_LENGTH as u64
-            || proof_query_count == 0
         {
             return Err(CommonProofRuntimeError::InvalidLimits);
         }
         Ok(Self {
             proof_application_slot_hash,
             canonical_proof_application_binding_hash,
+            row_code_whir_construction_plan_identity_hash,
             application_statement_schema_identifier,
             proof_header_hash,
             proof_stream_domain,
             proof_stream_full_object_digest,
             proof_byte_length,
-            proof_query_count,
         })
     }
 
@@ -72,12 +74,12 @@ impl CommonProofApplicationBinding {
             &[
                 &self.proof_application_slot_hash,
                 &self.canonical_proof_application_binding_hash,
+                &self.row_code_whir_construction_plan_identity_hash,
                 &self.application_statement_schema_identifier.to_le_bytes(),
                 &self.proof_header_hash,
                 &self.proof_stream_domain.canonical_code().to_le_bytes(),
                 &self.proof_stream_full_object_digest,
                 &self.proof_byte_length.to_le_bytes(),
-                &self.proof_query_count.to_le_bytes(),
             ],
         )
     }
@@ -221,19 +223,26 @@ struct CommonProofOperationEntry {
 #[derive(Clone, Copy)]
 struct CommonProofRelationPlanTerminalBinding {
     relation_plan_hash: [u8; HASH_BYTE_LENGTH],
+    row_code_whir_construction_plan_identity_hash: [u8; HASH_BYTE_LENGTH],
+    expected_verified_query_count: u32,
     relation_plan_variant_hash: [u8; HASH_BYTE_LENGTH],
     schedule_position: Option<u32>,
     top_count: Option<u16>,
 }
 
 impl CommonProofRelationPlanTerminalBinding {
-    const fn from_relation_plan(relation_plan: &CommonProofRelationPlanCapability) -> Self {
-        Self {
+    fn try_from_relation_plan(
+        relation_plan: &CommonProofRelationPlanCapability,
+    ) -> Result<Self, CommonProofRuntimeError> {
+        Ok(Self {
             relation_plan_hash: relation_plan.relation_plan_hash(),
+            row_code_whir_construction_plan_identity_hash: relation_plan
+                .row_code_whir_construction_plan_identity_hash(),
+            expected_verified_query_count: relation_plan.proof_query_count()?,
             relation_plan_variant_hash: relation_plan.relation_plan_variant_hash(),
             schedule_position: relation_plan.schedule_position,
             top_count: relation_plan.top_count,
-        }
+        })
     }
 }
 
@@ -266,6 +275,7 @@ pub(crate) struct ConsumedVerifiedCommonProofCapability {
 /// Callback-scoped view of one still-retained verifier capability. Exact
 /// family adapters use this view to complete every fallible terminal and
 /// destination check before the registry permanently retires the handle.
+#[derive(Clone, Copy)]
 pub(crate) struct BorrowedVerifiedCommonProofCapability<'capability> {
     entry: &'capability VerifiedCommonProofCapabilityEntry,
 }
@@ -352,10 +362,6 @@ impl BorrowedVerifiedCommonProofCapability<'_> {
 
     pub(crate) const fn proof_byte_length(&self) -> u64 {
         self.entry.proof.proof_byte_length()
-    }
-
-    pub(crate) const fn verified_query_count(&self) -> u32 {
-        self.entry.proof.verified_query_count()
     }
 
     pub(crate) const fn relation_plan_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
@@ -541,8 +547,6 @@ pub(crate) struct PreparedCommonProofAuthorization {
     application_statement_schema_identifier: u16,
     #[cfg(test)]
     proof_byte_length: u64,
-    #[cfg(test)]
-    verified_query_count: u32,
 }
 
 impl PreparedCommonProofAuthorization {
@@ -571,11 +575,6 @@ impl PreparedCommonProofAuthorization {
     #[cfg(test)]
     pub(crate) const fn proof_byte_length(&self) -> u64 {
         self.proof_byte_length
-    }
-
-    #[cfg(test)]
-    pub(crate) const fn verified_query_count(&self) -> u32 {
-        self.verified_query_count
     }
 }
 
@@ -736,18 +735,29 @@ impl CommonProofRuntimeRegistry {
         &mut self,
         prepared: PreparedCommonProofGeneration,
         authenticated_checkpoint_state: &[u8],
+        authenticated_generation_cursor_manifest: &[u8],
     ) -> Result<CommonProofGenerationOperationHandle, CommonProofGenerationWorkerError> {
         let handle = self.preissue_generation_operation_handle()?;
-        self.resume_owned_generation_with_handle(prepared, authenticated_checkpoint_state, handle)
+        self.resume_owned_generation_with_handle(
+            prepared,
+            authenticated_checkpoint_state,
+            authenticated_generation_cursor_manifest,
+            handle,
+        )
     }
 
     pub(crate) fn resume_owned_generation_with_handle(
         &mut self,
         prepared: PreparedCommonProofGeneration,
         authenticated_checkpoint_state: &[u8],
+        authenticated_generation_cursor_manifest: &[u8],
         handle: CommonProofGenerationOperationHandle,
     ) -> Result<CommonProofGenerationOperationHandle, CommonProofGenerationWorkerError> {
-        let worker = CommonProofGenerationWorker::resume(prepared, authenticated_checkpoint_state)?;
+        let worker = CommonProofGenerationWorker::resume(
+            prepared,
+            authenticated_checkpoint_state,
+            authenticated_generation_cursor_manifest,
+        )?;
         self.generation_operations
             .insert(handle, CommonProofGenerationOperationEntry { worker });
         Ok(handle)
@@ -764,16 +774,27 @@ impl CommonProofRuntimeRegistry {
             .poll()
     }
 
-    pub(crate) fn generation_storage_request(
+    pub(crate) fn generation_storage_request_byte_length(
         &self,
         handle: CommonProofGenerationOperationHandle,
-    ) -> Result<&[u8], CommonProofRuntimeError> {
+    ) -> Result<usize, CommonProofRuntimeError> {
         self.generation_operations
             .get(&handle)
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
             .worker
-            .pending_storage_request()
-            .ok_or(CommonProofRuntimeError::TransactionResponseMissing)
+            .pending_storage_request_byte_length()
+    }
+
+    pub(crate) fn encode_generation_storage_request_into(
+        &mut self,
+        handle: CommonProofGenerationOperationHandle,
+        output: &mut [u8],
+    ) -> Result<(), CommonProofRuntimeError> {
+        self.generation_operations
+            .get_mut(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .worker
+            .encode_pending_storage_request_into(output)
     }
 
     pub(crate) fn generation_external_memory_accounting(
@@ -912,6 +933,29 @@ impl CommonProofRuntimeRegistry {
             .supply_authenticated_source_range(request, authenticated_bytes)
     }
 
+    pub(in crate::bgv::proof_suite) fn generation_authenticated_transcript_prefix_request(
+        &self,
+        handle: CommonProofGenerationOperationHandle,
+    ) -> Result<ExactSameSecretAuthenticatedTranscriptPrefixRequest, CommonProofRuntimeError> {
+        self.generation_operations
+            .get(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .worker
+            .authenticated_transcript_prefix_request()
+    }
+
+    pub(in crate::bgv::proof_suite) fn supply_generation_authenticated_transcript_prefix(
+        &mut self,
+        handle: CommonProofGenerationOperationHandle,
+        prepared: PreparedExactSameSecretTranscriptPrefix,
+    ) -> Result<(), CommonProofRuntimeError> {
+        self.generation_operations
+            .get_mut(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .worker
+            .supply_authenticated_transcript_prefix(prepared)
+    }
+
     pub(crate) fn generation_output_chunk(
         &self,
         handle: CommonProofGenerationOperationHandle,
@@ -1022,6 +1066,24 @@ impl CommonProofRuntimeRegistry {
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
     }
 
+    #[cfg(test)]
+    pub(crate) fn insert_test_generated_proof(
+        &mut self,
+        handle_identifier: u32,
+        authorization: CommonProofGenerationAuthorization,
+    ) -> Result<GeneratedCommonProofCapabilityHandle, CommonProofRuntimeError> {
+        let handle = GeneratedCommonProofCapabilityHandle::from_identifier(handle_identifier);
+        if handle_identifier == 0 || self.generated_capabilities.contains_key(&handle) {
+            return Err(CommonProofRuntimeError::WrongVerificationBinding);
+        }
+        let proof = GeneratedCommonProof::from_genuine_test_authorization(authorization)?;
+        self.generated_capabilities
+            .insert(handle, GeneratedCommonProofCapabilityEntry { proof });
+        Ok(GeneratedCommonProofCapabilityHandle::from_identifier(
+            handle_identifier,
+        ))
+    }
+
     /// Retires every still-live member of a family-owned pending set. Missing
     /// or duplicated identifiers remain a loud binding error, but cannot make
     /// another retained proof leak when the owning lifecycle is cancelled.
@@ -1071,6 +1133,22 @@ impl CommonProofRuntimeRegistry {
                 expected_roster_position,
                 expected_schedule_position,
                 canonical_application_statement_bytes,
+            )
+    }
+
+    pub(crate) fn preflight_generated_proof_attempt_binding(
+        &self,
+        handle: &GeneratedCommonProofCapabilityHandle,
+        expected_generation_binding_hash: [u8; HASH_BYTE_LENGTH],
+        expected_attempt_identifier: [u8; 32],
+    ) -> Result<(), CommonProofRuntimeError> {
+        self.generated_capabilities
+            .get(handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .proof
+            .preflight_attempt_binding(
+                expected_generation_binding_hash,
+                expected_attempt_identifier,
             )
     }
 
@@ -1214,7 +1292,12 @@ impl CommonProofRuntimeRegistry {
         relation_plan: &CommonProofRelationPlanCapability,
         limits: CommonProofRuntimeLimits,
     ) -> Result<CommonProofVerificationOperationHandle, CommonProofRuntimeError> {
-        if binding.relation_plan_hash != relation_plan.relation_plan_hash() {
+        if binding.relation_plan_hash != relation_plan.relation_plan_hash()
+            || binding
+                .proof_application
+                .row_code_whir_construction_plan_identity_hash
+                != relation_plan.row_code_whir_construction_plan_identity_hash()
+        {
             return Err(CommonProofRuntimeError::WrongVerificationBinding);
         }
         self.require_entry_capacity()?;
@@ -1358,7 +1441,7 @@ impl CommonProofRuntimeRegistry {
                 .as_ref()
                 .ok_or(CommonProofRuntimeError::WrongOperationPhase)?
                 .relation_plan();
-            CommonProofRelationPlanTerminalBinding::from_relation_plan(relation_plan)
+            CommonProofRelationPlanTerminalBinding::try_from_relation_plan(relation_plan)?
         };
         let (proof, verified_stream) = worker.finish()?;
         self.register_verified_proof_with_identifier(
@@ -1468,7 +1551,7 @@ impl CommonProofRuntimeRegistry {
         )?;
         self.register_verified_proof_with_identifier(
             handle,
-            CommonProofRelationPlanTerminalBinding::from_relation_plan(relation_plan),
+            CommonProofRelationPlanTerminalBinding::try_from_relation_plan(relation_plan)?,
             proof,
             verified_stream,
             capability_identifier,
@@ -1489,6 +1572,8 @@ impl CommonProofRuntimeRegistry {
             return Err(CommonProofRuntimeError::CancellationRequested);
         }
         if operation.binding.relation_plan_hash != relation_plan.relation_plan_hash
+            || proof_application.row_code_whir_construction_plan_identity_hash
+                != relation_plan.row_code_whir_construction_plan_identity_hash
             || operation.binding.suite_identifier != proof.suite_identifier()
             || proof_application.application_statement_schema_identifier
                 != proof.application_statement_schema_identifier()
@@ -1498,9 +1583,14 @@ impl CommonProofRuntimeRegistry {
                 != verified_stream.full_object_digest().into_bytes()
             || proof_application.proof_byte_length != verified_stream.total_byte_length()
             || proof_application.proof_byte_length != proof.proof_byte_length()
-            || usize::try_from(proof_application.proof_byte_length).ok()
-                != Some(operation.limits.proof_byte_length())
-            || proof_application.proof_query_count != proof.verified_query_count()
+            || usize::try_from(proof_application.proof_byte_length)
+                .ok()
+                .is_none_or(|proof_byte_length| {
+                    proof_byte_length > operation.limits.maximum_proof_byte_length()
+                })
+            || proof.verified_query_count() != relation_plan.expected_verified_query_count
+            || proof.row_code_whir_construction_plan_identity_hash()
+                != relation_plan.row_code_whir_construction_plan_identity_hash
             || proof.relation_plan_variant_hash() != relation_plan.relation_plan_variant_hash
             || proof.schedule_position() != relation_plan.schedule_position
             || proof.top_count() != relation_plan.top_count
@@ -1508,6 +1598,10 @@ impl CommonProofRuntimeRegistry {
                 source.verification_binding() != operation.binding
                     || source.relation_plan().relation_plan_hash()
                         != relation_plan.relation_plan_hash
+                    || source
+                        .relation_plan()
+                        .row_code_whir_construction_plan_identity_hash()
+                        != relation_plan.row_code_whir_construction_plan_identity_hash
                     || source.relation_plan().relation_plan_variant_hash()
                         != relation_plan.relation_plan_variant_hash
                     || source.relation_plan().schedule_position != relation_plan.schedule_position
@@ -1700,8 +1794,6 @@ impl CommonProofRuntimeRegistry {
                 .application_statement_schema_identifier(),
             #[cfg(test)]
             proof_byte_length: entry.proof.proof_byte_length(),
-            #[cfg(test)]
-            verified_query_count: entry.proof.verified_query_count(),
         };
         self.pending_authorizations.insert(
             PendingCommonProofAuthorizationHandle(pending_identifier),
@@ -1914,7 +2006,14 @@ fn durable_authorization_frame(
             .proof_application
             .canonical_proof_application_binding_hash,
     );
-    append_authorization_frame_bytes(&mut frame, &mut cursor, &entry.binding.relation_plan_hash);
+    append_authorization_frame_bytes(
+        &mut frame,
+        &mut cursor,
+        &entry
+            .binding
+            .proof_application
+            .row_code_whir_construction_plan_identity_hash,
+    );
     append_authorization_frame_bytes(
         &mut frame,
         &mut cursor,
@@ -1952,11 +2051,6 @@ fn durable_authorization_frame(
         &mut frame,
         &mut cursor,
         &entry.proof.proof_byte_length().to_le_bytes(),
-    );
-    append_authorization_frame_bytes(
-        &mut frame,
-        &mut cursor,
-        &entry.proof.verified_query_count().to_le_bytes(),
     );
     append_authorization_frame_bytes(
         &mut frame,

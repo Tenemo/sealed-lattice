@@ -656,10 +656,10 @@ impl CommonProofMerkleMaterializer {
                         self.current_byte_offset == self.current_leaf_bytes.len();
                     if self.leaf_bytes_write_chunk.len() == maximum_chunk_byte_length {
                         executor
-                            .append_object_bytes(
+                            .append_owned_object_bytes(
                                 storage,
                                 self.leaf_bytes_object,
-                                &self.leaf_bytes_write_chunk,
+                                &mut self.leaf_bytes_write_chunk,
                             )
                             .map_err(CommonProofTreeStorageError::Storage)?;
                         self.leaf_bytes_write_chunk.zeroize();
@@ -685,10 +685,10 @@ impl CommonProofMerkleMaterializer {
                         continue;
                     }
                     executor
-                        .append_object_bytes(
+                        .append_owned_object_bytes(
                             storage,
                             self.leaf_bytes_object,
-                            &self.leaf_bytes_write_chunk,
+                            &mut self.leaf_bytes_write_chunk,
                         )
                         .map_err(CommonProofTreeStorageError::Storage)?;
                     self.leaf_bytes_write_chunk.zeroize();

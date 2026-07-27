@@ -4,14 +4,18 @@
 //! - Both batch them the same way under one challenge.
 //! - The committed polynomial is the only mode-specific datum.
 //! - The prefix prover keeps that polynomial separately and embeds this state.
+//!
+//! Local modification: prefix claims may retain table shapes without duplicate
+//! source-table evaluations after move-only materialization. See `UPSTREAM.md`.
 
 use alloc::vec::Vec;
 
-use p3_field::{ExtensionField, Field, dot_product};
+use p3_field::{dot_product, ExtensionField, Field};
 
-use crate::Claim;
 use crate::layout::witness::{Table, TablePlacement};
 use crate::layout::{ProverMultiClaim, ProverVirtualClaim};
+use crate::table::TableShape;
+use crate::Claim;
 
 /// Opening claims recorded against one stacked polynomial, shared by both binding modes.
 ///
@@ -19,8 +23,11 @@ use crate::layout::{ProverMultiClaim, ProverVirtualClaim};
 /// - Both provers embed this and add only their mode-specific state on top.
 #[derive(Debug, Clone)]
 pub struct StackedClaims<F: Field, EF: ExtensionField<F>> {
-    /// Source tables behind the stacked polynomial.
+    /// Source tables retained by suffix mode. Prefix mode leaves this empty and
+    /// reconstructs bounded columns from its interleaved polynomial.
     pub(crate) tables: Vec<Table<F>>,
+    /// Source shapes survive after prefix mode releases duplicate table data.
+    pub(crate) table_shapes: Vec<TableShape>,
     /// Per-table placement metadata inside the stacked polynomial.
     pub(crate) placements: Vec<TablePlacement>,
     /// Number of variables of the stacked polynomial.
@@ -54,11 +61,34 @@ impl<F: Field, EF: ExtensionField<F>> StackedClaims<F, EF> {
         num_variables: usize,
         folding: usize,
     ) -> Self {
+        let table_shapes = tables.iter().map(Table::shape).collect();
+        Self::new_with_optional_tables(tables, table_shapes, placements, num_variables, folding)
+    }
+
+    /// Creates prefix claim state from shape metadata without retaining source
+    /// tables that are already represented by the interleaved polynomial.
+    pub(crate) fn new_without_tables(
+        table_shapes: Vec<TableShape>,
+        placements: Vec<TablePlacement>,
+        num_variables: usize,
+        folding: usize,
+    ) -> Self {
+        Self::new_with_optional_tables(Vec::new(), table_shapes, placements, num_variables, folding)
+    }
+
+    fn new_with_optional_tables(
+        tables: Vec<Table<F>>,
+        table_shapes: Vec<TableShape>,
+        placements: Vec<TablePlacement>,
+        num_variables: usize,
+        folding: usize,
+    ) -> Self {
         // One empty claim list per source table.
         // Virtual claims live in their own bucket.
-        let claim_map = (0..tables.len()).map(|_| Vec::new()).collect();
+        let claim_map = (0..table_shapes.len()).map(|_| Vec::new()).collect();
         Self {
             tables,
+            table_shapes,
             placements,
             num_variables,
             folding,
@@ -79,7 +109,7 @@ impl<F: Field, EF: ExtensionField<F>> StackedClaims<F, EF> {
 
     /// Returns the number of variables of table `id`.
     pub(crate) fn num_variables_table(&self, id: usize) -> usize {
-        self.tables[id].num_variables()
+        self.table_shapes[id].num_variables()
     }
 
     /// Returns the total number of concrete openings recorded so far.
@@ -160,8 +190,8 @@ mod tests {
     use alloc::vec;
 
     use p3_baby_bear::BabyBear;
-    use p3_field::PrimeCharacteristicRing;
     use p3_field::extension::BinomialExtensionField;
+    use p3_field::PrimeCharacteristicRing;
     use p3_multilinear_util::point::Point;
     use p3_multilinear_util::poly::Poly;
 

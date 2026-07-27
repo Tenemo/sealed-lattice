@@ -20,10 +20,13 @@ use bgv::proof_suite::{
     absorb_authenticated_recipient_vss_payload, aggregate_threshold_share_runtime_error_status,
     begin_aggregate_threshold_share_recipient_authority,
     bind_generated_aggregate_threshold_share_proof_to_board,
+    cancel_aggregate_threshold_share_private_share_acceptance_carrier,
     discard_aggregate_threshold_share_generation_board_binding_source,
     discard_aggregate_threshold_share_recipient_authority,
     discard_aggregate_threshold_share_verification_terminal_source,
+    finish_aggregate_threshold_share_private_share_acceptance_carrier,
     finish_aggregate_threshold_share_verification, prepare_aggregate_threshold_share_generation,
+    prepare_aggregate_threshold_share_private_share_acceptance_carrier,
     prepare_aggregate_threshold_share_verification,
 };
 use bgv::proof_suite::{
@@ -53,8 +56,8 @@ use foundation::{
     finish_mailbox_gcm_authentication, finish_mailbox_gcm_decryptor, finish_mailbox_gcm_encryptor,
     finish_state_output_intent_verification, finish_state_output_verification,
     release_verified_finality, release_verified_state_object, run_action_randomness_command,
-    run_local_storage_root_command, run_state_producer_command, verify_finality,
-    verify_state_reservation, verify_state_reservation_intent,
+    run_local_storage_root_command, run_state_producer_command, verify_canonical_suite_artifact,
+    verify_finality, verify_state_reservation, verify_state_reservation_intent,
 };
 
 pub use encoding::run_transcript_core_command;
@@ -148,6 +151,34 @@ unsafe fn canonical_stream_input<'input>(pointer: *const u8, length: usize) -> &
         &[]
     } else {
         unsafe { slice::from_raw_parts(pointer, length) }
+    }
+}
+
+/// Verifies one canonical suite artifact against its canonical suite record.
+///
+/// Returns zero on success or the canonical refusal-reason code on failure.
+///
+/// # Safety
+///
+/// Each pointer must either be null with a zero length or point to readable
+/// bytes of the corresponding length in WebAssembly linear memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_foundation_verify_suite_artifact(
+    suite_record_pointer: *const u8,
+    suite_record_byte_length: usize,
+    artifact_kind_code: u32,
+    artifact_pointer: *const u8,
+    artifact_byte_length: usize,
+) -> u32 {
+    let Ok(artifact_kind_code) = u16::try_from(artifact_kind_code) else {
+        return u32::from(foundation::RefusalReason::UnsupportedVersionOrSuite.canonical_code());
+    };
+    let suite_record =
+        unsafe { canonical_stream_input(suite_record_pointer, suite_record_byte_length) };
+    let artifact = unsafe { canonical_stream_input(artifact_pointer, artifact_byte_length) };
+    match verify_canonical_suite_artifact(suite_record, artifact_kind_code, artifact) {
+        Ok(()) => 0,
+        Err(error) => u32::from(error.refusal_reason.canonical_code()),
     }
 }
 
@@ -497,6 +528,147 @@ pub unsafe extern "C" fn sealed_lattice_aggregate_threshold_share_prepare_resume
             AggregateThresholdShareGenerationMode::Resume,
         )
     }
+}
+
+/// Retains the exact private-share acceptance envelope after the generated
+/// aggregate proof has reached canonical completion. Every payload field is
+/// derived inside Rust from the generation statement and proof capability.
+///
+/// # Safety
+///
+/// The roster pointer must name its declared readable range. The carrier
+/// length output must name one writable `u32`, the signature-message output
+/// must name 64 writable bytes, and a non-null status pointer must name one
+/// writable `u32`.
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_aggregate_threshold_share_prepare_private_share_acceptance_carrier(
+    generated_common_proof_handle: u32,
+    board_binding_source_handle: u32,
+    canonical_roster_pointer: *const u8,
+    canonical_roster_byte_length: usize,
+    canonical_carrier_byte_length_output_pointer: *mut u32,
+    signature_message_output_pointer: *mut u8,
+    signature_message_output_byte_length: usize,
+    status_pointer: *mut u32,
+) -> u32 {
+    let result: Result<u32, AggregateThresholdShareRuntimeError> = (|| {
+        if canonical_carrier_byte_length_output_pointer.is_null()
+            || signature_message_output_pointer.is_null()
+            || signature_message_output_byte_length != foundation::Hash512::BYTE_LENGTH
+        {
+            return Err(AggregateThresholdShareRuntimeError::InvalidInput);
+        }
+        let canonical_roster_bytes = unsafe {
+            canonical_stream_input(canonical_roster_pointer, canonical_roster_byte_length)
+        };
+        let description = prepare_aggregate_threshold_share_private_share_acceptance_carrier(
+            generated_common_proof_handle,
+            board_binding_source_handle,
+            canonical_roster_bytes,
+        )?;
+        let canonical_carrier_byte_length =
+            u32::try_from(description.canonical_carrier_byte_length())
+                .map_err(|_| AggregateThresholdShareRuntimeError::InvalidInput)?;
+        unsafe {
+            canonical_carrier_byte_length_output_pointer.write(canonical_carrier_byte_length);
+            slice::from_raw_parts_mut(
+                signature_message_output_pointer,
+                signature_message_output_byte_length,
+            )
+            .copy_from_slice(description.signature_message().as_bytes());
+        }
+        Ok(description.handle())
+    })();
+    match result {
+        Ok(handle) => {
+            unsafe { write_u32_if_present(status_pointer, 0) };
+            handle
+        }
+        Err(error) => {
+            unsafe {
+                write_u32_if_present(
+                    status_pointer,
+                    aggregate_threshold_share_runtime_error_status(error),
+                )
+            };
+            0
+        }
+    }
+}
+
+/// Completes a prepared private-share acceptance only after the exact roster
+/// participant signature verifies. The signing handle is spent by every
+/// finish attempt, including a refused signature.
+///
+/// # Safety
+///
+/// The signature pointer must name one ML-DSA-65 signature and the output
+/// pointer must name the exact writable length returned by preparation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_aggregate_threshold_share_finish_private_share_acceptance_carrier(
+    board_binding_source_handle: u32,
+    prepared_carrier_handle: u32,
+    signature_pointer: *const u8,
+    signature_byte_length: usize,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+) -> u32 {
+    let signature_bytes =
+        unsafe { canonical_stream_input(signature_pointer, signature_byte_length) };
+    let Ok(signature): Result<[u8; foundation::ML_DSA_65_SIGNATURE_BYTE_LENGTH], _> =
+        signature_bytes.try_into()
+    else {
+        return aggregate_threshold_share_runtime_error_status(
+            AggregateThresholdShareRuntimeError::InvalidInput,
+        );
+    };
+    let expected_output_byte_length =
+        match foundation::prepared_signed_carrier_byte_length(prepared_carrier_handle) {
+            Ok(byte_length) => byte_length,
+            Err(reason) => {
+                return aggregate_threshold_share_runtime_error_status(
+                    AggregateThresholdShareRuntimeError::Refusal(reason),
+                );
+            }
+        };
+    if output_pointer.is_null() || output_byte_length != expected_output_byte_length {
+        return aggregate_threshold_share_runtime_error_status(
+            AggregateThresholdShareRuntimeError::InvalidInput,
+        );
+    }
+    let result = finish_aggregate_threshold_share_private_share_acceptance_carrier(
+        board_binding_source_handle,
+        prepared_carrier_handle,
+        signature,
+    );
+    match result {
+        Ok(canonical_carrier) if canonical_carrier.len() == output_byte_length => {
+            unsafe {
+                slice::from_raw_parts_mut(output_pointer, output_byte_length)
+                    .copy_from_slice(&canonical_carrier)
+            };
+            0
+        }
+        Ok(_) => aggregate_threshold_share_runtime_error_status(
+            AggregateThresholdShareRuntimeError::InvalidInput,
+        ),
+        Err(error) => aggregate_threshold_share_runtime_error_status(error),
+    }
+}
+
+/// Cancels one still-prepared private-share acceptance and restores the typed
+/// publication authority for a fresh preparation.
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_aggregate_threshold_share_cancel_private_share_acceptance_carrier(
+    board_binding_source_handle: u32,
+    prepared_carrier_handle: u32,
+) -> u32 {
+    cancel_aggregate_threshold_share_private_share_acceptance_carrier(
+        board_binding_source_handle,
+        prepared_carrier_handle,
+    )
+    .map_or_else(aggregate_threshold_share_runtime_error_status, |()| 0)
 }
 
 /// Consumes a generated aggregate-threshold-share proof only after the exact

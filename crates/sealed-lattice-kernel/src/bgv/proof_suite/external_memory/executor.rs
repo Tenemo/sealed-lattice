@@ -1,3 +1,5 @@
+use zeroize::Zeroizing;
+
 use super::plan::{
     ProofExternalMemory, ProofExternalMemoryObject, ProofExternalMemoryObjectPlan,
     ProofExternalMemoryPlan,
@@ -11,6 +13,14 @@ enum ProofExternalMemoryObjectState {
     Claimed,
     Consumed,
     Cancelled,
+}
+
+struct ValidatedAppendTransition {
+    plan_index: usize,
+    written_byte_length: u64,
+    chunk_byte_length: u64,
+    next_object_byte_length: u64,
+    next_total_written_byte_length: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -209,27 +219,68 @@ impl ProofExternalMemoryExecutor {
         object: ProofExternalMemoryObject,
         bytes: &[u8],
     ) -> Result<(), ProofExternalMemoryExecutorError<Storage::Error>> {
+        let transition = self.validate_append_object_bytes(object, bytes.len())?;
+
+        self.run_mutating_transaction(storage, transition.chunk_byte_length, |storage| {
+            storage.append_object_bytes(object, transition.written_byte_length, bytes)
+        })?;
+        self.set_state(
+            transition.plan_index,
+            ProofExternalMemoryObjectState::Writing {
+                written_byte_length: transition.next_object_byte_length,
+            },
+        )?;
+        self.usage.total_written_byte_length = transition.next_total_written_byte_length;
+        Ok(())
+    }
+
+    pub(crate) fn append_owned_object_bytes<Storage: ProofExternalMemory>(
+        &mut self,
+        storage: &mut Storage,
+        object: ProofExternalMemoryObject,
+        bytes: &mut Zeroizing<Vec<u8>>,
+    ) -> Result<(), ProofExternalMemoryExecutorError<Storage::Error>> {
+        let transition = self.validate_append_object_bytes(object, bytes.len())?;
+
+        self.run_mutating_transaction(storage, transition.chunk_byte_length, |storage| {
+            storage.append_owned_object_bytes(object, transition.written_byte_length, bytes)
+        })?;
+        self.set_state(
+            transition.plan_index,
+            ProofExternalMemoryObjectState::Writing {
+                written_byte_length: transition.next_object_byte_length,
+            },
+        )?;
+        self.usage.total_written_byte_length = transition.next_total_written_byte_length;
+        Ok(())
+    }
+
+    fn validate_append_object_bytes(
+        &self,
+        object: ProofExternalMemoryObject,
+        byte_length: usize,
+    ) -> Result<ValidatedAppendTransition, ProofExternalMemoryError> {
         self.require_active()?;
-        if bytes.is_empty()
-            || bytes.len()
+        if byte_length == 0
+            || byte_length
                 > usize::try_from(self.plan.maximum_chunk_byte_length)
                     .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)?
         {
-            return Err(ProofExternalMemoryError::WrongOffsetOrLength.into());
+            return Err(ProofExternalMemoryError::WrongOffsetOrLength);
         }
         let plan_index = self.active_object_plan_index(object)?;
         let object_plan = self.plan.objects[plan_index];
         if self.current_step < object_plan.issued_step || self.current_step > object_plan.seal_step
         {
-            return Err(ProofExternalMemoryError::WrongStep.into());
+            return Err(ProofExternalMemoryError::WrongStep);
         }
         let ProofExternalMemoryObjectState::Writing {
             written_byte_length,
         } = self.state(plan_index)?
         else {
-            return Err(ProofExternalMemoryError::InvalidLifecycle.into());
+            return Err(ProofExternalMemoryError::InvalidLifecycle);
         };
-        let chunk_byte_length = u64::try_from(bytes.len())
+        let chunk_byte_length = u64::try_from(byte_length)
             .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)?;
         let remaining_object_byte_length = object_plan
             .exact_byte_length
@@ -238,33 +289,28 @@ impl ProofExternalMemoryExecutor {
         let expected_chunk_byte_length =
             remaining_object_byte_length.min(u64::from(self.plan.maximum_chunk_byte_length));
         if chunk_byte_length != expected_chunk_byte_length {
-            return Err(ProofExternalMemoryError::WrongOffsetOrLength.into());
+            return Err(ProofExternalMemoryError::WrongOffsetOrLength);
         }
         let next_object_byte_length = written_byte_length
             .checked_add(chunk_byte_length)
             .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
-        let next_total_written = self
+        let next_total_written_byte_length = self
             .usage
             .total_written_byte_length
             .checked_add(chunk_byte_length)
             .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
         if next_object_byte_length > object_plan.exact_byte_length
-            || next_total_written > self.plan.maximum_total_written_byte_length
+            || next_total_written_byte_length > self.plan.maximum_total_written_byte_length
         {
-            return Err(ProofExternalMemoryError::ResourceLimitExceeded.into());
+            return Err(ProofExternalMemoryError::ResourceLimitExceeded);
         }
-
-        self.run_mutating_transaction(storage, chunk_byte_length, |storage| {
-            storage.append_object_bytes(object, written_byte_length, bytes)
-        })?;
-        self.set_state(
+        Ok(ValidatedAppendTransition {
             plan_index,
-            ProofExternalMemoryObjectState::Writing {
-                written_byte_length: next_object_byte_length,
-            },
-        )?;
-        self.usage.total_written_byte_length = next_total_written;
-        Ok(())
+            written_byte_length,
+            chunk_byte_length,
+            next_object_byte_length,
+            next_total_written_byte_length,
+        })
     }
 
     pub(crate) fn seal_object<Storage: ProofExternalMemory>(

@@ -8,30 +8,58 @@
 
 mod algebra;
 mod column_commitment;
-mod construction_plan;
+#[cfg(test)]
+mod construction_correspondence;
+pub(super) mod construction_plan;
 mod exact_same_secret;
+mod generation_state;
+#[cfg(test)]
+mod literal_bcs_merkle;
+#[cfg(test)]
+mod masking_rank_oracle;
 mod plain_whir;
 mod plain_whir_wire;
 #[cfg(test)]
 mod protocol;
+mod quotient_transform_storage;
+mod relation_materialization;
+mod retained_oracle;
+mod retained_oracle_codec;
 mod row_encoding;
-#[cfg(test)]
+mod same_secret_source_manifest;
 mod streaming_whir_prover;
 
 pub(in crate::bgv::proof_suite) use construction_plan::RowCodeWhirConstructionPlan;
+pub(in crate::bgv::proof_suite) use construction_plan::RowCodeWhirSelectedParameters;
+pub(in crate::bgv::proof_suite) use construction_plan::RowCodeWhirSoundnessAssumption;
 pub(in crate::bgv::proof_suite) use construction_plan::{
     ROW_CODE_WHIR_EVALUATION_DOMAIN_SIZE, ROW_CODE_WHIR_OPENING_DEGREE_BOUND_EXCLUSIVE,
     ROW_CODE_WHIR_PHASE_COLUMN_QUERY_COORDINATE_COUNT,
-};
-#[cfg(test)]
-pub(in crate::bgv::proof_suite) use construction_plan::{
-    RowCodeWhirSelectedParameters, RowCodeWhirSoundnessAssumption,
+    selected_row_code_whir_trace_mask_degree_bound_exclusive,
 };
 
 pub(in crate::bgv) use exact_same_secret::VerifiedSameSecretLowDegreePrerequisite;
-pub(crate) use exact_same_secret::{
-    PreparedExactSameSecretVerification, prepare_exact_same_secret_verification,
+pub(in crate::bgv::proof_suite) use exact_same_secret::{
+    ExactSameSecretAuthenticatedTranscriptPrefixRequest, ExactSameSecretFiatShamirBinding,
+    ExactSameSecretTranscriptPrefixAuthorityBinding, PreparedExactSameSecretTranscriptPrefix,
 };
+pub(crate) use exact_same_secret::{
+    ExactSameSecretFinalProofVerification, ExactSameSecretIncrementalVerification,
+    PreparedExactSameSecretVerification, exact_same_secret_verification_resident_memory_accounting,
+    exact_same_secret_verification_runtime_limits, prepare_exact_same_secret_verification,
+};
+pub(in crate::bgv::proof_suite) use generation_state::{
+    RowCodeWhirGenerationStateMachine, planned_row_code_whir_external_memory_requirement,
+};
+pub(in crate::bgv::proof_suite) use quotient_transform_storage::{
+    RowCodeWhirQuotientTransformStoragePlan, plan_row_code_whir_quotient_transform_storage,
+};
+#[cfg(test)]
+pub(in crate::bgv::proof_suite) use retained_oracle::{
+    RetainedPlainWhirExternalMemoryAccounting,
+    selected_plain_whir_retained_oracle_external_memory_accounting,
+};
+#[cfg(test)]
 pub(crate) const MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH: usize = 5_242_880;
 
 use core::mem::size_of;
@@ -57,13 +85,15 @@ use super::PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT;
 use super::{
     ProofChallengeExtensionElement,
     transcript::{
-        RowCodeWhirChallenge, RowCodeWhirTranscript, RowCodeWhirTranscriptSummary, TranscriptError,
+        RowCodeWhirChallenge, RowCodeWhirProofStreamAbsorber, RowCodeWhirTranscript,
+        RowCodeWhirTranscriptSummary, TranscriptError,
     },
 };
 
 const MERKLE_DIGEST_WORD_LENGTH: usize = 8;
 const MERKLE_DIGEST_BYTE_LENGTH: usize = MERKLE_DIGEST_WORD_LENGTH * size_of::<u64>();
 const GOLDILOCKS_MODULUS: u64 = 0xffff_ffff_0000_0001;
+#[cfg(test)]
 const PROTOCOL_SECURITY_LEVEL: usize = 260;
 pub(in crate::bgv::proof_suite) const ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN: &[u8] =
     b"sealed-lattice/row-code-whir/shake256/v1";
@@ -87,7 +117,6 @@ type DiscreteFourierTransform = Radix2DFTSmallBatch<ChallengeField>;
 
 #[derive(Clone)]
 struct AuthenticatedColumn {
-    column_index: usize,
     values: Vec<Goldilocks>,
 }
 
@@ -167,6 +196,24 @@ struct RowCodeWhirChallenger {
     active_query_indices: Vec<usize>,
     next_active_query_index: usize,
     next_unscheduled_failure_query_index: usize,
+}
+
+pub(super) struct RowCodeWhirChallengerProofStreamAbsorber {
+    transcript_absorber: RowCodeWhirProofStreamAbsorber,
+}
+
+impl RowCodeWhirChallengerProofStreamAbsorber {
+    pub(super) fn absorb(&mut self, canonical_proof_byte_chunk: &[u8]) -> Result<(), String> {
+        self.transcript_absorber
+            .absorb(canonical_proof_byte_chunk)
+            .map_err(|error| format!("absorb typed row-code WHIR proof stream: {error:?}"))
+    }
+
+    pub(super) fn finish(self) -> Result<RowCodeWhirTranscriptSummary, String> {
+        self.transcript_absorber
+            .finish()
+            .map_err(|error| format!("finish typed row-code WHIR transcript: {error:?}"))
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -313,7 +360,21 @@ impl RowCodeWhirChallenger {
             return;
         }
         let result = if self.protocol_schedule_absorbed {
-            self.transcript.observe_whir_values(values)
+            match self.transcript.next_live_whir_observation_role() {
+                Ok(Some(role)) => self.transcript.observe_whir_values(role, values),
+                Ok(None) => {
+                    #[cfg(test)]
+                    {
+                        self.transcript
+                            .observe_whir_values_without_role_for_test(values)
+                    }
+                    #[cfg(not(test))]
+                    {
+                        Err(TranscriptError::UnexpectedRowCodeWhirRound)
+                    }
+                }
+                Err(error) => Err(error),
+            }
         } else {
             self.transcript.absorb_protocol_schedule(values)
         };
@@ -366,13 +427,34 @@ impl RowCodeWhirChallenger {
         }
     }
 
-    fn finish(self, canonical_proof_bytes: &[u8]) -> Result<RowCodeWhirTranscriptSummary, String> {
-        self.ensure_sampling_succeeded()?;
+    fn ensure_query_schedule_consumed(&self) -> Result<(), String> {
         if self.next_query_epoch != self.query_schedule.len()
             || self.next_active_query_index != self.active_query_indices.len()
         {
             return Err("plain WHIR query schedule was not completely consumed".to_owned());
         }
+        Ok(())
+    }
+
+    pub(super) fn begin_final_proof_stream(
+        self,
+        canonical_proof_byte_length: usize,
+    ) -> Result<RowCodeWhirChallengerProofStreamAbsorber, String> {
+        self.ensure_sampling_succeeded()?;
+        self.ensure_query_schedule_consumed()?;
+        let transcript_absorber = self
+            .transcript
+            .begin_final_proof_stream(canonical_proof_byte_length)
+            .map_err(|error| format!("begin typed row-code WHIR proof stream: {error:?}"))?;
+        Ok(RowCodeWhirChallengerProofStreamAbsorber {
+            transcript_absorber,
+        })
+    }
+
+    #[cfg(test)]
+    fn finish(self, canonical_proof_bytes: &[u8]) -> Result<RowCodeWhirTranscriptSummary, String> {
+        self.ensure_sampling_succeeded()?;
+        self.ensure_query_schedule_consumed()?;
         self.transcript
             .finish(canonical_proof_bytes)
             .map_err(|error| format!("finish typed row-code WHIR transcript: {error:?}"))
@@ -435,7 +517,22 @@ impl CanObserve<MerkleCap<ChallengeField, [u64; MERKLE_DIGEST_WORD_LENGTH]>>
 
 impl CanSample<ChallengeField> for RowCodeWhirChallenger {
     fn sample(&mut self) -> ChallengeField {
-        match self.transcript.sample_whir_extension() {
+        let sampled = match self.transcript.next_live_whir_extension_role() {
+            Ok(Some(role)) => self.transcript.sample_whir_extension(role),
+            Ok(None) => {
+                #[cfg(test)]
+                {
+                    self.transcript
+                        .sample_whir_extension_without_role_for_test()
+                }
+                #[cfg(not(test))]
+                {
+                    Err(TranscriptError::UnexpectedRowCodeWhirChallenge)
+                }
+            }
+            Err(error) => Err(error),
+        };
+        match sampled {
             Ok(sampled) => challenge_from_production(sampled),
             Err(error) => {
                 self.record_extension_transcript_error(error);

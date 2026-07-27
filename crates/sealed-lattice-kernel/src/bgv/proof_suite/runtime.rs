@@ -50,8 +50,8 @@ use super::{SelectedApplicationStatementContext, decode_selected_vss_share_linka
 
 const HASH_BYTE_LENGTH: usize = 64;
 const VERIFICATION_BINDING_HASH_DOMAIN: &str =
-    "sealed-lattice/common-proof/verification-binding/v1";
-const GENERATION_BINDING_HASH_DOMAIN: &str = "sealed-lattice/common-proof/generation-binding/v1";
+    "sealed-lattice/common-proof/verification-binding/v2";
+const GENERATION_BINDING_HASH_DOMAIN: &str = "sealed-lattice/common-proof/generation-binding/v2";
 const CHECKPOINT_GENESIS_HASH_DOMAIN: &str = "sealed-lattice/common-proof/checkpoint-genesis/v1";
 const CHECKPOINT_CURSOR_MANIFEST_HASH_DOMAIN: &str =
     "sealed-lattice/common-proof/checkpoint-cursor-manifest/v3";
@@ -59,20 +59,15 @@ const CHECKPOINT_EVENT_HASH_DOMAIN: &str = "sealed-lattice/common-proof/checkpoi
 const CHECKPOINT_CUMULATIVE_HASH_DOMAIN: &str =
     "sealed-lattice/common-proof/checkpoint-cumulative/v1";
 const CHECKPOINT_SCHEDULE_HASH_DOMAIN: &str = "sealed-lattice/common-proof/checkpoint-schedule/v1";
-const CHECKPOINT_SCHEDULE_VERSION: u16 = 1;
-// The first four durable boundaries precede application-column derivation,
-// quotient construction, out-of-domain openings, and FRI preparation. Tag five is
-// repeated for every completed non-terminal FRI fold. This is the entire
-// ordered durable-boundary alphabet exposed by the generation state machine.
-const CHECKPOINT_BOUNDARY_PHASE_TAGS: [u8; 5] = [1, 2, 3, 4, 5];
+const CHECKPOINT_SCHEDULE_VERSION: u16 = 2;
 const PROOF_APPLICATION_BINDING_HASH_DOMAIN: &str =
-    "sealed-lattice/common-proof/application-binding/v1";
+    "sealed-lattice/common-proof/application-binding/v2";
 pub(super) const CANONICAL_PROOF_APPLICATION_BINDING_HASH_DOMAIN: &str =
     "sealed-lattice/common-proof/canonical-application-binding/v1";
 const OUTPUT_WRITE_HASH_DOMAIN: &str = "sealed-lattice/common-proof/output-write/v1";
 const DURABLE_AUTHORIZATION_FRAME_MAGIC: [u8; 8] = *b"SLCPA001";
-const DURABLE_AUTHORIZATION_FRAME_VERSION: u16 = 1;
-pub(crate) const DURABLE_AUTHORIZATION_FRAME_BYTE_LENGTH: usize = 746;
+const DURABLE_AUTHORIZATION_FRAME_VERSION: u16 = 2;
+pub(crate) const DURABLE_AUTHORIZATION_FRAME_BYTE_LENGTH: usize = 742;
 const DURABLE_AUTHORIZATION_RECORD_HASH_DOMAIN: &str =
     "sealed-lattice/common-proof/durable-authorization-record/v1";
 const COMMON_PROOF_CHECKPOINT_STATE_MAGIC: [u8; 8] = *b"SLCPCK02";
@@ -178,45 +173,46 @@ pub(crate) enum CommonProofRuntimeError {
 }
 
 /// Runtime parameters applied before any large proof allocation or browser
-/// storage request. The declared proof and prefetched-query byte lengths may
-/// reduce their absolute safety bounds. The external-memory record length
+/// storage request. The maximum proof and prefetched-query byte lengths may
+/// reduce their absolute safety bounds. The generated proof's exact length is
+/// authenticated separately by its canonical stream descriptor. The external-memory record length
 /// must equal its fixed format parameter, as must the foundation proof
 /// transport chunk checked by [`CommonProofRuntimeLimits::new`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CommonProofRuntimeLimits {
-    proof_byte_length: usize,
+    maximum_proof_byte_length: usize,
     external_memory_chunk_byte_length: u32,
     prefetched_query_byte_length: u64,
 }
 
 impl CommonProofRuntimeLimits {
     pub(crate) fn new(
-        proof_byte_length: usize,
+        maximum_proof_byte_length: usize,
         external_memory_chunk_byte_length: u32,
         prefetched_query_byte_length: u64,
     ) -> Result<Self, CommonProofRuntimeError> {
         let canonical_chunk_byte_length = FOUNDATION_PROFILE.stream_chunk_byte_length;
-        if proof_byte_length == 0
-            || proof_byte_length > MAXIMUM_COMMON_PROOF_BYTE_LENGTH
+        if maximum_proof_byte_length == 0
+            || maximum_proof_byte_length > MAXIMUM_COMMON_PROOF_BYTE_LENGTH
             || canonical_chunk_byte_length != MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH
             || external_memory_chunk_byte_length
                 != MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH
             || prefetched_query_byte_length == 0
             || prefetched_query_byte_length
-                > u64::try_from(proof_byte_length)
+                > u64::try_from(maximum_proof_byte_length)
                     .map_err(|_| CommonProofRuntimeError::InvalidLimits)?
         {
             return Err(CommonProofRuntimeError::InvalidLimits);
         }
         Ok(Self {
-            proof_byte_length,
+            maximum_proof_byte_length,
             external_memory_chunk_byte_length,
             prefetched_query_byte_length,
         })
     }
 
-    pub(crate) const fn proof_byte_length(self) -> usize {
-        self.proof_byte_length
+    pub(crate) const fn maximum_proof_byte_length(self) -> usize {
+        self.maximum_proof_byte_length
     }
 
     pub(crate) const fn external_memory_chunk_byte_length(self) -> u32 {
@@ -328,10 +324,10 @@ impl CommonProofRelationPlanCapability {
         self.relation_plan_variant_hash
     }
 
-    pub(crate) fn row_code_whir_construction_plan_identity_hash(
+    pub(crate) const fn row_code_whir_construction_plan_identity_hash(
         &self,
-    ) -> Result<[u8; HASH_BYTE_LENGTH], CommonProofRuntimeError> {
-        Ok(self.row_code_whir_construction_plan_identity_hash)
+    ) -> [u8; HASH_BYTE_LENGTH] {
+        self.row_code_whir_construction_plan_identity_hash
     }
 
     pub(in crate::bgv::proof_suite) const fn row_code_whir_construction_plan(
@@ -350,52 +346,25 @@ impl CommonProofRelationPlanCapability {
     }
 
     pub(crate) fn proof_query_count(&self) -> Result<u32, CommonProofRuntimeError> {
-        self.validated_relation_plan
-            .compiled_plan()
-            .select_variant(self.schedule_position, self.top_count)
-            .and_then(|variant| {
-                super::packed_fri_transcript_schedule(variant, &self.relation_context)
-            })
-            .map(|schedule| schedule.unique_query_count())
+        u32::try_from(self.row_code_whir_construction_plan.outer_query_count())
             .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)
     }
 
-    /// Derives the exact durable-boundary schedule from the checked plan and
-    /// operative runtime limits. Family adapters provide only a fresh lineage
-    /// identifier; no transported schedule digest can mint checkpoint
-    /// continuation authority.
-    pub(crate) fn checkpoint_schedule_digest(
-        &self,
-        limits: CommonProofRuntimeLimits,
-    ) -> Result<Hash512, CommonProofRuntimeError> {
-        let schedule = self
-            .validated_relation_plan
-            .compiled_plan()
-            .select_variant(self.schedule_position, self.top_count)
-            .and_then(|variant| {
-                super::packed_fri_transcript_schedule(variant, &self.relation_context)
-            })
+    /// Derives the exact durable-boundary schedule from the checked plan.
+    /// Transport chunking and prefetch policy are deliberately absent: they
+    /// may change how work is resumed but never which construction is proved.
+    pub(crate) fn checkpoint_schedule_digest(&self) -> Result<Hash512, CommonProofRuntimeError> {
+        let checkpoint_schedule_bytes = self
+            .row_code_whir_construction_plan
+            .canonical_checkpoint_schedule_bytes()
             .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?;
-        let proof_byte_length = u64::try_from(limits.proof_byte_length())
-            .map_err(|_| CommonProofRuntimeError::InvalidLimits)?;
-        let non_terminal_fri_fold_count = schedule.fri_fold_count().saturating_sub(1);
-        let durable_boundary_count = 4_u32
-            .checked_add(u32::from(non_terminal_fri_fold_count))
-            .ok_or(CommonProofRuntimeError::InvalidPlanCapability)?;
         Ok(Hash512::from_bytes(hash_framed_parts_512(
             CHECKPOINT_SCHEDULE_HASH_DOMAIN,
             &[
                 &CHECKPOINT_SCHEDULE_VERSION.to_le_bytes(),
                 &COMMON_PROOF_CHECKPOINT_STATE_FORMAT_IDENTIFIER.to_le_bytes(),
-                &self.relation_plan_hash,
-                &self.relation_plan_variant_hash,
-                &proof_byte_length.to_le_bytes(),
-                &limits.external_memory_chunk_byte_length().to_le_bytes(),
-                &limits.prefetched_query_byte_length().to_le_bytes(),
-                &schedule.unique_query_count().to_le_bytes(),
-                &schedule.fri_fold_count().to_le_bytes(),
-                &durable_boundary_count.to_le_bytes(),
-                &CHECKPOINT_BOUNDARY_PHASE_TAGS,
+                &self.row_code_whir_construction_plan_identity_hash,
+                &checkpoint_schedule_bytes,
             ],
         )))
     }
@@ -791,7 +760,7 @@ impl VerifiedCommonProofStatementSource {
             || canonical_application_statement_bytes.is_empty()
             || canonical_application_statement_bytes.len()
                 > FOUNDATION_PROFILE.maximum_copied_buffer_byte_length
-            || proof_byte_length != limits.proof_byte_length()
+            || proof_byte_length > limits.maximum_proof_byte_length()
             || !application_source_authority
                 .matches_proof_application_binding(&proof_application_binding)
             || proof_application_binding.proof_header_hash() != expected_proof_header_hash
@@ -819,12 +788,12 @@ impl VerifiedCommonProofStatementSource {
                 .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?
                 .into_bytes(),
             canonical_binding_hash,
+            relation_plan.row_code_whir_construction_plan_identity_hash(),
             statement_schema_identifier,
             expected_proof_header_hash.into_bytes(),
             proof_stream_domain,
             proof_stream_descriptor.full_object_digest.into_bytes(),
             proof_stream_descriptor.total_byte_length,
-            relation_plan.proof_query_count()?,
         )?;
         let verification_binding = CommonProofVerificationBinding::new(
             application_slot.suite_identifier().into_bytes(),

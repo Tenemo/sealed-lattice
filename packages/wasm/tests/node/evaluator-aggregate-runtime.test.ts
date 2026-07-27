@@ -763,8 +763,13 @@ const unusedResumeOptions = Object.freeze({
     resume: Object.freeze({
         checkpointCustody: Object.freeze({
             publishAuthenticatedCheckpoint: () => Promise.resolve(),
-            restoreAuthenticatedCheckpointState: () =>
-                Promise.resolve(new Uint8Array()),
+            restoreAuthenticatedCheckpoint: () =>
+                Promise.resolve(
+                    Object.freeze({
+                        canonicalStateBytes: new Uint8Array(),
+                        generationCursorManifestBytes: new Uint8Array(),
+                    }),
+                ),
         }),
         prefixReplayExternalMemory: Object.freeze({
             executeDeterministicPrefixReplayTransaction: () =>

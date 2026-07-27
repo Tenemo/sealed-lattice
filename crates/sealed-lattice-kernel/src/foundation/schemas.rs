@@ -19,6 +19,8 @@ pub const SIGNED_CARRIER_SCHEMA_IDENTIFIER: u16 = 0x0101;
 pub const ROSTER_ENTRY_SCHEMA_IDENTIFIER: u16 = 0x0114;
 pub const ROSTER_SCHEMA_IDENTIFIER: u16 = 0x0115;
 pub const STREAM_DESCRIPTOR_SCHEMA_IDENTIFIER: u16 = 0x1800;
+pub(crate) const PRIVATE_SHARE_ACCEPTANCE_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1203;
+pub(crate) const BALLOT_PACKAGE_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1301;
 pub(crate) const AGGREGATE_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1404;
 pub(crate) const AGGREGATE_PAYLOAD_SCHEMA_VERSION: u16 = 2;
 pub(super) const EVALUATOR_REPLAY_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1502;
@@ -121,6 +123,7 @@ pub enum FoundationObjectType {
     Complaint = 0x0012,
     PublicSetupRecord = 0x0013,
     BallotPackage = 0x0020,
+    BallotCandidateList = 0x0021,
     Aggregate = 0x0030,
     EvaluatorReplay = 0x0040,
     FinalitySignature = 0x0050,
@@ -132,7 +135,7 @@ pub enum FoundationObjectType {
 }
 
 impl FoundationObjectType {
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::PublicRandomnessCommitment,
         Self::PublicRandomnessReveal,
         Self::SetupIntent,
@@ -140,6 +143,7 @@ impl FoundationObjectType {
         Self::Complaint,
         Self::PublicSetupRecord,
         Self::BallotPackage,
+        Self::BallotCandidateList,
         Self::Aggregate,
         Self::EvaluatorReplay,
         Self::FinalitySignature,
@@ -163,6 +167,7 @@ impl FoundationObjectType {
             0x0012 => Some(Self::Complaint),
             0x0013 => Some(Self::PublicSetupRecord),
             0x0020 => Some(Self::BallotPackage),
+            0x0021 => Some(Self::BallotCandidateList),
             0x0030 => Some(Self::Aggregate),
             0x0040 => Some(Self::EvaluatorReplay),
             0x0050 => Some(Self::FinalitySignature),
@@ -173,6 +178,74 @@ impl FoundationObjectType {
             0x0070 => Some(Self::StorageRootCommitment),
             _ => None,
         }
+    }
+}
+
+/// The canonical signed result of one recipient's aggregate-threshold-share
+/// proof generation. The object envelope owns the recipient and action
+/// coordinates; this payload owns only the recomputed input root, aggregate
+/// material roots, and exact generated proof descriptor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PrivateShareAcceptancePayload {
+    recipient_input_root: Hash512,
+    aggregate_threshold_share_material_roots: Box<[Hash512]>,
+    aggregate_threshold_share_proof: StreamDescriptor,
+}
+
+impl PrivateShareAcceptancePayload {
+    pub(crate) fn new(
+        recipient_input_root: Hash512,
+        aggregate_threshold_share_material_roots: Vec<Hash512>,
+        aggregate_threshold_share_proof: StreamDescriptor,
+    ) -> SchemaResult<Self> {
+        if aggregate_threshold_share_material_roots.is_empty() {
+            return Err(FoundationSchemaError::new(
+                RefusalReason::WrongTypeOrLength,
+                "private-share acceptance has no aggregate material roots",
+            ));
+        }
+        aggregate_threshold_share_proof.validate()?;
+        Ok(Self {
+            recipient_input_root,
+            aggregate_threshold_share_material_roots: aggregate_threshold_share_material_roots
+                .into_boxed_slice(),
+            aggregate_threshold_share_proof,
+        })
+    }
+
+    pub(crate) fn encode(&self) -> SchemaResult<Vec<u8>> {
+        Ok(self.canonical_tuple()?.encode()?)
+    }
+
+    fn canonical_tuple(&self) -> SchemaResult<CanonicalTuple> {
+        let aggregate_roots = self
+            .aggregate_threshold_share_material_roots
+            .iter()
+            .map(|root| CanonicalItem::hash512(root.into_bytes()))
+            .collect::<Vec<_>>();
+        Ok(CanonicalTuple::new(
+            PRIVATE_SHARE_ACCEPTANCE_PAYLOAD_SCHEMA_IDENTIFIER,
+            FOUNDATION_SCHEMA_VERSION,
+            vec![
+                CanonicalItem::hash512(self.recipient_input_root.into_bytes()),
+                CanonicalItem::homogeneous_list(CanonicalItemType::Hash512, &aggregate_roots)?,
+                CanonicalItem::nested_tuple(
+                    &self.aggregate_threshold_share_proof.canonical_tuple()?,
+                )?,
+            ],
+        ))
+    }
+
+    pub(crate) fn from_tuple(
+        tuple: &CanonicalTuple,
+        limits: &CanonicalDecodeLimits,
+    ) -> SchemaResult<Self> {
+        require_header(tuple, PRIVATE_SHARE_ACCEPTANCE_PAYLOAD_SCHEMA_IDENTIFIER, 3)?;
+        Self::new(
+            read_hash(&tuple.items[0])?,
+            read_hash_list(&tuple.items[1])?,
+            read_stream_descriptor_item(&tuple.items[2], limits)?,
+        )
     }
 }
 
@@ -478,6 +551,68 @@ impl StreamDescriptor {
             read_u64(&tuple.items[0])?,
             read_hash_list(&tuple.items[1])?,
             read_hash(&tuple.items[2])?,
+        )
+    }
+}
+
+/// The single canonical representation of one direct-ballot package payload.
+/// The signed foundation envelope owns the setup prerequisite and producer
+/// coordinate; this payload owns only the two authenticated stream descriptors
+/// in their protocol order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct BallotPackagePayload {
+    ciphertext_descriptor: StreamDescriptor,
+    proof_descriptor: StreamDescriptor,
+}
+
+impl BallotPackagePayload {
+    pub(crate) fn new(
+        ciphertext_descriptor: StreamDescriptor,
+        proof_descriptor: StreamDescriptor,
+    ) -> SchemaResult<Self> {
+        ciphertext_descriptor.validate()?;
+        proof_descriptor.validate()?;
+        Ok(Self {
+            ciphertext_descriptor,
+            proof_descriptor,
+        })
+    }
+
+    pub(crate) const fn ciphertext_descriptor(&self) -> &StreamDescriptor {
+        &self.ciphertext_descriptor
+    }
+
+    pub(crate) const fn proof_descriptor(&self) -> &StreamDescriptor {
+        &self.proof_descriptor
+    }
+
+    pub(crate) fn encode(&self) -> SchemaResult<Vec<u8>> {
+        Ok(self.canonical_tuple()?.encode()?)
+    }
+
+    fn canonical_tuple(&self) -> SchemaResult<CanonicalTuple> {
+        Ok(CanonicalTuple::new(
+            BALLOT_PACKAGE_PAYLOAD_SCHEMA_IDENTIFIER,
+            FOUNDATION_SCHEMA_VERSION,
+            vec![
+                CanonicalItem::nested_tuple(&self.ciphertext_descriptor.canonical_tuple()?)?,
+                CanonicalItem::nested_tuple(&self.proof_descriptor.canonical_tuple()?)?,
+            ],
+        ))
+    }
+
+    pub(crate) fn decode(bytes: &[u8], limits: &CanonicalDecodeLimits) -> SchemaResult<Self> {
+        Self::from_tuple(&CanonicalTuple::decode(bytes, limits)?, limits)
+    }
+
+    pub(crate) fn from_tuple(
+        tuple: &CanonicalTuple,
+        limits: &CanonicalDecodeLimits,
+    ) -> SchemaResult<Self> {
+        require_header(tuple, BALLOT_PACKAGE_PAYLOAD_SCHEMA_IDENTIFIER, 2)?;
+        Self::new(
+            read_stream_descriptor_item(&tuple.items[0], limits)?,
+            read_stream_descriptor_item(&tuple.items[1], limits)?,
         )
     }
 }
@@ -915,6 +1050,7 @@ pub fn signature_message(envelope: &ObjectEnvelope, roster_hash: Hash512) -> Sch
         FoundationObjectType::Complaint => "setup-complaint",
         FoundationObjectType::PublicSetupRecord => "dealer-public-setup",
         FoundationObjectType::BallotPackage => "direct-ballot",
+        FoundationObjectType::BallotCandidateList => "ballot-candidate-list",
         FoundationObjectType::Aggregate | FoundationObjectType::EvaluatorReplay => {
             return Err(FoundationSchemaError::new(
                 RefusalReason::WrongTypeOrLength,
@@ -1434,6 +1570,210 @@ mod tests {
     use super::*;
 
     #[test]
+    fn private_share_acceptance_payload_roundtrips_all_authenticated_material() {
+        let recipient_input_root = Hash512::from_bytes([0x11; Hash512::BYTE_LENGTH]);
+        let aggregate_material_roots = vec![
+            Hash512::from_bytes([0x12; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes([0x13; Hash512::BYTE_LENGTH]),
+        ];
+        let proof_chunk_digests = vec![
+            Hash512::from_bytes([0x14; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes([0x15; Hash512::BYTE_LENGTH]),
+        ];
+        let proof_descriptor = StreamDescriptor::new(
+            u64::try_from(FOUNDATION_PROFILE.stream_chunk_byte_length)
+                .expect("chunk length fits u64")
+                + 7,
+            proof_chunk_digests,
+            Hash512::from_bytes([0x16; Hash512::BYTE_LENGTH]),
+        )
+        .expect("proof descriptor is valid");
+        let payload = PrivateShareAcceptancePayload::new(
+            recipient_input_root,
+            aggregate_material_roots,
+            proof_descriptor,
+        )
+        .expect("private-share acceptance payload is valid");
+        let encoded = payload
+            .encode()
+            .expect("private-share acceptance payload encodes");
+
+        let canonical_tuple = CanonicalTuple::decode(&encoded, &CanonicalDecodeLimits::default())
+            .expect("private-share acceptance tuple decodes");
+        let decoded = PrivateShareAcceptancePayload::from_tuple(
+            &canonical_tuple,
+            &CanonicalDecodeLimits::default(),
+        )
+        .expect("private-share acceptance payload decodes");
+        assert_eq!(decoded, payload);
+        assert_eq!(
+            decoded
+                .encode()
+                .expect("decoded private-share payload re-encodes"),
+            encoded
+        );
+    }
+
+    #[test]
+    fn private_share_acceptance_payload_refuses_empty_roots_and_shape_changes() {
+        let digest = Hash512::from_bytes([0x17; Hash512::BYTE_LENGTH]);
+        let proof_descriptor = StreamDescriptor::new(1, vec![digest], digest)
+            .expect("one-byte proof descriptor is valid");
+        assert_eq!(
+            PrivateShareAcceptancePayload::new(digest, Vec::new(), proof_descriptor.clone())
+                .expect_err("aggregate material roots cannot be empty")
+                .refusal_reason,
+            RefusalReason::WrongTypeOrLength
+        );
+
+        let payload = PrivateShareAcceptancePayload::new(
+            digest,
+            vec![Hash512::from_bytes([0x18; Hash512::BYTE_LENGTH])],
+            proof_descriptor,
+        )
+        .expect("private-share acceptance payload is valid");
+        let encoded = payload
+            .encode()
+            .expect("private-share acceptance payload encodes");
+        let canonical_tuple = CanonicalTuple::decode(&encoded, &CanonicalDecodeLimits::default())
+            .expect("private-share acceptance tuple decodes");
+
+        let mut wrong_version = canonical_tuple.clone();
+        wrong_version.schema_version = FOUNDATION_SCHEMA_VERSION + 1;
+        assert_eq!(
+            PrivateShareAcceptancePayload::from_tuple(
+                &wrong_version,
+                &CanonicalDecodeLimits::default(),
+            )
+            .expect_err("a future private-share payload version refuses")
+            .refusal_reason,
+            RefusalReason::UnsupportedVersionOrSuite
+        );
+
+        let mut missing_proof = canonical_tuple.clone();
+        missing_proof.items.pop();
+        assert_eq!(
+            PrivateShareAcceptancePayload::from_tuple(
+                &missing_proof,
+                &CanonicalDecodeLimits::default(),
+            )
+            .expect_err("a missing proof descriptor refuses")
+            .refusal_reason,
+            RefusalReason::WrongTypeOrLength
+        );
+
+        let mut empty_roots = canonical_tuple;
+        empty_roots.items[1] = CanonicalItem::homogeneous_list(CanonicalItemType::Hash512, &[])
+            .expect("empty root list encodes");
+        assert_eq!(
+            PrivateShareAcceptancePayload::from_tuple(
+                &empty_roots,
+                &CanonicalDecodeLimits::default(),
+            )
+            .expect_err("empty aggregate material roots refuse")
+            .refusal_reason,
+            RefusalReason::WrongTypeOrLength
+        );
+    }
+
+    #[test]
+    fn ballot_package_payload_roundtrips_the_two_streams_in_protocol_order() {
+        let ciphertext_digest = Hash512::from_bytes([0x21; Hash512::BYTE_LENGTH]);
+        let proof_chunk_digests = vec![
+            Hash512::from_bytes([0x31; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes([0x32; Hash512::BYTE_LENGTH]),
+        ];
+        let ciphertext_descriptor =
+            StreamDescriptor::new(17, vec![ciphertext_digest], ciphertext_digest)
+                .expect("short ciphertext descriptor is valid");
+        let proof_descriptor = StreamDescriptor::new(
+            u64::try_from(FOUNDATION_PROFILE.stream_chunk_byte_length)
+                .expect("chunk length fits u64")
+                + 1,
+            proof_chunk_digests,
+            Hash512::from_bytes([0x33; Hash512::BYTE_LENGTH]),
+        )
+        .expect("two-chunk proof descriptor is valid");
+        let payload =
+            BallotPackagePayload::new(ciphertext_descriptor.clone(), proof_descriptor.clone())
+                .expect("ballot package payload is valid");
+        let encoded = payload.encode().expect("ballot package payload encodes");
+
+        let decoded = BallotPackagePayload::decode(&encoded, &CanonicalDecodeLimits::default())
+            .expect("ballot package payload decodes");
+        assert_eq!(decoded, payload);
+        assert_eq!(decoded.ciphertext_descriptor(), &ciphertext_descriptor);
+        assert_eq!(decoded.proof_descriptor(), &proof_descriptor);
+
+        let tuple = CanonicalTuple::decode(&encoded, &CanonicalDecodeLimits::default())
+            .expect("ballot package tuple decodes");
+        assert_eq!(
+            tuple.schema_identifier,
+            BALLOT_PACKAGE_PAYLOAD_SCHEMA_IDENTIFIER
+        );
+        assert_eq!(tuple.schema_version, FOUNDATION_SCHEMA_VERSION);
+        assert_eq!(tuple.items.len(), 2);
+        assert!(
+            tuple
+                .items
+                .iter()
+                .all(|item| item.item_type() == CanonicalItemType::NestedTuple)
+        );
+    }
+
+    #[test]
+    fn ballot_package_payload_rejects_version_arity_and_item_type_changes() {
+        let digest = Hash512::from_bytes([0x41; Hash512::BYTE_LENGTH]);
+        let descriptor = StreamDescriptor::new(1, vec![digest], digest)
+            .expect("one-byte stream descriptor is valid");
+        let payload = BallotPackagePayload::new(descriptor.clone(), descriptor)
+            .expect("ballot package payload is valid");
+        let encoded = payload.encode().expect("ballot package payload encodes");
+        let canonical_tuple = CanonicalTuple::decode(&encoded, &CanonicalDecodeLimits::default())
+            .expect("ballot package tuple decodes");
+
+        let mut wrong_version = canonical_tuple.clone();
+        wrong_version.schema_version = FOUNDATION_SCHEMA_VERSION + 1;
+        assert_eq!(
+            BallotPackagePayload::decode(
+                &wrong_version.encode().expect("wrong version tuple encodes"),
+                &CanonicalDecodeLimits::default(),
+            )
+            .expect_err("a future ballot package version refuses")
+            .refusal_reason,
+            RefusalReason::UnsupportedVersionOrSuite
+        );
+
+        let mut missing_proof_descriptor = canonical_tuple.clone();
+        missing_proof_descriptor.items.pop();
+        assert_eq!(
+            BallotPackagePayload::decode(
+                &missing_proof_descriptor
+                    .encode()
+                    .expect("short ballot tuple encodes"),
+                &CanonicalDecodeLimits::default(),
+            )
+            .expect_err("a missing proof descriptor refuses")
+            .refusal_reason,
+            RefusalReason::WrongTypeOrLength
+        );
+
+        let mut wrong_item_type = canonical_tuple;
+        wrong_item_type.items[1] = CanonicalItem::hash512([0x51; Hash512::BYTE_LENGTH]);
+        assert_eq!(
+            BallotPackagePayload::decode(
+                &wrong_item_type
+                    .encode()
+                    .expect("wrong item type tuple encodes"),
+                &CanonicalDecodeLimits::default(),
+            )
+            .expect_err("a non-descriptor proof item refuses")
+            .refusal_reason,
+            RefusalReason::WrongTypeOrLength
+        );
+    }
+
+    #[test]
     fn aggregate_payload_roundtrips_every_load_bearing_field_in_selected_order() {
         let selected_ballot_object_hashes = vec![
             Hash512::from_bytes([0x31; Hash512::BYTE_LENGTH]),
@@ -1914,6 +2254,10 @@ mod tests {
                 "dealer-public-setup",
             ),
             (FoundationObjectType::BallotPackage, "direct-ballot"),
+            (
+                FoundationObjectType::BallotCandidateList,
+                "ballot-candidate-list",
+            ),
             (FoundationObjectType::FinalitySignature, "target-finality"),
             (
                 FoundationObjectType::StateReservation,

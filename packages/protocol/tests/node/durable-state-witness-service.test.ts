@@ -391,7 +391,7 @@ describe('durable state witness service', () => {
     it('persists one fixed common-proof authorization frame and rereads the exact authenticated bytes', async () => {
         const { adapter, service } = await openService();
         const authorizationFrame = Uint8Array.from(
-            { length: 746 },
+            { length: 742 },
             (_, byteIndex) => (byteIndex * 149 + 31) & 0xff,
         );
         const proofApplicationSlotHash = new Uint8Array(64).fill(0x6d);
@@ -450,7 +450,7 @@ describe('durable state witness service', () => {
             throw error;
         }
 
-        const authorizationFrame = new Uint8Array(746).fill(0x83);
+        const authorizationFrame = new Uint8Array(742).fill(0x83);
         const proofApplicationSlotHash = new Uint8Array(64).fill(0x47);
         await expect(
             persistCommonProofApplicationAuthorization(service, {
@@ -516,7 +516,7 @@ describe('durable state witness service', () => {
 
     it('reports a published-or-indeterminate disposition before committed readback failure', async () => {
         const { adapter, service } = await openService();
-        const authorizationFrame = new Uint8Array(746).fill(0x8e);
+        const authorizationFrame = new Uint8Array(742).fill(0x8e);
         const proofApplicationSlotHash = new Uint8Array(64).fill(0x4c);
         const publicationDispositions: string[] = [];
         adapter.afterAtomicMutation = (mutation) => {
@@ -545,7 +545,7 @@ describe('durable state witness service', () => {
 
     it('reports definite nonpublication after adapter rejection and permits an exact retry', async () => {
         const { adapter, service } = await openService();
-        const authorizationFrame = new Uint8Array(746).fill(0x72);
+        const authorizationFrame = new Uint8Array(742).fill(0x72);
         const proofApplicationSlotHash = new Uint8Array(64).fill(0x39);
         const firstPublicationDispositions: string[] = [];
         adapter.failAtomicMutationAfter(1);
@@ -580,7 +580,7 @@ describe('durable state witness service', () => {
 
     it('reports definite nonpublication after staging failure and permits an exact retry', async () => {
         const { adapter, service } = await openService();
-        const authorizationFrame = new Uint8Array(746).fill(0x91);
+        const authorizationFrame = new Uint8Array(742).fill(0x91);
         const proofApplicationSlotHash = new Uint8Array(64).fill(0x58);
         const firstPublicationDispositions: string[] = [];
         adapter.failNextWriteCount = 1;
@@ -615,7 +615,7 @@ describe('durable state witness service', () => {
 
     it('reports definite nonpublication after transient pretransaction read failure', async () => {
         const { adapter, service } = await openService();
-        const authorizationFrame = new Uint8Array(746).fill(0xa4);
+        const authorizationFrame = new Uint8Array(742).fill(0xa4);
         const proofApplicationSlotHash = new Uint8Array(64).fill(0x27);
         const firstPublicationDispositions: string[] = [];
         adapter.failNextReadCount = 1;

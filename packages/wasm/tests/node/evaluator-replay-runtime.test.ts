@@ -822,11 +822,14 @@ const createFakeEvaluatorRuntime = (
             return 1;
         },
         cachedCarrierLength: () => 0,
+        cancelBallotCandidateList: () => 0,
         cancel: () => 0,
         copyCachedCarrier: () => 0,
         deallocate,
         describe: () => 0,
+        finishBallotCandidateList: () => 0,
         memory,
+        prepareBallotCandidateList: () => 0,
         release: () => 0,
         runExclusive: (_operationName, operation) => operation(),
         verifyUnordered: (

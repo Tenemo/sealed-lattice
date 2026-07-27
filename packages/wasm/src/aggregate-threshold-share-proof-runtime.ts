@@ -1,4 +1,5 @@
 import {
+    foundationProfile,
     refusalReasonCodes,
     type BrowserActionStorageWorkerKernel,
 } from '@sealed-lattice/types';
@@ -34,6 +35,7 @@ import {
 import { deriveGeneratedCommonProofDescriptor } from './generated-common-proof-output-runtime.js';
 import type { ClosedWorkerProductionOperationIdentifiers } from './local-storage-root-worker-kernel/authorities.js';
 import { withClosedWorkerProductionOperationAuthority } from './local-storage-root-worker-kernel/worker-kernel.js';
+import { mlDsa65SignatureByteLength } from './state-verifier-runtime/contracts.js';
 import { resolveCommonProofKernelContext } from './transcript-core-bridge/common-proof-kernel-context.js';
 import type { TranscriptCoreKernelCommandRuntime } from './transcript-core-bridge/kernel-runtime.js';
 import type {
@@ -51,8 +53,15 @@ const verifierCapabilityByteLength = 32;
 const checkpointLineageIdentifierByteLength = 32;
 const wasm32WordByteLength = Uint32Array.BYTES_PER_ELEMENT;
 const maximumWasm32UnsignedInteger = 0xffff_ffff;
+const foundationHashByteLength = 64;
 
 export type AggregateThresholdShareGenerationMode = 'fresh' | 'resumed';
+
+export type PrivateShareAcceptanceSignatureOperation = Readonly<{
+    signPrivateShareAcceptanceMessage(
+        signatureMessageHash: Uint8Array<ArrayBuffer>,
+    ): Uint8Array;
+}>;
 
 type PreparedAggregateThresholdShareGeneration = Readonly<{
     adapterHandle: number;
@@ -63,6 +72,9 @@ type AggregateThresholdShareProofKernel = Readonly<{
     bindGeneratedProofToBoard: NonNullable<
         TranscriptCoreKernelExports['sealed_lattice_aggregate_threshold_share_bind_generated_proof_to_board']
     >;
+    cancelPrivateShareAcceptanceCarrier: NonNullable<
+        TranscriptCoreKernelExports['sealed_lattice_aggregate_threshold_share_cancel_private_share_acceptance_carrier']
+    >;
     discardBoardBindingSource: NonNullable<
         TranscriptCoreKernelExports['sealed_lattice_aggregate_threshold_share_discard_generation_board_binding_source']
     >;
@@ -72,8 +84,14 @@ type AggregateThresholdShareProofKernel = Readonly<{
     finishVerification: NonNullable<
         TranscriptCoreKernelExports['sealed_lattice_aggregate_threshold_share_finish_verification']
     >;
+    finishPrivateShareAcceptanceCarrier: NonNullable<
+        TranscriptCoreKernelExports['sealed_lattice_aggregate_threshold_share_finish_private_share_acceptance_carrier']
+    >;
     prepareGeneration: NonNullable<
         TranscriptCoreKernelExports['sealed_lattice_aggregate_threshold_share_prepare_generation']
+    >;
+    preparePrivateShareAcceptanceCarrier: NonNullable<
+        TranscriptCoreKernelExports['sealed_lattice_aggregate_threshold_share_prepare_private_share_acceptance_carrier']
     >;
     prepareResumedGeneration: NonNullable<
         TranscriptCoreKernelExports['sealed_lattice_aggregate_threshold_share_prepare_resumed_generation']
@@ -136,20 +154,45 @@ const requireCanonicalSuiteRecordBytes = (
     return value.slice();
 };
 
+const requireBoundedCanonicalBytes = (
+    value: Uint8Array,
+): Uint8Array<ArrayBuffer> => {
+    if (
+        !isUint8Array(value) ||
+        !(value.buffer instanceof ArrayBuffer) ||
+        value.byteLength === 0
+    ) {
+        throw new CanonicalStreamRefusalError('wrongTypeOrLength');
+    }
+    if (
+        value.byteLength > foundationProfile.maximumCopiedBufferByteLength ||
+        value.byteLength > maximumWasm32UnsignedInteger
+    ) {
+        throw new CanonicalStreamRefusalError('outsideSupportedProfile');
+    }
+    return value.slice();
+};
+
 const requireAggregateThresholdShareProofKernel = (
     context: TranscriptCoreKernelCommandRuntime,
 ): AggregateThresholdShareProofKernel => {
     const {
         sealed_lattice_aggregate_threshold_share_bind_generated_proof_to_board:
             bindGeneratedProofToBoard,
+        sealed_lattice_aggregate_threshold_share_cancel_private_share_acceptance_carrier:
+            cancelPrivateShareAcceptanceCarrier,
         sealed_lattice_aggregate_threshold_share_discard_generation_board_binding_source:
             discardBoardBindingSource,
         sealed_lattice_aggregate_threshold_share_discard_verification_terminal_source:
             discardVerificationTerminalSource,
         sealed_lattice_aggregate_threshold_share_finish_verification:
             finishVerification,
+        sealed_lattice_aggregate_threshold_share_finish_private_share_acceptance_carrier:
+            finishPrivateShareAcceptanceCarrier,
         sealed_lattice_aggregate_threshold_share_prepare_generation:
             prepareGeneration,
+        sealed_lattice_aggregate_threshold_share_prepare_private_share_acceptance_carrier:
+            preparePrivateShareAcceptanceCarrier,
         sealed_lattice_aggregate_threshold_share_prepare_resumed_generation:
             prepareResumedGeneration,
         sealed_lattice_aggregate_threshold_share_prepare_verification:
@@ -159,10 +202,13 @@ const requireAggregateThresholdShareProofKernel = (
     } = context.wasmExports;
     if (
         typeof bindGeneratedProofToBoard !== 'function' ||
+        typeof cancelPrivateShareAcceptanceCarrier !== 'function' ||
         typeof discardBoardBindingSource !== 'function' ||
         typeof discardVerificationTerminalSource !== 'function' ||
+        typeof finishPrivateShareAcceptanceCarrier !== 'function' ||
         typeof finishVerification !== 'function' ||
         typeof prepareGeneration !== 'function' ||
+        typeof preparePrivateShareAcceptanceCarrier !== 'function' ||
         typeof prepareResumedGeneration !== 'function' ||
         typeof prepareVerification !== 'function' ||
         typeof releaseSelectedSuite !== 'function' ||
@@ -174,10 +220,13 @@ const requireAggregateThresholdShareProofKernel = (
     }
     return Object.freeze({
         bindGeneratedProofToBoard,
+        cancelPrivateShareAcceptanceCarrier,
         discardBoardBindingSource,
         discardVerificationTerminalSource,
+        finishPrivateShareAcceptanceCarrier,
         finishVerification,
         prepareGeneration,
+        preparePrivateShareAcceptanceCarrier,
         prepareResumedGeneration,
         prepareVerification,
         releaseSelectedSuite,
@@ -309,7 +358,201 @@ const resolveSingleBoardObjectAuthorization = (input: {
     });
 };
 
+const produceCanonicalPrivateShareAcceptanceCarrier = (input: {
+    boardBindingSourceHandle: number;
+    canonicalRosterBytes: Uint8Array;
+    context: TranscriptCoreKernelCommandRuntime;
+    generatedCommonProofHandle: number;
+    kernel: AggregateThresholdShareProofKernel;
+    memoryBoundary: WasmMemoryBoundary;
+    signatureOperation: PrivateShareAcceptanceSignatureOperation;
+    statusBoundary: WasmStatusBoundary;
+}): Uint8Array<ArrayBuffer> => {
+    let signPrivateShareAcceptanceMessage: (
+        signatureMessageHash: Uint8Array<ArrayBuffer>,
+    ) => Uint8Array;
+    try {
+        if (
+            typeof input.signatureOperation !== 'object' ||
+            input.signatureOperation === null
+        ) {
+            throw new CanonicalStreamRefusalError('wrongTypeOrLength');
+        }
+        signPrivateShareAcceptanceMessage =
+            input.signatureOperation.signPrivateShareAcceptanceMessage;
+        if (typeof signPrivateShareAcceptanceMessage !== 'function') {
+            throw new CanonicalStreamRefusalError('wrongTypeOrLength');
+        }
+    } catch (error) {
+        if (error instanceof CanonicalStreamRefusalError) {
+            throw error;
+        }
+        throw new CanonicalStreamRefusalError('wrongTypeOrLength');
+    }
+
+    const canonicalRosterBytes = requireBoundedCanonicalBytes(
+        input.canonicalRosterBytes,
+    );
+    let preparedCarrierHandle = 0;
+    let signatureMessage: Uint8Array<ArrayBuffer> | undefined;
+    let signature: Uint8Array<ArrayBuffer> | undefined;
+    try {
+        const preparation = input.context.runExclusive(
+            'private-share acceptance carrier preparation',
+            () => {
+                let canonicalRosterPointer = 0;
+                let canonicalCarrierByteLengthPointer = 0;
+                let signatureMessagePointer = 0;
+                let statusPointer = 0;
+                try {
+                    canonicalRosterPointer =
+                        input.memoryBoundary.copy(canonicalRosterBytes);
+                    canonicalCarrierByteLengthPointer =
+                        input.memoryBoundary.allocateZeroedWords(1);
+                    signatureMessagePointer = input.memoryBoundary.allocate(
+                        foundationHashByteLength,
+                    );
+                    statusPointer = input.memoryBoundary.allocateZeroedWords(1);
+                    const handle =
+                        input.kernel.preparePrivateShareAcceptanceCarrier(
+                            input.generatedCommonProofHandle,
+                            input.boardBindingSourceHandle,
+                            canonicalRosterPointer,
+                            canonicalRosterBytes.byteLength,
+                            canonicalCarrierByteLengthPointer,
+                            signatureMessagePointer,
+                            foundationHashByteLength,
+                            statusPointer,
+                        );
+                    if (handle !== 0) {
+                        preparedCarrierHandle = requireLiveHandle(
+                            handle,
+                            'The prepared private-share acceptance carrier handle',
+                        );
+                    }
+                    const [canonicalCarrierByteLength] =
+                        input.memoryBoundary.readWords(
+                            canonicalCarrierByteLengthPointer,
+                            1,
+                        );
+                    const [status] = input.memoryBoundary.readWords(
+                        statusPointer,
+                        1,
+                    );
+                    input.statusBoundary.throwIfError(status);
+                    input.memoryBoundary.validateAllocationByteLength(
+                        canonicalCarrierByteLength,
+                    );
+                    return Object.freeze({
+                        canonicalCarrierByteLength,
+                        handle: requireLiveHandle(
+                            preparedCarrierHandle,
+                            'The prepared private-share acceptance carrier handle',
+                        ),
+                        signatureMessage: new Uint8Array(
+                            input.context.memory.buffer,
+                            signatureMessagePointer,
+                            foundationHashByteLength,
+                        ).slice(),
+                    });
+                } finally {
+                    input.memoryBoundary.zeroAndDeallocate(
+                        statusPointer,
+                        wasm32WordByteLength,
+                    );
+                    input.memoryBoundary.zeroAndDeallocate(
+                        signatureMessagePointer,
+                        foundationHashByteLength,
+                    );
+                    input.memoryBoundary.zeroAndDeallocate(
+                        canonicalCarrierByteLengthPointer,
+                        wasm32WordByteLength,
+                    );
+                    input.memoryBoundary.zeroAndDeallocate(
+                        canonicalRosterPointer,
+                        canonicalRosterBytes.byteLength,
+                    );
+                }
+            },
+        );
+        preparedCarrierHandle = preparation.handle;
+        signatureMessage = preparation.signatureMessage;
+        signature = requireFixedBytes(
+            signPrivateShareAcceptanceMessage.call(
+                input.signatureOperation,
+                signatureMessage,
+            ),
+            mlDsa65SignatureByteLength,
+        );
+        const exactSignature = signature;
+        return input.context.runExclusive(
+            'private-share acceptance carrier completion',
+            () => {
+                let signaturePointer = 0;
+                let outputPointer = 0;
+                try {
+                    signaturePointer =
+                        input.memoryBoundary.copy(exactSignature);
+                    outputPointer = input.memoryBoundary.allocate(
+                        preparation.canonicalCarrierByteLength,
+                    );
+                    const status =
+                        input.kernel.finishPrivateShareAcceptanceCarrier(
+                            input.boardBindingSourceHandle,
+                            preparedCarrierHandle,
+                            signaturePointer,
+                            exactSignature.byteLength,
+                            outputPointer,
+                            preparation.canonicalCarrierByteLength,
+                        );
+                    preparedCarrierHandle = 0;
+                    input.statusBoundary.throwIfError(status);
+                    return new Uint8Array(
+                        input.context.memory.buffer,
+                        outputPointer,
+                        preparation.canonicalCarrierByteLength,
+                    ).slice();
+                } finally {
+                    input.memoryBoundary.zeroAndDeallocate(
+                        outputPointer,
+                        preparation.canonicalCarrierByteLength,
+                    );
+                    input.memoryBoundary.zeroAndDeallocate(
+                        signaturePointer,
+                        exactSignature.byteLength,
+                    );
+                }
+            },
+        );
+    } catch (operationFailure) {
+        if (preparedCarrierHandle !== 0) {
+            try {
+                const cancellationStatus = input.context.runExclusive(
+                    'private-share acceptance carrier cancellation',
+                    () =>
+                        input.kernel.cancelPrivateShareAcceptanceCarrier(
+                            input.boardBindingSourceHandle,
+                            preparedCarrierHandle,
+                        ),
+                );
+                input.statusBoundary.throwIfError(cancellationStatus);
+            } catch (cleanupFailure) {
+                throw new CanonicalStreamInternalError(
+                    'Private-share acceptance carrier production and cancellation both failed.',
+                    Object.freeze({ cleanupFailure, operationFailure }),
+                );
+            }
+        }
+        throw operationFailure;
+    } finally {
+        canonicalRosterBytes.fill(0);
+        signatureMessage?.fill(0);
+        signature?.fill(0);
+    }
+};
+
 export const generateAggregateThresholdShareInClosedWorker = async (input: {
+    canonicalRosterBytes: Uint8Array;
     canonicalSuiteRecordBytes: Uint8Array;
     checkpointLineageIdentifier: Uint8Array;
     generationMode: AggregateThresholdShareGenerationMode;
@@ -318,8 +561,10 @@ export const generateAggregateThresholdShareInClosedWorker = async (input: {
     productionOperationIdentifiers: ClosedWorkerProductionOperationIdentifiers;
     recipientAuthority: AggregateThresholdShareRecipientAuthority;
     resolveVerifiedPrivateShareAcceptance(input: {
+        canonicalPrivateShareAcceptanceCarrier: Uint8Array<ArrayBuffer>;
         proofDescriptorBytes: Uint8Array<ArrayBuffer>;
     }): Promise<VerifiedTranscriptObject>;
+    signatureOperation: PrivateShareAcceptanceSignatureOperation;
     setupIntentObject: VerifiedTranscriptObject;
     workerKernel: BrowserActionStorageWorkerKernel;
 }): Promise<void> => {
@@ -514,10 +759,42 @@ export const generateAggregateThresholdShareInClosedWorker = async (input: {
                     canonicalStreamDomains.recipientAggregateThresholdShareProof,
             },
         );
-        const privateShareAcceptanceObject =
-            await input.resolveVerifiedPrivateShareAcceptance({
-                proofDescriptorBytes,
-            });
+        let canonicalPrivateShareAcceptanceCarrier:
+            | Uint8Array<ArrayBuffer>
+            | undefined;
+        let privateShareAcceptanceObject: VerifiedTranscriptObject;
+        try {
+            canonicalPrivateShareAcceptanceCarrier =
+                applyClosedWorkerGeneratedCommonProofCapability(
+                    generatedCapability,
+                    context,
+                    (generatedCommonProofHandle) =>
+                        Object.freeze({
+                            consumed: false,
+                            result: produceCanonicalPrivateShareAcceptanceCarrier(
+                                {
+                                    boardBindingSourceHandle,
+                                    canonicalRosterBytes:
+                                        input.canonicalRosterBytes,
+                                    context,
+                                    generatedCommonProofHandle,
+                                    kernel,
+                                    memoryBoundary,
+                                    signatureOperation:
+                                        input.signatureOperation,
+                                    statusBoundary,
+                                },
+                            ),
+                        }),
+                );
+            privateShareAcceptanceObject =
+                await input.resolveVerifiedPrivateShareAcceptance({
+                    canonicalPrivateShareAcceptanceCarrier,
+                    proofDescriptorBytes,
+                });
+        } finally {
+            canonicalPrivateShareAcceptanceCarrier?.fill(0);
+        }
         const acceptance = resolveSingleBoardObjectAuthorization({
             context,
             kernel: input.kernel,

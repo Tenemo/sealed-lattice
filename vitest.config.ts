@@ -7,6 +7,7 @@ import { defineConfig, type UserWorkspaceConfig } from 'vitest/config';
 import type { BrowserInstanceOption } from 'vitest/node';
 
 import {
+    desktopBrowserProofEvidenceSessionDefinitions,
     manualDesktopBrowserProofEvidenceTestGlobs,
     ordinaryDesktopBrowserExcludedTestGlobs,
 } from './tools/ci/browser-test-project-selection.js';
@@ -131,19 +132,13 @@ const desktopBrowserInstances: BrowserInstanceOption[] = [
     },
 ];
 
-const desktopBrowserProofEvidenceInstances: BrowserInstanceOption[] = [
-    {
-        browser: 'chromium',
-        name: 'chromium-desktop-proof-evidence',
-        provider: playwright({
-            persistentContext: resolveFromRepoRoot(
-                'temp',
-                'test-checkpoints',
-                'desktop-browser-proof-evidence-chromium-profile',
-            ),
+const desktopBrowserProofEvidenceInstances: BrowserInstanceOption[] =
+    desktopBrowserProofEvidenceSessionDefinitions.map(
+        ({ browserEngine, vitestProjectName }) => ({
+            browser: browserEngine,
+            name: vitestProjectName,
         }),
-    },
-];
+    );
 
 type NodeProjectInput = {
     readonly exclude?: readonly string[];
@@ -227,7 +222,7 @@ const makeBrowserProject = ({
                 // Playwright writes active .network chunks to one project-level
                 // directory before Vitest can add browser or worker identity.
                 // Routine multi-engine coverage therefore keeps tracing off.
-                // The single-engine manual evidence project remains isolated.
+                // Each manual evidence command selects one isolated instance.
                 trace:
                     retainFailureTrace &&
                     projectAttachmentDirectoryPath !== undefined

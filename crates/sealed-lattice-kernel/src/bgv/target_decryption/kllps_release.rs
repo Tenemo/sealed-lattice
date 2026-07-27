@@ -21,7 +21,11 @@ use crate::{
         direct_ballots::{MAXIMUM_SCORE, MINIMUM_SCORE},
         encoding::decode_plaintext_coefficients_to_scalar_lanes,
         evaluator::{
-            engine::Ciphertext, noise_recurrence::direct_ballot_target_noise_bounds,
+            engine::Ciphertext,
+            noise_recurrence::{
+                TargetReleaseNoiseStage, direct_ballot_target_noise_bounds,
+                direct_ballot_target_release_noise_trace,
+            },
             top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL,
         },
         modular_arithmetic::{add_mod_fast, inverse_mod, mul_mod_fast, sub_mod_fast},
@@ -68,7 +72,7 @@ pub(crate) const KLLPS_DENOMINATOR_CLEARING_FACTOR: u64 = 4;
 pub(crate) const KLLPS_THRESHOLD_SIMULATION_BIT_LENGTH: u32 = 96;
 pub(crate) const KLLPS_PAIRED_TARGET_ROLE_COUNT: usize = 2;
 const KLLPS_SPACED_POINT_COUNT: usize = 16;
-const KLLPS_SUBRING_DEGREE: usize = KLLPS_SPACED_POINT_COUNT / 2;
+pub(crate) const KLLPS_SUBRING_DEGREE: usize = KLLPS_SPACED_POINT_COUNT / 2;
 pub(crate) const KLLPS_POINT_STRIDE: usize = (2 * POLYNOMIAL_DEGREE) / KLLPS_SPACED_POINT_COUNT;
 const MAXIMUM_AUTHORIZED_COEFFICIENT_NORM: u64 = 44;
 const MAXIMUM_UNAUTHORIZED_COEFFICIENT_NORM: u64 = 8;
@@ -202,6 +206,21 @@ impl KllpsTargetPair {
     pub(crate) fn level(&self) -> usize {
         self.target_identifier.level
     }
+}
+
+#[cfg(test)]
+pub(crate) fn kllps_target_pair_from_verified_evaluator_execution_for_tests(
+    binding: KllpsReleaseBinding,
+    participant_binding: KllpsParticipantReleaseBinding,
+    target_identifier: Ciphertext,
+    target_order: Ciphertext,
+) -> CanonicalResult<KllpsTargetPair> {
+    KllpsTargetPair::from_verified_finality(
+        binding,
+        participant_binding,
+        target_identifier,
+        target_order,
+    )
 }
 
 /// Authenticates the exact finalized target bytes and derives every release
@@ -833,7 +852,6 @@ impl KllpsTargetReleaseWitnessSource {
                 &relation_plan,
                 FOUNDATION_PROFILE.protocol_version,
                 &canonical_application_statement_bytes,
-                limits,
             )?;
         let private_coins = PrivateRandomnessCommonProofCoinSource::new(
             action_private_randomness,
@@ -2056,6 +2074,37 @@ impl VerifiedKllpsPairedShare {
     pub(crate) fn roster_position(&self) -> usize {
         self.partial_decryption.roster_position
     }
+
+    #[cfg(test)]
+    pub(crate) fn role_partials_for_tests(&self) -> [&[Vec<u64>]; 2] {
+        [
+            &self.partial_decryption.target_identifier_by_limb,
+            &self.partial_decryption.target_order_by_limb,
+        ]
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn generate_verified_factor_four_paired_share_for_tests<ThresholdShareLimb>(
+    target_pair: &KllpsTargetPair,
+    roster_position: usize,
+    threshold_share_by_limb: &[ThresholdShareLimb],
+    target_identifier_flooding_error: &[BigInt],
+    target_order_flooding_error: &[BigInt],
+    flooding_coefficient_bound: &BigUint,
+) -> CanonicalResult<VerifiedKllpsPairedShare>
+where
+    ThresholdShareLimb: AsRef<[u64]>,
+{
+    let partial_decryption = generate_factor_four_paired_partial_decryption(
+        target_pair,
+        roster_position,
+        threshold_share_by_limb,
+        target_identifier_flooding_error,
+        target_order_flooding_error,
+        flooding_coefficient_bound,
+    )?;
+    VerifiedKllpsPairedShare::from_common_proof_verifier(target_pair, partial_decryption)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2611,6 +2660,14 @@ fn reconstruct_factor_four_target_pair(
     )
 }
 
+#[cfg(test)]
+pub(crate) fn reconstruct_factor_four_target_scalar_lanes_for_tests(
+    target_pair: &KllpsTargetPair,
+    verified_shares: &[&VerifiedKllpsPairedShare],
+) -> CanonicalResult<(Vec<u64>, Vec<u64>)> {
+    reconstruct_factor_four_target_pair(target_pair, verified_shares)?.decode_scalar_lanes()
+}
+
 pub(crate) fn reconstruct_factor_four_finalized_target_result(
     target_pair: &KllpsReconstructionTargetPair,
     verified_shares: &[&VerifiedKllpsPairedShare],
@@ -3025,6 +3082,30 @@ pub(crate) fn selected_factor_four_flooding_bound() -> CanonicalResult<BigUint> 
             )
         })?;
     let flooding_coefficient_bound = factor_four_required_flooding_bound(&evaluation_error_bound)?;
+    let release_trace = direct_ballot_target_release_noise_trace(
+        u64::from(FOUNDATION_PROFILE.participant_count),
+        usize::from(FOUNDATION_PROFILE.participant_count),
+        usize::from(FOUNDATION_PROFILE.option_count),
+        MINIMUM_SCORE,
+        MAXIMUM_SCORE,
+        KLLPS_DENOMINATOR_CLEARING_FACTOR,
+        KLLPS_RECONSTRUCTION_THRESHOLD,
+        MAXIMUM_AUTHORIZED_COEFFICIENT_NORM,
+        &flooding_coefficient_bound,
+    )?;
+    let scaled_c2_left =
+        factor_four_scaled_c2_left(&evaluation_error_bound, &flooding_coefficient_bound);
+    if release_trace.last().is_none_or(|bound| {
+        bound.stage != TargetReleaseNoiseStage::Decode
+            || !bound.scaled_no_wrap_margin.is_positive()
+            || BigUint::from(PLAINTEXT_MODULUS) * &bound.four_times_reconstruction_error_bound
+                != scaled_c2_left
+    }) {
+        return Err(invalid_release(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "selected evaluator-to-release recurrence has no positive decode margin",
+        ));
+    }
     ensure_factor_four_parameter_conditions(
         CANONICAL_TARGET_CIPHERTEXT_LEVEL,
         &evaluation_error_bound,
@@ -3057,6 +3138,15 @@ pub(crate) fn authorized_scaled_lagrange_coefficient_at_zero(
     let coefficient =
         authorized_lagrange_coefficient_at_zero(selected_positions, selected_index, modulus)?;
     Ok(coefficient.map(|value| mul_mod_fast(value, KLLPS_DENOMINATOR_CLEARING_FACTOR, modulus)))
+}
+
+#[cfg(test)]
+pub(crate) fn authorized_lagrange_coefficient_at_zero_for_tests(
+    selected_positions: &[usize],
+    selected_index: usize,
+    modulus: u64,
+) -> CanonicalResult<[u64; KLLPS_SUBRING_DEGREE]> {
+    authorized_lagrange_coefficient_at_zero(selected_positions, selected_index, modulus)
 }
 
 fn authorized_lagrange_coefficient_at_zero(

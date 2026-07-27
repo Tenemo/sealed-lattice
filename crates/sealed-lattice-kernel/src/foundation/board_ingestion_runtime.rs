@@ -7,20 +7,21 @@ use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 
 use super::board_ingestion::{
-    BALLOT_PACKAGE_PAYLOAD_SCHEMA_IDENTIFIER, CanonicalBoardLimits, CanonicalBoardVerifier,
-    DEALER_PUBLIC_RECORD_PAYLOAD_SCHEMA_IDENTIFIER, FOUNDATION_SCHEMA_VERSION,
-    MAXIMUM_CANONICAL_BOARD_BATCH_CARRIER_COUNT,
-    PRIVATE_SHARE_ACCEPTANCE_PAYLOAD_SCHEMA_IDENTIFIER,
+    CanonicalBoardLimits, CanonicalBoardVerifier, DEALER_PUBLIC_RECORD_PAYLOAD_SCHEMA_IDENTIFIER,
+    FOUNDATION_SCHEMA_VERSION, MAXIMUM_CANONICAL_BOARD_BATCH_CARRIER_COUNT,
     PUBLIC_RANDOMNESS_COMMITMENT_PAYLOAD_SCHEMA_IDENTIFIER,
     PUBLIC_RANDOMNESS_REVEAL_PAYLOAD_SCHEMA_IDENTIFIER, SETUP_INTENT_PAYLOAD_SCHEMA_IDENTIFIER,
     VerifiedTranscriptObject,
 };
 use super::runtime_input::{RuntimeInputReader as InputReader, refusal_status};
+use super::schemas::{BallotPackagePayload, PRIVATE_SHARE_ACCEPTANCE_PAYLOAD_SCHEMA_IDENTIFIER};
 use super::{
-    ActionContext, ActionDefinition, BoardPolicy, CanonicalDecodeLimits, CanonicalItem,
-    CanonicalItemType, CeremonyContext, FOUNDATION_PROFILE, FoundationObjectType, Hash512,
-    Manifest, ParticipantIdentity, RefusalReason, Roster, SignedCarrier, StreamDescriptor,
-    SuiteRecord, hash_foundation_tuple_512,
+    ActionContext, ActionDefinition, BallotCandidateListPayload, BoardPolicy, CandidateEntry,
+    CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CeremonyContext, FOUNDATION_PROFILE,
+    FoundationObjectType, Hash512, Manifest, ObjectEnvelope, ParticipantIdentity,
+    PreparedSignedCarrierDescription, RefusalReason, Roster, SignedCarrier, StreamDescriptor,
+    SuiteRecord, cancel_prepared_signed_carrier, finish_prepared_signed_carrier,
+    hash_foundation_tuple_512, retain_prepared_signed_carrier,
 };
 
 pub(crate) const BOARD_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH: usize = 32;
@@ -448,11 +449,14 @@ impl VerifiedBoardApplicationSource {
         &self,
     ) -> Result<VerifiedBallotPackageApplicationPayload, RefusalReason> {
         let carrier = self.decode_exact_signed_carrier(FoundationObjectType::BallotPackage)?;
-        let tuple = decode_exact_payload_tuple(&carrier.envelope.payload_bytes)?;
-        require_payload_shape(&tuple, BALLOT_PACKAGE_PAYLOAD_SCHEMA_IDENTIFIER, 2)?;
+        let payload = BallotPackagePayload::decode(
+            &carrier.envelope.payload_bytes,
+            &CanonicalDecodeLimits::default(),
+        )
+        .map_err(|error| error.refusal_reason)?;
         Ok(VerifiedBallotPackageApplicationPayload {
-            ciphertext_descriptor: read_payload_stream_descriptor(&tuple.items[0])?,
-            proof_descriptor: read_payload_stream_descriptor(&tuple.items[1])?,
+            ciphertext_descriptor: payload.ciphertext_descriptor().clone(),
+            proof_descriptor: payload.proof_descriptor().clone(),
         })
     }
 
@@ -573,11 +577,21 @@ struct BoardVerifierRuntimeSession {
     capability: Zeroizing<[u8; BOARD_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH]>,
     handle: u32,
     action_top_count: u16,
+    submission_cutoff_hash: Hash512,
+    maximum_ballot_attempts_per_participant: u64,
     manifest_hash: Hash512,
+    roster: Roster,
     verifier: CanonicalBoardVerifier,
     verified_objects: HashMap<u32, VerifiedTranscriptObject>,
     object_handles_by_hash: HashMap<Hash512, u32>,
     setup_complaint_resolution: SetupComplaintResolutionState,
+    candidate_list_publications: HashMap<ParticipantIdentity, CandidateListPublicationState>,
+}
+
+enum CandidateListPublicationState {
+    Prepared { carrier_handle: u32 },
+    Published,
+    Spent,
 }
 
 enum SetupComplaintResolutionState {
@@ -697,7 +711,7 @@ impl BoardVerifierRuntimeRegistry {
             return Err(refusal_status(RefusalReason::WrongContext));
         }
         let configuration = derive_configuration(context_input)?;
-        let verifier = CanonicalBoardVerifier::new(
+        let mut verifier = CanonicalBoardVerifier::new(
             configuration.suite_id,
             configuration.ceremony_context_hash,
             configuration.action_context_hash,
@@ -706,16 +720,25 @@ impl BoardVerifierRuntimeRegistry {
             CanonicalDecodeLimits::default(),
         )
         .map_err(|error| refusal_status(error.refusal_reason))?;
+        verifier
+            .bind_submission_cutoff_hash(configuration.submission_cutoff_hash)
+            .map_err(|error| refusal_status(error.refusal_reason))?;
         let handle = take_nonrepeating_handle(&mut self.next_session_handle)?;
         self.active_session = Some(BoardVerifierRuntimeSession {
             capability,
             handle,
             action_top_count: configuration.action_top_count,
+            submission_cutoff_hash: configuration.submission_cutoff_hash,
+            maximum_ballot_attempts_per_participant: configuration
+                .limits
+                .maximum_ballot_attempts_per_participant,
             manifest_hash: configuration.manifest_hash,
+            roster: configuration.roster,
             verifier,
             verified_objects: HashMap::new(),
             object_handles_by_hash: HashMap::new(),
             setup_complaint_resolution: SetupComplaintResolutionState::Unresolved,
+            candidate_list_publications: HashMap::new(),
         });
         Ok(handle)
     }
@@ -812,6 +835,156 @@ impl BoardVerifierRuntimeRegistry {
         Ok(())
     }
 
+    fn prepare_ballot_candidate_list(
+        &mut self,
+        session_handle: u32,
+        capability: &[u8],
+        ballot_package_object_handles: &[u32],
+    ) -> RuntimeResult<PreparedSignedCarrierDescription> {
+        if ballot_package_object_handles.is_empty() {
+            return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+        }
+        let session =
+            require_active_session_mut(&mut self.active_session, session_handle, capability)?;
+        if u64::try_from(ballot_package_object_handles.len())
+            .map_err(|_| refusal_status(RefusalReason::OutsideSupportedProfile))?
+            > session.maximum_ballot_attempts_per_participant
+        {
+            return Err(refusal_status(RefusalReason::OutsideSupportedProfile));
+        }
+
+        let mut producer_identity = None;
+        let mut entries = Vec::with_capacity(ballot_package_object_handles.len());
+        for (entry_ordinal, object_handle) in ballot_package_object_handles.iter().enumerate() {
+            let verified_object = session
+                .verified_objects
+                .get(object_handle)
+                .ok_or_else(|| refusal_status(RefusalReason::ConsumedState))?;
+            if verified_object.object_type() != FoundationObjectType::BallotPackage {
+                return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+            }
+            let package_producer = verified_object
+                .producer_participant_id()
+                .ok_or_else(|| refusal_status(RefusalReason::WrongContext))?;
+            match producer_identity {
+                None => producer_identity = Some(package_producer),
+                Some(expected) if expected != package_producer => {
+                    return Err(refusal_status(RefusalReason::WrongContext));
+                }
+                Some(_) => {}
+            }
+            let expected_sequence = u64::try_from(entry_ordinal)
+                .map_err(|_| refusal_status(RefusalReason::OutsideSupportedProfile))?;
+            if verified_object.producer_sequence() != expected_sequence {
+                return Err(refusal_status(RefusalReason::WrongContext));
+            }
+            entries.push(CandidateEntry::new(
+                expected_sequence,
+                verified_object.object_hash(),
+            ));
+        }
+        let producer_identity =
+            producer_identity.ok_or_else(|| refusal_status(RefusalReason::WrongContext))?;
+        if session
+            .candidate_list_publications
+            .contains_key(&producer_identity)
+        {
+            return Err(refusal_status(RefusalReason::ConsumedState));
+        }
+
+        let payload = BallotCandidateListPayload::new(session.submission_cutoff_hash, entries)
+            .map_err(|error| refusal_status(error.refusal_reason))?;
+        let envelope = ObjectEnvelope {
+            suite_id: session.verifier.suite_id(),
+            object_type: FoundationObjectType::BallotCandidateList,
+            ceremony_context_hash: session.verifier.ceremony_context_hash(),
+            action_context_hash: session.verifier.action_context_hash(),
+            producer_participant_id: Some(producer_identity),
+            producer_sequence: 0,
+            ordered_prerequisite_hashes: Vec::new(),
+            payload_bytes: payload
+                .encode()
+                .map_err(|error| refusal_status(error.refusal_reason))?,
+        };
+        let description = retain_prepared_signed_carrier(
+            envelope,
+            &session.roster,
+            session.verifier.roster_hash(),
+        )
+        .map_err(refusal_status)?;
+        session.candidate_list_publications.insert(
+            producer_identity,
+            CandidateListPublicationState::Prepared {
+                carrier_handle: description.handle(),
+            },
+        );
+        Ok(description)
+    }
+
+    fn finish_ballot_candidate_list(
+        &mut self,
+        session_handle: u32,
+        capability: &[u8],
+        prepared_carrier_handle: u32,
+        signature: [u8; super::ML_DSA_65_SIGNATURE_BYTE_LENGTH],
+    ) -> RuntimeResult<Vec<u8>> {
+        let session =
+            require_active_session_mut(&mut self.active_session, session_handle, capability)?;
+        let producer_identity = session
+            .candidate_list_publications
+            .iter()
+            .find_map(|(participant_identity, state)| match state {
+                CandidateListPublicationState::Prepared { carrier_handle }
+                    if *carrier_handle == prepared_carrier_handle =>
+                {
+                    Some(*participant_identity)
+                }
+                _ => None,
+            })
+            .ok_or_else(|| refusal_status(RefusalReason::ConsumedState))?;
+        match finish_prepared_signed_carrier(prepared_carrier_handle, signature) {
+            Ok(canonical_carrier) => {
+                session
+                    .candidate_list_publications
+                    .insert(producer_identity, CandidateListPublicationState::Published);
+                Ok(canonical_carrier)
+            }
+            Err(reason) => {
+                session
+                    .candidate_list_publications
+                    .insert(producer_identity, CandidateListPublicationState::Spent);
+                Err(refusal_status(reason))
+            }
+        }
+    }
+
+    fn cancel_ballot_candidate_list(
+        &mut self,
+        session_handle: u32,
+        capability: &[u8],
+        prepared_carrier_handle: u32,
+    ) -> RuntimeResult<()> {
+        let session =
+            require_active_session_mut(&mut self.active_session, session_handle, capability)?;
+        let producer_identity = session
+            .candidate_list_publications
+            .iter()
+            .find_map(|(participant_identity, state)| match state {
+                CandidateListPublicationState::Prepared { carrier_handle }
+                    if *carrier_handle == prepared_carrier_handle =>
+                {
+                    Some(*participant_identity)
+                }
+                _ => None,
+            })
+            .ok_or_else(|| refusal_status(RefusalReason::ConsumedState))?;
+        cancel_prepared_signed_carrier(prepared_carrier_handle).map_err(refusal_status)?;
+        session
+            .candidate_list_publications
+            .remove(&producer_identity);
+        Ok(())
+    }
+
     fn cancel(&mut self, session_handle: u32, capability: &[u8]) -> RuntimeResult<()> {
         let session = require_active_session(&self.active_session, session_handle, capability)?;
         if matches!(
@@ -819,6 +992,11 @@ impl BoardVerifierRuntimeRegistry {
             SetupComplaintResolutionState::Reserved { .. }
         ) {
             return Err(refusal_status(RefusalReason::ConsumedState));
+        }
+        for state in session.candidate_list_publications.values() {
+            if let CandidateListPublicationState::Prepared { carrier_handle } = state {
+                cancel_prepared_signed_carrier(*carrier_handle).map_err(refusal_status)?;
+            }
         }
         self.active_session = None;
         Ok(())
@@ -894,6 +1072,7 @@ struct BoardVerifierRuntimeConfiguration {
     manifest_hash: Hash512,
     ceremony_context_hash: Hash512,
     action_context_hash: Hash512,
+    submission_cutoff_hash: Hash512,
     action_top_count: u16,
     limits: CanonicalBoardLimits,
     roster: Roster,
@@ -954,6 +1133,46 @@ pub(crate) fn release_verified_transcript_object(
 ) -> RuntimeResult<()> {
     with_runtime_registry(|registry| {
         registry.release(session_handle, capability, verified_object_handle)
+    })
+}
+
+pub(crate) fn prepare_ballot_candidate_list_carrier(
+    session_handle: u32,
+    capability: &[u8],
+    ballot_package_object_handles: &[u32],
+) -> RuntimeResult<PreparedSignedCarrierDescription> {
+    with_runtime_registry(|registry| {
+        registry.prepare_ballot_candidate_list(
+            session_handle,
+            capability,
+            ballot_package_object_handles,
+        )
+    })
+}
+
+pub(crate) fn finish_ballot_candidate_list_carrier(
+    session_handle: u32,
+    capability: &[u8],
+    prepared_carrier_handle: u32,
+    signature: [u8; super::ML_DSA_65_SIGNATURE_BYTE_LENGTH],
+) -> RuntimeResult<Vec<u8>> {
+    with_runtime_registry(|registry| {
+        registry.finish_ballot_candidate_list(
+            session_handle,
+            capability,
+            prepared_carrier_handle,
+            signature,
+        )
+    })
+}
+
+pub(crate) fn cancel_ballot_candidate_list_carrier(
+    session_handle: u32,
+    capability: &[u8],
+    prepared_carrier_handle: u32,
+) -> RuntimeResult<()> {
+    with_runtime_registry(|registry| {
+        registry.cancel_ballot_candidate_list(session_handle, capability, prepared_carrier_handle)
     })
 }
 
@@ -1143,6 +1362,7 @@ fn derive_configuration(
         maximum_ballot_attempts_per_participant: u64::from(
             count_limits.maximum_ballot_attempts_per_participant(),
         ),
+        maximum_candidate_packages_per_action: count_limits.maximum_candidate_packages_per_action(),
         maximum_retained_canonical_carrier_byte_length: super::MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH,
         maximum_unordered_carriers_per_batch: MAXIMUM_CANONICAL_BOARD_BATCH_CARRIER_COUNT,
         maximum_retained_transcript_objects: MAXIMUM_CANONICAL_BOARD_BATCH_CARRIER_COUNT,
@@ -1152,6 +1372,7 @@ fn derive_configuration(
         manifest_hash: ceremony_context.manifest_hash(),
         ceremony_context_hash: action_context.ceremony_context_hash(),
         action_context_hash: action_context.context_hash(),
+        submission_cutoff_hash: action_context.submission_cutoff_hash(),
         action_top_count: action_definition.top_count(),
         limits,
         roster,

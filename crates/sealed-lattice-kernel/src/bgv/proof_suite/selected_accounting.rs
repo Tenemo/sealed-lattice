@@ -1,11 +1,17 @@
 //! Canonical proof ceilings and runtime limits for the selected suite.
 
+#[cfg(test)]
 use std::collections::BTreeSet;
 
 #[cfg(test)]
 use std::sync::OnceLock;
 
-use crate::foundation::{CanonicalDecodeLimits, Hash512, ProofObjectHeader};
+#[cfg(test)]
+use crate::foundation::Hash512;
+use crate::foundation::{
+    CanonicalDecodeLimits, MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT,
+    MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT, ProofObjectHeader,
+};
 
 #[cfg(test)]
 use crate::{
@@ -22,21 +28,19 @@ use crate::{
         },
     },
     foundation::{
-        FOUNDATION_PROFILE, MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH,
-        MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT,
-        MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT, ProofApplicationSlotCeilings,
+        FOUNDATION_PROFILE, MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH, ProofApplicationSlotCeilings,
         ProofFamilyApplicationInventory, SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT,
         SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION, selected_evaluator_resource_accounting,
     },
 };
 
+#[cfg(test)]
 use super::body::minimal_frontier_node_count;
 #[cfg(test)]
 use super::collective_public_key_runtime::{
     CollectivePublicKeyApplicationMemoryAccounting,
     collective_public_key_application_memory_accounting,
 };
-#[cfg(test)]
 use super::external_memory::{
     MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_COUNT,
     MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
@@ -49,9 +53,9 @@ use super::prover::{
     common_proof_external_memory_requirement, common_proof_resident_memory_requirement,
     common_proof_source_provider_is_live_during_phase,
 };
+#[cfg(test)]
 use super::relation_plan::{
-    BoundTreeConstructionKind, RelationColumnOrigin, RelationPlanCheckContext, RelationPlanVariant,
-    RelationTreeDescriptor,
+    BoundTreeConstructionKind, RelationColumnOrigin, RelationTreeDescriptor,
 };
 #[cfg(test)]
 use super::relation_plan::{
@@ -70,21 +74,23 @@ use super::relation_plan::{
     same_secret_source_provider_memory_accounting,
     vss_share_linkage_source_provider_memory_accounting,
 };
+use super::relation_plan::{RelationPlanCheckContext, RelationPlanVariant};
+use super::row_code_whir::RowCodeWhirConstructionPlan;
 #[cfg(test)]
 use super::selected_profile::selected_proof_application_slot_ceilings;
+#[cfg(test)]
 use super::{
-    CommonProofByteLengthCeiling, CommonProofRuntimeLimits, MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
-    MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH, ProofBodyLayout, ProofLeafVisibility,
-    ProofTreeCatalogInput, ProofTreeRole, RelationProofTreeInput, StatementOwnedProofTreeInput,
+    CommonProofByteLengthCeiling, ProofBodyLayout, ProofLeafVisibility, ProofTreeCatalogInput,
+    ProofTreeRole, RelationProofTreeInput, StatementOwnedProofTreeInput,
     build_complete_proof_tree_catalog, canonical_common_proof_byte_length_ceiling,
-    proof_query_tree_byte_length, selected_relation_plan_check_context,
+    proof_query_tree_byte_length,
 };
 #[cfg(test)]
 use super::{
     CommonProofGenerationCheckpointCustodyRequirement, CommonProofSourceProviderMemoryAccounting,
     CommonProofTranscriptSchedule, KeySwitchComponentMaterialTopology,
-    MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
-    PROOF_BASE_FIELD_MODULUS, PROOF_CHALLENGE_EXTENSION_DEGREE, PROOF_OUT_OF_DOMAIN_POINT_COUNT,
+    MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, PROOF_BASE_FIELD_MODULUS,
+    PROOF_CHALLENGE_EXTENSION_DEGREE, PROOF_OUT_OF_DOMAIN_POINT_COUNT,
     SelectedApplicationStatementContext, SelectedBallotCiphertextReadbackMemoryAccounting,
     SelectedBallotValidityCarrierBufferAccounting,
     SelectedEvaluatorAggregateSourceProviderMemoryAccounting,
@@ -101,10 +107,16 @@ use super::{
     selected_relinearization_relation_plan_inputs, selected_same_secret_relation_plan_input,
     selected_target_release_relation,
 };
+use super::{
+    CommonProofRuntimeLimits, MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
+    MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+    selected_relation_plan_check_context, selected_relation_plans,
+};
 
 #[cfg(test)]
 use super::ProofTreeCatalogSource;
 
+#[cfg(test)]
 struct SelectedProofTransportSizing {
     ceiling: CommonProofByteLengthCeiling,
     #[cfg(test)]
@@ -118,9 +130,12 @@ struct SelectedProofTransportSizing {
 pub(crate) enum SelectedProofAccountingError {
     CanonicalEncoding,
     InvalidProfile,
+    #[cfg(test)]
     InvalidTreeGeometry,
     CountOverflow,
+    #[cfg(test)]
     AllocationLimitExceeded,
+    #[cfg(test)]
     ProofByteLengthExceeded {
         application_statement_schema_identifier: u16,
         schedule_position: Option<u32>,
@@ -131,6 +146,27 @@ pub(crate) enum SelectedProofAccountingError {
     ResourcePlanning,
 }
 
+#[cfg(test)]
+const SELECTED_CANONICAL_PROOF_OBJECT_BYTE_LENGTH_TARGET: usize = 5_242_880;
+
+#[cfg(test)]
+fn selected_canonical_proof_object_byte_length(
+    canonical_header_byte_length: usize,
+    canonical_family_body_byte_length: usize,
+) -> Result<usize, SelectedProofAccountingError> {
+    if canonical_header_byte_length == 0 || canonical_family_body_byte_length == 0 {
+        return Err(SelectedProofAccountingError::ResourcePlanning);
+    }
+    let total_byte_length = canonical_header_byte_length
+        .checked_add(canonical_family_body_byte_length)
+        .ok_or(SelectedProofAccountingError::CountOverflow)?;
+    if total_byte_length > SELECTED_CANONICAL_PROOF_OBJECT_BYTE_LENGTH_TARGET {
+        return Err(SelectedProofAccountingError::ResourcePlanning);
+    }
+    Ok(total_byte_length)
+}
+
+#[cfg(test)]
 fn selected_proof_transport_sizing(
     application_statement_schema_identifier: u16,
     canonical_application_statement_bytes: &[u8],
@@ -162,6 +198,7 @@ fn selected_cap_neutral_proof_transport_sizing(
     )
 }
 
+#[cfg(test)]
 fn selected_proof_transport_sizing_with_proof_byte_length_policy(
     application_statement_schema_identifier: u16,
     canonical_application_statement_bytes: &[u8],
@@ -242,6 +279,7 @@ fn selected_proof_transport_sizing_with_proof_byte_length_policy(
     })
 }
 
+#[cfg(test)]
 fn selected_runtime_limits_from_sizing(
     transport_sizing: &SelectedProofTransportSizing,
 ) -> Result<CommonProofRuntimeLimits, SelectedProofAccountingError> {
@@ -253,6 +291,111 @@ fn selected_runtime_limits_from_sizing(
     .map_err(|_| SelectedProofAccountingError::ResourcePlanning)
 }
 
+fn require_selected_row_code_whir_runtime_geometry(
+    construction_plan: &RowCodeWhirConstructionPlan,
+    variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
+) -> Result<(), SelectedProofAccountingError> {
+    use super::row_code_whir::construction_plan::{
+        RowCodeWhirCheckpointBoundary, RowCodeWhirProofSectionRole,
+    };
+
+    let proof_sections = construction_plan.proof_sections();
+    let checkpoints = construction_plan.checkpoints();
+    let whir_plan = construction_plan.whir_plan();
+    let query_epoch_count = whir_plan
+        .rounds
+        .len()
+        .checked_add(1)
+        .ok_or(SelectedProofAccountingError::CountOverflow)?;
+    let proof_section_count = u32::try_from(proof_sections.len())
+        .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
+    let transcript_operation_count = u32::try_from(construction_plan.transcript_operations().len())
+        .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
+    let total_proof_section_item_count =
+        proof_sections.iter().try_fold(0_u64, |total, section| {
+            u64::try_from(section.item_count)
+                .ok()
+                .and_then(|item_count| total.checked_add(item_count))
+                .ok_or(SelectedProofAccountingError::CountOverflow)
+        })?;
+    let parameters = construction_plan.selected_parameters();
+    let external_memory = super::row_code_whir::planned_row_code_whir_external_memory_requirement(
+        construction_plan,
+        variant,
+        relation_context,
+    )
+    .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?;
+    let maximum_external_memory_object_count =
+        u32::try_from(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_COUNT)
+            .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
+
+    if proof_sections.is_empty()
+        || checkpoints.is_empty()
+        || total_proof_section_item_count == 0
+        || proof_sections.iter().enumerate().any(|(ordinal, section)| {
+            u32::try_from(ordinal).ok() != Some(section.section_ordinal) || section.item_count == 0
+        })
+        || !matches!(
+            proof_sections.last().map(|section| section.role),
+            Some(RowCodeWhirProofSectionRole::PlainWhir)
+        )
+        || checkpoints.iter().enumerate().any(|(ordinal, checkpoint)| {
+            u32::try_from(ordinal).ok() != Some(checkpoint.checkpoint_ordinal)
+                || checkpoint.next_transcript_operation_ordinal > transcript_operation_count
+                || checkpoint.next_proof_section_ordinal > proof_section_count
+        })
+        || checkpoints.windows(2).any(|pair| {
+            pair[0].next_transcript_operation_ordinal > pair[1].next_transcript_operation_ordinal
+                || pair[0].next_proof_section_ordinal > pair[1].next_proof_section_ordinal
+        })
+        || !matches!(
+            checkpoints.first().map(|checkpoint| checkpoint.boundary),
+            Some(RowCodeWhirCheckpointBoundary::SourcesAndConstruction)
+        )
+        || checkpoints.last().is_none_or(|checkpoint| {
+            !matches!(
+                checkpoint.boundary,
+                RowCodeWhirCheckpointBoundary::CompletedProofStream
+            ) || checkpoint.next_transcript_operation_ordinal != transcript_operation_count
+                || checkpoint.next_proof_section_ordinal != proof_section_count
+        })
+        || parameters.outer_query_count != construction_plan.outer_query_count()
+        || parameters.direct_bound_query_count > parameters.outer_query_count
+        || parameters.verified_vss_bound_query_count > parameters.direct_bound_query_count
+        || whir_plan
+            .rounds
+            .first()
+            .is_none_or(|round| round.query_epoch.query_count != parameters.outer_query_count)
+        || query_epoch_count == 0
+        || external_memory.distinct_physical_object_count() == 0
+        || external_memory.object_lifecycle_count()
+            < external_memory.distinct_physical_object_count()
+        || external_memory.distinct_physical_object_count() > maximum_external_memory_object_count
+        || external_memory.step_count() == 0
+        || external_memory.maximum_chunk_byte_length()
+            != MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH
+        || external_memory.maximum_transaction_payload_byte_length()
+            < u64::from(external_memory.maximum_chunk_byte_length())
+        || external_memory.peak_stored_byte_length() == 0
+        || external_memory.peak_stored_byte_length()
+            > MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH
+        || external_memory.total_written_byte_length() == 0
+        || external_memory.total_read_byte_length() == 0
+        || external_memory.transaction_count()
+            < u64::from(external_memory.distinct_physical_object_count())
+        || external_memory.local_record_seal_invocation_count() == 0
+        || external_memory.local_record_seal_invocation_count()
+            > MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT
+        || external_memory.local_record_sealed_plaintext_byte_length() == 0
+        || external_memory.local_record_sealed_plaintext_byte_length()
+            > MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT
+    {
+        return Err(SelectedProofAccountingError::ResourcePlanning);
+    }
+    Ok(())
+}
+
 pub(crate) fn selected_proof_runtime_limits(
     application_statement_schema_identifier: u16,
     canonical_application_statement_bytes: &[u8],
@@ -261,15 +404,56 @@ pub(crate) fn selected_proof_runtime_limits(
     let relation_context =
         selected_relation_plan_check_context(application_statement_schema_identifier)
             .ok_or(SelectedProofAccountingError::InvalidProfile)?;
-    let transport_sizing = selected_proof_transport_sizing(
-        application_statement_schema_identifier,
-        canonical_application_statement_bytes,
-        variant,
+    ProofObjectHeader::from_canonical_application_statement(
+        canonical_application_statement_bytes.to_vec(),
+        &CanonicalDecodeLimits::default(),
+    )
+    .map_err(|_| SelectedProofAccountingError::CanonicalEncoding)?;
+
+    let relation_plans =
+        selected_relation_plans().map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+    let mut matching_artifacts = relation_plans.iter().filter(|artifact| {
+        artifact.application_statement_schema_identifier()
+            == application_statement_schema_identifier
+    });
+    let artifact = matching_artifacts
+        .next()
+        .ok_or(SelectedProofAccountingError::InvalidProfile)?;
+    if matching_artifacts.next().is_some() || artifact.checked_context() != &relation_context {
+        return Err(SelectedProofAccountingError::InvalidProfile);
+    }
+    let checked_variant = artifact
+        .compiled_plan()
+        .select_variant(variant.schedule_position(), variant.top_count())
+        .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+    if checked_variant != variant {
+        return Err(SelectedProofAccountingError::InvalidProfile);
+    }
+    let construction_plan = RowCodeWhirConstructionPlan::for_selected_variant(
+        artifact,
+        variant.schedule_position(),
+        variant.top_count(),
+    )
+    .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+    construction_plan
+        .canonical_identity_hash()
+        .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+    require_selected_row_code_whir_runtime_geometry(
+        &construction_plan,
+        checked_variant,
         &relation_context,
     )?;
-    selected_runtime_limits_from_sizing(&transport_sizing)
+
+    CommonProofRuntimeLimits::new(
+        MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
+        MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+        u64::try_from(MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH)
+            .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+    )
+    .map_err(|_| SelectedProofAccountingError::ResourcePlanning)
 }
 
+#[cfg(test)]
 fn require_selected_proof_byte_length(
     application_statement_schema_identifier: u16,
     schedule_position: Option<u32>,
@@ -288,6 +472,7 @@ fn require_selected_proof_byte_length(
     Ok(())
 }
 
+#[cfg(test)]
 fn selected_relation_tree_inputs(
     variant: &RelationPlanVariant,
 ) -> Result<Vec<RelationProofTreeInput>, SelectedProofAccountingError> {
@@ -348,6 +533,7 @@ fn selected_relation_tree_inputs(
         .collect()
 }
 
+#[cfg(test)]
 fn require_selected_query_ceiling_geometry(
     unique_query_count: u32,
     query_orbit_count: u64,
@@ -398,6 +584,7 @@ fn require_selected_query_ceiling_geometry(
 
 /// Constructs one shared query vector that attains every folded-tree frontier
 /// maximum for a production schedule.
+#[cfg(test)]
 fn selected_query_ceiling_witness(
     unique_query_count: usize,
     query_orbit_count: u64,
@@ -587,6 +774,7 @@ pub(crate) use resource_accounting::{
     SelectedCompleteActionMaterialResourceAccounting, SelectedProofExternalMemoryDiagnosticError,
     SelectedProofExternalMemoryDiagnosticRequirement, SelectedProofExternalMemoryDiagnosticRow,
     SelectedProofQueryTreeResourceAccounting, SelectedProofResidentPhaseResourceAccounting,
+    SelectedRowCodeWhirConstructionResourceAccounting,
     derive_selected_complete_action_material_resource_accounting,
     derive_selected_proof_family_application_inventory,
     selected_complete_proof_resource_accounting, selected_proof_external_memory_diagnostic_report,
@@ -1109,6 +1297,8 @@ mod resource_accounting {
         CheckpointCustody(SelectedProofAccountingError),
         ResidentMemoryAccounting(SelectedProofAccountingError),
         QueryTreeAccounting(SelectedProofAccountingError),
+        RowCodeWhirConstruction(SelectedProofAccountingError),
+        RetainedOracleAccounting(SelectedProofAccountingError),
         RelationGeometry(SelectedProofAccountingError),
         CompleteActionMultiplicity(SelectedProofAccountingError),
         LogicalEntryCount(SelectedProofAccountingError),
@@ -1127,6 +1317,8 @@ mod resource_accounting {
                 Self::CheckpointCustody(_) => "checkpoint-custody",
                 Self::ResidentMemoryAccounting(_) => "resident-memory-accounting",
                 Self::QueryTreeAccounting(_) => "query-tree-accounting",
+                Self::RowCodeWhirConstruction(_) => "row-code-whir-construction",
+                Self::RetainedOracleAccounting(_) => "retained-oracle-accounting",
                 Self::RelationGeometry(_) => "relation-geometry",
                 Self::CompleteActionMultiplicity(_) => "complete-action-multiplicity",
                 Self::LogicalEntryCount(_) => "logical-entry-count",
@@ -1231,9 +1423,179 @@ mod resource_accounting {
         }
     }
 
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub(crate) struct SelectedRowCodeWhirProofSectionAccounting {
+        section_ordinal: u32,
+        role_code: u16,
+        role_name: &'static str,
+        phase_code: Option<u8>,
+        associated_ordinal: Option<u32>,
+        item_count: u64,
+    }
+
+    impl SelectedRowCodeWhirProofSectionAccounting {
+        pub(crate) const fn section_ordinal(self) -> u32 {
+            self.section_ordinal
+        }
+
+        pub(crate) const fn role_code(self) -> u16 {
+            self.role_code
+        }
+
+        pub(crate) const fn role_name(self) -> &'static str {
+            self.role_name
+        }
+
+        pub(crate) const fn phase_code(self) -> Option<u8> {
+            self.phase_code
+        }
+
+        pub(crate) const fn associated_ordinal(self) -> Option<u32> {
+            self.associated_ordinal
+        }
+
+        pub(crate) const fn item_count(self) -> u64 {
+            self.item_count
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub(crate) struct SelectedRowCodeWhirCheckpointAccounting {
+        checkpoint_ordinal: u32,
+        boundary_code: u16,
+        boundary_name: &'static str,
+        phase_code: Option<u8>,
+        round_ordinal: Option<u32>,
+        next_transcript_operation_ordinal: u32,
+        next_proof_section_ordinal: u32,
+    }
+
+    impl SelectedRowCodeWhirCheckpointAccounting {
+        pub(crate) const fn checkpoint_ordinal(self) -> u32 {
+            self.checkpoint_ordinal
+        }
+
+        pub(crate) const fn boundary_code(self) -> u16 {
+            self.boundary_code
+        }
+
+        pub(crate) const fn boundary_name(self) -> &'static str {
+            self.boundary_name
+        }
+
+        pub(crate) const fn phase_code(self) -> Option<u8> {
+            self.phase_code
+        }
+
+        pub(crate) const fn round_ordinal(self) -> Option<u32> {
+            self.round_ordinal
+        }
+
+        pub(crate) const fn next_transcript_operation_ordinal(self) -> u32 {
+            self.next_transcript_operation_ordinal
+        }
+
+        pub(crate) const fn next_proof_section_ordinal(self) -> u32 {
+            self.next_proof_section_ordinal
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub(crate) struct SelectedRowCodeWhirQueryEpochAccounting {
+        epoch_ordinal: u32,
+        bit_length: u32,
+        domain_size: u64,
+        query_count: u32,
+    }
+
+    impl SelectedRowCodeWhirQueryEpochAccounting {
+        pub(crate) const fn epoch_ordinal(self) -> u32 {
+            self.epoch_ordinal
+        }
+
+        pub(crate) const fn bit_length(self) -> u32 {
+            self.bit_length
+        }
+
+        pub(crate) const fn domain_size(self) -> u64 {
+            self.domain_size
+        }
+
+        pub(crate) const fn query_count(self) -> u32 {
+            self.query_count
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub(crate) struct SelectedRowCodeWhirConstructionResourceAccounting {
+        construction_identity_hash: [u8; Hash512::BYTE_LENGTH],
+        outer_query_count: u32,
+        direct_bound_query_count: u32,
+        prior_vss_bound_query_count: u32,
+        aggregate_table_width: u32,
+        opening_batch_count: u32,
+        transcript_operation_count: u32,
+        ordered_proof_sections: Box<[SelectedRowCodeWhirProofSectionAccounting]>,
+        ordered_checkpoints: Box<[SelectedRowCodeWhirCheckpointAccounting]>,
+        ordered_query_epochs: Box<[SelectedRowCodeWhirQueryEpochAccounting]>,
+        retained_oracle_external_memory:
+            super::super::row_code_whir::RetainedPlainWhirExternalMemoryAccounting,
+    }
+
+    impl SelectedRowCodeWhirConstructionResourceAccounting {
+        pub(crate) const fn construction_identity_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+            self.construction_identity_hash
+        }
+
+        pub(crate) const fn outer_query_count(&self) -> u32 {
+            self.outer_query_count
+        }
+
+        pub(crate) const fn direct_bound_query_count(&self) -> u32 {
+            self.direct_bound_query_count
+        }
+
+        pub(crate) const fn prior_vss_bound_query_count(&self) -> u32 {
+            self.prior_vss_bound_query_count
+        }
+
+        pub(crate) const fn aggregate_table_width(&self) -> u32 {
+            self.aggregate_table_width
+        }
+
+        pub(crate) const fn opening_batch_count(&self) -> u32 {
+            self.opening_batch_count
+        }
+
+        pub(crate) const fn transcript_operation_count(&self) -> u32 {
+            self.transcript_operation_count
+        }
+
+        pub(crate) fn ordered_proof_sections(
+            &self,
+        ) -> &[SelectedRowCodeWhirProofSectionAccounting] {
+            &self.ordered_proof_sections
+        }
+
+        pub(crate) fn ordered_checkpoints(&self) -> &[SelectedRowCodeWhirCheckpointAccounting] {
+            &self.ordered_checkpoints
+        }
+
+        pub(crate) fn ordered_query_epochs(&self) -> &[SelectedRowCodeWhirQueryEpochAccounting] {
+            &self.ordered_query_epochs
+        }
+
+        pub(crate) const fn retained_oracle_external_memory(
+            &self,
+        ) -> super::super::row_code_whir::RetainedPlainWhirExternalMemoryAccounting {
+            self.retained_oracle_external_memory
+        }
+    }
+
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub(crate) struct SelectedProofExternalMemoryDiagnosticRequirement {
         external_memory_requirement: CommonProofExternalMemoryRequirement,
+        row_code_whir_construction: SelectedRowCodeWhirConstructionResourceAccounting,
         complete_action_application_multiplicity: u32,
         logical_entry_count: u32,
         opening_claim_count: u32,
@@ -1271,6 +1633,12 @@ mod resource_accounting {
             &self,
         ) -> CommonProofExternalMemoryRequirement {
             self.external_memory_requirement
+        }
+
+        pub(crate) const fn row_code_whir_construction(
+            &self,
+        ) -> &SelectedRowCodeWhirConstructionResourceAccounting {
+            &self.row_code_whir_construction
         }
 
         pub(crate) const fn complete_action_application_multiplicity(&self) -> u32 {
@@ -1443,6 +1811,201 @@ mod resource_accounting {
         }
     }
 
+    fn row_code_whir_phase_code(
+        phase: super::super::row_code_whir::construction_plan::RowCodeWhirPhase,
+    ) -> u8 {
+        match phase {
+            super::super::row_code_whir::construction_plan::RowCodeWhirPhase::Base => 1,
+            super::super::row_code_whir::construction_plan::RowCodeWhirPhase::Auxiliary => 2,
+            super::super::row_code_whir::construction_plan::RowCodeWhirPhase::Quotient => 3,
+        }
+    }
+
+    fn row_code_whir_proof_section_accounting(
+        section: super::super::row_code_whir::construction_plan::RowCodeWhirProofSectionPlan,
+    ) -> Result<SelectedRowCodeWhirProofSectionAccounting, SelectedProofAccountingError> {
+        use super::super::row_code_whir::construction_plan::RowCodeWhirProofSectionRole;
+
+        let (role_code, role_name, phase_code, associated_ordinal) = match section.role {
+            RowCodeWhirProofSectionRole::RelationCommitment { phase } => (
+                1,
+                "relation-commitment",
+                Some(row_code_whir_phase_code(phase)),
+                None,
+            ),
+            RowCodeWhirProofSectionRole::OutOfDomainEvaluations => {
+                (2, "out-of-domain-evaluations", None, None)
+            }
+            RowCodeWhirProofSectionRole::OpeningBatchMaskEvaluations => {
+                (3, "opening-batch-mask-evaluations", None, None)
+            }
+            RowCodeWhirProofSectionRole::AggregateCommitment => {
+                (4, "aggregate-commitment", None, None)
+            }
+            RowCodeWhirProofSectionRole::PhaseOpenings { phase } => (
+                5,
+                "phase-openings",
+                Some(row_code_whir_phase_code(phase)),
+                None,
+            ),
+            RowCodeWhirProofSectionRole::BoundTreeOpenings { bound_tree_ordinal } => {
+                (6, "bound-tree-openings", None, Some(bound_tree_ordinal))
+            }
+            RowCodeWhirProofSectionRole::PlainWhir => (7, "plain-whir", None, None),
+        };
+        Ok(SelectedRowCodeWhirProofSectionAccounting {
+            section_ordinal: section.section_ordinal,
+            role_code,
+            role_name,
+            phase_code,
+            associated_ordinal,
+            item_count: u64::try_from(section.item_count)
+                .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+        })
+    }
+
+    fn row_code_whir_checkpoint_accounting(
+        checkpoint: super::super::row_code_whir::construction_plan::RowCodeWhirCheckpointPlan,
+    ) -> SelectedRowCodeWhirCheckpointAccounting {
+        use super::super::row_code_whir::construction_plan::RowCodeWhirCheckpointBoundary;
+
+        let (boundary_code, boundary_name, phase_code, round_ordinal) = match checkpoint.boundary {
+            RowCodeWhirCheckpointBoundary::SourcesAndConstruction => {
+                (1, "sources-and-construction", None, None)
+            }
+            RowCodeWhirCheckpointBoundary::PhaseCommitment { phase } => (
+                2,
+                "phase-commitment",
+                Some(row_code_whir_phase_code(phase)),
+                None,
+            ),
+            RowCodeWhirCheckpointBoundary::RelationEvaluationsAndMask => {
+                (3, "relation-evaluations-and-mask", None, None)
+            }
+            RowCodeWhirCheckpointBoundary::AggregateCommitmentAndQueries => {
+                (4, "aggregate-commitment-and-queries", None, None)
+            }
+            RowCodeWhirCheckpointBoundary::WhirRound { round_ordinal } => {
+                (5, "whir-round", None, Some(round_ordinal))
+            }
+            RowCodeWhirCheckpointBoundary::CompletedProofStream => {
+                (6, "completed-proof-stream", None, None)
+            }
+        };
+        SelectedRowCodeWhirCheckpointAccounting {
+            checkpoint_ordinal: checkpoint.checkpoint_ordinal,
+            boundary_code,
+            boundary_name,
+            phase_code,
+            round_ordinal,
+            next_transcript_operation_ordinal: checkpoint.next_transcript_operation_ordinal,
+            next_proof_section_ordinal: checkpoint.next_proof_section_ordinal,
+        }
+    }
+
+    fn row_code_whir_query_epoch_accounting(
+        epoch: super::super::row_code_whir::construction_plan::RowCodeWhirQueryEpochPlan,
+    ) -> Result<SelectedRowCodeWhirQueryEpochAccounting, SelectedProofAccountingError> {
+        Ok(SelectedRowCodeWhirQueryEpochAccounting {
+            epoch_ordinal: epoch.epoch_ordinal,
+            bit_length: u32::try_from(epoch.bit_length)
+                .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+            domain_size: u64::try_from(epoch.domain_size)
+                .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+            query_count: u32::try_from(epoch.query_count)
+                .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+        })
+    }
+
+    fn selected_row_code_whir_construction_resource_accounting(
+        relation_plan: &super::super::profile::ValidatedRelationPlanArtifact,
+        variant: &RelationPlanVariant,
+    ) -> Result<SelectedRowCodeWhirConstructionResourceAccounting, SelectedProofAccountingError>
+    {
+        let construction_plan = RowCodeWhirConstructionPlan::for_selected_variant(
+            relation_plan,
+            variant.schedule_position(),
+            variant.top_count(),
+        )
+        .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+        let parameters = construction_plan.selected_parameters();
+        let ordered_proof_sections = construction_plan
+            .proof_sections()
+            .iter()
+            .copied()
+            .map(row_code_whir_proof_section_accounting)
+            .collect::<Result<Vec<_>, _>>()?;
+        let ordered_checkpoints = construction_plan
+            .checkpoints()
+            .iter()
+            .copied()
+            .map(row_code_whir_checkpoint_accounting)
+            .collect::<Vec<_>>();
+        let mut ordered_query_epochs = construction_plan
+            .whir_plan()
+            .rounds
+            .iter()
+            .map(|round| row_code_whir_query_epoch_accounting(round.query_epoch))
+            .collect::<Result<Vec<_>, _>>()?;
+        ordered_query_epochs.push(row_code_whir_query_epoch_accounting(
+            construction_plan.whir_plan().final_round.query_epoch,
+        )?);
+        let retained_oracle_external_memory = super::super::row_code_whir::
+            selected_plain_whir_retained_oracle_external_memory_accounting(0)
+            .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?;
+        let query_epoch_count = u32::try_from(ordered_query_epochs.len())
+            .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
+        if ordered_proof_sections.is_empty()
+            || ordered_checkpoints.is_empty()
+            || ordered_query_epochs.is_empty()
+            || ordered_proof_sections
+                .iter()
+                .enumerate()
+                .any(|(ordinal, section)| {
+                    u32::try_from(ordinal).ok() != Some(section.section_ordinal)
+                })
+            || ordered_checkpoints
+                .iter()
+                .enumerate()
+                .any(|(ordinal, checkpoint)| {
+                    u32::try_from(ordinal).ok() != Some(checkpoint.checkpoint_ordinal)
+                })
+            || ordered_query_epochs
+                .iter()
+                .enumerate()
+                .any(|(ordinal, epoch)| u32::try_from(ordinal).ok() != Some(epoch.epoch_ordinal))
+            || retained_oracle_external_memory.distinct_physical_object_count() != query_epoch_count
+            || retained_oracle_external_memory.object_lifecycle_count() != query_epoch_count
+        {
+            return Err(SelectedProofAccountingError::InvalidProfile);
+        }
+        Ok(SelectedRowCodeWhirConstructionResourceAccounting {
+            construction_identity_hash: construction_plan
+                .canonical_identity_hash()
+                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?,
+            outer_query_count: u32::try_from(construction_plan.outer_query_count())
+                .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+            direct_bound_query_count: u32::try_from(parameters.direct_bound_query_count)
+                .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+            prior_vss_bound_query_count: u32::try_from(parameters.verified_vss_bound_query_count)
+                .map_err(|_| {
+                SelectedProofAccountingError::CountOverflow
+            })?,
+            aggregate_table_width: u32::try_from(construction_plan.aggregate_table_width())
+                .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+            opening_batch_count: u32::try_from(construction_plan.opening_batches().len())
+                .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+            transcript_operation_count: u32::try_from(
+                construction_plan.transcript_operations().len(),
+            )
+            .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+            ordered_proof_sections: ordered_proof_sections.into_boxed_slice(),
+            ordered_checkpoints: ordered_checkpoints.into_boxed_slice(),
+            ordered_query_epochs: ordered_query_epochs.into_boxed_slice(),
+            retained_oracle_external_memory,
+        })
+    }
+
     fn selected_relation_column_origin_counts(
         variant: &RelationPlanVariant,
     ) -> Result<(u32, u32, u32, u32), SelectedProofAccountingError> {
@@ -1510,6 +2073,22 @@ mod resource_accounting {
                     let relation_context = relation_context.as_ref().ok_or(
                         SelectedProofExternalMemoryDiagnosticError::MissingRelationContext,
                     )?;
+                    let row_code_whir_construction =
+                        selected_row_code_whir_construction_resource_accounting(
+                            relation_plan,
+                            variant,
+                        )
+                        .map_err(|error| {
+                            if error == SelectedProofAccountingError::ResourcePlanning {
+                                SelectedProofExternalMemoryDiagnosticError::RetainedOracleAccounting(
+                                    error,
+                                )
+                            } else {
+                                SelectedProofExternalMemoryDiagnosticError::RowCodeWhirConstruction(
+                                    error,
+                                )
+                            }
+                        })?;
                     let statement_context = SelectedApplicationStatementContext::new(
                         FOUNDATION_PROFILE.protocol_version,
                         [0; Hash512::BYTE_LENGTH],
@@ -1703,6 +2282,7 @@ mod resource_accounting {
                     )?;
                     Ok(SelectedProofExternalMemoryDiagnosticRequirement {
                         external_memory_requirement,
+                        row_code_whir_construction,
                         complete_action_application_multiplicity,
                         logical_entry_count,
                         opening_claim_count,
@@ -2924,17 +3504,17 @@ mod resource_accounting {
             .copied()
             .max()
             .ok_or(SelectedProofAccountingError::ResourcePlanning)?;
-        let proof_byte_length = u64::try_from(runtime_limits.proof_byte_length())
+        let maximum_proof_byte_length = u64::try_from(runtime_limits.maximum_proof_byte_length())
             .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
         let maximum_proof_output_chunk_byte_length_ceiling =
             u64::try_from(MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH)
                 .map_err(|_| SelectedProofAccountingError::CountOverflow)?
-                .min(proof_byte_length);
-        let proof_output_chunk_count_ceiling = proof_byte_length.div_ceil(
+                .min(maximum_proof_byte_length);
+        let proof_output_chunk_count_ceiling = maximum_proof_byte_length.div_ceil(
             u64::try_from(MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH)
                 .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
         );
-        if u64::try_from(runtime_limits.proof_byte_length())
+        if u64::try_from(runtime_limits.maximum_proof_byte_length())
             .map_err(|_| SelectedProofAccountingError::CountOverflow)?
             > MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH
             || external_memory_requirement.peak_stored_byte_length()
@@ -3742,6 +4322,30 @@ mod resource_accounting {
         use crate::foundation::{CanonicalItem, CanonicalItemType, CanonicalTuple};
 
         #[test]
+        fn selected_proof_size_target_counts_the_header_and_family_body_together() {
+            assert_eq!(
+                selected_canonical_proof_object_byte_length(1, 5_242_879),
+                Ok(SELECTED_CANONICAL_PROOF_OBJECT_BYTE_LENGTH_TARGET)
+            );
+            assert_eq!(
+                selected_canonical_proof_object_byte_length(1, 5_242_880),
+                Err(SelectedProofAccountingError::ResourcePlanning)
+            );
+            assert_eq!(
+                selected_canonical_proof_object_byte_length(usize::MAX, 1),
+                Err(SelectedProofAccountingError::CountOverflow)
+            );
+            assert_eq!(
+                selected_canonical_proof_object_byte_length(0, 1),
+                Err(SelectedProofAccountingError::ResourcePlanning)
+            );
+            assert_eq!(
+                selected_canonical_proof_object_byte_length(1, 0),
+                Err(SelectedProofAccountingError::ResourcePlanning)
+            );
+        }
+
+        #[test]
         fn selected_proof_family_inventory_uses_the_production_relation_catalogs() {
             let inventory = derive_selected_proof_family_application_inventory()
                 .expect("the selected proof-family inventory derives");
@@ -4501,8 +5105,6 @@ mod resource_accounting {
         #[test]
         #[ignore = "guarded selected proof resource measurement"]
         fn runtime_limits_match_resource_ceilings_for_every_selected_variant() {
-            let inventory = selected_proof_variant_resource_inventory()
-                .expect("the selected resource inventory derives");
             let proof_profile =
                 selected_proof_profile_set(SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT)
                     .expect("the selected proof profile derives");
@@ -4524,18 +5126,14 @@ mod resource_accounting {
                     let runtime_limits =
                         selected_proof_runtime_limits(schema_identifier, &statement_bytes, variant)
                             .expect("selected runtime limits derive");
-                    let compiler_ceiling = inventory
-                        .iter()
-                        .find(|ceiling| {
-                            ceiling.application_statement_schema_identifier() == schema_identifier
-                                && ceiling.schedule_position() == variant.schedule_position()
-                                && ceiling.top_count() == variant.top_count()
-                        })
-                        .expect("every compiled variant has one ceiling");
-
                     assert_eq!(
-                        runtime_limits.proof_byte_length(),
-                        compiler_ceiling.proof_byte_length_ceiling()
+                        runtime_limits.maximum_proof_byte_length(),
+                        MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
+                        "cryptographic admission uses the absolute stream bound",
+                    );
+                    assert!(
+                        SELECTED_CANONICAL_PROOF_OBJECT_BYTE_LENGTH_TARGET
+                            < MAXIMUM_COMMON_PROOF_BYTE_LENGTH
                     );
                     assert_eq!(
                         runtime_limits.external_memory_chunk_byte_length(),
@@ -4544,7 +5142,7 @@ mod resource_accounting {
                     assert!(runtime_limits.prefetched_query_byte_length() > 0);
                     assert!(
                         runtime_limits.prefetched_query_byte_length()
-                            <= u64::try_from(runtime_limits.proof_byte_length())
+                            <= u64::try_from(runtime_limits.maximum_proof_byte_length())
                                 .expect("the proof ceiling fits u64")
                     );
                 }

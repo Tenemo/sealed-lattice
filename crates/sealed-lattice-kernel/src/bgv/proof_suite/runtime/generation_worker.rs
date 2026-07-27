@@ -1,5 +1,12 @@
 use super::super::prover::{CommonProofExternalMemoryRequirement, PublicOnlyCommonProofCoinSource};
-use super::super::{CommonProofAuthenticatedSourceReadRequest, ProofExternalMemoryUsage};
+use super::super::row_code_whir::{
+    ExactSameSecretAuthenticatedTranscriptPrefixRequest, ExactSameSecretFiatShamirBinding,
+    ExactSameSecretTranscriptPrefixAuthorityBinding, PreparedExactSameSecretTranscriptPrefix,
+    RowCodeWhirGenerationStateMachine,
+};
+use super::super::{
+    CommonProofAuthenticatedSourceReadRequest, CommonProofProverError, ProofExternalMemoryUsage,
+};
 #[cfg(test)]
 use super::super::{
     CommonProofCheckpointCursorManifestError, CommonProofCheckpointCursorManifestRequirement,
@@ -13,7 +20,7 @@ use super::{
     CHECKPOINT_EVENT_HASH_DOMAIN, CHECKPOINT_GENESIS_HASH_DOMAIN,
     COMMON_PROOF_CHECKPOINT_STATE_BYTE_LENGTH, COMMON_PROOF_CHECKPOINT_STATE_FORMAT_IDENTIFIER,
     COMMON_PROOF_CHECKPOINT_STATE_MAGIC, COMMON_PROOF_CHECKPOINT_STATE_VERSION,
-    CanonicalDecodeLimits, CheckpointableCommonProofPrivateCoinSource,
+    CanonicalDecodeLimits, CheckpointableCommonProofPrivateCoinSource, CommonProofByteSink,
     CommonProofGenerationCheckpointBoundary, CommonProofGenerationError,
     CommonProofGenerationInitializationError, CommonProofGenerationPoll,
     CommonProofGenerationStage, CommonProofGenerationStateMachine,
@@ -36,6 +43,154 @@ use crate::foundation::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CommonProofGenerationSourceError {
     PrivateCoinSource,
+}
+
+const COMMON_PROOF_GENERATION_CURSOR_MANIFEST_MAGIC: [u8; 8] = *b"SLCGCM01";
+const COMMON_PROOF_PRIVATE_COIN_CURSOR_MANIFEST_MAGIC: [u8; 8] = *b"SLCPCM03";
+const COMMON_PROOF_GENERATION_CURSOR_MANIFEST_VERSION: u16 = 1;
+const COMMON_PROOF_GENERATION_CURSOR_MANIFEST_TRANSCRIPT_PRESENT_FLAG: u16 = 1;
+const COMMON_PROOF_GENERATION_CURSOR_MANIFEST_PREFIX_BYTE_LENGTH: usize =
+    8 + 2 + 2 + 4 + 4 + 4 + HASH_BYTE_LENGTH;
+const MAXIMUM_COMMON_PROOF_GENERATION_CURSOR_MANIFEST_BYTE_LENGTH: usize = 1_048_576;
+const MAXIMUM_ROW_CODE_WHIR_TRANSCRIPT_CHECKPOINT_CURSOR_BYTE_LENGTH: usize = 16 * 1_024;
+
+struct DecodedCommonProofGenerationCursorManifest<'bytes> {
+    private_coin_cursor_manifest_bytes: &'bytes [u8],
+    transcript_cursor_bytes: &'bytes [u8],
+    transcript_cursor_digest: Option<[u8; HASH_BYTE_LENGTH]>,
+}
+
+fn encode_common_proof_generation_cursor_manifest(
+    private_coin_cursor_manifest_bytes: Vec<u8>,
+    transcript_cursor_bytes: &[u8],
+    transcript_cursor_digest: Option<[u8; HASH_BYTE_LENGTH]>,
+) -> Result<Vec<u8>, CommonProofRuntimeError> {
+    let transcript_is_present = !transcript_cursor_bytes.is_empty();
+    if private_coin_cursor_manifest_bytes.is_empty()
+        || transcript_is_present != transcript_cursor_digest.is_some()
+        || transcript_cursor_bytes.len()
+            > MAXIMUM_ROW_CODE_WHIR_TRANSCRIPT_CHECKPOINT_CURSOR_BYTE_LENGTH
+    {
+        return Err(CommonProofRuntimeError::WrongVerificationBinding);
+    }
+    let private_coin_cursor_manifest_byte_length =
+        u32::try_from(private_coin_cursor_manifest_bytes.len())
+            .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?;
+    let transcript_cursor_byte_length = u32::try_from(transcript_cursor_bytes.len())
+        .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?;
+    let total_byte_length = COMMON_PROOF_GENERATION_CURSOR_MANIFEST_PREFIX_BYTE_LENGTH
+        .checked_add(private_coin_cursor_manifest_bytes.len())
+        .and_then(|byte_length| byte_length.checked_add(transcript_cursor_bytes.len()))
+        .filter(|byte_length| {
+            *byte_length <= MAXIMUM_COMMON_PROOF_GENERATION_CURSOR_MANIFEST_BYTE_LENGTH
+        })
+        .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
+    let total_byte_length_u32 = u32::try_from(total_byte_length)
+        .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?;
+    let mut output = Vec::new();
+    output
+        .try_reserve_exact(total_byte_length)
+        .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?;
+    output.extend_from_slice(&COMMON_PROOF_GENERATION_CURSOR_MANIFEST_MAGIC);
+    output.extend_from_slice(&COMMON_PROOF_GENERATION_CURSOR_MANIFEST_VERSION.to_le_bytes());
+    output.extend_from_slice(
+        &if transcript_is_present {
+            COMMON_PROOF_GENERATION_CURSOR_MANIFEST_TRANSCRIPT_PRESENT_FLAG
+        } else {
+            0
+        }
+        .to_le_bytes(),
+    );
+    output.extend_from_slice(&total_byte_length_u32.to_le_bytes());
+    output.extend_from_slice(&private_coin_cursor_manifest_byte_length.to_le_bytes());
+    output.extend_from_slice(&transcript_cursor_byte_length.to_le_bytes());
+    output.extend_from_slice(&transcript_cursor_digest.unwrap_or([0_u8; HASH_BYTE_LENGTH]));
+    output.extend_from_slice(&private_coin_cursor_manifest_bytes);
+    output.extend_from_slice(transcript_cursor_bytes);
+    if output.len() != total_byte_length {
+        return Err(CommonProofRuntimeError::WrongVerificationBinding);
+    }
+    Ok(output)
+}
+
+fn decode_common_proof_generation_cursor_manifest(
+    manifest_bytes: &[u8],
+) -> Result<DecodedCommonProofGenerationCursorManifest<'_>, CommonProofRuntimeError> {
+    if manifest_bytes.len() < COMMON_PROOF_GENERATION_CURSOR_MANIFEST_PREFIX_BYTE_LENGTH
+        || manifest_bytes.len() > MAXIMUM_COMMON_PROOF_GENERATION_CURSOR_MANIFEST_BYTE_LENGTH
+        || manifest_bytes[..8] != COMMON_PROOF_GENERATION_CURSOR_MANIFEST_MAGIC
+    {
+        return Err(CommonProofRuntimeError::WrongVerificationBinding);
+    }
+    let version = u16::from_le_bytes(
+        manifest_bytes[8..10]
+            .try_into()
+            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?,
+    );
+    let flags = u16::from_le_bytes(
+        manifest_bytes[10..12]
+            .try_into()
+            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?,
+    );
+    let total_byte_length = usize::try_from(u32::from_le_bytes(
+        manifest_bytes[12..16]
+            .try_into()
+            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?,
+    ))
+    .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+    let private_coin_cursor_manifest_byte_length = usize::try_from(u32::from_le_bytes(
+        manifest_bytes[16..20]
+            .try_into()
+            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?,
+    ))
+    .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+    let transcript_cursor_byte_length = usize::try_from(u32::from_le_bytes(
+        manifest_bytes[20..24]
+            .try_into()
+            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?,
+    ))
+    .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+    let transcript_cursor_digest: [u8; HASH_BYTE_LENGTH] = manifest_bytes
+        [24..24 + HASH_BYTE_LENGTH]
+        .try_into()
+        .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+    let private_coin_cursor_manifest_start =
+        COMMON_PROOF_GENERATION_CURSOR_MANIFEST_PREFIX_BYTE_LENGTH;
+    let transcript_cursor_start = private_coin_cursor_manifest_start
+        .checked_add(private_coin_cursor_manifest_byte_length)
+        .ok_or(CommonProofRuntimeError::WrongVerificationBinding)?;
+    let computed_total_byte_length = transcript_cursor_start
+        .checked_add(transcript_cursor_byte_length)
+        .ok_or(CommonProofRuntimeError::WrongVerificationBinding)?;
+    let transcript_is_present =
+        flags == COMMON_PROOF_GENERATION_CURSOR_MANIFEST_TRANSCRIPT_PRESENT_FLAG;
+    if version != COMMON_PROOF_GENERATION_CURSOR_MANIFEST_VERSION
+        || flags & !COMMON_PROOF_GENERATION_CURSOR_MANIFEST_TRANSCRIPT_PRESENT_FLAG != 0
+        || total_byte_length != manifest_bytes.len()
+        || computed_total_byte_length != total_byte_length
+        || private_coin_cursor_manifest_byte_length == 0
+        || transcript_cursor_byte_length
+            > MAXIMUM_ROW_CODE_WHIR_TRANSCRIPT_CHECKPOINT_CURSOR_BYTE_LENGTH
+        || transcript_is_present != (transcript_cursor_byte_length != 0)
+        || (!transcript_is_present && transcript_cursor_digest != [0_u8; HASH_BYTE_LENGTH])
+    {
+        return Err(CommonProofRuntimeError::WrongVerificationBinding);
+    }
+    let decoded = DecodedCommonProofGenerationCursorManifest {
+        private_coin_cursor_manifest_bytes: &manifest_bytes
+            [private_coin_cursor_manifest_start..transcript_cursor_start],
+        transcript_cursor_bytes: &manifest_bytes[transcript_cursor_start..],
+        transcript_cursor_digest: transcript_is_present.then_some(transcript_cursor_digest),
+    };
+    if decoded.private_coin_cursor_manifest_bytes.len()
+        < COMMON_PROOF_PRIVATE_COIN_CURSOR_MANIFEST_MAGIC.len()
+        || decoded.private_coin_cursor_manifest_bytes
+            [..COMMON_PROOF_PRIVATE_COIN_CURSOR_MANIFEST_MAGIC.len()]
+            != COMMON_PROOF_PRIVATE_COIN_CURSOR_MANIFEST_MAGIC
+    {
+        return Err(CommonProofRuntimeError::WrongVerificationBinding);
+    }
+    Ok(decoded)
 }
 
 trait ErasedCommonProofPrivateCoinSource {
@@ -193,6 +348,7 @@ pub(crate) struct CommonProofGenerationAuthorization {
     application_statement_hash: [u8; HASH_BYTE_LENGTH],
     proof_header_hash: [u8; HASH_BYTE_LENGTH],
     relation_plan_hash: [u8; HASH_BYTE_LENGTH],
+    row_code_whir_construction_plan_identity_hash: [u8; HASH_BYTE_LENGTH],
     attempt_identifier: [u8; 32],
     checkpoint_lineage_identifier: [u8; 32],
     checkpoint_schedule_digest: Hash512,
@@ -201,19 +357,22 @@ pub(crate) struct CommonProofGenerationAuthorization {
 }
 
 impl CommonProofGenerationAuthorization {
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) const fn ceremony_context_hash(self) -> [u8; HASH_BYTE_LENGTH] {
+        self.ceremony_context_hash
+    }
+
     pub(crate) fn from_witness_bound_authenticated_attempt(
         attempt_source: WitnessBoundPreparedActionProofAttemptSource,
         relation_plan: &CommonProofRelationPlanCapability,
         protocol_version: u16,
         canonical_application_statement_bytes: &[u8],
-        limits: CommonProofRuntimeLimits,
     ) -> Result<Self, CommonProofRuntimeError> {
         Self::from_attempt_fields(
             CommonProofGenerationAttemptFields::from_witness_bound(attempt_source),
             relation_plan,
             protocol_version,
             canonical_application_statement_bytes,
-            limits,
         )
     }
 
@@ -222,7 +381,6 @@ impl CommonProofGenerationAuthorization {
         relation_plan: &CommonProofRelationPlanCapability,
         protocol_version: u16,
         canonical_application_statement_bytes: &[u8],
-        limits: CommonProofRuntimeLimits,
     ) -> Result<Self, CommonProofRuntimeError> {
         if attempt_source.application_statement_schema_identifier()
             != ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER
@@ -234,7 +392,6 @@ impl CommonProofGenerationAuthorization {
             relation_plan,
             protocol_version,
             canonical_application_statement_bytes,
-            limits,
         )
     }
 
@@ -243,7 +400,6 @@ impl CommonProofGenerationAuthorization {
         relation_plan: &CommonProofRelationPlanCapability,
         protocol_version: u16,
         canonical_application_statement_bytes: &[u8],
-        limits: CommonProofRuntimeLimits,
     ) -> Result<Self, CommonProofRuntimeError> {
         if !ProofApplicationSlotCeilings::PUBLIC_ONLY_FAMILY_SCHEMA_IDENTIFIERS
             .contains(&attempt_source.application_statement_schema_identifier())
@@ -257,7 +413,6 @@ impl CommonProofGenerationAuthorization {
             relation_plan,
             protocol_version,
             canonical_application_statement_bytes,
-            limits,
         )
     }
 
@@ -266,7 +421,6 @@ impl CommonProofGenerationAuthorization {
         relation_plan: &CommonProofRelationPlanCapability,
         protocol_version: u16,
         canonical_application_statement_bytes: &[u8],
-        limits: CommonProofRuntimeLimits,
     ) -> Result<Self, CommonProofRuntimeError> {
         let application_slot = attempt_source.application_slot;
         let proof_application_slot_hash = application_slot
@@ -288,15 +442,12 @@ impl CommonProofGenerationAuthorization {
             application_statement_schema_identifier,
             canonical_application_statement_bytes,
         );
-        let proof_query_count = relation_plan.proof_query_count()?;
         if protocol_version == 0
             || common_proof_stream_domain(application_statement_schema_identifier).is_none()
             || proof_application_slot_hash != attempt_source.application_slot_hash.into_bytes()
             || application_statement_schema_identifier
                 != attempt_source.application_statement_schema_identifier
             || application_statement_hash != attempt_source.application_statement_hash.into_bytes()
-            || limits.proof_byte_length() as u64 != attempt_source.expected_proof_byte_length
-            || proof_query_count != attempt_source.expected_query_count
         {
             return Err(CommonProofRuntimeError::WrongVerificationBinding);
         }
@@ -312,6 +463,8 @@ impl CommonProofGenerationAuthorization {
             application_statement_hash,
             proof_header_hash,
             relation_plan_hash: relation_plan.relation_plan_hash(),
+            row_code_whir_construction_plan_identity_hash: relation_plan
+                .row_code_whir_construction_plan_identity_hash(),
             attempt_identifier: attempt_source.attempt_identifier,
             checkpoint_lineage_identifier: checkpoint.checkpoint_lineage_identifier(),
             checkpoint_schedule_digest: checkpoint.checkpoint_schedule_digest(),
@@ -327,6 +480,7 @@ impl CommonProofGenerationAuthorization {
         application_statement_hash: [u8; HASH_BYTE_LENGTH],
         proof_header_hash: [u8; HASH_BYTE_LENGTH],
         relation_plan_hash: [u8; HASH_BYTE_LENGTH],
+        row_code_whir_construction_plan_identity_hash: [u8; HASH_BYTE_LENGTH],
     ) -> Result<Self, CommonProofRuntimeError> {
         if protocol_version == 0
             || common_proof_stream_domain(
@@ -351,6 +505,7 @@ impl CommonProofGenerationAuthorization {
             application_statement_hash,
             proof_header_hash,
             relation_plan_hash,
+            row_code_whir_construction_plan_identity_hash,
             attempt_identifier: [0x91; 32],
             checkpoint_lineage_identifier: [0x92; 32],
             checkpoint_schedule_digest: Hash512::from_bytes([0x93; HASH_BYTE_LENGTH]),
@@ -372,11 +527,49 @@ impl CommonProofGenerationAuthorization {
                 &self.application_statement_hash,
                 &self.proof_header_hash,
                 &self.relation_plan_hash,
+                &self.row_code_whir_construction_plan_identity_hash,
                 &self.attempt_identifier,
                 &self.checkpoint_lineage_identifier,
                 &self.checkpoint_schedule_digest.into_bytes(),
             ],
         )
+    }
+
+    pub(in crate::bgv::proof_suite) fn exact_same_secret_transcript_prefix_authority_binding(
+        self,
+        canonical_application_statement_bytes: &[u8],
+        relation_plan: &CommonProofRelationPlanCapability,
+    ) -> Result<ExactSameSecretTranscriptPrefixAuthorityBinding, CommonProofRuntimeError> {
+        let fiat_shamir_binding = ExactSameSecretFiatShamirBinding::derive(
+            self.protocol_version,
+            self.suite_identifier,
+            self.ceremony_context_hash,
+            self.action_context_hash,
+            canonical_application_statement_bytes,
+            relation_plan,
+        )
+        .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+        if fiat_shamir_binding.proof_application_slot_hash() != self.proof_application_slot_hash
+            || fiat_shamir_binding.application_statement_schema_identifier()
+                != self.application_statement_schema_identifier
+            || fiat_shamir_binding.application_statement_hash() != self.application_statement_hash
+            || fiat_shamir_binding.proof_header_hash() != self.proof_header_hash
+            || fiat_shamir_binding.relation_plan_hash() != self.relation_plan_hash
+            || fiat_shamir_binding.construction_plan_identity_hash()
+                != self.row_code_whir_construction_plan_identity_hash
+            || self.application_slot.roster_position()
+                != Some(fiat_shamir_binding.roster_position())
+            || self.application_slot.schedule_position().is_some()
+            || self.application_slot.producer_sequence().is_some()
+        {
+            return Err(CommonProofRuntimeError::WrongVerificationBinding);
+        }
+        ExactSameSecretTranscriptPrefixAuthorityBinding::new(
+            fiat_shamir_binding,
+            self.binding_hash(),
+            self.attempt_identifier,
+        )
+        .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)
     }
 
     fn derive_post_output_binding(
@@ -385,6 +578,8 @@ impl CommonProofGenerationAuthorization {
         stream_descriptor: &StreamDescriptor,
     ) -> Result<CommonProofPostOutputApplicationBinding, CommonProofRuntimeError> {
         if relation_plan.relation_plan_hash() != self.relation_plan_hash
+            || relation_plan.row_code_whir_construction_plan_identity_hash()
+                != self.row_code_whir_construction_plan_identity_hash
             || stream_descriptor.total_byte_length == 0
         {
             return Err(CommonProofRuntimeError::WrongVerificationBinding);
@@ -408,12 +603,12 @@ impl CommonProofGenerationAuthorization {
         let proof_application = super::CommonProofApplicationBinding::new(
             self.proof_application_slot_hash,
             canonical_binding_hash,
+            relation_plan.row_code_whir_construction_plan_identity_hash(),
             self.application_statement_schema_identifier,
             self.proof_header_hash,
             proof_stream_domain,
             stream_descriptor.full_object_digest.into_bytes(),
             stream_descriptor.total_byte_length,
-            relation_plan.proof_query_count()?,
         )?;
         Ok(CommonProofPostOutputApplicationBinding {
             authorization: self,
@@ -428,8 +623,6 @@ struct CommonProofGenerationAttemptFields {
     application_slot_hash: Hash512,
     application_statement_schema_identifier: u16,
     application_statement_hash: Hash512,
-    expected_proof_byte_length: u64,
-    expected_query_count: u32,
     attempt_identifier: [u8; 32],
     checkpoint_continuation: AuthenticatedCheckpointContinuationSource,
 }
@@ -442,8 +635,6 @@ impl CommonProofGenerationAttemptFields {
             application_statement_schema_identifier: source
                 .application_statement_schema_identifier(),
             application_statement_hash: source.application_statement_hash(),
-            expected_proof_byte_length: source.expected_proof_byte_length(),
-            expected_query_count: source.expected_query_count(),
             attempt_identifier: source.attempt_identifier(),
             checkpoint_continuation: *source.checkpoint_continuation(),
         }
@@ -456,8 +647,6 @@ impl CommonProofGenerationAttemptFields {
             application_statement_schema_identifier: source
                 .application_statement_schema_identifier(),
             application_statement_hash: source.application_statement_hash(),
-            expected_proof_byte_length: source.expected_proof_byte_length(),
-            expected_query_count: source.expected_query_count(),
             attempt_identifier: source.attempt_identifier(),
             checkpoint_continuation: *source.checkpoint_continuation(),
         }
@@ -470,8 +659,6 @@ impl CommonProofGenerationAttemptFields {
             application_statement_schema_identifier: source
                 .application_statement_schema_identifier(),
             application_statement_hash: source.application_statement_hash(),
-            expected_proof_byte_length: source.expected_proof_byte_length(),
-            expected_query_count: source.expected_query_count(),
             attempt_identifier: source.attempt_lineage_identifier(),
             checkpoint_continuation: *source.checkpoint_continuation(),
         }
@@ -630,9 +817,263 @@ impl From<CommonProofRuntimeError> for CommonProofGenerationPreparationError {
 pub(crate) struct PreparedCommonProofGeneration {
     binding: CommonProofGenerationBinding,
     relation_plan: CommonProofRelationPlanCapability,
-    state: CommonProofGenerationStateMachine,
+    state: CommonProofGenerationExecutionState,
     sources: CommonProofGenerationSources,
     limits: CommonProofRuntimeLimits,
+}
+
+enum CommonProofGenerationExecutionState {
+    RowCodeWhir(RowCodeWhirGenerationStateMachine),
+    RemainingFamilies(CommonProofGenerationStateMachine),
+}
+
+impl CommonProofGenerationExecutionState {
+    fn stage(&self) -> CommonProofGenerationStage {
+        match self {
+            Self::RowCodeWhir(state) => state.stage(),
+            Self::RemainingFamilies(state) => state.stage(),
+        }
+    }
+
+    const fn pending_authenticated_source_read(
+        &self,
+    ) -> Option<CommonProofAuthenticatedSourceReadRequest> {
+        match self {
+            Self::RowCodeWhir(state) => state.pending_authenticated_source_read(),
+            Self::RemainingFamilies(state) => state.pending_authenticated_source_read(),
+        }
+    }
+
+    fn supply_authenticated_source_range(
+        &mut self,
+        request: CommonProofAuthenticatedSourceReadRequest,
+        authenticated_bytes: Zeroizing<Box<[u8]>>,
+    ) -> Result<(), CommonProofProverError> {
+        match self {
+            Self::RowCodeWhir(state) => {
+                state.supply_authenticated_source_range(request, authenticated_bytes)
+            }
+            Self::RemainingFamilies(state) => {
+                state.supply_authenticated_source_range(request, authenticated_bytes)
+            }
+        }
+    }
+
+    fn authenticated_transcript_prefix_request(
+        &self,
+    ) -> Result<ExactSameSecretAuthenticatedTranscriptPrefixRequest, CommonProofRuntimeError> {
+        match self {
+            Self::RowCodeWhir(state) => state
+                .authenticated_transcript_prefix_request()
+                .map_err(|_| CommonProofRuntimeError::WrongOperationPhase),
+            Self::RemainingFamilies(_) => Err(CommonProofRuntimeError::WrongOperationPhase),
+        }
+    }
+
+    fn supply_authenticated_transcript_prefix(
+        &mut self,
+        prepared: PreparedExactSameSecretTranscriptPrefix,
+    ) -> Result<(), CommonProofRuntimeError> {
+        match self {
+            Self::RowCodeWhir(state) => state
+                .supply_authenticated_transcript_prefix(prepared)
+                .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding),
+            Self::RemainingFamilies(_) => Err(CommonProofRuntimeError::WrongOperationPhase),
+        }
+    }
+
+    fn external_memory_usage(&self) -> Option<ProofExternalMemoryUsage> {
+        match self {
+            Self::RowCodeWhir(state) => state.external_memory_usage(),
+            Self::RemainingFamilies(state) => state.external_memory_usage(),
+        }
+    }
+
+    fn terminal_external_memory_usage(&self) -> Option<ProofExternalMemoryUsage> {
+        match self {
+            Self::RowCodeWhir(state) => state.terminal_external_memory_usage(),
+            Self::RemainingFamilies(state) => state.terminal_external_memory_usage(),
+        }
+    }
+
+    fn external_memory_requirement(&self) -> Option<CommonProofExternalMemoryRequirement> {
+        match self {
+            Self::RowCodeWhir(state) => Some(state.external_memory_requirement()),
+            Self::RemainingFamilies(state) => Some(state.external_memory_requirement()),
+        }
+    }
+
+    const fn canonical_output_byte_length(&self) -> Option<usize> {
+        match self {
+            Self::RowCodeWhir(state) => state.canonical_output_byte_length(),
+            Self::RemainingFamilies(state) => state.canonical_output_byte_length(),
+        }
+    }
+
+    fn checkpoint_boundary(&self) -> Option<CommonProofGenerationCheckpointBoundary> {
+        match self {
+            Self::RowCodeWhir(state) => state.checkpoint_boundary(),
+            Self::RemainingFamilies(state) => state.checkpoint_boundary(),
+        }
+    }
+
+    fn restore_authenticated_checkpoint_transcript_cursor(
+        &mut self,
+        canonical_cursor_bytes: &[u8],
+        expected_cursor_digest: Option<[u8; HASH_BYTE_LENGTH]>,
+    ) -> Result<(), CommonProofRuntimeError> {
+        match self {
+            Self::RowCodeWhir(state) => state
+                .restore_authenticated_checkpoint_transcript_cursor(
+                    canonical_cursor_bytes,
+                    expected_cursor_digest,
+                )
+                .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding),
+            Self::RemainingFamilies(_) => {
+                if canonical_cursor_bytes.is_empty() && expected_cursor_digest.is_none() {
+                    Ok(())
+                } else {
+                    Err(CommonProofRuntimeError::WrongVerificationBinding)
+                }
+            }
+        }
+    }
+
+    fn poll(
+        &mut self,
+        storage: &mut CommonProofStorageTransactionRuntime,
+        coins: &mut CommonProofWorkerPrivateCoinSource,
+        sink: &mut RuntimeCommonProofByteSink,
+    ) -> Result<CommonProofGenerationPoll, OwnedCommonProofGenerationError> {
+        match self {
+            Self::RowCodeWhir(state) => state.poll(storage, coins, sink),
+            Self::RemainingFamilies(state) => state.poll(storage, coins, sink),
+        }
+    }
+
+    fn cancel(
+        &mut self,
+        storage: &mut CommonProofStorageTransactionRuntime,
+    ) -> Result<(), ProofExternalMemoryExecutorError<ProofExternalMemoryTransactionAdapterError>>
+    {
+        match self {
+            Self::RowCodeWhir(state) => state.cancel(storage),
+            Self::RemainingFamilies(state) => state.cancel(storage),
+        }
+    }
+}
+
+enum RuntimeCommonProofByteSink {
+    Pending {
+        stream_domain: super::CanonicalStreamDomain,
+        limits: CommonProofRuntimeLimits,
+    },
+    Active(PollableCommonProofByteSink),
+    Cancelled,
+}
+
+impl RuntimeCommonProofByteSink {
+    fn activate(&mut self, declared_byte_length: usize) -> Result<(), CommonProofRuntimeError> {
+        match self {
+            Self::Pending {
+                stream_domain,
+                limits,
+            } => {
+                let sink = PollableCommonProofByteSink::new(
+                    *stream_domain,
+                    declared_byte_length,
+                    *limits,
+                )?;
+                *self = Self::Active(sink);
+                Ok(())
+            }
+            Self::Active(_) => Ok(()),
+            Self::Cancelled => Err(CommonProofRuntimeError::WrongOperationPhase),
+        }
+    }
+
+    fn pending_chunk(&self) -> Option<(usize, &[u8])> {
+        match self {
+            Self::Active(sink) => sink.pending_chunk(),
+            Self::Pending { .. } | Self::Cancelled => None,
+        }
+    }
+
+    const fn pending_readback_chunk_index(&self) -> Option<usize> {
+        match self {
+            Self::Active(sink) => sink.pending_readback_chunk_index(),
+            Self::Pending { .. } | Self::Cancelled => None,
+        }
+    }
+
+    fn acknowledge_pending_chunk(&mut self) -> Result<(), CommonProofRuntimeError> {
+        match self {
+            Self::Active(sink) => sink.acknowledge_pending_chunk(),
+            Self::Pending { .. } | Self::Cancelled => {
+                Err(CommonProofRuntimeError::WrongOperationPhase)
+            }
+        }
+    }
+
+    fn confirm_pending_chunk_readback(
+        &mut self,
+        chunk_index: usize,
+        readback_bytes: &[u8],
+    ) -> Result<(), CommonProofRuntimeError> {
+        match self {
+            Self::Active(sink) => sink.confirm_pending_chunk_readback(chunk_index, readback_bytes),
+            Self::Pending { .. } | Self::Cancelled => {
+                Err(CommonProofRuntimeError::WrongOperationPhase)
+            }
+        }
+    }
+
+    fn final_partial_chunk_is_ready(&self) -> bool {
+        matches!(self, Self::Active(sink) if sink.final_partial_chunk_is_ready())
+    }
+
+    fn complete_output_is_authenticated(&self) -> bool {
+        matches!(self, Self::Active(sink) if sink.complete_output_is_authenticated())
+    }
+
+    fn seal_final_chunk(&mut self) -> Result<(), CommonProofRuntimeError> {
+        match self {
+            Self::Active(sink) => sink.seal_final_chunk(),
+            Self::Pending { .. } | Self::Cancelled => {
+                Err(CommonProofRuntimeError::WrongOperationPhase)
+            }
+        }
+    }
+
+    fn finish(&mut self) -> Result<StreamDescriptor, CommonProofRuntimeError> {
+        let active = match core::mem::replace(self, Self::Cancelled) {
+            Self::Active(sink) => sink,
+            Self::Pending { .. } | Self::Cancelled => {
+                return Err(CommonProofRuntimeError::WrongOperationPhase);
+            }
+        };
+        active.finish()
+    }
+
+    fn cancel(&mut self) {
+        if let Self::Active(sink) = self {
+            sink.cancel();
+        }
+        *self = Self::Cancelled;
+    }
+}
+
+impl CommonProofByteSink for RuntimeCommonProofByteSink {
+    type Error = PollableCommonProofByteSinkError;
+
+    fn write_bytes(&mut self, bytes: &[u8]) -> Result<(), Self::Error> {
+        match self {
+            Self::Active(sink) => sink.write_bytes(bytes),
+            Self::Pending { .. } | Self::Cancelled => {
+                Err(PollableCommonProofByteSinkError::ByteLengthExceeded)
+            }
+        }
+    }
 }
 
 impl PreparedCommonProofGeneration {
@@ -681,6 +1122,8 @@ impl PreparedCommonProofGeneration {
     ) -> Result<Self, CommonProofGenerationPreparationError> {
         let binding = CommonProofGenerationBinding::from_authorization(authorization);
         if relation_plan.relation_plan_hash() != authorization.relation_plan_hash
+            || relation_plan.row_code_whir_construction_plan_identity_hash()
+                != authorization.row_code_whir_construction_plan_identity_hash
             || verified_application_statement_hash(
                 authorization.protocol_version,
                 authorization.suite_identifier,
@@ -702,7 +1145,56 @@ impl PreparedCommonProofGeneration {
         Ok(Self {
             binding,
             relation_plan,
-            state,
+            state: CommonProofGenerationExecutionState::RemainingFamilies(state),
+            sources,
+            limits,
+        })
+    }
+
+    pub(crate) fn from_row_code_whir_sources(
+        authorization: CommonProofGenerationAuthorization,
+        relation_plan: CommonProofRelationPlanCapability,
+        canonical_application_statement_bytes: Vec<u8>,
+        relation_trees: Vec<RelationProofTreeInput>,
+        limits: CommonProofRuntimeLimits,
+        mut sources: CommonProofGenerationSources,
+    ) -> Result<Self, CommonProofGenerationPreparationError> {
+        let binding = CommonProofGenerationBinding::from_authorization(authorization);
+        if relation_plan.relation_plan_hash() != authorization.relation_plan_hash
+            || relation_plan.row_code_whir_construction_plan_identity_hash()
+                != authorization.row_code_whir_construction_plan_identity_hash
+            || verified_application_statement_hash(
+                authorization.protocol_version,
+                authorization.suite_identifier,
+                authorization.application_statement_schema_identifier,
+                &canonical_application_statement_bytes,
+            ) != authorization.application_statement_hash
+        {
+            return Err(CommonProofRuntimeError::WrongVerificationBinding.into());
+        }
+        let transcript_prefix_authority_binding = authorization
+            .exact_same_secret_transcript_prefix_authority_binding(
+                &canonical_application_statement_bytes,
+                &relation_plan,
+            )?;
+        let source_polynomial_provider = sources.take_source_polynomial_provider()?;
+        let state = RowCodeWhirGenerationStateMachine::new(
+            relation_plan.generation_input(
+                authorization.protocol_version,
+                authorization.suite_identifier,
+                &canonical_application_statement_bytes,
+                relation_trees,
+                source_polynomial_provider,
+                limits,
+            ),
+            relation_plan.row_code_whir_construction_plan(),
+            transcript_prefix_authority_binding,
+        )
+        .map_err(CommonProofGenerationPreparationError::Generation)?;
+        Ok(Self {
+            binding,
+            relation_plan,
+            state: CommonProofGenerationExecutionState::RowCodeWhir(state),
             sources,
             limits,
         })
@@ -719,7 +1211,7 @@ impl PreparedCommonProofGeneration {
         Self {
             binding: CommonProofGenerationBinding::from_authorization(authorization),
             relation_plan,
-            state,
+            state: CommonProofGenerationExecutionState::RemainingFamilies(state),
             sources,
             limits,
         }
@@ -754,7 +1246,7 @@ impl PreparedCommonProofGeneration {
         Ok(Self {
             binding,
             relation_plan,
-            state,
+            state: CommonProofGenerationExecutionState::RemainingFamilies(state),
             sources,
             limits,
         })
@@ -797,6 +1289,7 @@ pub(crate) enum CommonProofGenerationWorkerPoll {
         source_byte_length: u32,
         authentication_chunk_index: u32,
     },
+    AuthenticatedTranscriptPrefixRequired,
     OutputChunkReady {
         chunk_index: u32,
         chunk_byte_length: u32,
@@ -831,10 +1324,18 @@ pub(crate) struct AuthenticatedCommonProofGenerationCheckpoint {
 impl AuthenticatedCommonProofGenerationCheckpoint {
     pub(crate) fn decode(
         authenticated_checkpoint_state: &[u8],
+        authenticated_generation_cursor_manifest: &[u8],
     ) -> Result<Self, CommonProofRuntimeError> {
-        Ok(Self {
-            state: CommonProofGenerationCheckpointState::decode(authenticated_checkpoint_state)?,
-        })
+        let state = CommonProofGenerationCheckpointState::decode(authenticated_checkpoint_state)?;
+        decode_common_proof_generation_cursor_manifest(authenticated_generation_cursor_manifest)?;
+        let cursor_manifest_digest = hash_framed_parts_512(
+            CHECKPOINT_CURSOR_MANIFEST_HASH_DOMAIN,
+            &[authenticated_generation_cursor_manifest],
+        );
+        if state.cursor_manifest_digest != cursor_manifest_digest {
+            return Err(CommonProofRuntimeError::WrongVerificationBinding);
+        }
+        Ok(Self { state })
     }
 
     pub(crate) const fn stable_attempt_binding_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
@@ -856,6 +1357,32 @@ impl AuthenticatedCommonProofGenerationCheckpoint {
             self.state.next_event_index,
             Hash512::from_bytes(self.state.cumulative_event_digest),
         )
+    }
+}
+
+struct CommonProofGenerationResumeTarget {
+    state: CommonProofGenerationCheckpointState,
+    cursor_manifest_bytes: Vec<u8>,
+}
+
+impl CommonProofGenerationResumeTarget {
+    fn decode(
+        authenticated_checkpoint_state: &[u8],
+        authenticated_generation_cursor_manifest: &[u8],
+    ) -> Result<Self, CommonProofRuntimeError> {
+        let authenticated_checkpoint = AuthenticatedCommonProofGenerationCheckpoint::decode(
+            authenticated_checkpoint_state,
+            authenticated_generation_cursor_manifest,
+        )?;
+        let mut cursor_manifest_bytes = Vec::new();
+        cursor_manifest_bytes
+            .try_reserve_exact(authenticated_generation_cursor_manifest.len())
+            .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?;
+        cursor_manifest_bytes.extend_from_slice(authenticated_generation_cursor_manifest);
+        Ok(Self {
+            state: authenticated_checkpoint.state,
+            cursor_manifest_bytes,
+        })
     }
 }
 
@@ -1061,6 +1588,21 @@ pub(crate) fn common_proof_generation_checkpoint_custody_requirement_for_variant
 > {
     let cursor_manifest_requirement =
         common_proof_checkpoint_cursor_manifest_requirement_for_variant(variant)?;
+    let generation_cursor_manifest_byte_ceiling =
+        usize::try_from(cursor_manifest_requirement.canonical_manifest_byte_ceiling())
+            .map_err(|_| CommonProofCheckpointCursorManifestError::CountOverflow)?
+            .checked_add(COMMON_PROOF_GENERATION_CURSOR_MANIFEST_PREFIX_BYTE_LENGTH)
+            .and_then(|byte_length| {
+                byte_length
+                    .checked_add(MAXIMUM_ROW_CODE_WHIR_TRANSCRIPT_CHECKPOINT_CURSOR_BYTE_LENGTH)
+            })
+            .filter(|byte_length| {
+                *byte_length <= MAXIMUM_COMMON_PROOF_GENERATION_CURSOR_MANIFEST_BYTE_LENGTH
+            })
+            .ok_or(CommonProofCheckpointCursorManifestError::OutsideSupportedProfile)?;
+    let generation_cursor_manifest_byte_ceiling =
+        u32::try_from(generation_cursor_manifest_byte_ceiling)
+            .map_err(|_| CommonProofCheckpointCursorManifestError::CountOverflow)?;
     let encoded_state_byte_length = u32::try_from(COMMON_PROOF_CHECKPOINT_STATE_BYTE_LENGTH)
         .map_err(|_| CommonProofCheckpointCursorManifestError::CountOverflow)?;
     let decoded_state_owner_byte_length =
@@ -1073,27 +1615,32 @@ pub(crate) fn common_proof_generation_checkpoint_custody_requirement_for_variant
         .map_err(|_| CommonProofCheckpointCursorManifestError::CountOverflow)?;
     let transient_construction_resident_byte_ceiling = cursor_manifest_requirement
         .peak_additional_resident_byte_ceiling()
-        .checked_add(u64::from(decoded_state_owner_byte_length))
+        .checked_add(u64::from(generation_cursor_manifest_byte_ceiling))
+        .and_then(|bytes| {
+            bytes.checked_add(
+                u64::try_from(MAXIMUM_ROW_CODE_WHIR_TRANSCRIPT_CHECKPOINT_CURSOR_BYTE_LENGTH)
+                    .ok()?,
+            )
+        })
+        .and_then(|bytes| bytes.checked_add(u64::from(decoded_state_owner_byte_length)))
         .and_then(|bytes| bytes.checked_add(u64::from(encoded_state_byte_length)))
         .and_then(|bytes| bytes.checked_add(manifest_vector_owner_byte_length))
         .ok_or(CommonProofCheckpointCursorManifestError::CountOverflow)?;
     let pending_checkpoint_resident_byte_ceiling = cursor_manifest_requirement
         .retained_cursor_state_byte_ceiling()
-        .checked_add(u64::from(
-            cursor_manifest_requirement.pending_manifest_resident_byte_ceiling(),
-        ))
+        .checked_add(u64::from(generation_cursor_manifest_byte_ceiling))
         .and_then(|bytes| bytes.checked_add(u64::from(pending_checkpoint_fixed_owner_byte_length)))
         .ok_or(CommonProofCheckpointCursorManifestError::CountOverflow)?;
     let boundary_peak_additional_resident_byte_ceiling =
         transient_construction_resident_byte_ceiling.max(pending_checkpoint_resident_byte_ceiling);
     let restore_workspace_byte_ceiling = cursor_manifest_requirement
         .restore_workspace_byte_ceiling()
-        .checked_add(u64::from(decoded_state_owner_byte_length))
+        .checked_add(u64::from(generation_cursor_manifest_byte_ceiling))
+        .and_then(|bytes| bytes.checked_add(u64::from(decoded_state_owner_byte_length)))
         .and_then(|bytes| bytes.checked_add(manifest_vector_owner_byte_length))
         .ok_or(CommonProofCheckpointCursorManifestError::CountOverflow)?;
-    let peak_copied_buffer_byte_length = cursor_manifest_requirement
-        .peak_copied_buffer_byte_length()
-        .max(encoded_state_byte_length);
+    let peak_copied_buffer_byte_length =
+        generation_cursor_manifest_byte_ceiling.max(encoded_state_byte_length);
     Ok(CommonProofGenerationCheckpointCustodyRequirement {
         cursor_manifest_requirement,
         encoded_state_byte_length,
@@ -1121,9 +1668,14 @@ fn build_generation_checkpoint(
         return Err(CommonProofRuntimeError::WrongVerificationBinding);
     }
 
-    let cursor_manifest_bytes = private_coins
+    let private_coin_cursor_manifest_bytes = private_coins
         .checkpoint_cursor_manifest()
         .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+    let cursor_manifest_bytes = encode_common_proof_generation_cursor_manifest(
+        private_coin_cursor_manifest_bytes,
+        boundary.canonical_transcript_cursor_bytes(),
+        boundary.canonical_transcript_cursor_digest(),
+    )?;
     let cursor_manifest_digest = hash_framed_parts_512(
         CHECKPOINT_CURSOR_MANIFEST_HASH_DOMAIN,
         &[&cursor_manifest_bytes],
@@ -1205,6 +1757,51 @@ impl CommonProofGenerationExternalMemoryAccounting {
 }
 
 impl GeneratedCommonProof {
+    #[cfg(test)]
+    pub(super) fn from_genuine_test_authorization(
+        authorization: CommonProofGenerationAuthorization,
+    ) -> Result<Self, CommonProofRuntimeError> {
+        let stream_descriptor = StreamDescriptor {
+            total_byte_length: 1,
+            ordered_chunk_digests: vec![Hash512::from_bytes([0xa1; HASH_BYTE_LENGTH])].into(),
+            full_object_digest: Hash512::from_bytes([0xa2; HASH_BYTE_LENGTH]),
+        };
+        let proof_stream_domain =
+            common_proof_stream_domain(authorization.application_statement_schema_identifier)
+                .ok_or(CommonProofRuntimeError::WrongVerificationBinding)?;
+        let proof_application = super::CommonProofApplicationBinding::new(
+            authorization.proof_application_slot_hash,
+            [0xa3; HASH_BYTE_LENGTH],
+            authorization.row_code_whir_construction_plan_identity_hash,
+            authorization.application_statement_schema_identifier,
+            authorization.proof_header_hash,
+            proof_stream_domain,
+            stream_descriptor.full_object_digest.into_bytes(),
+            stream_descriptor.total_byte_length,
+        )?;
+        Ok(Self {
+            binding: CommonProofGenerationBinding::from_authorization(authorization),
+            stream_descriptor,
+            post_output_binding: CommonProofPostOutputApplicationBinding {
+                authorization,
+                proof_application,
+            },
+        })
+    }
+
+    pub(super) fn preflight_attempt_binding(
+        &self,
+        expected_generation_binding_hash: [u8; HASH_BYTE_LENGTH],
+        expected_attempt_identifier: [u8; 32],
+    ) -> Result<(), CommonProofRuntimeError> {
+        if self.binding.binding_hash() != expected_generation_binding_hash
+            || self.binding.authorization.attempt_identifier != expected_attempt_identifier
+        {
+            return Err(CommonProofRuntimeError::WrongVerificationBinding);
+        }
+        Ok(())
+    }
+
     /// Checks the exact family statement and application coordinates retained
     /// beside a prepackage proof without joining a package source or consuming
     /// the generated capability. The returned descriptor was derived from the
@@ -1362,7 +1959,7 @@ pub(crate) enum CommonProofGenerationResumePrefixExecution {
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CommonProofGenerationResumeStateRestoration {
-    CheckpointTargetComparisonWithoutCryptographicStateRestoration,
+    CheckpointTargetComparisonAndAuthenticatedTranscriptCursorRestoration,
 }
 
 #[cfg(test)]
@@ -1372,10 +1969,11 @@ pub(crate) enum CommonProofGenerationCumulativeWorkRule {
 }
 
 /// Production resume topology used by static accounting. A checkpoint binds
-/// the target state and cursors, but it does not restore prover state. Resume
-/// therefore executes a new worker from genesis through the authenticated
-/// target before continuing, and that replayed prefix remains additional work
-/// beside the prefix completed by the prior attempt.
+/// the target state and cursors. Resume executes a new worker from genesis
+/// through the authenticated target, compares the complete reconstructed
+/// checkpoint, restores the exact transcript cursor, and then continues. The
+/// replayed prefix remains additional work beside the prefix completed by the
+/// prior attempt.
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CommonProofGenerationAttemptTopology {
@@ -1423,7 +2021,7 @@ pub(crate) const fn common_proof_generation_attempt_topology()
         resumed_prefix_execution:
             CommonProofGenerationResumePrefixExecution::DeterministicReplayFromGenesisThroughAuthenticatedTarget,
         resumed_state_restoration:
-            CommonProofGenerationResumeStateRestoration::CheckpointTargetComparisonWithoutCryptographicStateRestoration,
+            CommonProofGenerationResumeStateRestoration::CheckpointTargetComparisonAndAuthenticatedTranscriptCursorRestoration,
         cumulative_work_rule:
             CommonProofGenerationCumulativeWorkRule::PriorPrefixPlusReplayedPrefixPlusRemainingSuffix,
     }
@@ -1432,17 +2030,16 @@ pub(crate) const fn common_proof_generation_attempt_topology()
 pub(super) struct CommonProofGenerationWorker {
     binding: CommonProofGenerationBinding,
     relation_plan: CommonProofRelationPlanCapability,
-    state: CommonProofGenerationStateMachine,
+    state: CommonProofGenerationExecutionState,
     private_coins: CommonProofWorkerPrivateCoinSource,
     storage: CommonProofStorageTransactionRuntime,
-    output: Option<PollableCommonProofByteSink>,
-    encoded_storage_request: Option<Zeroizing<Vec<u8>>>,
+    output: RuntimeCommonProofByteSink,
     terminal_stream_descriptor: Option<StreamDescriptor>,
     checkpoint_next_event_index: u64,
     checkpoint_cumulative_event_digest: [u8; HASH_BYTE_LENGTH],
     last_checkpoint_position: Option<[u8; 16]>,
     pending_checkpoint: Option<PendingCommonProofGenerationCheckpoint>,
-    resume_target: Option<CommonProofGenerationCheckpointState>,
+    resume_target: Option<CommonProofGenerationResumeTarget>,
     deterministic_prefix_replay_external_memory_usage: Option<ProofExternalMemoryUsage>,
     generation_complete: bool,
     cancellation_requested: bool,
@@ -1463,9 +2060,13 @@ impl CommonProofGenerationWorker {
     pub(super) fn resume(
         prepared: PreparedCommonProofGeneration,
         authenticated_checkpoint_state: &[u8],
+        authenticated_generation_cursor_manifest: &[u8],
     ) -> Result<Self, CommonProofRuntimeError> {
-        let target = CommonProofGenerationCheckpointState::decode(authenticated_checkpoint_state)?;
-        if !target.matches_binding(prepared.binding) {
+        let target = CommonProofGenerationResumeTarget::decode(
+            authenticated_checkpoint_state,
+            authenticated_generation_cursor_manifest,
+        )?;
+        if !target.state.matches_binding(prepared.binding) {
             return Err(CommonProofRuntimeError::WrongVerificationBinding);
         }
         Self::new_with_resume_target(prepared, Some(target))
@@ -1473,7 +2074,7 @@ impl CommonProofGenerationWorker {
 
     fn new_with_resume_target(
         prepared: PreparedCommonProofGeneration,
-        resume_target: Option<CommonProofGenerationCheckpointState>,
+        resume_target: Option<CommonProofGenerationResumeTarget>,
     ) -> Result<Self, CommonProofRuntimeError> {
         let stream_domain = common_proof_stream_domain(
             prepared
@@ -1482,11 +2083,10 @@ impl CommonProofGenerationWorker {
                 .application_statement_schema_identifier,
         )
         .ok_or(CommonProofRuntimeError::WrongVerificationBinding)?;
-        let output = PollableCommonProofByteSink::new(
+        let output = RuntimeCommonProofByteSink::Pending {
             stream_domain,
-            prepared.limits.proof_byte_length(),
-            prepared.limits,
-        )?;
+            limits: prepared.limits,
+        };
         Ok(Self {
             binding: prepared.binding,
             relation_plan: prepared.relation_plan,
@@ -1495,8 +2095,7 @@ impl CommonProofGenerationWorker {
             storage: CommonProofStorageTransactionRuntime::for_runtime_binding(
                 prepared.binding.binding_hash(),
             ),
-            output: Some(output),
-            encoded_storage_request: None,
+            output,
             terminal_stream_descriptor: None,
             checkpoint_next_event_index: 0,
             checkpoint_cumulative_event_digest: prepared.binding.checkpoint_genesis_digest(),
@@ -1526,10 +2125,17 @@ impl CommonProofGenerationWorker {
         Ok(())
     }
 
-    pub(super) fn pending_storage_request(&self) -> Option<&[u8]> {
-        self.encoded_storage_request
-            .as_ref()
-            .map(|request| request.as_slice())
+    pub(super) fn pending_storage_request_byte_length(
+        &self,
+    ) -> Result<usize, CommonProofRuntimeError> {
+        self.storage.pending_request_encoded_byte_length()
+    }
+
+    pub(super) fn encode_pending_storage_request_into(
+        &mut self,
+        output: &mut [u8],
+    ) -> Result<(), CommonProofRuntimeError> {
+        self.storage.encode_pending_worker_request_into(output)
     }
 
     pub(super) const fn pending_authenticated_source_read(
@@ -1548,6 +2154,19 @@ impl CommonProofGenerationWorker {
             .map_err(|_| CommonProofGenerationWorkerError::AuthenticatedSource)
     }
 
+    pub(super) fn authenticated_transcript_prefix_request(
+        &self,
+    ) -> Result<ExactSameSecretAuthenticatedTranscriptPrefixRequest, CommonProofRuntimeError> {
+        self.state.authenticated_transcript_prefix_request()
+    }
+
+    pub(super) fn supply_authenticated_transcript_prefix(
+        &mut self,
+        prepared: PreparedExactSameSecretTranscriptPrefix,
+    ) -> Result<(), CommonProofRuntimeError> {
+        self.state.supply_authenticated_transcript_prefix(prepared)
+    }
+
     #[cfg(test)]
     pub(super) fn pending_storage_transaction_request(
         &self,
@@ -1559,27 +2178,18 @@ impl CommonProofGenerationWorker {
         &mut self,
         encoded_response: &[u8],
     ) -> Result<(), CommonProofGenerationWorkerError> {
-        if self.encoded_storage_request.is_none() {
-            return Err(CommonProofRuntimeError::TransactionResponseMissing.into());
-        }
         self.storage.supply_worker_response(encoded_response)?;
-        self.encoded_storage_request = None;
         Ok(())
     }
 
     pub(super) fn pending_output_chunk(&self) -> Option<(usize, &[u8])> {
-        self.output
-            .as_ref()
-            .and_then(|output| output.pending_chunk())
+        self.output.pending_chunk()
     }
 
     pub(super) fn acknowledge_output_chunk(
         &mut self,
     ) -> Result<(), CommonProofGenerationWorkerError> {
-        self.output
-            .as_mut()
-            .ok_or(CommonProofRuntimeError::WrongOperationPhase)?
-            .acknowledge_pending_chunk()?;
+        self.output.acknowledge_pending_chunk()?;
         Ok(())
     }
 
@@ -1589,8 +2199,6 @@ impl CommonProofGenerationWorker {
         readback_bytes: &[u8],
     ) -> Result<(), CommonProofGenerationWorkerError> {
         self.output
-            .as_mut()
-            .ok_or(CommonProofRuntimeError::WrongOperationPhase)?
             .confirm_pending_chunk_readback(chunk_index, readback_bytes)?;
         Ok(())
     }
@@ -1601,7 +2209,7 @@ impl CommonProofGenerationWorker {
         }
         self.cancellation_requested = true;
         self.generation_transaction_must_replay_before_cancellation =
-            self.encoded_storage_request.is_some() || self.storage.replay_is_active();
+            self.storage.request_is_pending() || self.storage.replay_is_active();
     }
 
     pub(super) fn poll(
@@ -1619,10 +2227,12 @@ impl CommonProofGenerationWorker {
                 checkpoint_ready: true,
             });
         }
-        if let Some(request) = self.pending_storage_request() {
+        if self.storage.request_is_pending() {
             return Ok(CommonProofGenerationWorkerPoll::StorageRequestReady {
-                encoded_request_byte_length: u32::try_from(request.len())
-                    .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?,
+                encoded_request_byte_length: u32::try_from(
+                    self.pending_storage_request_byte_length()?,
+                )
+                .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?,
             });
         }
         if let Some(request) = self.pending_authenticated_source_read() {
@@ -1641,11 +2251,7 @@ impl CommonProofGenerationWorker {
                     .map_err(|_| CommonProofRuntimeError::OutputByteLengthExceeded)?,
             });
         }
-        if let Some(chunk_index) = self
-            .output
-            .as_ref()
-            .and_then(PollableCommonProofByteSink::pending_readback_chunk_index)
-        {
+        if let Some(chunk_index) = self.output.pending_readback_chunk_index() {
             return Ok(CommonProofGenerationWorkerPoll::OutputReadbackRequired {
                 chunk_index: u32::try_from(chunk_index)
                     .map_err(|_| CommonProofRuntimeError::OutputByteLengthExceeded)?,
@@ -1655,13 +2261,13 @@ impl CommonProofGenerationWorker {
             return self.finalize_output();
         }
 
-        let result = self.state.poll(
-            &mut self.storage,
-            &mut self.private_coins,
-            self.output
-                .as_mut()
-                .ok_or(CommonProofRuntimeError::WrongOperationPhase)?,
-        );
+        if let Some(canonical_output_byte_length) = self.state.canonical_output_byte_length() {
+            self.output.activate(canonical_output_byte_length)?;
+        }
+
+        let result = self
+            .state
+            .poll(&mut self.storage, &mut self.private_coins, &mut self.output);
         if result.is_ok() && self.storage.replay_is_active() {
             self.storage.transaction_completed()?;
         }
@@ -1677,6 +2283,9 @@ impl CommonProofGenerationWorker {
             )) => self.poll(),
             Err(_) => Err(CommonProofGenerationWorkerError::Generation),
             Ok(CommonProofGenerationPoll::StorageTransactionCompleted) => self.progress_poll(),
+            Ok(CommonProofGenerationPoll::AuthenticatedTranscriptPrefixRequired) => {
+                Ok(CommonProofGenerationWorkerPoll::AuthenticatedTranscriptPrefixRequired)
+            }
             Ok(CommonProofGenerationPoll::Complete) => {
                 self.generation_complete = true;
                 self.finalize_output()
@@ -1723,22 +2332,34 @@ impl CommonProofGenerationWorker {
             &self.private_coins,
         )?;
         if let Some(target) = &self.resume_target {
-            if checkpoint.state.next_event_index > target.next_event_index {
+            if checkpoint.state.next_event_index > target.state.next_event_index {
                 return Err(CommonProofRuntimeError::WrongVerificationBinding.into());
             }
             self.checkpoint_next_event_index = checkpoint.state.next_event_index;
             self.checkpoint_cumulative_event_digest = checkpoint.state.cumulative_event_digest;
             self.last_checkpoint_position = Some(checkpoint.state.position);
-            if checkpoint.state.next_event_index == target.next_event_index {
-                if &checkpoint.state != target {
+            if checkpoint.state.next_event_index == target.state.next_event_index {
+                let target = self
+                    .resume_target
+                    .take()
+                    .ok_or(CommonProofRuntimeError::WrongOperationPhase)?;
+                if checkpoint.state != target.state
+                    || checkpoint.cursor_manifest_bytes != target.cursor_manifest_bytes
+                {
                     return Err(CommonProofRuntimeError::WrongVerificationBinding.into());
                 }
+                let decoded_cursor_manifest =
+                    decode_common_proof_generation_cursor_manifest(&target.cursor_manifest_bytes)?;
+                self.state
+                    .restore_authenticated_checkpoint_transcript_cursor(
+                        decoded_cursor_manifest.transcript_cursor_bytes,
+                        decoded_cursor_manifest.transcript_cursor_digest,
+                    )?;
                 self.deterministic_prefix_replay_external_memory_usage = Some(
                     self.state
                         .external_memory_usage()
                         .ok_or(CommonProofRuntimeError::WrongOperationPhase)?,
                 );
-                self.resume_target = None;
                 return Ok(CommonProofGenerationWorkerPoll::ResumeComplete { stage });
             }
             return Ok(CommonProofGenerationWorkerPoll::Progress {
@@ -1755,17 +2376,13 @@ impl CommonProofGenerationWorker {
 
     fn capture_storage_request(&mut self) -> Result<(), CommonProofGenerationWorkerError> {
         self.storage.capture_yielded_request()?;
-        self.encoded_storage_request = Some(self.storage.encode_pending_worker_request()?);
         Ok(())
     }
 
     fn finalize_output(
         &mut self,
     ) -> Result<CommonProofGenerationWorkerPoll, CommonProofGenerationWorkerError> {
-        let output = self
-            .output
-            .as_mut()
-            .ok_or(CommonProofRuntimeError::WrongOperationPhase)?;
+        let output = &mut self.output;
         if output.final_partial_chunk_is_ready() {
             output.seal_final_chunk()?;
             return self.poll();
@@ -1773,11 +2390,7 @@ impl CommonProofGenerationWorker {
         if !output.complete_output_is_authenticated() {
             return Err(CommonProofRuntimeError::OutputChunkNotReady.into());
         }
-        let descriptor = self
-            .output
-            .take()
-            .ok_or(CommonProofRuntimeError::WrongOperationPhase)?
-            .finish()?;
+        let descriptor = self.output.finish()?;
         self.terminal_stream_descriptor = Some(descriptor);
         Ok(CommonProofGenerationWorkerPoll::Complete)
     }
@@ -1785,39 +2398,34 @@ impl CommonProofGenerationWorker {
     fn poll_cancellation(
         &mut self,
     ) -> Result<CommonProofGenerationWorkerPoll, CommonProofGenerationWorkerError> {
-        if let Some(request) = self.pending_storage_request() {
+        if self.storage.request_is_pending() {
             return Ok(CommonProofGenerationWorkerPoll::StorageRequestReady {
-                encoded_request_byte_length: u32::try_from(request.len())
-                    .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?,
+                encoded_request_byte_length: u32::try_from(
+                    self.pending_storage_request_byte_length()?,
+                )
+                .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?,
             });
         }
         if self.generation_transaction_must_replay_before_cancellation {
             if !self.storage.replay_is_active() {
                 return Err(CommonProofRuntimeError::TransactionResponseMissing.into());
             }
-            let result = self.state.poll(
-                &mut self.storage,
-                &mut self.private_coins,
-                self.output
-                    .as_mut()
-                    .ok_or(CommonProofRuntimeError::WrongOperationPhase)?,
-            );
+            let result =
+                self.state
+                    .poll(&mut self.storage, &mut self.private_coins, &mut self.output);
             match result {
                 Ok(_) => self.storage.transaction_completed()?,
                 Err(_) => return Err(CommonProofGenerationWorkerError::Generation),
             }
             self.generation_transaction_must_replay_before_cancellation = false;
         }
-        if let Some(output) = self.output.as_mut() {
-            output.cancel();
-        }
+        self.output.cancel();
         match self.state.cancel(&mut self.storage) {
             Ok(()) => {
                 if self.storage.replay_is_active() {
                     self.storage.transaction_completed()?;
                 }
                 self.storage.cancel();
-                self.output = None;
                 self.cancellation_complete = true;
                 Ok(CommonProofGenerationWorkerPoll::Cancelled)
             }
@@ -1843,7 +2451,10 @@ impl CommonProofGenerationWorker {
             .terminal_external_memory_usage()
             .ok_or(CommonProofRuntimeError::WrongOperationPhase)?;
         Ok(CommonProofGenerationExternalMemoryAccounting {
-            compiled_requirement: self.state.external_memory_requirement(),
+            compiled_requirement: self
+                .state
+                .external_memory_requirement()
+                .ok_or(CommonProofRuntimeError::WrongOperationPhase)?,
             actual_usage,
             deterministic_prefix_replay_usage: self
                 .deterministic_prefix_replay_external_memory_usage,
@@ -1908,4 +2519,139 @@ pub(super) fn required_chunk_indices(
         first_chunk_index,
         (final_chunk_index != first_chunk_index).then_some(final_chunk_index),
     ))
+}
+
+#[cfg(test)]
+mod generation_cursor_manifest_tests {
+    use super::*;
+
+    fn private_coin_cursor_manifest() -> Vec<u8> {
+        let mut manifest = COMMON_PROOF_PRIVATE_COIN_CURSOR_MANIFEST_MAGIC.to_vec();
+        manifest.extend_from_slice(&[3, 0, 1, 0, 0, 0, 0]);
+        manifest
+    }
+
+    fn checkpoint_state_for_manifest(
+        manifest: &[u8],
+    ) -> [u8; COMMON_PROOF_CHECKPOINT_STATE_BYTE_LENGTH] {
+        CommonProofGenerationCheckpointState {
+            stable_attempt_binding_hash: [1_u8; HASH_BYTE_LENGTH],
+            checkpoint_lineage_identifier: [2_u8; 32],
+            checkpoint_schedule_digest: [3_u8; HASH_BYTE_LENGTH],
+            next_event_index: 1,
+            cumulative_event_digest: [4_u8; HASH_BYTE_LENGTH],
+            safe_boundary_ordinal: 0,
+            position: [5_u8; 16],
+            committed_state_digest: [6_u8; HASH_BYTE_LENGTH],
+            cursor_manifest_digest: hash_framed_parts_512(
+                CHECKPOINT_CURSOR_MANIFEST_HASH_DOMAIN,
+                &[manifest],
+            ),
+        }
+        .encode()
+    }
+
+    #[test]
+    fn composite_generation_cursor_manifest_round_trips_private_and_transcript_state() {
+        let private_manifest = private_coin_cursor_manifest();
+        let private_only =
+            encode_common_proof_generation_cursor_manifest(private_manifest.clone(), &[], None)
+                .expect("a private-only checkpoint cursor manifest is canonical");
+        let decoded_private_only = decode_common_proof_generation_cursor_manifest(&private_only)
+            .expect("the private-only manifest decodes");
+        assert_eq!(
+            decoded_private_only.private_coin_cursor_manifest_bytes,
+            private_manifest
+        );
+        assert!(decoded_private_only.transcript_cursor_bytes.is_empty());
+        assert_eq!(decoded_private_only.transcript_cursor_digest, None);
+
+        let transcript_cursor = (0_u8..31).collect::<Vec<_>>();
+        let transcript_digest = [0xa5_u8; HASH_BYTE_LENGTH];
+        let composite = encode_common_proof_generation_cursor_manifest(
+            private_manifest.clone(),
+            &transcript_cursor,
+            Some(transcript_digest),
+        )
+        .expect("the composite checkpoint cursor manifest is canonical");
+        let decoded = decode_common_proof_generation_cursor_manifest(&composite)
+            .expect("the composite manifest decodes");
+        assert_eq!(decoded.private_coin_cursor_manifest_bytes, private_manifest);
+        assert_eq!(decoded.transcript_cursor_bytes, transcript_cursor);
+        assert_eq!(decoded.transcript_cursor_digest, Some(transcript_digest));
+
+        let state = checkpoint_state_for_manifest(&composite);
+        AuthenticatedCommonProofGenerationCheckpoint::decode(&state, &composite)
+            .expect("the exact authenticated state and composite manifest agree");
+        let mut changed_composite = composite;
+        let final_index = changed_composite.len() - 1;
+        changed_composite[final_index] ^= 1;
+        assert!(matches!(
+            AuthenticatedCommonProofGenerationCheckpoint::decode(&state, &changed_composite),
+            Err(CommonProofRuntimeError::WrongVerificationBinding)
+        ));
+    }
+
+    #[test]
+    fn composite_generation_cursor_manifest_refuses_malformed_framing_and_limits() {
+        let canonical = encode_common_proof_generation_cursor_manifest(
+            private_coin_cursor_manifest(),
+            &[],
+            None,
+        )
+        .expect("the fixture manifest is canonical");
+        let mut malformed_manifests = Vec::new();
+
+        let mut wrong_magic = canonical.clone();
+        wrong_magic[0] ^= 1;
+        malformed_manifests.push(wrong_magic);
+        let mut wrong_version = canonical.clone();
+        wrong_version[8] ^= 1;
+        malformed_manifests.push(wrong_version);
+        let mut reserved_flag = canonical.clone();
+        reserved_flag[10] = 2;
+        malformed_manifests.push(reserved_flag);
+        let mut wrong_total = canonical.clone();
+        wrong_total[12..16].copy_from_slice(&1_u32.to_le_bytes());
+        malformed_manifests.push(wrong_total);
+        let mut empty_private_manifest = canonical.clone();
+        empty_private_manifest[16..20].copy_from_slice(&0_u32.to_le_bytes());
+        malformed_manifests.push(empty_private_manifest);
+        let mut wrong_private_manifest_magic = canonical.clone();
+        wrong_private_manifest_magic[COMMON_PROOF_GENERATION_CURSOR_MANIFEST_PREFIX_BYTE_LENGTH] ^=
+            1;
+        malformed_manifests.push(wrong_private_manifest_magic);
+        let mut present_transcript_flag_without_cursor = canonical.clone();
+        present_transcript_flag_without_cursor[10..12].copy_from_slice(
+            &COMMON_PROOF_GENERATION_CURSOR_MANIFEST_TRANSCRIPT_PRESENT_FLAG.to_le_bytes(),
+        );
+        malformed_manifests.push(present_transcript_flag_without_cursor);
+        let mut absent_transcript_with_digest = canonical.clone();
+        absent_transcript_with_digest[24] = 1;
+        malformed_manifests.push(absent_transcript_with_digest);
+        let mut trailing_byte = canonical.clone();
+        trailing_byte.push(0);
+        malformed_manifests.push(trailing_byte);
+        malformed_manifests.push(
+            canonical[..COMMON_PROOF_GENERATION_CURSOR_MANIFEST_PREFIX_BYTE_LENGTH - 1].to_vec(),
+        );
+
+        for malformed in malformed_manifests {
+            assert!(matches!(
+                decode_common_proof_generation_cursor_manifest(&malformed),
+                Err(CommonProofRuntimeError::WrongVerificationBinding)
+            ));
+        }
+
+        let overlong_transcript =
+            vec![0_u8; MAXIMUM_ROW_CODE_WHIR_TRANSCRIPT_CHECKPOINT_CURSOR_BYTE_LENGTH + 1];
+        assert!(matches!(
+            encode_common_proof_generation_cursor_manifest(
+                private_coin_cursor_manifest(),
+                &overlong_transcript,
+                Some([7_u8; HASH_BYTE_LENGTH]),
+            ),
+            Err(CommonProofRuntimeError::WrongVerificationBinding)
+        ));
+    }
 }

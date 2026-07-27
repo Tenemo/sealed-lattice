@@ -1,8 +1,8 @@
 //! SIMD-aware polynomial pair for quadratic sumcheck.
 //!
-//! Local modification: constraint combination preserves the chronological
-//! query-restoration batching recurrence used by the enclosing WHIR reduction.
-//! See `UPSTREAM.md`.
+//! Local modifications preserve the chronological query-restoration batching
+//! recurrence used by the enclosing WHIR reduction and expose bounded logical
+//! range extraction from a live polynomial view. See `UPSTREAM.md`.
 //!
 //! This module implements a data structure that manages two multilinear polynomials.
 //!
@@ -126,6 +126,27 @@ pub enum PolyView<'a, F: Field, EF: ExtensionField<F>> {
     Scalar(&'a Poly<EF>),
 }
 
+/// Rejection returned when a requested logical polynomial range is not valid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PolyViewRangeError {
+    /// The destination length differs from the requested logical value count.
+    DestinationLengthMismatch {
+        /// Number of logical values requested by the caller.
+        requested_value_count: usize,
+        /// Number of values available in the destination.
+        destination_value_count: usize,
+    },
+    /// Adding the logical start and value count overflowed `usize`.
+    LogicalRangeOverflow,
+    /// The requested logical range extends beyond the polynomial.
+    LogicalRangeOutOfBounds {
+        /// Exclusive end of the requested logical range.
+        logical_end: usize,
+        /// Complete logical evaluation count of the polynomial.
+        logical_evaluation_count: usize,
+    },
+}
+
 impl<F: Field, EF: ExtensionField<F>> PolyView<'_, F, EF> {
     /// Returns the logical number of variables, accounting for SIMD packing.
     pub const fn num_variables(&self) -> usize {
@@ -156,6 +177,61 @@ impl<F: Field, EF: ExtensionField<F>> PolyView<'_, F, EF> {
             }
             Self::Scalar(poly) => out.copy_from_slice(poly.as_slice()),
         }
+    }
+
+    /// Copies one checked contiguous range from the logical scalar view.
+    ///
+    /// Packed storage is read in place, including ranges that start or end in
+    /// the middle of a SIMD value. No complete scalar polynomial is allocated.
+    /// Empty ranges are accepted at every in-bounds position, including the
+    /// logical end of the polynomial.
+    pub fn copy_logical_range_into(
+        &self,
+        logical_start: usize,
+        logical_value_count: usize,
+        destination: &mut [EF],
+    ) -> Result<(), PolyViewRangeError> {
+        if destination.len() != logical_value_count {
+            return Err(PolyViewRangeError::DestinationLengthMismatch {
+                requested_value_count: logical_value_count,
+                destination_value_count: destination.len(),
+            });
+        }
+        let logical_end = logical_start
+            .checked_add(logical_value_count)
+            .ok_or(PolyViewRangeError::LogicalRangeOverflow)?;
+        let logical_evaluation_count = self.num_evals();
+        if logical_end > logical_evaluation_count {
+            return Err(PolyViewRangeError::LogicalRangeOutOfBounds {
+                logical_end,
+                logical_evaluation_count,
+            });
+        }
+
+        match self {
+            Self::Packed(poly) => {
+                let packing_width = F::Packing::WIDTH;
+                let mut logical_index = logical_start;
+                let mut destination_offset = 0;
+                while destination_offset < destination.len() {
+                    let packed_index = logical_index / packing_width;
+                    let first_lane = logical_index % packing_width;
+                    let copied_lane_count =
+                        (packing_width - first_lane).min(destination.len() - destination_offset);
+                    let packed_value = &poly.as_slice()[packed_index];
+                    for lane_offset in 0..copied_lane_count {
+                        destination[destination_offset + lane_offset] =
+                            packed_value.extract(first_lane + lane_offset);
+                    }
+                    logical_index += copied_lane_count;
+                    destination_offset += copied_lane_count;
+                }
+            }
+            Self::Scalar(poly) => {
+                destination.copy_from_slice(&poly.as_slice()[logical_start..logical_end])
+            }
+        }
+        Ok(())
     }
 }
 
@@ -430,6 +506,7 @@ impl<F: Field, EF: ExtensionField<F>> ProductPolynomial<F, EF> {
 
     /// Computes the plain quadratic coefficients for the current round without
     /// touching the transcript or folding the polynomial.
+    #[cfg(feature = "zk")]
     pub(crate) fn round_coefficients(&self) -> (EF, EF) {
         let order = self.order;
         match &self.inner {
@@ -447,6 +524,7 @@ impl<F: Field, EF: ExtensionField<F>> ProductPolynomial<F, EF> {
     }
 
     /// Folds both product-polynomial sides by one verifier challenge.
+    #[cfg(feature = "zk")]
     pub(crate) fn fold_round(&mut self, r: EF) {
         self.compress(r);
         self.transition();
@@ -460,6 +538,7 @@ impl<F: Field, EF: ExtensionField<F>> ProductPolynomial<F, EF> {
     /// - An HVZK code-switch, for example, commits the folded message
     ///   verbatim.
     /// - The combining challenge then lands on the constraint weights.
+    #[cfg(feature = "zk")]
     pub(crate) fn scale_weights(&mut self, scale: EF) {
         match &mut self.inner {
             MaybePacked::Packed { weights, .. } => {
@@ -1128,6 +1207,169 @@ mod tests {
         view.unpack_into(&mut out);
         assert_eq!(out, evals_scalar);
         assert_eq!(out, poly.evals().into_evals());
+    }
+
+    fn packed_range_fixture() -> (ProductPolynomial<F, EF>, Vec<EF>) {
+        type ExtensionPacking = <EF as ExtensionField<F>>::ExtensionPacking;
+
+        let packing_width = <F as Field>::Packing::WIDTH;
+        let logical_evaluation_count = packing_width * 4;
+        let logical_values = (0..logical_evaluation_count)
+            .map(|logical_index| EF::from_u64(logical_index as u64 + 1))
+            .collect::<Vec<_>>();
+        let packed_evaluations = Poly::new(
+            logical_values
+                .chunks(packing_width)
+                .map(ExtensionPacking::from_ext_slice)
+                .collect(),
+        );
+        let packed_weights = Poly::new(vec![
+            ExtensionPacking::ONE;
+            logical_evaluation_count / packing_width
+        ]);
+        (
+            ProductPolynomial::new_packed(
+                VariableOrder::Prefix,
+                packed_evaluations,
+                packed_weights,
+            ),
+            logical_values,
+        )
+    }
+
+    #[test]
+    fn scalar_view_copies_checked_logical_range() {
+        let logical_values = (1..=8).map(EF::from_u64).collect::<Vec<_>>();
+        let polynomial = ProductPolynomial::<F, EF>::new_unpacked(
+            VariableOrder::Prefix,
+            Poly::new(logical_values.clone()),
+            Poly::new(vec![EF::ONE; logical_values.len()]),
+        );
+        let mut destination = vec![EF::ZERO; 4];
+
+        polynomial
+            .evals_view()
+            .copy_logical_range_into(2, 4, &mut destination)
+            .expect("copy scalar logical range");
+
+        assert_eq!(destination, logical_values[2..6]);
+    }
+
+    #[test]
+    fn packed_view_copies_aligned_logical_range() {
+        let (polynomial, logical_values) = packed_range_fixture();
+        let packing_width = <F as Field>::Packing::WIDTH;
+        let mut destination = vec![EF::ZERO; packing_width];
+
+        polynomial
+            .evals_view()
+            .copy_logical_range_into(packing_width, packing_width, &mut destination)
+            .expect("copy aligned packed logical range");
+
+        assert_eq!(
+            destination,
+            logical_values[packing_width..packing_width * 2]
+        );
+    }
+
+    #[test]
+    fn packed_view_copies_unaligned_cross_packing_logical_range() {
+        let (polynomial, logical_values) = packed_range_fixture();
+        let packing_width = <F as Field>::Packing::WIDTH;
+        let logical_start = packing_width - 2;
+        let logical_value_count = packing_width + 3;
+        let mut destination = vec![EF::ZERO; logical_value_count];
+
+        polynomial
+            .evals_view()
+            .copy_logical_range_into(logical_start, logical_value_count, &mut destination)
+            .expect("copy unaligned packed logical range");
+
+        assert_eq!(
+            destination,
+            logical_values[logical_start..logical_start + logical_value_count]
+        );
+    }
+
+    #[test]
+    fn packed_view_copies_final_logical_range() {
+        let (polynomial, logical_values) = packed_range_fixture();
+        let logical_start = logical_values.len() - 3;
+        let mut destination = vec![EF::ZERO; 3];
+
+        polynomial
+            .evals_view()
+            .copy_logical_range_into(logical_start, 3, &mut destination)
+            .expect("copy final packed logical range");
+
+        assert_eq!(destination, logical_values[logical_start..]);
+    }
+
+    #[test]
+    fn polynomial_views_accept_empty_logical_ranges() {
+        let scalar_values = vec![EF::ONE; 4];
+        let scalar_polynomial = ProductPolynomial::<F, EF>::new_unpacked(
+            VariableOrder::Prefix,
+            Poly::new(scalar_values.clone()),
+            Poly::new(vec![EF::ONE; scalar_values.len()]),
+        );
+        let (packed_polynomial, packed_values) = packed_range_fixture();
+
+        scalar_polynomial
+            .evals_view()
+            .copy_logical_range_into(scalar_values.len(), 0, &mut [])
+            .expect("copy empty scalar range");
+        packed_polynomial
+            .evals_view()
+            .copy_logical_range_into(packed_values.len(), 0, &mut [])
+            .expect("copy empty packed range");
+    }
+
+    #[test]
+    fn logical_range_copy_rejects_destination_length_mismatch() {
+        let (polynomial, _) = packed_range_fixture();
+        let mut destination = vec![EF::ZERO; 2];
+
+        assert_eq!(
+            polynomial
+                .evals_view()
+                .copy_logical_range_into(0, 3, &mut destination),
+            Err(PolyViewRangeError::DestinationLengthMismatch {
+                requested_value_count: 3,
+                destination_value_count: 2,
+            })
+        );
+    }
+
+    #[test]
+    fn logical_range_copy_rejects_arithmetic_overflow() {
+        let (polynomial, _) = packed_range_fixture();
+        let mut destination = [EF::ZERO];
+
+        assert_eq!(
+            polynomial
+                .evals_view()
+                .copy_logical_range_into(usize::MAX, 1, &mut destination,),
+            Err(PolyViewRangeError::LogicalRangeOverflow)
+        );
+    }
+
+    #[test]
+    fn logical_range_copy_rejects_out_of_bounds_range() {
+        let (polynomial, logical_values) = packed_range_fixture();
+        let mut destination = [EF::ZERO; 2];
+
+        assert_eq!(
+            polynomial.evals_view().copy_logical_range_into(
+                logical_values.len() - 1,
+                2,
+                &mut destination,
+            ),
+            Err(PolyViewRangeError::LogicalRangeOutOfBounds {
+                logical_end: logical_values.len() + 1,
+                logical_evaluation_count: logical_values.len(),
+            })
+        );
     }
 
     #[test]

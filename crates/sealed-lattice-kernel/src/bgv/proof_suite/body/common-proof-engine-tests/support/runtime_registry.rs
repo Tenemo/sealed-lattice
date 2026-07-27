@@ -31,15 +31,20 @@ fn runtime_registry_accepts_only_terminal_verifier_tokens_and_retires_stale_hand
         fixture.top_count,
     )
     .expect("the checked relation plan mints a runtime capability");
+    let construction_plan_identity_hash =
+        relation_plan_capability.row_code_whir_construction_plan_identity_hash();
+    let expected_verified_query_count = relation_plan_capability
+        .proof_query_count()
+        .expect("the checked construction plan has a bounded query count");
     let proof_application = CommonProofApplicationBinding::new(
         [0x41; 64],
         [0x42; 64],
+        construction_plan_identity_hash,
         verified_proof.application_statement_schema_identifier(),
         verified_proof.proof_header_hash(),
         verified_stream.stream_domain(),
         verified_stream.full_object_digest().into_bytes(),
         verified_proof.proof_byte_length(),
-        verified_proof.verified_query_count(),
     )
     .expect("the verified proof fits the exact application reservation");
     let binding = CommonProofVerificationBinding::new(
@@ -57,9 +62,74 @@ fn runtime_registry_accepts_only_terminal_verifier_tokens_and_retires_stale_hand
     )
     .expect("the generated proof fits the worker limits");
     let mut registry = CommonProofRuntimeRegistry::default();
+    let mut wrong_construction_plan_identity_hash = construction_plan_identity_hash;
+    wrong_construction_plan_identity_hash[0] ^= 1;
+    let wrong_construction_proof_application = CommonProofApplicationBinding::new(
+        [0x41; 64],
+        [0x42; 64],
+        wrong_construction_plan_identity_hash,
+        verified_proof.application_statement_schema_identifier(),
+        verified_proof.proof_header_hash(),
+        verified_stream.stream_domain(),
+        verified_stream.full_object_digest().into_bytes(),
+        verified_proof.proof_byte_length(),
+    )
+    .expect("the mismatched construction identity remains structurally bounded");
+    let wrong_construction_binding = CommonProofVerificationBinding::new(
+        [0x11; 64],
+        [0x32; 64],
+        [0x31; 64],
+        [0x33; 64],
+        wrong_construction_proof_application,
+        relation_plan_capability.relation_plan_hash(),
+    );
+    assert_eq!(
+        registry.begin_verification(
+            wrong_construction_binding,
+            &relation_plan_capability,
+            runtime_limits,
+        ),
+        Err(CommonProofRuntimeError::WrongVerificationBinding),
+        "a different row-code WHIR construction identity cannot reserve proof authority",
+    );
     let operation_handle = registry
         .begin_verification(binding, &relation_plan_capability, runtime_limits)
         .expect("the bound verification operation starts");
+    let mismatched_query_count = expected_verified_query_count
+        .checked_add(1)
+        .expect("the test query count can increase");
+    let verified_proof = verified_proof.with_test_verified_query_count(mismatched_query_count);
+    assert_eq!(
+        registry.register_verified_proof(
+            operation_handle,
+            &relation_plan_capability,
+            verified_proof,
+            verified_stream.clone(),
+        ),
+        Err(CommonProofRuntimeError::WrongVerificationBinding),
+        "verifier metrics that disagree with the checked construction plan cannot mint authority",
+    );
+    let verified_proof =
+        verify_fixture_proof_incrementally(&fixture, &proof_bytes, &verified_trees)
+            .expect("query-count refusal leaves the verification operation retryable")
+            .with_test_verified_query_count(expected_verified_query_count)
+            .with_test_row_code_whir_construction_plan_identity_hash(
+                wrong_construction_plan_identity_hash,
+            );
+    assert_eq!(
+        registry.register_verified_proof(
+            operation_handle,
+            &relation_plan_capability,
+            verified_proof,
+            verified_stream.clone(),
+        ),
+        Err(CommonProofRuntimeError::WrongVerificationBinding),
+        "terminal proof facts for another construction cannot mint authority",
+    );
+    let verified_proof =
+        verify_fixture_proof_incrementally(&fixture, &proof_bytes, &verified_trees)
+            .expect("construction-binding refusal leaves the verification operation retryable")
+            .with_test_verified_query_count(expected_verified_query_count);
     let mut substituted_stream_bytes = proof_bytes.clone();
     let final_byte = substituted_stream_bytes
         .last_mut()
@@ -80,7 +150,8 @@ fn runtime_registry_accepts_only_terminal_verifier_tokens_and_retires_stale_hand
     );
     let verified_proof =
         verify_fixture_proof_incrementally(&fixture, &proof_bytes, &verified_trees)
-            .expect("stream-binding refusal leaves the verification operation retryable");
+            .expect("stream-binding refusal leaves the verification operation retryable")
+            .with_test_verified_query_count(expected_verified_query_count);
     let capability_handle = registry
         .register_verified_proof(
             operation_handle,
@@ -126,16 +197,7 @@ fn runtime_registry_accepts_only_terminal_verifier_tokens_and_retires_stale_hand
         prepared.application_statement_schema_identifier(),
         APPLICATION_STATEMENT_SCHEMA_IDENTIFIER,
     );
-    assert_eq!(
-        (
-            prepared.proof_byte_length(),
-            prepared.verified_query_count()
-        ),
-        (
-            proof_bytes.len() as u64,
-            PUBLIC_AGGREGATE_TEST_PACKED_FRI_QUERY_COUNT,
-        ),
-    );
+    assert_eq!(prepared.proof_byte_length(), proof_bytes.len() as u64);
     let durable_frame = prepared.durable_authorization_frame();
     let durable_frame_digest = prepared.durable_authorization_frame_digest();
     assert_eq!(
@@ -152,7 +214,7 @@ fn runtime_registry_accepts_only_terminal_verifier_tokens_and_retires_stale_hand
         "changed durable bytes cannot authenticate the pending transition",
     );
     assert_eq!(&durable_frame[0..8], b"SLCPA001");
-    assert_eq!(u16::from_le_bytes([durable_frame[8], durable_frame[9]]), 1);
+    assert_eq!(u16::from_le_bytes([durable_frame[8], durable_frame[9]]), 2);
     assert_eq!(
         u32::from_le_bytes(
             durable_frame[10..14]
@@ -169,7 +231,7 @@ fn runtime_registry_accepts_only_terminal_verifier_tokens_and_retires_stale_hand
     assert_eq!(&durable_frame[334..398], &[0x42; 64]);
     assert_eq!(
         &durable_frame[398..462],
-        &relation_plan_capability.relation_plan_hash(),
+        &relation_plan_capability.row_code_whir_construction_plan_identity_hash(),
     );
     assert_eq!(
         u16::from_le_bytes(durable_frame[462..464].try_into().unwrap()),
@@ -197,21 +259,17 @@ fn runtime_registry_accepts_only_terminal_verifier_tokens_and_retires_stale_hand
         proof_bytes.len() as u64,
     );
     assert_eq!(
-        u32::from_le_bytes(durable_frame[670..674].try_into().unwrap()),
-        PUBLIC_AGGREGATE_TEST_PACKED_FRI_QUERY_COUNT,
-    );
-    assert_eq!(
-        &durable_frame[674..738],
+        &durable_frame[670..734],
         &relation_plan_capability.relation_plan_variant_hash(),
     );
-    assert_eq!(durable_frame[738], 0);
+    assert_eq!(durable_frame[734], 0);
     assert_eq!(
-        u32::from_le_bytes(durable_frame[739..743].try_into().unwrap()),
+        u32::from_le_bytes(durable_frame[735..739].try_into().unwrap()),
         0,
     );
-    assert_eq!(durable_frame[743], 0);
+    assert_eq!(durable_frame[739], 0);
     assert_eq!(
-        u16::from_le_bytes(durable_frame[744..746].try_into().unwrap()),
+        u16::from_le_bytes(durable_frame[740..742].try_into().unwrap()),
         0,
     );
     let first_pending_handle_identifier = prepared.pending_handle().get();
@@ -412,12 +470,12 @@ fn upstream_input_registry_consumes_only_one_complete_application_owned_capabili
     let proof_application = CommonProofApplicationBinding::new(
         [0x41; 64],
         [0x42; 64],
+        relation_plan_capability.row_code_whir_construction_plan_identity_hash(),
         APPLICATION_STATEMENT_SCHEMA_IDENTIFIER,
         [0x43; 64],
         CanonicalStreamDomain::CollectivePublicKeyAggregateProof,
         [0x44; 64],
         super::super::super::super::MAXIMUM_COMMON_PROOF_BYTE_LENGTH as u64,
-        PUBLIC_AGGREGATE_TEST_PACKED_FRI_QUERY_COUNT,
     )
     .expect("the application reservation fits the worker safety bound");
     let binding = CommonProofVerificationBinding::new(
@@ -574,14 +632,12 @@ fn application_owned_statement_tree_batch_does_not_spend_one_registry_entry_per_
     let proof_application = CommonProofApplicationBinding::new(
         [0x61; 64],
         [0x62; 64],
+        relation_plan_capability.row_code_whir_construction_plan_identity_hash(),
         schema_identifier,
         [0x63; 64],
         CanonicalStreamDomain::DealerVssShareLinkageProof,
         proof_stream_digest,
         super::super::super::super::MAXIMUM_COMMON_PROOF_BYTE_LENGTH as u64,
-        relation_plan_capability
-            .proof_query_count()
-            .expect("selected VSS query count"),
     )
     .expect("VSS application binding");
     let verification_binding = CommonProofVerificationBinding::new(

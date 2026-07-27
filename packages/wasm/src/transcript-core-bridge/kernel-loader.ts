@@ -60,6 +60,11 @@ export const createTranscriptCoreKernelLoader = (
             exports,
             'sealed_lattice_board_verifier_cached_carrier_length',
         );
+        const boardVerifierCancelBallotCandidateList =
+            resolveOptionalNumberExport(
+                exports,
+                'sealed_lattice_board_verifier_cancel_ballot_candidate_list',
+            );
         const boardVerifierCancel = resolveOptionalNumberExport(
             exports,
             'sealed_lattice_board_verifier_cancel',
@@ -72,6 +77,16 @@ export const createTranscriptCoreKernelLoader = (
             exports,
             'sealed_lattice_board_verifier_describe',
         );
+        const boardVerifierFinishBallotCandidateList =
+            resolveOptionalNumberExport(
+                exports,
+                'sealed_lattice_board_verifier_finish_ballot_candidate_list',
+            );
+        const boardVerifierPrepareBallotCandidateList =
+            resolveOptionalNumberExport(
+                exports,
+                'sealed_lattice_board_verifier_prepare_ballot_candidate_list',
+            );
         const boardVerifierRelease = resolveOptionalNumberExport(
             exports,
             'sealed_lattice_board_verifier_release',
@@ -245,9 +260,12 @@ export const createTranscriptCoreKernelLoader = (
         if (
             boardVerifierBegin !== undefined &&
             boardVerifierCachedCarrierLength !== undefined &&
+            boardVerifierCancelBallotCandidateList !== undefined &&
             boardVerifierCancel !== undefined &&
             boardVerifierCopyCachedCarrier !== undefined &&
             boardVerifierDescribe !== undefined &&
+            boardVerifierFinishBallotCandidateList !== undefined &&
+            boardVerifierPrepareBallotCandidateList !== undefined &&
             boardVerifierRelease !== undefined &&
             boardVerifierVerifyUnordered !== undefined
         ) {
@@ -255,11 +273,17 @@ export const createTranscriptCoreKernelLoader = (
                 allocate,
                 begin: boardVerifierBegin,
                 cachedCarrierLength: boardVerifierCachedCarrierLength,
+                cancelBallotCandidateList:
+                    boardVerifierCancelBallotCandidateList,
                 cancel: boardVerifierCancel,
                 copyCachedCarrier: boardVerifierCopyCachedCarrier,
                 deallocate,
                 describe: boardVerifierDescribe,
+                finishBallotCandidateList:
+                    boardVerifierFinishBallotCandidateList,
                 memory,
+                prepareBallotCandidateList:
+                    boardVerifierPrepareBallotCandidateList,
                 release: boardVerifierRelease,
                 runExclusive: runExclusiveKernelOperation,
                 verifyUnordered: boardVerifierVerifyUnordered,

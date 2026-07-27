@@ -33,6 +33,8 @@ fn owned_verification_worker_authenticates_external_readback_before_minting_auth
     )
     .expect("the checked relation plan mints an application capability");
     let expected_relation_plan_hash = relation_plan_capability.relation_plan_hash();
+    let expected_construction_plan_identity_hash =
+        relation_plan_capability.row_code_whir_construction_plan_identity_hash();
     let expected_relation_plan_variant_hash = relation_plan_capability.relation_plan_variant_hash();
     let proof_header_hash = ProofObjectHeader::from_canonical_application_statement(
         fixture.canonical_application_statement_bytes.clone(),
@@ -44,12 +46,12 @@ fn owned_verification_worker_authenticates_external_readback_before_minting_auth
     let proof_application = CommonProofApplicationBinding::new(
         [0x41; 64],
         [0x42; 64],
+        relation_plan_capability.row_code_whir_construction_plan_identity_hash(),
         APPLICATION_STATEMENT_SCHEMA_IDENTIFIER,
         proof_header_hash,
         stream_domain,
         proof_stream_descriptor.full_object_digest.into_bytes(),
         proof_bytes.len() as u64,
-        PUBLIC_AGGREGATE_TEST_PACKED_FRI_QUERY_COUNT,
     )
     .expect("the generated proof fits the exact application reservation");
     let binding = CommonProofVerificationBinding::new(
@@ -243,6 +245,13 @@ fn owned_verification_worker_authenticates_external_readback_before_minting_auth
         PUBLIC_AGGREGATE_TEST_PACKED_FRI_QUERY_COUNT
     );
     assert_eq!(consumed.relation_plan_hash(), expected_relation_plan_hash);
+    assert_eq!(
+        consumed
+            .borrowed()
+            .verified_proof()
+            .row_code_whir_construction_plan_identity_hash(),
+        expected_construction_plan_identity_hash,
+    );
     assert_eq!(
         consumed.relation_plan_variant_hash(),
         expected_relation_plan_variant_hash,

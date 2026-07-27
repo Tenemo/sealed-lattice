@@ -1,7 +1,7 @@
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from "vitest";
 
 import {
     asciiItem,
@@ -14,7 +14,7 @@ import {
     unsigned32LittleEndian,
     unsigned64Item,
     variableValue,
-} from '../canonical-tuple-test-helpers';
+} from "../canonical-tuple-test-helpers";
 
 import {
     createRuntimeAssetHashAccumulator,
@@ -28,10 +28,11 @@ import {
     runtimeBuildBytesToHex,
     runtimeBuildCanonicalLimits,
     type RuntimeAssetRole,
-} from '#packages/wasm/src/runtime-build-canonical';
+} from "#packages/wasm/src/runtime-build-canonical";
 import {
     compileRuntimeBuildBootstrap,
     copyRuntimeBuildAuthorityBindingDescription,
+    createRuntimeBuildKernelWorkerPreflight,
     RuntimeBuildPreflightError,
     type RuntimeBuildAuthorityBinding,
     type RuntimeBuildByteSource,
@@ -39,11 +40,14 @@ import {
     type RuntimeBuildFetchResponse,
     type RuntimeBuildFetcher,
     type RuntimeBuildWorkerPreflight,
-} from '#packages/wasm/src/runtime-build-preflight';
+} from "#packages/wasm/src/runtime-build-preflight";
+import { registerCommonProofKernelContext } from "#packages/wasm/src/transcript-core-bridge/common-proof-kernel-context";
+import type { TranscriptCoreKernelCommandRuntime } from "#packages/wasm/src/transcript-core-bridge/kernel-runtime";
+import type { TranscriptCoreKernel } from "#packages/wasm/src/transcript-core-bridge/kernel-types";
 
-const origin = 'https://runtime.example';
-const manifestPath = '/runtime-manifest.canonical';
-const suiteRecordPath = '/suite.canonical';
+const origin = "https://runtime.example";
+const manifestPath = "/runtime-manifest.canonical";
+const suiteRecordPath = "/suite.canonical";
 const artifactPaths = Object.freeze(
     Array.from({ length: 6 }, (_, index) => `/artifact-${index + 1}.canonical`),
 );
@@ -69,10 +73,10 @@ const readPrivateRandomnessProofCoordinatesVector =
         JSON.parse(
             await readFile(
                 path.resolve(
-                    'test-vectors',
-                    'private-randomness-proof-coordinates.json',
+                    "test-vectors",
+                    "private-randomness-proof-coordinates.json",
                 ),
-                'utf8',
+                "utf8",
             ),
         ) as PrivateRandomnessProofCoordinatesVector;
 
@@ -231,23 +235,23 @@ const ballotAggregationCheckpointOperationProfile = (): Uint8Array => {
 const createFixture = (overrides: FixtureOverrides = {}) => {
     const assets: readonly AssetFixture[] = Object.freeze([
         {
-            bytes: textEncoder.encode('export const application = 1;'),
-            canonicalPath: '/application.js',
+            bytes: textEncoder.encode("export const application = 1;"),
+            canonicalPath: "/application.js",
             role: 1,
         },
         {
-            bytes: textEncoder.encode('self.onmessage = () => {};'),
-            canonicalPath: '/worker.js',
+            bytes: textEncoder.encode("self.onmessage = () => {};"),
+            canonicalPath: "/worker.js",
             role: 2,
         },
         {
             bytes: Uint8Array.of(0x00, 0x61, 0x73, 0x6d, 1, 0, 0, 0),
-            canonicalPath: '/kernel.wasm',
+            canonicalPath: "/kernel.wasm",
             role: 3,
         },
         {
-            bytes: textEncoder.encode('body { color: black; }'),
-            canonicalPath: '/style.css',
+            bytes: textEncoder.encode("body { color: black; }"),
+            canonicalPath: "/style.css",
             role: 4,
         },
     ]);
@@ -281,7 +285,7 @@ const createFixture = (overrides: FixtureOverrides = {}) => {
         : assets;
     const assetReferences = orderedAssets.map((asset) => {
         if (asset === undefined) {
-            throw new Error('The test asset fixture is incomplete.');
+            throw new Error("The test asset fixture is incomplete.");
         }
         return assetReferenceTuple(
             asset,
@@ -297,7 +301,7 @@ const createFixture = (overrides: FixtureOverrides = {}) => {
     const manifestBytes = canonicalTuple(
         0x1802,
         unsigned16Item(1),
-        asciiItem('release-1'),
+        asciiItem("release-1"),
         hashItem(suiteIdentifier),
         asciiItem(suiteRecordPath),
         asciiListItem(orderedArtifactPaths),
@@ -362,7 +366,7 @@ class MemoryRuntimeBuildCache implements RuntimeBuildCache {
     ): Promise<void> {
         const bytes = await collectSource(source);
         if (bytes.byteLength !== byteLength) {
-            throw new Error('The test cache observed the wrong byte length.');
+            throw new Error("The test cache observed the wrong byte length.");
         }
         let entries = this.#namespaces.get(namespace);
         if (entries === undefined) {
@@ -474,6 +478,139 @@ const createWorkerHarness = (consumeWasm = true) => {
     return { launch, observations };
 };
 
+const createSemanticWorker = (input: {
+    artifactStatus?: (artifactKind: number, bytes: Uint8Array) => number;
+    suiteIdentifier: Uint8Array;
+}) => {
+    const observedArtifactKinds: number[] = [];
+    let finished = 0;
+    let terminated = 0;
+    const worker = createRuntimeBuildKernelWorkerPreflight({
+        instantiateVerifiedWasm: ({ canonicalBytes }) => {
+            expect(canonicalBytes).toEqual(
+                Uint8Array.of(0x00, 0x61, 0x73, 0x6d, 1, 0, 0, 0),
+            );
+            const memory = new WebAssembly.Memory({ initial: 1 });
+            let nextPointer = 8;
+            const allocate = (byteLength: number): number => {
+                const pointer = nextPointer;
+                nextPointer += byteLength;
+                if (nextPointer > memory.buffer.byteLength) {
+                    memory.grow(
+                        Math.ceil(
+                            (nextPointer - memory.buffer.byteLength) /
+                                (64 * 1024),
+                        ),
+                    );
+                }
+                return pointer;
+            };
+            const deallocate = (): void => undefined;
+            const kernel = {
+                verifyFoundationSuiteRecord: () => ({
+                    isValid: true as const,
+                    value: {
+                        suiteId: runtimeBuildBytesToHex(input.suiteIdentifier),
+                    },
+                }),
+            } as unknown as TranscriptCoreKernel;
+            const context = {
+                allocate,
+                deallocate,
+                executeCommand: <Result>(): Result => {
+                    throw new Error(
+                        "The semantic preflight test uses no command.",
+                    );
+                },
+                memory,
+                runExclusive: <Result>(
+                    _operationName: string,
+                    operation: () => Result,
+                ): Result => operation(),
+                wasmExports: {
+                    memory,
+                    sealed_lattice_foundation_verify_suite_artifact: (
+                        _suitePointer: number,
+                        _suiteByteLength: number,
+                        artifactKind: number,
+                        artifactPointer: number,
+                        artifactByteLength: number,
+                    ): number => {
+                        observedArtifactKinds.push(artifactKind);
+                        return (
+                            input.artifactStatus?.(
+                                artifactKind,
+                                new Uint8Array(
+                                    memory.buffer,
+                                    artifactPointer,
+                                    artifactByteLength,
+                                ).slice(),
+                            ) ?? 0
+                        );
+                    },
+                },
+            } as unknown as TranscriptCoreKernelCommandRuntime;
+            registerCommonProofKernelContext(kernel, context);
+            return Promise.resolve({
+                finish: (): Promise<Readonly<{ ready: true }>> => {
+                    finished += 1;
+                    return Promise.resolve(Object.freeze({ ready: true }));
+                },
+                kernel,
+                terminate: (): void => {
+                    terminated += 1;
+                },
+            });
+        },
+    });
+    return {
+        observations: {
+            get finished(): number {
+                return finished;
+            },
+            observedArtifactKinds,
+            get terminated(): number {
+                return terminated;
+            },
+        },
+        worker,
+    };
+};
+
+const prepareSemanticWorker = async (input: {
+    artifactStatus?: (artifactKind: number, bytes: Uint8Array) => number;
+    fixture: ReturnType<typeof createFixture>;
+}) => {
+    const harness = createSemanticWorker({
+        artifactStatus: input.artifactStatus,
+        suiteIdentifier: input.fixture.suiteIdentifier,
+    });
+    const manifest = decodeRuntimeBuildManifest(input.fixture.manifestBytes);
+    const wasmReference = manifest.orderedAssets.find(
+        (reference) => reference.assetRole === 3,
+    );
+    const wasmBytes = input.fixture.routes.get("/kernel.wasm");
+    const suiteRecordBytes = input.fixture.routes.get(suiteRecordPath);
+    if (
+        wasmReference === undefined ||
+        wasmBytes === undefined ||
+        suiteRecordBytes === undefined
+    ) {
+        throw new Error("The semantic preflight fixture is incomplete.");
+    }
+    await harness.worker.verifyWasm({
+        assetReference: wasmReference,
+        source: byteSource(wasmBytes),
+    });
+    const artifactReferences = decodeSuiteArtifactReferences(suiteRecordBytes);
+    await harness.worker.verifySuiteRecord({
+        artifactReferences,
+        canonicalBytes: suiteRecordBytes,
+        suiteIdentifier: input.fixture.suiteIdentifier,
+    });
+    return { artifactReferences, harness };
+};
+
 const runFixture = async (input: {
     cache?: MemoryRuntimeBuildCache;
     fetcher?: ReturnType<typeof createFetcher>;
@@ -496,21 +633,85 @@ const runFixture = async (input: {
             expect(applicationInput.applicationBytes).toEqual(
                 fixture.assets[0]?.bytes,
             );
-            expect(applicationInput.localAssetBytes.get('/style.css')).toEqual(
+            expect(applicationInput.localAssetBytes.get("/style.css")).toEqual(
                 fixture.assets[3]?.bytes,
             );
             expect(workerHarness.observations.artifactKinds).toEqual([
                 1, 2, 3, 4, 5, 6,
             ]);
-            return Promise.resolve('application-imported' as const);
+            return Promise.resolve("application-imported" as const);
         },
         launchVerifiedWorker: workerHarness.launch,
     });
     return { activation, cache, fetcher, fixture, workerHarness };
 };
 
-describe('runtime build preflight', () => {
-    it('parses the exact ballot aggregation checkpoint operation profile', () => {
+describe("runtime build preflight", () => {
+    it("semantically preflights all six suite artifacts before worker finish", async () => {
+        const fixture = createFixture();
+        const { artifactReferences, harness } = await prepareSemanticWorker({
+            fixture,
+        });
+        for (const [index, artifactReference] of artifactReferences.entries()) {
+            const canonicalPath = artifactPaths[index];
+            const artifactBytes =
+                canonicalPath === undefined
+                    ? undefined
+                    : fixture.routes.get(canonicalPath);
+            if (canonicalPath === undefined || artifactBytes === undefined) {
+                throw new Error("The suite-artifact fixture is incomplete.");
+            }
+            await harness.worker.verifySuiteArtifact({
+                artifactReference,
+                canonicalPath,
+                source: byteSource(artifactBytes),
+            });
+        }
+
+        await expect(harness.worker.finish()).resolves.toEqual({ ready: true });
+        expect(harness.observations.observedArtifactKinds).toEqual([
+            1, 2, 3, 4, 5, 6,
+        ]);
+        expect(harness.observations.finished).toBe(1);
+        expect(harness.observations.terminated).toBe(0);
+    });
+
+    it("propagates semantic mutation refusal and keeps finish unavailable", async () => {
+        const fixture = createFixture();
+        const firstArtifactBytes = fixture.routes.get(artifactPaths[0] ?? "");
+        if (firstArtifactBytes === undefined) {
+            throw new Error("The first suite artifact is unavailable.");
+        }
+        const { artifactReferences, harness } = await prepareSemanticWorker({
+            artifactStatus: (artifactKind, bytes) =>
+                artifactKind === 1 && bytes[0] !== firstArtifactBytes[0]
+                    ? 0x0006
+                    : 0,
+            fixture,
+        });
+        const mutated = firstArtifactBytes.slice();
+        mutated[0] = (mutated[0] ?? 0) ^ 0xff;
+        const firstReference = artifactReferences[0];
+        if (firstReference === undefined) {
+            throw new Error(
+                "The first suite-artifact reference is unavailable.",
+            );
+        }
+        await expect(
+            harness.worker.verifySuiteArtifact({
+                artifactReference: firstReference,
+                canonicalPath: artifactPaths[0] ?? "",
+                source: byteSource(mutated),
+            }),
+        ).rejects.toThrow("wrongHashOrRoot");
+        await expect(harness.worker.finish()).rejects.toThrow(
+            "before every suite artifact passes",
+        );
+        await harness.worker.terminate();
+        expect(harness.observations.terminated).toBe(1);
+    });
+
+    it("parses the exact ballot aggregation checkpoint operation profile", () => {
         const fixture = createFixture({
             operationProfiles: [ballotAggregationCheckpointOperationProfile()],
         });
@@ -526,18 +727,18 @@ describe('runtime build preflight', () => {
         });
     });
 
-    it('matches the shared proof-family randomness coordinates', async () => {
+    it("matches the shared proof-family randomness coordinates", async () => {
         const vector = await readPrivateRandomnessProofCoordinatesVector();
         expect(vector.families.map((family) => family.familyName)).toEqual([
-            'sameSecret',
-            'publicKeyShare',
-            'relinearizationRoundOne',
-            'relinearizationRoundTwo',
-            'galoisKeyShare',
-            'ballotValidity',
-            'targetShareProof',
-            'vssShareLinkage',
-            'aggregateThresholdShare',
+            "sameSecret",
+            "publicKeyShare",
+            "relinearizationRoundOne",
+            "relinearizationRoundTwo",
+            "galoisKeyShare",
+            "ballotValidity",
+            "targetShareProof",
+            "vssShareLinkage",
+            "aggregateThresholdShare",
         ]);
         expect(proofRandomnessFamilyAssignments).toEqual(
             vector.families.map(({ familySchemaIdentifier }) => ({
@@ -579,7 +780,7 @@ describe('runtime build preflight', () => {
                 });
                 expect(() =>
                     decodeRuntimeBuildManifest(fixture.manifestBytes),
-                ).toThrow('A checkpoint random-use profile is unassigned.');
+                ).toThrow("A checkpoint random-use profile is unassigned.");
             }
         }
 
@@ -594,15 +795,15 @@ describe('runtime build preflight', () => {
             });
             expect(() =>
                 decodeRuntimeBuildManifest(fixture.manifestBytes),
-            ).toThrow('A checkpoint random-use profile is unassigned.');
+            ).toThrow("A checkpoint random-use profile is unassigned.");
         }
     });
 
-    it('authenticates every inert fetch and cache reread before activation', async () => {
+    it("authenticates every inert fetch and cache reread before activation", async () => {
         const { activation, fetcher, fixture, workerHarness } =
             await runFixture({});
 
-        expect(activation.application).toBe('application-imported');
+        expect(activation.application).toBe("application-imported");
         expect(activation.workerChannel).toEqual({ ready: true });
         const authorityBindingDescription =
             copyRuntimeBuildAuthorityBindingDescription(
@@ -644,7 +845,7 @@ describe('runtime build preflight', () => {
         );
     });
 
-    it('refuses a substituted asset before worker creation and clears it', async () => {
+    it("refuses a substituted asset before worker creation and clears it", async () => {
         const fixture = createFixture();
         const cache = new MemoryRuntimeBuildCache();
         const workerHarness = createWorkerHarness();
@@ -652,10 +853,10 @@ describe('runtime build preflight', () => {
             fixture.routes,
             new Map([
                 [
-                    '/worker.js',
+                    "/worker.js",
                     {
                         substitutedBytes: textEncoder.encode(
-                            'self.onmessage = () => {0}',
+                            "self.onmessage = () => {0}",
                         ),
                     },
                 ],
@@ -669,22 +870,22 @@ describe('runtime build preflight', () => {
         expect(await cache.listPaths(fixture.manifestHashHex)).toEqual([]);
     });
 
-    it('refuses a stale namespace without fetching or launching', async () => {
+    it("refuses a stale namespace without fetching or launching", async () => {
         const fixture = createFixture();
         const cache = new MemoryRuntimeBuildCache();
         const fetcher = createFetcher(fixture.routes);
         const workerHarness = createWorkerHarness();
-        cache.seed(fixture.manifestHashHex, '/stale.js', Uint8Array.of(1));
+        cache.seed(fixture.manifestHashHex, "/stale.js", Uint8Array.of(1));
 
         await expect(
             runFixture({ cache, fetcher, fixture, workerHarness }),
-        ).rejects.toThrow('namespace was not empty');
+        ).rejects.toThrow("namespace was not empty");
         expect(fetcher.fetchCounts.size).toBe(0);
         expect(workerHarness.observations.launched).toBe(0);
         expect(await cache.listPaths(fixture.manifestHashHex)).toEqual([]);
     });
 
-    it('refuses redirects even when redirected bytes are authentic', async () => {
+    it("refuses redirects even when redirected bytes are authentic", async () => {
         const fixture = createFixture();
         const workerHarness = createWorkerHarness();
         const fetcher = createFetcher(
@@ -692,23 +893,23 @@ describe('runtime build preflight', () => {
             new Map([
                 [
                     manifestPath,
-                    { finalPath: '/mirror.canonical', redirected: true },
+                    { finalPath: "/mirror.canonical", redirected: true },
                 ],
             ]),
         );
 
         await expect(
             runFixture({ fetcher, fixture, workerHarness }),
-        ).rejects.toThrow('did not resolve exactly');
+        ).rejects.toThrow("did not resolve exactly");
         expect(workerHarness.observations.launched).toBe(0);
     });
 
-    it('terminates a worker that returns before consuming verified WASM', async () => {
+    it("terminates a worker that returns before consuming verified WASM", async () => {
         const fixture = createFixture();
         const workerHarness = createWorkerHarness(false);
 
         await expect(runFixture({ fixture, workerHarness })).rejects.toThrow(
-            'did not consume all bytes',
+            "did not consume all bytes",
         );
         expect(workerHarness.observations).toMatchObject({
             finished: 0,
@@ -718,10 +919,10 @@ describe('runtime build preflight', () => {
     });
 
     it.each([
-        ['reordered assets', { reorderAssets: true }],
-        ['duplicate paths', { duplicateArtifactPath: true }],
+        ["reordered assets", { reorderAssets: true }],
+        ["duplicate paths", { duplicateArtifactPath: true }],
     ] as const)(
-        'refuses %s in a hash-pinned manifest',
+        "refuses %s in a hash-pinned manifest",
         async (_, overrides) => {
             const fixture = createFixture(overrides);
             const workerHarness = createWorkerHarness();
@@ -733,7 +934,7 @@ describe('runtime build preflight', () => {
         },
     );
 
-    it('checks small-record, executable, and artifact ceilings before allocation', async () => {
+    it("checks small-record, executable, and artifact ceilings before allocation", async () => {
         expect(runtimeBuildCanonicalLimits).toMatchObject({
             maximumCopiedExecutableAssetByteLength: 8_388_608,
             maximumEvaluatorProgramSetArtifactByteLength: 67_108_864,
@@ -743,21 +944,21 @@ describe('runtime build preflight', () => {
         const ordinaryFixture = createFixture();
         const oversizedManifestFetcher = createFetcher(
             ordinaryFixture.routes,
-            new Map([[manifestPath, { contentLength: '65537' }]]),
+            new Map([[manifestPath, { contentLength: "65537" }]]),
         );
         await expect(
             runFixture({
                 fetcher: oversizedManifestFetcher,
                 fixture: ordinaryFixture,
             }),
-        ).rejects.toThrow('outside its accepted bound');
+        ).rejects.toThrow("outside its accepted bound");
 
         const oversizedExecutableFixture = createFixture({
             executableReferenceByteLength: 8_388_609,
         });
         await expect(
             runFixture({ fixture: oversizedExecutableFixture }),
-        ).rejects.toThrow('copied-buffer safety bound');
+        ).rejects.toThrow("copied-buffer safety bound");
 
         const oversizedArtifactFixture = createFixture({
             artifactReferenceByteLength: 8 * 1024 * 1024 - 3,
@@ -765,11 +966,11 @@ describe('runtime build preflight', () => {
         const workerHarness = createWorkerHarness();
         await expect(
             runFixture({ fixture: oversizedArtifactFixture, workerHarness }),
-        ).rejects.toThrow('outside its accepted kind or safety bounds');
+        ).rejects.toThrow("outside its accepted kind or safety bounds");
         expect(workerHarness.observations.terminated).toBe(1);
     });
 
-    it('admits the selected evaluator artifact with slack and rejects one byte beyond the safety bound', () => {
+    it("admits the selected evaluator artifact with slack and rejects one byte beyond the safety bound", () => {
         const evaluatorProgramSetSafetyByteLength =
             runtimeBuildCanonicalLimits.maximumEvaluatorProgramSetArtifactByteLength;
         expect(() =>
@@ -786,7 +987,7 @@ describe('runtime build preflight', () => {
                 5,
                 BigInt(evaluatorProgramSetSafetyByteLength + 1),
             ),
-        ).toThrow('canonical safety bound');
+        ).toThrow("canonical safety bound");
         const selectedEvaluatorFixture = createFixture({
             artifactReferenceByteLength: 20_270_968,
             artifactReferenceKind: 5,
@@ -811,15 +1012,15 @@ describe('runtime build preflight', () => {
                 oversizedEvaluatorFixture.routes.get(suiteRecordPath) ??
                     new Uint8Array(0),
             ),
-        ).toThrow('outside its accepted kind or safety bounds');
+        ).toThrow("outside its accepted kind or safety bounds");
     });
 
-    it('uses the evaluator artifact bound for streamed response admission', async () => {
+    it("uses the evaluator artifact bound for streamed response admission", async () => {
         const evaluatorProgramSetSafetyByteLength =
             runtimeBuildCanonicalLimits.maximumEvaluatorProgramSetArtifactByteLength;
         const evaluatorArtifactPath = artifactPaths[4];
         if (evaluatorArtifactPath === undefined) {
-            throw new Error('The evaluator artifact test path is unavailable.');
+            throw new Error("The evaluator artifact test path is unavailable.");
         }
         const fixture = createFixture();
         const acceptedBoundaryFetcher = createFetcher(
@@ -837,7 +1038,7 @@ describe('runtime build preflight', () => {
         );
         await expect(
             runFixture({ fetcher: acceptedBoundaryFetcher, fixture }),
-        ).rejects.toThrow('wrong declared length');
+        ).rejects.toThrow("wrong declared length");
 
         const rejectedBoundaryFetcher = createFetcher(
             fixture.routes,
@@ -854,6 +1055,6 @@ describe('runtime build preflight', () => {
         );
         await expect(
             runFixture({ fetcher: rejectedBoundaryFetcher, fixture }),
-        ).rejects.toThrow('outside its accepted bound');
+        ).rejects.toThrow("outside its accepted bound");
     });
 });

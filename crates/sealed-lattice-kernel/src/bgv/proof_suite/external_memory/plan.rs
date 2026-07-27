@@ -94,13 +94,13 @@ impl ProofExternalMemorySecretSealCustodyRequirement {
         })
     }
 
-    #[cfg(test)]
-    pub(crate) const fn local_record_seal_invocation_count(self) -> u64 {
+    pub(in crate::bgv::proof_suite) const fn local_record_seal_invocation_count(self) -> u64 {
         self.local_record_seal_invocation_count
     }
 
-    #[cfg(test)]
-    pub(crate) const fn local_record_sealed_plaintext_byte_length(self) -> u64 {
+    pub(in crate::bgv::proof_suite) const fn local_record_sealed_plaintext_byte_length(
+        self,
+    ) -> u64 {
         self.local_record_sealed_plaintext_byte_length
     }
 
@@ -229,8 +229,48 @@ impl ProofExternalMemoryPlan {
         Ok(plan)
     }
 
+    pub(in crate::bgv::proof_suite) const fn step_count(&self) -> u32 {
+        self.step_count
+    }
+
+    pub(in crate::bgv::proof_suite) const fn maximum_chunk_byte_length(&self) -> u32 {
+        self.maximum_chunk_byte_length
+    }
+
+    pub(in crate::bgv::proof_suite) const fn maximum_transaction_payload_byte_length(&self) -> u64 {
+        self.maximum_transaction_payload_byte_length
+    }
+
     pub(crate) const fn maximum_transaction_operation_count(&self) -> u32 {
         self.maximum_transaction_operation_count
+    }
+
+    pub(in crate::bgv::proof_suite) const fn maximum_stored_byte_length(&self) -> u64 {
+        self.maximum_stored_byte_length
+    }
+
+    pub(in crate::bgv::proof_suite) const fn maximum_total_written_byte_length(&self) -> u64 {
+        self.maximum_total_written_byte_length
+    }
+
+    pub(in crate::bgv::proof_suite) const fn maximum_total_read_byte_length(&self) -> u64 {
+        self.maximum_total_read_byte_length
+    }
+
+    pub(in crate::bgv::proof_suite) const fn maximum_transaction_count(&self) -> u64 {
+        self.maximum_transaction_count
+    }
+
+    pub(in crate::bgv::proof_suite) fn into_object_plans(
+        self,
+    ) -> Vec<ProofExternalMemoryObjectPlan> {
+        self.objects
+    }
+
+    pub(in crate::bgv::proof_suite) fn secret_seal_custody_requirement(
+        &self,
+    ) -> Result<ProofExternalMemorySecretSealCustodyRequirement, ProofExternalMemoryError> {
+        secret_seal_custody_requirement_for_object_lifecycles(&self.objects)
     }
 
     pub(super) fn validate(&self) -> Result<(), ProofExternalMemoryError> {
@@ -354,13 +394,9 @@ impl ProofExternalMemoryPlan {
         Ok(())
     }
 
-    #[cfg(test)]
-    pub(crate) const fn step_count(&self) -> u32 {
-        self.step_count
-    }
-
-    #[cfg(test)]
-    pub(crate) fn physical_object_count(&self) -> Result<u32, ProofExternalMemoryError> {
+    pub(in crate::bgv::proof_suite) fn physical_object_count(
+        &self,
+    ) -> Result<u32, ProofExternalMemoryError> {
         u32::try_from(
             self.objects
                 .iter()
@@ -371,8 +407,9 @@ impl ProofExternalMemoryPlan {
         .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)
     }
 
-    #[cfg(test)]
-    pub(crate) fn object_lifecycle_count(&self) -> Result<u32, ProofExternalMemoryError> {
+    pub(in crate::bgv::proof_suite) fn object_lifecycle_count(
+        &self,
+    ) -> Result<u32, ProofExternalMemoryError> {
         u32::try_from(self.objects.len())
             .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)
     }
@@ -564,6 +601,18 @@ pub(crate) trait ProofExternalMemory {
         expected_offset: u64,
         bytes: &[u8],
     ) -> Result<(), Self::Error>;
+
+    /// Transfers an append allocation when the producer can relinquish it.
+    /// Implementations without an owned fast path preserve the ordinary
+    /// borrowed behavior and leave the producer allocation unchanged.
+    fn append_owned_object_bytes(
+        &mut self,
+        object: ProofExternalMemoryObject,
+        expected_offset: u64,
+        bytes: &mut Zeroizing<Vec<u8>>,
+    ) -> Result<(), Self::Error> {
+        self.append_object_bytes(object, expected_offset, bytes.as_slice())
+    }
 
     fn seal_object(&mut self, object: ProofExternalMemoryObject) -> Result<(), Self::Error>;
 

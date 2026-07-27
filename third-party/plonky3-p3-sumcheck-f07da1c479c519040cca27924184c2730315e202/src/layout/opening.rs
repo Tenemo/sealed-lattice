@@ -2,14 +2,14 @@
 
 use alloc::vec::Vec;
 
-use p3_field::{Field, add_scaled_slice_in_place};
+use p3_field::{add_scaled_slice_in_place, Field};
 use p3_multilinear_util::point::Point;
 use p3_multilinear_util::poly::Poly;
 
-use crate::Claim;
 use crate::svo::{
-    SvoAccumulators, SvoPoint, calculate_product_accumulator, evals_01inf_grid_prefix,
+    calculate_product_accumulator, evals_01inf_grid_prefix, SvoAccumulators, SvoPoint,
 };
+use crate::Claim;
 
 /// Multi-opening claim over an SVO point.
 pub type ProverMultiClaim<F, EF> =
@@ -667,8 +667,8 @@ mod tests {
     use p3_field::PrimeCharacteristicRing;
     use p3_multilinear_util::point::Point;
     use p3_multilinear_util::poly::Poly;
-    use rand::SeedableRng;
     use rand::rngs::SmallRng;
+    use rand::SeedableRng;
 
     use super::*;
 

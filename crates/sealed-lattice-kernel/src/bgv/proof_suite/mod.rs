@@ -62,10 +62,13 @@ pub(crate) use aggregate_threshold_share_runtime::{
     absorb_authenticated_recipient_vss_payload, aggregate_threshold_share_runtime_error_status,
     begin_aggregate_threshold_share_recipient_authority,
     bind_generated_aggregate_threshold_share_proof_to_board,
+    cancel_aggregate_threshold_share_private_share_acceptance_carrier,
     discard_aggregate_threshold_share_generation_board_binding_source,
     discard_aggregate_threshold_share_recipient_authority,
     discard_aggregate_threshold_share_verification_terminal_source,
+    finish_aggregate_threshold_share_private_share_acceptance_carrier,
     finish_aggregate_threshold_share_verification, prepare_aggregate_threshold_share_generation,
+    prepare_aggregate_threshold_share_private_share_acceptance_carrier,
     prepare_aggregate_threshold_share_verification,
 };
 pub(in crate::bgv) use aggregate_threshold_share_runtime::{
@@ -84,8 +87,10 @@ pub(crate) use ballot_validity_runtime::{
     consume_verified_ballot_validity_output, with_verified_ballot_validity_output,
 };
 #[cfg(test)]
+pub(crate) use body::CommonProofByteLengthCeiling;
+pub(crate) use body::canonical_common_proof_byte_length_ceiling;
+#[cfg(test)]
 pub(crate) use body::decode_proof_body_prefix;
-pub(crate) use body::{CommonProofByteLengthCeiling, canonical_common_proof_byte_length_ceiling};
 pub(crate) use body::{
     CompleteProofTreeCatalog, DecodedProofBodyPrefix, DecodedProofPhasePairLeaf, ProofBodyError,
     ProofBodyLayout, ProofTreeCatalogEntry, ProofTreeCatalogInput, ProofTreeCatalogSource,
@@ -140,14 +145,12 @@ pub(crate) use external_memory::{
     ProofExternalMemoryTransactionRecorder, ProofExternalMemoryTransactionReplay,
     ProofExternalMemoryTransactionRequest, ProofExternalMemoryUsage,
 };
+#[cfg(test)]
+pub(crate) use field::validate_proof_field_profile;
 pub(crate) use field::{
     PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR, PROOF_BASE_FIELD_MODULUS,
     PROOF_CHALLENGE_EXTENSION_DEGREE, ProofBaseFieldElement, ProofChallengeExtensionElement,
     ProofFieldError,
-};
-#[cfg(test)]
-pub(crate) use field::{
-    PROOF_CHALLENGE_EXTENSION_POLYNOMIAL_COEFFICIENTS, validate_proof_field_profile,
 };
 pub(crate) use fri::{
     OpenedFriLayerPair, ProofFriError, ProofFriQueryState, ProofFriQueryVerifier,
@@ -175,13 +178,14 @@ pub(crate) use profile::{
     PROOF_EVALUATION_COSET_OFFSET, PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
     PROOF_NON_NATIVE_ALPHA_REPETITION_COUNT, PROOF_NON_NATIVE_THETA_REPETITION_COUNT,
     PROOF_OUT_OF_DOMAIN_POINT_COUNT, ProofProfileError, ValidatedRelationPlanArtifact,
+    verify_canonical_proof_profile_set,
 };
 #[cfg(test)]
 pub(crate) use prover::{
     BoundedCommonProofByteSink, CommonProofPrivateCoinSamplingCatalog,
     CommonProofPrivateCoinSamplingOperation, CommonProofResidentMemoryPhase,
     PublicOnlyCommonProofCoinSource, RecordingCommonProofPrivateCoinSource,
-    ResidentCommonProofSourcePolynomialProvider, canonical_proof_object_header_bytes,
+    ResidentCommonProofSourcePolynomialProvider,
     common_proof_private_coin_coordinate_derivation_context_hash,
     construct_composed_quotient_polynomial,
     construct_constraint_stream_composed_quotient_polynomial,
@@ -201,12 +205,13 @@ pub(crate) use prover::{
     CommonProofSourcePolynomialRequestContext, CommonProofSourceProviderMemoryAccounting,
     MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, PrivateRandomnessCommonProofCoinError,
     PrivateRandomnessCommonProofCoinSource, ProvidedCommonProofSourcePolynomial, apply_trace_mask,
+    canonical_proof_object_header_bytes, construct_opening_batch_mask,
 };
 #[cfg(test)]
 pub(crate) use prover::{
     CommonProofAuxiliaryColumnSynthesisCursor, CommonProofPreChallengeSourceCursor,
     CommonProofPreChallengeSourcePoll, CommonProofQuotientComponentCursor,
-    construct_opening_batch_mask, construct_reversed_relation_column,
+    construct_reversed_relation_column,
 };
 #[cfg(test)]
 pub(crate) use prover::{
@@ -275,6 +280,10 @@ pub(crate) use relinearization_source_material::{
     VerifiedRelinearizationSourceMaterialPreflight,
 };
 pub(in crate::bgv) use row_code_whir::VerifiedSameSecretLowDegreePrerequisite;
+pub(in crate::bgv) use row_code_whir::exact_same_secret_verification_runtime_limits;
+pub(in crate::bgv::proof_suite) use row_code_whir::{
+    ExactSameSecretAuthenticatedTranscriptPrefixRequest, PreparedExactSameSecretTranscriptPrefix,
+};
 pub(crate) use runtime::{
     AuthenticatedCommonProofGenerationCheckpoint, BorrowedVerifiedCommonProofCapability,
     COMMON_PROOF_CHECKPOINT_STATE_BYTE_LENGTH, CommonProofGenerationAuthorization,
@@ -342,6 +351,12 @@ pub(crate) use setup_generation_runtime::{
     setup_generation_recipient_payload_source_byte_length,
     setup_generation_recipient_payload_source_recipient_roster_position,
 };
+pub(crate) use setup_key_relation_runtime::{
+    consume_reserved_setup_key_relation_generation_statement_source,
+    require_reserved_setup_key_relation_generation_statement_source,
+    reserve_setup_key_relation_generation_statement_source,
+    restore_setup_key_relation_generation_statement_source,
+};
 pub(crate) use setup_public_polynomial::{
     SetupPublicPolynomialContext, SetupPublicPolynomialError, SetupPublicPolynomialLeafByteBuilder,
     SetupPublicPolynomialLeafHashArena, SetupPublicPolynomialRootBuilder,
@@ -363,15 +378,21 @@ pub(crate) use verifier::verify_checked_fixture_common_proof;
 pub(crate) use verifier::{
     CommonProofRequiredByteRange, CommonProofVerificationPoll,
     CommonProofVerificationResidentMemoryAccounting, CommonProofVerificationStateMachine,
-    CommonProofVerifierError, PollableCommonProofVerificationInput, VerifiedCommonProof,
-    VerifiedEvaluatorAuxiliaryRoot, VerifiedEvaluatorKeyStore, VerifiedEvaluatorKeyStorePreflight,
-    VerifiedEvaluatorRuntimeRoot, VerifiedRelationColumnEvaluator,
-    VerifiedRelationColumnEvaluatorMemoryAccounting, VerifiedRowCodeWhirProofFacts,
-    VerifiedStatementOwnedTree, VerifiedStreamedProofTreeTerminal,
-    VerifiedStreamedProofTreeTerminalPreflight, verified_application_statement_hash,
+    CommonProofVerifierError, IncrementalExpectedProofObjectHeaderComparator,
+    PollableCommonProofVerificationInput, VerifiedCommonProof, VerifiedEvaluatorAuxiliaryRoot,
+    VerifiedEvaluatorKeyStore, VerifiedEvaluatorKeyStorePreflight, VerifiedEvaluatorRuntimeRoot,
+    VerifiedRelationColumnEvaluator, VerifiedRelationColumnEvaluatorMemoryAccounting,
+    VerifiedRowCodeWhirProofFacts, VerifiedStatementOwnedTree, VerifiedStreamedProofTreeTerminal,
+    VerifiedStreamedProofTreeTerminalPreflight, decode_application_statement,
+    derive_relation_tree_inputs, verified_application_statement_hash,
 };
 pub(in crate::bgv) use vss_share_linkage_runtime::consume_ordered_verified_vss_share_linkage_terminals;
-pub(in crate::bgv) use vss_share_linkage_runtime::with_verified_vss_share_linkage_terminal;
+pub(in crate::bgv) use vss_share_linkage_runtime::{
+    attach_verified_vss_low_degree_evidence_to_same_secret_generation,
+    consume_attached_verified_vss_low_degree_evidence, consume_verified_vss_low_degree_evidence,
+    detach_verified_vss_low_degree_evidence_from_same_secret_generation,
+    with_attached_verified_vss_low_degree_evidence,
+};
 pub(crate) use zero_knowledge::validate_zero_knowledge_mask_image;
 
 #[cfg(test)]

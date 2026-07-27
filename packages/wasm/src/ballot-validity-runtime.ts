@@ -34,6 +34,10 @@ import {
     type CommonProofVerificationWorkerOptions,
 } from './common-proof-worker-runtime/runtime.js';
 import { deriveGeneratedCommonProofDescriptor } from './generated-common-proof-output-runtime.js';
+import {
+    mlDsa65SignatureByteLength,
+    type StateObjectSignatureOperation,
+} from './state-verifier-runtime/contracts.js';
 import { resolveCommonProofKernelContext } from './transcript-core-bridge/common-proof-kernel-context.js';
 import type { TranscriptCoreKernelCommandRuntime } from './transcript-core-bridge/kernel-runtime.js';
 import type { TranscriptCoreKernel } from './transcript-core-bridge/kernel-types.js';
@@ -47,6 +51,7 @@ const wasm32WordByteLength = Uint32Array.BYTES_PER_ELEMENT;
 const fixedAttemptIdentifierByteLength = 32;
 const boardVerifierCapabilityByteLength = 32;
 const ballotScoreByteLength = BigUint64Array.BYTES_PER_ELEMENT;
+const foundationHashByteLength = 64;
 
 export type BallotValidityGenerationMode = 'fresh' | 'resumed';
 
@@ -66,6 +71,9 @@ type BallotValidityKernel = Readonly<{
     copyCiphertextDescriptor: NonNullable<
         TranscriptCoreKernelCommandRuntime['wasmExports']['sealed_lattice_ballot_validity_copy_ciphertext_descriptor']
     >;
+    cancelBallotPackageCarrier: NonNullable<
+        TranscriptCoreKernelCommandRuntime['wasmExports']['sealed_lattice_ballot_validity_cancel_ballot_package_carrier']
+    >;
     discardCiphertextReadback: NonNullable<
         TranscriptCoreKernelCommandRuntime['wasmExports']['sealed_lattice_ballot_validity_discard_ciphertext_readback']
     >;
@@ -81,6 +89,9 @@ type BallotValidityKernel = Readonly<{
     finishCiphertextReadback: NonNullable<
         TranscriptCoreKernelCommandRuntime['wasmExports']['sealed_lattice_ballot_validity_finish_ciphertext_readback']
     >;
+    finishBallotPackageCarrier: NonNullable<
+        TranscriptCoreKernelCommandRuntime['wasmExports']['sealed_lattice_ballot_validity_finish_ballot_package_carrier']
+    >;
     finishVerification: NonNullable<
         TranscriptCoreKernelCommandRuntime['wasmExports']['sealed_lattice_ballot_validity_finish_verification']
     >;
@@ -89,6 +100,9 @@ type BallotValidityKernel = Readonly<{
     >;
     prepareGeneration: NonNullable<
         TranscriptCoreKernelCommandRuntime['wasmExports']['sealed_lattice_ballot_validity_prepare_generation']
+    >;
+    prepareBallotPackageCarrier: NonNullable<
+        TranscriptCoreKernelCommandRuntime['wasmExports']['sealed_lattice_ballot_validity_prepare_ballot_package_carrier']
     >;
     prepareResumedGeneration: NonNullable<
         TranscriptCoreKernelCommandRuntime['wasmExports']['sealed_lattice_ballot_validity_prepare_resumed_generation']
@@ -141,6 +155,8 @@ const requireBallotValidityKernel = (
             ciphertextDescriptorByteLength,
         sealed_lattice_ballot_validity_copy_ciphertext_descriptor:
             copyCiphertextDescriptor,
+        sealed_lattice_ballot_validity_cancel_ballot_package_carrier:
+            cancelBallotPackageCarrier,
         sealed_lattice_ballot_validity_discard_ciphertext_readback:
             discardCiphertextReadback,
         sealed_lattice_ballot_validity_discard_verification_preparation:
@@ -151,10 +167,14 @@ const requireBallotValidityKernel = (
             discardVerifiedOutput,
         sealed_lattice_ballot_validity_finish_ciphertext_readback:
             finishCiphertextReadback,
+        sealed_lattice_ballot_validity_finish_ballot_package_carrier:
+            finishBallotPackageCarrier,
         sealed_lattice_ballot_validity_finish_verification: finishVerification,
         sealed_lattice_ballot_validity_finish_verification_preparation:
             finishVerificationPreparation,
         sealed_lattice_ballot_validity_prepare_generation: prepareGeneration,
+        sealed_lattice_ballot_validity_prepare_ballot_package_carrier:
+            prepareBallotPackageCarrier,
         sealed_lattice_ballot_validity_prepare_resumed_generation:
             prepareResumedGeneration,
         sealed_lattice_ballot_validity_read_ciphertext_chunk:
@@ -168,14 +188,17 @@ const requireBallotValidityKernel = (
         bindGeneratedProofToBoard,
         ciphertextDescriptorByteLength,
         copyCiphertextDescriptor,
+        cancelBallotPackageCarrier,
         discardCiphertextReadback,
         discardVerificationPreparation,
         discardVerificationTerminalSource,
         discardVerifiedOutput,
         finishCiphertextReadback,
+        finishBallotPackageCarrier,
         finishVerification,
         finishVerificationPreparation,
         prepareGeneration,
+        prepareBallotPackageCarrier,
         prepareResumedGeneration,
         readCiphertextChunk,
         releaseSelectedSuite,
@@ -192,14 +215,17 @@ const requireBallotValidityKernel = (
         bindGeneratedProofToBoard,
         ciphertextDescriptorByteLength,
         copyCiphertextDescriptor,
+        cancelBallotPackageCarrier,
         discardCiphertextReadback,
         discardVerificationPreparation,
         discardVerificationTerminalSource,
         discardVerifiedOutput,
         finishCiphertextReadback,
+        finishBallotPackageCarrier,
         finishVerification,
         finishVerificationPreparation,
         prepareGeneration,
+        prepareBallotPackageCarrier,
         prepareResumedGeneration,
         readCiphertextChunk,
         releaseSelectedSuite,
@@ -235,6 +261,22 @@ const requireCanonicalSuiteRecordBytes = (
         value.byteLength === 0
     ) {
         throw new CanonicalStreamRefusalError('wrongTypeOrLength');
+    }
+    return value.slice();
+};
+
+const requireBoundedCanonicalBytes = (
+    value: Uint8Array,
+): Uint8Array<ArrayBuffer> => {
+    if (
+        !isUint8Array(value) ||
+        !(value.buffer instanceof ArrayBuffer) ||
+        value.byteLength === 0
+    ) {
+        throw new CanonicalStreamRefusalError('wrongTypeOrLength');
+    }
+    if (value.byteLength > foundationProfile.maximumCopiedBufferByteLength) {
+        throw new CanonicalStreamRefusalError('outsideSupportedProfile');
     }
     return value.slice();
 };
@@ -567,6 +609,8 @@ export const markVerifiedBallotOutputConsumedAfterKernelSuccess = (
 
 export type GeneratedBallotValidityTransport = Readonly<{
     ballotPackageObject: VerifiedTranscriptObject;
+    canonicalBallotPackageCarrier: Uint8Array<ArrayBuffer>;
+    completeBallotPackageByteLength: number;
     ciphertextByteLength: number;
     ciphertextChunkByteLengths: readonly number[];
     proofByteLength: number;
@@ -795,6 +839,222 @@ const totalChunkByteLength = (
         return total + byteLength;
     }, 0);
 
+const exactByteLengthSum = (
+    byteLengths: readonly number[],
+    label: string,
+): number =>
+    byteLengths.reduce((total, byteLength) => {
+        if (
+            !Number.isSafeInteger(byteLength) ||
+            byteLength <= 0 ||
+            !Number.isSafeInteger(total + byteLength)
+        ) {
+            throw new CanonicalStreamInternalError(
+                `${label} has invalid exact byte accounting.`,
+            );
+        }
+        return total + byteLength;
+    }, 0);
+
+const produceCanonicalBallotPackageCarrier = (input: {
+    canonicalRosterBytes: Uint8Array;
+    ciphertextReadbackHandle: number;
+    context: TranscriptCoreKernelCommandRuntime;
+    kernel: BallotValidityKernel;
+    memoryBoundary: WasmMemoryBoundary;
+    proofDescriptorBytes: Uint8Array;
+    signatureOperation: StateObjectSignatureOperation;
+    statusBoundary: WasmStatusBoundary;
+}): Uint8Array<ArrayBuffer> => {
+    if (
+        typeof input.signatureOperation !== 'object' ||
+        input.signatureOperation === null ||
+        typeof input.signatureOperation.signStateObjectMessage !== 'function'
+    ) {
+        throw new CanonicalStreamRefusalError('wrongTypeOrLength');
+    }
+    const canonicalRosterBytes = requireBoundedCanonicalBytes(
+        input.canonicalRosterBytes,
+    );
+    const proofDescriptorBytes = requireBoundedCanonicalBytes(
+        input.proofDescriptorBytes,
+    );
+    let preparedCarrierHandle = 0;
+    let signatureMessage: Uint8Array<ArrayBuffer> | undefined;
+    let signature: Uint8Array<ArrayBuffer> | undefined;
+    try {
+        const preparation = input.context.runExclusive(
+            'ballot package carrier preparation',
+            () => {
+                let proofDescriptorPointer = 0;
+                let canonicalRosterPointer = 0;
+                let canonicalCarrierByteLengthPointer = 0;
+                let signatureMessagePointer = 0;
+                let statusPointer = 0;
+                try {
+                    proofDescriptorPointer =
+                        input.memoryBoundary.copy(proofDescriptorBytes);
+                    canonicalRosterPointer =
+                        input.memoryBoundary.copy(canonicalRosterBytes);
+                    canonicalCarrierByteLengthPointer =
+                        input.memoryBoundary.allocateZeroedWords(1);
+                    signatureMessagePointer = input.memoryBoundary.allocate(
+                        foundationHashByteLength,
+                    );
+                    statusPointer = input.memoryBoundary.allocateZeroedWords(1);
+                    const handle = input.kernel.prepareBallotPackageCarrier(
+                        input.ciphertextReadbackHandle,
+                        proofDescriptorPointer,
+                        proofDescriptorBytes.byteLength,
+                        canonicalRosterPointer,
+                        canonicalRosterBytes.byteLength,
+                        canonicalCarrierByteLengthPointer,
+                        signatureMessagePointer,
+                        foundationHashByteLength,
+                        statusPointer,
+                    );
+                    if (handle !== 0) {
+                        preparedCarrierHandle = requireLiveHandle(
+                            handle,
+                            'The prepared ballot-package carrier handle',
+                        );
+                    }
+                    const [canonicalCarrierByteLength] =
+                        input.memoryBoundary.readWords(
+                            canonicalCarrierByteLengthPointer,
+                            1,
+                        );
+                    const [status] = input.memoryBoundary.readWords(
+                        statusPointer,
+                        1,
+                    );
+                    input.statusBoundary.throwIfError(status);
+                    input.memoryBoundary.validateAllocationByteLength(
+                        canonicalCarrierByteLength,
+                    );
+                    return Object.freeze({
+                        canonicalCarrierByteLength,
+                        handle: requireLiveHandle(
+                            preparedCarrierHandle,
+                            'The prepared ballot-package carrier handle',
+                        ),
+                        signatureMessage: new Uint8Array(
+                            input.context.memory.buffer,
+                            signatureMessagePointer,
+                            foundationHashByteLength,
+                        ).slice(),
+                    });
+                } finally {
+                    input.memoryBoundary.zeroAndDeallocate(
+                        statusPointer,
+                        wasm32WordByteLength,
+                    );
+                    input.memoryBoundary.zeroAndDeallocate(
+                        signatureMessagePointer,
+                        foundationHashByteLength,
+                    );
+                    input.memoryBoundary.zeroAndDeallocate(
+                        canonicalCarrierByteLengthPointer,
+                        wasm32WordByteLength,
+                    );
+                    input.memoryBoundary.zeroAndDeallocate(
+                        canonicalRosterPointer,
+                        canonicalRosterBytes.byteLength,
+                    );
+                    input.memoryBoundary.zeroAndDeallocate(
+                        proofDescriptorPointer,
+                        proofDescriptorBytes.byteLength,
+                    );
+                }
+            },
+        );
+        preparedCarrierHandle = preparation.handle;
+        signatureMessage = preparation.signatureMessage;
+        signature = requireFixedBytes(
+            input.signatureOperation.signStateObjectMessage(signatureMessage),
+            mlDsa65SignatureByteLength,
+            'The ballot-package signature',
+        );
+        const exactSignature = signature;
+        const canonicalCarrier = input.context.runExclusive(
+            'ballot package carrier completion',
+            () => {
+                let signaturePointer = 0;
+                let outputPointer = 0;
+                try {
+                    signaturePointer =
+                        input.memoryBoundary.copy(exactSignature);
+                    outputPointer = input.memoryBoundary.allocate(
+                        preparation.canonicalCarrierByteLength,
+                    );
+                    const status = input.kernel.finishBallotPackageCarrier(
+                        preparedCarrierHandle,
+                        signaturePointer,
+                        exactSignature.byteLength,
+                        outputPointer,
+                        preparation.canonicalCarrierByteLength,
+                    );
+                    input.statusBoundary.throwIfError(status);
+                    preparedCarrierHandle = 0;
+                    return new Uint8Array(
+                        input.context.memory.buffer,
+                        outputPointer,
+                        preparation.canonicalCarrierByteLength,
+                    ).slice();
+                } finally {
+                    input.memoryBoundary.zeroAndDeallocate(
+                        outputPointer,
+                        preparation.canonicalCarrierByteLength,
+                    );
+                    input.memoryBoundary.zeroAndDeallocate(
+                        signaturePointer,
+                        exactSignature.byteLength,
+                    );
+                }
+            },
+        );
+        if (
+            canonicalCarrier.byteLength !==
+            preparation.canonicalCarrierByteLength
+        ) {
+            canonicalCarrier.fill(0);
+            throw new CanonicalStreamInternalError(
+                'The ballot-package carrier has the wrong canonical length.',
+            );
+        }
+        return canonicalCarrier;
+    } catch (error) {
+        if (preparedCarrierHandle !== 0) {
+            try {
+                const cancellationStatus = input.context.runExclusive(
+                    'ballot package carrier cancellation',
+                    () =>
+                        input.kernel.cancelBallotPackageCarrier(
+                            preparedCarrierHandle,
+                        ),
+                );
+                if (
+                    cancellationStatus >>> 0 !==
+                    refusalReasonCodes.consumedState
+                ) {
+                    input.statusBoundary.throwIfError(cancellationStatus);
+                }
+            } catch (cleanupFailure) {
+                throw new CanonicalStreamInternalError(
+                    'Ballot-package carrier production and cancellation both failed.',
+                    Object.freeze({ cleanupFailure, error }),
+                );
+            }
+        }
+        throw error;
+    } finally {
+        canonicalRosterBytes.fill(0);
+        proofDescriptorBytes.fill(0);
+        signatureMessage?.fill(0);
+        signature?.fill(0);
+    }
+};
+
 /**
  * Generates, persists, and binds one exact ballot-validity proof and its
  * encrypted ballot package inside the dedicated browser worker.
@@ -802,6 +1062,7 @@ const totalChunkByteLength = (
 export const generateBallotValidityInClosedWorker = async (input: {
     acceptedSetupAuthority: VerifiedAcceptedSetupAuthority;
     actionRandomnessSession: ActionRandomnessSession;
+    canonicalRosterBytes: Uint8Array;
     canonicalSuiteRecordBytes: Uint8Array;
     checkpointLineageIdentifier: Uint8Array;
     ciphertextStore: CommonProofCanonicalOutputStore;
@@ -812,10 +1073,10 @@ export const generateBallotValidityInClosedWorker = async (input: {
     producerSequence: bigint;
     proofAttemptNonce: Uint8Array;
     resolveVerifiedBallotPackage(input: {
-        ciphertextDescriptorBytes: Uint8Array<ArrayBuffer>;
-        proofDescriptorBytes: Uint8Array<ArrayBuffer>;
+        canonicalCarrier: Uint8Array<ArrayBuffer>;
     }): Promise<VerifiedTranscriptObject>;
     scores: readonly bigint[];
+    signatureOperation: StateObjectSignatureOperation;
 }): Promise<GeneratedBallotValidityTransport> => {
     if (typeof globalThis.document !== 'undefined') {
         throw new CanonicalStreamInternalError(
@@ -884,6 +1145,7 @@ export const generateBallotValidityInClosedWorker = async (input: {
     let result: GeneratedBallotValidityTransport | undefined;
     let ciphertextDescriptorBytes: Uint8Array<ArrayBuffer> | undefined;
     let proofDescriptorBytes: Uint8Array<ArrayBuffer> | undefined;
+    let canonicalBallotPackageCarrier: Uint8Array<ArrayBuffer> | undefined;
     try {
         selectedSuiteHandle = selectSuite({
             canonicalSuiteRecordBytes: input.canonicalSuiteRecordBytes,
@@ -1004,9 +1266,18 @@ export const generateBallotValidityInClosedWorker = async (input: {
         ciphertextDescriptorBytes =
             ciphertextTransport.ciphertextDescriptorBytes;
         throwIfAborted(execution.options?.signal);
+        canonicalBallotPackageCarrier = produceCanonicalBallotPackageCarrier({
+            canonicalRosterBytes: input.canonicalRosterBytes,
+            ciphertextReadbackHandle,
+            context,
+            kernel,
+            memoryBoundary,
+            proofDescriptorBytes,
+            signatureOperation: input.signatureOperation,
+            statusBoundary,
+        });
         const ballotPackageObject = await input.resolveVerifiedBallotPackage({
-            ciphertextDescriptorBytes: ciphertextDescriptorBytes.slice(),
-            proofDescriptorBytes: proofDescriptorBytes.slice(),
+            canonicalCarrier: canonicalBallotPackageCarrier.slice(),
         });
         throwIfAborted(execution.options?.signal);
         const boardAuthorization =
@@ -1044,19 +1315,31 @@ export const generateBallotValidityInClosedWorker = async (input: {
         );
         generatedCapability = undefined;
         ciphertextReadbackHandle = 0;
+        const proofByteLength = totalChunkByteLength(
+            execution.outputChunkByteLengths,
+            'The ballot-validity proof',
+        );
+        const completeBallotPackageByteLength = exactByteLengthSum(
+            [
+                canonicalBallotPackageCarrier.byteLength,
+                ciphertextTransport.ciphertextByteLength,
+                proofByteLength,
+            ],
+            'The complete ballot package',
+        );
         result = Object.freeze({
             ballotPackageObject,
+            canonicalBallotPackageCarrier,
+            completeBallotPackageByteLength,
             ciphertextByteLength: ciphertextTransport.ciphertextByteLength,
             ciphertextChunkByteLengths:
                 ciphertextTransport.ciphertextChunkByteLengths,
-            proofByteLength: totalChunkByteLength(
-                execution.outputChunkByteLengths,
-                'The ballot-validity proof',
-            ),
+            proofByteLength,
             proofChunkByteLengths: Object.freeze([
                 ...execution.outputChunkByteLengths,
             ]),
         });
+        canonicalBallotPackageCarrier = undefined;
     } catch (error) {
         operationFailed = true;
         operationFailure = error;
@@ -1067,6 +1350,7 @@ export const generateBallotValidityInClosedWorker = async (input: {
         checkpointLineageIdentifier.fill(0);
         ciphertextDescriptorBytes?.fill(0);
         proofDescriptorBytes?.fill(0);
+        canonicalBallotPackageCarrier?.fill(0);
     }
 
     const cleanupFailures: unknown[] = [];

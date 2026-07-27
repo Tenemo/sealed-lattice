@@ -48,6 +48,10 @@ import {
     type SelectedSuiteRecordSource,
 } from './selected-suite-record-source.js';
 import {
+    mlDsa65SignatureByteLength,
+    type StateObjectSignatureOperation,
+} from './state-verifier-runtime/contracts.js';
+import {
     resolveVerifiedStateOutputKernelAuthorization,
     resolveVerifiedStateReservationKernelAuthorization,
     type VerifiedStateOutput,
@@ -67,6 +71,7 @@ const verifierCapabilityByteLength = 32;
 const checkpointLineageIdentifierByteLength = 32;
 const wasm32WordByteLength = Uint32Array.BYTES_PER_ELEMENT;
 const maximumWasm32UnsignedInteger = 0xffff_ffff;
+const foundationHashByteLength = 64;
 const targetReleasePartialRoleCount = 2;
 const targetReleaseReconstructionThreshold =
     foundationProfile.reconstructionThreshold;
@@ -82,8 +87,9 @@ export type TargetReleasePartialOutputStoreResolver = Readonly<{
     }): Promise<CommonProofCanonicalOutputStore>;
 }>;
 
-/** Public canonical descriptors for one bound paired target release. */
+/** Canonical signed carrier and descriptors for one bound paired target release. */
 export type GeneratedTargetReleaseTransport = Readonly<{
+    canonicalTargetShareCarrier: Uint8Array<ArrayBuffer>;
     proofDescriptorBytes: Uint8Array<ArrayBuffer>;
     targetIdentifierPartialDescriptorBytes: Uint8Array<ArrayBuffer>;
     targetOrderPartialDescriptorBytes: Uint8Array<ArrayBuffer>;
@@ -119,6 +125,9 @@ type TargetReleaseKernel = Readonly<{
     bindGeneratedProof: NonNullable<
         TranscriptCoreKernelExports['sealed_lattice_target_release_bind_generated_proof']
     >;
+    cancelOutputCarrier: NonNullable<
+        TranscriptCoreKernelExports['sealed_lattice_target_release_cancel_output_carrier']
+    >;
     copyPartialDescriptor: NonNullable<
         TranscriptCoreKernelExports['sealed_lattice_target_release_copy_partial_descriptor']
     >;
@@ -143,6 +152,9 @@ type TargetReleaseKernel = Readonly<{
     finishReconstruction: NonNullable<
         TranscriptCoreKernelExports['sealed_lattice_target_release_finish_reconstruction']
     >;
+    finishOutputCarrier: NonNullable<
+        TranscriptCoreKernelExports['sealed_lattice_target_release_finish_output_carrier']
+    >;
     discardReconstruction: NonNullable<
         TranscriptCoreKernelExports['sealed_lattice_target_release_discard_reconstruction']
     >;
@@ -160,6 +172,9 @@ type TargetReleaseKernel = Readonly<{
     >;
     prepareResumedGeneration: NonNullable<
         TranscriptCoreKernelExports['sealed_lattice_target_release_prepare_resumed_generation']
+    >;
+    prepareOutputCarrier: NonNullable<
+        TranscriptCoreKernelExports['sealed_lattice_target_release_prepare_output_carrier']
     >;
     prepareVerification: NonNullable<
         TranscriptCoreKernelExports['sealed_lattice_target_release_prepare_verification']
@@ -189,6 +204,8 @@ const requireTargetReleaseKernel = (
     const requiredExports = {
         bindGeneratedProof:
             wasmExports.sealed_lattice_target_release_bind_generated_proof,
+        cancelOutputCarrier:
+            wasmExports.sealed_lattice_target_release_cancel_output_carrier,
         copyPartialDescriptor:
             wasmExports.sealed_lattice_target_release_copy_partial_descriptor,
         discardGenerationSource:
@@ -205,6 +222,8 @@ const requireTargetReleaseKernel = (
             wasmExports.sealed_lattice_target_release_copy_reconstructed_option_identifiers,
         finishReconstruction:
             wasmExports.sealed_lattice_target_release_finish_reconstruction,
+        finishOutputCarrier:
+            wasmExports.sealed_lattice_target_release_finish_output_carrier,
         discardReconstruction:
             wasmExports.sealed_lattice_target_release_discard_reconstruction,
         finishVerification:
@@ -217,6 +236,8 @@ const requireTargetReleaseKernel = (
             wasmExports.sealed_lattice_target_release_prepare_generation,
         prepareResumedGeneration:
             wasmExports.sealed_lattice_target_release_prepare_resumed_generation,
+        prepareOutputCarrier:
+            wasmExports.sealed_lattice_target_release_prepare_output_carrier,
         prepareVerification:
             wasmExports.sealed_lattice_target_release_prepare_verification,
         readPartialChunk:
@@ -498,6 +519,182 @@ const copyPartialStreamToStore = async (input: {
     }
 };
 
+const produceCanonicalTargetShareCarrier = (input: {
+    context: TranscriptCoreKernelCommandRuntime;
+    generationSourceHandle: number;
+    kernel: TargetReleaseKernel;
+    memoryBoundary: WasmMemoryBoundary;
+    proofDescriptorBytes: Uint8Array;
+    signatureOperation: StateObjectSignatureOperation;
+    statusBoundary: WasmStatusBoundary;
+}): Uint8Array<ArrayBuffer> => {
+    if (
+        typeof input.signatureOperation !== 'object' ||
+        input.signatureOperation === null ||
+        typeof input.signatureOperation.signStateObjectMessage !== 'function'
+    ) {
+        throw new CanonicalStreamRefusalError('wrongTypeOrLength');
+    }
+    const proofDescriptorBytes = requireOwnedBytes(input.proofDescriptorBytes);
+    let preparedCarrierHandle = 0;
+    let signatureMessage: Uint8Array<ArrayBuffer> | undefined;
+    let signature: Uint8Array<ArrayBuffer> | undefined;
+    try {
+        const preparation = input.context.runExclusive(
+            'target-share carrier preparation',
+            () => {
+                let proofDescriptorPointer = 0;
+                let canonicalCarrierByteLengthPointer = 0;
+                let signatureMessagePointer = 0;
+                let statusPointer = 0;
+                try {
+                    proofDescriptorPointer =
+                        input.memoryBoundary.copy(proofDescriptorBytes);
+                    canonicalCarrierByteLengthPointer =
+                        input.memoryBoundary.allocateZeroedWords(1);
+                    signatureMessagePointer = input.memoryBoundary.allocate(
+                        foundationHashByteLength,
+                    );
+                    statusPointer = input.memoryBoundary.allocateZeroedWords(1);
+                    const handle = input.kernel.prepareOutputCarrier(
+                        input.generationSourceHandle,
+                        proofDescriptorPointer,
+                        proofDescriptorBytes.byteLength,
+                        canonicalCarrierByteLengthPointer,
+                        signatureMessagePointer,
+                        foundationHashByteLength,
+                        statusPointer,
+                    );
+                    if (handle !== 0) {
+                        preparedCarrierHandle = requireLiveHandle(
+                            handle,
+                            'The prepared target-share carrier handle',
+                        );
+                    }
+                    const [canonicalCarrierByteLength] =
+                        input.memoryBoundary.readWords(
+                            canonicalCarrierByteLengthPointer,
+                            1,
+                        );
+                    const [status] = input.memoryBoundary.readWords(
+                        statusPointer,
+                        1,
+                    );
+                    input.statusBoundary.throwIfError(status);
+                    input.memoryBoundary.validateAllocationByteLength(
+                        canonicalCarrierByteLength,
+                    );
+                    return Object.freeze({
+                        canonicalCarrierByteLength,
+                        handle: requireLiveHandle(
+                            preparedCarrierHandle,
+                            'The prepared target-share carrier handle',
+                        ),
+                        signatureMessage: new Uint8Array(
+                            input.context.memory.buffer,
+                            signatureMessagePointer,
+                            foundationHashByteLength,
+                        ).slice(),
+                    });
+                } finally {
+                    input.memoryBoundary.zeroAndDeallocate(
+                        statusPointer,
+                        wasm32WordByteLength,
+                    );
+                    input.memoryBoundary.zeroAndDeallocate(
+                        signatureMessagePointer,
+                        foundationHashByteLength,
+                    );
+                    input.memoryBoundary.zeroAndDeallocate(
+                        canonicalCarrierByteLengthPointer,
+                        wasm32WordByteLength,
+                    );
+                    input.memoryBoundary.zeroAndDeallocate(
+                        proofDescriptorPointer,
+                        proofDescriptorBytes.byteLength,
+                    );
+                }
+            },
+        );
+        preparedCarrierHandle = preparation.handle;
+        signatureMessage = preparation.signatureMessage;
+        signature = requireOwnedBytes(
+            input.signatureOperation.signStateObjectMessage(signatureMessage),
+            mlDsa65SignatureByteLength,
+        );
+        const exactSignature = signature;
+        const canonicalCarrier = input.context.runExclusive(
+            'target-share carrier completion',
+            () => {
+                let signaturePointer = 0;
+                let outputPointer = 0;
+                try {
+                    signaturePointer =
+                        input.memoryBoundary.copy(exactSignature);
+                    outputPointer = input.memoryBoundary.allocate(
+                        preparation.canonicalCarrierByteLength,
+                    );
+                    const status = input.kernel.finishOutputCarrier(
+                        preparedCarrierHandle,
+                        signaturePointer,
+                        exactSignature.byteLength,
+                        outputPointer,
+                        preparation.canonicalCarrierByteLength,
+                    );
+                    input.statusBoundary.throwIfError(status);
+                    preparedCarrierHandle = 0;
+                    return new Uint8Array(
+                        input.context.memory.buffer,
+                        outputPointer,
+                        preparation.canonicalCarrierByteLength,
+                    ).slice();
+                } finally {
+                    input.memoryBoundary.zeroAndDeallocate(
+                        outputPointer,
+                        preparation.canonicalCarrierByteLength,
+                    );
+                    input.memoryBoundary.zeroAndDeallocate(
+                        signaturePointer,
+                        exactSignature.byteLength,
+                    );
+                }
+            },
+        );
+        if (
+            canonicalCarrier.byteLength !==
+            preparation.canonicalCarrierByteLength
+        ) {
+            canonicalCarrier.fill(0);
+            throw new CanonicalStreamInternalError(
+                'The target-share carrier has the wrong canonical length.',
+            );
+        }
+        return canonicalCarrier;
+    } catch (error) {
+        if (preparedCarrierHandle !== 0) {
+            try {
+                discardHandle({
+                    context: input.context,
+                    discard: input.kernel.cancelOutputCarrier,
+                    handle: preparedCarrierHandle,
+                    operationName: 'target-share carrier cancellation',
+                    statusBoundary: input.statusBoundary,
+                });
+            } catch (cleanupFailure) {
+                throw new CanonicalStreamInternalError(
+                    'Target-share carrier production and cancellation both failed.',
+                    Object.freeze({ cleanupFailure, error }),
+                );
+            }
+        }
+        throw error;
+    } finally {
+        proofDescriptorBytes.fill(0);
+        signatureMessage?.fill(0);
+        signature?.fill(0);
+    }
+};
+
 const releaseVerifiedShare = (share: VerifiedTargetReleaseShare): void => {
     const record = verifiedTargetReleaseShareRecords.get(share);
     if (record === undefined) {
@@ -550,6 +747,7 @@ export const generateTargetReleaseInClosedWorker = async (input: {
         verifiedOutput: VerifiedStateOutput;
     }>;
     selectedSuiteRecordSource: SelectedSuiteRecordSource;
+    signatureOperation: StateObjectSignatureOperation;
     verifiedFinality: VerifiedFinality;
     verifiedReservation: VerifiedStateReservation;
 }): Promise<GeneratedTargetReleaseTransport> => {
@@ -655,6 +853,7 @@ export const generateTargetReleaseInClosedWorker = async (input: {
         | Uint8Array<ArrayBuffer>
         | undefined;
     let targetOrderPartialDescriptorBytes: Uint8Array<ArrayBuffer> | undefined;
+    let canonicalTargetShareCarrier: Uint8Array<ArrayBuffer> | undefined;
     let result: GeneratedTargetReleaseTransport | undefined;
     let operationFailure: unknown;
     let operationFailed = false;
@@ -804,20 +1003,47 @@ export const generateTargetReleaseInClosedWorker = async (input: {
         }
         targetIdentifierPartialDescriptorBytes = targetIdentifierDescriptor;
         targetOrderPartialDescriptorBytes = targetOrderDescriptor;
+        throwIfAborted(input.options?.signal);
+        canonicalTargetShareCarrier = produceCanonicalTargetShareCarrier({
+            context,
+            generationSourceHandle,
+            kernel,
+            memoryBoundary,
+            proofDescriptorBytes,
+            signatureOperation: input.signatureOperation,
+            statusBoundary,
+        });
+        throwIfAborted(input.options?.signal);
         const transport: GeneratedTargetReleaseTransport = Object.freeze({
+            canonicalTargetShareCarrier,
             proofDescriptorBytes,
             targetIdentifierPartialDescriptorBytes,
             targetOrderPartialDescriptorBytes,
         });
-        const verifiedTargetShare = await input.resolveVerifiedTargetShare(
+        const resolverTransport: GeneratedTargetReleaseTransport =
             Object.freeze({
+                canonicalTargetShareCarrier:
+                    transport.canonicalTargetShareCarrier.slice(),
                 proofDescriptorBytes: transport.proofDescriptorBytes.slice(),
                 targetIdentifierPartialDescriptorBytes:
                     transport.targetIdentifierPartialDescriptorBytes.slice(),
                 targetOrderPartialDescriptorBytes:
                     transport.targetOrderPartialDescriptorBytes.slice(),
-            }),
-        );
+            });
+        let verifiedTargetShare: {
+            targetShareObject: VerifiedTranscriptObject;
+            verifiedOutput: VerifiedStateOutput;
+        };
+        try {
+            verifiedTargetShare =
+                await input.resolveVerifiedTargetShare(resolverTransport);
+        } finally {
+            resolverTransport.canonicalTargetShareCarrier.fill(0);
+            resolverTransport.proofDescriptorBytes.fill(0);
+            resolverTransport.targetIdentifierPartialDescriptorBytes.fill(0);
+            resolverTransport.targetOrderPartialDescriptorBytes.fill(0);
+        }
+        throwIfAborted(input.options?.signal);
         const outputAuthorization =
             resolveVerifiedStateOutputKernelAuthorization(
                 verifiedTargetShare.verifiedOutput,
@@ -871,6 +1097,7 @@ export const generateTargetReleaseInClosedWorker = async (input: {
         generatedCapability = undefined;
         generationSourceHandle = 0;
         result = transport;
+        canonicalTargetShareCarrier = undefined;
         proofDescriptorBytes = undefined;
         targetIdentifierPartialDescriptorBytes = undefined;
         targetOrderPartialDescriptorBytes = undefined;
@@ -914,6 +1141,7 @@ export const generateTargetReleaseInClosedWorker = async (input: {
         }
     }
     if (result === undefined) {
+        canonicalTargetShareCarrier?.fill(0);
         proofDescriptorBytes?.fill(0);
         targetIdentifierPartialDescriptorBytes?.fill(0);
         targetOrderPartialDescriptorBytes?.fill(0);

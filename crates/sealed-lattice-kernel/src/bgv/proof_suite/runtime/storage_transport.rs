@@ -17,27 +17,21 @@ pub(crate) struct CommonProofStorageTransactionRuntime {
     pass: CommonProofStorageTransactionPass,
     runtime_binding_hash: [u8; HASH_BYTE_LENGTH],
     next_request_sequence: u64,
-    operation_encoding_bytes: Zeroizing<Vec<u8>>,
     recycled_append_bytes: Vec<Zeroizing<Vec<u8>>>,
     recycled_read_results: Vec<Zeroizing<Vec<u8>>>,
 }
 
 enum CommonProofStorageTransactionPass {
     Recording(ProofExternalMemoryTransactionRecorder),
-    RequestReady(ProofExternalMemoryTransactionRequest),
+    RequestReady {
+        request: ProofExternalMemoryTransactionRequest,
+        copied_to_host: bool,
+    },
     Replaying(ProofExternalMemoryTransactionReplay),
     Cancelled,
 }
 
 #[cfg(test)]
-type StorageAllocationIdentity = (usize, usize);
-#[cfg(test)]
-type PooledStorageIdentities = (
-    StorageAllocationIdentity,
-    StorageAllocationIdentity,
-    Option<StorageAllocationIdentity>,
-);
-
 impl Default for CommonProofStorageTransactionRuntime {
     fn default() -> Self {
         Self::for_runtime_binding([0; HASH_BYTE_LENGTH])
@@ -55,7 +49,6 @@ impl CommonProofStorageTransactionRuntime {
             ),
             runtime_binding_hash,
             next_request_sequence: 1,
-            operation_encoding_bytes: Zeroizing::new(Vec::new()),
             recycled_append_bytes: Vec::new(),
             recycled_read_results: Vec::new(),
         }
@@ -94,8 +87,11 @@ impl CommonProofStorageTransactionRuntime {
             .next_request_sequence
             .checked_add(1)
             .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
-        self.pass = CommonProofStorageTransactionPass::RequestReady(request);
-        let CommonProofStorageTransactionPass::RequestReady(request) = &self.pass else {
+        self.pass = CommonProofStorageTransactionPass::RequestReady {
+            request,
+            copied_to_host: false,
+        };
+        let CommonProofStorageTransactionPass::RequestReady { request, .. } = &self.pass else {
             unreachable!("the request-ready state was just installed")
         };
         Ok(request)
@@ -103,42 +99,88 @@ impl CommonProofStorageTransactionRuntime {
 
     pub(crate) fn pending_request(&self) -> Option<&ProofExternalMemoryTransactionRequest> {
         match &self.pass {
-            CommonProofStorageTransactionPass::RequestReady(request) => Some(request),
+            CommonProofStorageTransactionPass::RequestReady { request, .. } => Some(request),
             _ => None,
         }
+    }
+
+    pub(crate) fn pending_request_encoded_byte_length(
+        &self,
+    ) -> Result<usize, CommonProofRuntimeError> {
+        self.pending_request()
+            .ok_or(CommonProofRuntimeError::TransactionResponseMissing)?
+            .encoded_worker_request_byte_length()
+            .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)
+    }
+
+    pub(crate) fn request_is_pending(&self) -> bool {
+        matches!(
+            &self.pass,
+            CommonProofStorageTransactionPass::RequestReady { .. }
+        )
     }
 
     pub(crate) fn replay_is_active(&self) -> bool {
         matches!(self.pass, CommonProofStorageTransactionPass::Replaying(_))
     }
 
+    #[cfg(test)]
     pub(crate) fn encode_pending_worker_request(
-        &self,
+        &mut self,
     ) -> Result<Zeroizing<Vec<u8>>, CommonProofRuntimeError> {
-        self.pending_request()
-            .ok_or(CommonProofRuntimeError::TransactionResponseMissing)?
-            .encode_worker_request()
-            .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)
+        let byte_length = self.pending_request_encoded_byte_length()?;
+        let mut encoded = Zeroizing::new(Vec::new());
+        encoded
+            .try_reserve_exact(byte_length)
+            .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?;
+        encoded.resize(byte_length, 0);
+        self.encode_pending_worker_request_into(encoded.as_mut_slice())?;
+        Ok(encoded)
     }
 
-    #[cfg(test)]
     pub(crate) fn encode_pending_worker_request_into(
         &mut self,
-        encoded_request: &mut Zeroizing<Vec<u8>>,
+        encoded_request: &mut [u8],
     ) -> Result<(), CommonProofRuntimeError> {
-        let CommonProofStorageTransactionPass::RequestReady(request) = &self.pass else {
+        let CommonProofStorageTransactionPass::RequestReady {
+            request,
+            copied_to_host,
+        } = &mut self.pass
+        else {
             return Err(CommonProofRuntimeError::TransactionResponseMissing);
         };
+        if *copied_to_host {
+            return Err(CommonProofRuntimeError::WrongOperationPhase);
+        }
+        if encoded_request.len()
+            != request
+                .encoded_worker_request_byte_length()
+                .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?
+        {
+            return Err(CommonProofRuntimeError::AllocationLimitExceeded);
+        }
         request
-            .encode_worker_request_into(&mut self.operation_encoding_bytes, encoded_request)
-            .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)
+            .prepare_exported_request_binding()
+            .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?;
+        request
+            .encode_worker_request_into(encoded_request)
+            .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?;
+        request
+            .release_exported_append_payloads()
+            .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?;
+        *copied_to_host = true;
+        Ok(())
     }
 
     pub(crate) fn supply_worker_response(
         &mut self,
         encoded_response: &[u8],
     ) -> Result<(), CommonProofRuntimeError> {
-        let CommonProofStorageTransactionPass::RequestReady(request) = &self.pass else {
+        let CommonProofStorageTransactionPass::RequestReady {
+            request,
+            copied_to_host: true,
+        } = &self.pass
+        else {
             return Err(CommonProofRuntimeError::TransactionResponseMissing);
         };
         let read_result_count = request.read_result_count();
@@ -148,11 +190,7 @@ impl CommonProofStorageTransactionRuntime {
             core::mem::take(&mut self.recycled_read_results)
         };
         if request
-            .decode_worker_response_into(
-                encoded_response,
-                &mut self.operation_encoding_bytes,
-                &mut read_results,
-            )
+            .decode_worker_response_into(encoded_response, &mut read_results)
             .is_err()
         {
             if read_result_count != 0 {
@@ -163,7 +201,7 @@ impl CommonProofStorageTransactionRuntime {
         self.supply_read_results(read_results)
     }
 
-    pub(crate) fn supply_read_results(
+    fn supply_read_results(
         &mut self,
         read_results: Vec<Zeroizing<Vec<u8>>>,
     ) -> Result<(), CommonProofRuntimeError> {
@@ -176,16 +214,36 @@ impl CommonProofStorageTransactionRuntime {
                 ),
             ),
         );
-        let CommonProofStorageTransactionPass::RequestReady(request) = previous else {
-            self.pass = previous;
-            return Err(CommonProofRuntimeError::TransactionResponseMissing);
+        let request = match previous {
+            CommonProofStorageTransactionPass::RequestReady {
+                request,
+                copied_to_host: true,
+            } => request,
+            CommonProofStorageTransactionPass::RequestReady {
+                request,
+                copied_to_host: false,
+            } => {
+                self.pass = CommonProofStorageTransactionPass::RequestReady {
+                    request,
+                    copied_to_host: false,
+                };
+                return Err(CommonProofRuntimeError::WrongOperationPhase);
+            }
+            previous => {
+                self.pass = previous;
+                return Err(CommonProofRuntimeError::TransactionResponseMissing);
+            }
         };
         match ProofExternalMemoryTransactionReplay::new(request, read_results) {
             Ok(replay) => {
                 self.pass = CommonProofStorageTransactionPass::Replaying(replay);
                 Ok(())
             }
-            Err(_) => Err(CommonProofRuntimeError::TransactionReplayIncomplete),
+            Err(_) => {
+                self.pass = CommonProofStorageTransactionPass::Cancelled;
+                self.next_request_sequence = 0;
+                Err(CommonProofRuntimeError::TransactionReplayIncomplete)
+            }
         }
     }
 
@@ -225,23 +283,6 @@ impl CommonProofStorageTransactionRuntime {
         self.pass = CommonProofStorageTransactionPass::Cancelled;
         self.next_request_sequence = 0;
     }
-
-    #[cfg(test)]
-    pub(crate) fn pooled_storage_identities(&self) -> PooledStorageIdentities {
-        (
-            (
-                self.operation_encoding_bytes.as_ptr() as usize,
-                self.operation_encoding_bytes.capacity(),
-            ),
-            (
-                self.recycled_append_bytes.as_ptr() as usize,
-                self.recycled_append_bytes.capacity(),
-            ),
-            self.recycled_read_results
-                .first()
-                .map(|bytes| (bytes.as_ptr() as usize, bytes.capacity())),
-        )
-    }
 }
 
 impl ProofExternalMemory for CommonProofStorageTransactionRuntime {
@@ -259,7 +300,7 @@ impl ProofExternalMemory for CommonProofStorageTransactionRuntime {
             CommonProofStorageTransactionPass::Replaying(storage) => {
                 storage.begin_transaction(maximum_payload_byte_length, maximum_operation_count)
             }
-            CommonProofStorageTransactionPass::RequestReady(_)
+            CommonProofStorageTransactionPass::RequestReady { .. }
             | CommonProofStorageTransactionPass::Cancelled => {
                 Err(ProofExternalMemoryTransactionAdapterError::InvalidLifecycle)
             }
@@ -279,7 +320,7 @@ impl ProofExternalMemory for CommonProofStorageTransactionRuntime {
             CommonProofStorageTransactionPass::Replaying(storage) => {
                 storage.create_object(object, protection, exact_byte_length)
             }
-            CommonProofStorageTransactionPass::RequestReady(_)
+            CommonProofStorageTransactionPass::RequestReady { .. }
             | CommonProofStorageTransactionPass::Cancelled => {
                 Err(ProofExternalMemoryTransactionAdapterError::InvalidLifecycle)
             }
@@ -299,7 +340,27 @@ impl ProofExternalMemory for CommonProofStorageTransactionRuntime {
             CommonProofStorageTransactionPass::Replaying(storage) => {
                 storage.append_object_bytes(object, expected_offset, bytes)
             }
-            CommonProofStorageTransactionPass::RequestReady(_)
+            CommonProofStorageTransactionPass::RequestReady { .. }
+            | CommonProofStorageTransactionPass::Cancelled => {
+                Err(ProofExternalMemoryTransactionAdapterError::InvalidLifecycle)
+            }
+        }
+    }
+
+    fn append_owned_object_bytes(
+        &mut self,
+        object: super::super::ProofExternalMemoryObject,
+        expected_offset: u64,
+        bytes: &mut Zeroizing<Vec<u8>>,
+    ) -> Result<(), Self::Error> {
+        match &mut self.pass {
+            CommonProofStorageTransactionPass::Recording(storage) => {
+                storage.append_owned_object_bytes(object, expected_offset, bytes)
+            }
+            CommonProofStorageTransactionPass::Replaying(storage) => {
+                storage.append_owned_object_bytes(object, expected_offset, bytes)
+            }
+            CommonProofStorageTransactionPass::RequestReady { .. }
             | CommonProofStorageTransactionPass::Cancelled => {
                 Err(ProofExternalMemoryTransactionAdapterError::InvalidLifecycle)
             }
@@ -313,7 +374,7 @@ impl ProofExternalMemory for CommonProofStorageTransactionRuntime {
         match &mut self.pass {
             CommonProofStorageTransactionPass::Recording(storage) => storage.seal_object(object),
             CommonProofStorageTransactionPass::Replaying(storage) => storage.seal_object(object),
-            CommonProofStorageTransactionPass::RequestReady(_)
+            CommonProofStorageTransactionPass::RequestReady { .. }
             | CommonProofStorageTransactionPass::Cancelled => {
                 Err(ProofExternalMemoryTransactionAdapterError::InvalidLifecycle)
             }
@@ -333,7 +394,7 @@ impl ProofExternalMemory for CommonProofStorageTransactionRuntime {
             CommonProofStorageTransactionPass::Replaying(storage) => {
                 storage.read_object_bytes(object, offset, destination)
             }
-            CommonProofStorageTransactionPass::RequestReady(_)
+            CommonProofStorageTransactionPass::RequestReady { .. }
             | CommonProofStorageTransactionPass::Cancelled => {
                 Err(ProofExternalMemoryTransactionAdapterError::InvalidLifecycle)
             }
@@ -347,7 +408,7 @@ impl ProofExternalMemory for CommonProofStorageTransactionRuntime {
         match &mut self.pass {
             CommonProofStorageTransactionPass::Recording(storage) => storage.delete_object(object),
             CommonProofStorageTransactionPass::Replaying(storage) => storage.delete_object(object),
-            CommonProofStorageTransactionPass::RequestReady(_)
+            CommonProofStorageTransactionPass::RequestReady { .. }
             | CommonProofStorageTransactionPass::Cancelled => {
                 Err(ProofExternalMemoryTransactionAdapterError::InvalidLifecycle)
             }
@@ -358,7 +419,7 @@ impl ProofExternalMemory for CommonProofStorageTransactionRuntime {
         match &mut self.pass {
             CommonProofStorageTransactionPass::Recording(storage) => storage.commit_transaction(),
             CommonProofStorageTransactionPass::Replaying(storage) => storage.commit_transaction(),
-            CommonProofStorageTransactionPass::RequestReady(_)
+            CommonProofStorageTransactionPass::RequestReady { .. }
             | CommonProofStorageTransactionPass::Cancelled => {
                 Err(ProofExternalMemoryTransactionAdapterError::InvalidLifecycle)
             }
@@ -369,7 +430,7 @@ impl ProofExternalMemory for CommonProofStorageTransactionRuntime {
         match &mut self.pass {
             CommonProofStorageTransactionPass::Recording(storage) => storage.abort_transaction(),
             CommonProofStorageTransactionPass::Replaying(storage) => storage.abort_transaction(),
-            CommonProofStorageTransactionPass::RequestReady(_)
+            CommonProofStorageTransactionPass::RequestReady { .. }
             | CommonProofStorageTransactionPass::Cancelled => {
                 Err(ProofExternalMemoryTransactionAdapterError::InvalidLifecycle)
             }
@@ -415,7 +476,7 @@ impl PollableCommonProofByteSink {
         declared_byte_length: usize,
         limits: CommonProofRuntimeLimits,
     ) -> Result<Self, CommonProofRuntimeError> {
-        if declared_byte_length == 0 || declared_byte_length > limits.proof_byte_length() {
+        if declared_byte_length == 0 || declared_byte_length > limits.maximum_proof_byte_length() {
             return Err(CommonProofRuntimeError::OutputByteLengthExceeded);
         }
         let stream_writer = CanonicalStreamWriter::new(

@@ -16,7 +16,7 @@ const boundaryMocks = vi.hoisted(() => {
     const generatedCapability = Object.freeze({
         release: generatedCapabilityRelease,
     });
-    const verifiedVssShareLinkageTerminal = Object.freeze({});
+    const vssLowDegreeEvidence = Object.freeze({});
     const verifiedCapability = Object.freeze({
         release: verifiedCapabilityRelease,
     });
@@ -59,12 +59,12 @@ const boundaryMocks = vi.hoisted(() => {
                 Object.freeze({ handle: 19, kernel }),
         ),
         runVerification: vi.fn(() => Promise.resolve(verifiedCapability)),
-        verifiedVssShareLinkageTerminal,
+        vssLowDegreeEvidence,
         verifiedCapabilityRelease,
         verifiedConsumptionOutcomes,
-        withVerifiedVssShareLinkageTerminal: vi.fn(
-            (input: Readonly<{ inspect(handle: number): unknown }>) =>
-                input.inspect(501),
+        consumeVerifiedVssLowDegreeEvidence: vi.fn(
+            (input: Readonly<{ consume(handle: number): unknown }>) =>
+                input.consume(501),
         ),
     };
 });
@@ -88,8 +88,8 @@ vi.mock('#packages/wasm/src/common-proof-worker-runtime/runtime', () => ({
 }));
 
 vi.mock('#packages/wasm/src/vss-share-linkage-verification-runtime', () => ({
-    withVerifiedVssShareLinkageTerminal:
-        boundaryMocks.withVerifiedVssShareLinkageTerminal,
+    consumeVerifiedVssLowDegreeEvidence:
+        boundaryMocks.consumeVerifiedVssLowDegreeEvidence,
 }));
 
 type VerificationFamily = 'publicKeyShare' | 'sameSecret';
@@ -336,7 +336,7 @@ const createFakeRuntime = (): FakeAcceptedSetupProofVerificationRuntime => {
         sealed_lattice_accepted_setup_same_secret_prepare_verification: (
             _selectedSuiteHandle: number,
             _assemblyHandle: number,
-            _verifiedVssShareLinkageTerminalHandle: number,
+            _vssLowDegreeEvidenceHandle: number,
             statementPointer: number,
             statementByteLength: number,
             sourceHandlePointer: number,
@@ -353,7 +353,6 @@ const createFakeRuntime = (): FakeAcceptedSetupProofVerificationRuntime => {
             (
                 _selectedSuiteHandle: number,
                 _assemblyHandle: number,
-                _verifiedVssShareLinkageTerminalHandle: number,
                 generationStatementSourceHandle: number,
                 sourceHandlePointer: number,
                 statusPointer: number,
@@ -441,7 +440,6 @@ describe('accepted-setup generated proof verification', () => {
                 verificationInput(runtime.kernel) as never,
                 boundaryMocks.generatedCapability,
                 51,
-                boundaryMocks.verifiedVssShareLinkageTerminal as never,
             );
 
             expect(runtime.generatedFinishes).toEqual([
@@ -481,7 +479,6 @@ describe('accepted-setup generated proof verification', () => {
                 verificationInput(runtime.kernel) as never,
                 boundaryMocks.generatedCapability,
                 51,
-                boundaryMocks.verifiedVssShareLinkageTerminal as never,
             ),
         ).rejects.toThrow(/wrongContext/u);
 
@@ -499,8 +496,7 @@ describe('accepted-setup generated proof verification', () => {
         const runtime = createFakeRuntime();
         await verifyAcceptedSetupSameSecretInClosedWorker({
             ...verificationInput(runtime.kernel),
-            verifiedVssShareLinkageTerminal:
-                boundaryMocks.verifiedVssShareLinkageTerminal,
+            vssLowDegreeEvidence: boundaryMocks.vssLowDegreeEvidence,
         } as never);
 
         expect(runtime.ordinaryFinishes).toEqual([

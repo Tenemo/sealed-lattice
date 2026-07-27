@@ -21,6 +21,7 @@ import {
     CanonicalStreamRefusalError,
     CanonicalStreamResourceError,
 } from './canonical-stream-runtime.js';
+import type { CommonProofGenerationExternalMemoryAccounting } from './common-proof-worker-runtime/kernel-boundaries.js';
 import {
     applyClosedWorkerGeneratedCommonProofCapability,
     openClosedWorkerCommonProofGenerationFamilyAdapter,
@@ -44,8 +45,9 @@ import type {
     TranscriptCoreKernelExports,
 } from './transcript-core-bridge/kernel-types.js';
 import {
+    consumeVerifiedVssLowDegreeEvidence,
     resolveOrderedVerifiedBoardObjectAuthorization,
-    type VerifiedVssShareLinkageTerminal,
+    type VerifiedVssLowDegreeEvidence,
 } from './vss-share-linkage-verification-runtime.js';
 import { WasmMemoryBoundary } from './wasm-memory-boundary.js';
 import { WasmStatusBoundary } from './wasm-status-boundary.js';
@@ -66,6 +68,7 @@ const generatedAcceptedSetupKeyRelationProofBrand = Symbol(
 /** Same-worker custody of one generated proof until positive package verification. */
 export type GeneratedAcceptedSetupKeyRelationProof = Readonly<{
     readonly [generatedAcceptedSetupKeyRelationProofBrand]: true;
+    copyExternalMemoryAccounting(): CommonProofGenerationExternalMemoryAccounting;
     copyProofDescriptorBytes(): Uint8Array<ArrayBuffer>;
     release(): void;
 }>;
@@ -73,6 +76,7 @@ export type GeneratedAcceptedSetupKeyRelationProof = Readonly<{
 type GeneratedAcceptedSetupKeyRelationProofRecord = Readonly<{
     capability: ClosedWorkerGeneratedCommonProofCapability;
     context: TranscriptCoreKernelCommandRuntime;
+    externalMemoryAccounting: CommonProofGenerationExternalMemoryAccounting;
     family: AcceptedSetupKeyRelationProofFamily;
     kernel: TranscriptCoreKernel;
     proofDescriptorBytes: Uint8Array<ArrayBuffer>;
@@ -96,6 +100,18 @@ export type AcceptedSetupKeyRelationGenerationInput = Readonly<{
     workerKernel: BrowserActionStorageWorkerKernel;
 }>;
 
+export type AcceptedSetupSameSecretGenerationInput =
+    AcceptedSetupKeyRelationGenerationInput &
+        Readonly<{
+            vssLowDegreeEvidence: VerifiedVssLowDegreeEvidence;
+        }>;
+
+type AcceptedSetupKeyRelationGenerationRuntimeInput =
+    AcceptedSetupKeyRelationGenerationInput &
+        Partial<
+            Pick<AcceptedSetupSameSecretGenerationInput, 'vssLowDegreeEvidence'>
+        >;
+
 export type GeneratedAcceptedSetupKeyRelationProofVerificationInput = Omit<
     AcceptedSetupProofVerificationInput,
     'canonicalApplicationStatementBytes'
@@ -105,24 +121,34 @@ export type GeneratedAcceptedSetupKeyRelationProofVerificationInput = Omit<
     }>;
 
 export type GeneratedAcceptedSetupSameSecretProofVerificationInput =
-    GeneratedAcceptedSetupKeyRelationProofVerificationInput &
-        Readonly<{
-            verifiedVssShareLinkageTerminal: VerifiedVssShareLinkageTerminal;
-        }>;
+    GeneratedAcceptedSetupKeyRelationProofVerificationInput;
 
 type GeneratedAcceptedSetupKeyRelationProofVerificationRuntimeInput =
-    GeneratedAcceptedSetupKeyRelationProofVerificationInput &
-        Partial<
-            Pick<
-                GeneratedAcceptedSetupSameSecretProofVerificationInput,
-                'verifiedVssShareLinkageTerminal'
-            >
-        >;
+    GeneratedAcceptedSetupKeyRelationProofVerificationInput;
 
 type GeneratedAcceptedSetupKeyRelationPackageContributionInput = Readonly<{
     generatedProof: GeneratedAcceptedSetupKeyRelationProof;
     packageBuilder: AcceptedSetupPackageBuilder;
 }>;
+
+type PrepareSetupKeyRelationGeneration = (
+    selectedSuiteHandle: number,
+    setupGenerationAuthorityHandle: number,
+    vssLowDegreeEvidenceHandle: number | undefined,
+    actionRandomnessHandle: number,
+    stateVerifierSessionHandle: number,
+    stateVerifierSessionCapabilityPointer: number,
+    stateVerifierSessionCapabilityByteLength: number,
+    verifiedReservationHandle: number,
+    boardVerifierSessionHandle: number,
+    boardVerifierSessionCapabilityPointer: number,
+    boardVerifierSessionCapabilityByteLength: number,
+    setupIntentObjectHandle: number,
+    checkpointLineageIdentifierPointer: number,
+    checkpointLineageIdentifierByteLength: number,
+    statementSourceHandleOutputPointer: number,
+    statusPointer: number,
+) => number;
 
 type SetupKeyRelationGenerationKernel = Readonly<{
     cancelGeneratedSource: NonNullable<
@@ -134,17 +160,16 @@ type SetupKeyRelationGenerationKernel = Readonly<{
     discardStatementSource: NonNullable<
         TranscriptCoreKernelExports['sealed_lattice_setup_key_relation_generation_statement_discard']
     >;
-    prepareGeneration: NonNullable<
-        TranscriptCoreKernelExports['sealed_lattice_same_secret_prepare_generation']
-    >;
-    prepareResumedGeneration: NonNullable<
-        TranscriptCoreKernelExports['sealed_lattice_same_secret_prepare_resumed_generation']
-    >;
+    prepareGeneration: PrepareSetupKeyRelationGeneration;
+    prepareResumedGeneration: PrepareSetupKeyRelationGeneration;
     releaseSelectedSuite: NonNullable<
         TranscriptCoreKernelExports['sealed_lattice_common_proof_release_suite']
     >;
     selectSuite: NonNullable<
         TranscriptCoreKernelExports['sealed_lattice_common_proof_select_suite']
+    >;
+    supplyAuthenticatedTranscriptPrefix?: NonNullable<
+        TranscriptCoreKernelExports['sealed_lattice_same_secret_generation_supply_authenticated_transcript_prefix']
     >;
 }>;
 
@@ -205,12 +230,12 @@ const requireGenerationKernel = (
         sealed_lattice_setup_key_relation_generation_statement_discard:
             discardStatementSource,
     } = context.wasmExports;
-    const prepareGeneration =
+    const rawPrepareGeneration =
         family === 'sameSecret'
             ? context.wasmExports.sealed_lattice_same_secret_prepare_generation
             : context.wasmExports
                   .sealed_lattice_public_key_share_prepare_generation;
-    const prepareResumedGeneration =
+    const rawPrepareResumedGeneration =
         family === 'sameSecret'
             ? context.wasmExports
                   .sealed_lattice_same_secret_prepare_resumed_generation
@@ -227,27 +252,88 @@ const requireGenerationKernel = (
                   .sealed_lattice_same_secret_generation_contribute_package
             : context.wasmExports
                   .sealed_lattice_public_key_share_generation_contribute_package;
+    const supplyAuthenticatedTranscriptPrefix =
+        family === 'sameSecret'
+            ? context.wasmExports
+                  .sealed_lattice_same_secret_generation_supply_authenticated_transcript_prefix
+            : undefined;
     if (
         typeof cancelGeneratedSource !== 'function' ||
         typeof contributePackage !== 'function' ||
         typeof releaseSelectedSuite !== 'function' ||
         typeof selectSuite !== 'function' ||
         typeof discardStatementSource !== 'function' ||
-        typeof prepareGeneration !== 'function' ||
-        typeof prepareResumedGeneration !== 'function'
+        typeof rawPrepareGeneration !== 'function' ||
+        typeof rawPrepareResumedGeneration !== 'function' ||
+        (family === 'sameSecret' &&
+            typeof supplyAuthenticatedTranscriptPrefix !== 'function')
     ) {
         throw new CanonicalStreamInternalError(
             `The transcript-core kernel lacks the accepted-setup ${family} generation boundary.`,
         );
     }
+    const normalizePreparation = (
+        rawPreparation:
+            | NonNullable<
+                  TranscriptCoreKernelExports['sealed_lattice_same_secret_prepare_generation']
+              >
+            | NonNullable<
+                  TranscriptCoreKernelExports['sealed_lattice_same_secret_prepare_resumed_generation']
+              >
+            | NonNullable<
+                  TranscriptCoreKernelExports['sealed_lattice_public_key_share_prepare_generation']
+              >
+            | NonNullable<
+                  TranscriptCoreKernelExports['sealed_lattice_public_key_share_prepare_resumed_generation']
+              >,
+    ): PrepareSetupKeyRelationGeneration =>
+        family === 'sameSecret'
+            ? (
+                  selectedSuiteHandle,
+                  setupGenerationAuthorityHandle,
+                  vssLowDegreeEvidenceHandle,
+                  ...remainingArguments
+              ) => {
+                  if (vssLowDegreeEvidenceHandle === undefined) {
+                      throw new CanonicalStreamInternalError(
+                          'The same-secret generator lacks its VSS low-degree evidence.',
+                      );
+                  }
+                  return rawPreparation(
+                      selectedSuiteHandle,
+                      setupGenerationAuthorityHandle,
+                      vssLowDegreeEvidenceHandle,
+                      ...remainingArguments,
+                  );
+              }
+            : (
+                  selectedSuiteHandle,
+                  setupGenerationAuthorityHandle,
+                  _vssLowDegreeEvidenceHandle,
+                  ...remainingArguments
+              ) =>
+                  (
+                      rawPreparation as NonNullable<
+                          TranscriptCoreKernelExports['sealed_lattice_public_key_share_prepare_generation']
+                      >
+                  )(
+                      selectedSuiteHandle,
+                      setupGenerationAuthorityHandle,
+                      ...remainingArguments,
+                  );
     return Object.freeze({
         cancelGeneratedSource,
         contributePackage,
         discardStatementSource,
-        prepareGeneration,
-        prepareResumedGeneration,
+        prepareGeneration: normalizePreparation(rawPrepareGeneration),
+        prepareResumedGeneration: normalizePreparation(
+            rawPrepareResumedGeneration,
+        ),
         releaseSelectedSuite,
         selectSuite,
+        ...(supplyAuthenticatedTranscriptPrefix === undefined
+            ? {}
+            : { supplyAuthenticatedTranscriptPrefix }),
     });
 };
 
@@ -379,11 +465,52 @@ const retireConsumedGeneratedProof = (
     generatedProofRecords.delete(proof);
 };
 
+const copyExternalMemoryUsageAccounting = (
+    accounting: CommonProofGenerationExternalMemoryAccounting['actualUsage'],
+): CommonProofGenerationExternalMemoryAccounting['actualUsage'] =>
+    Object.freeze({ ...accounting });
+
+const copyExternalMemoryAccounting = (
+    accounting: CommonProofGenerationExternalMemoryAccounting,
+): CommonProofGenerationExternalMemoryAccounting =>
+    Object.freeze({
+        actualUsage: copyExternalMemoryUsageAccounting(accounting.actualUsage),
+        ...(accounting.browserStorage === undefined
+            ? {}
+            : {
+                  browserStorage: Object.freeze({
+                      ...accounting.browserStorage,
+                  }),
+              }),
+        compiledRequirement: Object.freeze({
+            ...accounting.compiledRequirement,
+        }),
+        ...(accounting.deterministicPrefixReplayUsage === undefined
+            ? {}
+            : {
+                  deterministicPrefixReplayUsage:
+                      copyExternalMemoryUsageAccounting(
+                          accounting.deterministicPrefixReplayUsage,
+                      ),
+              }),
+        ...(accounting.workerTransport === undefined
+            ? {}
+            : {
+                  workerTransport: Object.freeze({
+                      ...accounting.workerTransport,
+                  }),
+              }),
+    });
+
 const createGeneratedProof = (
     record: GeneratedAcceptedSetupKeyRelationProofRecord,
 ): GeneratedAcceptedSetupKeyRelationProof => {
     const proof: GeneratedAcceptedSetupKeyRelationProof = Object.freeze({
         [generatedAcceptedSetupKeyRelationProofBrand]: true as const,
+        copyExternalMemoryAccounting: () =>
+            copyExternalMemoryAccounting(
+                requireGeneratedProofRecord(proof).externalMemoryAccounting,
+            ),
         copyProofDescriptorBytes: () =>
             requireGeneratedProofRecord(proof).proofDescriptorBytes.slice(),
         release: (): void => {
@@ -403,7 +530,7 @@ const createGeneratedProof = (
 
 const generateAcceptedSetupKeyRelationInClosedWorker = async (
     family: AcceptedSetupKeyRelationProofFamily,
-    input: AcceptedSetupKeyRelationGenerationInput,
+    input: AcceptedSetupKeyRelationGenerationRuntimeInput,
 ): Promise<GeneratedAcceptedSetupKeyRelationProof> => {
     if (typeof globalThis.document !== 'undefined') {
         throw new CanonicalStreamInternalError(
@@ -413,7 +540,8 @@ const generateAcceptedSetupKeyRelationInClosedWorker = async (
     if (
         (input.generationMode !== 'fresh' &&
             input.generationMode !== 'resumed') ||
-        typeof input.openProofGenerationExecution !== 'function'
+        typeof input.openProofGenerationExecution !== 'function' ||
+        (family === 'sameSecret') !== (input.vssLowDegreeEvidence !== undefined)
     ) {
         throw new CanonicalStreamRefusalError('wrongContext');
     }
@@ -518,30 +646,57 @@ const generateAcceptedSetupKeyRelationInClosedWorker = async (
                                         input.generationMode === 'fresh'
                                             ? kernel.prepareGeneration
                                             : kernel.prepareResumedGeneration;
-                                    const adapterHandle = prepare(
-                                        selectedSuiteHandle,
-                                        setupGenerationAuthorization.handle,
-                                        authorization.actionRandomnessHandle,
-                                        authorization.stateVerifierSessionHandle,
-                                        authorization.stateReservationCapabilityPointer,
-                                        verifierCapabilityByteLength,
-                                        authorization.stateReservationHandle,
-                                        setupIntentAuthorization.sessionHandle,
-                                        setupIntentAuthorization.capabilityPointer,
-                                        verifierCapabilityByteLength,
-                                        new DataView(
-                                            setupIntentAuthorization.handleBytes
-                                                .buffer,
-                                            setupIntentAuthorization.handleBytes
-                                                .byteOffset,
-                                            setupIntentAuthorization.handleBytes
-                                                .byteLength,
-                                        ).getUint32(0, true),
-                                        checkpointPointer,
-                                        checkpointLineageIdentifier.byteLength,
-                                        metadataPointer,
-                                        metadataPointer + wasm32WordByteLength,
-                                    );
+                                    const prepareWithEvidenceHandle = (
+                                        vssLowDegreeEvidenceHandle:
+                                            | number
+                                            | undefined,
+                                    ): number =>
+                                        prepare(
+                                            selectedSuiteHandle,
+                                            setupGenerationAuthorization.handle,
+                                            vssLowDegreeEvidenceHandle,
+                                            authorization.actionRandomnessHandle,
+                                            authorization.stateVerifierSessionHandle,
+                                            authorization.stateReservationCapabilityPointer,
+                                            verifierCapabilityByteLength,
+                                            authorization.stateReservationHandle,
+                                            setupIntentAuthorization.sessionHandle,
+                                            setupIntentAuthorization.capabilityPointer,
+                                            verifierCapabilityByteLength,
+                                            new DataView(
+                                                setupIntentAuthorization
+                                                    .handleBytes.buffer,
+                                                setupIntentAuthorization
+                                                    .handleBytes.byteOffset,
+                                                setupIntentAuthorization
+                                                    .handleBytes.byteLength,
+                                            ).getUint32(0, true),
+                                            checkpointPointer,
+                                            checkpointLineageIdentifier.byteLength,
+                                            metadataPointer,
+                                            metadataPointer +
+                                                wasm32WordByteLength,
+                                        );
+                                    const adapterHandle =
+                                        family === 'sameSecret'
+                                            ? consumeVerifiedVssLowDegreeEvidence(
+                                                  {
+                                                      consume:
+                                                          prepareWithEvidenceHandle,
+                                                      context,
+                                                      evidence:
+                                                          input.vssLowDegreeEvidence ??
+                                                          (() => {
+                                                              throw new CanonicalStreamRefusalError(
+                                                                  'wrongContext',
+                                                              );
+                                                          })(),
+                                                      kernel: input.kernel,
+                                                  },
+                                              )
+                                            : prepareWithEvidenceHandle(
+                                                  undefined,
+                                              );
                                     const [sourceHandle, status] =
                                         memoryBoundary.readWords(
                                             metadataPointer,
@@ -595,10 +750,37 @@ const generateAcceptedSetupKeyRelationInClosedWorker = async (
 
         const adapterForRun = familyAdapter;
         familyAdapter = undefined;
+        const authenticatedTranscriptPrefixAuthority =
+            family === 'sameSecret'
+                ? Object.freeze({
+                      supply: (operationHandle: number): void => {
+                          const supplyAuthenticatedTranscriptPrefix =
+                              kernel.supplyAuthenticatedTranscriptPrefix;
+                          if (
+                              supplyAuthenticatedTranscriptPrefix === undefined
+                          ) {
+                              throw new CanonicalStreamInternalError(
+                                  'The same-secret generator lost its authenticated transcript-prefix boundary.',
+                              );
+                          }
+                          context.runExclusive(
+                              'accepted-setup same-secret authenticated transcript prefix',
+                              () =>
+                                  statusBoundary.throwIfError(
+                                      supplyAuthenticatedTranscriptPrefix(
+                                          statementSourceHandle,
+                                          operationHandle,
+                                      ),
+                                  ),
+                          );
+                      },
+                  })
+                : undefined;
         const execution =
             await runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpener(
                 adapterForRun,
                 input.openProofGenerationExecution,
+                authenticatedTranscriptPrefixAuthority,
             );
         generatedCapability = execution.generatedCapability;
         proofDescriptorBytes = await deriveGeneratedCommonProofDescriptor({
@@ -616,6 +798,7 @@ const generateAcceptedSetupKeyRelationInClosedWorker = async (
             Object.freeze({
                 capability: generatedCapability,
                 context,
+                externalMemoryAccounting: execution.externalMemoryAccounting,
                 family,
                 kernel: input.kernel,
                 proofDescriptorBytes,
@@ -709,7 +892,7 @@ const generateAcceptedSetupKeyRelationInClosedWorker = async (
 
 /** Generates one same-secret proof for later positive package verification. */
 export const generateAcceptedSetupSameSecretInClosedWorker = (
-    input: AcceptedSetupKeyRelationGenerationInput,
+    input: AcceptedSetupSameSecretGenerationInput,
 ): Promise<GeneratedAcceptedSetupKeyRelationProof> =>
     generateAcceptedSetupKeyRelationInClosedWorker('sameSecret', input);
 
@@ -797,14 +980,10 @@ const verifyGeneratedAcceptedSetupKeyRelationInClosedWorker = async (
         options: input.options,
     });
     if (family === 'sameSecret') {
-        if (input.verifiedVssShareLinkageTerminal === undefined) {
-            throw new CanonicalStreamRefusalError('wrongContext');
-        }
         await verifyGeneratedAcceptedSetupSameSecretCapabilityInClosedWorker(
             verificationInput,
             record.capability,
             record.statementSourceHandle,
-            input.verifiedVssShareLinkageTerminal,
         );
     } else {
         await verifyGeneratedAcceptedSetupPublicKeyShareCapabilityInClosedWorker(

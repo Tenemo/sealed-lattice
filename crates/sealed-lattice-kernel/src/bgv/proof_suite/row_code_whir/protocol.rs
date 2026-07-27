@@ -10,6 +10,7 @@ use sha3::{
     digest::{ExtendableOutput, Update, XofReader},
 };
 
+use super::super::MAXIMUM_COMMON_PROOF_BYTE_LENGTH;
 use super::algebra::{aggregate_opening_reduction, coset_point};
 use super::column_commitment::{ColumnDigest, StreamingColumnHasher, verify_column_frontier};
 use super::plain_whir::{
@@ -38,8 +39,6 @@ const CHALLENGE_FIELD_LIMB_COUNT: usize = 5;
 const MAXIMUM_OPENING_CLAIM_COUNT: usize = 64;
 const PROTOCOL_BINDING_DOMAIN: &[u8] = b"sealed-lattice/streaming-polynomial-commitment/v2";
 const STREAMING_WIRE_MAGIC: &[u8; 8] = b"SLSTRM04";
-pub(super) const MAXIMUM_STREAMING_WIRE_BYTE_LENGTH: usize =
-    super::MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH;
 
 pub(super) trait RecomputableRowSource {
     fn read_row(&self, row_index: usize) -> Result<Vec<Goldilocks>, String>;
@@ -109,12 +108,6 @@ pub(super) fn encode_streaming_prover_output(
             .expect("wire-shape validation requires one aggregate root"),
     );
     for column in &output.proof.authenticated_columns {
-        writer.write_u32(u32::try_from(column.column_index).map_err(|_| {
-            format!(
-                "column index {} does not fit canonical u32",
-                column.column_index
-            )
-        })?);
         for value in &column.values {
             writer.write_u64(value.as_canonical_u64());
         }
@@ -128,11 +121,11 @@ pub(super) fn encode_streaming_prover_output(
     }
     writer.write_bytes(&aggregate_opening_proof);
     let canonical = writer.finish();
-    if canonical.len() > MAXIMUM_STREAMING_WIRE_BYTE_LENGTH {
+    if canonical.len() > MAXIMUM_COMMON_PROOF_BYTE_LENGTH {
         return Err(format!(
             "streaming proof wire has {} bytes, exceeding the {}-byte decoder cap",
             canonical.len(),
-            MAXIMUM_STREAMING_WIRE_BYTE_LENGTH
+            MAXIMUM_COMMON_PROOF_BYTE_LENGTH
         ));
     }
     Ok(canonical)
@@ -142,11 +135,11 @@ pub(super) fn decode_streaming_prover_output(
     geometry: RowEncodingGeometry,
     canonical: &[u8],
 ) -> Result<StreamingProverOutput, String> {
-    if canonical.len() > MAXIMUM_STREAMING_WIRE_BYTE_LENGTH {
+    if canonical.len() > MAXIMUM_COMMON_PROOF_BYTE_LENGTH {
         return Err(format!(
             "streaming proof wire has {} bytes, exceeding the {}-byte decoder cap",
             canonical.len(),
-            MAXIMUM_STREAMING_WIRE_BYTE_LENGTH
+            MAXIMUM_COMMON_PROOF_BYTE_LENGTH
         ));
     }
     let mut reader = StreamingWireReader::new(canonical);
@@ -164,12 +157,8 @@ pub(super) fn decode_streaming_prover_output(
     let aggregate_commitment = p3_merkle_tree::MerkleCap::new(vec![reader.read_digest()?]);
     let mut authenticated_columns = Vec::with_capacity(COLUMN_QUERY_COUNT);
     for _ in 0..COLUMN_QUERY_COUNT {
-        let column_index = reader.read_u32()? as usize;
         let values = reader.read_goldilocks_values(geometry.row_count)?;
-        authenticated_columns.push(AuthenticatedColumn {
-            column_index,
-            values,
-        });
+        authenticated_columns.push(AuthenticatedColumn { values });
     }
     let frontier_count = reader.read_u32()? as usize;
     let maximum_frontier_count = COLUMN_QUERY_COUNT
@@ -235,11 +224,10 @@ fn validate_streaming_wire_shape(
             output.proof.authenticated_columns.len()
         ));
     }
-    for column in &output.proof.authenticated_columns {
+    for (column_ordinal, column) in output.proof.authenticated_columns.iter().enumerate() {
         if column.values.len() != geometry.row_count {
             return Err(format!(
-                "streaming authenticated column {} has {} values, expected {}",
-                column.column_index,
+                "streaming authenticated column {column_ordinal} has {} values, expected {}",
                 column.values.len(),
                 geometry.row_count
             ));
@@ -551,30 +539,24 @@ pub(super) fn verify_streaming_opening(
         ));
     }
 
-    for (opening, expected_column_index) in proof
-        .authenticated_columns
-        .iter()
-        .zip(&expected_column_indices)
-    {
-        if opening.column_index != *expected_column_index {
-            return Err(format!(
-                "authenticated column index {} does not match derived index {expected_column_index}",
-                opening.column_index
-            ));
-        }
+    for (column_ordinal, opening) in proof.authenticated_columns.iter().enumerate() {
         if opening.values.len() != geometry.row_count {
             return Err(format!(
-                "authenticated column {} has {} row values, expected {}",
-                opening.column_index,
+                "authenticated column {column_ordinal} has {} row values, expected {}",
                 opening.values.len(),
                 geometry.row_count
             ));
         }
     }
-    let opened_columns = proof
-        .authenticated_columns
+    let opened_columns = expected_column_indices
         .iter()
-        .map(|opening| (opening.column_index, opening.values.as_slice()))
+        .copied()
+        .zip(
+            proof
+                .authenticated_columns
+                .iter()
+                .map(|opening| opening.values.as_slice()),
+        )
         .collect::<Vec<_>>();
     verify_column_frontier(
         &commitment.column_root,
@@ -588,6 +570,7 @@ pub(super) fn verify_streaming_opening(
         &claim_batching_weights,
         aggregate_batching_challenge,
         geometry.coefficient_variable_count(),
+        &expected_column_indices,
         &integrity_row_weights,
         &evaluation_row_weights,
         &proof.authenticated_columns,
@@ -882,14 +865,9 @@ pub(super) fn recompute_authenticated_columns<Source: RecomputableRowSource>(
             "recomputed column commitment differs from the first-pass commitment".to_owned(),
         );
     }
-    let columns = column_indices
-        .iter()
-        .copied()
-        .zip(column_values)
-        .map(|(column_index, values)| AuthenticatedColumn {
-            column_index,
-            values,
-        })
+    let columns = column_values
+        .into_iter()
+        .map(|values| AuthenticatedColumn { values })
         .collect();
     Ok((columns, recomputed.frontier))
 }
@@ -953,16 +931,24 @@ fn expected_aggregate_evaluations(
     claim_batching_weights: &[ChallengeField],
     batching_challenge: ChallengeField,
     coefficient_variable_count: usize,
+    authenticated_column_indices: &[usize],
     integrity_row_weights: &[ChallengeField],
     evaluation_row_weights: &[ChallengeField],
     authenticated_columns: &[AuthenticatedColumn],
 ) -> Vec<ChallengeField> {
+    debug_assert_eq!(
+        authenticated_column_indices.len(),
+        authenticated_columns.len()
+    );
     let mut evaluations = Vec::with_capacity(authenticated_columns.len() + 1);
     evaluations.push(
         batched_claimed_evaluation(claimed_evaluations, claim_batching_weights)
             .expect("validated claim and batching-weight counts agree"),
     );
-    for opening in authenticated_columns {
+    for (column_index, opening) in authenticated_column_indices
+        .iter()
+        .zip(authenticated_columns)
+    {
         let integrity_value = opening
             .values
             .iter()
@@ -981,7 +967,7 @@ fn expected_aggregate_evaluations(
             + batching_challenge * evaluation_value;
         let evaluation_point = coset_point(
             coefficient_variable_count + super::row_encoding::ROW_CODE_LOG_INV_RATE,
-            opening.column_index,
+            *column_index,
         )
         .expect("verified column geometry gives a valid coset point");
         let reduction = aggregate_opening_reduction(
@@ -1256,7 +1242,7 @@ mod tests {
         assert_eq!(output.claimed_evaluations, expected_evaluation);
         let canonical = encode_streaming_prover_output(geometry, &output)
             .expect("encode canonical streaming proof");
-        assert!(canonical.len() < MAXIMUM_STREAMING_WIRE_BYTE_LENGTH);
+        assert!(canonical.len() < MAXIMUM_COMMON_PROOF_BYTE_LENGTH);
         let decoded = decode_streaming_prover_output(geometry, &canonical)
             .expect("decode canonical streaming proof into verifier-owned types");
         verify_streaming_opening(
@@ -1424,15 +1410,15 @@ mod tests {
             .is_err()
         );
 
-        let mut changed_index = output.proof.clone();
-        changed_index.authenticated_columns[0].column_index ^= 1;
+        let mut changed_order = output.proof.clone();
+        changed_order.authenticated_columns.swap(0, 1);
         assert!(
             verify_streaming_opening(
                 geometry,
                 &statement,
                 &output.commitment,
                 &output.claimed_evaluations,
-                &changed_index,
+                &changed_order,
             )
             .is_err()
         );
@@ -1572,8 +1558,7 @@ mod tests {
                 * CHALLENGE_FIELD_LIMB_COUNT
                 * core::mem::size_of::<u64>()
             + core::mem::size_of::<ColumnDigest>()
-            + COLUMN_QUERY_COUNT
-                * (core::mem::size_of::<u32>() + geometry.row_count * core::mem::size_of::<u64>());
+            + COLUMN_QUERY_COUNT * geometry.row_count * core::mem::size_of::<u64>();
         assert_eq!(
             u32::from_le_bytes(
                 canonical[frontier_count_offset..frontier_count_offset + 4]

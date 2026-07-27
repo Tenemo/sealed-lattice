@@ -15,10 +15,14 @@ use crate::{
         serialization::two_component_data_ciphertext_canonical_byte_length_ceiling_at_level,
     },
     foundation::{
-        FOUNDATION_PROFILE, Hash512, MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH,
-        SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT, StreamDescriptor,
-        TargetReleaseOutputBundleByteLengths,
+        FOUNDATION_PROFILE, FoundationObjectType, Hash512, MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH,
+        ML_DSA_65_SIGNATURE_BYTE_LENGTH, ObjectEnvelope, ParticipantIdentity,
+        SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT, SignedCarrier,
+        StateCapabilityKind, StateCertificate, StateOutputIntentPayload,
+        StateReservationIntentPayload, StateWitnessVoteKind, StateWitnessVotePayload,
+        StreamDescriptor, TargetReleaseOutputBundleByteLengths,
         canonical_target_release_output_bundle_byte_lengths_for_accounting,
+        derive_state_witness_vote_sequence,
     },
 };
 
@@ -49,6 +53,9 @@ pub(crate) enum SelectedTargetReleaseStaticAccountingError {
     CanonicalEncoding,
     SourceProviderMemory,
     InvalidReconstructionInput,
+    MissingProductionCarrier,
+    DuplicateProductionCarrier,
+    InvalidProductionCarrierLifetime,
     CountOverflow,
 }
 
@@ -67,77 +74,16 @@ impl SelectedTargetReleaseStaticAccountingError {
             Self::InvalidReconstructionInput => {
                 "target-release-static-accounting-invalid-reconstruction-input"
             }
+            Self::MissingProductionCarrier => {
+                "target-release-static-accounting-missing-production-carrier"
+            }
+            Self::DuplicateProductionCarrier => {
+                "target-release-static-accounting-duplicate-production-carrier"
+            }
+            Self::InvalidProductionCarrierLifetime => {
+                "target-release-static-accounting-invalid-production-carrier-lifetime"
+            }
             Self::CountOverflow => "target-release-static-accounting-count-overflow",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub(crate) enum SelectedTargetReleaseStaticAccountingGap {
-    InjectedProofOutputStorePersistenceAndRetainedCopyLiveness,
-    InjectedPartialOutputStorePersistenceAndRetainedCopyLiveness,
-    CallbackOwnedStateCertificationTraffic,
-    PublicTargetShareDistributionFanout,
-    ReconstructedResultStateAndTransportTransition,
-}
-
-impl SelectedTargetReleaseStaticAccountingGap {
-    pub(crate) const fn dimension(self) -> &'static str {
-        match self {
-            Self::InjectedProofOutputStorePersistenceAndRetainedCopyLiveness => {
-                "target-release-proof-output-store"
-            }
-            Self::InjectedPartialOutputStorePersistenceAndRetainedCopyLiveness => {
-                "target-release-partial-output-store"
-            }
-            Self::CallbackOwnedStateCertificationTraffic => {
-                "target-release-state-certification-traffic"
-            }
-            Self::PublicTargetShareDistributionFanout => "target-release-public-share-distribution",
-            Self::ReconstructedResultStateAndTransportTransition => {
-                "target-release-result-transition"
-            }
-        }
-    }
-
-    pub(crate) const fn reason_code(self) -> &'static str {
-        match self {
-            Self::InjectedProofOutputStorePersistenceAndRetainedCopyLiveness => {
-                "proof-output-store-lifetime-not-production-fixed"
-            }
-            Self::InjectedPartialOutputStorePersistenceAndRetainedCopyLiveness => {
-                "partial-output-store-lifetime-not-production-fixed"
-            }
-            Self::CallbackOwnedStateCertificationTraffic => {
-                "state-certification-traffic-not-production-fixed"
-            }
-            Self::PublicTargetShareDistributionFanout => {
-                "public-share-distribution-fanout-not-production-fixed"
-            }
-            Self::ReconstructedResultStateAndTransportTransition => {
-                "reconstructed-result-transition-not-production-fixed"
-            }
-        }
-    }
-
-    pub(crate) const fn required_carrier(self) -> &'static str {
-        match self {
-            Self::InjectedProofOutputStorePersistenceAndRetainedCopyLiveness => {
-                "production proof-output store persistence, copy, and release lifetime"
-            }
-            Self::InjectedPartialOutputStorePersistenceAndRetainedCopyLiveness => {
-                "production partial-output store persistence, copy, and release lifetime"
-            }
-            Self::CallbackOwnedStateCertificationTraffic => {
-                "production target-share state certification transport and lifetime"
-            }
-            Self::PublicTargetShareDistributionFanout => {
-                "production target-share public distribution topology and recipient fanout"
-            }
-            Self::ReconstructedResultStateAndTransportTransition => {
-                "production reconstructed-result state or transport transition"
-            }
         }
     }
 }
@@ -165,6 +111,143 @@ pub(crate) struct SelectedTargetReleaseCanonicalMaterialAccounting {
     pub(crate) one_target_share_bundle_chunk_count_ceiling: u64,
     pub(crate) complete_action_target_share_bundle_byte_length_ceiling: u64,
     pub(crate) complete_action_target_share_bundle_chunk_count_ceiling: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum SelectedTargetReleaseProductionBoundary {
+    ProofCommit,
+    PartialCommit,
+    ReservationCertification,
+    OutputCertification,
+    FreshShareVerification,
+    Reconstruction,
+    JavascriptResultReturn,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SelectedTargetReleaseProofOutputStoreAccounting {
+    pub(crate) lifetime_start_boundary: SelectedTargetReleaseProductionBoundary,
+    pub(crate) lifetime_end_boundary: SelectedTargetReleaseProductionBoundary,
+    pub(crate) store_count: u64,
+    pub(crate) committed_payload_byte_length_ceiling: u64,
+    pub(crate) committed_chunk_count_ceiling: u64,
+    pub(crate) immediate_commit_readback_byte_length_ceiling: u64,
+    pub(crate) immediate_commit_readback_count_ceiling: u64,
+    pub(crate) descriptor_readback_byte_length_ceiling: u64,
+    pub(crate) descriptor_readback_count_ceiling: u64,
+    pub(crate) fresh_verifier_read_byte_length_ceiling: u64,
+    pub(crate) fresh_verifier_read_count_ceiling: u64,
+    pub(crate) total_local_storage_read_byte_length_ceiling: u64,
+    pub(crate) maximum_boundary_live_payload_byte_length_ceiling: u64,
+    pub(crate) terminal_store_release_count: u64,
+    pub(crate) protocol_transport_byte_length: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SelectedTargetReleasePartialOutputStoreAccounting {
+    pub(crate) lifetime_start_boundary: SelectedTargetReleaseProductionBoundary,
+    pub(crate) lifetime_end_boundary: SelectedTargetReleaseProductionBoundary,
+    pub(crate) store_count: u64,
+    pub(crate) committed_payload_byte_length: u64,
+    pub(crate) committed_chunk_count: u64,
+    pub(crate) immediate_commit_readback_byte_length: u64,
+    pub(crate) immediate_commit_readback_count: u64,
+    pub(crate) fresh_verifier_read_byte_length: u64,
+    pub(crate) fresh_verifier_read_count: u64,
+    pub(crate) total_local_storage_read_byte_length: u64,
+    pub(crate) maximum_boundary_live_payload_byte_length: u64,
+    pub(crate) terminal_store_release_count: u64,
+    pub(crate) protocol_transport_byte_length: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SelectedTargetReleaseStateCertificationTransportAccounting {
+    pub(crate) lifetime_start_boundary: SelectedTargetReleaseProductionBoundary,
+    pub(crate) lifetime_end_boundary: SelectedTargetReleaseProductionBoundary,
+    pub(crate) certification_round_count: u64,
+    pub(crate) witness_quorum: u64,
+    pub(crate) reservation_intent_carrier_byte_length: u64,
+    pub(crate) output_intent_carrier_byte_length: u64,
+    pub(crate) reservation_witness_vote_carrier_byte_length: u64,
+    pub(crate) output_witness_vote_carrier_byte_length: u64,
+    pub(crate) reservation_certificate_byte_length: u64,
+    pub(crate) output_certificate_byte_length: u64,
+    pub(crate) one_share_subject_to_witness_request_byte_length: u64,
+    pub(crate) one_share_witness_to_subject_response_byte_length: u64,
+    pub(crate) one_share_public_state_attachment_byte_length: u64,
+    pub(crate) complete_action_subject_to_witness_request_byte_length: u64,
+    pub(crate) complete_action_witness_to_subject_response_byte_length: u64,
+    pub(crate) complete_action_public_state_attachment_byte_length: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SelectedTargetReleasePublicDistributionAccounting {
+    pub(crate) lifetime_start_boundary: SelectedTargetReleaseProductionBoundary,
+    pub(crate) lifetime_end_boundary: SelectedTargetReleaseProductionBoundary,
+    pub(crate) publication_count: u64,
+    pub(crate) other_participant_recipient_count_per_share: u64,
+    pub(crate) one_state_certified_share_path_byte_length_ceiling: u64,
+    pub(crate) complete_public_corpus_byte_length_ceiling: u64,
+    pub(crate) complete_action_publication_byte_length_ceiling: u64,
+    pub(crate) complete_action_peer_delivery_count: u64,
+    pub(crate) complete_action_peer_delivery_byte_length_ceiling: u64,
+    pub(crate) one_participant_clean_state_download_byte_length_ceiling: u64,
+    pub(crate) local_storage_traffic_byte_length: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SelectedTargetReleaseResultTransitionAccounting {
+    pub(crate) lifetime_start_boundary: SelectedTargetReleaseProductionBoundary,
+    pub(crate) lifetime_end_boundary: SelectedTargetReleaseProductionBoundary,
+    pub(crate) transition_count: u64,
+    pub(crate) result_word_count: u64,
+    pub(crate) rust_result_byte_length: u64,
+    pub(crate) wasm_to_javascript_copy_byte_length: u64,
+    pub(crate) maximum_boundary_live_byte_length: u64,
+    pub(crate) terminal_rust_handle_consumption_count: u64,
+    pub(crate) protocol_transport_byte_length: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TargetReleaseProductionCarrierKind {
+    ProofOutputStore,
+    PartialOutputStore,
+    StateCertificationTransport,
+    PublicTargetShareDistribution,
+    ResultTransition,
+}
+
+impl TargetReleaseProductionCarrierKind {
+    const ALL: [Self; 5] = [
+        Self::ProofOutputStore,
+        Self::PartialOutputStore,
+        Self::StateCertificationTransport,
+        Self::PublicTargetShareDistribution,
+        Self::ResultTransition,
+    ];
+
+    const fn ordinal(self) -> usize {
+        match self {
+            Self::ProofOutputStore => 0,
+            Self::PartialOutputStore => 1,
+            Self::StateCertificationTransport => 2,
+            Self::PublicTargetShareDistribution => 3,
+            Self::ResultTransition => 4,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TargetReleaseProductionCarrier {
+    kind: TargetReleaseProductionCarrierKind,
+    starts_at: SelectedTargetReleaseProductionBoundary,
+    ends_at: SelectedTargetReleaseProductionBoundary,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -547,7 +630,12 @@ pub(crate) struct SelectedTargetReleaseStaticAccounting {
         SelectedTargetReleaseReconstructionOperationAccounting,
     pub(crate) reconstruction_subset_operations:
         SelectedTargetReleaseReconstructionSubsetAccounting,
-    pub(crate) gaps: Box<[SelectedTargetReleaseStaticAccountingGap]>,
+    pub(crate) proof_output_store: SelectedTargetReleaseProofOutputStoreAccounting,
+    pub(crate) partial_output_store: SelectedTargetReleasePartialOutputStoreAccounting,
+    pub(crate) state_certification_transport:
+        SelectedTargetReleaseStateCertificationTransportAccounting,
+    pub(crate) public_distribution: SelectedTargetReleasePublicDistributionAccounting,
+    pub(crate) result_transition: SelectedTargetReleaseResultTransitionAccounting,
 }
 
 impl SelectedTargetReleaseStaticAccounting {
@@ -737,8 +825,21 @@ pub(crate) fn derive_selected_target_release_static_accounting(
         derive_selected_target_release_reconstruction_operation_accounting([0, 1, 2, 3])?;
     let reconstruction_subset_operations =
         derive_selected_target_release_reconstruction_subset_accounting()?;
+    let proof_output_store =
+        derive_proof_output_store_accounting(canonical_material, fresh_generation, verification)?;
+    let partial_output_store =
+        derive_partial_output_store_accounting(canonical_material, fresh_generation)?;
+    let state_certification_transport =
+        derive_state_certification_transport_accounting(participant_count)?;
+    let public_distribution = derive_public_distribution_accounting(
+        canonical_material,
+        state_certification_transport,
+        participant_count,
+    )?;
+    let result_transition =
+        derive_result_transition_accounting(complete_action_reconstruction_buffers)?;
 
-    Ok(SelectedTargetReleaseStaticAccounting {
+    let accounting = SelectedTargetReleaseStaticAccounting {
         participant_count,
         target_role_count,
         target_data_prime_count,
@@ -753,13 +854,460 @@ pub(crate) fn derive_selected_target_release_static_accounting(
         complete_action_reconstruction_buffers,
         complete_action_reconstruction_operations,
         reconstruction_subset_operations,
-        gaps: Box::new([
-            SelectedTargetReleaseStaticAccountingGap::InjectedProofOutputStorePersistenceAndRetainedCopyLiveness,
-            SelectedTargetReleaseStaticAccountingGap::InjectedPartialOutputStorePersistenceAndRetainedCopyLiveness,
-            SelectedTargetReleaseStaticAccountingGap::CallbackOwnedStateCertificationTraffic,
-            SelectedTargetReleaseStaticAccountingGap::PublicTargetShareDistributionFanout,
-            SelectedTargetReleaseStaticAccountingGap::ReconstructedResultStateAndTransportTransition,
-        ]),
+        proof_output_store,
+        partial_output_store,
+        state_certification_transport,
+        public_distribution,
+        result_transition,
+    };
+    validate_target_release_production_carriers(&target_release_production_carriers(&accounting))?;
+    Ok(accounting)
+}
+
+fn target_release_production_carriers(
+    accounting: &SelectedTargetReleaseStaticAccounting,
+) -> [TargetReleaseProductionCarrier; 5] {
+    [
+        TargetReleaseProductionCarrier {
+            kind: TargetReleaseProductionCarrierKind::ProofOutputStore,
+            starts_at: accounting.proof_output_store.lifetime_start_boundary,
+            ends_at: accounting.proof_output_store.lifetime_end_boundary,
+        },
+        TargetReleaseProductionCarrier {
+            kind: TargetReleaseProductionCarrierKind::PartialOutputStore,
+            starts_at: accounting.partial_output_store.lifetime_start_boundary,
+            ends_at: accounting.partial_output_store.lifetime_end_boundary,
+        },
+        TargetReleaseProductionCarrier {
+            kind: TargetReleaseProductionCarrierKind::StateCertificationTransport,
+            starts_at: accounting
+                .state_certification_transport
+                .lifetime_start_boundary,
+            ends_at: accounting
+                .state_certification_transport
+                .lifetime_end_boundary,
+        },
+        TargetReleaseProductionCarrier {
+            kind: TargetReleaseProductionCarrierKind::PublicTargetShareDistribution,
+            starts_at: accounting.public_distribution.lifetime_start_boundary,
+            ends_at: accounting.public_distribution.lifetime_end_boundary,
+        },
+        TargetReleaseProductionCarrier {
+            kind: TargetReleaseProductionCarrierKind::ResultTransition,
+            starts_at: accounting.result_transition.lifetime_start_boundary,
+            ends_at: accounting.result_transition.lifetime_end_boundary,
+        },
+    ]
+}
+
+fn validate_target_release_production_carriers(
+    carriers: &[TargetReleaseProductionCarrier],
+) -> Result<(), SelectedTargetReleaseStaticAccountingError> {
+    let mut observed = [false; TargetReleaseProductionCarrierKind::ALL.len()];
+    for carrier in carriers {
+        let ordinal = carrier.kind.ordinal();
+        if observed[ordinal] {
+            return Err(SelectedTargetReleaseStaticAccountingError::DuplicateProductionCarrier);
+        }
+        observed[ordinal] = true;
+        let expected_lifetime = match carrier.kind {
+            TargetReleaseProductionCarrierKind::ProofOutputStore => (
+                SelectedTargetReleaseProductionBoundary::ProofCommit,
+                SelectedTargetReleaseProductionBoundary::OutputCertification,
+            ),
+            TargetReleaseProductionCarrierKind::PartialOutputStore => (
+                SelectedTargetReleaseProductionBoundary::PartialCommit,
+                SelectedTargetReleaseProductionBoundary::OutputCertification,
+            ),
+            TargetReleaseProductionCarrierKind::StateCertificationTransport => (
+                SelectedTargetReleaseProductionBoundary::ReservationCertification,
+                SelectedTargetReleaseProductionBoundary::OutputCertification,
+            ),
+            TargetReleaseProductionCarrierKind::PublicTargetShareDistribution => (
+                SelectedTargetReleaseProductionBoundary::OutputCertification,
+                SelectedTargetReleaseProductionBoundary::FreshShareVerification,
+            ),
+            TargetReleaseProductionCarrierKind::ResultTransition => (
+                SelectedTargetReleaseProductionBoundary::Reconstruction,
+                SelectedTargetReleaseProductionBoundary::JavascriptResultReturn,
+            ),
+        };
+        if (carrier.starts_at, carrier.ends_at) != expected_lifetime {
+            return Err(
+                SelectedTargetReleaseStaticAccountingError::InvalidProductionCarrierLifetime,
+            );
+        }
+    }
+    if observed.into_iter().any(|is_present| !is_present) {
+        return Err(SelectedTargetReleaseStaticAccountingError::MissingProductionCarrier);
+    }
+    Ok(())
+}
+
+fn derive_proof_output_store_accounting(
+    canonical_material: SelectedTargetReleaseCanonicalMaterialAccounting,
+    generation: SelectedTargetReleaseGenerationModeAccounting,
+    verification: SelectedTargetReleaseVerificationAccounting,
+) -> Result<
+    SelectedTargetReleaseProofOutputStoreAccounting,
+    SelectedTargetReleaseStaticAccountingError,
+> {
+    let committed_payload_byte_length_ceiling =
+        generation.proof_output_store_commit_byte_length_ceiling;
+    let committed_chunk_count_ceiling = generation.proof_output_store_commit_count_ceiling;
+    if committed_payload_byte_length_ceiling
+        != canonical_material.target_share_proof_byte_length_ceiling
+        || committed_chunk_count_ceiling
+            != canonical_material.target_share_proof_chunk_count_ceiling
+        || verification.proof_input_store_read_byte_length_ceiling
+            != committed_payload_byte_length_ceiling
+        || verification.proof_input_store_read_count_ceiling != committed_chunk_count_ceiling
+    {
+        return Err(SelectedTargetReleaseStaticAccountingError::InvalidSelectedProfile);
+    }
+    let total_local_storage_read_byte_length_ceiling = [
+        committed_payload_byte_length_ceiling,
+        generation.proof_output_descriptor_store_read_byte_length_ceiling,
+        verification.proof_input_store_read_byte_length_ceiling,
+    ]
+    .into_iter()
+    .try_fold(0_u64, checked_add)?;
+    Ok(SelectedTargetReleaseProofOutputStoreAccounting {
+        lifetime_start_boundary: SelectedTargetReleaseProductionBoundary::ProofCommit,
+        lifetime_end_boundary: SelectedTargetReleaseProductionBoundary::OutputCertification,
+        store_count: 1,
+        committed_payload_byte_length_ceiling,
+        committed_chunk_count_ceiling,
+        immediate_commit_readback_byte_length_ceiling: committed_payload_byte_length_ceiling,
+        immediate_commit_readback_count_ceiling: committed_chunk_count_ceiling,
+        descriptor_readback_byte_length_ceiling: generation
+            .proof_output_descriptor_store_read_byte_length_ceiling,
+        descriptor_readback_count_ceiling: generation
+            .proof_output_descriptor_store_read_count_ceiling,
+        fresh_verifier_read_byte_length_ceiling: verification
+            .proof_input_store_read_byte_length_ceiling,
+        fresh_verifier_read_count_ceiling: verification.proof_input_store_read_count_ceiling,
+        total_local_storage_read_byte_length_ceiling,
+        maximum_boundary_live_payload_byte_length_ceiling: generation
+            .maximum_proof_descriptor_derivation_copy_live_set_byte_length_ceiling,
+        terminal_store_release_count: 1,
+        protocol_transport_byte_length: 0,
+    })
+}
+
+fn derive_partial_output_store_accounting(
+    canonical_material: SelectedTargetReleaseCanonicalMaterialAccounting,
+    generation: SelectedTargetReleaseGenerationModeAccounting,
+) -> Result<
+    SelectedTargetReleasePartialOutputStoreAccounting,
+    SelectedTargetReleaseStaticAccountingError,
+> {
+    if generation.partial_output_store_resolver_call_count
+        != u64::try_from(KLLPS_PAIRED_TARGET_ROLE_COUNT)
+            .map_err(|_| SelectedTargetReleaseStaticAccountingError::CountOverflow)?
+        || generation.partial_output_store_commit_byte_length
+            != canonical_material.paired_partial_stream_byte_length
+        || generation.partial_output_store_commit_count
+            != canonical_material.paired_partial_stream_chunk_count
+    {
+        return Err(SelectedTargetReleaseStaticAccountingError::InvalidSelectedProfile);
+    }
+    Ok(SelectedTargetReleasePartialOutputStoreAccounting {
+        lifetime_start_boundary: SelectedTargetReleaseProductionBoundary::PartialCommit,
+        lifetime_end_boundary: SelectedTargetReleaseProductionBoundary::OutputCertification,
+        store_count: generation.partial_output_store_resolver_call_count,
+        committed_payload_byte_length: generation.partial_output_store_commit_byte_length,
+        committed_chunk_count: generation.partial_output_store_commit_count,
+        immediate_commit_readback_byte_length: generation.partial_output_store_commit_byte_length,
+        immediate_commit_readback_count: generation.partial_output_store_commit_count,
+        fresh_verifier_read_byte_length: canonical_material.paired_partial_stream_byte_length,
+        fresh_verifier_read_count: canonical_material.paired_partial_stream_chunk_count,
+        total_local_storage_read_byte_length: checked_multiply(
+            canonical_material.paired_partial_stream_byte_length,
+            2,
+        )?,
+        maximum_boundary_live_payload_byte_length: generation
+            .maximum_partial_output_boundary_copy_live_set_byte_length,
+        terminal_store_release_count: generation.partial_output_store_resolver_call_count,
+        protocol_transport_byte_length: 0,
+    })
+}
+
+fn derive_state_certification_transport_accounting(
+    participant_count: u64,
+) -> Result<
+    SelectedTargetReleaseStateCertificationTransportAccounting,
+    SelectedTargetReleaseStaticAccountingError,
+> {
+    let suite_id = Hash512::from_bytes([0x31; Hash512::BYTE_LENGTH]);
+    let ceremony_context_hash = Hash512::from_bytes([0x32; Hash512::BYTE_LENGTH]);
+    let action_context_hash = Hash512::from_bytes([0x33; Hash512::BYTE_LENGTH]);
+    let subject_participant_id =
+        ParticipantIdentity::from_bytes([0x34; ParticipantIdentity::BYTE_LENGTH]);
+    let reservation_payload = StateReservationIntentPayload {
+        capability_kind: StateCapabilityKind::TargetRelease,
+        authorization_hash: Hash512::from_bytes([0x35; Hash512::BYTE_LENGTH]),
+    }
+    .encode()
+    .map_err(|_| SelectedTargetReleaseStaticAccountingError::CanonicalEncoding)?;
+    let (reservation_intent_carrier, reservation_intent_object_hash) =
+        canonical_state_carrier_for_accounting(
+            suite_id,
+            ceremony_context_hash,
+            action_context_hash,
+            subject_participant_id,
+            FoundationObjectType::StateReservation,
+            0,
+            reservation_payload,
+        )?;
+    let output_payload = StateOutputIntentPayload {
+        reservation_intent_object_hash,
+        exact_output_hash: Hash512::from_bytes([0x36; Hash512::BYTE_LENGTH]),
+    }
+    .encode()
+    .map_err(|_| SelectedTargetReleaseStaticAccountingError::CanonicalEncoding)?;
+    let (output_intent_carrier, output_intent_object_hash) =
+        canonical_state_carrier_for_accounting(
+            suite_id,
+            ceremony_context_hash,
+            action_context_hash,
+            subject_participant_id,
+            FoundationObjectType::StateOutputIntent,
+            0,
+            output_payload,
+        )?;
+    let witness_quorum = u64::from(FOUNDATION_PROFILE.state_witness_quorum);
+    let mut reservation_witness_carriers = Vec::new();
+    let mut output_witness_carriers = Vec::new();
+    for witness_ordinal in 0..FOUNDATION_PROFILE.state_witness_quorum {
+        let witness_marker = u8::try_from(witness_ordinal + 1)
+            .map_err(|_| SelectedTargetReleaseStaticAccountingError::CountOverflow)?;
+        let witness_participant_id =
+            ParticipantIdentity::from_bytes([witness_marker; ParticipantIdentity::BYTE_LENGTH]);
+        let reservation_vote_payload = StateWitnessVotePayload {
+            intent_object_hash: reservation_intent_object_hash,
+        }
+        .encode()
+        .map_err(|_| SelectedTargetReleaseStaticAccountingError::CanonicalEncoding)?;
+        reservation_witness_carriers.push(
+            canonical_state_carrier_for_accounting(
+                suite_id,
+                ceremony_context_hash,
+                action_context_hash,
+                witness_participant_id,
+                FoundationObjectType::StateWitnessVote,
+                derive_state_witness_vote_sequence(StateWitnessVoteKind::Reservation),
+                reservation_vote_payload,
+            )?
+            .0,
+        );
+        let output_vote_payload = StateWitnessVotePayload {
+            intent_object_hash: output_intent_object_hash,
+        }
+        .encode()
+        .map_err(|_| SelectedTargetReleaseStaticAccountingError::CanonicalEncoding)?;
+        output_witness_carriers.push(
+            canonical_state_carrier_for_accounting(
+                suite_id,
+                ceremony_context_hash,
+                action_context_hash,
+                witness_participant_id,
+                FoundationObjectType::StateWitnessVote,
+                derive_state_witness_vote_sequence(StateWitnessVoteKind::Output),
+                output_vote_payload,
+            )?
+            .0,
+        );
+    }
+    let reservation_witness_vote_carrier_byte_length =
+        uniform_encoded_byte_length(&reservation_witness_carriers)?;
+    let output_witness_vote_carrier_byte_length =
+        uniform_encoded_byte_length(&output_witness_carriers)?;
+    let reservation_certificate_byte_length = encoded_byte_length(
+        &StateCertificate::new(reservation_witness_carriers)
+            .map_err(|_| SelectedTargetReleaseStaticAccountingError::CanonicalEncoding)?
+            .encode()
+            .map_err(|_| SelectedTargetReleaseStaticAccountingError::CanonicalEncoding)?,
+    )?;
+    let output_certificate_byte_length = encoded_byte_length(
+        &StateCertificate::new(output_witness_carriers)
+            .map_err(|_| SelectedTargetReleaseStaticAccountingError::CanonicalEncoding)?
+            .encode()
+            .map_err(|_| SelectedTargetReleaseStaticAccountingError::CanonicalEncoding)?,
+    )?;
+    let reservation_intent_carrier_byte_length = encoded_byte_length(&reservation_intent_carrier)?;
+    let output_intent_carrier_byte_length = encoded_byte_length(&output_intent_carrier)?;
+    let one_share_subject_to_witness_request_byte_length = checked_multiply(
+        checked_add(
+            reservation_intent_carrier_byte_length,
+            output_intent_carrier_byte_length,
+        )?,
+        witness_quorum,
+    )?;
+    let one_share_witness_to_subject_response_byte_length = checked_multiply(
+        checked_add(
+            reservation_witness_vote_carrier_byte_length,
+            output_witness_vote_carrier_byte_length,
+        )?,
+        witness_quorum,
+    )?;
+    let one_share_public_state_attachment_byte_length = [
+        reservation_intent_carrier_byte_length,
+        reservation_certificate_byte_length,
+        output_intent_carrier_byte_length,
+        output_certificate_byte_length,
+    ]
+    .into_iter()
+    .try_fold(0_u64, checked_add)?;
+    Ok(SelectedTargetReleaseStateCertificationTransportAccounting {
+        lifetime_start_boundary: SelectedTargetReleaseProductionBoundary::ReservationCertification,
+        lifetime_end_boundary: SelectedTargetReleaseProductionBoundary::OutputCertification,
+        certification_round_count: 2,
+        witness_quorum,
+        reservation_intent_carrier_byte_length,
+        output_intent_carrier_byte_length,
+        reservation_witness_vote_carrier_byte_length,
+        output_witness_vote_carrier_byte_length,
+        reservation_certificate_byte_length,
+        output_certificate_byte_length,
+        one_share_subject_to_witness_request_byte_length,
+        one_share_witness_to_subject_response_byte_length,
+        one_share_public_state_attachment_byte_length,
+        complete_action_subject_to_witness_request_byte_length: checked_multiply(
+            one_share_subject_to_witness_request_byte_length,
+            participant_count,
+        )?,
+        complete_action_witness_to_subject_response_byte_length: checked_multiply(
+            one_share_witness_to_subject_response_byte_length,
+            participant_count,
+        )?,
+        complete_action_public_state_attachment_byte_length: checked_multiply(
+            one_share_public_state_attachment_byte_length,
+            participant_count,
+        )?,
+    })
+}
+
+fn canonical_state_carrier_for_accounting(
+    suite_id: Hash512,
+    ceremony_context_hash: Hash512,
+    action_context_hash: Hash512,
+    producer_participant_id: ParticipantIdentity,
+    object_type: FoundationObjectType,
+    producer_sequence: u64,
+    payload_bytes: Vec<u8>,
+) -> Result<(Vec<u8>, Hash512), SelectedTargetReleaseStaticAccountingError> {
+    let envelope = ObjectEnvelope {
+        suite_id,
+        object_type,
+        ceremony_context_hash,
+        action_context_hash,
+        producer_participant_id: Some(producer_participant_id),
+        producer_sequence,
+        ordered_prerequisite_hashes: Vec::new(),
+        payload_bytes,
+    };
+    let object_hash = envelope
+        .object_hash()
+        .map_err(|_| SelectedTargetReleaseStaticAccountingError::CanonicalEncoding)?;
+    let canonical_carrier = SignedCarrier {
+        envelope,
+        signature: [0_u8; ML_DSA_65_SIGNATURE_BYTE_LENGTH],
+    }
+    .encode()
+    .map_err(|_| SelectedTargetReleaseStaticAccountingError::CanonicalEncoding)?;
+    Ok((canonical_carrier, object_hash))
+}
+
+fn uniform_encoded_byte_length(
+    encoded_values: &[Vec<u8>],
+) -> Result<u64, SelectedTargetReleaseStaticAccountingError> {
+    let Some(first) = encoded_values.first() else {
+        return Err(SelectedTargetReleaseStaticAccountingError::InvalidSelectedProfile);
+    };
+    let expected = encoded_byte_length(first)?;
+    if encoded_values
+        .iter()
+        .any(|value| encoded_byte_length(value) != Ok(expected))
+    {
+        return Err(SelectedTargetReleaseStaticAccountingError::InvalidSelectedProfile);
+    }
+    Ok(expected)
+}
+
+fn encoded_byte_length(
+    encoded_value: &[u8],
+) -> Result<u64, SelectedTargetReleaseStaticAccountingError> {
+    u64::try_from(encoded_value.len())
+        .map_err(|_| SelectedTargetReleaseStaticAccountingError::CountOverflow)
+}
+
+fn derive_public_distribution_accounting(
+    canonical_material: SelectedTargetReleaseCanonicalMaterialAccounting,
+    state_certification: SelectedTargetReleaseStateCertificationTransportAccounting,
+    participant_count: u64,
+) -> Result<
+    SelectedTargetReleasePublicDistributionAccounting,
+    SelectedTargetReleaseStaticAccountingError,
+> {
+    let one_state_certified_share_path_byte_length_ceiling = checked_add(
+        canonical_material.one_target_share_bundle_byte_length_ceiling,
+        state_certification.one_share_public_state_attachment_byte_length,
+    )?;
+    let complete_public_corpus_byte_length_ceiling = checked_multiply(
+        one_state_certified_share_path_byte_length_ceiling,
+        participant_count,
+    )?;
+    let other_participant_recipient_count_per_share = participant_count
+        .checked_sub(1)
+        .ok_or(SelectedTargetReleaseStaticAccountingError::InvalidSelectedProfile)?;
+    let complete_action_peer_delivery_count = checked_multiply(
+        participant_count,
+        other_participant_recipient_count_per_share,
+    )?;
+    Ok(SelectedTargetReleasePublicDistributionAccounting {
+        lifetime_start_boundary: SelectedTargetReleaseProductionBoundary::OutputCertification,
+        lifetime_end_boundary: SelectedTargetReleaseProductionBoundary::FreshShareVerification,
+        publication_count: participant_count,
+        other_participant_recipient_count_per_share,
+        one_state_certified_share_path_byte_length_ceiling,
+        complete_public_corpus_byte_length_ceiling,
+        complete_action_publication_byte_length_ceiling: complete_public_corpus_byte_length_ceiling,
+        complete_action_peer_delivery_count,
+        complete_action_peer_delivery_byte_length_ceiling: checked_multiply(
+            one_state_certified_share_path_byte_length_ceiling,
+            complete_action_peer_delivery_count,
+        )?,
+        one_participant_clean_state_download_byte_length_ceiling:
+            complete_public_corpus_byte_length_ceiling,
+        local_storage_traffic_byte_length: 0,
+    })
+}
+
+fn derive_result_transition_accounting(
+    reconstruction: SelectedTargetReleaseReconstructionBufferAccounting,
+) -> Result<
+    SelectedTargetReleaseResultTransitionAccounting,
+    SelectedTargetReleaseStaticAccountingError,
+> {
+    let result_word_count = reconstruction
+        .reconstructed_result_byte_length
+        .checked_div(WASM_WORD_BYTE_LENGTH)
+        .ok_or(SelectedTargetReleaseStaticAccountingError::InvalidSelectedProfile)?;
+    if result_word_count != u64::from(FOUNDATION_PROFILE.option_count) {
+        return Err(SelectedTargetReleaseStaticAccountingError::InvalidSelectedProfile);
+    }
+    Ok(SelectedTargetReleaseResultTransitionAccounting {
+        lifetime_start_boundary: SelectedTargetReleaseProductionBoundary::Reconstruction,
+        lifetime_end_boundary: SelectedTargetReleaseProductionBoundary::JavascriptResultReturn,
+        transition_count: 1,
+        result_word_count,
+        rust_result_byte_length: reconstruction.reconstructed_result_byte_length,
+        wasm_to_javascript_copy_byte_length: reconstruction.reconstructed_result_byte_length,
+        maximum_boundary_live_byte_length: reconstruction
+            .reconstructed_result_boundary_copy_live_set_byte_length,
+        terminal_rust_handle_consumption_count: 1,
+        protocol_transport_byte_length: 0,
     })
 }
 
@@ -1391,16 +1939,53 @@ mod tests {
             fresh.required_store_owned_payload_byte_length_ceiling,
             TWO_CHUNK_PROOF_BYTE_LENGTH_CEILING + 4_194_436
         );
+        let proof_store = accounting.proof_output_store;
+        assert_eq!(proof_store.store_count, 1);
         assert_eq!(
-            accounting.gaps.as_ref(),
-            [
-                SelectedTargetReleaseStaticAccountingGap::InjectedProofOutputStorePersistenceAndRetainedCopyLiveness,
-                SelectedTargetReleaseStaticAccountingGap::InjectedPartialOutputStorePersistenceAndRetainedCopyLiveness,
-                SelectedTargetReleaseStaticAccountingGap::CallbackOwnedStateCertificationTraffic,
-                SelectedTargetReleaseStaticAccountingGap::PublicTargetShareDistributionFanout,
-                SelectedTargetReleaseStaticAccountingGap::ReconstructedResultStateAndTransportTransition,
-            ]
+            proof_store.committed_payload_byte_length_ceiling,
+            TWO_CHUNK_PROOF_BYTE_LENGTH_CEILING
         );
+        assert_eq!(proof_store.committed_chunk_count_ceiling, 2);
+        assert_eq!(
+            proof_store.total_local_storage_read_byte_length_ceiling,
+            TWO_CHUNK_PROOF_BYTE_LENGTH_CEILING * 3
+        );
+        assert_eq!(proof_store.terminal_store_release_count, 1);
+        assert_eq!(proof_store.protocol_transport_byte_length, 0);
+        let partial_store = accounting.partial_output_store;
+        assert_eq!(partial_store.store_count, 2);
+        assert_eq!(partial_store.committed_payload_byte_length, 4_194_436);
+        assert_eq!(partial_store.committed_chunk_count, 6);
+        assert_eq!(
+            partial_store.total_local_storage_read_byte_length,
+            8_388_872
+        );
+        assert_eq!(partial_store.terminal_store_release_count, 2);
+        assert_eq!(partial_store.protocol_transport_byte_length, 0);
+        let state_transport = accounting.state_certification_transport;
+        assert_eq!(state_transport.certification_round_count, 2);
+        assert_eq!(state_transport.witness_quorum, 7);
+        assert_eq!(
+            state_transport.complete_action_public_state_attachment_byte_length,
+            state_transport.one_share_public_state_attachment_byte_length * 10
+        );
+        let distribution = accounting.public_distribution;
+        assert_eq!(distribution.publication_count, 10);
+        assert_eq!(distribution.other_participant_recipient_count_per_share, 9);
+        assert_eq!(distribution.complete_action_peer_delivery_count, 90);
+        assert_eq!(
+            distribution.complete_public_corpus_byte_length_ceiling,
+            distribution.one_state_certified_share_path_byte_length_ceiling * 10
+        );
+        assert_eq!(distribution.local_storage_traffic_byte_length, 0);
+        let result_transition = accounting.result_transition;
+        assert_eq!(result_transition.transition_count, 1);
+        assert_eq!(result_transition.result_word_count, 20);
+        assert_eq!(result_transition.rust_result_byte_length, 80);
+        assert_eq!(result_transition.wasm_to_javascript_copy_byte_length, 80);
+        assert_eq!(result_transition.maximum_boundary_live_byte_length, 160);
+        assert_eq!(result_transition.terminal_rust_handle_consumption_count, 1);
+        assert_eq!(result_transition.protocol_transport_byte_length, 0);
         let subset_accounting = accounting.reconstruction_subset_operations;
         assert_eq!(subset_accounting.valid_subset_count, 210);
         assert!(
@@ -1422,6 +2007,30 @@ mod tests {
                 .minimum_operation_counts
                 .ciphertext_component_scale_multiplication_count,
             524_288
+        );
+    }
+
+    #[test]
+    fn target_release_production_carrier_catalog_rejects_missing_duplicate_and_wrong_lifetimes() {
+        let accounting =
+            derive_selected_target_release_static_accounting(TWO_CHUNK_PROOF_BYTE_LENGTH_CEILING)
+                .expect("selected target-release carrier catalog derives");
+        let carriers = target_release_production_carriers(&accounting);
+        assert_eq!(
+            validate_target_release_production_carriers(&carriers[..4]),
+            Err(SelectedTargetReleaseStaticAccountingError::MissingProductionCarrier)
+        );
+        let mut duplicate = carriers;
+        duplicate[4] = duplicate[0];
+        assert_eq!(
+            validate_target_release_production_carriers(&duplicate),
+            Err(SelectedTargetReleaseStaticAccountingError::DuplicateProductionCarrier)
+        );
+        let mut wrong_lifetime = carriers;
+        wrong_lifetime[0].ends_at = SelectedTargetReleaseProductionBoundary::FreshShareVerification;
+        assert_eq!(
+            validate_target_release_production_carriers(&wrong_lifetime),
+            Err(SelectedTargetReleaseStaticAccountingError::InvalidProductionCarrierLifetime)
         );
     }
 

@@ -253,7 +253,6 @@ impl From<RefusalReason> for RelinearizationRuntimeError {
 struct SelectedRelinearizationProofRuntimePlan {
     relation_plan: CommonProofRelationPlanCapability,
     limits: CommonProofRuntimeLimits,
-    proof_query_count: u32,
 }
 
 struct GeneratedRelinearizationComponentReadback {
@@ -805,11 +804,9 @@ fn selected_relinearization_proof_runtime_plan(
         Some(preparation_source.schedule_position()),
         None,
     )?;
-    let proof_query_count = relation_plan.proof_query_count()?;
     Ok(SelectedRelinearizationProofRuntimePlan {
         relation_plan,
         limits,
-        proof_query_count,
     })
 }
 
@@ -913,7 +910,6 @@ fn resolve_prepared_attempt(
     verified_reservation_binding: VerifiedStateReservationRuntimeBinding,
     board_source: &VerifiedBoardApplicationSource,
     preparation_source: &RelinearizationPreparationSource,
-    runtime_plan: &SelectedRelinearizationProofRuntimePlan,
     checkpoint_continuation: crate::foundation::AuthenticatedCheckpointContinuationSource,
 ) -> Result<PreparedActionProofAttemptSource, RelinearizationRuntimeError> {
     let statement_schema_identifier = preparation_source
@@ -934,16 +930,12 @@ fn resolve_prepared_attempt(
         statement_schema_identifier,
         preparation_source.canonical_application_statement_bytes(),
     ));
-    let proof_byte_length = u64::try_from(runtime_plan.limits.proof_byte_length())
-        .map_err(|_| RelinearizationRuntimeError::InvalidInput)?;
     resolve_prepared_action_proof_attempt_source(
         action_randomness_handle,
         verified_reservation_binding,
         board_source,
         application_slot,
         application_statement_hash,
-        proof_byte_length,
-        runtime_plan.proof_query_count,
         checkpoint_continuation,
     )
     .map_err(RelinearizationRuntimeError::ActionRandomnessRuntime)
@@ -1167,9 +1159,7 @@ fn prepare_generation(
         &preparation_source,
     )?;
     let runtime_plan = selected_relinearization_proof_runtime_plan(&preparation_source)?;
-    let checkpoint_schedule_digest = runtime_plan
-        .relation_plan
-        .checkpoint_schedule_digest(runtime_plan.limits)?;
+    let checkpoint_schedule_digest = runtime_plan.relation_plan.checkpoint_schedule_digest()?;
     let fresh_continuation =
         crate::foundation::AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
             checkpoint_lineage_identifier,
@@ -1180,7 +1170,6 @@ fn prepare_generation(
         verified_reservation_binding,
         &board_source,
         &preparation_source,
-        &runtime_plan,
         fresh_continuation,
     )?;
     let (generation_family_adapter, ordered_components) = match generation_mode {
@@ -1230,7 +1219,6 @@ fn prepare_generation(
                             verified_reservation_binding,
                             &board_source,
                             &resumed_preparation_source,
-                            &resumed_runtime_plan,
                             authenticated_continuation,
                         )
                         .map_err(resumed_generation_preparation_error)?;

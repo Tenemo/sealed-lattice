@@ -1230,7 +1230,6 @@ struct CollectiveProofRuntimePlan {
     compiled_relation_plan: CompiledRelationPlan,
     relation_plan: CommonProofRelationPlanCapability,
     limits: CommonProofRuntimeLimits,
-    proof_query_count: u32,
 }
 
 fn selected_collective_relation_plan() -> Result<CompiledRelationPlan, CommonProofRuntimeError> {
@@ -1265,14 +1264,10 @@ fn selected_collective_runtime_plan(
         None,
     )
     .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?;
-    let proof_query_count = relation_plan
-        .proof_query_count()
-        .map_err(|_| CommonProofRuntimeError::InvalidLimits)?;
     Ok(CollectiveProofRuntimePlan {
         compiled_relation_plan,
         relation_plan,
         limits,
-        proof_query_count,
     })
 }
 
@@ -1280,7 +1275,6 @@ fn resolve_collective_public_key_prepared_attempt(
     action_randomness_handle: u32,
     verified_reservation_binding: VerifiedStateReservationRuntimeBinding,
     session_handle: u32,
-    runtime_plan: &CollectiveProofRuntimePlan,
     checkpoint_continuation: AuthenticatedCheckpointContinuationSource,
 ) -> Result<PreparedPublicOnlyProofAttemptSource, CommonProofRuntimeError> {
     let (context, statement) = COLLECTIVE_PUBLIC_KEY_SESSION_REGISTRY.with(|registry| {
@@ -1316,9 +1310,6 @@ fn resolve_collective_public_key_prepared_attempt(
         Hash512::from_bytes(context.roster_hash),
         application_slot,
         statement_hash,
-        u64::try_from(runtime_plan.limits.proof_byte_length())
-            .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?,
-        runtime_plan.proof_query_count,
         checkpoint_continuation,
     )
     .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)
@@ -1350,7 +1341,6 @@ fn prepare_common_generation(
         &runtime_plan.relation_plan,
         context.protocol_version,
         &canonical_statement,
-        runtime_plan.limits,
     )
     .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
     let sources = CommonProofGenerationSources::public_only(
@@ -1417,7 +1407,7 @@ fn prepare_generation(
     let runtime_plan = selected_collective_runtime_plan(&canonical_statement)?;
     let checkpoint_schedule_digest = runtime_plan
         .relation_plan
-        .checkpoint_schedule_digest(runtime_plan.limits)
+        .checkpoint_schedule_digest()
         .map_err(|_| CommonProofRuntimeError::InvalidLimits)?;
     let fresh_continuation =
         AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
@@ -1428,7 +1418,6 @@ fn prepare_generation(
         action_randomness_handle,
         verified_reservation_binding,
         session_handle,
-        &runtime_plan,
         fresh_continuation,
     )?;
     let adapter = match generation_mode {
@@ -1463,7 +1452,6 @@ fn prepare_generation(
                         action_randomness_handle,
                         verified_reservation_binding,
                         session_handle,
-                        &runtime_plan,
                         continuation,
                     )?;
                     prepare_common_generation(session_handle, attempt, runtime_plan)

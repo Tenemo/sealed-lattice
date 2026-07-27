@@ -19,6 +19,7 @@ import {
     canonicalTupleVersion,
 } from '../canonical-tuple-constants.js';
 import type {
+    UntrustedStoragePhysicalAccountingSnapshot,
     UntrustedStorageTransaction,
     UntrustedStorageTransactionStore,
 } from '../untrusted-storage-transaction-store.js';
@@ -45,6 +46,9 @@ export const checkpointOperationIdentityBrand = Symbol(
 );
 export const checkpointLineageReservationBrand = Symbol(
     'checkpoint-lineage-reservation',
+);
+export const authenticatedCheckpointPhysicalAccountingScopeBrand = Symbol(
+    'authenticated-checkpoint-physical-accounting-scope',
 );
 const storedCheckpointManifestHeaderByteLength = 2 + identifierByteLength + 4;
 
@@ -75,6 +79,25 @@ export type CheckpointLineageReservation = Readonly<{
     readonly [checkpointLineageReservationBrand]: true;
     checkpointLineageIdentifier: Uint8Array;
 }>;
+
+/**
+ * Opaque lineage-scoped authority for diagnostic physical accounting. The
+ * issuing checkpoint store remains the sole owner of every counter.
+ */
+export type AuthenticatedCheckpointPhysicalAccountingScope = Readonly<{
+    readonly [authenticatedCheckpointPhysicalAccountingScopeBrand]: true;
+}>;
+
+export type AuthenticatedCheckpointPhysicalAccountingSnapshot =
+    UntrustedStoragePhysicalAccountingSnapshot &
+        Readonly<{
+            openCallCount: number;
+            openCiphertextByteLength: number;
+            openPlaintextByteLength: number;
+            sealCallCount: number;
+            sealCiphertextByteLength: number;
+            sealPlaintextByteLength: number;
+        }>;
 
 export type CheckpointBoundary = Readonly<{
     operationKind: number;
@@ -121,10 +144,16 @@ export type AuthenticatedCheckpointStore = Readonly<{
     close(): Promise<void>;
     copyAuthorityContext(): RuntimeStorageAuthorityContext;
     copyStorageInstanceIdentity(): Uint8Array;
+    copyPhysicalAccounting(
+        scope: AuthenticatedCheckpointPhysicalAccountingScope,
+    ): AuthenticatedCheckpointPhysicalAccountingSnapshot;
     beginOperation(
         privateRandomnessStreamAttemptIdentifier?: Uint8Array,
     ): Promise<CheckpointOperationIdentity>;
     evict(checkpointLineageIdentifier: Uint8Array): Promise<void>;
+    openPhysicalAccountingScope(
+        checkpointLineageIdentifier: Uint8Array,
+    ): Promise<AuthenticatedCheckpointPhysicalAccountingScope>;
     publish(input: {
         boundary: CheckpointBoundary;
         identity: CheckpointOperationIdentity;
@@ -133,6 +162,9 @@ export type AuthenticatedCheckpointStore = Readonly<{
     /** Releases process-local operation authority without evicting durable checkpoint state. */
     releaseOperationIdentity(
         identity: CheckpointOperationIdentity,
+    ): Promise<void>;
+    releasePhysicalAccountingScope(
+        scope: AuthenticatedCheckpointPhysicalAccountingScope,
     ): Promise<void>;
     releaseCheckpointLineageReservation(
         reservation: CheckpointLineageReservation,
@@ -1176,6 +1208,10 @@ export const closeTransactionAfterFailure = async (
 
 export const deleteAuthenticatedRecord = async (input: {
     logicalRecordKey: string;
+    observeOpenedRecord?: (opened: {
+        plaintext: Uint8Array;
+        sealedBytes: Uint8Array;
+    }) => void;
     operationDomain: string;
     protection: ReturnType<typeof createRuntimeRecordProtection>;
     store: UntrustedStorageTransactionStore;
@@ -1190,6 +1226,7 @@ export const deleteAuthenticatedRecord = async (input: {
     if (opened === undefined) {
         return;
     }
+    input.observeOpenedRecord?.(opened);
     opened.plaintext.fill(0);
     const transaction = await input.store.beginTransaction({
         lifetimeMilliseconds: input.transactionLifetimeMilliseconds,

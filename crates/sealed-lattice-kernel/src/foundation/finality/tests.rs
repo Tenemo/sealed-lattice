@@ -112,6 +112,7 @@ impl FinalityTestFixture {
             &self.roster,
             CanonicalBoardLimits {
                 maximum_ballot_attempts_per_participant: 4,
+                maximum_candidate_packages_per_action: 20,
                 maximum_retained_canonical_carrier_byte_length: 8 * 1024 * 1024,
                 maximum_unordered_carriers_per_batch: 128,
                 maximum_retained_transcript_objects: 512,

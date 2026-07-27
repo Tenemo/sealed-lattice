@@ -789,7 +789,6 @@ pub(crate) fn restore_pending_generated_galois_source(
 struct SelectedGaloisProofRuntimePlan {
     relation_plan: CommonProofRelationPlanCapability,
     limits: CommonProofRuntimeLimits,
-    proof_query_count: u32,
 }
 
 fn selected_galois_proof_runtime_plan(
@@ -819,11 +818,9 @@ fn selected_galois_proof_runtime_plan(
         Some(batch_schedule_position),
         None,
     )?;
-    let proof_query_count = relation_plan.proof_query_count()?;
     Ok(SelectedGaloisProofRuntimePlan {
         relation_plan,
         limits,
-        proof_query_count,
     })
 }
 
@@ -922,7 +919,6 @@ fn resolve_galois_prepared_attempt(
     verified_reservation_binding: VerifiedStateReservationRuntimeBinding,
     board_source: &VerifiedBoardApplicationSource,
     source: &SetupGenerationGaloisPreparationSource,
-    runtime_plan: &SelectedGaloisProofRuntimePlan,
     checkpoint_continuation: crate::foundation::AuthenticatedCheckpointContinuationSource,
 ) -> Result<PreparedActionProofAttemptSource, GaloisKeyShareRuntimeError> {
     let application_slot = ProofApplicationSlot::new(
@@ -940,16 +936,12 @@ fn resolve_galois_prepared_attempt(
         ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
         source.canonical_application_statement_bytes(),
     ));
-    let proof_byte_length = u64::try_from(runtime_plan.limits.proof_byte_length())
-        .map_err(|_| GaloisKeyShareRuntimeError::InvalidInput)?;
     resolve_prepared_action_proof_attempt_source(
         action_randomness_handle,
         verified_reservation_binding,
         board_source,
         application_slot,
         application_statement_hash,
-        proof_byte_length,
-        runtime_plan.proof_query_count,
         checkpoint_continuation,
     )
     .map_err(GaloisKeyShareRuntimeError::ActionRandomnessRuntime)
@@ -978,6 +970,11 @@ fn prepare_galois_common_generation(
         ),
     )
     .map_err(|_| GaloisKeyShareRuntimeError::Refusal(RefusalReason::WrongContext))?;
+    if statement.setup_proof_context_hash() != preparation_source.setup_proof_context_hash() {
+        return Err(GaloisKeyShareRuntimeError::Refusal(
+            RefusalReason::WrongContext,
+        ));
+    }
     let application = SetupGenerationGaloisApplication::from_decoded_statement(
         prepared_attempt,
         preparation_source.canonical_application_statement_bytes(),
@@ -1064,9 +1061,7 @@ fn prepare_galois_generation(
         preparation_source.canonical_application_statement_bytes(),
         preparation_source.batch_schedule_position(),
     )?;
-    let checkpoint_schedule_digest = runtime_plan
-        .relation_plan
-        .checkpoint_schedule_digest(runtime_plan.limits)?;
+    let checkpoint_schedule_digest = runtime_plan.relation_plan.checkpoint_schedule_digest()?;
     let fresh_continuation =
         crate::foundation::AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
             checkpoint_lineage_identifier,
@@ -1077,7 +1072,6 @@ fn prepare_galois_generation(
         verified_reservation_binding,
         &board_source,
         &preparation_source,
-        &runtime_plan,
         fresh_continuation,
     )?;
     let (generation_family_adapter, generated_source_authority) = match generation_mode {
@@ -1126,7 +1120,6 @@ fn prepare_galois_generation(
                         verified_reservation_binding,
                         &board_source,
                         &resumed_preparation_source,
-                        &resumed_runtime_plan,
                         authenticated_continuation,
                     )
                     .map_err(resumed_generation_preparation_error)?;

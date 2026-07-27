@@ -1,13 +1,14 @@
 //! Prefix-mode stacked-sumcheck prover.
 //!
-//! Local modification: explicit-point claim recording is implemented for the
-//! sealed-lattice WHIR reduction. See `UPSTREAM.md`.
+//! Local modifications implement explicit-point claim recording and expose an
+//! owned, one-round-at-a-time initial sumcheck state for the sealed-lattice
+//! WHIR reduction. See `UPSTREAM.md`.
 
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 
 use p3_challenger::{FieldChallenger, GrindingChallenger};
 use p3_field::{
-    ExtensionField, Field, PackedFieldExtension, PackedValue, TwoAdicField, dot_product,
+    dot_product, ExtensionField, Field, PackedFieldExtension, PackedValue, TwoAdicField,
 };
 use p3_multilinear_util::point::Point;
 use p3_multilinear_util::poly::Poly;
@@ -21,9 +22,9 @@ use crate::layout::witness::Table;
 use crate::layout::{LayoutStrategy, ProverMultiClaim, Witness};
 use crate::product_polynomial::ProductPolynomial;
 use crate::strategy::{SumcheckProver, VariableOrder};
-use crate::svo::{SvoPoint, calculate_accumulators_batch};
+use crate::svo::{calculate_accumulators_batch, SvoAccumulators, SvoPoint};
 use crate::table::{OpeningBatch, OpeningEvals, OpeningRequest};
-use crate::{Claim, SumcheckData, extrapolate_01inf};
+use crate::{extrapolate_01inf, Claim, SumcheckData};
 
 /// Stacked-sumcheck prover with prefix-first variable binding.
 ///
@@ -31,7 +32,7 @@ use crate::{Claim, SumcheckData, extrapolate_01inf};
 ///
 /// - Round one runs in SIMD-packed form.
 /// - Every later round runs on the residual product polynomial.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PrefixProver<F: Field, EF: ExtensionField<F>> {
     /// Recorded opening claims and the layout context that batches them.
     pub(crate) claims: StackedClaims<F, EF>,
@@ -42,13 +43,139 @@ pub struct PrefixProver<F: Field, EF: ExtensionField<F>> {
     pub(crate) poly: Poly<F>,
 }
 
+/// Owned prefix-layout state before the residual product sumcheck is formed.
+///
+/// Each call to [`Self::advance_round`] performs at most one initial sumcheck
+/// round, giving an enclosing prover an explicit cancellation or yield point
+/// between transcript challenges. Final residual polynomial construction is
+/// available only after every configured initial round has completed.
+#[derive(Debug)]
+pub struct PrefixInitialSumcheckProver<F: Field, EF: ExtensionField<F>> {
+    prover: PrefixProver<F, EF>,
+    batching_challenge: EF,
+    concrete_accumulators: Vec<SvoAccumulators<EF>>,
+    claimed_sum: EF,
+    folding_randomness: Vec<EF>,
+    virtual_claim_alpha_base: EF,
+}
+
+impl<F: TwoAdicField, EF: ExtensionField<F>> PrefixInitialSumcheckProver<F, EF> {
+    /// Returns the number of initial sumcheck rounds already completed.
+    pub fn completed_round_count(&self) -> usize {
+        self.folding_randomness.len()
+    }
+
+    /// Returns the number of initial sumcheck rounds still to be completed.
+    pub fn remaining_round_count(&self) -> usize {
+        self.prover
+            .claims
+            .folding
+            .saturating_sub(self.completed_round_count())
+    }
+
+    /// Advances exactly one initial sumcheck round when one remains.
+    ///
+    /// Returns `true` when a round was emitted and `false` after the initial
+    /// sumcheck is already complete. A `false` return has no transcript side
+    /// effects.
+    pub fn advance_round<Ch>(
+        &mut self,
+        sumcheck_data: &mut SumcheckData<F, EF>,
+        pow_bits: usize,
+        challenger: &mut Ch,
+    ) -> bool
+    where
+        Ch: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+    {
+        let round_index = self.completed_round_count();
+        if round_index >= self.prover.claims.folding {
+            return false;
+        }
+
+        let lagrange_weights = lagrange_weights_01inf_multi(&self.folding_randomness);
+        let mut constant_coefficient = EF::ZERO;
+        let mut leading_coefficient = EF::ZERO;
+
+        for accumulators in &self.concrete_accumulators {
+            constant_coefficient += dot_product::<EF, _, _>(
+                accumulators[round_index][0].iter().copied(),
+                lagrange_weights.iter().copied(),
+            );
+            leading_coefficient += dot_product::<EF, _, _>(
+                accumulators[round_index][1].iter().copied(),
+                lagrange_weights.iter().copied(),
+            );
+        }
+
+        for (virtual_claim, alpha_power) in self.prover.claims.virtual_claims.iter().zip(
+            self.batching_challenge
+                .shifted_powers(self.virtual_claim_alpha_base),
+        ) {
+            let accumulators = &virtual_claim.data;
+            constant_coefficient += alpha_power
+                * dot_product::<EF, _, _>(
+                    accumulators[round_index][0].iter().copied(),
+                    lagrange_weights.iter().copied(),
+                );
+            leading_coefficient += alpha_power
+                * dot_product::<EF, _, _>(
+                    accumulators[round_index][1].iter().copied(),
+                    lagrange_weights.iter().copied(),
+                );
+        }
+
+        let round_challenge = sumcheck_data.observe_and_sample(
+            challenger,
+            constant_coefficient,
+            leading_coefficient,
+            pow_bits,
+        );
+        self.claimed_sum = extrapolate_01inf(
+            constant_coefficient,
+            self.claimed_sum - constant_coefficient,
+            leading_coefficient,
+            round_challenge,
+        );
+        self.folding_randomness.push(round_challenge);
+        true
+    }
+
+    /// Converts the completed initial state into the residual sumcheck prover.
+    ///
+    /// When rounds remain, ownership is returned unchanged so a caller cannot
+    /// accidentally discard the live witness while probing completion.
+    pub fn try_finish(self) -> Result<(SumcheckProver<F, EF>, Point<EF>), Self> {
+        if self.remaining_round_count() != 0 {
+            return Err(self);
+        }
+
+        let folding_randomness = Point::new(self.folding_randomness);
+        let compressed = tracing::info_span!("compress_prefix_to_packed").in_scope(|| {
+            self.prover
+                .poly
+                .compress_prefix_to_packed(&folding_randomness, EF::ONE)
+        });
+        let weights = self
+            .prover
+            .residual_weights_packed(&folding_randomness, self.batching_challenge);
+        let product_polynomial =
+            ProductPolynomial::<F, EF>::new_packed(VariableOrder::Prefix, compressed, weights);
+        debug_assert_eq!(product_polynomial.dot_product(), self.claimed_sum);
+
+        Ok((
+            SumcheckProver::new(product_polynomial, self.claimed_sum),
+            folding_randomness,
+        ))
+    }
+}
+
 impl<F: TwoAdicField, EF: ExtensionField<F>> Layout<F, EF> for PrefixProver<F, EF> {
     fn from_witness(witness: Witness<F>) -> Self {
         // Move the witness fields out so the prover owns them outright.
         let parts = witness.into_parts();
         Self {
-            claims: StackedClaims::new(
-                parts.tables,
+            claims: StackedClaims::new_without_tables(
+                parts.table_shapes,
                 parts.placements,
                 parts.num_variables,
                 parts.folding,
@@ -107,10 +234,9 @@ impl<F: TwoAdicField, EF: ExtensionField<F>> Layout<F, EF> for PrefixProver<F, E
             "opening schedule must name at least one column"
         );
         // Sample the local-frame opening point from the transcript.
-        let table = &self.claims.tables[table_idx];
         let point = Point::expand_from_univariate(
             challenger.sample_algebra_element(),
-            table.num_variables(),
+            self.claims.num_variables_table(table_idx),
         );
 
         // Factorise the point once; every selected column reuses it.
@@ -122,7 +248,8 @@ impl<F: TwoAdicField, EF: ExtensionField<F>> Layout<F, EF> for PrefixProver<F, E
             .iter()
             .copied()
             .map(|poly_idx| {
-                let (eval, partial_evals) = point.eval(table.poly(poly_idx));
+                let poly = self.interleaved_table_polynomial(table_idx, poly_idx);
+                let (eval, partial_evals) = point.eval(&poly);
                 (Opening::new_with_data(poly_idx, eval, partial_evals), eval)
             })
             .unzip();
@@ -133,7 +260,8 @@ impl<F: TwoAdicField, EF: ExtensionField<F>> Layout<F, EF> for PrefixProver<F, E
             .iter()
             .copied()
             .map(|poly_idx| {
-                let (eval, partial_evals) = point.eval_next_prefix(table.poly(poly_idx));
+                let poly = self.interleaved_table_polynomial(table_idx, poly_idx);
+                let (eval, partial_evals) = point.eval_next_prefix(&poly);
                 (Opening::new_with_data(poly_idx, eval, partial_evals), eval)
             })
             .unzip();
@@ -168,8 +296,10 @@ impl<F: TwoAdicField, EF: ExtensionField<F>> Layout<F, EF> for PrefixProver<F, E
             !batch.is_empty(),
             "opening schedule must name at least one column"
         );
-        let table = &self.claims.tables[table_idx];
-        assert_eq!(point.num_variables(), table.num_variables());
+        assert_eq!(
+            point.num_variables(),
+            self.claims.num_variables_table(table_idx)
+        );
         challenger.observe_algebra_slice(point.as_slice());
 
         let point = SvoPoint::new_packed(self.claims.folding, &point);
@@ -178,7 +308,8 @@ impl<F: TwoAdicField, EF: ExtensionField<F>> Layout<F, EF> for PrefixProver<F, E
             .iter()
             .copied()
             .map(|poly_idx| {
-                let (evaluation, partial_evaluations) = point.eval(table.poly(poly_idx));
+                let poly = self.interleaved_table_polynomial(table_idx, poly_idx);
+                let (evaluation, partial_evaluations) = point.eval(&poly);
                 (
                     Opening::new_with_data(poly_idx, evaluation, partial_evaluations),
                     evaluation,
@@ -190,8 +321,8 @@ impl<F: TwoAdicField, EF: ExtensionField<F>> Layout<F, EF> for PrefixProver<F, E
             .iter()
             .copied()
             .map(|poly_idx| {
-                let (evaluation, partial_evaluations) =
-                    point.eval_next_prefix(table.poly(poly_idx));
+                let poly = self.interleaved_table_polynomial(table_idx, poly_idx);
+                let (evaluation, partial_evaluations) = point.eval_next_prefix(&poly);
                 (
                     Opening::new_with_data(poly_idx, evaluation, partial_evaluations),
                     evaluation,
@@ -227,40 +358,20 @@ impl<F: TwoAdicField, EF: ExtensionField<F>> Layout<F, EF> for PrefixProver<F, E
             self.claims.num_variables,
         );
 
-        let mut eval = EF::ZERO;
-        let mut openings = Vec::new();
-        let mut weights = Vec::new();
-
-        for placement in &self.claims.placements {
-            let table = &self.claims.tables[placement.idx()];
-            for (poly_idx, selector) in placement.selectors().iter().enumerate() {
-                let poly = table.poly(poly_idx);
-
-                let (local_part, selector_part) = point.split_at(table.num_variables());
-
-                let weight =
-                    Point::eval_eq::<EF>(selector.point().as_slice(), selector_part.as_slice());
-
-                let local_svo = SvoPoint::new_packed(self.claims.folding, &local_part);
-                let (column_eval, partial_evals) = local_svo.eval(poly);
-
-                eval += weight * column_eval;
-                openings.push(Opening {
-                    poly_idx: None,
-                    eval: column_eval,
-                    data: partial_evals,
-                });
-                weights.push(weight);
-            }
-        }
+        let full_svo = SvoPoint::new_packed(self.claims.folding, &point);
+        let (eval, partial_evals) = full_svo.eval(&self.poly);
 
         let accumulators = calculate_accumulators_batch(
             &ProverMultiClaim::new(
                 SvoPoint::new_unpacked(self.claims.folding, &point, VariableOrder::Prefix),
-                openings,
+                vec![Opening {
+                    poly_idx: None,
+                    eval,
+                    data: partial_evals,
+                }],
                 Vec::new(),
             ),
-            &weights,
+            &[EF::ONE],
         );
 
         // Commit the evaluation to the transcript.
@@ -307,80 +418,12 @@ impl<F: TwoAdicField, EF: ExtensionField<F>> Layout<F, EF> for PrefixProver<F, E
     where
         Ch: FieldChallenger<F> + GrindingChallenger<Witness = F>,
     {
-        // Sanity: preprocessing cannot consume more rounds than the stacked arity.
-        assert!(self.claims.folding <= self.claims.num_variables);
-
-        let alpha: EF = challenger.sample_algebra_element();
-        let n_claims = self.num_claims();
-
-        let mut alphas = alpha.powers();
-        let accumulators: Vec<_> = self
-            .claims
-            .concrete_claims()
-            .map(|claim| {
-                let per_claim: Vec<EF> = alphas.by_ref().take(claim.len()).collect();
-                calculate_accumulators_batch(claim, &per_claim)
-            })
-            .collect();
-
-        let mut sum = self.claims.sum(alpha);
-        let mut rs = Vec::new();
-
-        // First alpha power assigned to the virtual claims, sitting just past the concrete claims.
-        // The claim count is fixed for the whole fold, so this exponentiation is loop-invariant.
-        let alpha_base = alpha.exp_u64(n_claims as u64);
-
-        for round_idx in 0..self.claims.folding {
-            let weights = lagrange_weights_01inf_multi(&rs);
-
-            let mut c0 = EF::ZERO;
-            let mut c_inf = EF::ZERO;
-
-            for accs in &accumulators {
-                c0 += dot_product::<EF, _, _>(
-                    accs[round_idx][0].iter().copied(),
-                    weights.iter().copied(),
-                );
-                c_inf += dot_product::<EF, _, _>(
-                    accs[round_idx][1].iter().copied(),
-                    weights.iter().copied(),
-                );
-            }
-
-            for (vc, alpha_i) in self
-                .claims
-                .virtual_claims
-                .iter()
-                .zip(alpha.shifted_powers(alpha_base))
-            {
-                let vc_accs = &vc.data;
-                c0 += alpha_i
-                    * dot_product::<EF, _, _>(
-                        vc_accs[round_idx][0].iter().copied(),
-                        weights.iter().copied(),
-                    );
-                c_inf += alpha_i
-                    * dot_product::<EF, _, _>(
-                        vc_accs[round_idx][1].iter().copied(),
-                        weights.iter().copied(),
-                    );
-            }
-
-            let r = sumcheck_data.observe_and_sample(challenger, c0, c_inf, pow_bits);
-            sum = extrapolate_01inf(c0, sum - c0, c_inf, r);
-            rs.push(r);
+        let mut initial_sumcheck = self.begin_initial_sumcheck(challenger);
+        while initial_sumcheck.advance_round(sumcheck_data, pow_bits, challenger) {}
+        match initial_sumcheck.try_finish() {
+            Ok(output) => output,
+            Err(_) => unreachable!("all prefix initial sumcheck rounds were advanced"),
         }
-
-        let rs = Point::new(rs);
-        let compressed = tracing::info_span!("compress_prefix_to_packed")
-            .in_scope(|| self.poly.compress_prefix_to_packed(&rs, EF::ONE));
-
-        let weights = self.residual_weights_packed(&rs, alpha);
-        let prod_poly =
-            ProductPolynomial::<F, EF>::new_packed(VariableOrder::Prefix, compressed, weights);
-        debug_assert_eq!(prod_poly.dot_product(), sum);
-
-        (SumcheckProver::new(prod_poly, sum), rs)
     }
 
     fn strategy() -> LayoutStrategy {
@@ -389,6 +432,67 @@ impl<F: TwoAdicField, EF: ExtensionField<F>> Layout<F, EF> for PrefixProver<F, E
 }
 
 impl<F: TwoAdicField, EF: ExtensionField<F>> PrefixProver<F, EF> {
+    /// Reconstructs one source column from the interleaved committed
+    /// polynomial. The temporary owns only one column and is released after
+    /// its opening claim is recorded.
+    fn interleaved_table_polynomial(&self, table_index: usize, column_index: usize) -> Poly<F> {
+        let table_variable_count = self.claims.num_variables_table(table_index);
+        let placement = self
+            .claims
+            .placements
+            .iter()
+            .find(|placement| placement.idx() == table_index)
+            .expect("every table shape has a planned placement");
+        let selector = &placement.selectors()[column_index];
+        let values = (0..1_usize << table_variable_count)
+            .map(|local_index| {
+                self.poly.as_slice()[(local_index << selector.num_variables()) | selector.index()]
+            })
+            .collect();
+        Poly::new(values)
+    }
+
+    /// Starts the owned, incrementally advanced initial sumcheck state.
+    ///
+    /// This samples the batching challenge and prepares claim accumulators but
+    /// does not emit a sumcheck round. The caller controls every subsequent
+    /// round through [`PrefixInitialSumcheckProver::advance_round`].
+    pub fn begin_initial_sumcheck<Ch>(
+        self,
+        challenger: &mut Ch,
+    ) -> PrefixInitialSumcheckProver<F, EF>
+    where
+        Ch: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+    {
+        assert!(self.claims.folding <= self.claims.num_variables);
+
+        let batching_challenge: EF = challenger.sample_algebra_element();
+        let concrete_claim_count = self.num_claims();
+        let mut batching_challenge_powers = batching_challenge.powers();
+        let concrete_accumulators = self
+            .claims
+            .concrete_claims()
+            .map(|claim| {
+                let claim_batching_coefficients = batching_challenge_powers
+                    .by_ref()
+                    .take(claim.len())
+                    .collect::<Vec<_>>();
+                calculate_accumulators_batch(claim, &claim_batching_coefficients)
+            })
+            .collect();
+        let claimed_sum = self.claims.sum(batching_challenge);
+        let virtual_claim_alpha_base = batching_challenge.exp_u64(concrete_claim_count as u64);
+
+        PrefixInitialSumcheckProver {
+            prover: self,
+            batching_challenge,
+            concrete_accumulators,
+            claimed_sum,
+            folding_randomness: Vec::new(),
+            virtual_claim_alpha_base,
+        }
+    }
+
     /// Builds the residual equality weights in packed form.
     ///
     /// Two routes produce the identical polynomial; each call takes the cheaper one:
@@ -645,9 +749,9 @@ mod tests {
 
     use super::*;
     use crate::layout::prover::test_utils::{
-        FOLDING, arb_opening_schedule, arb_witness_and_schedule, build_tables, tables_from_shape,
+        arb_opening_schedule, arb_witness_and_schedule, build_tables, tables_from_shape, FOLDING,
     };
-    use crate::tests::{EF, F, challenger};
+    use crate::tests::{challenger, EF, F};
 
     /// Replays a schedule plus virtual claims, then pins packed against scalar.
     fn assert_packed_matches_scalar(
@@ -725,11 +829,9 @@ mod tests {
         let alpha: EF = ch.sample_algebra_element();
         let rs = Point::expand_from_univariate(ch.sample_algebra_element(), FOLDING);
         let packed = prover.combine_weights_packed(&rs, alpha);
-        assert!(
-            packed
-                .iter()
-                .all(|&w| w == <EF as ExtensionField<F>>::ExtensionPacking::ZERO)
-        );
+        assert!(packed
+            .iter()
+            .all(|&w| w == <EF as ExtensionField<F>>::ExtensionPacking::ZERO));
     }
 
     #[test]
@@ -737,6 +839,59 @@ mod tests {
         // No concrete openings: only the virtual-claim accumulation contributes.
         let witness = PrefixProver::<F, EF>::new_witness(build_tables(), FOLDING);
         assert_packed_matches_scalar(witness, &[], 2);
+    }
+
+    #[test]
+    fn initial_sumcheck_advances_one_round_and_replays_after_cancellation() {
+        let cancelled_witness = PrefixProver::<F, EF>::new_witness(build_tables(), FOLDING);
+        let mut cancelled_prover = PrefixProver::<F, EF>::from_witness(cancelled_witness);
+        let mut cancelled_transcript = challenger();
+        cancelled_prover.eval(
+            0,
+            &OpeningBatch::new(vec![0], Vec::new()),
+            &mut cancelled_transcript,
+        );
+        let _ = cancelled_prover.add_virtual_eval(&mut cancelled_transcript);
+        let mut cancelled_state =
+            cancelled_prover.begin_initial_sumcheck(&mut cancelled_transcript);
+        let mut cancelled_proof = SumcheckData::default();
+        assert_eq!(cancelled_state.completed_round_count(), 0);
+        assert_eq!(cancelled_state.remaining_round_count(), FOLDING);
+        assert!(cancelled_state.advance_round(&mut cancelled_proof, 0, &mut cancelled_transcript,));
+        assert_eq!(cancelled_state.completed_round_count(), 1);
+        assert_eq!(cancelled_state.remaining_round_count(), FOLDING - 1);
+        let cancelled_first_round = cancelled_proof.polynomial_evaluations.clone();
+        drop(cancelled_state);
+
+        let replayed_witness = PrefixProver::<F, EF>::new_witness(build_tables(), FOLDING);
+        let mut replayed_prover = PrefixProver::<F, EF>::from_witness(replayed_witness);
+        let mut replayed_transcript = challenger();
+        replayed_prover.eval(
+            0,
+            &OpeningBatch::new(vec![0], Vec::new()),
+            &mut replayed_transcript,
+        );
+        let _ = replayed_prover.add_virtual_eval(&mut replayed_transcript);
+        let mut replayed_state = replayed_prover.begin_initial_sumcheck(&mut replayed_transcript);
+        let mut replayed_proof = SumcheckData::default();
+        assert!(replayed_state.advance_round(&mut replayed_proof, 0, &mut replayed_transcript,));
+        assert_eq!(replayed_proof.polynomial_evaluations, cancelled_first_round);
+
+        let mut replayed_state = match replayed_state.try_finish() {
+            Ok(_) => panic!("incomplete initial sumcheck must not finish"),
+            Err(state) => state,
+        };
+        while replayed_state.advance_round(&mut replayed_proof, 0, &mut replayed_transcript) {}
+        assert_eq!(replayed_proof.num_rounds(), FOLDING);
+        assert!(!replayed_state.advance_round(&mut replayed_proof, 0, &mut replayed_transcript,));
+        let (residual_prover, folding_randomness) = replayed_state
+            .try_finish()
+            .expect("completed initial sumcheck");
+        assert_eq!(folding_randomness.num_variables(), FOLDING);
+        assert_eq!(
+            residual_prover.num_variables(),
+            PrefixProver::<F, EF>::new_witness(build_tables(), FOLDING).num_variables() - FOLDING
+        );
     }
 
     proptest! {

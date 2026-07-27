@@ -26,16 +26,19 @@ use crate::{
     foundation::{
         ActionPrivateRandomness, BOARD_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH,
         CanonicalDecodeLimits, FOUNDATION_PROFILE, FoundationObjectType, FoundationSchemaError,
-        Hash512, ParticipantIdentity, PersistentProofCoinInput, PreparedActionProofAttemptSource,
-        PrivateRandomnessDomain, ProofApplicationBinding, ProofApplicationSlot,
-        ProofApplicationSlotCeilings, ProofObjectHeader, RefusalReason,
-        STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, SignedMailboxEnvelope,
-        VerifiedBoardApplicationSource, VerifiedStateReservationRuntimeBinding,
-        bind_prepared_action_proof_attempt_to_canonical_witness,
-        consume_authenticated_mailbox_plaintext_capability,
+        Hash512, ObjectEnvelope, ParticipantIdentity, PersistentProofCoinInput,
+        PreparedActionProofAttemptSource, PreparedSignedCarrierDescription,
+        PrivateRandomnessDomain, PrivateShareAcceptancePayload, ProofApplicationBinding,
+        ProofApplicationSlot, ProofApplicationSlotCeilings, ProofObjectHeader, RefusalReason,
+        Roster, STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, SignedCarrier,
+        SignedMailboxEnvelope, VerifiedBoardApplicationSource,
+        VerifiedStateReservationRuntimeBinding,
+        bind_prepared_action_proof_attempt_to_canonical_witness, cancel_prepared_signed_carrier,
+        consume_authenticated_mailbox_plaintext_capability, finish_prepared_signed_carrier,
         resolve_prepared_action_proof_attempt_source, resolve_verified_board_application_sources,
-        retain_action_private_randomness_for_exact_family, selected_sharing_data_prime_coordinates,
-        selected_target_data_prime_coordinates, verified_state_reservation_binding,
+        retain_action_private_randomness_for_exact_family, retain_prepared_signed_carrier,
+        selected_sharing_data_prime_coordinates, selected_target_data_prime_coordinates,
+        verified_state_reservation_binding,
     },
 };
 
@@ -47,19 +50,20 @@ use super::{
     CommonProofRelationPlanCapabilityError, CommonProofRuntimeError, CommonProofRuntimeLimits,
     CommonProofSelectedSuiteCapabilityHandle, ConsumedVerifiedCommonProofCapability,
     PreparedCommonProofGeneration, PrivateRandomnessCommonProofCoinSource, ProofProfileError,
-    RecipientPrivateVssPayloadError, RelationPlanError, SelectedProofAccountingError,
-    canonical_selected_aggregate_threshold_share_statement,
+    RecipientPrivateVssPayloadError, RelationPlanError, SelectedApplicationStatementContext,
+    SelectedProofAccountingError, canonical_selected_aggregate_threshold_share_statement,
     canonical_selected_vss_share_linkage_statement,
     compile_aggregate_threshold_share_relation_plan,
     consume_ordered_verified_vss_share_linkage_terminals, decode_recipient_private_vss_payload,
-    selected_committed_material_profile, selected_committed_material_relation_plan_input,
-    selected_proof_runtime_limits, selected_relation_plan_check_context,
-    verified_application_statement_hash,
+    decode_selected_aggregate_threshold_share_statement, selected_committed_material_profile,
+    selected_committed_material_relation_plan_input, selected_proof_runtime_limits,
+    selected_relation_plan_check_context, verified_application_statement_hash,
 };
 
 use super::runtime_ffi::{
     CommonProofGenerationFamilyAdapter, CommonProofGenerationFamilyAdapterDescription,
     bind_generated_common_proof_to_verified_board_source,
+    preflight_generated_common_proof_pending_statement,
     retain_common_proof_generation_family_adapter,
     retain_common_proof_verification_family_adapter_from_upstream,
     with_common_proof_selected_suite,
@@ -1276,6 +1280,19 @@ impl<Source> SingleActiveAggregateSourceRegistry<Source> {
             ))
     }
 
+    fn source_mut(
+        &mut self,
+        handle: u32,
+    ) -> Result<&mut Source, AggregateThresholdShareRuntimeError> {
+        self.active
+            .as_mut()
+            .filter(|(active_handle, _)| *active_handle == handle)
+            .map(|(_, source)| source)
+            .ok_or(AggregateThresholdShareRuntimeError::Runtime(
+                CommonProofRuntimeError::UnknownOrStaleHandle,
+            ))
+    }
+
     fn take(&mut self, handle: u32) -> Result<Source, AggregateThresholdShareRuntimeError> {
         self.source(handle)?;
         self.active.take().map(|(_, source)| source).ok_or(
@@ -1302,6 +1319,21 @@ impl<Source> SingleActiveAggregateSourceRegistry<Source> {
 
 struct AggregateGenerationBoardBindingSource {
     recipient_authority_handle: u32,
+    private_share_acceptance_carrier_state: PrivateShareAcceptanceCarrierState,
+}
+
+enum PrivateShareAcceptanceCarrierState {
+    Available,
+    Prepared {
+        carrier_handle: u32,
+        object_hash: Hash512,
+        proof_descriptor: crate::foundation::StreamDescriptor,
+    },
+    Published {
+        object_hash: Hash512,
+        proof_descriptor: crate::foundation::StreamDescriptor,
+    },
+    Spent,
 }
 
 thread_local! {
@@ -1313,7 +1345,6 @@ thread_local! {
 struct SelectedAggregateProofRuntimePlan {
     relation_plan: CommonProofRelationPlanCapability,
     limits: CommonProofRuntimeLimits,
-    proof_query_count: u32,
 }
 
 fn selected_aggregate_proof_runtime_plan(
@@ -1340,11 +1371,9 @@ fn selected_aggregate_proof_runtime_plan(
         None,
         None,
     )?;
-    let proof_query_count = relation_plan.proof_query_count()?;
     Ok(SelectedAggregateProofRuntimePlan {
         relation_plan,
         limits,
-        proof_query_count,
     })
 }
 
@@ -1473,7 +1502,6 @@ fn resolve_aggregate_prepared_attempt(
     verified_reservation_binding: VerifiedStateReservationRuntimeBinding,
     setup_intent_source: &VerifiedBoardApplicationSource,
     authority: &AggregateThresholdShareRecipientAuthority,
-    runtime_plan: &SelectedAggregateProofRuntimePlan,
     checkpoint_continuation: crate::foundation::AuthenticatedCheckpointContinuationSource,
 ) -> Result<PreparedActionProofAttemptSource, AggregateThresholdShareRuntimeError> {
     let verified_public_randomness = authority.verified_public_randomness.as_ref().ok_or(
@@ -1498,16 +1526,12 @@ fn resolve_aggregate_prepared_attempt(
         ProofApplicationSlotCeilings::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
         &generation_material.canonical_application_statement_bytes,
     ));
-    let proof_byte_length = u64::try_from(runtime_plan.limits.proof_byte_length())
-        .map_err(|_| AggregateThresholdShareRuntimeError::InvalidInput)?;
     resolve_prepared_action_proof_attempt_source(
         action_randomness_handle,
         verified_reservation_binding,
         setup_intent_source,
         application_slot,
         application_statement_hash,
-        proof_byte_length,
-        runtime_plan.proof_query_count,
         checkpoint_continuation,
     )
     .map_err(AggregateThresholdShareRuntimeError::ActionRandomnessRuntime)
@@ -1633,7 +1657,6 @@ fn prepare_aggregate_common_generation(
                 &relation_plan,
                 verified_public_randomness.context().protocol_version(),
                 &generation_material.canonical_application_statement_bytes,
-                limits,
             )?;
         let attempt_identifier = witness_bound_attempt.private_randomness_attempt_identifier();
         let coordinate_capacity =
@@ -1742,9 +1765,7 @@ pub(crate) fn prepare_aggregate_threshold_share_generation(
         })?;
     let runtime_plan =
         selected_aggregate_proof_runtime_plan(&canonical_application_statement_bytes)?;
-    let checkpoint_schedule_digest = runtime_plan
-        .relation_plan
-        .checkpoint_schedule_digest(runtime_plan.limits)?;
+    let checkpoint_schedule_digest = runtime_plan.relation_plan.checkpoint_schedule_digest()?;
     let fresh_continuation =
         crate::foundation::AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
             checkpoint_lineage_identifier,
@@ -1759,7 +1780,6 @@ pub(crate) fn prepare_aggregate_threshold_share_generation(
                 verified_reservation_binding,
                 &setup_intent_source,
                 authority,
-                &runtime_plan,
                 fresh_continuation,
             )
         })?;
@@ -1807,7 +1827,6 @@ pub(crate) fn prepare_aggregate_threshold_share_generation(
                             verified_reservation_binding,
                             &setup_intent_source,
                             authority,
-                            &resumed_runtime_plan,
                             authenticated_continuation,
                         )
                         .map_err(resumed_aggregate_generation_preparation_error)
@@ -1829,6 +1848,8 @@ pub(crate) fn prepare_aggregate_threshold_share_generation(
                 .borrow_mut()
                 .retain(AggregateGenerationBoardBindingSource {
                     recipient_authority_handle,
+                    private_share_acceptance_carrier_state:
+                        PrivateShareAcceptanceCarrierState::Available,
                 })
         })?;
     match retain_common_proof_generation_family_adapter(generation_family_adapter) {
@@ -1975,6 +1996,274 @@ fn canonical_aggregate_statement_for_acceptance(
     .map_err(|_| AggregateThresholdShareRuntimeError::Refusal(RefusalReason::WrongTypeOrLength))
 }
 
+fn decode_exact_private_share_roster(
+    canonical_roster_bytes: &[u8],
+) -> Result<Roster, AggregateThresholdShareRuntimeError> {
+    if canonical_roster_bytes.is_empty()
+        || canonical_roster_bytes.len() > FOUNDATION_PROFILE.maximum_copied_buffer_byte_length
+    {
+        return Err(AggregateThresholdShareRuntimeError::Refusal(
+            if canonical_roster_bytes.is_empty() {
+                RefusalReason::WrongTypeOrLength
+            } else {
+                RefusalReason::OutsideSupportedProfile
+            },
+        ));
+    }
+    let roster = Roster::decode(canonical_roster_bytes, &CanonicalDecodeLimits::default())?;
+    if roster.encode()? != canonical_roster_bytes {
+        return Err(AggregateThresholdShareRuntimeError::Refusal(
+            RefusalReason::MalformedEncoding,
+        ));
+    }
+    roster.require_selected_profile_size()?;
+    Ok(roster)
+}
+
+/// Retains the exact recipient-signed private-share acceptance only after the
+/// generated proof is complete and its descriptor matches the canonical
+/// aggregate statement owned by this generation attempt.
+pub(crate) fn prepare_aggregate_threshold_share_private_share_acceptance_carrier(
+    generated_common_proof_handle: u32,
+    board_binding_source_handle: u32,
+    canonical_roster_bytes: &[u8],
+) -> Result<PreparedSignedCarrierDescription, AggregateThresholdShareRuntimeError> {
+    let recipient_authority_handle =
+        AGGREGATE_GENERATION_BOARD_BINDING_SOURCE_REGISTRY.with(|registry| {
+            let registry = registry.borrow();
+            let source = registry.source(board_binding_source_handle)?;
+            if !matches!(
+                &source.private_share_acceptance_carrier_state,
+                PrivateShareAcceptanceCarrierState::Available
+            ) {
+                return Err(AggregateThresholdShareRuntimeError::Refusal(
+                    RefusalReason::ConsumedState,
+                ));
+            }
+            Ok::<_, AggregateThresholdShareRuntimeError>(source.recipient_authority_handle)
+        })?;
+    let canonical_statement =
+        AGGREGATE_THRESHOLD_SHARE_RECIPIENT_AUTHORITY_REGISTRY.with(|registry| {
+            let registry = registry.borrow();
+            let authority = registry.authority(recipient_authority_handle)?;
+            authority
+                .generation_material
+                .as_ref()
+                .ok_or(AggregateThresholdShareRuntimeError::Refusal(
+                    RefusalReason::MissingPrerequisite,
+                ))
+                .map(|material| material.canonical_application_statement_bytes.clone())
+        })?;
+    let statement = decode_selected_aggregate_threshold_share_statement(
+        &canonical_statement,
+        SelectedApplicationStatementContext::new(
+            FOUNDATION_PROFILE.protocol_version,
+            AGGREGATE_THRESHOLD_SHARE_RECIPIENT_AUTHORITY_REGISTRY.with(|registry| {
+                let registry = registry.borrow();
+                let authority = registry.authority(recipient_authority_handle)?;
+                let verified_public_randomness =
+                    authority.verified_public_randomness.as_ref().ok_or(
+                        AggregateThresholdShareRuntimeError::Refusal(RefusalReason::ConsumedState),
+                    )?;
+                Ok::<_, AggregateThresholdShareRuntimeError>(
+                    verified_public_randomness
+                        .context()
+                        .suite_identifier()
+                        .into_bytes(),
+                )
+            })?,
+            None,
+            None,
+        ),
+    )
+    .map_err(|_| AggregateThresholdShareRuntimeError::Refusal(RefusalReason::WrongTypeOrLength))?;
+    AGGREGATE_THRESHOLD_SHARE_RECIPIENT_AUTHORITY_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let authority = registry.authority(recipient_authority_handle)?;
+        let verified_public_randomness = authority.verified_public_randomness.as_ref().ok_or(
+            AggregateThresholdShareRuntimeError::Refusal(RefusalReason::ConsumedState),
+        )?;
+        let context = verified_public_randomness.context();
+        if statement.protocol_version() != context.protocol_version()
+            || statement.suite_identifier() != context.suite_identifier().into_bytes()
+            || statement.ceremony_context_hash() != context.ceremony_context_hash().into_bytes()
+            || statement.action_context_hash() != context.action_context_hash().into_bytes()
+            || statement.roster_hash() != context.roster_hash().into_bytes()
+            || statement.participant_identity() != authority.local_recipient_identity.into_bytes()
+            || statement.roster_position() != authority.local_recipient_roster_position
+        {
+            return Err(AggregateThresholdShareRuntimeError::Refusal(
+                RefusalReason::WrongContext,
+            ));
+        }
+        Ok::<_, AggregateThresholdShareRuntimeError>(())
+    })?;
+    let proof_descriptor = preflight_generated_common_proof_pending_statement(
+        generated_common_proof_handle,
+        ProofApplicationSlotCeilings::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+        Some(statement.roster_position()),
+        None,
+        &canonical_statement,
+    )?;
+    let roster = decode_exact_private_share_roster(canonical_roster_bytes)?;
+    if roster.roster_hash()?.into_bytes() != statement.roster_hash() {
+        return Err(AggregateThresholdShareRuntimeError::Refusal(
+            RefusalReason::WrongHashOrRoot,
+        ));
+    }
+    let roster_entry = roster
+        .entries
+        .get(usize::from(statement.roster_position()))
+        .ok_or(AggregateThresholdShareRuntimeError::Refusal(
+            RefusalReason::WrongContext,
+        ))?;
+    if roster_entry.participant_identity()?.into_bytes() != statement.participant_identity() {
+        return Err(AggregateThresholdShareRuntimeError::Refusal(
+            RefusalReason::WrongContext,
+        ));
+    }
+
+    let payload = PrivateShareAcceptancePayload::new(
+        Hash512::from_bytes(statement.recipient_input_root()),
+        statement
+            .ordered_aggregate_threshold_roots()
+            .iter()
+            .copied()
+            .map(Hash512::from_bytes)
+            .collect(),
+        proof_descriptor.clone(),
+    )?;
+    let envelope = ObjectEnvelope {
+        suite_id: Hash512::from_bytes(statement.suite_identifier()),
+        object_type: FoundationObjectType::PrivateShareAcceptance,
+        ceremony_context_hash: Hash512::from_bytes(statement.ceremony_context_hash()),
+        action_context_hash: Hash512::from_bytes(statement.action_context_hash()),
+        producer_participant_id: Some(ParticipantIdentity::from_bytes(
+            statement.participant_identity(),
+        )),
+        producer_sequence: 0,
+        ordered_prerequisite_hashes: Vec::new(),
+        payload_bytes: payload.encode()?,
+    };
+    let object_hash = envelope.object_hash()?;
+    let description = retain_prepared_signed_carrier(
+        envelope,
+        &roster,
+        Hash512::from_bytes(statement.roster_hash()),
+    )
+    .map_err(AggregateThresholdShareRuntimeError::Refusal)?;
+    let state_result = AGGREGATE_GENERATION_BOARD_BINDING_SOURCE_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let source = registry.source_mut(board_binding_source_handle)?;
+        if !matches!(
+            &source.private_share_acceptance_carrier_state,
+            PrivateShareAcceptanceCarrierState::Available
+        ) {
+            return Err(AggregateThresholdShareRuntimeError::Refusal(
+                RefusalReason::ConsumedState,
+            ));
+        }
+        source.private_share_acceptance_carrier_state =
+            PrivateShareAcceptanceCarrierState::Prepared {
+                carrier_handle: description.handle(),
+                object_hash,
+                proof_descriptor,
+            };
+        Ok::<_, AggregateThresholdShareRuntimeError>(())
+    });
+    if let Err(error) = state_result {
+        let _ = cancel_prepared_signed_carrier(description.handle());
+        return Err(error);
+    }
+    Ok(description)
+}
+
+pub(crate) fn finish_aggregate_threshold_share_private_share_acceptance_carrier(
+    board_binding_source_handle: u32,
+    prepared_carrier_handle: u32,
+    signature: [u8; crate::foundation::ML_DSA_65_SIGNATURE_BYTE_LENGTH],
+) -> Result<Vec<u8>, AggregateThresholdShareRuntimeError> {
+    let (expected_object_hash, proof_descriptor) =
+        AGGREGATE_GENERATION_BOARD_BINDING_SOURCE_REGISTRY.with(|registry| {
+            let registry = registry.borrow();
+            let source = registry.source(board_binding_source_handle)?;
+            match &source.private_share_acceptance_carrier_state {
+                PrivateShareAcceptanceCarrierState::Prepared {
+                    carrier_handle,
+                    object_hash,
+                    proof_descriptor,
+                } if *carrier_handle == prepared_carrier_handle => {
+                    Ok((*object_hash, proof_descriptor.clone()))
+                }
+                _ => Err(AggregateThresholdShareRuntimeError::Refusal(
+                    RefusalReason::ConsumedState,
+                )),
+            }
+        })?;
+    let canonical_carrier = match finish_prepared_signed_carrier(prepared_carrier_handle, signature)
+    {
+        Ok(canonical_carrier) => canonical_carrier,
+        Err(reason) => {
+            AGGREGATE_GENERATION_BOARD_BINDING_SOURCE_REGISTRY.with(|registry| {
+                registry
+                    .borrow_mut()
+                    .source_mut(board_binding_source_handle)?
+                    .private_share_acceptance_carrier_state =
+                    PrivateShareAcceptanceCarrierState::Spent;
+                Ok::<_, AggregateThresholdShareRuntimeError>(())
+            })?;
+            return Err(AggregateThresholdShareRuntimeError::Refusal(reason));
+        }
+    };
+    let signed_carrier =
+        SignedCarrier::decode(&canonical_carrier, &CanonicalDecodeLimits::default())?;
+    if signed_carrier.envelope.object_hash()? != expected_object_hash {
+        return Err(AggregateThresholdShareRuntimeError::Refusal(
+            RefusalReason::WrongHashOrRoot,
+        ));
+    }
+    AGGREGATE_GENERATION_BOARD_BINDING_SOURCE_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let source = registry.source_mut(board_binding_source_handle)?;
+        source.private_share_acceptance_carrier_state =
+            PrivateShareAcceptanceCarrierState::Published {
+                object_hash: expected_object_hash,
+                proof_descriptor,
+            };
+        Ok::<_, AggregateThresholdShareRuntimeError>(())
+    })?;
+    Ok(canonical_carrier)
+}
+
+pub(crate) fn cancel_aggregate_threshold_share_private_share_acceptance_carrier(
+    board_binding_source_handle: u32,
+    prepared_carrier_handle: u32,
+) -> Result<(), AggregateThresholdShareRuntimeError> {
+    AGGREGATE_GENERATION_BOARD_BINDING_SOURCE_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let source = registry.source(board_binding_source_handle)?;
+        match &source.private_share_acceptance_carrier_state {
+            PrivateShareAcceptanceCarrierState::Prepared { carrier_handle, .. }
+                if *carrier_handle == prepared_carrier_handle => {}
+            _ => {
+                return Err(AggregateThresholdShareRuntimeError::Refusal(
+                    RefusalReason::ConsumedState,
+                ));
+            }
+        }
+        Ok::<_, AggregateThresholdShareRuntimeError>(())
+    })?;
+    cancel_prepared_signed_carrier(prepared_carrier_handle)
+        .map_err(AggregateThresholdShareRuntimeError::Refusal)?;
+    AGGREGATE_GENERATION_BOARD_BINDING_SOURCE_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        registry
+            .source_mut(board_binding_source_handle)?
+            .private_share_acceptance_carrier_state = PrivateShareAcceptanceCarrierState::Available;
+        Ok::<_, AggregateThresholdShareRuntimeError>(())
+    })
+}
+
 pub(crate) fn bind_generated_aggregate_threshold_share_proof_to_board(
     generated_common_proof_handle: u32,
     board_binding_source_handle: u32,
@@ -1982,14 +2271,27 @@ pub(crate) fn bind_generated_aggregate_threshold_share_proof_to_board(
     board_verifier_session_capability: &[u8],
     private_share_acceptance_object_handle: u32,
 ) -> Result<(), AggregateThresholdShareRuntimeError> {
-    let recipient_authority_handle =
+    let (recipient_authority_handle, published_object_hash, published_proof_descriptor) =
         AGGREGATE_GENERATION_BOARD_BINDING_SOURCE_REGISTRY.with(|registry| {
-            Ok::<_, AggregateThresholdShareRuntimeError>(
-                registry
-                    .borrow()
-                    .source(board_binding_source_handle)?
-                    .recipient_authority_handle,
-            )
+            let registry = registry.borrow();
+            let source = registry.source(board_binding_source_handle)?;
+            let (object_hash, proof_descriptor) =
+                match &source.private_share_acceptance_carrier_state {
+                    PrivateShareAcceptanceCarrierState::Published {
+                        object_hash,
+                        proof_descriptor,
+                    } => (*object_hash, proof_descriptor.clone()),
+                    _ => {
+                        return Err(AggregateThresholdShareRuntimeError::Refusal(
+                            RefusalReason::MissingPrerequisite,
+                        ));
+                    }
+                };
+            Ok::<_, AggregateThresholdShareRuntimeError>((
+                source.recipient_authority_handle,
+                object_hash,
+                proof_descriptor,
+            ))
         })?;
     let (board_source, canonical_application_statement_bytes) =
         AGGREGATE_THRESHOLD_SHARE_RECIPIENT_AUTHORITY_REGISTRY.with(|registry| {
@@ -2034,6 +2336,13 @@ pub(crate) fn bind_generated_aggregate_threshold_share_proof_to_board(
         })?;
     let private_share_acceptance_payload = board_source.private_share_acceptance_payload()?;
     let proof_descriptor = private_share_acceptance_payload.aggregate_threshold_share_proof();
+    if board_source.object_hash() != published_object_hash
+        || proof_descriptor != &published_proof_descriptor
+    {
+        return Err(AggregateThresholdShareRuntimeError::Refusal(
+            RefusalReason::WrongHashOrRoot,
+        ));
+    }
     bind_generated_common_proof_to_verified_board_source(
         generated_common_proof_handle,
         &board_source,
@@ -2381,6 +2690,22 @@ pub(crate) fn discard_aggregate_threshold_share_generation_board_binding_source(
     board_binding_source_handle: u32,
 ) -> Result<(), AggregateThresholdShareRuntimeError> {
     AGGREGATE_GENERATION_BOARD_BINDING_SOURCE_REGISTRY.with(|registry| {
+        let prepared_carrier_handle = {
+            let registry = registry.borrow();
+            match &registry
+                .source(board_binding_source_handle)?
+                .private_share_acceptance_carrier_state
+            {
+                PrivateShareAcceptanceCarrierState::Prepared { carrier_handle, .. } => {
+                    Some(*carrier_handle)
+                }
+                _ => None,
+            }
+        };
+        if let Some(carrier_handle) = prepared_carrier_handle {
+            cancel_prepared_signed_carrier(carrier_handle)
+                .map_err(AggregateThresholdShareRuntimeError::Refusal)?;
+        }
         registry
             .borrow_mut()
             .take(board_binding_source_handle)
@@ -2408,8 +2733,170 @@ pub(crate) fn discard_aggregate_threshold_share_recipient_authority(
 
 #[cfg(test)]
 mod tests {
+    use fips203::{
+        ml_kem_768,
+        traits::{KeyGen as KemKeyGen, SerDes as KemSerDes},
+    };
+    use fips204::{
+        ml_dsa_65,
+        traits::{KeyGen as SignatureKeyGen, SerDes as SignatureSerDes, Signer},
+    };
+
     use super::super::{RecipientShareLimbInput, canonical_recipient_private_vss_payload};
     use super::*;
+    use crate::foundation::{RosterEntry, StreamDescriptor};
+
+    const OBJECT_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/object-signature/v1";
+
+    fn private_share_carrier_signing_fixture() -> (Roster, ml_dsa_65::PrivateKey) {
+        let mut entries = Vec::with_capacity(usize::from(FOUNDATION_PROFILE.participant_count));
+        let mut first_signing_key = None;
+        for roster_position in 0..FOUNDATION_PROFILE.participant_count {
+            let mut signing_seed = [0_u8; 32];
+            signing_seed[0] =
+                u8::try_from(roster_position + 1).expect("test roster position fits u8");
+            let (verification_key, signing_key) = ml_dsa_65::KG::keygen_from_seed(&signing_seed);
+            if roster_position == 0 {
+                first_signing_key = Some(signing_key);
+            }
+            let mut mailbox_seed = [0x31_u8; 32];
+            mailbox_seed[0] =
+                u8::try_from(roster_position + 1).expect("test roster position fits u8");
+            let mut mailbox_fallback_seed = [0x72_u8; 32];
+            mailbox_fallback_seed[31] =
+                u8::try_from(FOUNDATION_PROFILE.participant_count - roster_position)
+                    .expect("test reverse roster position fits u8");
+            let (mailbox_key, _) =
+                ml_kem_768::KG::keygen_from_seed(mailbox_seed, mailbox_fallback_seed);
+            entries.push(RosterEntry {
+                roster_position,
+                signing_verification_key: verification_key.into_bytes(),
+                mailbox_encapsulation_key: mailbox_key.into_bytes(),
+            });
+        }
+        (
+            Roster::new(entries).expect("private-share test roster is valid"),
+            first_signing_key.expect("first test signing key exists"),
+        )
+    }
+
+    fn retain_private_share_carrier_for_finish_test()
+    -> (u32, PreparedSignedCarrierDescription, ml_dsa_65::PrivateKey) {
+        let (roster, signing_key) = private_share_carrier_signing_fixture();
+        let participant_identity = roster.entries[0]
+            .participant_identity()
+            .expect("first participant identity derives");
+        let proof_digest = Hash512::from_bytes([0x63; Hash512::BYTE_LENGTH]);
+        let proof_descriptor = StreamDescriptor::new(1, vec![proof_digest], proof_digest)
+            .expect("test proof descriptor is valid");
+        let payload = PrivateShareAcceptancePayload::new(
+            Hash512::from_bytes([0x64; Hash512::BYTE_LENGTH]),
+            vec![Hash512::from_bytes([0x65; Hash512::BYTE_LENGTH])],
+            proof_descriptor.clone(),
+        )
+        .expect("test private-share payload is valid");
+        let envelope = ObjectEnvelope {
+            suite_id: Hash512::from_bytes([0x66; Hash512::BYTE_LENGTH]),
+            object_type: FoundationObjectType::PrivateShareAcceptance,
+            ceremony_context_hash: Hash512::from_bytes([0x67; Hash512::BYTE_LENGTH]),
+            action_context_hash: Hash512::from_bytes([0x68; Hash512::BYTE_LENGTH]),
+            producer_participant_id: Some(participant_identity),
+            producer_sequence: 0,
+            ordered_prerequisite_hashes: Vec::new(),
+            payload_bytes: payload
+                .encode()
+                .expect("test private-share payload encodes"),
+        };
+        let object_hash = envelope
+            .object_hash()
+            .expect("test private-share object hash derives");
+        let description = retain_prepared_signed_carrier(
+            envelope,
+            &roster,
+            roster.roster_hash().expect("test roster hash derives"),
+        )
+        .expect("test private-share carrier prepares");
+        let source_handle = AGGREGATE_GENERATION_BOARD_BINDING_SOURCE_REGISTRY.with(|registry| {
+            registry
+                .borrow_mut()
+                .retain(AggregateGenerationBoardBindingSource {
+                    recipient_authority_handle: 71,
+                    private_share_acceptance_carrier_state:
+                        PrivateShareAcceptanceCarrierState::Prepared {
+                            carrier_handle: description.handle(),
+                            object_hash,
+                            proof_descriptor,
+                        },
+                })
+                .expect("test private-share source retains")
+        });
+        (source_handle, description, signing_key)
+    }
+
+    #[test]
+    fn private_share_acceptance_carrier_finish_is_typed_and_one_shot() {
+        let (source_handle, description, signing_key) =
+            retain_private_share_carrier_for_finish_test();
+        let signature = signing_key
+            .try_sign_with_seed(
+                &[0x91; 32],
+                description.signature_message().as_bytes(),
+                OBJECT_SIGNATURE_CONTEXT,
+            )
+            .expect("private-share test signature generates");
+        let canonical_carrier = finish_aggregate_threshold_share_private_share_acceptance_carrier(
+            source_handle,
+            description.handle(),
+            signature,
+        )
+        .expect("the exact prepared private-share carrier finishes");
+        let carrier = SignedCarrier::decode(&canonical_carrier, &CanonicalDecodeLimits::default())
+            .expect("finished private-share carrier decodes");
+        assert_eq!(
+            carrier.envelope.object_type,
+            FoundationObjectType::PrivateShareAcceptance
+        );
+        assert_eq!(carrier.envelope.producer_sequence, 0);
+        assert!(carrier.envelope.ordered_prerequisite_hashes.is_empty());
+        assert!(matches!(
+            finish_aggregate_threshold_share_private_share_acceptance_carrier(
+                source_handle,
+                description.handle(),
+                [0; crate::foundation::ML_DSA_65_SIGNATURE_BYTE_LENGTH],
+            ),
+            Err(AggregateThresholdShareRuntimeError::Refusal(
+                RefusalReason::ConsumedState
+            ))
+        ));
+        discard_aggregate_threshold_share_generation_board_binding_source(source_handle)
+            .expect("published private-share source discards");
+    }
+
+    #[test]
+    fn refused_private_share_signature_spends_the_signing_handle() {
+        let (source_handle, description, _) = retain_private_share_carrier_for_finish_test();
+        assert!(matches!(
+            finish_aggregate_threshold_share_private_share_acceptance_carrier(
+                source_handle,
+                description.handle(),
+                [0; crate::foundation::ML_DSA_65_SIGNATURE_BYTE_LENGTH],
+            ),
+            Err(AggregateThresholdShareRuntimeError::Refusal(
+                RefusalReason::InvalidSignature
+            ))
+        ));
+        assert!(matches!(
+            cancel_aggregate_threshold_share_private_share_acceptance_carrier(
+                source_handle,
+                description.handle(),
+            ),
+            Err(AggregateThresholdShareRuntimeError::Refusal(
+                RefusalReason::ConsumedState
+            ))
+        ));
+        discard_aggregate_threshold_share_generation_board_binding_source(source_handle)
+            .expect("spent private-share source discards cleanly");
+    }
 
     fn decoded_selected_share_limbs() -> Box<[super::super::DecodedRecipientShareLimb]> {
         let sharing_coordinates =

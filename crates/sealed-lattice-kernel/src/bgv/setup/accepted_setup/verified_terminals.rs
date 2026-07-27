@@ -660,6 +660,10 @@ pub(in crate::bgv) struct VerifiedVssShareLinkageTerminalPreflight {
 }
 
 impl VerifiedVssShareLinkageTerminalPreflight {
+    pub(in crate::bgv) const fn terminal(&self) -> &VerifiedVssShareLinkageTerminal {
+        &self.terminal
+    }
+
     pub(in crate::bgv) fn complete(
         self,
         _verified_proof: ConsumedVerifiedCommonProofCapability,

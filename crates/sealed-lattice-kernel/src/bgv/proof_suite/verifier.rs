@@ -119,14 +119,14 @@ mod verified_values;
 pub(crate) use core_verification::verify_checked_fixture_common_proof;
 pub(crate) use core_verification::{
     VerifiedRelationColumnEvaluator, VerifiedRelationColumnEvaluatorMemoryAccounting,
-    verified_application_statement_hash,
+    decode_application_statement, derive_relation_tree_inputs, verified_application_statement_hash,
 };
 #[cfg(test)]
 pub(crate) use verification_state::CommonProofVerificationInput;
 pub(crate) use verification_state::{
     CommonProofRequiredByteRange, CommonProofVerificationPoll,
     CommonProofVerificationResidentMemoryAccounting, CommonProofVerificationStateMachine,
-    PollableCommonProofVerificationInput,
+    IncrementalExpectedProofObjectHeaderComparator, PollableCommonProofVerificationInput,
 };
 pub(crate) use verified_values::{
     VerifiedCommonProof, VerifiedEvaluatorAuxiliaryRoot, VerifiedEvaluatorKeyStore,
@@ -136,9 +136,8 @@ pub(crate) use verified_values::{
 };
 
 use core_verification::{
-    absorb_relation_roots, catalog_root, decode_application_statement, derive_relation_tree_inputs,
-    validate_evaluator_auxiliary_root_linkage, verified_proof_header_hash,
-    verify_out_of_domain_composition_with_verified_sequences,
+    absorb_relation_roots, catalog_root, validate_evaluator_auxiliary_root_linkage,
+    verified_proof_header_hash, verify_out_of_domain_composition_with_verified_sequences,
 };
 use query_verification::{QueryVerificationWorkspace, build_runtime_claim_groups};
 #[cfg(test)]

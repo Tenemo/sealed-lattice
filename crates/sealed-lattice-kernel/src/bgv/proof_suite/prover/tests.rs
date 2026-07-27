@@ -540,16 +540,16 @@ fn quotient_rotation_positions_cover_both_directions_wraparound_and_reduction() 
 }
 
 #[test]
-fn materialization_write_budget_counts_only_canonical_leaf_chunks() {
+fn materialization_write_budget_counts_replayable_canonical_leaf_chunks() {
     assert_eq!(
         common_tree_materialization_write_transaction_count(4, 100, 1_024)
-            .expect("the canonical leaves fit one transaction"),
-        1,
+            .expect("each canonical leaf fits one transaction"),
+        4,
     );
     assert_eq!(
         common_tree_materialization_write_transaction_count(4, 100, 48)
             .expect("canonical leaf chunking fits the transaction count"),
-        9,
+        12,
     );
     assert_eq!(
         common_tree_materialization_write_transaction_count(1_u64 << 63, 100, 48),

@@ -32,10 +32,19 @@ const maximumWasm32UnsignedInteger = 0xffff_ffff;
 const verifiedVssShareLinkageTerminalBrand: unique symbol = Symbol(
     'sealed-lattice/verified-vss-share-linkage-terminal',
 );
+const verifiedVssLowDegreeEvidenceBrand: unique symbol = Symbol(
+    'sealed-lattice/verified-vss-low-degree-evidence',
+);
 
 /** One positive VSS relation result retained by the exact WASM worker. */
 export type VerifiedVssShareLinkageTerminal = Readonly<{
     readonly [verifiedVssShareLinkageTerminalBrand]: true;
+    release(): void;
+}>;
+
+/** One-shot VSS low-degree authority for the exact same-secret construction. */
+export type VerifiedVssLowDegreeEvidence = Readonly<{
+    readonly [verifiedVssLowDegreeEvidenceBrand]: true;
     release(): void;
 }>;
 
@@ -49,12 +58,22 @@ const verifiedVssShareLinkageTerminalRecords = new WeakMap<
     VerifiedVssShareLinkageTerminal,
     VerifiedVssShareLinkageTerminalRecord
 >();
+const verifiedVssLowDegreeEvidenceRecords = new WeakMap<
+    VerifiedVssLowDegreeEvidence,
+    VerifiedVssShareLinkageTerminalRecord
+>();
 
 type VssVerificationKernel = Readonly<{
     boardObjectHandleCatalogByteLength(): number;
     discardTerminalSource(terminalSourceHandle: number): number;
     discardVerifiedTerminal(terminalHandle: number): number;
+    discardLowDegreeEvidence(evidenceHandle: number): number;
     finishVerification(
+        verifiedCommonProofHandle: number,
+        terminalSourceHandle: number,
+        statusPointer: number,
+    ): number;
+    finishLowDegreeEvidence(
         verifiedCommonProofHandle: number,
         terminalSourceHandle: number,
         statusPointer: number,
@@ -126,8 +145,12 @@ const requireVssVerificationKernel = (
             discardTerminalSource,
         sealed_lattice_vss_share_linkage_discard_verified_terminal:
             discardVerifiedTerminal,
+        sealed_lattice_vss_share_linkage_discard_low_degree_evidence:
+            discardLowDegreeEvidence,
         sealed_lattice_vss_share_linkage_finish_verification:
             finishVerification,
+        sealed_lattice_vss_share_linkage_finish_low_degree_evidence:
+            finishLowDegreeEvidence,
         sealed_lattice_vss_share_linkage_prepare_verification:
             prepareVerification,
     } = context.wasmExports;
@@ -137,7 +160,9 @@ const requireVssVerificationKernel = (
         typeof boardObjectHandleCatalogByteLength !== 'function' ||
         typeof discardTerminalSource !== 'function' ||
         typeof discardVerifiedTerminal !== 'function' ||
+        typeof discardLowDegreeEvidence !== 'function' ||
         typeof finishVerification !== 'function' ||
+        typeof finishLowDegreeEvidence !== 'function' ||
         typeof prepareVerification !== 'function'
     ) {
         throw new CanonicalStreamInternalError(
@@ -148,6 +173,8 @@ const requireVssVerificationKernel = (
         boardObjectHandleCatalogByteLength,
         discardTerminalSource,
         discardVerifiedTerminal,
+        discardLowDegreeEvidence,
+        finishLowDegreeEvidence,
         finishVerification,
         prepareVerification,
         releaseSelectedSuite,
@@ -277,6 +304,74 @@ const createVerifiedTerminal = (
     });
     verifiedVssShareLinkageTerminalRecords.set(terminal, record);
     return terminal;
+};
+
+const releaseLowDegreeEvidence = (
+    evidence: VerifiedVssLowDegreeEvidence,
+): void => {
+    const record = verifiedVssLowDegreeEvidenceRecords.get(evidence);
+    if (record === undefined) {
+        throw new CanonicalStreamRefusalError('consumedState');
+    }
+    verifiedVssLowDegreeEvidenceRecords.delete(evidence);
+    const kernel = requireVssVerificationKernel(record.context);
+    discardHandle({
+        context: record.context,
+        discard: kernel.discardLowDegreeEvidence,
+        handle: record.handle,
+        operationName: 'VSS low-degree evidence release',
+        statusBoundary: createStatusBoundary(),
+    });
+};
+
+const createVerifiedLowDegreeEvidence = (
+    record: VerifiedVssShareLinkageTerminalRecord,
+): VerifiedVssLowDegreeEvidence => {
+    const evidence: VerifiedVssLowDegreeEvidence = Object.freeze({
+        [verifiedVssLowDegreeEvidenceBrand]: true as const,
+        release: () => releaseLowDegreeEvidence(evidence),
+    });
+    verifiedVssLowDegreeEvidenceRecords.set(evidence, record);
+    return evidence;
+};
+
+/** Internal one-shot ownership transfer into same-secret generation or verification. */
+export const consumeVerifiedVssLowDegreeEvidence = <Result>(input: {
+    consume(evidenceHandle: number): Result;
+    context: TranscriptCoreKernelCommandRuntime;
+    evidence: VerifiedVssLowDegreeEvidence;
+    kernel: TranscriptCoreKernel;
+}): Result => {
+    const record = verifiedVssLowDegreeEvidenceRecords.get(input.evidence);
+    if (
+        record === undefined ||
+        record.context !== input.context ||
+        record.kernel !== input.kernel
+    ) {
+        throw new CanonicalStreamRefusalError('wrongContext');
+    }
+    verifiedVssLowDegreeEvidenceRecords.delete(input.evidence);
+    try {
+        return input.consume(record.handle);
+    } catch (operationFailure) {
+        try {
+            discardHandle({
+                context: input.context,
+                discard: requireVssVerificationKernel(input.context)
+                    .discardLowDegreeEvidence,
+                handle: record.handle,
+                operationName:
+                    'VSS uncertain low-degree evidence transfer cleanup',
+                statusBoundary: createStatusBoundary(),
+            });
+        } catch (cleanupFailure) {
+            throw new CanonicalStreamInternalError(
+                'The VSS low-degree evidence transfer failed and its token could not be retired.',
+                Object.freeze({ cleanupFailure, operationFailure }),
+            );
+        }
+        throw operationFailure;
+    }
 };
 
 export const withVerifiedVssShareLinkageTerminal = <Result>(input: {
@@ -411,21 +506,23 @@ const discardTerminalSource = (input: {
         statusBoundary: input.statusBoundary,
     });
 
-/**
- * Runs the exact VSS common-proof verifier and returns only its Rust-owned
- * one-shot family terminal. The canonical-board objects stay independently
- * live; no statement facts or numeric handles are returned.
- */
-export const verifyVssShareLinkageInClosedWorker = async (input: {
-    canonicalSuiteRecordBytes: Uint8Array;
-    dealerRecordObject: VerifiedTranscriptObject;
-    inputStore: AuthenticatedCommonProofInputStore;
-    kernel: TranscriptCoreKernel;
-    options?: CommonProofVerificationWorkerOptions;
-    orderedCommitmentObjects: readonly VerifiedTranscriptObject[];
-    orderedRevealObjects: readonly VerifiedTranscriptObject[];
-    orderedSetupIntentObjects: readonly VerifiedTranscriptObject[];
-}): Promise<VerifiedVssShareLinkageTerminal> => {
+type VssShareLinkageVerificationOutput =
+    | VerifiedVssLowDegreeEvidence
+    | VerifiedVssShareLinkageTerminal;
+
+const verifyVssShareLinkageOutputInClosedWorker = async (
+    input: {
+        canonicalSuiteRecordBytes: Uint8Array;
+        dealerRecordObject: VerifiedTranscriptObject;
+        inputStore: AuthenticatedCommonProofInputStore;
+        kernel: TranscriptCoreKernel;
+        options?: CommonProofVerificationWorkerOptions;
+        orderedCommitmentObjects: readonly VerifiedTranscriptObject[];
+        orderedRevealObjects: readonly VerifiedTranscriptObject[];
+        orderedSetupIntentObjects: readonly VerifiedTranscriptObject[];
+    },
+    outputKind: 'lowDegreeEvidence' | 'terminal',
+): Promise<VssShareLinkageVerificationOutput> => {
     if (typeof globalThis.document !== 'undefined') {
         throw new CanonicalStreamInternalError(
             'VSS proof verification may only run inside the dedicated WASM worker.',
@@ -486,7 +583,7 @@ export const verifyVssShareLinkageInClosedWorker = async (input: {
     });
     let operationFailed = false;
     let operationFailure: unknown;
-    let verifiedTerminal: VerifiedVssShareLinkageTerminal | undefined;
+    let verifiedOutput: VssShareLinkageVerificationOutput | undefined;
     try {
         const prepared = context.runExclusive(
             'VSS verification preparation',
@@ -563,11 +660,18 @@ export const verifyVssShareLinkageInClosedWorker = async (input: {
                             const statusPointer =
                                 memoryBoundary.allocateZeroedWords(1);
                             try {
-                                const handle = kernel.finishVerification(
-                                    verifiedCommonProofHandle,
-                                    terminalSourceHandle,
-                                    statusPointer,
-                                );
+                                const handle =
+                                    outputKind === 'lowDegreeEvidence'
+                                        ? kernel.finishLowDegreeEvidence(
+                                              verifiedCommonProofHandle,
+                                              terminalSourceHandle,
+                                              statusPointer,
+                                          )
+                                        : kernel.finishVerification(
+                                              verifiedCommonProofHandle,
+                                              terminalSourceHandle,
+                                              statusPointer,
+                                          );
                                 const [status] = memoryBoundary.readWords(
                                     statusPointer,
                                     1,
@@ -610,29 +714,41 @@ export const verifyVssShareLinkageInClosedWorker = async (input: {
             }
             statusBoundary.throwIfError(verificationFinish.status);
         }
-        const terminalHandle = requireLiveHandle(
+        const outputHandle = requireLiveHandle(
             verificationFinish.handle,
-            'The verified VSS relation terminal handle',
+            outputKind === 'lowDegreeEvidence'
+                ? 'The verified VSS low-degree evidence handle'
+                : 'The verified VSS relation terminal handle',
         );
         terminalSourceHandle = 0;
         try {
-            verifiedTerminal = createVerifiedTerminal({
+            const outputRecord = {
                 context,
-                handle: terminalHandle,
+                handle: outputHandle,
                 kernel: input.kernel,
-            });
+            };
+            verifiedOutput =
+                outputKind === 'lowDegreeEvidence'
+                    ? createVerifiedLowDegreeEvidence(outputRecord)
+                    : createVerifiedTerminal(outputRecord);
         } catch (terminalAdoptionFailure) {
             try {
                 discardHandle({
                     context,
-                    discard: kernel.discardVerifiedTerminal,
-                    handle: terminalHandle,
-                    operationName: 'VSS verified-terminal adoption discard',
+                    discard:
+                        outputKind === 'lowDegreeEvidence'
+                            ? kernel.discardLowDegreeEvidence
+                            : kernel.discardVerifiedTerminal,
+                    handle: outputHandle,
+                    operationName:
+                        outputKind === 'lowDegreeEvidence'
+                            ? 'VSS low-degree evidence adoption discard'
+                            : 'VSS verified-terminal adoption discard',
                     statusBoundary,
                 });
             } catch (cleanupFailure) {
                 throw new CanonicalStreamInternalError(
-                    'The verified VSS terminal could not be adopted or retired.',
+                    'The verified VSS output could not be adopted or retired.',
                     Object.freeze({
                         cleanupFailure,
                         operationFailure: terminalAdoptionFailure,
@@ -688,10 +804,28 @@ export const verifyVssShareLinkageInClosedWorker = async (input: {
     if (operationFailed) {
         throw operationFailure;
     }
-    if (verifiedTerminal === undefined) {
+    if (verifiedOutput === undefined) {
         throw new CanonicalStreamInternalError(
-            'VSS verification completed without a terminal.',
+            'VSS verification completed without its requested output.',
         );
     }
-    return verifiedTerminal;
+    return verifiedOutput;
 };
+
+/** Verifies VSS and returns the broad one-shot family terminal. */
+export const verifyVssShareLinkageInClosedWorker = async (
+    input: Parameters<typeof verifyVssShareLinkageOutputInClosedWorker>[0],
+): Promise<VerifiedVssShareLinkageTerminal> =>
+    (await verifyVssShareLinkageOutputInClosedWorker(
+        input,
+        'terminal',
+    )) as VerifiedVssShareLinkageTerminal;
+
+/** Verifies VSS and returns only the one-shot same-secret low-degree authority. */
+export const verifyVssLowDegreeEvidenceInClosedWorker = async (
+    input: Parameters<typeof verifyVssShareLinkageOutputInClosedWorker>[0],
+): Promise<VerifiedVssLowDegreeEvidence> =>
+    (await verifyVssShareLinkageOutputInClosedWorker(
+        input,
+        'lowDegreeEvidence',
+    )) as VerifiedVssLowDegreeEvidence;

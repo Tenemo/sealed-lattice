@@ -3,11 +3,8 @@ use crate::bgv::proof_suite::{
     ProofByteSource, ProofExternalMemoryExecutor, ProofExternalMemoryExecutorError,
     ProofExternalMemoryObject, ProofExternalMemoryObjectPlan, ProofExternalMemoryPlan,
     ProofExternalMemoryTransactionOperation,
-    external_memory::{
-        EXTERNAL_MEMORY_SINGLE_APPEND_RECYCLER_CAPACITY_CEILING,
-        EXTERNAL_MEMORY_SINGLE_OPERATION_VECTOR_CAPACITY_CEILING,
-    },
 };
+use zeroize::Zeroize;
 
 #[test]
 fn checkpoint_state_format_identifier_does_not_reuse_the_proof_application_slot_schema() {
@@ -30,11 +27,11 @@ fn registry_test_verification_binding() -> CommonProofVerificationBinding {
     let proof_application = CommonProofApplicationBinding::new(
         [0x11; HASH_BYTE_LENGTH],
         [0x12; HASH_BYTE_LENGTH],
+        [0x15; HASH_BYTE_LENGTH],
         1,
         [0x13; HASH_BYTE_LENGTH],
         CanonicalStreamDomain::BallotValidityProof,
         [0x14; HASH_BYTE_LENGTH],
-        1,
         1,
     )
     .expect("the registry test proof application is bounded");
@@ -150,6 +147,76 @@ fn destination_handle_exhaustion_preserves_the_live_source_for_retry() {
         Ok(19),
     );
     assert!(source_entries.contains_key(&7));
+}
+
+#[test]
+fn generated_capability_attempt_preflight_refusals_are_retryable() {
+    let application_slot = ProofApplicationSlot::new(
+        Hash512::from_bytes([0x31; HASH_BYTE_LENGTH]),
+        Hash512::from_bytes([0x32; HASH_BYTE_LENGTH]),
+        Hash512::from_bytes([0x33; HASH_BYTE_LENGTH]),
+        ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
+        Some(0),
+        None,
+        None,
+    )
+    .expect("the live generated-capability test slot is canonical");
+    let authorization = CommonProofGenerationAuthorization::from_genuine_test_application(
+        1,
+        application_slot,
+        [0x34; HASH_BYTE_LENGTH],
+        [0x35; HASH_BYTE_LENGTH],
+        [0x36; HASH_BYTE_LENGTH],
+        [0x37; HASH_BYTE_LENGTH],
+    )
+    .expect("the live generated-capability test authorization is valid");
+    let expected_generation_binding_hash = authorization.binding_hash();
+    let expected_attempt_identifier = [0x91; 32];
+    let mut registry = CommonProofRuntimeRegistry::default();
+    let handle = registry
+        .insert_test_generated_proof(41, authorization)
+        .expect("the live generated capability is retained");
+
+    registry
+        .preflight_generated_proof_attempt_binding(
+            &handle,
+            expected_generation_binding_hash,
+            expected_attempt_identifier,
+        )
+        .expect("the exact generation binding and attempt are accepted");
+
+    let mut changed_generation_binding_hash = expected_generation_binding_hash;
+    changed_generation_binding_hash[0] ^= 1;
+    assert_eq!(
+        registry.preflight_generated_proof_attempt_binding(
+            &handle,
+            changed_generation_binding_hash,
+            expected_attempt_identifier,
+        ),
+        Err(CommonProofRuntimeError::WrongVerificationBinding),
+    );
+
+    let mut changed_attempt_identifier = expected_attempt_identifier;
+    changed_attempt_identifier[31] ^= 1;
+    assert_eq!(
+        registry.preflight_generated_proof_attempt_binding(
+            &handle,
+            expected_generation_binding_hash,
+            changed_attempt_identifier,
+        ),
+        Err(CommonProofRuntimeError::WrongVerificationBinding),
+    );
+
+    registry
+        .preflight_generated_proof_attempt_binding(
+            &handle,
+            expected_generation_binding_hash,
+            expected_attempt_identifier,
+        )
+        .expect("refused preflights leave the exact generated capability retryable");
+    registry
+        .release_generated_proof(handle)
+        .expect("the retryable generated capability releases exactly once");
 }
 
 #[test]
@@ -356,6 +423,56 @@ fn storage_transaction_requires_exact_replay_before_state_advances() {
 }
 
 #[test]
+fn storage_transaction_refuses_a_worker_response_before_request_export() {
+    let object = ProofExternalMemoryObject::new(0);
+    let mut runtime = CommonProofStorageTransactionRuntime::for_runtime_binding([0x54; 64]);
+    runtime
+        .begin_transaction(4, 1)
+        .expect("the bounded create transaction begins");
+    runtime
+        .create_object(object, ProofExternalMemoryProtection::PublicIntegrity, 4)
+        .expect("the create operation records");
+    assert_eq!(
+        runtime.commit_transaction(),
+        Err(ProofExternalMemoryTransactionAdapterError::Yielded),
+    );
+    let encoded_response = runtime
+        .capture_yielded_request()
+        .expect("the create request is captured")
+        .encode_test_worker_response(&[])
+        .expect("the create response encodes");
+
+    assert_eq!(
+        runtime.supply_worker_response(&encoded_response),
+        Err(CommonProofRuntimeError::TransactionResponseMissing),
+        "a response cannot enter replay before the exact request reaches the host",
+    );
+    assert!(
+        runtime.request_is_pending(),
+        "the refused early response must leave the request available for its one valid export",
+    );
+
+    let _encoded_request = runtime
+        .encode_pending_worker_request()
+        .expect("the request remains exportable after the refused response");
+    runtime
+        .supply_worker_response(&encoded_response)
+        .expect("the response enters replay only after export");
+    runtime
+        .begin_transaction(4, 1)
+        .expect("the create replay begins");
+    runtime
+        .create_object(object, ProofExternalMemoryProtection::PublicIntegrity, 4)
+        .expect("the exact create request replays");
+    runtime
+        .commit_transaction()
+        .expect("the exact create replay commits");
+    runtime
+        .transaction_completed()
+        .expect("the exact exported transaction completes");
+}
+
+#[test]
 fn storage_transaction_cancellation_invalidates_an_inflight_request() {
     let object = ProofExternalMemoryObject::new(0);
     let mut runtime = CommonProofStorageTransactionRuntime::for_runtime_binding([0x55; 64]);
@@ -391,118 +508,175 @@ fn storage_transaction_cancellation_invalidates_an_inflight_request() {
 }
 
 #[test]
-fn storage_transaction_reuses_fixed_append_and_encoding_allocations_across_captures() {
-    type StorageIdentity = (usize, usize);
-
-    fn complete_append_cycle(
-        runtime: &mut CommonProofStorageTransactionRuntime,
-        encoded_request: &mut Zeroizing<Vec<u8>>,
-        payload: &[u8],
-    ) -> (
-        StorageIdentity,
-        StorageIdentity,
-        StorageIdentity,
-        StorageIdentity,
-    ) {
-        let object = ProofExternalMemoryObject::new(0);
-        runtime
-            .begin_transaction(
-                u64::from(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH),
-                1,
-            )
-            .expect("maximum append transaction begins");
-        runtime
-            .append_object_bytes(object, 0, payload)
-            .expect("maximum append payload records");
-        assert_eq!(
-            runtime.commit_transaction(),
-            Err(ProofExternalMemoryTransactionAdapterError::Yielded)
-        );
-        let (operation_storage, append_payload_storage, encoded_response) = {
-            let request = runtime
-                .capture_yielded_request()
-                .expect("maximum append request is captured");
-            (
-                request.operation_storage_identity(),
-                request
-                    .append_payload_storage_identity()
-                    .expect("append request owns one payload"),
-                request
-                    .encode_test_worker_response(&[])
-                    .expect("empty append response encodes"),
-            )
-        };
-        runtime
-            .encode_pending_worker_request_into(encoded_request)
-            .expect("maximum append request encodes into caller storage");
-        let (operation_encoding_storage, append_recycler_storage, _) =
-            runtime.pooled_storage_identities();
-        runtime
-            .supply_worker_response(&encoded_response)
-            .expect("empty append response enters replay");
-        encoded_request.clear();
-        runtime
-            .begin_transaction(
-                u64::from(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH),
-                1,
-            )
-            .expect("maximum append replay begins");
-        runtime
-            .append_object_bytes(object, 0, payload)
-            .expect("maximum append payload replays without an owned copy");
-        runtime
-            .commit_transaction()
-            .expect("maximum append replay commits");
-        runtime
-            .transaction_completed()
-            .expect("maximum append replay releases its pooled storage");
-        (
-            operation_storage,
-            append_payload_storage,
-            operation_encoding_storage,
-            append_recycler_storage,
-        )
-    }
-
+fn owned_storage_replays_resumable_append_at_maximum_chunk_and_releases_payload_before_host_copy() {
     let maximum_payload_byte_length =
         usize::try_from(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH)
             .expect("maximum external-memory chunk length fits usize");
-    let payload = vec![0x5a; maximum_payload_byte_length];
+    let object = ProofExternalMemoryObject::new(0);
+    let mut payload = Zeroizing::new(vec![0x5a; maximum_payload_byte_length]);
+    let original_payload_storage = (payload.as_ptr() as usize, payload.capacity());
     let mut runtime = CommonProofStorageTransactionRuntime::for_runtime_binding([0x61; 64]);
-    let mut encoded_request = Zeroizing::new(Vec::new());
-    let first = complete_append_cycle(&mut runtime, &mut encoded_request, &payload);
-    let encoded_request_storage = (
-        encoded_request.as_ptr() as usize,
-        encoded_request.capacity(),
-    );
-    let second = complete_append_cycle(&mut runtime, &mut encoded_request, &payload);
-    assert_eq!(
-        (
-            encoded_request.as_ptr() as usize,
-            encoded_request.capacity()
-        ),
-        encoded_request_storage,
-        "caller-owned request encoding must not churn"
-    );
-    let third = complete_append_cycle(&mut runtime, &mut encoded_request, &payload);
 
-    assert_eq!(first.0, second.0, "operation backing must be recycled");
-    assert_eq!(second.0, third.0, "operation backing must remain stable");
-    assert_eq!(first.1, second.1, "append payload must be recycled");
-    assert_eq!(second.1, third.1, "append payload must remain stable");
-    assert_eq!(first.2, second.2, "operation encoding must be recycled");
-    assert_eq!(second.2, third.2, "operation encoding must remain stable");
+    runtime
+        .begin_transaction(
+            u64::from(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH),
+            1,
+        )
+        .expect("maximum owned append transaction begins");
+    runtime
+        .append_owned_object_bytes(object, 0, &mut payload)
+        .expect("the recorder takes the maximum append allocation");
     assert_eq!(
-        second.3, third.3,
-        "append recycler outer backing must transfer without reallocation"
+        (payload.len(), payload.capacity()),
+        (0, 0),
+        "the successor producer must retain no payload allocation"
     );
-    assert!(
-        first.0.1 <= EXTERNAL_MEMORY_SINGLE_OPERATION_VECTOR_CAPACITY_CEILING,
-        "one-operation request exceeded its static backing ceiling"
+    assert_eq!(
+        runtime.commit_transaction(),
+        Err(ProofExternalMemoryTransactionAdapterError::Yielded)
     );
+    let encoded_response = {
+        let request = runtime
+            .capture_yielded_request()
+            .expect("the maximum owned append request is captured");
+        assert_eq!(
+            request
+                .append_payload_storage_identity()
+                .expect("the request owns the transferred payload"),
+            original_payload_storage,
+            "recording must move the exact producer allocation"
+        );
+        request
+            .encode_test_worker_response(&[])
+            .expect("an append-only response encodes")
+    };
+    let encoded_request_byte_length = runtime
+        .pending_request_encoded_byte_length()
+        .expect("the maximum request byte length derives");
+    {
+        let mut wrong_length_output = vec![0_u8; encoded_request_byte_length - 1];
+        assert_eq!(
+            runtime.encode_pending_worker_request_into(&mut wrong_length_output),
+            Err(CommonProofRuntimeError::AllocationLimitExceeded),
+            "wrong output storage must not consume the one-shot export"
+        );
+        assert!(
+            !runtime
+                .pending_request()
+                .expect("the request remains pending")
+                .append_payload_was_released(),
+            "a failed copy must retain replay material"
+        );
+    }
+
+    let mut encoded_request = Zeroizing::new(vec![0_u8; encoded_request_byte_length]);
+    assert_eq!(
+        [original_payload_storage.1, encoded_request.capacity()]
+            .into_iter()
+            .filter(|capacity| *capacity >= maximum_payload_byte_length)
+            .count(),
+        2,
+        "recorded payload and caller output are the only payload-sized owners before export"
+    );
+    runtime
+        .encode_pending_worker_request_into(encoded_request.as_mut_slice())
+        .expect("the request encodes directly into caller storage");
     assert!(
-        second.3.1 <= EXTERNAL_MEMORY_SINGLE_APPEND_RECYCLER_CAPACITY_CEILING,
-        "append recycler exceeded its static backing ceiling"
+        runtime
+            .pending_request()
+            .expect("the compact request remains pending")
+            .append_payload_was_released(),
+        "successful export must drop the recorded append allocation"
+    );
+    assert_eq!(
+        runtime.encode_pending_worker_request_into(encoded_request.as_mut_slice()),
+        Err(CommonProofRuntimeError::WrongOperationPhase),
+        "request export is one-shot"
+    );
+
+    let host_copy = Zeroizing::new(encoded_request.to_vec());
+    assert_eq!(
+        [encoded_request.capacity(), host_copy.capacity()]
+            .into_iter()
+            .filter(|capacity| *capacity >= maximum_payload_byte_length)
+            .count(),
+        2,
+        "WASM output and the host copy are the only payload-sized owners during transfer"
+    );
+    encoded_request.as_mut_slice().zeroize();
+    drop(encoded_request);
+
+    runtime
+        .supply_worker_response(&encoded_response)
+        .expect("the authenticated append response enters replay");
+    drop(host_copy);
+    runtime
+        .begin_transaction(
+            u64::from(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH),
+            1,
+        )
+        .expect("maximum append replay begins");
+    let mut regenerated_payload = Zeroizing::new(vec![0x5a; maximum_payload_byte_length]);
+    runtime
+        .append_owned_object_bytes(object, 0, &mut regenerated_payload)
+        .expect("exact regenerated bytes enter canonical request replay");
+    assert!(
+        regenerated_payload.capacity() >= maximum_payload_byte_length,
+        "replay borrows rather than retaining regenerated bytes"
+    );
+    runtime
+        .commit_transaction()
+        .expect("maximum append replay commits");
+    runtime
+        .transaction_completed()
+        .expect("maximum append replay completes");
+}
+
+#[test]
+fn exported_request_digest_rejects_changed_replayed_append_at_commit() {
+    let object = ProofExternalMemoryObject::new(0);
+    let mut payload = Zeroizing::new(vec![1, 2, 3, 4]);
+    let mut runtime = CommonProofStorageTransactionRuntime::for_runtime_binding([0x62; 64]);
+    runtime
+        .begin_transaction(4, 1)
+        .expect("the changed-replay transaction begins");
+    runtime
+        .append_owned_object_bytes(object, 0, &mut payload)
+        .expect("the original append allocation transfers");
+    assert_eq!(
+        runtime.commit_transaction(),
+        Err(ProofExternalMemoryTransactionAdapterError::Yielded),
+    );
+    let encoded_response = runtime
+        .capture_yielded_request()
+        .expect("the original append request is captured")
+        .encode_test_worker_response(&[])
+        .expect("the append-only response encodes");
+    drop(
+        runtime
+            .encode_pending_worker_request()
+            .expect("the original append request is exported"),
+    );
+    runtime
+        .supply_worker_response(&encoded_response)
+        .expect("the append response enters replay");
+
+    runtime
+        .begin_transaction(4, 1)
+        .expect("the changed append replay begins");
+    let mut changed_payload = Zeroizing::new(vec![1, 2, 3, 5]);
+    runtime
+        .append_owned_object_bytes(object, 0, &mut changed_payload)
+        .expect("the equal-length append is staged for canonical digest validation");
+    assert_eq!(
+        runtime.commit_transaction(),
+        Err(ProofExternalMemoryTransactionAdapterError::InvalidReplay),
+        "the cached canonical request digest rejects changed replay bytes",
+    );
+    assert_eq!(
+        runtime.transaction_completed(),
+        Err(CommonProofRuntimeError::TransactionReplayIncomplete),
+        "a rejected canonical replay cannot advance the transaction runtime",
     );
 }
 
@@ -519,22 +693,22 @@ fn runtime_limits_bind_absolute_safety_bounds_and_reject_overruns() {
             .expect("the external-memory chunk length fits usize"),
         FOUNDATION_PROFILE.stream_chunk_byte_length
     );
-    let exact_limits = CommonProofRuntimeLimits::new(
+    let maximum_limits = CommonProofRuntimeLimits::new(
         MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
         MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
         MAXIMUM_COMMON_PROOF_BYTE_LENGTH as u64,
     )
-    .expect("the exact worker safety bounds are accepted");
+    .expect("the absolute worker safety bounds are accepted");
     assert_eq!(
-        exact_limits.proof_byte_length(),
+        maximum_limits.maximum_proof_byte_length(),
         MAXIMUM_COMMON_PROOF_BYTE_LENGTH
     );
     assert_eq!(
-        exact_limits.external_memory_chunk_byte_length(),
+        maximum_limits.external_memory_chunk_byte_length(),
         MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH
     );
     assert_eq!(
-        exact_limits.prefetched_query_byte_length(),
+        maximum_limits.prefetched_query_byte_length(),
         MAXIMUM_COMMON_PROOF_BYTE_LENGTH as u64
     );
     assert_eq!(

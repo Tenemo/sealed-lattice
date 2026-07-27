@@ -139,8 +139,6 @@ pub(crate) struct PreparedActionProofAttemptSource {
     application_slot_hash: Hash512,
     application_statement_schema_identifier: u16,
     application_statement_hash: Hash512,
-    expected_proof_byte_length: u64,
-    expected_query_count: u32,
     checkpoint_continuation: AuthenticatedCheckpointContinuationSource,
 }
 
@@ -165,14 +163,6 @@ impl PreparedActionProofAttemptSource {
         self.application_statement_hash
     }
 
-    pub(crate) const fn expected_proof_byte_length(&self) -> u64 {
-        self.expected_proof_byte_length
-    }
-
-    pub(crate) const fn expected_query_count(&self) -> u32 {
-        self.expected_query_count
-    }
-
     pub(crate) const fn checkpoint_continuation(
         &self,
     ) -> &AuthenticatedCheckpointContinuationSource {
@@ -185,13 +175,8 @@ pub(crate) fn prepare_exact_same_secret_evidence_attempt(
     action_private_randomness: &ActionPrivateRandomness,
     application_slot: ProofApplicationSlot,
     application_statement_hash: Hash512,
-    expected_proof_byte_length: u64,
-    expected_query_count: u32,
 ) -> Result<PreparedActionProofAttemptSource, super::FoundationSchemaError> {
-    if expected_proof_byte_length == 0
-        || expected_query_count == 0
-        || application_statement_hash.into_bytes() == [0_u8; HASH_BYTE_LENGTH]
-    {
+    if application_statement_hash.into_bytes() == [0_u8; HASH_BYTE_LENGTH] {
         return Err(super::FoundationSchemaError::new(
             RefusalReason::OutsideSupportedProfile,
             "the exact same-secret evidence attempt has invalid limits",
@@ -221,8 +206,6 @@ pub(crate) fn prepare_exact_same_secret_evidence_attempt(
         application_statement_schema_identifier: application_slot
             .application_statement_schema_identifier(),
         application_statement_hash,
-        expected_proof_byte_length,
-        expected_query_count,
         checkpoint_continuation:
             AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
                 [0x71; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
@@ -251,8 +234,6 @@ pub(crate) struct PreparedPublicOnlyProofAttemptSource {
     application_slot_hash: Hash512,
     application_statement_schema_identifier: u16,
     application_statement_hash: Hash512,
-    expected_proof_byte_length: u64,
-    expected_query_count: u32,
     checkpoint_continuation: AuthenticatedCheckpointContinuationSource,
 }
 
@@ -275,14 +256,6 @@ impl PreparedPublicOnlyProofAttemptSource {
 
     pub(crate) const fn application_statement_hash(&self) -> Hash512 {
         self.application_statement_hash
-    }
-
-    pub(crate) const fn expected_proof_byte_length(&self) -> u64 {
-        self.expected_proof_byte_length
-    }
-
-    pub(crate) const fn expected_query_count(&self) -> u32 {
-        self.expected_query_count
     }
 
     pub(crate) const fn checkpoint_continuation(
@@ -318,14 +291,6 @@ impl WitnessBoundPreparedActionProofAttemptSource {
 
     pub(crate) const fn application_statement_hash(&self) -> Hash512 {
         self.prepared_source.application_statement_hash()
-    }
-
-    pub(crate) const fn expected_proof_byte_length(&self) -> u64 {
-        self.prepared_source.expected_proof_byte_length()
-    }
-
-    pub(crate) const fn expected_query_count(&self) -> u32 {
-        self.prepared_source.expected_query_count()
     }
 
     pub(crate) const fn checkpoint_continuation(
@@ -367,13 +332,8 @@ pub(crate) fn resolve_prepared_action_proof_attempt_source(
     board_source: &VerifiedBoardApplicationSource,
     application_slot: ProofApplicationSlot,
     application_statement_hash: Hash512,
-    expected_proof_byte_length: u64,
-    expected_query_count: u32,
     checkpoint_continuation: AuthenticatedCheckpointContinuationSource,
 ) -> RuntimeResult<PreparedActionProofAttemptSource> {
-    if expected_proof_byte_length == 0 || expected_query_count == 0 {
-        return Err(RefusalReason::OutsideSupportedProfile.canonical_code() as u32);
-    }
     ACTION_RANDOMNESS_REGISTRY.with(|registry| {
         let registry = registry.borrow();
         let randomness = registry.get(action_randomness_handle)?;
@@ -410,8 +370,6 @@ pub(crate) fn resolve_prepared_action_proof_attempt_source(
             application_slot_hash: application_slot.hash().map_err(schema_status)?,
             application_statement_schema_identifier: statement_schema_identifier,
             application_statement_hash,
-            expected_proof_byte_length,
-            expected_query_count,
             checkpoint_continuation,
         })
     })
@@ -429,15 +387,11 @@ pub(crate) fn resolve_prepared_public_only_proof_attempt_source(
     roster_hash: Hash512,
     application_slot: ProofApplicationSlot,
     application_statement_hash: Hash512,
-    expected_proof_byte_length: u64,
-    expected_query_count: u32,
     checkpoint_continuation: AuthenticatedCheckpointContinuationSource,
 ) -> RuntimeResult<PreparedPublicOnlyProofAttemptSource> {
     let statement_schema_identifier = application_slot.application_statement_schema_identifier();
     if !ProofFamilyIdentifiers::PUBLIC_ONLY_FAMILY_SCHEMA_IDENTIFIERS
         .contains(&statement_schema_identifier)
-        || expected_proof_byte_length == 0
-        || expected_query_count == 0
         || application_statement_hash.into_bytes() == [0_u8; HASH_BYTE_LENGTH]
     {
         return Err(RefusalReason::OutsideSupportedProfile.canonical_code() as u32);
@@ -479,8 +433,6 @@ pub(crate) fn resolve_prepared_public_only_proof_attempt_source(
             application_slot_hash,
             application_statement_schema_identifier: statement_schema_identifier,
             application_statement_hash,
-            expected_proof_byte_length,
-            expected_query_count,
             checkpoint_continuation,
         })
     })
@@ -494,16 +446,12 @@ pub(crate) fn resolve_prepared_public_only_proof_attempt_source(
 pub(crate) fn resolve_prepared_ordinary_proof_attempt_source(
     action_private_randomness: &ActionPrivateRandomness,
     proof_coin_input: OrdinaryProofCoinInput,
-    expected_proof_byte_length: u64,
-    expected_query_count: u32,
     checkpoint_continuation: AuthenticatedCheckpointContinuationSource,
 ) -> Result<PreparedActionProofAttemptSource, super::FoundationSchemaError> {
     let application_slot = proof_coin_input.application_slot();
     let application_statement_hash = proof_coin_input.application_statement_hash();
     if application_slot.application_statement_schema_identifier()
         != ProofFamilyIdentifiers::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER
-        || expected_proof_byte_length == 0
-        || expected_query_count == 0
         || application_statement_hash.into_bytes() == [0_u8; HASH_BYTE_LENGTH]
     {
         return Err(super::FoundationSchemaError::new(
@@ -533,8 +481,6 @@ pub(crate) fn resolve_prepared_ordinary_proof_attempt_source(
         application_statement_schema_identifier:
             ProofFamilyIdentifiers::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
         application_statement_hash,
-        expected_proof_byte_length,
-        expected_query_count,
         checkpoint_continuation,
     })
 }
@@ -1352,8 +1298,6 @@ mod tests {
                 .expect("persistent proof slot hashes"),
             application_statement_schema_identifier: 0x1211,
             application_statement_hash,
-            expected_proof_byte_length: 1,
-            expected_query_count: 1,
             checkpoint_continuation:
                 AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
                     [0x77; ATTEMPT_IDENTIFIER_BYTE_LENGTH],

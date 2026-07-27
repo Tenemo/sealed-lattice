@@ -1,23 +1,16 @@
 //! Recomputable row encoding with an explicit public or private high half.
 
-#[cfg(test)]
 use p3_dft::{Radix2Bowers, TwoAdicSubgroupDft};
-use p3_field::TwoAdicField;
-#[cfg(test)]
-use p3_field::{Field, PrimeCharacteristicRing};
+use p3_field::{Field, PrimeCharacteristicRing, TwoAdicField};
 use p3_goldilocks::Goldilocks;
-#[cfg(test)]
 use sha3::{
     Shake256,
     digest::{ExtendableOutput, Update, XofReader},
 };
 
-#[cfg(test)]
 use super::GOLDILOCKS_MODULUS;
-#[cfg(test)]
 use crate::bgv::proof_suite::PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT;
 
-#[cfg(test)]
 const PRIVATE_ROW_HIGH_HALF_DOMAIN: &[u8] = b"sealed-lattice/streaming-row-pad/v1";
 #[cfg(test)]
 pub(super) const ROW_CODE_LOG_INV_RATE: usize = 2;
@@ -28,21 +21,18 @@ pub(super) const ROW_CODE_LOG_INV_RATE: usize = 2;
 /// the plain Reed-Solomon encoding of those coefficients. Secret rows append
 /// the existing private, domain-separated masking coefficients. Transform
 /// slack after the complete coefficient message is always zero-filled.
-#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum RowCodeHighHalfSource<'seed> {
     CanonicalPublicZeros,
     PrivateMaskSeed(&'seed [u8; 32]),
 }
 
-#[cfg(test)]
 impl<'seed> From<&'seed [u8; 32]> for RowCodeHighHalfSource<'seed> {
     fn from(private_seed: &'seed [u8; 32]) -> Self {
         Self::PrivateMaskSeed(private_seed)
     }
 }
 
-#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum RowEncodingError {
     RowIndexOutsideGeometry {
@@ -59,7 +49,6 @@ pub(super) enum RowEncodingError {
     },
 }
 
-#[cfg(test)]
 impl core::fmt::Display for RowEncodingError {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
@@ -86,7 +75,6 @@ impl core::fmt::Display for RowEncodingError {
     }
 }
 
-#[cfg(test)]
 impl From<RowEncodingError> for String {
     fn from(error: RowEncodingError) -> Self {
         error.to_string()
@@ -170,7 +158,6 @@ impl RowEncodingGeometry {
         })
     }
 
-    #[cfg(test)]
     pub(super) const fn pad_value_count(self) -> usize {
         self.witness_values_per_row
     }
@@ -181,7 +168,6 @@ impl RowEncodingGeometry {
     }
 }
 
-#[cfg(test)]
 pub(super) fn encode_row<'seed>(
     geometry: RowEncodingGeometry,
     row_index: usize,
@@ -245,7 +231,6 @@ pub(super) fn padded_row_coefficients<'seed>(
     Ok(coefficients)
 }
 
-#[cfg(test)]
 fn append_row_high_half(
     coefficients: &mut Vec<Goldilocks>,
     geometry: RowEncodingGeometry,
@@ -267,7 +252,6 @@ fn append_row_high_half(
     Ok(())
 }
 
-#[cfg(test)]
 fn derive_private_row_high_half(
     geometry: RowEncodingGeometry,
     row_index: usize,
@@ -288,7 +272,6 @@ fn derive_private_row_high_half(
     })
 }
 
-#[cfg(test)]
 fn derive_private_row_high_half_from_candidates(
     output_count: usize,
     mut next_candidate: impl FnMut() -> u64,

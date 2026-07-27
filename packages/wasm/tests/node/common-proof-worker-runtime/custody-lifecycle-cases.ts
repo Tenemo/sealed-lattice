@@ -178,7 +178,7 @@ describe('common-proof custody lifecycle', () => {
             if (copiedResumeDescriptor !== undefined) {
                 copiedResumeDescriptor.checkpointLineageIdentifier.fill(0);
                 copiedResumeDescriptor.commonProofEnvironmentIdentifier.fill(0);
-                copiedResumeDescriptor.privateRandomCursorManifestBytes.fill(0);
+                copiedResumeDescriptor.generationCursorManifestBytes.fill(0);
                 copiedResumeDescriptor.privateRandomnessStreamAttemptIdentifier?.fill(
                     0,
                 );
@@ -235,7 +235,7 @@ describe('common-proof custody lifecycle', () => {
                 );
             resumeDescriptor.checkpointLineageIdentifier.fill(0);
             resumeDescriptor.commonProofEnvironmentIdentifier.fill(0);
-            resumeDescriptor.privateRandomCursorManifestBytes.fill(0);
+            resumeDescriptor.generationCursorManifestBytes.fill(0);
             resumeDescriptor.privateRandomnessStreamAttemptIdentifier?.fill(0);
             resumeDescriptor.stableAttemptBindingHash.fill(0);
             await runCommonProofGenerationInInstalledCustodyWorker(
@@ -381,7 +381,7 @@ describe('common-proof custody lifecycle', () => {
                 );
             resumeDescriptor.checkpointLineageIdentifier.fill(0);
             resumeDescriptor.commonProofEnvironmentIdentifier.fill(0);
-            resumeDescriptor.privateRandomCursorManifestBytes.fill(0);
+            resumeDescriptor.generationCursorManifestBytes.fill(0);
             resumeDescriptor.privateRandomnessStreamAttemptIdentifier?.fill(0);
             resumeDescriptor.stableAttemptBindingHash.fill(0);
 
@@ -1427,7 +1427,7 @@ describe('common-proof custody lifecycle', () => {
             const expectedEnvironmentIdentifier =
                 initialResumeDescriptor.commonProofEnvironmentIdentifier.slice();
             const expectedCursorManifest =
-                initialResumeDescriptor.privateRandomCursorManifestBytes.slice();
+                initialResumeDescriptor.generationCursorManifestBytes.slice();
             const expectedPrivateRandomnessStreamAttemptIdentifier =
                 initialResumeDescriptor.privateRandomnessStreamAttemptIdentifier?.slice();
             const expectedStableAttemptBindingHash =
@@ -1445,7 +1445,7 @@ describe('common-proof custody lifecycle', () => {
                 );
             initialResumeDescriptor.checkpointLineageIdentifier.fill(0);
             initialResumeDescriptor.commonProofEnvironmentIdentifier.fill(0);
-            initialResumeDescriptor.privateRandomCursorManifestBytes.fill(0);
+            initialResumeDescriptor.generationCursorManifestBytes.fill(0);
             initialResumeDescriptor.privateRandomnessStreamAttemptIdentifier?.fill(
                 0,
             );
@@ -1482,7 +1482,7 @@ describe('common-proof custody lifecycle', () => {
                 ...retriedResumeDescriptor.commonProofEnvironmentIdentifier,
             ]).toEqual([...expectedEnvironmentIdentifier]);
             expect([
-                ...retriedResumeDescriptor.privateRandomCursorManifestBytes,
+                ...retriedResumeDescriptor.generationCursorManifestBytes,
             ]).toEqual([...expectedCursorManifest]);
             expect(
                 retriedResumeDescriptor.privateRandomnessStreamAttemptIdentifier,
@@ -1492,7 +1492,7 @@ describe('common-proof custody lifecycle', () => {
             ]).toEqual([...expectedStableAttemptBindingHash]);
             retriedResumeDescriptor.checkpointLineageIdentifier.fill(0);
             retriedResumeDescriptor.commonProofEnvironmentIdentifier.fill(0);
-            retriedResumeDescriptor.privateRandomCursorManifestBytes.fill(0);
+            retriedResumeDescriptor.generationCursorManifestBytes.fill(0);
             retriedResumeDescriptor.privateRandomnessStreamAttemptIdentifier?.fill(
                 0,
             );
@@ -1567,7 +1567,7 @@ describe('common-proof custody lifecycle', () => {
                 );
             resumeDescriptor.checkpointLineageIdentifier.fill(0);
             resumeDescriptor.commonProofEnvironmentIdentifier.fill(0);
-            resumeDescriptor.privateRandomCursorManifestBytes.fill(0);
+            resumeDescriptor.generationCursorManifestBytes.fill(0);
             resumeDescriptor.privateRandomnessStreamAttemptIdentifier?.fill(0);
             resumeDescriptor.stableAttemptBindingHash.fill(0);
             await runCommonProofGenerationInInstalledCustodyWorker(
@@ -1728,7 +1728,7 @@ describe('common-proof custody lifecycle', () => {
                 );
             resumeDescriptor.checkpointLineageIdentifier.fill(0);
             resumeDescriptor.commonProofEnvironmentIdentifier.fill(0);
-            resumeDescriptor.privateRandomCursorManifestBytes.fill(0);
+            resumeDescriptor.generationCursorManifestBytes.fill(0);
             resumeDescriptor.privateRandomnessStreamAttemptIdentifier?.fill(0);
             resumeDescriptor.stableAttemptBindingHash.fill(0);
 

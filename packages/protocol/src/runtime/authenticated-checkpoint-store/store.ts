@@ -21,7 +21,11 @@ import {
     ExclusiveResourceLifecycle,
     type ExclusiveResourceOwnerToken,
 } from '../exclusive-resource-lifecycle.js';
-import type { UntrustedStorageTransactionStore } from '../untrusted-storage-transaction-store.js';
+import type { UntrustedStorageExclusiveCapacityReservationInput } from '../untrusted-storage-transaction-store/records.js';
+import type {
+    UntrustedStorageExclusiveCapacityReservation,
+    UntrustedStorageTransactionStore,
+} from '../untrusted-storage-transaction-store.js';
 
 import {
     identifierByteLength,
@@ -31,6 +35,7 @@ import {
     checkpointChunkOperationDomain,
     checkpointOperationIdentityBrand,
     checkpointLineageReservationBrand,
+    authenticatedCheckpointPhysicalAccountingScopeBrand,
     copyAndValidateBoundary,
     encodeCheckpointManifest,
     parseStreamDescriptor,
@@ -58,6 +63,8 @@ import {
     type ExpectedCheckpointBoundary,
     type AuthenticatedCheckpointStoreLimits,
     type AuthenticatedCheckpointStore,
+    type AuthenticatedCheckpointPhysicalAccountingScope,
+    type AuthenticatedCheckpointPhysicalAccountingSnapshot,
     type TransferableAuthenticatedCheckpointStore,
     type StoredCheckpointJournal,
     type CheckpointOperationIdentityRecord,
@@ -68,6 +75,8 @@ export { describeAuthenticatedCheckpointStateStream } from './records.js';
 export type {
     AuthenticatedCheckpointStore,
     AuthenticatedCheckpointStoreLimits,
+    AuthenticatedCheckpointPhysicalAccountingScope,
+    AuthenticatedCheckpointPhysicalAccountingSnapshot,
     CheckpointBoundary,
     CheckpointBoundaryPolicy,
     CheckpointLineageReservation,
@@ -76,6 +85,113 @@ export type {
     ResumedCheckpoint,
     TransferableAuthenticatedCheckpointStore,
 } from './records.js';
+
+const runtimeRecordEnvelopeOverheadByteLength = 34n;
+const checkpointStorageIndexValueByteLength = 256n;
+const authenticatedRepairRecordFixedByteLength = 68n;
+const checkpointStorageObjectKeyByteLength = 256n;
+const checkpointStorageProfileTextEncoder = new TextEncoder();
+
+const checkedCheckpointStorageNumber = (
+    value: bigint,
+    label: string,
+): number => {
+    if (value < 0n || value > BigInt(Number.MAX_SAFE_INTEGER)) {
+        throw new AuthenticatedRuntimeRecordError(
+            'InvalidConfiguration',
+            `${label} exceeds the exact JavaScript integer range.`,
+        );
+    }
+    return Number(value);
+};
+
+const checkpointPhysicalAccountingCapacity = (
+    limits: AuthenticatedCheckpointStoreLimits,
+): Omit<
+    UntrustedStorageExclusiveCapacityReservationInput,
+    'initialLogicalRecordKeyPrefixes'
+> => {
+    const maximumChunkCount = BigInt(
+        Math.ceil(
+            limits.maximumCheckpointStateByteLength /
+                foundationProfile.streamChunkByteLength,
+        ),
+    );
+    const maximumChunkRecordKeyByteLength = BigInt(
+        checkpointStorageProfileTextEncoder.encode(
+            `checkpoint/chunk/${'0'.repeat(64)}/${'0'.repeat(64)}/${'0'.repeat(8)}-${'0'.repeat(128)}`,
+        ).byteLength,
+    );
+    const maximumManifestRecordKeyByteLength = BigInt(
+        checkpointStorageProfileTextEncoder.encode(
+            `checkpoint/manifest/${'0'.repeat(64)}`,
+        ).byteLength,
+    );
+    const maximumJournalRecordKeyByteLength = BigInt(
+        checkpointStorageProfileTextEncoder.encode(
+            `checkpoint/journal/${'0'.repeat(64)}`,
+        ).byteLength,
+    );
+    const maximumLogicalRecordKeyByteLength = [
+        maximumChunkRecordKeyByteLength,
+        maximumManifestRecordKeyByteLength,
+        maximumJournalRecordKeyByteLength,
+    ].reduce((maximum, value) => (maximum > value ? maximum : value));
+    const simultaneousLogicalRecordCount = maximumChunkCount * 2n + 2n;
+    const checkpointChunkStoredValueByteLength =
+        BigInt(limits.maximumCheckpointStateByteLength) * 2n +
+        maximumChunkCount * runtimeRecordEnvelopeOverheadByteLength * 2n;
+    const manifestPlaintextByteLength =
+        BigInt(limits.maximumManifestByteLength) + 38n;
+    const manifestStoredValueByteLength =
+        (manifestPlaintextByteLength +
+            runtimeRecordEnvelopeOverheadByteLength) *
+        2n;
+    const journalPlaintextByteLength =
+        1_024n +
+        maximumChunkCount * 2n * (maximumChunkRecordKeyByteLength + 4n);
+    const journalStoredValueByteLength =
+        (journalPlaintextByteLength + runtimeRecordEnvelopeOverheadByteLength) *
+        2n;
+    const indexStoredValueByteLength =
+        simultaneousLogicalRecordCount * checkpointStorageIndexValueByteLength;
+    const authenticatedRepairHeadPlaintextByteLength =
+        simultaneousLogicalRecordCount *
+        (authenticatedRepairRecordFixedByteLength +
+            maximumLogicalRecordKeyByteLength +
+            checkpointStorageObjectKeyByteLength);
+    return Object.freeze({
+        maximumAdditionalAuthenticatedRepairHeadPlaintextByteLength:
+            checkedCheckpointStorageNumber(
+                authenticatedRepairHeadPlaintextByteLength,
+                'Checkpoint repair-head capacity',
+            ),
+        maximumAdditionalOwnedRecordCount: checkedCheckpointStorageNumber(
+            simultaneousLogicalRecordCount * 2n + 2n,
+            'Checkpoint owned-record capacity',
+        ),
+        maximumAdditionalStoredValueByteLength: checkedCheckpointStorageNumber(
+            checkpointChunkStoredValueByteLength +
+                manifestStoredValueByteLength +
+                journalStoredValueByteLength +
+                indexStoredValueByteLength,
+            'Checkpoint stored-value capacity',
+        ),
+        maximumDeletionBatchRecordCount: 1,
+    });
+};
+
+type CheckpointPhysicalAccountingScopeRecord = {
+    readonly checkpointLineageIdentifier: Uint8Array;
+    openCallCount: number;
+    openCiphertextByteLength: number;
+    openPlaintextByteLength: number;
+    readonly reservation: UntrustedStorageExclusiveCapacityReservation;
+    released: boolean;
+    sealCallCount: number;
+    sealCiphertextByteLength: number;
+    sealPlaintextByteLength: number;
+};
 
 export const openAuthenticatedCheckpointStoreWithProtection = (input: {
     boundaryPolicy: CheckpointBoundaryPolicy;
@@ -106,6 +222,115 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
         new Set<CheckpointOperationIdentityRecord>();
     const issuedCheckpointLineageReservationRecords =
         new Set<CheckpointLineageReservationRecord>();
+    let physicalAccountingScopes = new WeakMap<
+        AuthenticatedCheckpointPhysicalAccountingScope,
+        CheckpointPhysicalAccountingScopeRecord
+    >();
+    let activePhysicalAccountingScopeRecord:
+        | CheckpointPhysicalAccountingScopeRecord
+        | undefined;
+    const issuedPhysicalAccountingScopeRecords =
+        new Set<CheckpointPhysicalAccountingScopeRecord>();
+
+    const checkedAccountingAdd = (
+        currentValue: number,
+        increment: number,
+        label: string,
+    ): number => {
+        const value = currentValue + increment;
+        if (!Number.isSafeInteger(value) || value < 0) {
+            throw new AuthenticatedRuntimeRecordError(
+                'ResourceLimit',
+                `${label} exceeds the exact JavaScript integer range.`,
+            );
+        }
+        return value;
+    };
+
+    const requirePhysicalAccountingLineage = (
+        checkpointLineageIdentifier: Uint8Array,
+    ): void => {
+        if (
+            activePhysicalAccountingScopeRecord !== undefined &&
+            !bytesEqual(
+                activePhysicalAccountingScopeRecord.checkpointLineageIdentifier,
+                checkpointLineageIdentifier,
+            )
+        ) {
+            throw new AuthenticatedRuntimeRecordError(
+                'InvalidInput',
+                'Checkpoint physical accounting is reserved for a different lineage.',
+            );
+        }
+    };
+
+    const observeOpenedRecord = (opened: {
+        plaintext: Uint8Array;
+        sealedBytes: Uint8Array;
+    }): void => {
+        const accounting = activePhysicalAccountingScopeRecord;
+        if (accounting === undefined) {
+            return;
+        }
+        accounting.openCallCount = checkedAccountingAdd(
+            accounting.openCallCount,
+            1,
+            'Checkpoint open call accounting',
+        );
+        accounting.openCiphertextByteLength = checkedAccountingAdd(
+            accounting.openCiphertextByteLength,
+            opened.sealedBytes.byteLength,
+            'Checkpoint open ciphertext accounting',
+        );
+        accounting.openPlaintextByteLength = checkedAccountingAdd(
+            accounting.openPlaintextByteLength,
+            opened.plaintext.byteLength,
+            'Checkpoint open plaintext accounting',
+        );
+    };
+
+    const readCheckpointRuntimeRecord = async (
+        readInput: Parameters<typeof readRuntimeRecord>[0],
+        checkpointLineageIdentifier: Uint8Array,
+    ) => {
+        requirePhysicalAccountingLineage(checkpointLineageIdentifier);
+        const opened = await readRuntimeRecord(readInput);
+        if (opened !== undefined) {
+            observeOpenedRecord(opened);
+        }
+        return opened;
+    };
+
+    const stageCheckpointRuntimeRecordWrite = async (
+        writeInput: Parameters<typeof stageRuntimeRecordWrite>[0],
+        checkpointLineageIdentifier: Uint8Array,
+    ): Promise<void> => {
+        requirePhysicalAccountingLineage(checkpointLineageIdentifier);
+        const sealedBytes = await stageRuntimeRecordWrite(writeInput);
+        const accounting = activePhysicalAccountingScopeRecord;
+        try {
+            if (accounting === undefined) {
+                return;
+            }
+            accounting.sealCallCount = checkedAccountingAdd(
+                accounting.sealCallCount,
+                1,
+                'Checkpoint seal call accounting',
+            );
+            accounting.sealCiphertextByteLength = checkedAccountingAdd(
+                accounting.sealCiphertextByteLength,
+                sealedBytes.byteLength,
+                'Checkpoint seal ciphertext accounting',
+            );
+            accounting.sealPlaintextByteLength = checkedAccountingAdd(
+                accounting.sealPlaintextByteLength,
+                writeInput.plaintext.byteLength,
+                'Checkpoint seal plaintext accounting',
+            );
+        } finally {
+            sealedBytes.fill(0);
+        }
+    };
 
     const retainIdentifierKey = (identifierKey: string): void => {
         identifierReferenceCounts.set(
@@ -519,12 +744,15 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
 
     const readManifest = async (lineageIdentifier: Uint8Array) => {
         const logicalRecordKey = manifestRecordKey(lineageIdentifier);
-        const opened = await readRuntimeRecord({
-            logicalRecordKey,
-            operationDomain: checkpointManifestOperationDomain,
-            protection,
-            store: input.store,
-        });
+        const opened = await readCheckpointRuntimeRecord(
+            {
+                logicalRecordKey,
+                operationDomain: checkpointManifestOperationDomain,
+                protection,
+                store: input.store,
+            },
+            lineageIdentifier,
+        );
         if (opened === undefined) {
             return undefined;
         }
@@ -545,12 +773,15 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
 
     const readJournal = async (lineageIdentifier: Uint8Array) => {
         const logicalRecordKey = journalRecordKey(lineageIdentifier);
-        const opened = await readRuntimeRecord({
-            logicalRecordKey,
-            operationDomain: checkpointJournalOperationDomain,
-            protection,
-            store: input.store,
-        });
+        const opened = await readCheckpointRuntimeRecord(
+            {
+                logicalRecordKey,
+                operationDomain: checkpointJournalOperationDomain,
+                protection,
+                store: input.store,
+            },
+            lineageIdentifier,
+        );
         if (opened === undefined) {
             return undefined;
         }
@@ -595,6 +826,7 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
         }
         await deleteAuthenticatedRecord({
             logicalRecordKey: journalRecordKey(lineageIdentifier),
+            observeOpenedRecord,
             operationDomain: checkpointJournalOperationDomain,
             protection,
             store: input.store,
@@ -959,14 +1191,17 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
             lifetimeMilliseconds: limits.transactionLifetimeMilliseconds,
         });
         try {
-            await stageRuntimeRecordWrite({
-                expectedCurrentSealedBytes: null,
-                logicalRecordKey: journalRecordKey(lineageIdentifier),
-                operationDomain: checkpointJournalOperationDomain,
-                plaintext: journalPlaintext,
-                protection,
-                transaction: journalTransaction,
-            });
+            await stageCheckpointRuntimeRecordWrite(
+                {
+                    expectedCurrentSealedBytes: null,
+                    logicalRecordKey: journalRecordKey(lineageIdentifier),
+                    operationDomain: checkpointJournalOperationDomain,
+                    plaintext: journalPlaintext,
+                    protection,
+                    transaction: journalTransaction,
+                },
+                lineageIdentifier,
+            );
             await journalTransaction.commit();
         } catch (error) {
             throw await closeTransactionAfterFailure(journalTransaction, error);
@@ -1022,15 +1257,18 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
                         limits.transactionLifetimeMilliseconds,
                 });
                 try {
-                    await stageRuntimeRecordWrite({
-                        expectedCurrentSealedBytes: null,
-                        logicalRecordKey:
-                            newChunkRecordKeys[observedChunkCount],
-                        operationDomain: checkpointChunkOperationDomain,
-                        plaintext: chunkBytes,
-                        protection,
-                        transaction: chunkTransaction,
-                    });
+                    await stageCheckpointRuntimeRecordWrite(
+                        {
+                            expectedCurrentSealedBytes: null,
+                            logicalRecordKey:
+                                newChunkRecordKeys[observedChunkCount],
+                            operationDomain: checkpointChunkOperationDomain,
+                            plaintext: chunkBytes,
+                            protection,
+                            transaction: chunkTransaction,
+                        },
+                        lineageIdentifier,
+                    );
                     await chunkTransaction.commit();
                 } catch (error) {
                     throw await closeTransactionAfterFailure(
@@ -1065,15 +1303,18 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
             lifetimeMilliseconds: limits.transactionLifetimeMilliseconds,
         });
         try {
-            await stageRuntimeRecordWrite({
-                expectedCurrentSealedBytes:
-                    previousManifest?.opened.sealedBytes ?? null,
-                logicalRecordKey: manifestRecordKey(lineageIdentifier),
-                operationDomain: checkpointManifestOperationDomain,
-                plaintext: manifestPlaintext,
-                protection,
-                transaction: manifestTransaction,
-            });
+            await stageCheckpointRuntimeRecordWrite(
+                {
+                    expectedCurrentSealedBytes:
+                        previousManifest?.opened.sealedBytes ?? null,
+                    logicalRecordKey: manifestRecordKey(lineageIdentifier),
+                    operationDomain: checkpointManifestOperationDomain,
+                    plaintext: manifestPlaintext,
+                    protection,
+                    transaction: manifestTransaction,
+                },
+                lineageIdentifier,
+            );
             await manifestTransaction.commit();
             issuedIdentity.lastCanonicalManifestBytes =
                 canonicalManifestBytes.slice();
@@ -1235,14 +1476,18 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
                                 chunkIndex < chunkRecordKeys.length;
                                 chunkIndex += 1
                             ) {
-                                const openedChunk = await readRuntimeRecord({
-                                    logicalRecordKey:
-                                        chunkRecordKeys[chunkIndex],
-                                    operationDomain:
-                                        checkpointChunkOperationDomain,
-                                    protection,
-                                    store: input.store,
-                                });
+                                const openedChunk =
+                                    await readCheckpointRuntimeRecord(
+                                        {
+                                            logicalRecordKey:
+                                                chunkRecordKeys[chunkIndex],
+                                            operationDomain:
+                                                checkpointChunkOperationDomain,
+                                            protection,
+                                            store: input.store,
+                                        },
+                                        lineageIdentifier,
+                                    );
                                 if (openedChunk === undefined) {
                                     throw new AuthenticatedRuntimeRecordError(
                                         'MissingRecord',
@@ -1393,14 +1638,17 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
             lifetimeMilliseconds: limits.transactionLifetimeMilliseconds,
         });
         try {
-            await stageRuntimeRecordWrite({
-                expectedCurrentSealedBytes: null,
-                logicalRecordKey: journalRecordKey(lineageIdentifier),
-                operationDomain: checkpointJournalOperationDomain,
-                plaintext: journalPlaintext,
-                protection,
-                transaction: journalTransaction,
-            });
+            await stageCheckpointRuntimeRecordWrite(
+                {
+                    expectedCurrentSealedBytes: null,
+                    logicalRecordKey: journalRecordKey(lineageIdentifier),
+                    operationDomain: checkpointJournalOperationDomain,
+                    plaintext: journalPlaintext,
+                    protection,
+                    transaction: journalTransaction,
+                },
+                lineageIdentifier,
+            );
             await journalTransaction.commit();
         } catch (error) {
             throw await closeTransactionAfterFailure(journalTransaction, error);
@@ -1409,6 +1657,7 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
         }
         await deleteAuthenticatedRecord({
             logicalRecordKey: manifestRecordKey(lineageIdentifier),
+            observeOpenedRecord,
             operationDomain: checkpointManifestOperationDomain,
             protection,
             store: input.store,
@@ -1433,13 +1682,121 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
         );
     };
 
+    const requirePhysicalAccountingScopeRecord = (
+        scope: AuthenticatedCheckpointPhysicalAccountingScope,
+    ): CheckpointPhysicalAccountingScopeRecord => {
+        const record = physicalAccountingScopes.get(scope);
+        if (record === undefined) {
+            throw new AuthenticatedRuntimeRecordError(
+                'InvalidInput',
+                'Checkpoint physical accounting requires a scope issued by this store.',
+            );
+        }
+        return record;
+    };
+
+    const openPhysicalAccountingScope: AuthenticatedCheckpointStore['openPhysicalAccountingScope'] =
+        async (checkpointLineageIdentifier) => {
+            if (activePhysicalAccountingScopeRecord !== undefined) {
+                throw new AuthenticatedRuntimeRecordError(
+                    'Conflict',
+                    'Checkpoint physical accounting already owns this store.',
+                );
+            }
+            const lineageIdentifier = copyExactBytes(
+                checkpointLineageIdentifier,
+                identifierByteLength,
+                'checkpointLineageIdentifier',
+            );
+            const lineageHex = bytesToHex(lineageIdentifier);
+            const capacity = checkpointPhysicalAccountingCapacity(limits);
+            let reservation:
+                | UntrustedStorageExclusiveCapacityReservation
+                | undefined;
+            try {
+                reservation = await input.store.reserveExclusiveCapacity({
+                    ...capacity,
+                    initialLogicalRecordKeyPrefixes: [
+                        `checkpoint/manifest/${lineageHex}`,
+                        `checkpoint/journal/${lineageHex}`,
+                        `checkpoint/chunk/${lineageHex}/`,
+                    ],
+                });
+                const scope = Object.freeze({
+                    [authenticatedCheckpointPhysicalAccountingScopeBrand]:
+                        true as const,
+                });
+                const record: CheckpointPhysicalAccountingScopeRecord = {
+                    checkpointLineageIdentifier: lineageIdentifier,
+                    openCallCount: 0,
+                    openCiphertextByteLength: 0,
+                    openPlaintextByteLength: 0,
+                    reservation,
+                    released: false,
+                    sealCallCount: 0,
+                    sealCiphertextByteLength: 0,
+                    sealPlaintextByteLength: 0,
+                };
+                physicalAccountingScopes.set(scope, record);
+                issuedPhysicalAccountingScopeRecords.add(record);
+                activePhysicalAccountingScopeRecord = record;
+                return scope;
+            } catch (error) {
+                if (reservation !== undefined) {
+                    await reservation.release();
+                }
+                lineageIdentifier.fill(0);
+                throw error;
+            }
+        };
+
+    const copyPhysicalAccounting: AuthenticatedCheckpointStore['copyPhysicalAccounting'] =
+        (scope): AuthenticatedCheckpointPhysicalAccountingSnapshot => {
+            const record = requirePhysicalAccountingScopeRecord(scope);
+            return Object.freeze({
+                ...record.reservation.copyPhysicalStorageAccounting(),
+                openCallCount: record.openCallCount,
+                openCiphertextByteLength: record.openCiphertextByteLength,
+                openPlaintextByteLength: record.openPlaintextByteLength,
+                sealCallCount: record.sealCallCount,
+                sealCiphertextByteLength: record.sealCiphertextByteLength,
+                sealPlaintextByteLength: record.sealPlaintextByteLength,
+            });
+        };
+
+    const releasePhysicalAccountingScope: AuthenticatedCheckpointStore['releasePhysicalAccountingScope'] =
+        async (scope) => {
+            const record = requirePhysicalAccountingScopeRecord(scope);
+            if (record.released) {
+                return;
+            }
+            if (activePhysicalAccountingScopeRecord !== record) {
+                throw new AuthenticatedRuntimeRecordError(
+                    'InvalidState',
+                    'Checkpoint physical accounting scope is not the active store owner.',
+                );
+            }
+            await record.reservation.release();
+            record.released = true;
+            activePhysicalAccountingScopeRecord = undefined;
+        };
+
     const lifecycle = new ExclusiveResourceLifecycle({
         cleanup: async () => {
+            if (
+                activePhysicalAccountingScopeRecord !== undefined &&
+                !activePhysicalAccountingScopeRecord.released
+            ) {
+                await activePhysicalAccountingScopeRecord.reservation.release();
+                activePhysicalAccountingScopeRecord.released = true;
+                activePhysicalAccountingScopeRecord = undefined;
+            }
             await releaseRuntimeRecordProtection(protection);
             operationIdentities = new WeakMap();
             releasedOperationIdentities = new WeakSet();
             checkpointLineageReservations = new WeakMap();
             releasedCheckpointLineageReservations = new WeakSet();
+            physicalAccountingScopes = new WeakMap();
             for (const identityRecord of issuedOperationIdentityRecords) {
                 identityRecord.checkpointLineageIdentifier.fill(0);
                 identityRecord.lastCanonicalManifestBytes?.fill(0);
@@ -1453,6 +1810,10 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
                 reservationRecord.checkpointLineageIdentifier.fill(0);
             }
             issuedCheckpointLineageReservationRecords.clear();
+            for (const accountingRecord of issuedPhysicalAccountingScopeRecords) {
+                accountingRecord.checkpointLineageIdentifier.fill(0);
+            }
+            issuedPhysicalAccountingScopeRecords.clear();
             identifierReferenceCounts.clear();
             recentlyReleasedLineageIdentifierKeys.length = 0;
             pendingOperationIdentityCount = 0;
@@ -1493,12 +1854,24 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
                 lifecycle.assertOpen(owner);
                 return input.store.copyStorageInstanceIdentity();
             },
+            copyPhysicalAccounting: (scope) => {
+                lifecycle.assertOpen(owner);
+                return copyPhysicalAccounting(scope);
+            },
             evict: (checkpointLineageIdentifier) =>
                 lifecycle.run(owner, () => evict(checkpointLineageIdentifier)),
+            openPhysicalAccountingScope: (checkpointLineageIdentifier) =>
+                lifecycle.run(owner, () =>
+                    openPhysicalAccountingScope(checkpointLineageIdentifier),
+                ),
             publish: (publication) =>
                 lifecycle.run(owner, () => publish(publication)),
             releaseOperationIdentity: (identity) =>
                 lifecycle.run(owner, () => releaseOperationIdentity(identity)),
+            releasePhysicalAccountingScope: (scope) =>
+                lifecycle.run(owner, () =>
+                    releasePhysicalAccountingScope(scope),
+                ),
             releaseCheckpointLineageReservation: (reservation) =>
                 lifecycle.run(owner, () =>
                     releaseCheckpointLineageReservation(reservation),

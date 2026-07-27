@@ -2,7 +2,7 @@ use super::*;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use num_traits::ToPrimitive;
+use num_traits::{Signed, ToPrimitive};
 use sha3::{Digest, Sha3_512};
 
 use crate::bgv::{
@@ -140,10 +140,40 @@ fn selected_eight_prime_target_basis_satisfies_the_exact_factor_four_theorem_bou
         &expected_target_primes,
     );
 
-    let target_bounds = direct_ballot_target_noise_bounds(10, 10, 20, 1, 10)
-        .expect("the selected evaluator has an exact symbolic target bound");
-    let evaluation_error_bound = target_bounds
+    let target_bounds_by_ballot_count = (1..=10)
+        .map(|ballot_count| {
+            direct_ballot_target_noise_bounds(10, ballot_count, 20, 1, 10)
+                .expect("every accepted ballot count has exact symbolic target bounds")
+        })
+        .collect::<Vec<_>>();
+    assert!(target_bounds_by_ballot_count.iter().all(|target_bounds| {
+        target_bounds.len() == 20
+            && target_bounds
+                .iter()
+                .enumerate()
+                .all(|(top_count_index, bound)| {
+                    bound.top_count == top_count_index + 1
+                        && bound.every_decryption_margin_is_positive()
+                })
+    }));
+    let minimum_evaluator_margin = target_bounds_by_ballot_count
         .iter()
+        .flatten()
+        .flat_map(|bound| [&bound.target_identifier, &bound.target_order])
+        .map(|bound| &bound.minimum_decryption_margin)
+        .min()
+        .cloned()
+        .expect("the selected evaluator has at least one decryption margin");
+    assert!(minimum_evaluator_margin.is_positive());
+    assert_eq!(
+        minimum_evaluator_margin.to_str_radix(10),
+        "2271682199083132530942007860211960213597475281518060405409880153470463641741",
+        "the exact evaluator no-wrap margin must remain positive",
+    );
+
+    let evaluation_error_bound = target_bounds_by_ballot_count
+        .iter()
+        .flatten()
         .map(|bound| bound.maximum_error_coefficient_bound())
         .max()
         .cloned()
@@ -159,6 +189,20 @@ fn selected_eight_prime_target_basis_satisfies_the_exact_factor_four_theorem_bou
         flooding_bound.to_str_radix(10),
         "350448559458315701434059649110456171713052518886842104181466071040",
     );
+    let independently_required_flooding_bound = (&evaluation_error_bound
+        << usize::try_from(KLLPS_THRESHOLD_SIMULATION_BIT_LENGTH)
+            .expect("selected simulation width fits usize"))
+        * BigUint::from(POLYNOMIAL_DEGREE)
+        * BigUint::from(MAXIMUM_UNAUTHORIZED_COEFFICIENT_NORM);
+    assert_eq!(
+        flooding_bound, independently_required_flooding_bound,
+        "the selected C4 inequality is met at its exact non-strict minimum",
+    );
+    assert_eq!(
+        selected_factor_four_flooding_bound()
+            .expect("production target release derives its flooding bound"),
+        flooding_bound,
+    );
     ensure_factor_four_parameter_conditions(
         CANONICAL_TARGET_CIPHERTEXT_LEVEL,
         &evaluation_error_bound,
@@ -173,6 +217,11 @@ fn selected_eight_prime_target_basis_satisfies_the_exact_factor_four_theorem_bou
     assert_eq!(
         target_modulus.to_str_radix(10),
         "2271682199083132530942007860211960213597483954489024377020137669658856718337",
+    );
+    assert_eq!(
+        (&target_modulus - &flooding_bound).to_str_radix(10),
+        "2271682198732683971483692158777900564487027782775971858133295565477390647297",
+        "the selected flooding support must remain strictly below the target modulus",
     );
 
     let plaintext_modulus = BigUint::from(PLAINTEXT_MODULUS);
@@ -201,9 +250,61 @@ fn selected_eight_prime_target_basis_satisfies_the_exact_factor_four_theorem_bou
         "63405956965674143229061544194256614305082933848931450285473800446066085",
     );
     assert_eq!(
-        ((&target_modulus << 1_usize) - scaled_c2_left).to_str_radix(10),
+        ((&target_modulus << 1_usize) - &scaled_c2_left).to_str_radix(10),
         "4543300992209299387740786658879726170580662826044199822589989865517267370589",
         "the exact C2 margin must remain positive",
+    );
+    let release_traces_by_ballot_count = (1..=10)
+        .map(|ballot_count| {
+            direct_ballot_target_release_noise_trace(
+                10,
+                ballot_count,
+                20,
+                1,
+                10,
+                KLLPS_DENOMINATOR_CLEARING_FACTOR,
+                KLLPS_RECONSTRUCTION_THRESHOLD,
+                MAXIMUM_AUTHORIZED_COEFFICIENT_NORM,
+                &flooding_bound,
+            )
+            .expect("every accepted ballot count has an evaluator-to-release recurrence")
+        })
+        .collect::<Vec<_>>();
+    assert!(release_traces_by_ballot_count.iter().all(|trace| {
+        trace
+            .iter()
+            .all(|bound| bound.scaled_no_wrap_margin.is_positive())
+    }));
+    let release_trace = release_traces_by_ballot_count
+        .last()
+        .expect("ten-ballot release trace exists");
+    assert_eq!(
+        release_trace
+            .iter()
+            .map(|bound| bound.stage)
+            .collect::<Vec<_>>(),
+        vec![
+            TargetReleaseNoiseStage::PositiveMessageConversion,
+            TargetReleaseNoiseStage::PartialShare,
+            TargetReleaseNoiseStage::Flooding,
+            TargetReleaseNoiseStage::AuthorizedInterpolation,
+            TargetReleaseNoiseStage::Reconstruction,
+            TargetReleaseNoiseStage::Decode,
+        ],
+    );
+    let final_release_bound = release_trace
+        .last()
+        .expect("release trace has a decode stage");
+    assert_eq!(
+        &BigUint::from(PLAINTEXT_MODULUS)
+            * &final_release_bound.four_times_reconstruction_error_bound,
+        scaled_c2_left,
+        "the named recurrence stages must end at the exact C2 left side",
+    );
+    assert_eq!(
+        final_release_bound.scaled_no_wrap_margin,
+        BigInt::from((&target_modulus << 1_usize) - &scaled_c2_left),
+        "the decode-stage no-wrap margin must equal the independent exact margin",
     );
 }
 
@@ -242,7 +343,8 @@ fn factor_four_release_reconstructs_full_eight_prime_targets_from_lowest_distinc
     .expect("valid finalized target pair");
     assert_eq!(target_pair.binding(), &binding);
 
-    let flooding_bound = BigUint::from(16_u8);
+    let flooding_bound = selected_factor_four_flooding_bound()
+        .expect("four-share release uses the production-derived flooding bound");
     let mut shares_by_position = BTreeMap::new();
     for roster_position in [0, 1, 2, 3, 4, 5, 6, 9] {
         let producer_target_pair = KllpsTargetPair::from_verified_finality(
@@ -343,6 +445,68 @@ fn factor_four_release_reconstructs_full_eight_prime_targets_from_lowest_distinc
     assert!(
         VerifiedKllpsPairedShare::from_common_proof_verifier(&target_pair, wrong_binding_partial)
             .is_err()
+    );
+}
+
+#[test]
+fn factor_four_share_generation_accepts_exact_flood_support_edges_and_refuses_one_beyond() {
+    let binding = test_release_binding(19);
+    let sharing_polynomials = test_sharing_polynomials();
+    let target_plaintext =
+        encode_scalar_lanes_to_plaintext_coefficients(&sparse_scalar_lanes(&[(0, 1), (19, 20)]))
+            .expect("edge-support target plaintext encodes");
+    let target_identifier = test_target_ciphertext(
+        &target_plaintext,
+        3,
+        &sharing_polynomials[0],
+        CANONICAL_TARGET_CIPHERTEXT_LEVEL,
+        17,
+    );
+    let target_order = test_target_ciphertext(
+        &target_plaintext,
+        3,
+        &sharing_polynomials[0],
+        CANONICAL_TARGET_CIPHERTEXT_LEVEL,
+        23,
+    );
+    let target_pair = KllpsTargetPair::from_verified_finality(
+        binding,
+        test_participant_release_binding(19, 0),
+        target_identifier,
+        target_order,
+    )
+    .expect("edge-support target pair is valid");
+    let flooding_bound =
+        selected_factor_four_flooding_bound().expect("selected flooding support derives");
+    let mut positive_edge = vec![BigInt::zero(); POLYNOMIAL_DEGREE];
+    positive_edge[0] = BigInt::from_biguint(Sign::Plus, flooding_bound.clone());
+    let mut negative_edge = vec![BigInt::zero(); POLYNOMIAL_DEGREE];
+    negative_edge[POLYNOMIAL_DEGREE - 1] =
+        BigInt::from_biguint(Sign::Minus, flooding_bound.clone());
+    let threshold_share =
+        test_threshold_share(&sharing_polynomials, 0, CANONICAL_TARGET_CIPHERTEXT_LEVEL);
+    generate_factor_four_paired_partial_decryption(
+        &target_pair,
+        0,
+        &threshold_share,
+        &positive_edge,
+        &negative_edge,
+        &flooding_bound,
+    )
+    .expect("both exact flooding support edges are admitted");
+
+    positive_edge[0] = BigInt::from_biguint(Sign::Plus, &flooding_bound + BigUint::from(1_u8));
+    assert!(
+        generate_factor_four_paired_partial_decryption(
+            &target_pair,
+            0,
+            &threshold_share,
+            &positive_edge,
+            &negative_edge,
+            &flooding_bound,
+        )
+        .is_err(),
+        "one beyond the selected flooding support must refuse",
     );
 }
 

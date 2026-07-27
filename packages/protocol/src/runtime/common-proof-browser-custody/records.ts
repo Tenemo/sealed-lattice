@@ -15,11 +15,13 @@ import type {
 } from '@sealed-lattice/wasm';
 
 import type {
+    AuthenticatedCheckpointPhysicalAccountingScope,
     AuthenticatedCheckpointStore,
     CheckpointOperationIdentity,
 } from '../authenticated-checkpoint-store.js';
 import type {
     UntrustedStorageExclusiveCapacityReservation,
+    UntrustedStoragePhysicalAccountingSnapshot,
     UntrustedStorageTransaction,
     UntrustedStorageTransactionStore,
 } from '../untrusted-storage-transaction-store.js';
@@ -80,6 +82,7 @@ type StagedExternalMemoryRecordWrite = {
     descriptor: ExternalMemoryRecordDescriptor;
     encodedRecord?: Uint8Array<ArrayBuffer>;
     expectedCurrentValue: Uint8Array<ArrayBuffer> | null;
+    payloadByteLength: number;
     payloadOwnership?: CommonProofPayloadBufferOwnership;
 };
 
@@ -312,10 +315,10 @@ export type StagedExternalMemoryRecordChange =
       }>;
 
 export type ExternalMemoryShadowState = {
-    byteLength: bigint;
     readonly changes: Map<string, StagedExternalMemoryRecordChange>;
     readonly createdDescriptors: Set<ExternalMemoryRecordDescriptor>;
     readonly objects: Map<number, ExternalMemoryObjectState>;
+    payloadByteLength: bigint;
     recordCount: number;
     readonly replay: boolean;
 };
@@ -342,10 +345,12 @@ export type CommonProofBrowserCustodyInput = Readonly<{
     checkpoint?:
         | Readonly<{
               operationIdentity: CheckpointOperationIdentity;
+              physicalAccountingScope: AuthenticatedCheckpointPhysicalAccountingScope;
               store: AuthenticatedCheckpointStore;
           }>
         | Readonly<{
               resumeDescriptor: CommonProofCheckpointResumeDescriptor;
+              physicalAccountingScope: AuthenticatedCheckpointPhysicalAccountingScope;
               store: AuthenticatedCheckpointStore;
           }>;
     proofAttemptLineageIdentifier: Uint8Array;
@@ -356,7 +361,7 @@ export type CommonProofBrowserCustodyInput = Readonly<{
 export type CommonProofCheckpointResumeDescriptor = Readonly<{
     checkpointLineageIdentifier: Uint8Array;
     commonProofEnvironmentIdentifier: Uint8Array;
-    privateRandomCursorManifestBytes: Uint8Array;
+    generationCursorManifestBytes: Uint8Array;
     privateRandomnessStreamAttemptIdentifier?: Uint8Array;
     safeBoundaryOrdinal: number;
     stableAttemptBindingHash: Uint8Array;
@@ -371,8 +376,38 @@ export type CommonProofCheckpointCustody = Readonly<{
     publishAuthenticatedCheckpoint(
         checkpoint: CommonProofGenerationCheckpoint,
     ): Promise<void>;
-    restoreAuthenticatedCheckpointState(): Promise<Uint8Array>;
+    restoreAuthenticatedCheckpoint(): Promise<
+        Readonly<{
+            canonicalStateBytes: Uint8Array;
+            generationCursorManifestBytes: Uint8Array;
+        }>
+    >;
 }>;
+
+export type CommonProofBrowserCustodyPhysicalAccountingSnapshot =
+    UntrustedStoragePhysicalAccountingSnapshot &
+        Readonly<{
+            cleanupCompleted: boolean;
+            cleanupDurationMilliseconds: number;
+            commitReadbackByteLength: number;
+            commitReadbackCallCount: number;
+            ciphertextReadByteLength: number;
+            ciphertextReadCallCount: number;
+            ciphertextWriteByteLength: number;
+            ciphertextWriteCallCount: number;
+            deterministicRegeneratedByteLength: number;
+            deterministicRegenerationCallCount: number;
+            openCallCount: number;
+            openCiphertextByteLength: number;
+            openPlaintextByteLength: number;
+            plaintextReadByteLength: number;
+            plaintextReadCallCount: number;
+            plaintextWriteByteLength: number;
+            plaintextWriteCallCount: number;
+            sealCallCount: number;
+            sealCiphertextByteLength: number;
+            sealPlaintextByteLength: number;
+        }>;
 
 /**
  * Internal worker-owned storage composition. The installed custody host wraps
@@ -383,6 +418,7 @@ export type CommonProofBrowserCustody = Readonly<{
     armApplicationHandoff(): Promise<CommonProofApplicationHandoff>;
     checkpointCustody?: CommonProofCheckpointCustody;
     completeVerifiedOutput(): Promise<void>;
+    copyPhysicalStorageAccounting(): CommonProofBrowserCustodyPhysicalAccountingSnapshot;
     copyCheckpointResumeDescriptor():
         | CommonProofCheckpointResumeDescriptor
         | undefined;
@@ -521,8 +557,9 @@ export const copyCheckpointResumeDescriptor = (
     if (
         typeof value !== 'object' ||
         value === null ||
-        !(value.privateRandomCursorManifestBytes instanceof Uint8Array) ||
-        value.privateRandomCursorManifestBytes.byteLength >
+        !(value.generationCursorManifestBytes instanceof Uint8Array) ||
+        value.generationCursorManifestBytes.byteLength === 0 ||
+        value.generationCursorManifestBytes.byteLength >
             maximumCheckpointCursorManifestByteLength ||
         !isSafeUnsigned32(value.safeBoundaryOrdinal)
     ) {
@@ -533,7 +570,7 @@ export const copyCheckpointResumeDescriptor = (
     }
     let checkpointLineageIdentifier = new Uint8Array(0);
     let commonProofEnvironmentIdentifier = new Uint8Array(0);
-    let privateRandomCursorManifestBytes = new Uint8Array(0);
+    let generationCursorManifestBytes = new Uint8Array(0);
     let privateRandomnessStreamAttemptIdentifier:
         | Uint8Array<ArrayBuffer>
         | undefined;
@@ -549,8 +586,8 @@ export const copyCheckpointResumeDescriptor = (
             identifierByteLength,
             'Checkpoint common-proof environment identifier',
         );
-        privateRandomCursorManifestBytes = Uint8Array.from(
-            value.privateRandomCursorManifestBytes,
+        generationCursorManifestBytes = Uint8Array.from(
+            value.generationCursorManifestBytes,
         );
         privateRandomnessStreamAttemptIdentifier =
             value.privateRandomnessStreamAttemptIdentifier === undefined
@@ -568,7 +605,7 @@ export const copyCheckpointResumeDescriptor = (
         return Object.freeze({
             checkpointLineageIdentifier,
             commonProofEnvironmentIdentifier,
-            privateRandomCursorManifestBytes,
+            generationCursorManifestBytes,
             ...(privateRandomnessStreamAttemptIdentifier === undefined
                 ? {}
                 : { privateRandomnessStreamAttemptIdentifier }),
@@ -578,7 +615,7 @@ export const copyCheckpointResumeDescriptor = (
     } catch (error) {
         checkpointLineageIdentifier.fill(0);
         commonProofEnvironmentIdentifier.fill(0);
-        privateRandomCursorManifestBytes.fill(0);
+        generationCursorManifestBytes.fill(0);
         privateRandomnessStreamAttemptIdentifier?.fill(0);
         stableAttemptBindingHash.fill(0);
         throw error;
@@ -591,7 +628,7 @@ export const destroyCheckpointResumeDescriptor = (
     descriptor.checkpointLineageIdentifier.fill(0);
     descriptor.commonProofEnvironmentIdentifier.fill(0);
     descriptor.stableAttemptBindingHash.fill(0);
-    descriptor.privateRandomCursorManifestBytes.fill(0);
+    descriptor.generationCursorManifestBytes.fill(0);
     descriptor.privateRandomnessStreamAttemptIdentifier?.fill(0);
 };
 

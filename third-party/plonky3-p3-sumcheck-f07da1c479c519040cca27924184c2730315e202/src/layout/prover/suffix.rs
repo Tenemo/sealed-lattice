@@ -7,7 +7,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use p3_challenger::{FieldChallenger, GrindingChallenger};
-use p3_field::{ExtensionField, Field, TwoAdicField, dot_product};
+use p3_field::{dot_product, ExtensionField, Field, TwoAdicField};
 use p3_multilinear_util::point::Point;
 use p3_multilinear_util::poly::Poly;
 use p3_multilinear_util::split_eq::SplitEq;
@@ -19,9 +19,9 @@ use crate::layout::witness::Table;
 use crate::layout::{LayoutStrategy, Witness};
 use crate::product_polynomial::ProductPolynomial;
 use crate::strategy::{SumcheckProver, VariableOrder};
-use crate::svo::{SvoPoint, calculate_accumulators_batch};
+use crate::svo::{calculate_accumulators_batch, SvoPoint};
 use crate::table::{OpeningBatch, OpeningEvals, OpeningRequest};
-use crate::{Claim, SumcheckData, extrapolate_01inf};
+use crate::{extrapolate_01inf, Claim, SumcheckData};
 
 /// Stacked-sumcheck prover with suffix-first variable binding.
 ///

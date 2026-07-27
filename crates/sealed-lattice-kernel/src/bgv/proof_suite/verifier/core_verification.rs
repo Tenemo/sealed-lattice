@@ -378,6 +378,8 @@ where
         proof_byte_length: u64::try_from(input.declared_proof_byte_length)
             .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
         verified_query_count: transcript_schedule.unique_query_count(),
+        row_code_whir_construction_plan_identity_hash: input
+            .row_code_whir_construction_plan_identity_hash,
         relation_plan_variant_hash: variant.canonical_hash()?,
         schedule_position: input.schedule_position,
         top_count: input.top_count,
@@ -415,7 +417,7 @@ pub(super) fn verified_proof_header_hash(
     .map_err(|_| CommonProofVerifierError::CanonicalEncoding)
 }
 
-pub(super) fn decode_application_statement(
+pub(crate) fn decode_application_statement(
     canonical_bytes: &[u8],
     expected_schema_identifier: u16,
     protocol_version: u16,
@@ -520,7 +522,7 @@ pub(super) fn validate_evaluator_auxiliary_root_linkage(
     Ok(())
 }
 
-pub(super) fn derive_relation_tree_inputs(
+pub(crate) fn derive_relation_tree_inputs(
     variant: &RelationPlanVariant,
     application_statement: &CanonicalTuple,
     statement_owned_trees: &[VerifiedStatementOwnedTree],

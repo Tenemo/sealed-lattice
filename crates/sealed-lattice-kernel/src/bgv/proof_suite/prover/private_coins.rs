@@ -606,7 +606,9 @@ impl CommonProofCheckpointCursorManifestRequirement {
             <= MAXIMUM_COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_RUN_COUNT
             && self.canonical_manifest_byte_ceiling
                 <= MAXIMUM_COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_BYTE_LENGTH
-            && self.peak_copied_buffer_byte_length
+            && self.pending_manifest_resident_byte_ceiling()
+                <= MAXIMUM_COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_BYTE_LENGTH
+            && self.peak_copied_buffer_byte_length()
                 <= MAXIMUM_COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_BYTE_LENGTH
     }
 }

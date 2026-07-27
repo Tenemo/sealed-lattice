@@ -1,6 +1,7 @@
 //! Canonical foundation data shared by protocol verification paths.
 
 mod authenticated_mailbox;
+mod ballot_candidates;
 mod board_ingestion;
 mod board_ingestion_ffi;
 mod board_ingestion_runtime;
@@ -18,6 +19,7 @@ mod local_storage_runtime;
 mod mailbox_gcm;
 mod mailbox_gcm_runtime;
 mod participant_identity;
+mod prepared_signed_carrier;
 mod private_randomness;
 mod private_randomness_runtime;
 mod proof_application;
@@ -30,6 +32,7 @@ mod setup_transcript_runtime;
 mod state;
 mod state_runtime;
 mod suite;
+mod suite_artifact_preflight;
 #[cfg(test)]
 mod suite_artifacts;
 mod text;
@@ -41,6 +44,17 @@ pub use authenticated_mailbox::{
     MAILBOX_SOURCE_SIGNATURE_BYTE_LENGTH, MailboxAssociatedData, MailboxKeyScheduleInput,
     RECIPIENT_PRIVATE_VSS_SHARE_MAILBOX_PAYLOAD_TYPE, SIGNED_MAILBOX_ENVELOPE_SCHEMA_IDENTIFIER,
     SignedMailboxEnvelope, derive_setup_mailbox_slot_hash,
+};
+pub use ballot_candidates::{
+    AuthenticatedBallotCandidateList, AuthenticatedBallotCandidatePackage,
+    AuthenticatedBallotCandidateView, BALLOT_CANDIDATE_LIST_PAYLOAD_SCHEMA_IDENTIFIER,
+    BALLOT_CANDIDATE_VIEW_INPUT_SCHEMA_IDENTIFIER, BALLOT_CANDIDATE_VIEW_SCHEMA_IDENTIFIER,
+    BallotCandidateView, BallotCandidateViewInput, CANDIDATE_ENTRY_SCHEMA_IDENTIFIER,
+    CANDIDATE_LIST_INPUT_SCHEMA_IDENTIFIER, CandidateEntry, CandidateListInput,
+};
+pub(crate) use ballot_candidates::{
+    BallotCandidateAuthenticationContext, BallotCandidateListPayload,
+    authenticate_ballot_candidate_view,
 };
 pub use board_ingestion::{
     CanonicalBoardError, CanonicalBoardLimits, CanonicalBoardVerifier, VerifiedTranscriptBatch,
@@ -60,6 +74,7 @@ pub use canonical_stream::{
 };
 pub(crate) use canonical_stream::{
     CanonicalStreamReadbackVerifier, VerifiedCanonicalStreamSummary,
+    canonical_target_release_output_payload,
 };
 #[cfg(test)]
 pub(crate) use canonical_stream::{
@@ -128,6 +143,11 @@ pub(crate) use mailbox_gcm_runtime::{
 pub use participant_identity::{
     ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH, ParticipantIdentity, derive_participant_identity,
 };
+pub(crate) use prepared_signed_carrier::{
+    PreparedSignedCarrierDescription, cancel_prepared_signed_carrier,
+    finish_prepared_signed_carrier, prepared_signed_carrier_byte_length,
+    retain_prepared_signed_carrier,
+};
 pub(crate) use private_randomness::PersistentProofWitnessCoinBinding;
 pub use private_randomness::{
     ACTION_RANDOMNESS_DERIVATION_INPUT_SCHEMA_IDENTIFIER, ACTION_RANDOMNESS_ROOT_BYTE_LENGTH,
@@ -162,7 +182,8 @@ pub use proof_application::{
 };
 pub use refusal::{RefusalReason, VerificationResult};
 pub(crate) use schemas::{
-    AggregatePayload, encode_aggregate_carrier, encode_evaluator_replay_carrier,
+    AggregatePayload, BallotPackagePayload, PrivateShareAcceptancePayload,
+    encode_aggregate_carrier, encode_evaluator_replay_carrier,
 };
 pub use schemas::{
     FOUNDATION_PROFILE, FoundationObjectType, FoundationProfile, FoundationRosterParameters,
@@ -217,4 +238,5 @@ pub use suite::{
     DISTRIBUTION_RECORD_SCHEMA_IDENTIFIER, DistributionKind, DistributionPurpose,
     DistributionRecord, SUITE_RECORD_SCHEMA_IDENTIFIER, SuiteCountLimits, SuiteRecord,
 };
+pub(crate) use suite_artifact_preflight::verify_canonical_suite_artifact;
 pub use text::{DisplayTextError, StabilizedDisplayText};

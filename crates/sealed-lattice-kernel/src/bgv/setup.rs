@@ -1,4 +1,6 @@
 mod accepted_setup;
+#[cfg(test)]
+mod collective_setup_security_evidence;
 mod commitment;
 mod sampling;
 #[cfg(test)]
@@ -94,7 +96,7 @@ pub(in crate::bgv) use accepted_setup::{
 };
 #[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) use accepted_setup::{
-    ExactSameSecretEvidenceSources, populate_exact_same_secret_evidence_authority,
+    PreparedExactSameSecretGenerationSources, populate_exact_same_secret_evidence_authority,
 };
 pub(crate) use accepted_setup::{
     SetupGenerationDealerPublicRecordSource, resolve_setup_generation_dealer_public_record_source,

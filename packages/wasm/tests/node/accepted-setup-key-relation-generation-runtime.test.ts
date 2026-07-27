@@ -21,8 +21,57 @@ const boundaryMocks = vi.hoisted(() => {
     const generatedCapability = Object.freeze({
         release: generatedCapabilityRelease,
     });
-    const verifiedVssShareLinkageTerminal = Object.freeze({});
+    const vssLowDegreeEvidence = Object.freeze({});
     const generatedConsumptionOutcomes: boolean[] = [];
+    const externalMemoryAccounting = Object.freeze({
+        actualUsage: Object.freeze({
+            deletedObjectLifecycleCount: 3n,
+            peakStoredByteLength: 4_096n,
+            totalReadByteLength: 8_192n,
+            totalWrittenByteLength: 6_144n,
+            transactionCount: 7n,
+        }),
+        browserStorage: Object.freeze({
+            claimedBufferCount: 9n,
+            claimedByteLength: 10_000n,
+            maximumLiveBufferByteLength: 2_048n,
+            maximumLiveBufferCount: 2,
+            releasedBufferCount: 9n,
+            releasedByteLength: 10_000n,
+            secretRecordOpenByteLength: 5_000n,
+            secretRecordOpenCount: 4n,
+            secretRecordSealByteLength: 6_000n,
+            secretRecordSealCount: 5n,
+            transferredBufferCount: 12n,
+            transferredByteLength: 13_000n,
+        }),
+        compiledRequirement: Object.freeze({
+            distinctPhysicalObjectCount: 5,
+            maximumChunkByteLength: 1_048_576,
+            maximumTransactionPayloadByteLength: 1_048_576n,
+            objectLifecycleCount: 6,
+            peakStoredByteLength: 8_192n,
+            stepCount: 10,
+            totalReadByteLength: 12_288n,
+            totalWrittenByteLength: 8_192n,
+            transactionCount: 12n,
+        }),
+        deterministicPrefixReplayUsage: Object.freeze({
+            deletedObjectLifecycleCount: 1n,
+            peakStoredByteLength: 2_048n,
+            totalReadByteLength: 1_024n,
+            totalWrittenByteLength: 512n,
+            transactionCount: 2n,
+        }),
+        workerTransport: Object.freeze({
+            browserToWasmCopyByteLength: 2_000n,
+            browserToWasmCopyCount: 7n,
+            readResultTransferByteLength: 8_192n,
+            readResultTransferCount: 4n,
+            wasmToBrowserCopyByteLength: 3_000n,
+            wasmToBrowserCopyCount: 7n,
+        }),
+    });
     return {
         activeContext,
         applyGeneratedCapability: vi.fn(
@@ -41,6 +90,7 @@ const boundaryMocks = vi.hoisted(() => {
         deriveProofDescriptor: vi.fn(() =>
             Promise.resolve(Uint8Array.of(0xd1, 0xd2)),
         ),
+        externalMemoryAccounting,
         generatedCapability,
         generatedCapabilityRelease,
         generatedConsumptionOutcomes,
@@ -50,12 +100,17 @@ const boundaryMocks = vi.hoisted(() => {
             async (
                 _adapter: unknown,
                 openExecution: (description: unknown) => unknown,
+                authenticatedTranscriptPrefixAuthority?: Readonly<{
+                    supply(operationHandle: number): void;
+                }>,
             ) => {
+                authenticatedTranscriptPrefixAuthority?.supply(401);
                 const execution = (await openExecution(Object.freeze({}))) as {
                     options?: unknown;
                     outputStore: unknown;
                 };
                 return Object.freeze({
+                    externalMemoryAccounting,
                     generatedCapability,
                     options: execution.options,
                     outputChunkByteLengths: Object.freeze([2]),
@@ -77,7 +132,7 @@ const boundaryMocks = vi.hoisted(() => {
                 _statementSourceHandle: number,
             ) => Promise.resolve(undefined),
         ),
-        verifiedVssShareLinkageTerminal,
+        vssLowDegreeEvidence,
     };
 });
 
@@ -120,6 +175,9 @@ vi.mock(
 );
 
 vi.mock('#packages/wasm/src/vss-share-linkage-verification-runtime', () => ({
+    consumeVerifiedVssLowDegreeEvidence: (input: {
+        consume(handle: number): unknown;
+    }) => input.consume(501),
     resolveOrderedVerifiedBoardObjectAuthorization: () => {
         const handleBytes = new Uint8Array(4);
         new DataView(handleBytes.buffer).setUint32(0, 17, true);
@@ -169,6 +227,12 @@ type GenerationMode = 'fresh' | 'resumed';
 
 type FakeSetupKeyRelationRuntime = Readonly<{
     allocations: ReadonlyMap<number, number>;
+    authenticatedTranscriptPrefixes: Array<
+        Readonly<{
+            operationHandle: number;
+            statementSourceHandle: number;
+        }>
+    >;
     cancelledGeneratedSources: Array<
         Readonly<{
             family: SetupKeyRelationFamily;
@@ -203,6 +267,12 @@ const writeStatus = (
 const createFakeRuntime = (): FakeSetupKeyRelationRuntime => {
     const memory = new WebAssembly.Memory({ initial: 2 });
     const allocations = new Map<number, number>();
+    const authenticatedTranscriptPrefixes: Array<
+        Readonly<{
+            operationHandle: number;
+            statementSourceHandle: number;
+        }>
+    > = [];
     const cancelledGeneratedSources: Array<
         Readonly<{
             family: SetupKeyRelationFamily;
@@ -254,27 +324,15 @@ const createFakeRuntime = (): FakeSetupKeyRelationRuntime => {
         writeStatus(memory, statusPointer, 0);
         return family === 'sameSecret' ? 31 : 32;
     };
-    type PrepareArguments = [
-        number,
-        number,
-        number,
-        number,
-        number,
-        number,
-        number,
-        number,
-        number,
-        number,
-        number,
-        number,
-        number,
-        number,
-        number,
-    ];
     const preparation =
         (family: SetupKeyRelationFamily, mode: GenerationMode) =>
-        (...parameters: PrepareArguments): number =>
-            prepare(family, mode, parameters[13], parameters[14]);
+        (...parameters: number[]): number =>
+            prepare(
+                family,
+                mode,
+                parameters[parameters.length - 2] ?? 0,
+                parameters[parameters.length - 1] ?? 0,
+            );
     const cancelGeneratedSource =
         (family: SetupKeyRelationFamily) =>
         (
@@ -341,6 +399,14 @@ const createFakeRuntime = (): FakeSetupKeyRelationRuntime => {
             cancelGeneratedSource('sameSecret'),
         sealed_lattice_same_secret_generation_contribute_package:
             contributeGeneratedSource('sameSecret'),
+        sealed_lattice_same_secret_generation_supply_authenticated_transcript_prefix:
+            (statementSourceHandle: number, operationHandle: number) => {
+                authenticatedTranscriptPrefixes.push({
+                    operationHandle,
+                    statementSourceHandle,
+                });
+                return 0;
+            },
         sealed_lattice_setup_key_relation_generation_statement_discard: (
             handle: number,
         ) => {
@@ -368,6 +434,7 @@ const createFakeRuntime = (): FakeSetupKeyRelationRuntime => {
     boundaryMocks.activeContext.value = context;
     return Object.freeze({
         allocations,
+        authenticatedTranscriptPrefixes,
         cancelledGeneratedSources,
         contributedGeneratedSources,
         discardedStatementSources,
@@ -380,6 +447,7 @@ const createFakeRuntime = (): FakeSetupKeyRelationRuntime => {
 const generationInput = (
     runtime: FakeSetupKeyRelationRuntime,
     mode: GenerationMode,
+    family: SetupKeyRelationFamily = 'sameSecret',
 ) => ({
     canonicalSuiteRecordBytes: Uint8Array.of(1, 2, 3),
     checkpointLineageIdentifier: new Uint8Array(32).fill(7),
@@ -399,6 +467,9 @@ const generationInput = (
     productionOperationIdentifiers: Object.freeze({}),
     setupGenerationAuthority: Object.freeze({}),
     setupIntentObject: Object.freeze({}),
+    ...(family === 'sameSecret'
+        ? { vssLowDegreeEvidence: boundaryMocks.vssLowDegreeEvidence }
+        : {}),
     workerKernel: Object.freeze({ kernel: runtime.kernel }),
 });
 
@@ -413,8 +484,6 @@ const verificationInput = (
     generatedProof,
     inputStore: Object.freeze({}),
     kernel,
-    verifiedVssShareLinkageTerminal:
-        boundaryMocks.verifiedVssShareLinkageTerminal,
 });
 
 beforeEach(() => {
@@ -468,13 +537,35 @@ describe('accepted-setup key-relation generation', () => {
         ) => {
             const runtime = createFakeRuntime();
             const proof = await generate(
-                generationInput(runtime, mode) as never,
+                generationInput(runtime, mode, family) as never,
             );
 
             expect(runtime.generationPreparations).toEqual([{ family, mode }]);
+            expect(runtime.authenticatedTranscriptPrefixes).toEqual(
+                family === 'sameSecret'
+                    ? [
+                          {
+                              operationHandle: 401,
+                              statementSourceHandle,
+                          },
+                      ]
+                    : [],
+            );
             expect(proof.copyProofDescriptorBytes()).toEqual(
                 Uint8Array.of(0xd1, 0xd2),
             );
+            const copiedExternalMemoryAccounting =
+                proof.copyExternalMemoryAccounting();
+            expect(copiedExternalMemoryAccounting).toEqual(
+                boundaryMocks.externalMemoryAccounting,
+            );
+            expect(copiedExternalMemoryAccounting).not.toBe(
+                boundaryMocks.externalMemoryAccounting,
+            );
+            expect(copiedExternalMemoryAccounting.actualUsage).not.toBe(
+                boundaryMocks.externalMemoryAccounting.actualUsage,
+            );
+            expect(Object.isFrozen(copiedExternalMemoryAccounting)).toBe(true);
             expect(boundaryMocks.deriveProofDescriptor).toHaveBeenCalledWith(
                 expect.objectContaining({ streamDomain: expectedStreamDomain }),
             );
@@ -495,6 +586,9 @@ describe('accepted-setup key-relation generation', () => {
                 boundaryMocks.generatedCapabilityRelease,
             ).not.toHaveBeenCalled();
             expect(() => proof.copyProofDescriptorBytes()).toThrow(/consumed/u);
+            expect(() => proof.copyExternalMemoryAccounting()).toThrow(
+                /consumed/u,
+            );
         },
     );
 
@@ -508,7 +602,7 @@ describe('accepted-setup key-relation generation', () => {
         ).rejects.toThrow(/wrongContext/u);
         await expect(
             generateAcceptedSetupPublicKeyShareInClosedWorker({
-                ...generationInput(runtime, 'resumed'),
+                ...generationInput(runtime, 'resumed', 'publicKeyShare'),
                 generationMode: undefined,
             } as never),
         ).rejects.toThrow(/wrongContext/u);
@@ -523,7 +617,7 @@ describe('accepted-setup key-relation generation', () => {
         );
         await expect(
             generateAcceptedSetupPublicKeyShareInClosedWorker(
-                generationInput(runtime, 'fresh') as never,
+                generationInput(runtime, 'fresh', 'publicKeyShare') as never,
             ),
         ).rejects.toThrow('descriptor failed');
         expect(runtime.cancelledGeneratedSources).toEqual([
@@ -556,7 +650,13 @@ describe('generated accepted-setup key-relation verification', () => {
         async (generate, verifyGenerated, verifyCapability) => {
             const runtime = createFakeRuntime();
             const proof = await generate(
-                generationInput(runtime, 'resumed') as never,
+                generationInput(
+                    runtime,
+                    'resumed',
+                    generate === generateAcceptedSetupSameSecretInClosedWorker
+                        ? 'sameSecret'
+                        : 'publicKeyShare',
+                ) as never,
             );
             await verifyGenerated(
                 verificationInput(runtime.kernel, proof) as never,
@@ -575,6 +675,9 @@ describe('generated accepted-setup key-relation verification', () => {
                 boundaryMocks.generatedCapabilityRelease,
             ).not.toHaveBeenCalled();
             expect(() => proof.copyProofDescriptorBytes()).toThrow(/consumed/u);
+            expect(() => proof.copyExternalMemoryAccounting()).toThrow(
+                /consumed/u,
+            );
         },
     );
 
@@ -598,6 +701,9 @@ describe('generated accepted-setup key-relation verification', () => {
         ).rejects.toThrow('package refused');
         expect(proof.copyProofDescriptorBytes()).toEqual(
             Uint8Array.of(0xd1, 0xd2),
+        );
+        expect(proof.copyExternalMemoryAccounting()).toEqual(
+            boundaryMocks.externalMemoryAccounting,
         );
 
         await verifyGeneratedAcceptedSetupSameSecretInClosedWorker(
@@ -646,7 +752,7 @@ describe('generated accepted-setup package contribution', () => {
         async (family, generate, contribute, statementSourceHandle) => {
             const runtime = createFakeRuntime();
             const proof = await generate(
-                generationInput(runtime, 'fresh') as never,
+                generationInput(runtime, 'fresh', family) as never,
             );
 
             contribute({

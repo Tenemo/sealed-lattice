@@ -862,6 +862,7 @@ mod authentication;
 mod decoding;
 mod sizing;
 
+#[cfg(test)]
 pub(super) use authentication::minimal_frontier_node_count;
 #[cfg(test)]
 use authentication::{
@@ -877,12 +878,13 @@ pub(crate) use decoding::{
     decode_proof_query_tree_at,
 };
 #[cfg(test)]
+pub(crate) use sizing::CommonProofByteLengthCeiling;
+#[cfg(test)]
 pub(crate) use sizing::ProofQueryTreeByteLengthCeiling;
 pub(super) use sizing::maximum_minimal_frontier_node_count;
 pub(crate) use sizing::{
-    CommonProofByteLengthCeiling, canonical_common_proof_byte_length_ceiling,
-    canonical_leaf_byte_length, entry_leaf_count, proof_body_prefix_byte_length,
-    proof_query_tree_byte_length,
+    canonical_common_proof_byte_length_ceiling, canonical_leaf_byte_length, entry_leaf_count,
+    proof_body_prefix_byte_length, proof_query_tree_byte_length,
 };
 
 #[cfg(test)]

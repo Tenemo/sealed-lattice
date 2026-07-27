@@ -11,8 +11,9 @@ use crate::{
         serialization::two_component_data_ciphertext_canonical_byte_length_ceiling_at_level,
     },
     foundation::{
-        AggregatePayload, CanonicalDecodeLimits, FOUNDATION_PROFILE, FoundationObjectType, Hash512,
-        ObjectEnvelope, StreamDescriptor,
+        AggregatePayload, BallotPackagePayload, CanonicalDecodeLimits, FOUNDATION_PROFILE,
+        FoundationObjectType, Hash512, ObjectEnvelope, SignedCarrier, StreamDescriptor,
+        VerifiedTranscriptObject,
         canonical_transport_accounting::{
             CanonicalTransportAccounting, derive_canonical_transport_accounting,
         },
@@ -29,6 +30,126 @@ pub(crate) enum SelectedMaterialTransportAccountingError {
     CanonicalEncoding,
     CanonicalTransport,
     IntegerOverflow,
+    WrongObjectType,
+}
+
+/// Exact transport geometry for one authenticated direct-ballot carrier and
+/// the two streams it binds. The canonical-board capability authenticates the
+/// carrier bytes and descriptors; ballot relation verification remains the
+/// separate owner of ciphertext and proof acceptance.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SelectedCompleteBallotPackageAccounting {
+    canonical_signed_carrier_byte_length: u64,
+    ciphertext_stream_byte_length: u64,
+    ciphertext_stream_chunk_count: u64,
+    ciphertext_stream_descriptor_byte_length: u64,
+    proof_stream_byte_length: u64,
+    proof_stream_chunk_count: u64,
+    proof_stream_descriptor_byte_length: u64,
+    complete_ballot_package_byte_length: u64,
+}
+
+impl SelectedCompleteBallotPackageAccounting {
+    pub(crate) const fn canonical_signed_carrier_byte_length(self) -> u64 {
+        self.canonical_signed_carrier_byte_length
+    }
+
+    pub(crate) const fn ciphertext_stream_byte_length(self) -> u64 {
+        self.ciphertext_stream_byte_length
+    }
+
+    pub(crate) const fn ciphertext_stream_chunk_count(self) -> u64 {
+        self.ciphertext_stream_chunk_count
+    }
+
+    pub(crate) const fn ciphertext_stream_descriptor_byte_length(self) -> u64 {
+        self.ciphertext_stream_descriptor_byte_length
+    }
+
+    pub(crate) const fn proof_stream_byte_length(self) -> u64 {
+        self.proof_stream_byte_length
+    }
+
+    pub(crate) const fn proof_stream_chunk_count(self) -> u64 {
+        self.proof_stream_chunk_count
+    }
+
+    pub(crate) const fn proof_stream_descriptor_byte_length(self) -> u64 {
+        self.proof_stream_descriptor_byte_length
+    }
+
+    pub(crate) const fn complete_ballot_package_byte_length(self) -> u64 {
+        self.complete_ballot_package_byte_length
+    }
+}
+
+/// Derives exact complete-package bytes from the same board-authenticated
+/// canonical carrier consumed by production ballot verification. No signature,
+/// descriptor, or proof length is fabricated for accounting.
+pub(crate) fn derive_selected_complete_ballot_package_accounting(
+    ballot_package_object: &VerifiedTranscriptObject,
+) -> Result<SelectedCompleteBallotPackageAccounting, SelectedMaterialTransportAccountingError> {
+    if ballot_package_object.object_type() != FoundationObjectType::BallotPackage {
+        return Err(SelectedMaterialTransportAccountingError::WrongObjectType);
+    }
+    let canonical_carrier_bytes = ballot_package_object.canonical_carrier_bytes();
+    let signed_carrier =
+        SignedCarrier::decode(canonical_carrier_bytes, &CanonicalDecodeLimits::default())
+            .map_err(|_| SelectedMaterialTransportAccountingError::CanonicalEncoding)?;
+    if signed_carrier.envelope != *ballot_package_object.envelope()
+        || signed_carrier
+            .envelope
+            .object_hash()
+            .map_err(|_| SelectedMaterialTransportAccountingError::CanonicalEncoding)?
+            != ballot_package_object.object_hash()
+        || signed_carrier
+            .encode()
+            .map_err(|_| SelectedMaterialTransportAccountingError::CanonicalEncoding)?
+            != canonical_carrier_bytes
+    {
+        return Err(SelectedMaterialTransportAccountingError::CanonicalEncoding);
+    }
+    let payload = BallotPackagePayload::decode(
+        &signed_carrier.envelope.payload_bytes,
+        &CanonicalDecodeLimits::default(),
+    )
+    .map_err(|_| SelectedMaterialTransportAccountingError::CanonicalEncoding)?;
+    if payload
+        .encode()
+        .map_err(|_| SelectedMaterialTransportAccountingError::CanonicalEncoding)?
+        != signed_carrier.envelope.payload_bytes
+    {
+        return Err(SelectedMaterialTransportAccountingError::CanonicalEncoding);
+    }
+
+    let ciphertext_descriptor = payload.ciphertext_descriptor();
+    let proof_descriptor = payload.proof_descriptor();
+    let canonical_signed_carrier_byte_length = slice_byte_length(canonical_carrier_bytes)?;
+    let ciphertext_stream_descriptor_byte_length = encoded_byte_length(
+        ciphertext_descriptor
+            .encode()
+            .map_err(|_| SelectedMaterialTransportAccountingError::CanonicalEncoding)?,
+    )?;
+    let proof_stream_descriptor_byte_length = encoded_byte_length(
+        proof_descriptor
+            .encode()
+            .map_err(|_| SelectedMaterialTransportAccountingError::CanonicalEncoding)?,
+    )?;
+    let complete_ballot_package_byte_length = canonical_signed_carrier_byte_length
+        .checked_add(ciphertext_descriptor.total_byte_length)
+        .and_then(|byte_length| byte_length.checked_add(proof_descriptor.total_byte_length))
+        .ok_or(SelectedMaterialTransportAccountingError::IntegerOverflow)?;
+
+    Ok(SelectedCompleteBallotPackageAccounting {
+        canonical_signed_carrier_byte_length,
+        ciphertext_stream_byte_length: ciphertext_descriptor.total_byte_length,
+        ciphertext_stream_chunk_count: descriptor_chunk_count(ciphertext_descriptor)?,
+        ciphertext_stream_descriptor_byte_length,
+        proof_stream_byte_length: proof_descriptor.total_byte_length,
+        proof_stream_chunk_count: descriptor_chunk_count(proof_descriptor)?,
+        proof_stream_descriptor_byte_length,
+        complete_ballot_package_byte_length,
+    })
 }
 
 /// Exact canonical bytes for the sole implemented private-mailbox payload
@@ -757,7 +878,191 @@ fn slice_byte_length(bytes: &[u8]) -> Result<u64, SelectedMaterialTransportAccou
 
 #[cfg(test)]
 mod tests {
+    use fips203::{
+        ml_kem_768,
+        traits::{KeyGen as KemKeyGen, SerDes as KemSerDes},
+    };
+    use fips204::{
+        ml_dsa_65,
+        traits::{KeyGen as SignatureKeyGen, SerDes as SignatureSerDes, Signer},
+    };
+
+    use crate::foundation::{
+        CanonicalBoardLimits, CanonicalBoardVerifier, ParticipantIdentity, Roster, RosterEntry,
+        signature_message,
+    };
+
     use super::*;
+
+    const OBJECT_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/object-signature/v1";
+
+    #[test]
+    fn complete_ballot_package_accounting_uses_the_board_authenticated_carrier_and_descriptors() {
+        let (roster, signing_key, producer_participant_identity) = accounting_test_roster();
+        let suite_identifier = deterministic_hash(0x81, 0).expect("suite identifier");
+        let ceremony_context_hash = deterministic_hash(0x82, 0).expect("ceremony context");
+        let action_context_hash = deterministic_hash(0x83, 0).expect("action context");
+        let verified_setup_source_hash = deterministic_hash(0x84, 0).expect("setup source");
+        let stream_chunk_byte_length = u64::try_from(FOUNDATION_PROFILE.stream_chunk_byte_length)
+            .expect("stream chunk length fits u64");
+        let ciphertext_descriptor =
+            deterministic_stream_descriptor(stream_chunk_byte_length, 0x91, 0x92)
+                .expect("exact-boundary ciphertext descriptor");
+        let proof_descriptor =
+            deterministic_stream_descriptor(stream_chunk_byte_length * 2 + 17, 0x93, 0x94)
+                .expect("multi-chunk proof descriptor");
+        let payload =
+            BallotPackagePayload::new(ciphertext_descriptor.clone(), proof_descriptor.clone())
+                .expect("ballot package payload")
+                .encode()
+                .expect("ballot package payload encodes");
+        let envelope = ObjectEnvelope {
+            suite_id: suite_identifier,
+            object_type: FoundationObjectType::BallotPackage,
+            ceremony_context_hash,
+            action_context_hash,
+            producer_participant_id: Some(producer_participant_identity),
+            producer_sequence: 2,
+            ordered_prerequisite_hashes: vec![verified_setup_source_hash],
+            payload_bytes: payload,
+        };
+        let ballot_object_hash = envelope.object_hash().expect("ballot object hash");
+        let roster_hash = roster.roster_hash().expect("roster hash");
+        let signature_message =
+            signature_message(&envelope, roster_hash).expect("signature message");
+        let signature = signing_key
+            .try_sign_with_seed(
+                &[0xa5; 32],
+                signature_message.as_bytes(),
+                OBJECT_SIGNATURE_CONTEXT,
+            )
+            .expect("ballot signature");
+        let canonical_ballot_carrier = SignedCarrier {
+            envelope,
+            signature,
+        }
+        .encode()
+        .expect("signed ballot carrier encodes");
+        let aggregate_carrier = encode_aggregate_carrier(
+            suite_identifier,
+            ceremony_context_hash,
+            action_context_hash,
+            verified_setup_source_hash,
+            vec![ballot_object_hash],
+            [ciphertext_descriptor.clone(), ciphertext_descriptor.clone()],
+        )
+        .expect("aggregate carrier encodes");
+        let mut verifier = CanonicalBoardVerifier::new(
+            suite_identifier,
+            ceremony_context_hash,
+            action_context_hash,
+            &roster,
+            CanonicalBoardLimits {
+                maximum_ballot_attempts_per_participant: 4,
+                maximum_candidate_packages_per_action: 20,
+                maximum_retained_canonical_carrier_byte_length: 8 * 1024 * 1024,
+                maximum_unordered_carriers_per_batch: 8,
+                maximum_retained_transcript_objects: 8,
+            },
+            CanonicalDecodeLimits::default(),
+        )
+        .expect("canonical board verifier");
+        let batch = verifier
+            .verify_unordered_carriers(&[aggregate_carrier, canonical_ballot_carrier.clone()])
+            .into_result()
+            .expect("ballot and dependent aggregate verify in either order");
+        let ballot_package_object = batch
+            .objects()
+            .iter()
+            .find(|object| object.object_type() == FoundationObjectType::BallotPackage)
+            .expect("verified ballot object");
+        let aggregate_object = batch
+            .objects()
+            .iter()
+            .find(|object| object.object_type() == FoundationObjectType::Aggregate)
+            .expect("verified aggregate object");
+
+        let accounting = derive_selected_complete_ballot_package_accounting(ballot_package_object)
+            .expect("exact complete ballot package accounting");
+        assert_eq!(
+            accounting.canonical_signed_carrier_byte_length(),
+            u64::try_from(canonical_ballot_carrier.len()).expect("carrier length fits u64")
+        );
+        assert_eq!(
+            accounting.ciphertext_stream_byte_length(),
+            ciphertext_descriptor.total_byte_length
+        );
+        assert_eq!(accounting.ciphertext_stream_chunk_count(), 1);
+        assert_eq!(
+            accounting.proof_stream_byte_length(),
+            proof_descriptor.total_byte_length
+        );
+        assert_eq!(accounting.proof_stream_chunk_count(), 3);
+        assert_eq!(
+            accounting.ciphertext_stream_descriptor_byte_length(),
+            u64::try_from(
+                ciphertext_descriptor
+                    .encode()
+                    .expect("ciphertext descriptor encodes")
+                    .len()
+            )
+            .expect("descriptor length fits u64")
+        );
+        assert_eq!(
+            accounting.proof_stream_descriptor_byte_length(),
+            u64::try_from(
+                proof_descriptor
+                    .encode()
+                    .expect("proof descriptor encodes")
+                    .len()
+            )
+            .expect("descriptor length fits u64")
+        );
+        assert_eq!(
+            accounting.complete_ballot_package_byte_length(),
+            accounting.canonical_signed_carrier_byte_length()
+                + accounting.ciphertext_stream_byte_length()
+                + accounting.proof_stream_byte_length()
+        );
+        assert_eq!(
+            derive_selected_complete_ballot_package_accounting(aggregate_object),
+            Err(SelectedMaterialTransportAccountingError::WrongObjectType)
+        );
+    }
+
+    fn accounting_test_roster() -> (Roster, ml_dsa_65::PrivateKey, ParticipantIdentity) {
+        let mut entries = Vec::with_capacity(usize::from(FOUNDATION_PROFILE.participant_count));
+        let mut first_signing_key = None;
+        for roster_position in 0..FOUNDATION_PROFILE.participant_count {
+            let mut signing_seed = [0xb1; 32];
+            signing_seed[0] = u8::try_from(roster_position).expect("roster position fits u8");
+            let (verification_key, signing_key) = ml_dsa_65::KG::keygen_from_seed(&signing_seed);
+            if roster_position == 0 {
+                first_signing_key = Some(signing_key);
+            }
+            let mut mailbox_seed = [0xc1; 32];
+            mailbox_seed[0] = u8::try_from(roster_position).expect("roster position fits u8");
+            let mut mailbox_fallback_seed = [0xd1; 32];
+            mailbox_fallback_seed[31] =
+                u8::try_from(roster_position).expect("roster position fits u8");
+            let (mailbox_key, _) =
+                ml_kem_768::KG::keygen_from_seed(mailbox_seed, mailbox_fallback_seed);
+            entries.push(RosterEntry {
+                roster_position,
+                signing_verification_key: verification_key.into_bytes(),
+                mailbox_encapsulation_key: mailbox_key.into_bytes(),
+            });
+        }
+        let roster = Roster::new(entries).expect("selected test roster");
+        let producer_participant_identity = roster.entries[0]
+            .participant_identity()
+            .expect("producer identity");
+        (
+            roster,
+            first_signing_key.expect("first signing key retained"),
+            producer_participant_identity,
+        )
+    }
 
     #[test]
     fn selected_private_vss_mailbox_accounting_counts_each_canonical_object_once() {

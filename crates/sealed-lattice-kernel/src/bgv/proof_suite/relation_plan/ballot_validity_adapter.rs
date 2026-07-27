@@ -1298,7 +1298,7 @@ impl BallotValidityPreparedProofAttempt {
         if checkpoint_lineage_identifier == [0_u8; 32] {
             return Err(CommonProofRuntimeError::WrongVerificationBinding.into());
         }
-        let checkpoint_schedule_digest = relation_plan.checkpoint_schedule_digest(limits)?;
+        let checkpoint_schedule_digest = relation_plan.checkpoint_schedule_digest()?;
         self.prepare_common_generation_with_continuation(
             compilation,
             relation_plan,
@@ -1317,18 +1317,14 @@ impl BallotValidityPreparedProofAttempt {
         limits: CommonProofRuntimeLimits,
         checkpoint_continuation: AuthenticatedCheckpointContinuationSource,
     ) -> Result<PreparedCommonProofGeneration, BallotValidityGenerationPreparationError> {
-        let proof_query_count = relation_plan.proof_query_count()?;
         if checkpoint_continuation.checkpoint_schedule_digest()
-            != relation_plan.checkpoint_schedule_digest(limits)?
+            != relation_plan.checkpoint_schedule_digest()?
         {
             return Err(CommonProofRuntimeError::WrongVerificationBinding.into());
         }
         let attempt_source = resolve_prepared_ordinary_proof_attempt_source(
             &self.action_private_randomness,
             self.proof_coin_input,
-            u64::try_from(limits.proof_byte_length())
-                .map_err(|_| CommonProofRuntimeError::InvalidLimits)?,
-            proof_query_count,
             checkpoint_continuation,
         )
         .map_err(BallotValidityAdapterError::from)?;
@@ -1338,7 +1334,6 @@ impl BallotValidityPreparedProofAttempt {
                 &relation_plan,
                 self.public_material.protocol_version,
                 &self.canonical_application_statement_bytes,
-                limits,
             )?;
         let variant = compilation
             .relation_plan()

@@ -26,17 +26,20 @@ use crate::{
     encoding::{CanonicalError, CanonicalErrorCode},
     foundation::{
         ACTION_RANDOMNESS_RUNTIME_RESOURCE_LIMIT, ACTION_RANDOMNESS_RUNTIME_STALE_HANDLE,
-        BOARD_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, CanonicalDecodeLimits,
-        CanonicalStreamDomain, FOUNDATION_PROFILE, FoundationSchemaError, Hash512,
-        ProofApplicationBinding, ProofApplicationSlot, ProofApplicationSlotCeilings,
-        ProofObjectHeader, RefusalReason, StreamDescriptor,
+        BOARD_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, BallotPackagePayload, CanonicalDecodeLimits,
+        CanonicalStreamDomain, FOUNDATION_PROFILE, FoundationObjectType, FoundationSchemaError,
+        Hash512, ML_DSA_65_SIGNATURE_BYTE_LENGTH, ObjectEnvelope, ParticipantIdentity,
+        PreparedSignedCarrierDescription, ProofApplicationBinding, ProofApplicationSlot,
+        ProofApplicationSlotCeilings, ProofObjectHeader, RefusalReason, Roster, StreamDescriptor,
         VerifiedBallotPackageApplicationPayload, VerifiedBoardApplicationSource,
-        resolve_verified_board_application_sources,
-        retain_action_private_randomness_for_exact_family,
+        cancel_prepared_signed_carrier, finish_prepared_signed_carrier,
+        prepared_signed_carrier_byte_length, resolve_verified_board_application_sources,
+        retain_action_private_randomness_for_exact_family, retain_prepared_signed_carrier,
     },
     hashing::hash_framed_parts_512,
 };
 
+use super::application_statement::SelectedBallotValidityStatement;
 use super::runtime::CANONICAL_PROOF_APPLICATION_BINDING_HASH_DOMAIN;
 use super::runtime_ffi::{
     CommonProofGenerationFamilyAdapter, CommonProofGenerationFamilyAdapterDescription,
@@ -53,11 +56,12 @@ use super::{
     BorrowedVerifiedCommonProofCapability, CommonProofGenerationPreparationError,
     CommonProofRelationPlanCapability, CommonProofRelationPlanCapabilityError,
     CommonProofRuntimeError, CommonProofSelectedSuiteCapabilityHandle,
-    ConsumedVerifiedCommonProofCapability, RelationPlanError, SelectedApplicationStatementContext,
-    SelectedProofAccountingError, VerifiedCommonProofStatementSource,
-    canonical_selected_ballot_validity_statement, decode_selected_ballot_validity_statement,
-    selected_ballot_validity_relation_compilation, selected_proof_runtime_limits,
-    selected_relation_plan_check_context, verified_application_statement_hash,
+    ConsumedVerifiedCommonProofCapability, MAXIMUM_COMMON_PROOF_BYTE_LENGTH, RelationPlanError,
+    SelectedApplicationStatementContext, SelectedProofAccountingError,
+    VerifiedCommonProofStatementSource, canonical_selected_ballot_validity_statement,
+    decode_selected_ballot_validity_statement, selected_ballot_validity_relation_compilation,
+    selected_proof_runtime_limits, selected_relation_plan_check_context,
+    verified_application_statement_hash,
 };
 
 const BALLOT_SCORE_COUNT: usize = 20;
@@ -138,6 +142,7 @@ struct BallotCiphertextReadbackEntry {
     next_chunk_index: usize,
     readback_complete: bool,
     canonical_application_statement_bytes: Box<[u8]>,
+    ballot_package_statement: SelectedBallotValidityStatement,
     readback: BallotValidityCiphertextReadback,
 }
 
@@ -389,7 +394,6 @@ struct BallotValidityVerificationTerminalSource {
     proof_header_hash: [u8; 64],
     relation_plan_hash: [u8; 64],
     relation_plan_variant_hash: [u8; 64],
-    proof_query_count: u32,
     ciphertext_catalog: Vec<VerifiedBallotCiphertextPolynomial>,
 }
 
@@ -1111,7 +1115,6 @@ fn finish_ballot_validity_verification_preparation(
     )?;
     let relation_plan_hash = relation_plan.relation_plan_hash();
     let relation_plan_variant_hash = relation_plan.relation_plan_variant_hash();
-    let proof_query_count = relation_plan.proof_query_count()?;
     let evaluator = BallotValidityVerifiedColumnEvaluator::new(
         &compilation,
         accepted_setup_binding.exact_verified_setup_source_hash,
@@ -1151,7 +1154,6 @@ fn finish_ballot_validity_verification_preparation(
         proof_header_hash: proof_header_hash.into_bytes(),
         relation_plan_hash,
         relation_plan_variant_hash,
-        proof_query_count,
         ciphertext_catalog,
     };
     let terminal_source_handle = BALLOT_VALIDITY_VERIFICATION_TERMINAL_REGISTRY
@@ -1201,7 +1203,6 @@ impl BallotValidityVerificationTerminalSource {
             || verified_common_proof.proof_stream_full_object_digest()
                 != self.proof_descriptor.full_object_digest.into_bytes()
             || verified_common_proof.proof_byte_length() != self.proof_descriptor.total_byte_length
-            || verified_common_proof.verified_query_count() != self.proof_query_count
             || verified_common_proof.relation_plan_hash() != self.relation_plan_hash
             || verified_common_proof.relation_plan_variant_hash() != self.relation_plan_variant_hash
             || verified_common_proof.schedule_position().is_some()
@@ -1351,6 +1352,15 @@ fn prepare_ballot_validity_generation(
             .map_err(BallotValidityRuntimeError::ActionRandomness)?;
     let accepted_setup_authority_handle =
         VerifiedAcceptedSetupAuthorityHandle::from_identifier(accepted_setup_authority_handle);
+    let application_statement_context =
+        with_verified_accepted_setup_authority(&accepted_setup_authority_handle, |authority| {
+            Ok(SelectedApplicationStatementContext::new(
+                authority.protocol_version(),
+                authority.suite_identifier(),
+                None,
+                None,
+            ))
+        })?;
     let attempt = with_common_proof_selected_suite(selected_suite_handle, |selected_suite| {
         BallotValidityPreparedProofAttempt::prepare_selected(
             &compilation,
@@ -1368,6 +1378,11 @@ fn prepare_ballot_validity_generation(
         .canonical_application_statement_bytes()
         .to_vec()
         .into_boxed_slice();
+    let ballot_package_statement = decode_selected_ballot_validity_statement(
+        &canonical_application_statement_bytes,
+        application_statement_context,
+    )
+    .map_err(|_| BallotValidityRuntimeError::InvalidInput)?;
     let limits = selected_proof_runtime_limits(
         ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
         &canonical_application_statement_bytes,
@@ -1397,7 +1412,7 @@ fn prepare_ballot_validity_generation(
             CommonProofGenerationFamilyAdapter::fresh(prepared_generation)
         }
         BallotValidityGenerationMode::Resume => {
-            let checkpoint_schedule_digest = relation_plan.checkpoint_schedule_digest(limits)?;
+            let checkpoint_schedule_digest = relation_plan.checkpoint_schedule_digest()?;
             let fresh_preparation = attempt.prepare_fresh_common_generation(
                 &compilation,
                 relation_plan,
@@ -1443,6 +1458,7 @@ fn prepare_ballot_validity_generation(
             next_chunk_index: 0,
             readback_complete: false,
             canonical_application_statement_bytes,
+            ballot_package_statement,
             readback,
         })
     })?;
@@ -1525,6 +1541,103 @@ fn read_ciphertext_chunk(
             .checked_add(1)
             .ok_or(BallotValidityRuntimeError::InvalidInput)?;
         Ok(chunk)
+    })
+}
+
+fn decode_exact_stream_descriptor(
+    canonical_bytes: &[u8],
+) -> Result<StreamDescriptor, BallotValidityRuntimeError> {
+    if canonical_bytes.is_empty()
+        || canonical_bytes.len() > FOUNDATION_PROFILE.maximum_copied_buffer_byte_length
+    {
+        return Err(BallotValidityRuntimeError::Refusal(
+            if canonical_bytes.is_empty() {
+                RefusalReason::WrongTypeOrLength
+            } else {
+                RefusalReason::OutsideSupportedProfile
+            },
+        ));
+    }
+    let descriptor = StreamDescriptor::decode(canonical_bytes, &CanonicalDecodeLimits::default())?;
+    if descriptor.encode()? != canonical_bytes {
+        return Err(BallotValidityRuntimeError::Refusal(
+            RefusalReason::MalformedEncoding,
+        ));
+    }
+    let maximum_proof_byte_length = u64::try_from(MAXIMUM_COMMON_PROOF_BYTE_LENGTH)
+        .map_err(|_| BallotValidityRuntimeError::InvalidInput)?;
+    if descriptor.total_byte_length > maximum_proof_byte_length {
+        return Err(BallotValidityRuntimeError::Refusal(
+            RefusalReason::OutsideSupportedProfile,
+        ));
+    }
+    Ok(descriptor)
+}
+
+fn decode_exact_roster(canonical_bytes: &[u8]) -> Result<Roster, BallotValidityRuntimeError> {
+    if canonical_bytes.is_empty()
+        || canonical_bytes.len() > FOUNDATION_PROFILE.maximum_copied_buffer_byte_length
+    {
+        return Err(BallotValidityRuntimeError::Refusal(
+            if canonical_bytes.is_empty() {
+                RefusalReason::WrongTypeOrLength
+            } else {
+                RefusalReason::OutsideSupportedProfile
+            },
+        ));
+    }
+    let roster = Roster::decode(canonical_bytes, &CanonicalDecodeLimits::default())?;
+    if roster.encode()? != canonical_bytes {
+        return Err(BallotValidityRuntimeError::Refusal(
+            RefusalReason::MalformedEncoding,
+        ));
+    }
+    Ok(roster)
+}
+
+fn prepare_ballot_package_carrier(
+    ciphertext_readback_handle: u32,
+    canonical_proof_descriptor_bytes: &[u8],
+    canonical_roster_bytes: &[u8],
+) -> Result<PreparedSignedCarrierDescription, BallotValidityRuntimeError> {
+    let proof_descriptor = decode_exact_stream_descriptor(canonical_proof_descriptor_bytes)?;
+    let roster = decode_exact_roster(canonical_roster_bytes)?;
+    BALLOT_CIPHERTEXT_READBACK_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let entry = registry.entry(ciphertext_readback_handle)?;
+        if !entry.readback_complete || entry.next_chunk_index != entry.descriptor_chunk_count {
+            return Err(BallotValidityRuntimeError::WrongReadbackPhase);
+        }
+        let statement = entry.ballot_package_statement;
+        if statement.protocol_version() != FOUNDATION_PROFILE.protocol_version
+            || statement.ballot_ciphertext_full_object_digest()
+                != entry.descriptor.full_object_digest.into_bytes()
+        {
+            return Err(BallotValidityRuntimeError::Refusal(
+                RefusalReason::WrongHashOrRoot,
+            ));
+        }
+        let payload = BallotPackagePayload::new(entry.descriptor.clone(), proof_descriptor)?;
+        let envelope = ObjectEnvelope {
+            suite_id: Hash512::from_bytes(statement.suite_identifier()),
+            object_type: FoundationObjectType::BallotPackage,
+            ceremony_context_hash: Hash512::from_bytes(statement.ceremony_context_hash()),
+            action_context_hash: Hash512::from_bytes(statement.action_context_hash()),
+            producer_participant_id: Some(ParticipantIdentity::from_bytes(
+                statement.participant_identity(),
+            )),
+            producer_sequence: statement.producer_sequence(),
+            ordered_prerequisite_hashes: vec![Hash512::from_bytes(
+                statement.verified_setup_source_hash(),
+            )],
+            payload_bytes: payload.encode()?,
+        };
+        retain_prepared_signed_carrier(
+            envelope,
+            &roster,
+            Hash512::from_bytes(statement.roster_hash()),
+        )
+        .map_err(BallotValidityRuntimeError::Refusal)
     })
 }
 
@@ -2002,6 +2115,128 @@ pub extern "C" fn sealed_lattice_ballot_validity_finish_ciphertext_readback(
             .finish_readback(ciphertext_readback_handle)
             .map_or_else(runtime_error_status, |()| 0)
     })
+}
+
+/// Retains the exact direct-ballot envelope and returns its one-shot signing
+/// handle. The ciphertext descriptor comes from the completed Rust readback;
+/// the proof descriptor comes from the canonical output stream produced for
+/// the same generation attempt. The roster is accepted only after canonical
+/// decoding and equality with the statement-bound roster hash.
+///
+/// # Safety
+///
+/// Each nonempty input pointer must name its declared readable range. The
+/// carrier-length output must name one writable `u32`; the signature-message
+/// output must name exactly 64 writable bytes. A non-null status pointer must
+/// name one writable `u32`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_ballot_validity_prepare_ballot_package_carrier(
+    ciphertext_readback_handle: u32,
+    proof_descriptor_pointer: *const u8,
+    proof_descriptor_byte_length: usize,
+    canonical_roster_pointer: *const u8,
+    canonical_roster_byte_length: usize,
+    canonical_carrier_byte_length_output_pointer: *mut u32,
+    signature_message_output_pointer: *mut u8,
+    signature_message_output_byte_length: usize,
+    status_pointer: *mut u32,
+) -> u32 {
+    let result = (|| {
+        if proof_descriptor_pointer.is_null()
+            || canonical_roster_pointer.is_null()
+            || canonical_carrier_byte_length_output_pointer.is_null()
+            || signature_message_output_pointer.is_null()
+            || signature_message_output_byte_length != Hash512::BYTE_LENGTH
+        {
+            return Err(BallotValidityRuntimeError::InvalidInput);
+        }
+        let proof_descriptor_bytes = unsafe {
+            slice::from_raw_parts(proof_descriptor_pointer, proof_descriptor_byte_length)
+        };
+        let canonical_roster_bytes = unsafe {
+            slice::from_raw_parts(canonical_roster_pointer, canonical_roster_byte_length)
+        };
+        let description = prepare_ballot_package_carrier(
+            ciphertext_readback_handle,
+            proof_descriptor_bytes,
+            canonical_roster_bytes,
+        )?;
+        let canonical_carrier_byte_length =
+            u32::try_from(description.canonical_carrier_byte_length())
+                .map_err(|_| BallotValidityRuntimeError::InvalidInput)?;
+        unsafe {
+            canonical_carrier_byte_length_output_pointer.write(canonical_carrier_byte_length);
+            slice::from_raw_parts_mut(
+                signature_message_output_pointer,
+                signature_message_output_byte_length,
+            )
+            .copy_from_slice(description.signature_message().as_bytes());
+        }
+        Ok(description.handle())
+    })();
+    match result {
+        Ok(handle) => {
+            unsafe { write_status(status_pointer, 0) };
+            handle
+        }
+        Err(error) => {
+            unsafe { write_status(status_pointer, runtime_error_status(error)) };
+            0
+        }
+    }
+}
+
+/// Completes one prepared direct-ballot carrier only after its participant
+/// signature verifies against the statement-bound canonical roster.
+///
+/// # Safety
+///
+/// The signature pointer must name exactly one ML-DSA-65 signature. The output
+/// pointer must name the exact writable length returned by preparation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_ballot_validity_finish_ballot_package_carrier(
+    prepared_carrier_handle: u32,
+    signature_pointer: *const u8,
+    signature_byte_length: usize,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+) -> u32 {
+    let result = (|| {
+        if signature_pointer.is_null()
+            || signature_byte_length != ML_DSA_65_SIGNATURE_BYTE_LENGTH
+            || output_pointer.is_null()
+        {
+            return Err(BallotValidityRuntimeError::InvalidInput);
+        }
+        let expected_output_byte_length =
+            prepared_signed_carrier_byte_length(prepared_carrier_handle)
+                .map_err(BallotValidityRuntimeError::Refusal)?;
+        if output_byte_length != expected_output_byte_length {
+            return Err(BallotValidityRuntimeError::InvalidInput);
+        }
+        let signature = unsafe { fixed_input(signature_pointer) }?;
+        let canonical_carrier = finish_prepared_signed_carrier(prepared_carrier_handle, signature)
+            .map_err(BallotValidityRuntimeError::Refusal)?;
+        if canonical_carrier.len() != output_byte_length {
+            return Err(BallotValidityRuntimeError::InvalidInput);
+        }
+        unsafe { slice::from_raw_parts_mut(output_pointer, output_byte_length) }
+            .copy_from_slice(&canonical_carrier);
+        Ok(())
+    })();
+    result.map_or_else(runtime_error_status, |()| 0)
+}
+
+/// Cancels a prepared direct-ballot carrier after signing, board ingestion, or
+/// another caller-owned step fails.
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_ballot_validity_cancel_ballot_package_carrier(
+    prepared_carrier_handle: u32,
+) -> u32 {
+    cancel_prepared_signed_carrier(prepared_carrier_handle).map_or_else(
+        |reason| runtime_error_status(BallotValidityRuntimeError::Refusal(reason)),
+        |()| 0,
+    )
 }
 
 /// Consumes a generated proof and its completed ciphertext readback only

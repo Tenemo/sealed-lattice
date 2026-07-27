@@ -93,8 +93,6 @@ pub(crate) use plan::{
     ProofExternalMemorySecretSealCustodyRequirement, ProofExternalMemoryTransactionOperation,
 };
 pub(crate) use transaction::EXTERNAL_MEMORY_SINGLE_APPEND_RECYCLER_CAPACITY_CEILING;
-#[cfg(test)]
-pub(crate) use transaction::EXTERNAL_MEMORY_SINGLE_OPERATION_VECTOR_CAPACITY_CEILING;
 pub(crate) use transaction::{
     ProofExternalMemoryTransactionAdapterError, ProofExternalMemoryTransactionRecorder,
     ProofExternalMemoryTransactionReplay, ProofExternalMemoryTransactionRequest,

@@ -28,15 +28,25 @@ const controlledCustody = (input: {
                           recordEvent('publish-checkpoint');
                           return Promise.resolve();
                       },
-                      restoreAuthenticatedCheckpointState: () => {
+                      restoreAuthenticatedCheckpoint: () => {
                           recordEvent('restore-checkpoint');
-                          return Promise.resolve(Uint8Array.of(2));
+                          return Promise.resolve(
+                              Object.freeze({
+                                  canonicalStateBytes: Uint8Array.of(2),
+                                  generationCursorManifestBytes:
+                                      Uint8Array.of(3),
+                              }),
+                          );
                       },
                   }),
               }),
         completeVerifiedOutput: () => {
             recordEvent('complete');
             return Promise.resolve();
+        },
+        copyPhysicalStorageAccounting: () => {
+            recordEvent('copy-accounting');
+            throw new Error('Synthetic accounting snapshot is unavailable.');
         },
         copyCheckpointResumeDescriptor: () => {
             recordEvent('copy-resume');
@@ -109,7 +119,7 @@ describe('Replaceable common-proof browser custody', () => {
         await replaceable.custody.outputStore.commitChunk(0, Uint8Array.of(4));
         await replaceable.custody.suspendForAuthenticatedResume();
         replaceable.replaceAfterAuthenticatedSuspension(resumedCustody);
-        await replaceable.custody.checkpointCustody?.restoreAuthenticatedCheckpointState();
+        await replaceable.custody.checkpointCustody?.restoreAuthenticatedCheckpoint();
         await replaceable.custody.prefixReplayExternalMemory.executeDeterministicPrefixReplayTransaction(
             {} as never,
         );

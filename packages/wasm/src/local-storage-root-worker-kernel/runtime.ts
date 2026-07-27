@@ -2054,12 +2054,23 @@ export class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorag
         };
 
         const cancelPreparedSetupCarrier = (preparedHandle: number): void => {
-            const output = this.#runActionRandomnessCommand(
-                actionRandomnessCommandIdentifiers.cancelSetupTranscriptCarrier,
-                encodeUnsigned32(preparedHandle),
-                'cancel a prepared setup transcript carrier',
-                'runtime',
-            );
+            let output: Uint8Array<ArrayBuffer>;
+            try {
+                output = this.#runActionRandomnessCommand(
+                    actionRandomnessCommandIdentifiers.cancelSetupTranscriptCarrier,
+                    encodeUnsigned32(preparedHandle),
+                    'cancel a prepared setup transcript carrier',
+                    'runtime',
+                );
+            } catch (error) {
+                if (
+                    error instanceof BrowserActionStorageCustodyError &&
+                    error.code === 'InvalidState'
+                ) {
+                    return;
+                }
+                throw error;
+            }
             try {
                 if (output.byteLength !== 0) {
                     throw new BrowserActionStorageCustodyError(

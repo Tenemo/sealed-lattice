@@ -21,14 +21,14 @@ use p3_dft::TwoAdicSubgroupDft;
 use p3_field::{ExtensionField, TwoAdicField};
 use p3_matrix::dense::DenseMatrix;
 use p3_multilinear_util::point::Point;
-pub use prefix::PrefixProver;
+pub use prefix::{PrefixInitialSumcheckProver, PrefixProver};
 pub use suffix::SuffixProver;
 
-use crate::SumcheckData;
 use crate::commit::commit_base;
 use crate::layout::{LayoutStrategy, Table, Witness};
 use crate::strategy::{SumcheckProver, VariableOrder};
 use crate::table::{OpeningEvals, OpeningRequest};
+use crate::SumcheckData;
 
 /// Stacked-sumcheck prover layout
 pub trait Layout<F: TwoAdicField, EF: ExtensionField<F>>: Sized {
@@ -172,14 +172,14 @@ pub(super) mod test_utils {
     use p3_multilinear_util::point::Point;
     use p3_multilinear_util::poly::Poly;
     use proptest::prelude::*;
-    use rand::SeedableRng;
     use rand::rngs::SmallRng;
+    use rand::SeedableRng;
 
-    use crate::SumcheckData;
     use crate::layout::{Layout, LayoutStrategy, Table, TableShape, Verifier, Witness};
     use crate::strategy::VariableOrder;
     use crate::table::{OpeningBatch, OpeningEvals, OpeningRequest};
     use crate::tests::*;
+    use crate::SumcheckData;
 
     /// Preprocessing rounds each end-to-end test consumes on both sides.
     pub(crate) const FOLDING: usize = 4;
@@ -539,8 +539,8 @@ pub(super) mod test_utils {
     /// - 1..=`SHAPE_MAX_CALLS` opening calls over the generated witness.
     /// - Every call picks an existing table index and a non-empty, de-duplicated
     ///   subset of that table's columns (columns may appear in any order).
-    pub(crate) fn arb_witness_and_schedule()
-    -> impl Strategy<Value = (WitnessShape, OpeningSchedule)> {
+    pub(crate) fn arb_witness_and_schedule(
+    ) -> impl Strategy<Value = (WitnessShape, OpeningSchedule)> {
         // Step 1: pick the witness shape.
         //
         // Stacked arity must accommodate two phases of FOLDING rounds plus the
@@ -604,18 +604,18 @@ mod tests {
     use proptest::prelude::*;
 
     use super::test_utils::{
-        ASCENDING_POLYS, NON_ASCENDING_POLYS, POW_BITS, ROUND_EQ_POINTS, ROUND_SEL_POINTS,
         arb_opening_schedule, arb_witness_and_schedule, drive_intermediate_and_final,
-        table_shapes_from,
+        table_shapes_from, ASCENDING_POLYS, NON_ASCENDING_POLYS, POW_BITS, ROUND_EQ_POINTS,
+        ROUND_SEL_POINTS,
     };
     use super::{PrefixProver, SuffixProver};
-    use crate::SumcheckData;
     use crate::layout::prover::test_utils::{
-        FOLDING, build_tables, run_roundtrip_test, table_shapes, tables_from_shape,
+        build_tables, run_roundtrip_test, table_shapes, tables_from_shape, FOLDING,
     };
     use crate::layout::{Layout, Verifier};
     use crate::table::OpeningBatch;
     use crate::tests::*;
+    use crate::SumcheckData;
 
     fn explicit_point(table_variables: usize, first_coordinate: u64) -> Point<EF> {
         Point::new(

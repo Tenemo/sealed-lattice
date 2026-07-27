@@ -8,7 +8,7 @@ import type {
     SignedMailboxEnvelope,
     UnsignedMailboxEnvelope,
     VerificationResult,
-} from '@sealed-lattice/types';
+} from "@sealed-lattice/types";
 
 export type {
     MailboxAssociatedData,
@@ -17,17 +17,17 @@ export type {
     SetupMailboxSlot,
     SignedMailboxEnvelope,
     UnsignedMailboxEnvelope,
-} from '@sealed-lattice/types';
+} from "@sealed-lattice/types";
 
 import type {
     BgvCollectiveSetupParametersDescription,
     BgvRnsParametersDescription,
-} from './kernel-types/bgv.js';
+} from "./kernel-types/bgv.js";
 
 export type {
     BgvCollectiveSetupParametersDescription,
     BgvRnsParametersDescription,
-} from './kernel-types/bgv.js';
+} from "./kernel-types/bgv.js";
 
 export type FoundationOptionDefinitionIngress = Readonly<{
     readonly displayLabelUtf8Hex: string;
@@ -221,15 +221,15 @@ export type TranscriptCoreKernelContextOwner = object;
 
 export type PublishedSdkKernel = Pick<
     TranscriptCoreKernel,
-    | 'encodeFoundationActionDefinition'
-    | 'encodeFoundationBoardPolicy'
-    | 'encodeFoundationManifest'
-    | 'verifyFoundationActionContext'
-    | 'verifyFoundationActionDefinition'
-    | 'verifyFoundationBoardPolicy'
-    | 'verifyFoundationCeremonyContext'
-    | 'verifyFoundationManifest'
-    | 'verifyFoundationSuiteRecord'
+    | "encodeFoundationActionDefinition"
+    | "encodeFoundationBoardPolicy"
+    | "encodeFoundationManifest"
+    | "verifyFoundationActionContext"
+    | "verifyFoundationActionDefinition"
+    | "verifyFoundationBoardPolicy"
+    | "verifyFoundationCeremonyContext"
+    | "verifyFoundationManifest"
+    | "verifyFoundationSuiteRecord"
 >;
 
 type KernelMethodInput<MethodName extends keyof TranscriptCoreKernel> =
@@ -238,7 +238,7 @@ type KernelMethodInput<MethodName extends keyof TranscriptCoreKernel> =
         : never;
 
 type KernelWireInput<Input> = Input extends unknown
-    ? Omit<Input, 'statementFamily'>
+    ? Omit<Input, "statementFamily">
     : never;
 
 type KernelCommandFromMethod<
@@ -252,100 +252,100 @@ type KernelCommandFromMethod<
 
 type TranscriptCoreKernelCommand =
     | KernelCommandFromMethod<
-          'DeriveCanonicalObjectHash',
-          'deriveCanonicalObjectHash'
+          "DeriveCanonicalObjectHash",
+          "deriveCanonicalObjectHash"
       >
     | KernelCommandFromMethod<
-          'EncodeFoundationManifest',
-          'encodeFoundationManifest'
+          "EncodeFoundationManifest",
+          "encodeFoundationManifest"
       >
     | KernelCommandFromMethod<
-          'VerifyFoundationManifest',
-          'verifyFoundationManifest'
+          "VerifyFoundationManifest",
+          "verifyFoundationManifest"
       >
     | KernelCommandFromMethod<
-          'EncodeFoundationActionDefinition',
-          'encodeFoundationActionDefinition'
+          "EncodeFoundationActionDefinition",
+          "encodeFoundationActionDefinition"
       >
     | KernelCommandFromMethod<
-          'VerifyFoundationActionDefinition',
-          'verifyFoundationActionDefinition'
+          "VerifyFoundationActionDefinition",
+          "verifyFoundationActionDefinition"
       >
     | KernelCommandFromMethod<
-          'EncodeFoundationBoardPolicy',
-          'encodeFoundationBoardPolicy'
+          "EncodeFoundationBoardPolicy",
+          "encodeFoundationBoardPolicy"
       >
     | KernelCommandFromMethod<
-          'VerifyFoundationBoardPolicy',
-          'verifyFoundationBoardPolicy'
+          "VerifyFoundationBoardPolicy",
+          "verifyFoundationBoardPolicy"
       >
     | KernelCommandFromMethod<
-          'VerifyFoundationSuiteRecord',
-          'verifyFoundationSuiteRecord'
+          "VerifyFoundationSuiteRecord",
+          "verifyFoundationSuiteRecord"
       >
     | KernelCommandFromMethod<
-          'VerifyFoundationCeremonyContext',
-          'verifyFoundationCeremonyContext'
+          "VerifyFoundationCeremonyContext",
+          "verifyFoundationCeremonyContext"
       >
     | KernelCommandFromMethod<
-          'VerifyFoundationActionContext',
-          'verifyFoundationActionContext'
+          "VerifyFoundationActionContext",
+          "verifyFoundationActionContext"
       >
     | Readonly<{
-          readonly command: 'EncodeMailboxKeyScheduleInput';
+          readonly command: "EncodeMailboxKeyScheduleInput";
           readonly kemCiphertextHex: string;
           readonly value: MailboxKeyScheduleInput;
       }>
     | KernelCommandFromMethod<
-          'DecodeMailboxKeyScheduleInput',
-          'decodeMailboxKeyScheduleInput'
+          "DecodeMailboxKeyScheduleInput",
+          "decodeMailboxKeyScheduleInput"
       >
     | Readonly<{
-          readonly command: 'EncodeMailboxAssociatedData';
+          readonly command: "EncodeMailboxAssociatedData";
           readonly value: MailboxAssociatedData;
       }>
     | KernelCommandFromMethod<
-          'DecodeMailboxAssociatedData',
-          'decodeMailboxAssociatedData'
+          "DecodeMailboxAssociatedData",
+          "decodeMailboxAssociatedData"
       >
     | Readonly<{
-          readonly command: 'EncodeStreamDescriptor';
+          readonly command: "EncodeStreamDescriptor";
           readonly value: MailboxCiphertextDescriptor;
       }>
     | KernelCommandFromMethod<
-          'DecodeStreamDescriptor',
-          'decodeStreamDescriptor'
+          "DecodeStreamDescriptor",
+          "decodeStreamDescriptor"
       >
     | Readonly<{
-          readonly command: 'DeriveSetupMailboxSlotHash';
+          readonly command: "DeriveSetupMailboxSlotHash";
           readonly value: SetupMailboxSlot;
       }>
     | Readonly<{
-          readonly command: 'EncodePrivateRandomCursor';
+          readonly command: "EncodePrivateRandomCursor";
           readonly value: PrivateRandomCursor;
       }>
     | KernelCommandFromMethod<
-          'DecodePrivateRandomCursor',
-          'decodePrivateRandomCursor'
+          "DecodePrivateRandomCursor",
+          "decodePrivateRandomCursor"
       >
     | Readonly<{
-          readonly command: 'EncodeSignedMailboxEnvelope';
+          readonly command: "EncodeSignedMailboxEnvelope";
           readonly value: SignedMailboxEnvelope;
       }>
     | KernelCommandFromMethod<
-          'DecodeSignedMailboxEnvelope',
-          'decodeSignedMailboxEnvelope'
+          "DecodeSignedMailboxEnvelope",
+          "decodeSignedMailboxEnvelope"
       >
     | Readonly<{
-          readonly command: 'DeriveMailboxEnvelopeHash';
+          readonly command: "DeriveMailboxEnvelopeHash";
           readonly value: UnsignedMailboxEnvelope;
       }>
     | {
-          readonly command: 'DescribeBgvRnsParameters';
+          readonly command: "DescribeBgvRnsParameters";
       }
     | KernelCommandFromMethod<
-          'DescribeCollectiveBgvSetupParameters',
-          'describeCollectiveBgvSetupParameters'
+          "DescribeCollectiveBgvSetupParameters",
+          "describeCollectiveBgvSetupParameters"
       >;
 
 type RelinearizationPrepareGenerationExport = (
@@ -412,6 +412,28 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
     ) => number;
     sealed_lattice_aggregate_threshold_share_prepare_generation?: AggregateThresholdSharePrepareGenerationExport;
     sealed_lattice_aggregate_threshold_share_prepare_resumed_generation?: AggregateThresholdSharePrepareGenerationExport;
+    sealed_lattice_aggregate_threshold_share_prepare_private_share_acceptance_carrier?: (
+        generatedCommonProofHandle: number,
+        boardBindingSourceHandle: number,
+        canonicalRosterPointer: number,
+        canonicalRosterByteLength: number,
+        canonicalCarrierByteLengthOutputPointer: number,
+        signatureMessageOutputPointer: number,
+        signatureMessageOutputByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_aggregate_threshold_share_finish_private_share_acceptance_carrier?: (
+        boardBindingSourceHandle: number,
+        preparedCarrierHandle: number,
+        signaturePointer: number,
+        signatureByteLength: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_aggregate_threshold_share_cancel_private_share_acceptance_carrier?: (
+        boardBindingSourceHandle: number,
+        preparedCarrierHandle: number,
+    ) => number;
     sealed_lattice_aggregate_threshold_share_bind_generated_proof_to_board?: (
         generatedCommonProofHandle: number,
         boardBindingSourceHandle: number,
@@ -507,6 +529,13 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         sourceHandle: number,
     ) => number;
     sealed_lattice_allocate?: (length: number) => number;
+    sealed_lattice_foundation_verify_suite_artifact?: (
+        suiteRecordPointer: number,
+        suiteRecordByteLength: number,
+        artifactKindCode: number,
+        artifactPointer: number,
+        artifactByteLength: number,
+    ) => number;
     sealed_lattice_action_randomness_command?: (
         command: number,
         inputPointer: number,
@@ -1206,7 +1235,7 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
     sealed_lattice_accepted_setup_same_secret_prepare_verification?: (
         selectedSuiteHandle: number,
         assemblyHandle: number,
-        verifiedVssShareLinkageTerminalHandle: number,
+        vssLowDegreeEvidenceHandle: number,
         canonicalApplicationStatementPointer: number,
         canonicalApplicationStatementByteLength: number,
         terminalSourceHandleOutputPointer: number,
@@ -1215,7 +1244,6 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
     sealed_lattice_accepted_setup_same_secret_prepare_generated_verification?: (
         selectedSuiteHandle: number,
         assemblyHandle: number,
-        verifiedVssShareLinkageTerminalHandle: number,
         generationStatementSourceHandle: number,
         terminalSourceHandleOutputPointer: number,
         statusPointer: number,
@@ -1262,6 +1290,7 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
     sealed_lattice_same_secret_prepare_generation?: (
         selectedSuiteHandle: number,
         setupGenerationAuthorityHandle: number,
+        vssLowDegreeEvidenceHandle: number,
         actionRandomnessHandle: number,
         stateVerifierSessionHandle: number,
         stateVerifierSessionCapabilityPointer: number,
@@ -1279,6 +1308,7 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
     sealed_lattice_same_secret_prepare_resumed_generation?: (
         selectedSuiteHandle: number,
         setupGenerationAuthorityHandle: number,
+        vssLowDegreeEvidenceHandle: number,
         actionRandomnessHandle: number,
         stateVerifierSessionHandle: number,
         stateVerifierSessionCapabilityPointer: number,
@@ -1343,6 +1373,10 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
     sealed_lattice_same_secret_generation_cancel?: (
         statementSourceHandle: number,
         generatedCommonProofHandle: number,
+    ) => number;
+    sealed_lattice_same_secret_generation_supply_authenticated_transcript_prefix?: (
+        statementSourceHandle: number,
+        operationHandle: number,
     ) => number;
     sealed_lattice_public_key_share_generation_cancel?: (
         statementSourceHandle: number,
@@ -1445,6 +1479,8 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         adapterHandle: number,
         authenticatedCheckpointStatePointer: number,
         authenticatedCheckpointStateByteLength: number,
+        authenticatedGenerationCursorManifestPointer: number,
+        authenticatedGenerationCursorManifestByteLength: number,
         statusPointer: number,
     ) => number;
     sealed_lattice_common_proof_prepare_verification_family_adapter?: (
@@ -1467,6 +1503,8 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         preparedGenerationHandle: number,
         authenticatedCheckpointStatePointer: number,
         authenticatedCheckpointStateByteLength: number,
+        authenticatedGenerationCursorManifestPointer: number,
+        authenticatedGenerationCursorManifestByteLength: number,
         statusPointer: number,
     ) => number;
     sealed_lattice_ballot_validity_prepare_generation?: (
@@ -1514,6 +1552,27 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
     ) => number;
     sealed_lattice_ballot_validity_finish_ciphertext_readback?: (
         ciphertextReadbackHandle: number,
+    ) => number;
+    sealed_lattice_ballot_validity_prepare_ballot_package_carrier?: (
+        ciphertextReadbackHandle: number,
+        proofDescriptorPointer: number,
+        proofDescriptorByteLength: number,
+        canonicalRosterPointer: number,
+        canonicalRosterByteLength: number,
+        canonicalCarrierByteLengthOutputPointer: number,
+        signatureMessageOutputPointer: number,
+        signatureMessageOutputByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_ballot_validity_finish_ballot_package_carrier?: (
+        preparedCarrierHandle: number,
+        signaturePointer: number,
+        signatureByteLength: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_ballot_validity_cancel_ballot_package_carrier?: (
+        preparedCarrierHandle: number,
     ) => number;
     sealed_lattice_ballot_validity_bind_generated_proof_to_board?: (
         generatedCommonProofHandle: number,
@@ -1857,11 +1916,19 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         terminalSourceHandle: number,
         statusPointer: number,
     ) => number;
+    sealed_lattice_vss_share_linkage_finish_low_degree_evidence?: (
+        verifiedCommonProofHandle: number,
+        terminalSourceHandle: number,
+        statusPointer: number,
+    ) => number;
     sealed_lattice_vss_share_linkage_discard_verification_terminal_source?: (
         terminalSourceHandle: number,
     ) => number;
     sealed_lattice_vss_share_linkage_discard_verified_terminal?: (
         terminalHandle: number,
+    ) => number;
+    sealed_lattice_vss_share_linkage_discard_low_degree_evidence?: (
+        evidenceHandle: number,
     ) => number;
     sealed_lattice_target_release_prepare_generation?: (
         selectedSuiteHandle: number,
@@ -1937,6 +2004,25 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         outputPointer: number,
         outputByteLength: number,
         statusPointer: number,
+    ) => number;
+    sealed_lattice_target_release_prepare_output_carrier?: (
+        generationSourceHandle: number,
+        proofDescriptorPointer: number,
+        proofDescriptorByteLength: number,
+        canonicalCarrierByteLengthOutputPointer: number,
+        signatureMessageOutputPointer: number,
+        signatureMessageOutputByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_target_release_finish_output_carrier?: (
+        preparedCarrierHandle: number,
+        signaturePointer: number,
+        signatureByteLength: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_target_release_cancel_output_carrier?: (
+        preparedCarrierHandle: number,
     ) => number;
     sealed_lattice_target_release_bind_generated_proof?: (
         generatedCommonProofHandle: number,
@@ -2093,6 +2179,33 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         capabilityLength: number,
         verifiedObjectHandle: number,
         statusPointer: number,
+    ) => number;
+    sealed_lattice_board_verifier_prepare_ballot_candidate_list?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityByteLength: number,
+        framedBallotPackageHandlesPointer: number,
+        framedBallotPackageHandlesByteLength: number,
+        canonicalCarrierByteLengthOutputPointer: number,
+        signatureMessageOutputPointer: number,
+        signatureMessageOutputByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_board_verifier_finish_ballot_candidate_list?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityByteLength: number,
+        preparedCarrierHandle: number,
+        signaturePointer: number,
+        signatureByteLength: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_board_verifier_cancel_ballot_candidate_list?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityByteLength: number,
+        preparedCarrierHandle: number,
     ) => number;
     sealed_lattice_board_verifier_cancel?: (
         sessionHandle: number,

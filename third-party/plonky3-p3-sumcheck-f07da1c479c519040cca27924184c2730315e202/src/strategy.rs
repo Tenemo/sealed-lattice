@@ -11,14 +11,16 @@
 //! See `UPSTREAM.md`.
 
 use p3_challenger::{FieldChallenger, GrindingChallenger};
-use p3_field::{Algebra, ExtensionField, Field, PrimeCharacteristicRing, dot_product};
+use p3_field::{dot_product, Algebra, ExtensionField, Field, PrimeCharacteristicRing};
 use p3_maybe_rayon::prelude::*;
 use p3_multilinear_util::point::Point;
 use p3_multilinear_util::poly::Poly;
 
 use crate::constraints::{Constraint, Statements};
+#[cfg(feature = "zk")]
+use crate::extrapolate_01inf;
 use crate::product_polynomial::{PolyView, ProductPolynomial};
-use crate::{SumcheckData, extrapolate_01inf};
+use crate::SumcheckData;
 
 /// Input size at which the round-coefficient routines switch from serial to parallel execution.
 ///
@@ -443,12 +445,14 @@ impl<F: Field, EF: ExtensionField<F>> SumcheckProver<F, EF> {
 
     /// Computes the current round's plain quadratic coefficients without
     /// touching the transcript or folding the polynomial.
+    #[cfg(feature = "zk")]
     pub(crate) fn round_coefficients(&self) -> (EF, EF) {
         self.poly.round_coefficients()
     }
 
     /// Folds the residual product polynomial by one challenge and updates the
     /// claimed sum with the same quadratic extrapolation as the plain path.
+    #[cfg(feature = "zk")]
     pub(crate) fn fold_round_with_coefficients(&mut self, c0: EF, c_inf: EF, gamma: EF) {
         self.sum = extrapolate_01inf(c0, self.sum - c0, c_inf, gamma);
         self.poly.fold_round(gamma);
@@ -459,6 +463,7 @@ impl<F: Field, EF: ExtensionField<F>> SumcheckProver<F, EF> {
     ///
     /// Leaves the evaluation side untouched, so downstream reductions can
     /// reuse it as the honest folded message.
+    #[cfg(feature = "zk")]
     pub(crate) fn scale_weights_and_claim(&mut self, scale: EF) {
         self.poly.scale_weights(scale);
         self.sum *= scale;
@@ -532,8 +537,8 @@ mod tests {
     use alloc::vec::Vec;
 
     use p3_baby_bear::BabyBear;
-    use p3_field::PrimeCharacteristicRing;
     use p3_field::extension::BinomialExtensionField;
+    use p3_field::PrimeCharacteristicRing;
     use p3_multilinear_util::point::Point;
     use proptest::prelude::*;
     use rand::rngs::SmallRng;

@@ -19,8 +19,6 @@ use super::super::{
     },
     selected_committed_material_relation_plan_input, selected_evaluator_aggregate_relation_plan,
 };
-#[cfg(test)]
-use super::CommittedMaterialTree;
 use super::{
     CanonicalItemType, CommonProofVerifierError, FOUNDATION_PROFILE, ProofApplicationSlotCeilings,
     SelectedApplicationStatementContext, SelectedEvaluatorEntryKind,
@@ -29,6 +27,8 @@ use super::{
     selected_evaluator_aggregate_entry_roots_in_order, selected_evaluator_entry_positions,
     verified_application_statement_hash,
 };
+#[cfg(test)]
+use super::{CommittedMaterialTree, RelationProofTreeInput};
 use crate::bgv::evaluator::candidate_evidence::EvaluatorCandidateInput;
 use crate::bgv::proof_suite::application_statement::decode_selected_relinearization_round_two_statement;
 use crate::bgv::setup::{
@@ -40,9 +40,10 @@ use crate::foundation::{CanonicalStreamDomain, StreamDescriptor, VerifiedCanonic
 use crate::foundation::{derive_canonical_stream_descriptor, selected_suite_capability_for_tests};
 
 /// Opaque evidence minted only after the complete generated verifier accepts.
-/// It binds the exact suite, protocol version, application statement, and
-/// selected relation-plan variant. Family code consumes this capability
-/// instead of accepting a proof byte string or a caller-supplied verdict.
+/// It binds the exact suite, protocol version, application statement,
+/// row-code WHIR construction plan, and selected relation-plan variant.
+/// Family code consumes this capability instead of accepting a proof byte
+/// string or a caller-supplied verdict.
 pub(crate) struct VerifiedCommonProof {
     pub(super) protocol_version: u16,
     pub(super) suite_identifier: [u8; 64],
@@ -51,6 +52,7 @@ pub(crate) struct VerifiedCommonProof {
     pub(super) proof_header_hash: [u8; 64],
     pub(super) proof_byte_length: u64,
     pub(super) verified_query_count: u32,
+    pub(super) row_code_whir_construction_plan_identity_hash: [u8; 64],
     pub(super) relation_plan_variant_hash: [u8; 64],
     pub(super) schedule_position: Option<u32>,
     pub(super) top_count: Option<u16>,
@@ -64,6 +66,7 @@ pub(crate) struct VerifiedRowCodeWhirProofFacts {
     pub(crate) proof_header_hash: [u8; 64],
     pub(crate) proof_byte_length: u64,
     pub(crate) verified_query_count: u32,
+    pub(crate) row_code_whir_construction_plan_identity_hash: [u8; 64],
     pub(crate) relation_plan_variant_hash: [u8; 64],
     pub(crate) schedule_position: Option<u32>,
     pub(crate) top_count: Option<u16>,
@@ -79,6 +82,8 @@ impl VerifiedCommonProof {
             proof_header_hash: facts.proof_header_hash,
             proof_byte_length: facts.proof_byte_length,
             verified_query_count: facts.verified_query_count,
+            row_code_whir_construction_plan_identity_hash: facts
+                .row_code_whir_construction_plan_identity_hash,
             relation_plan_variant_hash: facts.relation_plan_variant_hash,
             schedule_position: facts.schedule_position,
             top_count: facts.top_count,
@@ -111,6 +116,25 @@ impl VerifiedCommonProof {
 
     pub(crate) const fn verified_query_count(&self) -> u32 {
         self.verified_query_count
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn with_test_verified_query_count(mut self, query_count: u32) -> Self {
+        self.verified_query_count = query_count;
+        self
+    }
+
+    pub(crate) const fn row_code_whir_construction_plan_identity_hash(&self) -> [u8; 64] {
+        self.row_code_whir_construction_plan_identity_hash
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn with_test_row_code_whir_construction_plan_identity_hash(
+        mut self,
+        identity_hash: [u8; 64],
+    ) -> Self {
+        self.row_code_whir_construction_plan_identity_hash = identity_hash;
+        self
     }
 
     pub(crate) const fn relation_plan_variant_hash(&self) -> [u8; 64] {
@@ -160,8 +184,69 @@ impl VerifiedStatementOwnedTree {
         &self.ordered_canonical_residue_moduli
     }
 
+    #[cfg(test)]
     pub(crate) const fn statement_owned_tree_input(&self) -> &StatementOwnedProofTreeInput {
         &self.tree
+    }
+
+    /// Reconstructs the verifier-owned coordinates for a tree that already
+    /// came from the authenticated generation relation. This is test-only so
+    /// persisted proof evidence can exercise the production typed verifier
+    /// context without retaining a second public-input wire format.
+    #[cfg(test)]
+    pub(crate) fn from_authenticated_generation_relation_tree(
+        variant: &RelationPlanVariant,
+        ordered_tree_ordinal: usize,
+        relation_tree: &RelationProofTreeInput,
+    ) -> Result<Option<Self>, CommonProofVerifierError> {
+        let descriptor = variant
+            .ordered_trees()
+            .get(ordered_tree_ordinal)
+            .ok_or(CommonProofVerifierError::InvalidBoundTree)?;
+        match (descriptor, relation_tree) {
+            (
+                RelationTreeDescriptor::ProofCreated {
+                    proof_tree_role,
+                    ordered_column_ordinals,
+                },
+                RelationProofTreeInput::ProofCreated {
+                    tree_role,
+                    row_width,
+                    ..
+                },
+            ) if *proof_tree_role == *tree_role as u16
+                && usize::try_from(*row_width).ok() == Some(ordered_column_ordinals.len()) =>
+            {
+                Ok(None)
+            }
+            (
+                RelationTreeDescriptor::BoundPublic {
+                    expected_root_source_ordinal,
+                    ordered_column_ordinals,
+                    ..
+                },
+                RelationProofTreeInput::BoundPublic(tree),
+            ) => {
+                let ordered_canonical_residue_moduli = ordered_column_ordinals
+                    .iter()
+                    .map(|column_ordinal| {
+                        variant
+                            .ordered_columns()
+                            .get(*column_ordinal as usize)
+                            .map(|column| column.canonical_residue_modulus())
+                            .ok_or(CommonProofVerifierError::InvalidBoundTree)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(Some(Self {
+                    ordered_tree_ordinal: u32::try_from(ordered_tree_ordinal)
+                        .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?,
+                    expected_root_source_ordinal: *expected_root_source_ordinal,
+                    tree: tree.clone(),
+                    ordered_canonical_residue_moduli,
+                }))
+            }
+            _ => Err(CommonProofVerifierError::InvalidBoundTree),
+        }
     }
 
     #[cfg(test)]
@@ -196,6 +281,16 @@ impl VerifiedStatementOwnedTree {
                 ..
             } => *rebound_root = expected_root,
         }
+        rebound
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_test_statement_owned_tree_input(
+        &self,
+        tree: StatementOwnedProofTreeInput,
+    ) -> Self {
+        let mut rebound = self.clone();
+        rebound.tree = tree;
         rebound
     }
 

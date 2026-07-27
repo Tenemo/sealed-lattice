@@ -1092,6 +1092,103 @@ pub(crate) struct VerifiedEvaluatorKeyStoreMaterial {
 }
 
 impl VerifiedEvaluatorKeyStoreMaterial {
+    /// Authenticates a complete suite-maximal physical evaluator store assembled
+    /// from real test key material. Each logical entry contributes its runtime
+    /// component, and the relinearization entry alone contributes the adjacent
+    /// auxiliary component required by production replay.
+    #[cfg(test)]
+    pub(crate) fn from_test_authenticated_complete_physical_material(
+        ownership_binding: ComponentMaterialOwnershipBinding,
+        ordered_logical_components: Vec<(SelectedEvaluatorEntryPosition, Vec<u8>, Option<Vec<u8>>)>,
+    ) -> Result<(Self, Vec<u8>), RefusalReason> {
+        let selected_suite = selected_suite_capability_for_tests();
+        let expected_positions =
+            selected_evaluator_entry_positions(FOUNDATION_PROFILE.option_count)
+                .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+        if ordered_logical_components.len() != expected_positions.len() {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+
+        let mut ordered_topologies = Vec::new();
+        let mut ordered_positions = Vec::new();
+        let mut ordered_physical_roles = Vec::new();
+        let mut ordered_component_descriptors = Vec::new();
+        let mut store_bytes = Vec::new();
+        for ((position, mut runtime_bytes, mut auxiliary_bytes), expected_position) in
+            ordered_logical_components
+                .into_iter()
+                .zip(expected_positions)
+        {
+            if position != expected_position {
+                return Err(RefusalReason::WrongContext);
+            }
+            let topology = KeySwitchComponentMaterialTopology::from_selected_suite_at_level(
+                &selected_suite,
+                selected_entry_catalog_level(position),
+            )?;
+            let expected_byte_length = usize::try_from(topology.expected_byte_length())
+                .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+            if runtime_bytes.len() != expected_byte_length {
+                return Err(RefusalReason::WrongTypeOrLength);
+            }
+            ordered_component_descriptors.push(derive_canonical_stream_descriptor(
+                CanonicalStreamDomain::EvaluatorKeyStore,
+                &runtime_bytes,
+            )?);
+            ordered_topologies.push(topology.clone());
+            ordered_positions.push(position);
+            ordered_physical_roles.push(EvaluatorKeyStorePhysicalRole::Runtime);
+            store_bytes.append(&mut runtime_bytes);
+
+            match position.key_kind() {
+                SelectedEvaluatorEntryKind::Relinearization { .. } => {
+                    let mut auxiliary_bytes = auxiliary_bytes
+                        .take()
+                        .ok_or(RefusalReason::MissingPrerequisite)?;
+                    if auxiliary_bytes.len() != expected_byte_length {
+                        return Err(RefusalReason::WrongTypeOrLength);
+                    }
+                    ordered_component_descriptors.push(derive_canonical_stream_descriptor(
+                        CanonicalStreamDomain::EvaluatorKeyStore,
+                        &auxiliary_bytes,
+                    )?);
+                    ordered_topologies.push(topology);
+                    ordered_positions.push(position);
+                    ordered_physical_roles
+                        .push(EvaluatorKeyStorePhysicalRole::RelinearizationAuxiliary);
+                    store_bytes.append(&mut auxiliary_bytes);
+                }
+                SelectedEvaluatorEntryKind::Galois { .. } => {
+                    if auxiliary_bytes.is_some() {
+                        return Err(RefusalReason::WrongTypeOrLength);
+                    }
+                }
+            }
+        }
+
+        let store_descriptor = derive_canonical_stream_descriptor(
+            CanonicalStreamDomain::EvaluatorKeyStore,
+            &store_bytes,
+        )?;
+        let mut stream = VerifiedEvaluatorKeyStoreMaterialStream::begin_with_physical_layout(
+            FOUNDATION_PROFILE.option_count,
+            ordered_topologies,
+            ownership_binding,
+            ordered_positions,
+            ordered_physical_roles,
+            store_descriptor,
+            ordered_component_descriptors,
+        )?;
+        for (chunk_index, chunk) in store_bytes
+            .chunks(FOUNDATION_PROFILE.stream_chunk_byte_length)
+            .enumerate()
+        {
+            stream.absorb_chunk(chunk_index, chunk).into_result()?;
+        }
+        let material = stream.finish().into_result()?;
+        Ok((material, store_bytes))
+    }
+
     /// Authenticates the smallest exact selected-store catalog needed by the
     /// aggregation/evaluator seam tests. The physical bytes remain ordered as
     /// L22 relinearization B, linked L22 A, then L18 Galois-257 B.

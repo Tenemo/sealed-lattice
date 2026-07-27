@@ -1,7 +1,8 @@
 use super::*;
 use crate::foundation::{
     ACTION_STORAGE_ROOT_BYTE_LENGTH, DEVICE_WRAPPED_STORAGE_ROOT_NONCE_BYTE_LENGTH,
-    DEVICE_WRAPPED_STORAGE_ROOT_TAG_BYTE_LENGTH,
+    DEVICE_WRAPPED_STORAGE_ROOT_TAG_BYTE_LENGTH, LOCAL_RECORD_TAG_BYTE_LENGTH,
+    LocalRecordAssociatedData, MAXIMUM_LOCAL_RECORD_PLAINTEXT_BYTE_LENGTH,
 };
 
 fn test_binding(offset: u8) -> [u8; BINDING_BYTE_LENGTH] {
@@ -886,6 +887,324 @@ fn active_root_commands_derive_seal_open_hash_and_enforce_one_seal_per_record_ve
             &[wrong_capability_request.as_slice(), envelope.as_slice()].concat(),
         ),
         Err(LOCAL_STORAGE_ROOT_STATUS_CAPABILITY_MISMATCH),
+    );
+    reset_registry();
+}
+
+#[test]
+fn active_root_open_command_refuses_canonical_hostile_record_mutations() {
+    reset_registry();
+    let capability = test_capability(151);
+    let binding_bytes = test_binding(153);
+    let staged = run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_STAGE_NEW,
+        &stage_new_input(&capability, &binding_bytes, &test_root(155)),
+    )
+    .expect("root stages");
+    let (handle, _) = stage_output(&staged);
+    run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_COMMIT,
+        &commit_input(handle, &capability),
+    )
+    .expect("root commits");
+
+    let identifier_context = checkpoint_manifest_identifier_context();
+    let action_randomness_commitment = [0x9a; HASH_BYTE_LENGTH];
+    let request = record_request_input(
+        handle,
+        &capability,
+        &action_randomness_commitment,
+        LocalRecordType::CheckpointManifest,
+        &identifier_context,
+        0,
+        None,
+    );
+    let envelope = run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_SEAL_RECORD,
+        &[
+            request.as_slice(),
+            [0x9b; LOCAL_RECORD_NONCE_BYTE_LENGTH].as_slice(),
+            b"authenticated command-path record".as_slice(),
+        ]
+        .concat(),
+    )
+    .expect("record seals through the production command path");
+    let decoded_envelope =
+        LocalRecordEnvelope::decode(&envelope, &CanonicalDecodeLimits::default())
+            .expect("the produced canonical envelope decodes");
+    let associated_data = decoded_envelope.associated_data();
+    let encode_envelope = |associated_data: LocalRecordAssociatedData,
+                           nonce: [u8; LOCAL_RECORD_NONCE_BYTE_LENGTH],
+                           ciphertext: Vec<u8>,
+                           tag: [u8; LOCAL_RECORD_TAG_BYTE_LENGTH]| {
+        LocalRecordEnvelope::new(associated_data, nonce, ciphertext, tag)
+            .expect("the hostile envelope remains structurally canonical")
+            .encode()
+            .expect("the hostile envelope encodes canonically")
+    };
+
+    let mut changed_ciphertext = decoded_envelope.ciphertext().to_vec();
+    changed_ciphertext[0] ^= 1;
+    let mut changed_nonce = *decoded_envelope.nonce();
+    changed_nonce[0] ^= 1;
+    let mut changed_tag = *decoded_envelope.tag();
+    changed_tag[0] ^= 1;
+    let original_binding = associated_data.binding();
+    let changed_binding = LocalStorageBinding::new(
+        Hash512::from_bytes([0x9c; HASH_BYTE_LENGTH]),
+        original_binding.ceremony_context_hash(),
+        original_binding.action_context_hash(),
+        original_binding.participant_id(),
+    );
+    let changed_binding_associated_data = LocalRecordAssociatedData::new(
+        changed_binding,
+        associated_data.action_randomness_commitment(),
+        associated_data.record_type(),
+        associated_data.record_identifier(),
+        associated_data.record_version(),
+        associated_data.predecessor_record_hash(),
+        associated_data.plaintext_byte_length(),
+    )
+    .expect("the changed binding remains structurally valid");
+    let changed_version_associated_data = LocalRecordAssociatedData::new(
+        associated_data.binding(),
+        associated_data.action_randomness_commitment(),
+        associated_data.record_type(),
+        associated_data.record_identifier(),
+        1,
+        Some(Hash512::from_bytes([0x9d; HASH_BYTE_LENGTH])),
+        associated_data.plaintext_byte_length(),
+    )
+    .expect("the changed version and predecessor remain structurally valid");
+
+    let hostile_envelopes = [
+        (
+            "ciphertext",
+            encode_envelope(
+                associated_data,
+                *decoded_envelope.nonce(),
+                changed_ciphertext,
+                *decoded_envelope.tag(),
+            ),
+            RefusalReason::WrongHashOrRoot,
+        ),
+        (
+            "nonce",
+            encode_envelope(
+                associated_data,
+                changed_nonce,
+                decoded_envelope.ciphertext().to_vec(),
+                *decoded_envelope.tag(),
+            ),
+            RefusalReason::WrongHashOrRoot,
+        ),
+        (
+            "authentication tag",
+            encode_envelope(
+                associated_data,
+                *decoded_envelope.nonce(),
+                decoded_envelope.ciphertext().to_vec(),
+                changed_tag,
+            ),
+            RefusalReason::WrongHashOrRoot,
+        ),
+        (
+            "storage binding",
+            encode_envelope(
+                changed_binding_associated_data,
+                *decoded_envelope.nonce(),
+                decoded_envelope.ciphertext().to_vec(),
+                *decoded_envelope.tag(),
+            ),
+            RefusalReason::WrongContext,
+        ),
+        (
+            "record version and predecessor",
+            encode_envelope(
+                changed_version_associated_data,
+                *decoded_envelope.nonce(),
+                decoded_envelope.ciphertext().to_vec(),
+                *decoded_envelope.tag(),
+            ),
+            RefusalReason::WrongContext,
+        ),
+    ];
+    for (changed_field, hostile_envelope, expected_refusal) in hostile_envelopes {
+        assert_eq!(
+            run_local_storage_root_command(
+                LOCAL_STORAGE_ROOT_COMMAND_OPEN_RECORD,
+                &[request.as_slice(), hostile_envelope.as_slice()].concat(),
+            ),
+            Err(refusal_status(expected_refusal)),
+            "the borrowed command path must refuse a changed {changed_field}",
+        );
+    }
+
+    let mut wrong_action_randomness_commitment = action_randomness_commitment;
+    wrong_action_randomness_commitment[0] ^= 1;
+    let wrong_action_request = record_request_input(
+        handle,
+        &capability,
+        &wrong_action_randomness_commitment,
+        LocalRecordType::CheckpointManifest,
+        &identifier_context,
+        0,
+        None,
+    );
+    assert_eq!(
+        run_local_storage_root_command(
+            LOCAL_STORAGE_ROOT_COMMAND_OPEN_RECORD,
+            &[wrong_action_request.as_slice(), envelope.as_slice()].concat(),
+        ),
+        Err(refusal_status(RefusalReason::WrongContext)),
+        "the command path binds the action-randomness context",
+    );
+
+    let mut wrong_identifier_context = identifier_context.clone();
+    *wrong_identifier_context
+        .last_mut()
+        .expect("the checkpoint context is nonempty") ^= 1;
+    let wrong_identifier_request = record_request_input(
+        handle,
+        &capability,
+        &action_randomness_commitment,
+        LocalRecordType::CheckpointManifest,
+        &wrong_identifier_context,
+        0,
+        None,
+    );
+    assert_eq!(
+        run_local_storage_root_command(
+            LOCAL_STORAGE_ROOT_COMMAND_OPEN_RECORD,
+            &[wrong_identifier_request.as_slice(), envelope.as_slice()].concat(),
+        ),
+        Err(refusal_status(RefusalReason::WrongContext)),
+        "the command path binds the canonical identifier context",
+    );
+
+    let predecessor_hash = [0x9e; HASH_BYTE_LENGTH];
+    let wrong_version_request = record_request_input(
+        handle,
+        &capability,
+        &action_randomness_commitment,
+        LocalRecordType::CheckpointManifest,
+        &identifier_context,
+        1,
+        Some(&predecessor_hash),
+    );
+    assert_eq!(
+        run_local_storage_root_command(
+            LOCAL_STORAGE_ROOT_COMMAND_OPEN_RECORD,
+            &[wrong_version_request.as_slice(), envelope.as_slice()].concat(),
+        ),
+        Err(refusal_status(RefusalReason::WrongContext)),
+        "the command path binds a structurally valid version and predecessor pair",
+    );
+    let invalid_predecessor_request = record_request_input(
+        handle,
+        &capability,
+        &action_randomness_commitment,
+        LocalRecordType::CheckpointManifest,
+        &identifier_context,
+        0,
+        Some(&predecessor_hash),
+    );
+    assert_eq!(
+        run_local_storage_root_command(
+            LOCAL_STORAGE_ROOT_COMMAND_OPEN_RECORD,
+            &[invalid_predecessor_request.as_slice(), envelope.as_slice(),].concat(),
+        ),
+        Err(refusal_status(RefusalReason::WrongContext)),
+        "the command path refuses an invalid version and predecessor pairing",
+    );
+    reset_registry();
+}
+
+#[test]
+fn active_root_record_commands_enforce_exact_payload_and_envelope_bounds() {
+    reset_registry();
+    let capability = test_capability(157);
+    let staged = run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_STAGE_NEW,
+        &stage_new_input(&capability, &test_binding(159), &test_root(161)),
+    )
+    .expect("root stages");
+    let (handle, _) = stage_output(&staged);
+    run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_COMMIT,
+        &commit_input(handle, &capability),
+    )
+    .expect("root commits");
+
+    let identifier_context = checkpoint_manifest_identifier_context();
+    let request = record_request_input(
+        handle,
+        &capability,
+        &[0xa6; HASH_BYTE_LENGTH],
+        LocalRecordType::CheckpointManifest,
+        &identifier_context,
+        0,
+        None,
+    );
+
+    let mut oversized_envelope_input =
+        Vec::with_capacity(request.len() + LOCAL_RECORD_ENVELOPE_MAXIMUM_BYTE_LENGTH + 1);
+    oversized_envelope_input.extend_from_slice(&request);
+    oversized_envelope_input.resize(
+        request.len() + LOCAL_RECORD_ENVELOPE_MAXIMUM_BYTE_LENGTH + 1,
+        0,
+    );
+    assert_eq!(
+        run_local_storage_root_command(
+            LOCAL_STORAGE_ROOT_COMMAND_OPEN_RECORD,
+            &oversized_envelope_input,
+        ),
+        Err(refusal_status(RefusalReason::OutsideSupportedProfile)),
+        "the borrowed decoder must reject exactly one byte beyond the envelope ceiling before parsing",
+    );
+    drop(oversized_envelope_input);
+
+    let mut maximum_seal_input = Vec::with_capacity(
+        request.len()
+            + LOCAL_RECORD_NONCE_BYTE_LENGTH
+            + MAXIMUM_LOCAL_RECORD_PLAINTEXT_BYTE_LENGTH
+            + 1,
+    );
+    maximum_seal_input.extend_from_slice(&request);
+    maximum_seal_input.extend_from_slice(&[0xa7; LOCAL_RECORD_NONCE_BYTE_LENGTH]);
+    maximum_seal_input.resize(
+        request.len()
+            + LOCAL_RECORD_NONCE_BYTE_LENGTH
+            + MAXIMUM_LOCAL_RECORD_PLAINTEXT_BYTE_LENGTH
+            + 1,
+        0,
+    );
+    assert_eq!(
+        run_local_storage_root_command(LOCAL_STORAGE_ROOT_COMMAND_SEAL_RECORD, &maximum_seal_input,),
+        Err(refusal_status(RefusalReason::OutsideSupportedProfile)),
+        "the command path must reject exactly one plaintext byte beyond the chunk ceiling",
+    );
+
+    maximum_seal_input.pop();
+    let maximum_envelope =
+        run_local_storage_root_command(LOCAL_STORAGE_ROOT_COMMAND_SEAL_RECORD, &maximum_seal_input)
+            .expect("the exact maximum plaintext seals after the refused over-limit attempt");
+    assert!(
+        maximum_envelope.len() <= LOCAL_RECORD_ENVELOPE_MAXIMUM_BYTE_LENGTH,
+        "the maximum plaintext must still produce a bounded canonical envelope",
+    );
+    drop(maximum_seal_input);
+
+    let mut maximum_open_input = Vec::with_capacity(request.len() + maximum_envelope.len());
+    maximum_open_input.extend_from_slice(&request);
+    maximum_open_input.extend_from_slice(&maximum_envelope);
+    let opened =
+        run_local_storage_root_command(LOCAL_STORAGE_ROOT_COMMAND_OPEN_RECORD, &maximum_open_input)
+            .expect("the exact maximum canonical envelope opens");
+    assert_eq!(opened.len(), MAXIMUM_LOCAL_RECORD_PLAINTEXT_BYTE_LENGTH);
+    assert!(
+        opened.iter().all(|byte| *byte == 0),
+        "the exact maximum plaintext must survive sealing and opening",
     );
     reset_registry();
 }

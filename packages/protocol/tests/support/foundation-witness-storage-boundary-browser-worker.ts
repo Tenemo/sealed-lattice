@@ -128,7 +128,7 @@ const runBoundaryTest = async (databaseName: string): Promise<void> => {
         });
         const service = openedRole.durableStateService.claimExclusiveOwner();
         try {
-            const authorizationFrame = createTestBytes(746, 131);
+            const authorizationFrame = createTestBytes(742, 131);
             const proofApplicationSlotHash = createTestBytes(64, 149);
             let malformedAttemptFailed = false;
             try {

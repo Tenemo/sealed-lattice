@@ -29,8 +29,8 @@ import type {
     TranscriptCoreKernelExports,
 } from './transcript-core-bridge/kernel-types.js';
 import {
-    withVerifiedVssShareLinkageTerminal,
-    type VerifiedVssShareLinkageTerminal,
+    consumeVerifiedVssLowDegreeEvidence,
+    type VerifiedVssLowDegreeEvidence,
 } from './vss-share-linkage-verification-runtime.js';
 import { WasmMemoryBoundary } from './wasm-memory-boundary.js';
 import { WasmStatusBoundary } from './wasm-status-boundary.js';
@@ -54,7 +54,7 @@ type AcceptedSetupProofVerificationKernel = Readonly<{
     prepareVerification(
         selectedSuiteHandle: number,
         assemblyHandle: number,
-        verifiedVssShareLinkageTerminalHandle: number | undefined,
+        vssLowDegreeEvidenceHandle: number | undefined,
         canonicalApplicationStatementPointer: number,
         canonicalApplicationStatementByteLength: number,
         terminalSourceHandleOutputPointer: number,
@@ -63,7 +63,6 @@ type AcceptedSetupProofVerificationKernel = Readonly<{
     prepareGeneratedVerification(
         selectedSuiteHandle: number,
         assemblyHandle: number,
-        verifiedVssShareLinkageTerminalHandle: number | undefined,
         generationStatementSourceHandle: number,
         terminalSourceHandleOutputPointer: number,
         statusPointer: number,
@@ -88,7 +87,7 @@ export type AcceptedSetupProofVerificationInput = Readonly<{
 export type AcceptedSetupSameSecretProofVerificationInput =
     AcceptedSetupProofVerificationInput &
         Readonly<{
-            verifiedVssShareLinkageTerminal: VerifiedVssShareLinkageTerminal;
+            vssLowDegreeEvidence: VerifiedVssLowDegreeEvidence;
         }>;
 
 type AcceptedSetupProofVerificationCoreInput = Omit<
@@ -194,21 +193,21 @@ const requireVerificationKernel = (
             ? (
                   selectedSuiteHandle,
                   assemblyHandle,
-                  verifiedVssShareLinkageTerminalHandle,
+                  vssLowDegreeEvidenceHandle,
                   canonicalApplicationStatementPointer,
                   canonicalApplicationStatementByteLength,
                   terminalSourceHandleOutputPointer,
                   statusPointer,
               ) => {
-                  if (verifiedVssShareLinkageTerminalHandle === undefined) {
+                  if (vssLowDegreeEvidenceHandle === undefined) {
                       throw new CanonicalStreamInternalError(
-                          'The same-secret verifier lacks its verified VSS prerequisite.',
+                          'The same-secret verifier lacks its VSS low-degree evidence.',
                       );
                   }
                   return rawPrepareVerification(
                       selectedSuiteHandle,
                       assemblyHandle,
-                      verifiedVssShareLinkageTerminalHandle,
+                      vssLowDegreeEvidenceHandle,
                       canonicalApplicationStatementPointer,
                       canonicalApplicationStatementByteLength,
                       terminalSourceHandleOutputPointer,
@@ -218,7 +217,7 @@ const requireVerificationKernel = (
             : (
                   selectedSuiteHandle,
                   assemblyHandle,
-                  _verifiedVssShareLinkageTerminalHandle,
+                  _vssLowDegreeEvidenceHandle,
                   canonicalApplicationStatementPointer,
                   canonicalApplicationStatementByteLength,
                   terminalSourceHandleOutputPointer,
@@ -237,48 +236,20 @@ const requireVerificationKernel = (
                       statusPointer,
                   );
     const prepareGeneratedVerification: AcceptedSetupProofVerificationKernel['prepareGeneratedVerification'] =
-        family === 'sameSecret'
-            ? (
-                  selectedSuiteHandle,
-                  assemblyHandle,
-                  verifiedVssShareLinkageTerminalHandle,
-                  generationStatementSourceHandle,
-                  terminalSourceHandleOutputPointer,
-                  statusPointer,
-              ) => {
-                  if (verifiedVssShareLinkageTerminalHandle === undefined) {
-                      throw new CanonicalStreamInternalError(
-                          'The generated same-secret verifier lacks its verified VSS prerequisite.',
-                      );
-                  }
-                  return rawPrepareGeneratedVerification(
-                      selectedSuiteHandle,
-                      assemblyHandle,
-                      verifiedVssShareLinkageTerminalHandle,
-                      generationStatementSourceHandle,
-                      terminalSourceHandleOutputPointer,
-                      statusPointer,
-                  );
-              }
-            : (
-                  selectedSuiteHandle,
-                  assemblyHandle,
-                  _verifiedVssShareLinkageTerminalHandle,
-                  generationStatementSourceHandle,
-                  terminalSourceHandleOutputPointer,
-                  statusPointer,
-              ) =>
-                  (
-                      rawPrepareGeneratedVerification as NonNullable<
-                          TranscriptCoreKernelExports['sealed_lattice_accepted_setup_public_key_share_prepare_generated_verification']
-                      >
-                  )(
-                      selectedSuiteHandle,
-                      assemblyHandle,
-                      generationStatementSourceHandle,
-                      terminalSourceHandleOutputPointer,
-                      statusPointer,
-                  );
+        (
+            selectedSuiteHandle,
+            assemblyHandle,
+            generationStatementSourceHandle,
+            terminalSourceHandleOutputPointer,
+            statusPointer,
+        ) =>
+            rawPrepareGeneratedVerification(
+                selectedSuiteHandle,
+                assemblyHandle,
+                generationStatementSourceHandle,
+                terminalSourceHandleOutputPointer,
+                statusPointer,
+            );
     return Object.freeze({
         discardTerminalSource,
         finishGeneratedVerification,
@@ -370,9 +341,7 @@ const verifyAcceptedSetupProofInClosedWorker = async (
     family: AcceptedSetupProofFamily,
     input: AcceptedSetupProofVerificationCoreInput,
     source: AcceptedSetupProofVerificationSource,
-    verifiedVssShareLinkageTerminal:
-        | VerifiedVssShareLinkageTerminal
-        | undefined,
+    vssLowDegreeEvidence: VerifiedVssLowDegreeEvidence | undefined,
 ): Promise<void> => {
     if (typeof globalThis.document !== 'undefined') {
         throw new CanonicalStreamInternalError(
@@ -438,44 +407,42 @@ const verifyAcceptedSetupProofInClosedWorker = async (
                 try {
                     const statementByteLength =
                         canonicalApplicationStatementBytes?.byteLength ?? 0;
-                    const prepareWithVssTerminalHandle = (
-                        verifiedVssShareLinkageTerminalHandle:
-                            | number
-                            | undefined,
+                    const prepareTransportedWithEvidenceHandle = (
+                        vssLowDegreeEvidenceHandle: number | undefined,
                     ): number =>
+                        kernel.prepareVerification(
+                            selectedSuiteHandle,
+                            assemblyOwner.handle,
+                            vssLowDegreeEvidenceHandle,
+                            statementPointer,
+                            statementByteLength,
+                            metadataPointer,
+                            metadataPointer + wasm32WordByteLength,
+                        );
+                    const adapterHandle =
                         source.kind === 'generated'
                             ? kernel.prepareGeneratedVerification(
                                   selectedSuiteHandle,
                                   assemblyOwner.handle,
-                                  verifiedVssShareLinkageTerminalHandle,
                                   source.generationStatementSourceHandle,
                                   metadataPointer,
                                   metadataPointer + wasm32WordByteLength,
                               )
-                            : kernel.prepareVerification(
-                                  selectedSuiteHandle,
-                                  assemblyOwner.handle,
-                                  verifiedVssShareLinkageTerminalHandle,
-                                  statementPointer,
-                                  statementByteLength,
-                                  metadataPointer,
-                                  metadataPointer + wasm32WordByteLength,
-                              );
-                    const adapterHandle =
-                        family === 'sameSecret'
-                            ? withVerifiedVssShareLinkageTerminal({
-                                  context,
-                                  inspect: prepareWithVssTerminalHandle,
-                                  kernel: input.kernel,
-                                  terminal:
-                                      verifiedVssShareLinkageTerminal ??
-                                      (() => {
-                                          throw new CanonicalStreamRefusalError(
-                                              'wrongContext',
-                                          );
-                                      })(),
-                              })
-                            : prepareWithVssTerminalHandle(undefined);
+                            : family === 'sameSecret'
+                              ? consumeVerifiedVssLowDegreeEvidence({
+                                    consume:
+                                        prepareTransportedWithEvidenceHandle,
+                                    context,
+                                    evidence:
+                                        vssLowDegreeEvidence ??
+                                        (() => {
+                                            throw new CanonicalStreamRefusalError(
+                                                'wrongContext',
+                                            );
+                                        })(),
+                                    kernel: input.kernel,
+                                })
+                              : prepareTransportedWithEvidenceHandle(undefined);
                     const [sourceHandle, status] = memoryBoundary.readWords(
                         metadataPointer,
                         2,
@@ -651,7 +618,7 @@ export const verifyAcceptedSetupSameSecretInClosedWorker = (
                 input.canonicalApplicationStatementBytes,
             kind: 'transported',
         },
-        input.verifiedVssShareLinkageTerminal,
+        input.vssLowDegreeEvidence,
     );
 
 /** Verifies and inserts one selected public-key-share proof into its exact slot. */
@@ -677,7 +644,6 @@ export const verifyGeneratedAcceptedSetupSameSecretCapabilityInClosedWorker = (
     input: AcceptedSetupProofVerificationCoreInput,
     generatedCommonProofCapability: ClosedWorkerGeneratedCommonProofCapability,
     generationStatementSourceHandle: number,
-    verifiedVssShareLinkageTerminal: VerifiedVssShareLinkageTerminal,
 ): Promise<void> =>
     verifyAcceptedSetupProofInClosedWorker(
         'sameSecret',
@@ -687,7 +653,7 @@ export const verifyGeneratedAcceptedSetupSameSecretCapabilityInClosedWorker = (
             generationStatementSourceHandle,
             kind: 'generated',
         },
-        verifiedVssShareLinkageTerminal,
+        undefined,
     );
 
 /**

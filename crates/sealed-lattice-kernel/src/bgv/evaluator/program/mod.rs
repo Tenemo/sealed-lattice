@@ -19,7 +19,13 @@ mod compiler;
 mod executor;
 mod runtime;
 
+pub(crate) use codec::verify_canonical_program_set;
 pub(crate) use compiler::selected_evaluator_program_set;
+#[cfg(test)]
+pub(crate) use compiler::{
+    EvaluatorCompilerStage, EvaluatorCompilerStreamStageRegisters,
+    selected_evaluator_program_set_with_stage_registers,
+};
 pub(crate) use executor::{
     PreparedSelectedEvaluatorReplay, SelectedEvaluatorExecutionProgress,
     SelectedEvaluatorProgramExecution, VerifiedEvaluatorAggregate,
@@ -31,12 +37,9 @@ pub(crate) use executor::{
     SelectedEvaluatorExecutionResourceTotals, selected_evaluator_execution_resource_ledger,
     selected_evaluator_initial_ciphertext_coefficient_byte_count,
 };
-#[cfg(test)]
 pub(crate) const EVALUATOR_PROGRAM_SET_SCHEMA_IDENTIFIER: u16 = 0x1500;
-#[cfg(test)]
 pub(crate) const EVALUATOR_INSTRUCTION_SCHEMA_IDENTIFIER: u16 = 0x1501;
 pub(crate) const EVALUATOR_CONSTANT_SCHEMA_IDENTIFIER: u16 = 0x1503;
-#[cfg(test)]
 pub(crate) const EVALUATOR_INSTRUCTION_STREAM_SCHEMA_IDENTIFIER: u16 = 0x1504;
 
 const EVALUATOR_PROGRAM_SCHEMA_VERSION: u16 = 1;
@@ -56,6 +59,15 @@ pub(crate) enum EvaluatorConstantKind {
 impl EvaluatorConstantKind {
     const fn canonical_code(self) -> u16 {
         self as u16
+    }
+
+    fn from_canonical_code(code: u16) -> CanonicalResult<Self> {
+        match code {
+            1 => Ok(Self::CoefficientVector),
+            _ => Err(program_error(
+                "evaluator constant kind is outside the selected profile",
+            )),
+        }
     }
 }
 
@@ -122,9 +134,26 @@ pub(crate) enum EvaluatorOpcode {
 }
 
 impl EvaluatorOpcode {
-    #[cfg(test)]
     const fn canonical_code(self) -> u16 {
         self as u16
+    }
+
+    fn from_canonical_code(code: u16) -> CanonicalResult<Self> {
+        match code {
+            1 => Ok(Self::ModulusSwitchToLevel),
+            2 => Ok(Self::NormalizeDecryptionMultiplier),
+            3 => Ok(Self::CiphertextAdd),
+            6 => Ok(Self::PlaintextAdd),
+            7 => Ok(Self::PlaintextMultiply),
+            8 => Ok(Self::CiphertextMultiplyRelinearizeAndDrop),
+            9 => Ok(Self::CiphertextMultiplyAndRelinearize),
+            10 => Ok(Self::GaloisRotate),
+            11 => Ok(Self::DropRegister),
+            12 => Ok(Self::DeclareOutput),
+            _ => Err(program_error(
+                "evaluator opcode is outside the selected profile",
+            )),
+        }
     }
 
     const fn produces_register(self) -> bool {

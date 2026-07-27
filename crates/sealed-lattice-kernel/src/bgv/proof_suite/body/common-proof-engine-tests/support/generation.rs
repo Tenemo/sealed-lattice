@@ -53,6 +53,7 @@ fn prepared_generation_worker_fixture_for_public_family(
             ),
             proof_header_hash.into_bytes(),
             relation_plan.relation_plan_hash(),
+            relation_plan.row_code_whir_construction_plan_identity_hash(),
         )
         .expect("the genuine generation fixture has one pre-output authorization");
     let limits = CommonProofRuntimeLimits::new(
@@ -240,6 +241,19 @@ fn execute_generation_storage_request(
         .expect("the browser response binds every exact requested read")
 }
 
+fn export_pending_generation_storage_request(
+    registry: &mut CommonProofRuntimeRegistry,
+    operation: CommonProofGenerationOperationHandle,
+) {
+    let encoded_byte_length = registry
+        .generation_storage_request_byte_length(operation)
+        .expect("the pending generation storage request has one canonical byte length");
+    let mut encoded_request = vec![0_u8; encoded_byte_length];
+    registry
+        .encode_generation_storage_request_into(operation, &mut encoded_request)
+        .expect("the pending generation storage request exports canonically");
+}
+
 fn drive_generation_worker_to_complete(
     registry: &mut CommonProofRuntimeRegistry,
     operation: CommonProofGenerationOperationHandle,
@@ -271,12 +285,18 @@ fn drive_generation_worker_to_complete(
                         .expect("one exact generation storage request is pending");
                     execute_generation_storage_request(request, browser_storage)
                 };
+                export_pending_generation_storage_request(registry, operation);
                 registry
                     .supply_generation_storage_response(operation, &response)
                     .expect("the exact storage response replays the Rust transaction");
             }
             CommonProofGenerationWorkerPoll::AuthenticatedSourceReadReady { .. } => {
                 panic!("the resident generation fixture cannot request an authenticated source")
+            }
+            CommonProofGenerationWorkerPoll::AuthenticatedTranscriptPrefixRequired => {
+                panic!(
+                    "the public-only generation fixture cannot request exact transcript authority"
+                )
             }
             CommonProofGenerationWorkerPoll::OutputChunkReady {
                 chunk_index,
@@ -381,6 +401,7 @@ fn capture_first_generation_checkpoint_for_public_family(
                         .expect("the prefix storage request is exact");
                     execute_generation_storage_request(request, &mut browser_storage)
                 };
+                export_pending_generation_storage_request(&mut registry, operation);
                 registry
                     .supply_generation_storage_response(operation, &response)
                     .expect("the prefix transaction response replays exactly");
@@ -391,8 +412,12 @@ fn capture_first_generation_checkpoint_for_public_family(
 }
 
 #[test]
-fn owned_generation_worker_replays_storage_and_authenticates_every_output_chunk() {
+fn owned_generation_worker_replays_resumable_append_for_final_partial_and_authenticates_every_output_chunk()
+ {
     let (prepared, expected_proof_bytes) = prepared_generation_worker_fixture();
+    let canonical_external_memory_chunk_byte_length =
+        usize::try_from(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH)
+            .expect("the canonical external-memory chunk length fits usize");
     let mut registry = CommonProofRuntimeRegistry::default();
     let operation = registry
         .begin_owned_generation(prepared)
@@ -401,6 +426,7 @@ fn owned_generation_worker_replays_storage_and_authenticates_every_output_chunk(
         BoundedInMemoryExternalMemory::new(MAXIMUM_EXTERNAL_MEMORY_BYTE_LENGTH);
     let mut output_chunks = BTreeMap::<usize, Vec<u8>>::new();
     let mut observed_checkpoint_boundary = false;
+    let mut observed_partial_append = false;
 
     loop {
         match registry
@@ -425,14 +451,28 @@ fn owned_generation_worker_replays_storage_and_authenticates_every_output_chunk(
                     let request = registry
                         .generation_storage_transaction_request(operation)
                         .expect("one exact storage request is pending");
+                    observed_partial_append |= request.operations().iter().any(|operation| {
+                        matches!(
+                            operation,
+                            ProofExternalMemoryTransactionOperation::Append { bytes, .. }
+                                if !bytes.is_empty()
+                                    && bytes.len() < canonical_external_memory_chunk_byte_length
+                        )
+                    });
                     execute_generation_storage_request(request, &mut browser_storage)
                 };
+                export_pending_generation_storage_request(&mut registry, operation);
                 registry
                     .supply_generation_storage_response(operation, &response)
                     .expect("the exact response changes recording into replay");
             }
             CommonProofGenerationWorkerPoll::AuthenticatedSourceReadReady { .. } => {
                 panic!("the resident generation fixture cannot request an authenticated source")
+            }
+            CommonProofGenerationWorkerPoll::AuthenticatedTranscriptPrefixRequired => {
+                panic!(
+                    "the public-only generation fixture cannot request exact transcript authority"
+                )
             }
             CommonProofGenerationWorkerPoll::OutputChunkReady {
                 chunk_index,
@@ -471,6 +511,10 @@ fn owned_generation_worker_replays_storage_and_authenticates_every_output_chunk(
     let generated_proof_bytes = output_chunks.into_values().flatten().collect::<Vec<_>>();
     assert_eq!(generated_proof_bytes, expected_proof_bytes);
     assert!(observed_checkpoint_boundary);
+    assert!(
+        observed_partial_append,
+        "the real worker must replay at least one final partial append",
+    );
     let generated_capability = registry
         .finish_owned_generation(operation)
         .expect("only the cryptographic terminal state mints generation authority");
@@ -486,7 +530,7 @@ fn owned_generation_worker_replays_every_public_family_from_zero_with_byte_ident
     {
         let (
             authenticated_checkpoint_state,
-            _cursor_manifest_bytes,
+            generation_cursor_manifest_bytes,
             stable_attempt_binding_hash,
             expected_proof_bytes,
         ) = capture_first_generation_checkpoint_for_public_family(family_schema_identifier);
@@ -502,7 +546,11 @@ fn owned_generation_worker_replays_every_public_family_from_zero_with_byte_ident
         assert_eq!(independently_generated_proof_bytes, expected_proof_bytes);
         let mut registry = CommonProofRuntimeRegistry::default();
         let operation = registry
-            .resume_owned_generation(prepared, &authenticated_checkpoint_state)
+            .resume_owned_generation(
+                prepared,
+                &authenticated_checkpoint_state,
+                &generation_cursor_manifest_bytes,
+            )
             .expect("the authenticated checkpoint starts deterministic prefix replay");
         let mut replay_storage =
             BoundedInMemoryExternalMemory::new(MAXIMUM_EXTERNAL_MEMORY_BYTE_LENGTH);
@@ -522,7 +570,8 @@ fn owned_generation_worker_replays_every_public_family_from_zero_with_byte_ident
 
 #[test]
 fn owned_generation_worker_rejects_changed_checkpoint_bindings_and_replayed_state() {
-    let (authenticated_checkpoint_state, _, _, _) = capture_first_generation_checkpoint();
+    let (authenticated_checkpoint_state, generation_cursor_manifest_bytes, _, _) =
+        capture_first_generation_checkpoint();
 
     for changed_offset in [12_usize, 108] {
         let (prepared, _) = prepared_generation_worker_fixture_for_checkpoint(
@@ -533,7 +582,7 @@ fn owned_generation_worker_rejects_changed_checkpoint_bindings_and_replayed_stat
         let mut changed_state = authenticated_checkpoint_state.clone();
         changed_state[changed_offset] ^= 1;
         let error = CommonProofRuntimeRegistry::default()
-            .resume_owned_generation(prepared, &changed_state)
+            .resume_owned_generation(prepared, &changed_state, &generation_cursor_manifest_bytes)
             .expect_err("changed attempt or schedule binding cannot open replay");
         assert!(matches!(
             error,
@@ -547,10 +596,46 @@ fn owned_generation_worker_rejects_changed_checkpoint_bindings_and_replayed_stat
         prepared_generation_worker_fixture_for_checkpoint(Some(&authenticated_checkpoint_state), 0)
             .expect("the genuine checkpoint prepares the expected replay target");
     let missing_state_error = CommonProofRuntimeRegistry::default()
-        .resume_owned_generation(prepared, &[])
+        .resume_owned_generation(prepared, &[], &generation_cursor_manifest_bytes)
         .expect_err("missing checkpoint state permanently prevents replay");
     assert!(matches!(
         missing_state_error,
+        CommonProofGenerationWorkerError::Runtime(
+            CommonProofRuntimeError::WrongVerificationBinding
+        )
+    ));
+
+    let (prepared, _) =
+        prepared_generation_worker_fixture_for_checkpoint(Some(&authenticated_checkpoint_state), 0)
+            .expect("the genuine checkpoint prepares the expected replay target");
+    let missing_manifest_error = CommonProofRuntimeRegistry::default()
+        .resume_owned_generation(prepared, &authenticated_checkpoint_state, &[])
+        .expect_err("missing cursor manifest permanently prevents replay");
+    assert!(matches!(
+        missing_manifest_error,
+        CommonProofGenerationWorkerError::Runtime(
+            CommonProofRuntimeError::WrongVerificationBinding
+        )
+    ));
+
+    let mut changed_generation_cursor_manifest_bytes = generation_cursor_manifest_bytes.clone();
+    let changed_manifest_offset = changed_generation_cursor_manifest_bytes
+        .len()
+        .checked_sub(1)
+        .expect("the authenticated generation cursor manifest is nonempty");
+    changed_generation_cursor_manifest_bytes[changed_manifest_offset] ^= 1;
+    let (prepared, _) =
+        prepared_generation_worker_fixture_for_checkpoint(Some(&authenticated_checkpoint_state), 0)
+            .expect("the genuine checkpoint prepares the expected replay target");
+    let changed_manifest_error = CommonProofRuntimeRegistry::default()
+        .resume_owned_generation(
+            prepared,
+            &authenticated_checkpoint_state,
+            &changed_generation_cursor_manifest_bytes,
+        )
+        .expect_err("a changed cursor manifest cannot authenticate against the checkpoint state");
+    assert!(matches!(
+        changed_manifest_error,
         CommonProofGenerationWorkerError::Runtime(
             CommonProofRuntimeError::WrongVerificationBinding
         )
@@ -577,7 +662,7 @@ fn owned_generation_worker_rejects_changed_checkpoint_bindings_and_replayed_stat
         .expect("the authenticated checkpoint prepares a replay attempt");
         let mut registry = CommonProofRuntimeRegistry::default();
         let operation = registry
-            .resume_owned_generation(prepared, &replay_target)
+            .resume_owned_generation(prepared, &replay_target, &generation_cursor_manifest_bytes)
             .expect("hostile committed-state or source-lineage input reaches deterministic replay");
         let mut replay_storage =
             BoundedInMemoryExternalMemory::new(MAXIMUM_EXTERNAL_MEMORY_BYTE_LENGTH);
@@ -599,6 +684,7 @@ fn owned_generation_worker_rejects_changed_checkpoint_bindings_and_replayed_stat
                             .expect("hostile replay still issues exact deterministic requests");
                         execute_generation_storage_request(request, &mut replay_storage)
                     };
+                    export_pending_generation_storage_request(&mut registry, operation);
                     registry
                         .supply_generation_storage_response(operation, &response)
                         .expect("the exact replay response is accepted before target comparison");
@@ -615,8 +701,12 @@ fn owned_generation_worker_rejects_changed_checkpoint_bindings_and_replayed_stat
 }
 
 #[test]
-fn owned_generation_worker_replays_an_in_flight_transaction_before_cancellation_cleanup() {
+fn owned_generation_worker_replays_resumable_append_for_final_partial_before_cancellation_cleanup()
+{
     let (prepared, _) = prepared_generation_worker_fixture();
+    let canonical_external_memory_chunk_byte_length =
+        usize::try_from(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH)
+            .expect("the canonical external-memory chunk length fits usize");
     let mut registry = CommonProofRuntimeRegistry::default();
     let operation = registry
         .begin_owned_generation(prepared)
@@ -638,9 +728,36 @@ fn owned_generation_worker_replays_an_in_flight_transaction_before_cancellation_
                     );
                 }
             }
-            CommonProofGenerationWorkerPoll::StorageRequestReady { .. } => break,
+            CommonProofGenerationWorkerPoll::StorageRequestReady { .. } => {
+                let request_contains_partial_append = registry
+                    .generation_storage_transaction_request(operation)
+                    .expect("one exact storage request is pending")
+                    .operations()
+                    .iter()
+                    .any(|operation| {
+                        matches!(
+                            operation,
+                            ProofExternalMemoryTransactionOperation::Append { bytes, .. }
+                                if !bytes.is_empty()
+                                    && bytes.len() < canonical_external_memory_chunk_byte_length
+                        )
+                    });
+                if request_contains_partial_append {
+                    break;
+                }
+                let response = {
+                    let request = registry
+                        .generation_storage_transaction_request(operation)
+                        .expect("the non-append prefix request remains pending");
+                    execute_generation_storage_request(request, &mut browser_storage)
+                };
+                export_pending_generation_storage_request(&mut registry, operation);
+                registry
+                    .supply_generation_storage_response(operation, &response)
+                    .expect("the exact prefix response enables deterministic replay");
+            }
             unexpected => {
-                panic!("generation yielded {unexpected:?} before its first storage request")
+                panic!("generation yielded {unexpected:?} before its first partial append")
             }
         }
     }
@@ -659,9 +776,10 @@ fn owned_generation_worker_replays_an_in_flight_transaction_before_cancellation_
     let response = {
         let request = registry
             .generation_storage_transaction_request(operation)
-            .expect("the original generation transaction remains pending");
+            .expect("the original partial append transaction remains pending");
         execute_generation_storage_request(request, &mut browser_storage)
     };
+    export_pending_generation_storage_request(&mut registry, operation);
     registry
         .supply_generation_storage_response(operation, &response)
         .expect("the exact original response enables deterministic replay");
@@ -681,6 +799,7 @@ fn owned_generation_worker_replays_an_in_flight_transaction_before_cancellation_
                         .expect("one exact cleanup transaction is pending");
                     execute_generation_storage_request(request, &mut browser_storage)
                 };
+                export_pending_generation_storage_request(&mut registry, operation);
                 registry
                     .supply_generation_storage_response(operation, &response)
                     .expect("the exact cleanup response enables replay");

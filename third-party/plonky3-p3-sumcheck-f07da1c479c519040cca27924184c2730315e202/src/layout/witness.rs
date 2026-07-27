@@ -1,4 +1,7 @@
 //! Physical placement of source tables inside the stacked committed polynomial.
+//!
+//! Local modification: a checked move-only interleaved polynomial constructor
+//! avoids retaining duplicate production source tables. See `UPSTREAM.md`.
 
 use alloc::vec::Vec;
 
@@ -6,9 +9,9 @@ use itertools::Itertools;
 use p3_field::Field;
 use p3_multilinear_util::point::Point;
 use p3_multilinear_util::poly::Poly;
-use p3_util::reverse_bits_len;
+use p3_util::{log2_ceil_usize, reverse_bits_len};
 
-use crate::layout::plan::{LayoutShape, plan_layout};
+use crate::layout::plan::{plan_layout, LayoutShape};
 use crate::table::TableShape;
 
 /// Identifies one slot inside the stacked polynomial.
@@ -173,11 +176,20 @@ impl TablePlacement {
     }
 }
 
-/// Owns the source tables together with the stacked committed polynomial.
-#[derive(Debug, Clone)]
+/// Owns a stacked committed polynomial and its source-table layout metadata.
+///
+/// Ordinary constructors also retain source tables. The move-only interleaved
+/// constructor deliberately leaves `tables` empty so the stacked polynomial is
+/// the sole large source allocation. This type is not `Clone` because cloning a
+/// selected production witness would silently duplicate about 80 MiB.
+#[derive(Debug)]
 pub struct Witness<F: Field> {
-    /// Source tables behind the stacked polynomial.
+    /// Source tables when constructed through the ordinary compatibility path.
+    /// Empty for a move-only interleaved witness.
     pub(super) tables: Vec<Table<F>>,
+    /// Verifier-visible source-table shapes, retained independently so a
+    /// move-only interleaved polynomial does not require duplicate tables.
+    pub(super) table_shapes: Vec<TableShape>,
     /// Per-table placement metadata inside the stacked polynomial.
     pub(super) placements: Vec<TablePlacement>,
     /// Number of variables of the stacked polynomial.
@@ -186,6 +198,19 @@ pub struct Witness<F: Field> {
     pub(super) folding: usize,
     /// Stacked committed polynomial.
     pub(super) poly: Poly<F>,
+}
+
+/// Structural refusal from constructing a move-only interleaved witness.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InterleavedWitnessError {
+    /// At least one table shape is required.
+    EmptyTableShapes,
+    /// A table has fewer variables than the configured prefix folding depth.
+    TableBelowFoldingDepth,
+    /// The planned stacked cell count overflowed `usize`.
+    LayoutSizeOverflow,
+    /// The supplied polynomial does not have the planned stacked arity.
+    PolynomialVariableCountMismatch { expected: usize, actual: usize },
 }
 
 impl<F: Field> Witness<F> {
@@ -214,11 +239,12 @@ impl<F: Field> Witness<F> {
         tables.iter_mut().for_each(|table| table.pad_zeros(folding));
 
         // Delegate slot assignment to the shared planner (same routine as the verifier).
-        let shapes: Vec<LayoutShape> = tables
+        let table_shapes = tables.iter().map(Table::shape).collect::<Vec<_>>();
+        let shapes: Vec<LayoutShape> = table_shapes
             .iter()
-            .map(|t| LayoutShape {
-                arity: t.num_variables(),
-                width: t.num_polys(),
+            .map(|shape| LayoutShape {
+                arity: shape.num_variables(),
+                width: shape.width(),
             })
             .collect();
         let (num_variables, placements) = plan_layout(&shapes);
@@ -239,6 +265,7 @@ impl<F: Field> Witness<F> {
 
         Self {
             tables,
+            table_shapes,
             placements,
             num_variables,
             folding,
@@ -278,11 +305,12 @@ impl<F: Field> Witness<F> {
         );
         tables.iter_mut().for_each(|table| table.pad_zeros(folding));
 
-        let shapes: Vec<LayoutShape> = tables
+        let table_shapes = tables.iter().map(Table::shape).collect::<Vec<_>>();
+        let shapes: Vec<LayoutShape> = table_shapes
             .iter()
-            .map(|t| LayoutShape {
-                arity: t.num_variables(),
-                width: t.num_polys(),
+            .map(|shape| LayoutShape {
+                arity: shape.num_variables(),
+                width: shape.width(),
             })
             .collect();
         let (num_variables, mut placements) = plan_layout(&shapes);
@@ -306,11 +334,82 @@ impl<F: Field> Witness<F> {
 
         Self {
             tables,
+            table_shapes,
             placements,
             num_variables,
             folding,
             poly: stacked,
         }
+    }
+
+    /// Builds an interleaved witness around one already materialized stacked
+    /// polynomial without retaining duplicate source tables.
+    ///
+    /// The caller must have populated `poly` according to the same suffix
+    /// selector layout used by [`Self::new_interleaved`]. Shape validation is
+    /// completed before the shared layout planner is called, so malformed
+    /// dimensions refuse instead of overflowing inside the planner.
+    pub fn from_interleaved_poly(
+        table_shapes: Vec<TableShape>,
+        folding: usize,
+        poly: Poly<F>,
+    ) -> Result<Self, InterleavedWitnessError> {
+        if table_shapes.is_empty() {
+            return Err(InterleavedWitnessError::EmptyTableShapes);
+        }
+        if table_shapes
+            .iter()
+            .any(|shape| shape.num_variables() < folding)
+        {
+            return Err(InterleavedWitnessError::TableBelowFoldingDepth);
+        }
+        let mut total_cell_count = 0_usize;
+        for shape in &table_shapes {
+            let row_count = 1_usize
+                .checked_shl(shape.num_variables() as u32)
+                .ok_or(InterleavedWitnessError::LayoutSizeOverflow)?;
+            total_cell_count = total_cell_count
+                .checked_add(
+                    shape
+                        .width()
+                        .checked_mul(row_count)
+                        .ok_or(InterleavedWitnessError::LayoutSizeOverflow)?,
+                )
+                .ok_or(InterleavedWitnessError::LayoutSizeOverflow)?;
+        }
+        let checked_num_variables = log2_ceil_usize(total_cell_count);
+        if checked_num_variables >= usize::BITS as usize {
+            return Err(InterleavedWitnessError::LayoutSizeOverflow);
+        }
+        let shapes = table_shapes
+            .iter()
+            .map(|shape| LayoutShape {
+                arity: shape.num_variables(),
+                width: shape.width(),
+            })
+            .collect::<Vec<_>>();
+        // `plan_layout` repeats `width * (1 << arity)` and sums those products
+        // with ordinary arithmetic. Every identical shift, multiplication, and
+        // addition has succeeded above, so those operations are safe here.
+        let (num_variables, mut placements) = plan_layout(&shapes);
+        debug_assert_eq!(num_variables, checked_num_variables);
+        if poly.num_variables() != num_variables {
+            return Err(InterleavedWitnessError::PolynomialVariableCountMismatch {
+                expected: num_variables,
+                actual: poly.num_variables(),
+            });
+        }
+        placements
+            .iter_mut()
+            .for_each(TablePlacement::reverse_selectors);
+        Ok(Self {
+            tables: Vec::new(),
+            table_shapes,
+            placements,
+            num_variables,
+            folding,
+            poly,
+        })
     }
 
     /// Returns the number of variables of the stacked polynomial.
@@ -320,7 +419,7 @@ impl<F: Field> Witness<F> {
 
     /// Returns verifier table shapes after witness normalization/padding.
     pub fn table_shapes(&self) -> Vec<TableShape> {
-        self.tables.iter().map(Table::shape).collect()
+        self.table_shapes.clone()
     }
 
     /// Returns the stacked committed polynomial.
@@ -333,6 +432,7 @@ impl<F: Field> Witness<F> {
         // Hand each field to the caller verbatim; no normalisation is needed.
         WitnessParts {
             tables: self.tables,
+            table_shapes: self.table_shapes,
             placements: self.placements,
             num_variables: self.num_variables,
             folding: self.folding,
@@ -342,10 +442,12 @@ impl<F: Field> Witness<F> {
 }
 
 /// Owned components of a stacked-layout commitment.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(super) struct WitnessParts<F: Field> {
-    /// Source tables stacked into the committed polynomial.
+    /// Optional source tables; empty for a move-only interleaved witness.
     pub(super) tables: Vec<Table<F>>,
+    /// Source shapes retained even when the witness owns no duplicate tables.
+    pub(super) table_shapes: Vec<TableShape>,
     /// Per-table placement metadata inside the stacked polynomial.
     pub(super) placements: Vec<TablePlacement>,
     /// Number of variables of the stacked polynomial.
@@ -361,12 +463,12 @@ mod tests {
     use alloc::vec;
 
     use p3_baby_bear::BabyBear;
-    use p3_field::PrimeCharacteristicRing;
     use p3_field::extension::BinomialExtensionField;
+    use p3_field::PrimeCharacteristicRing;
     use p3_util::log2_ceil_usize;
     use proptest::prelude::*;
-    use rand::SeedableRng;
     use rand::rngs::SmallRng;
+    use rand::SeedableRng;
 
     use super::*;
     use crate::layout::{Layout, PrefixProver, SuffixProver};
@@ -704,6 +806,83 @@ mod tests {
     }
 
     #[test]
+    fn move_only_interleaved_witness_reuses_the_supplied_polynomial() {
+        let original = Witness::new_interleaved(
+            vec![Table::new(vec![
+                Poly::new((0..8).map(F::from_u64).collect()),
+                Poly::new((8..16).map(F::from_u64).collect()),
+            ])],
+            1,
+        );
+        let table_shapes = original.table_shapes();
+        let expected_polynomial = original.poly().clone();
+        let reconstructed = Witness::from_interleaved_poly(
+            table_shapes.clone(),
+            original.folding,
+            expected_polynomial.clone(),
+        )
+        .expect("move-only interleaved witness");
+
+        assert!(reconstructed.tables.is_empty());
+        assert_eq!(reconstructed.table_shapes(), table_shapes);
+        assert_eq!(
+            reconstructed.poly().as_slice(),
+            expected_polynomial.as_slice()
+        );
+    }
+
+    #[test]
+    fn move_only_interleaved_witness_refuses_malformed_geometry() {
+        assert_eq!(
+            Witness::<F>::from_interleaved_poly(Vec::new(), 0, Poly::zero(0)).unwrap_err(),
+            InterleavedWitnessError::EmptyTableShapes
+        );
+        assert_eq!(
+            Witness::<F>::from_interleaved_poly(vec![TableShape::new(2, 1)], 3, Poly::zero(2))
+                .unwrap_err(),
+            InterleavedWitnessError::TableBelowFoldingDepth
+        );
+        assert_eq!(
+            Witness::<F>::from_interleaved_poly(vec![TableShape::new(2, 2)], 0, Poly::zero(2))
+                .unwrap_err(),
+            InterleavedWitnessError::PolynomialVariableCountMismatch {
+                expected: 3,
+                actual: 2,
+            }
+        );
+        assert_eq!(
+            Witness::<F>::from_interleaved_poly(
+                vec![TableShape::new(usize::BITS as usize - 1, 3)],
+                0,
+                Poly::zero(0)
+            )
+            .unwrap_err(),
+            InterleavedWitnessError::LayoutSizeOverflow
+        );
+        assert_eq!(
+            Witness::<F>::from_interleaved_poly(
+                vec![TableShape::new(usize::BITS as usize - 2, 3)],
+                0,
+                Poly::zero(0)
+            )
+            .unwrap_err(),
+            InterleavedWitnessError::LayoutSizeOverflow
+        );
+        assert_eq!(
+            Witness::<F>::from_interleaved_poly(
+                vec![TableShape::new(usize::BITS as usize - 2, 2)],
+                0,
+                Poly::zero(0)
+            )
+            .unwrap_err(),
+            InterleavedWitnessError::PolynomialVariableCountMismatch {
+                expected: usize::BITS as usize - 1,
+                actual: 0,
+            }
+        );
+    }
+
+    #[test]
     fn witness_new_pads_tables_below_folding() {
         // Invariant:
         //     A table smaller than the preprocessing depth is committed as the
@@ -786,6 +965,7 @@ mod tests {
         // Check: source tables are carried over in source order.
         let actual_table_shapes: Vec<TableShape> = parts.tables.iter().map(Table::shape).collect();
         assert_eq!(actual_table_shapes, expected_table_shapes);
+        assert_eq!(parts.table_shapes, expected_table_shapes);
         // Check: placement order and table indices survive verbatim.
         let actual_placement_idx: Vec<usize> =
             parts.placements.iter().map(TablePlacement::idx).collect();

@@ -2,6 +2,10 @@ import { foundationProfile, refusalReasonCodes } from '@sealed-lattice/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+    mlDsa65SignatureByteLength,
+    type StateObjectSignatureOperation,
+} from '#packages/wasm/src/state-verifier-runtime/contracts';
+import {
     generateTargetReleaseInClosedWorker,
     reconstructTargetReleaseInClosedWorker,
     type VerifiedTargetReleaseShare,
@@ -10,6 +14,9 @@ import {
 import { registerCommonProofKernelContext } from '#packages/wasm/src/transcript-core-bridge/common-proof-kernel-context';
 import type { TranscriptCoreKernelCommandRuntime } from '#packages/wasm/src/transcript-core-bridge/kernel-runtime';
 import type { TranscriptCoreKernel } from '#packages/wasm/src/transcript-core-bridge/kernel-types';
+
+const foundationHashByteLength = 64;
+const validTargetShareSignatureByte = 0x5a;
 
 const boundaryMocks = vi.hoisted(() => {
     const activeContext: {
@@ -153,6 +160,7 @@ type FakeTargetReleaseRuntime = Readonly<{
     allocations: ReadonlyMap<number, number>;
     bindCalls: number[][];
     bindStatus: { value: number };
+    canonicalTargetShareCarrierByteLength: { value: number };
     generationModes: Array<'fresh' | 'resumed'>;
     generationPreparationArguments: number[][];
     generationSourceDiscards: number[];
@@ -162,6 +170,22 @@ type FakeTargetReleaseRuntime = Readonly<{
     >;
     reconstructedResultCopyCalls: number[];
     reconstructedResultCopyRefusal: { status: number };
+    targetShareCarrierCancellations: number[];
+    targetShareCarrierFinishCalls: Array<
+        Readonly<{
+            canonicalCarrierByteLength: number;
+            handle: number;
+            signatureBytes: number[];
+        }>
+    >;
+    targetShareCarrierFinishStatus: { value: number };
+    targetShareCarrierPreparationCalls: Array<
+        Readonly<{
+            generationSourceHandle: number;
+            proofDescriptorBytes: number[];
+        }>
+    >;
+    targetShareCarrierPreparationStatus: { value: number };
     reconstructionCalls: Array<
         Readonly<{
             finalityHandle: number;
@@ -194,6 +218,7 @@ const createFakeTargetReleaseRuntime = (): FakeTargetReleaseRuntime => {
     const allocations = new Map<number, number>();
     const bindCalls: number[][] = [];
     const bindStatus = { value: 0 };
+    const canonicalTargetShareCarrierByteLength = { value: 7 };
     const generationModes: Array<'fresh' | 'resumed'> = [];
     const generationPreparationArguments: number[][] = [];
     const generationSourceDiscards: number[] = [];
@@ -202,6 +227,22 @@ const createFakeTargetReleaseRuntime = (): FakeTargetReleaseRuntime => {
     > = [];
     const reconstructedResultCopyCalls: number[] = [];
     const reconstructedResultCopyRefusal = { status: 0 };
+    const targetShareCarrierCancellations: number[] = [];
+    const targetShareCarrierFinishCalls: Array<
+        Readonly<{
+            canonicalCarrierByteLength: number;
+            handle: number;
+            signatureBytes: number[];
+        }>
+    > = [];
+    const targetShareCarrierFinishStatus = { value: 0 };
+    const targetShareCarrierPreparationCalls: Array<
+        Readonly<{
+            generationSourceHandle: number;
+            proofDescriptorBytes: number[];
+        }>
+    > = [];
+    const targetShareCarrierPreparationStatus = { value: 0 };
     const reconstructionCalls: Array<
         Readonly<{
             finalityHandle: number;
@@ -220,10 +261,12 @@ const createFakeTargetReleaseRuntime = (): FakeTargetReleaseRuntime => {
     const verificationPreparationArguments: number[][] = [];
     const verificationTerminalSourceDiscards: number[] = [];
     const activeReconstructionHandles = new Set<number>();
+    const activeTargetShareCarrierHandles = new Set<number>();
     const activeVerifiedShareHandles = new Set<number>();
     const copiedReconstructionResults = new Set<number>();
     let nextReconstructedTargetResultHandle = 60;
     let nextVerifiedShareHandle = 46;
+    let nextTargetShareCarrierHandle = 70;
     let nextPointer = 1_024;
 
     const allocate = (byteLength: number): number => {
@@ -257,6 +300,14 @@ const createFakeTargetReleaseRuntime = (): FakeTargetReleaseRuntime => {
     };
 
     const wasmExports = {
+        sealed_lattice_target_release_cancel_output_carrier: (
+            handle: number,
+        ) => {
+            targetShareCarrierCancellations.push(handle);
+            return activeTargetShareCarrierHandles.delete(handle)
+                ? 0
+                : refusalReasonCodes.consumedState;
+        },
         sealed_lattice_target_release_bind_generated_proof: (
             ...argumentsList: number[]
         ) => {
@@ -475,6 +526,60 @@ const createFakeTargetReleaseRuntime = (): FakeTargetReleaseRuntime => {
             copiedReconstructionResults.delete(reconstructedTargetResultHandle);
             return 0;
         },
+        sealed_lattice_target_release_finish_output_carrier: (
+            handle: number,
+            signaturePointer: number,
+            signatureByteLength: number,
+            outputPointer: number,
+            outputByteLength: number,
+        ) => {
+            const signatureBytes = Array.from(
+                new Uint8Array(
+                    memory.buffer,
+                    signaturePointer,
+                    signatureByteLength,
+                ),
+            );
+            targetShareCarrierFinishCalls.push(
+                Object.freeze({
+                    canonicalCarrierByteLength: outputByteLength,
+                    handle,
+                    signatureBytes,
+                }),
+            );
+            if (targetShareCarrierFinishStatus.value !== 0) {
+                if (
+                    targetShareCarrierFinishStatus.value ===
+                    refusalReasonCodes.consumedState
+                ) {
+                    activeTargetShareCarrierHandles.delete(handle);
+                }
+                return targetShareCarrierFinishStatus.value;
+            }
+            if (!activeTargetShareCarrierHandles.has(handle)) {
+                return refusalReasonCodes.consumedState;
+            }
+            if (
+                signatureByteLength !== mlDsa65SignatureByteLength ||
+                signatureBytes.some(
+                    (signatureByte) =>
+                        signatureByte !== validTargetShareSignatureByte,
+                )
+            ) {
+                activeTargetShareCarrierHandles.delete(handle);
+                return refusalReasonCodes.invalidSignature;
+            }
+            if (
+                outputByteLength !== canonicalTargetShareCarrierByteLength.value
+            ) {
+                return refusalReasonCodes.wrongTypeOrLength;
+            }
+            new Uint8Array(memory.buffer, outputPointer, outputByteLength).fill(
+                0xc1,
+            );
+            activeTargetShareCarrierHandles.delete(handle);
+            return 0;
+        },
         sealed_lattice_target_release_finish_verification: (
             verifiedProofHandle: number,
             terminalSourceHandle: number,
@@ -517,6 +622,59 @@ const createFakeTargetReleaseRuntime = (): FakeTargetReleaseRuntime => {
         sealed_lattice_target_release_prepare_resumed_generation: (
             ...argumentsList: number[]
         ) => prepareGeneration('resumed', argumentsList),
+        sealed_lattice_target_release_prepare_output_carrier: (
+            generationSourceHandle: number,
+            proofDescriptorPointer: number,
+            proofDescriptorByteLength: number,
+            canonicalCarrierByteLengthOutputPointer: number,
+            signatureMessageOutputPointer: number,
+            signatureMessageOutputByteLength: number,
+            statusPointer: number,
+        ) => {
+            targetShareCarrierPreparationCalls.push(
+                Object.freeze({
+                    generationSourceHandle,
+                    proofDescriptorBytes: Array.from(
+                        new Uint8Array(
+                            memory.buffer,
+                            proofDescriptorPointer,
+                            proofDescriptorByteLength,
+                        ),
+                    ),
+                }),
+            );
+            if (targetShareCarrierPreparationStatus.value !== 0) {
+                writeWord(
+                    memory,
+                    statusPointer,
+                    targetShareCarrierPreparationStatus.value,
+                );
+                return 0;
+            }
+            if (signatureMessageOutputByteLength !== foundationHashByteLength) {
+                writeWord(
+                    memory,
+                    statusPointer,
+                    refusalReasonCodes.wrongTypeOrLength,
+                );
+                return 0;
+            }
+            writeWord(
+                memory,
+                canonicalCarrierByteLengthOutputPointer,
+                canonicalTargetShareCarrierByteLength.value,
+            );
+            new Uint8Array(
+                memory.buffer,
+                signatureMessageOutputPointer,
+                signatureMessageOutputByteLength,
+            ).fill(0x91);
+            writeWord(memory, statusPointer, 0);
+            const handle = nextTargetShareCarrierHandle;
+            nextTargetShareCarrierHandle += 1;
+            activeTargetShareCarrierHandles.add(handle);
+            return handle;
+        },
         sealed_lattice_target_release_prepare_verification: (
             ...argumentsList: number[]
         ) => {
@@ -562,6 +720,7 @@ const createFakeTargetReleaseRuntime = (): FakeTargetReleaseRuntime => {
         allocations,
         bindCalls,
         bindStatus,
+        canonicalTargetShareCarrierByteLength,
         generationModes,
         generationPreparationArguments,
         generationSourceDiscards,
@@ -569,6 +728,11 @@ const createFakeTargetReleaseRuntime = (): FakeTargetReleaseRuntime => {
         partialReadCalls,
         reconstructedResultCopyCalls,
         reconstructedResultCopyRefusal,
+        targetShareCarrierCancellations,
+        targetShareCarrierFinishCalls,
+        targetShareCarrierFinishStatus,
+        targetShareCarrierPreparationCalls,
+        targetShareCarrierPreparationStatus,
         reconstructionCalls,
         reconstructionDiscards,
         reconstructionFinishes,
@@ -626,6 +790,22 @@ const reservationIntentObject = Object.freeze({
 const targetShareObject = Object.freeze({ testKind: 'target-share' });
 const verifiedOutput = Object.freeze({ testKind: 'output' });
 
+const createTargetShareSignatureOperation = (input?: {
+    observedMessages?: Uint8Array<ArrayBuffer>[];
+    signatureByte?: number;
+    signatureByteLength?: number;
+}): StateObjectSignatureOperation =>
+    Object.freeze({
+        signStateObjectMessage: (
+            signatureMessageHash: Uint8Array,
+        ): Uint8Array => {
+            input?.observedMessages?.push(signatureMessageHash.slice());
+            return new Uint8Array(
+                input?.signatureByteLength ?? mlDsa65SignatureByteLength,
+            ).fill(input?.signatureByte ?? validTargetShareSignatureByte);
+        },
+    });
+
 const mintVerifiedTargetReleaseShares = async (
     runtime: FakeTargetReleaseRuntime,
     shareCount = 4,
@@ -652,6 +832,39 @@ const mintVerifiedTargetReleaseShares = async (
     return shares;
 };
 
+type TargetReleaseGenerationInput = Parameters<
+    typeof generateTargetReleaseInClosedWorker
+>[0];
+
+const createTargetReleaseGenerationInput = (
+    runtime: FakeTargetReleaseRuntime,
+    overrides: Partial<TargetReleaseGenerationInput> = {},
+): TargetReleaseGenerationInput => ({
+    acceptedSetupAuthority: Object.freeze({}) as never,
+    actionRandomnessSession: Object.freeze({}) as never,
+    checkpointLineageIdentifier: new Uint8Array(32).fill(0x31),
+    externalMemory: Object.freeze({}) as never,
+    finalizedTargetIdentifierBytes: Uint8Array.of(0x41),
+    finalizedTargetOrderBytes: Uint8Array.of(0x51),
+    generationMode: 'fresh',
+    kernel: runtime.kernel,
+    outputStore: createOutputStore(),
+    partialOutputStores: {
+        resolveOutputStore: () => Promise.resolve(createOutputStore()),
+    },
+    reservationIntentObject: reservationIntentObject as never,
+    resolveVerifiedTargetShare: () =>
+        Promise.resolve({
+            targetShareObject: targetShareObject as never,
+            verifiedOutput: verifiedOutput as never,
+        }),
+    selectedSuiteRecordSource: Object.freeze({}) as never,
+    signatureOperation: createTargetShareSignatureOperation(),
+    verifiedFinality: Object.freeze({}) as never,
+    verifiedReservation: Object.freeze({}) as never,
+    ...overrides,
+});
+
 beforeEach(() => {
     vi.clearAllMocks();
     boundaryMocks.activeContext.value = undefined;
@@ -660,6 +873,15 @@ beforeEach(() => {
 describe('target-release closed-worker lifecycle', () => {
     it('streams both fixed roles in canonical order before one-shot binding', async () => {
         const runtime = createFakeTargetReleaseRuntime();
+        const observedSignatureMessages: Uint8Array<ArrayBuffer>[] = [];
+        let resolverTransport:
+            | Readonly<{
+                  canonicalTargetShareCarrier: Uint8Array<ArrayBuffer>;
+                  proofDescriptorBytes: Uint8Array<ArrayBuffer>;
+                  targetIdentifierPartialDescriptorBytes: Uint8Array<ArrayBuffer>;
+                  targetOrderPartialDescriptorBytes: Uint8Array<ArrayBuffer>;
+              }>
+            | undefined;
         const targetIdentifierObservations: Array<
             Readonly<{ byteLength: number; firstByte: number }>
         > = [];
@@ -689,12 +911,20 @@ describe('target-release closed-worker lifecycle', () => {
                     ),
             },
             reservationIntentObject: reservationIntentObject as never,
-            resolveVerifiedTargetShare: () =>
-                Promise.resolve({
+            resolveVerifiedTargetShare: (transport) => {
+                resolverTransport = transport;
+                expect(
+                    Array.from(transport.canonicalTargetShareCarrier),
+                ).toEqual(new Array(7).fill(0xc1));
+                return Promise.resolve({
                     targetShareObject: targetShareObject as never,
                     verifiedOutput: verifiedOutput as never,
-                }),
+                });
+            },
             selectedSuiteRecordSource: Object.freeze({}) as never,
+            signatureOperation: createTargetShareSignatureOperation({
+                observedMessages: observedSignatureMessages,
+            }),
             verifiedFinality: Object.freeze({}) as never,
             verifiedReservation: Object.freeze({}) as never,
         });
@@ -719,15 +949,220 @@ describe('target-release closed-worker lifecycle', () => {
             { byteLength: 5, firstByte: 17 },
         ]);
         expect(runtime.bindCalls).toEqual([[301, 34, 21, 19]]);
+        expect(runtime.targetShareCarrierPreparationCalls).toEqual([
+            {
+                generationSourceHandle: 34,
+                proofDescriptorBytes: [0xd1, 0xd2],
+            },
+        ]);
+        expect(observedSignatureMessages).toHaveLength(1);
+        expect(observedSignatureMessages[0]).toEqual(
+            new Uint8Array(foundationHashByteLength).fill(0x91),
+        );
+        expect(runtime.targetShareCarrierFinishCalls).toHaveLength(1);
+        expect(runtime.targetShareCarrierFinishCalls[0]).toMatchObject({
+            canonicalCarrierByteLength: 7,
+            handle: 70,
+        });
+        expect(
+            runtime.targetShareCarrierFinishCalls[0]?.signatureBytes,
+        ).toEqual(
+            new Array(mlDsa65SignatureByteLength).fill(
+                validTargetShareSignatureByte,
+            ),
+        );
+        expect(runtime.targetShareCarrierCancellations).toEqual([]);
         expect(runtime.generationSourceDiscards).toEqual([]);
         expect(boundaryMocks.generatedCapabilityRelease).not.toHaveBeenCalled();
         expect(Array.from(result.proofDescriptorBytes)).toEqual([0xd1, 0xd2]);
+        expect(Array.from(result.canonicalTargetShareCarrier)).toEqual(
+            new Array(7).fill(0xc1),
+        );
         expect(
             Array.from(result.targetIdentifierPartialDescriptorBytes),
         ).toEqual([0xa0, 0xb0]);
         expect(Array.from(result.targetOrderPartialDescriptorBytes)).toEqual([
             0xa1, 0xb1,
         ]);
+        expect(resolverTransport).toBeDefined();
+        expect(
+            Array.from(resolverTransport?.canonicalTargetShareCarrier ?? []),
+        ).toEqual(new Array(7).fill(0));
+        expect(
+            Array.from(resolverTransport?.proofDescriptorBytes ?? []),
+        ).toEqual([0, 0]);
+        expect(
+            Array.from(
+                resolverTransport?.targetIdentifierPartialDescriptorBytes ?? [],
+            ),
+        ).toEqual([0, 0]);
+        expect(
+            Array.from(
+                resolverTransport?.targetOrderPartialDescriptorBytes ?? [],
+            ),
+        ).toEqual([0, 0]);
+        expect(runtime.allocations.size).toBe(0);
+    });
+
+    it.each([
+        ['a wrong live roster binding', 'wrongContext'],
+        ['a wrong authority hash', 'wrongHashOrRoot'],
+        ['a malformed proof descriptor', 'malformedEncoding'],
+    ] as const)(
+        'refuses %s before signing or resolving the target-share carrier',
+        async (_caseLabel, refusalReason) => {
+            const runtime = createFakeTargetReleaseRuntime();
+            runtime.targetShareCarrierPreparationStatus.value =
+                refusalReasonCodes[refusalReason];
+            const resolveVerifiedTargetShare = vi.fn();
+
+            await expect(
+                generateTargetReleaseInClosedWorker(
+                    createTargetReleaseGenerationInput(runtime, {
+                        resolveVerifiedTargetShare,
+                    }),
+                ),
+            ).rejects.toMatchObject({ refusalReason });
+
+            expect(runtime.targetShareCarrierPreparationCalls).toEqual([
+                {
+                    generationSourceHandle: 34,
+                    proofDescriptorBytes: [0xd1, 0xd2],
+                },
+            ]);
+            expect(runtime.targetShareCarrierFinishCalls).toEqual([]);
+            expect(runtime.targetShareCarrierCancellations).toEqual([]);
+            expect(resolveVerifiedTargetShare).not.toHaveBeenCalled();
+            expect(runtime.bindCalls).toEqual([]);
+            expect(
+                boundaryMocks.generatedCapabilityRelease,
+            ).toHaveBeenCalledTimes(1);
+            expect(runtime.generationSourceDiscards).toEqual([34]);
+            expect(runtime.allocations.size).toBe(0);
+        },
+    );
+
+    it('cancels the prepared carrier when Rust reports an invalid canonical length', async () => {
+        const runtime = createFakeTargetReleaseRuntime();
+        runtime.canonicalTargetShareCarrierByteLength.value = 0;
+
+        await expect(
+            generateTargetReleaseInClosedWorker(
+                createTargetReleaseGenerationInput(runtime),
+            ),
+        ).rejects.toThrow();
+
+        expect(runtime.targetShareCarrierFinishCalls).toEqual([]);
+        expect(runtime.targetShareCarrierCancellations).toEqual([70]);
+        expect(runtime.bindCalls).toEqual([]);
+        expect(boundaryMocks.generatedCapabilityRelease).toHaveBeenCalledTimes(
+            1,
+        );
+        expect(runtime.generationSourceDiscards).toEqual([34]);
+        expect(runtime.allocations.size).toBe(0);
+    });
+
+    it('cancels the prepared carrier when the signer returns the wrong signature length', async () => {
+        const runtime = createFakeTargetReleaseRuntime();
+
+        await expect(
+            generateTargetReleaseInClosedWorker(
+                createTargetReleaseGenerationInput(runtime, {
+                    signatureOperation: createTargetShareSignatureOperation({
+                        signatureByteLength: mlDsa65SignatureByteLength - 1,
+                    }),
+                }),
+            ),
+        ).rejects.toMatchObject({ refusalReason: 'wrongTypeOrLength' });
+
+        expect(runtime.targetShareCarrierFinishCalls).toEqual([]);
+        expect(runtime.targetShareCarrierCancellations).toEqual([70]);
+        expect(boundaryMocks.generatedCapabilityRelease).toHaveBeenCalledTimes(
+            1,
+        );
+        expect(runtime.generationSourceDiscards).toEqual([34]);
+        expect(runtime.allocations.size).toBe(0);
+    });
+
+    it('cancels the prepared carrier after an invalid signature refusal', async () => {
+        const runtime = createFakeTargetReleaseRuntime();
+
+        await expect(
+            generateTargetReleaseInClosedWorker(
+                createTargetReleaseGenerationInput(runtime, {
+                    signatureOperation: createTargetShareSignatureOperation({
+                        signatureByte: validTargetShareSignatureByte ^ 0xff,
+                    }),
+                }),
+            ),
+        ).rejects.toMatchObject({ refusalReason: 'invalidSignature' });
+
+        expect(runtime.targetShareCarrierFinishCalls).toHaveLength(1);
+        expect(runtime.targetShareCarrierCancellations).toEqual([70]);
+        expect(runtime.bindCalls).toEqual([]);
+        expect(boundaryMocks.generatedCapabilityRelease).toHaveBeenCalledTimes(
+            1,
+        );
+        expect(runtime.generationSourceDiscards).toEqual([34]);
+        expect(runtime.allocations.size).toBe(0);
+    });
+
+    it('preserves a consumed-state replay refusal while retiring remaining generation custody', async () => {
+        const runtime = createFakeTargetReleaseRuntime();
+        runtime.targetShareCarrierFinishStatus.value =
+            refusalReasonCodes.consumedState;
+
+        await expect(
+            generateTargetReleaseInClosedWorker(
+                createTargetReleaseGenerationInput(runtime),
+            ),
+        ).rejects.toMatchObject({ refusalReason: 'consumedState' });
+
+        expect(runtime.targetShareCarrierFinishCalls).toHaveLength(1);
+        expect(runtime.targetShareCarrierCancellations).toEqual([70]);
+        expect(runtime.bindCalls).toEqual([]);
+        expect(boundaryMocks.generatedCapabilityRelease).toHaveBeenCalledTimes(
+            1,
+        );
+        expect(runtime.generationSourceDiscards).toEqual([34]);
+        expect(runtime.allocations.size).toBe(0);
+    });
+
+    it('zeroes resolver copies and retires proof and source custody after cancellation', async () => {
+        const runtime = createFakeTargetReleaseRuntime();
+        const cancellation = new AbortController();
+        let resolverTransport:
+            | Parameters<
+                  TargetReleaseGenerationInput['resolveVerifiedTargetShare']
+              >[0]
+            | undefined;
+
+        await expect(
+            generateTargetReleaseInClosedWorker(
+                createTargetReleaseGenerationInput(runtime, {
+                    options: Object.freeze({ signal: cancellation.signal }),
+                    resolveVerifiedTargetShare: (transport) => {
+                        resolverTransport = transport;
+                        cancellation.abort();
+                        return Promise.resolve({
+                            targetShareObject: targetShareObject as never,
+                            verifiedOutput: verifiedOutput as never,
+                        });
+                    },
+                }),
+            ),
+        ).rejects.toThrow('cancelled');
+
+        expect(runtime.targetShareCarrierFinishCalls).toHaveLength(1);
+        expect(runtime.targetShareCarrierCancellations).toEqual([]);
+        expect(runtime.bindCalls).toEqual([]);
+        expect(boundaryMocks.generatedCapabilityRelease).toHaveBeenCalledTimes(
+            1,
+        );
+        expect(runtime.generationSourceDiscards).toEqual([34]);
+        expect(
+            Array.from(resolverTransport?.canonicalTargetShareCarrier ?? []),
+        ).toEqual(new Array(7).fill(0));
         expect(runtime.allocations.size).toBe(0);
     });
 
@@ -761,6 +1196,7 @@ describe('target-release closed-worker lifecycle', () => {
                         verifiedOutput: verifiedOutput as never,
                     }),
                 selectedSuiteRecordSource: Object.freeze({}) as never,
+                signatureOperation: createTargetShareSignatureOperation(),
                 verifiedFinality: Object.freeze({}) as never,
                 verifiedReservation: Object.freeze({}) as never,
             }),
@@ -801,6 +1237,7 @@ describe('target-release closed-worker lifecycle', () => {
                         verifiedOutput: verifiedOutput as never,
                     }),
                 selectedSuiteRecordSource: Object.freeze({}) as never,
+                signatureOperation: createTargetShareSignatureOperation(),
                 verifiedFinality: Object.freeze({}) as never,
                 verifiedReservation: Object.freeze({}) as never,
             }),

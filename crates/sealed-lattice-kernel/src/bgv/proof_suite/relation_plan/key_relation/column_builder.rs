@@ -3,6 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use num_bigint::{BigInt, BigUint};
 use num_traits::{One, Zero};
 
+use crate::bgv::proof_suite::row_code_whir::selected_row_code_whir_trace_mask_degree_bound_exclusive;
+
 use super::super::{
     bounds::{
         RelationBoundCertificate, RelationConstraintDescriptor, SemanticCellDescriptor,
@@ -584,6 +586,7 @@ impl KeyRelationPlanBuilder<'_> {
             return Err(RelationPlanError::InvalidOpening);
         }
         let trace_mask_degree_bound_exclusive = derived_trace_mask_degree_bound(
+            self.application_statement_schema_identifier,
             &self.ordered_columns,
             &required_rotations_by_column,
             self.geometry.trace_domain_size()?,
@@ -836,6 +839,7 @@ impl KeyRelationPlanBuilder<'_> {
 }
 
 pub(in crate::bgv::proof_suite::relation_plan) fn derived_trace_mask_degree_bound(
+    application_statement_schema_identifier: u16,
     ordered_columns: &[RelationColumnDescriptor],
     required_rotations_by_column: &BTreeMap<u32, BTreeSet<(bool, u64)>>,
     trace_domain_size: u64,
@@ -857,19 +861,43 @@ pub(in crate::bgv::proof_suite::relation_plan) fn derived_trace_mask_degree_boun
             .checked_mul(u64::from(context.out_of_domain_point_count))
             .and_then(|count| count.checked_mul(rotation_count))
             .ok_or(RelationPlanError::CountOverflow)?;
-        let query_view_count = u64::from(context.phase_column_query_coordinate_count)
-            .checked_mul(rotation_count)
-            .ok_or(RelationPlanError::CountOverflow)?;
+        // A sampled row-code coordinate opens the physical column once. The
+        // relation's rotations add direct out-of-domain evaluations, but they
+        // do not duplicate a row-code query opening.
+        let query_view_count = u64::from(context.phase_column_query_coordinate_count);
         maximum_view_count = maximum_view_count.max(
             out_of_domain_opening_view_count
                 .checked_add(query_view_count)
                 .ok_or(RelationPlanError::CountOverflow)?,
         );
     }
-    if maximum_view_count == 0 || maximum_view_count > trace_domain_size {
+    construction_owned_trace_mask_degree_bound(
+        application_statement_schema_identifier,
+        maximum_view_count,
+        trace_domain_size,
+        context,
+    )
+}
+
+pub(in crate::bgv::proof_suite::relation_plan) fn construction_owned_trace_mask_degree_bound(
+    application_statement_schema_identifier: u16,
+    minimum_direct_view_rank: u64,
+    trace_domain_size: u64,
+    context: &RelationPlanCheckContext,
+) -> Result<u64, RelationPlanError> {
+    let mask_degree_bound_exclusive = selected_row_code_whir_trace_mask_degree_bound_exclusive(
+        application_statement_schema_identifier,
+        trace_domain_size,
+        context,
+    )
+    .unwrap_or(minimum_direct_view_rank);
+    if minimum_direct_view_rank == 0
+        || mask_degree_bound_exclusive < minimum_direct_view_rank
+        || mask_degree_bound_exclusive > trace_domain_size
+    {
         Err(RelationPlanError::InvalidMaskGrammar)
     } else {
-        Ok(maximum_view_count)
+        Ok(mask_degree_bound_exclusive)
     }
 }
 

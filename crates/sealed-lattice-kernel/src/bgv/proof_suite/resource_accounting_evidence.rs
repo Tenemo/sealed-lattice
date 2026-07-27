@@ -61,6 +61,7 @@ use super::{
         SelectedProofExternalMemoryDiagnosticError,
         SelectedProofExternalMemoryDiagnosticRequirement, SelectedProofQueryTreeResourceAccounting,
         SelectedProofResidentPhaseResourceAccounting,
+        SelectedRowCodeWhirConstructionResourceAccounting,
         derive_selected_complete_action_material_resource_accounting,
         derive_selected_proof_family_application_inventory,
         selected_proof_external_memory_diagnostic_report,
@@ -75,8 +76,8 @@ use super::{
 };
 
 const RECORD_KIND: &str = "pair-character-candidate-static-resource-accounting";
-const RECORD_VERSION: u16 = 2;
-const RECORD_HASH_DOMAIN: &str = "sealed-lattice/pair-character-static-resource-accounting/v2";
+const RECORD_VERSION: u16 = 3;
+const RECORD_HASH_DOMAIN: &str = "sealed-lattice/pair-character-static-resource-accounting/v3";
 const SOURCE_HASH_DOMAIN: &str =
     "sealed-lattice/pair-character-static-resource-accounting/source/v1";
 const BUILD_HASH_DOMAIN: &str = "sealed-lattice/pair-character-static-resource-accounting/build/v1";
@@ -290,6 +291,7 @@ struct ProofVariantRequirement {
     logical_entry_count: u32,
     opening_claim_count: u32,
     relation_geometry: ProofRelationGeometry,
+    row_code_whir_construction: RowCodeWhirConstructionAccounting,
     proof_byte_length_ceiling: u64,
     canonical_header_byte_length_ceiling: u64,
     body_prefix_byte_length_ceiling: u64,
@@ -315,6 +317,54 @@ struct ProofRelationGeometry {
     quotient_component_count: u16,
     fri_fold_count: u16,
     terminal_coefficient_count: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RowCodeWhirConstructionAccounting {
+    construction_identity_hash: String,
+    outer_query_count: u32,
+    direct_bound_query_count: u32,
+    prior_vss_bound_query_count: u32,
+    aggregate_table_width: u32,
+    opening_batch_count: u32,
+    transcript_operation_count: u32,
+    ordered_proof_sections: Vec<RowCodeWhirProofSectionAccounting>,
+    ordered_checkpoints: Vec<RowCodeWhirCheckpointAccounting>,
+    ordered_query_epochs: Vec<RowCodeWhirQueryEpochAccounting>,
+    retained_oracle_external_memory: ProofExternalMemoryRequirement,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RowCodeWhirProofSectionAccounting {
+    section_ordinal: u32,
+    role_code: u16,
+    role_name: String,
+    phase_code: Option<u8>,
+    associated_ordinal: Option<u32>,
+    item_count: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RowCodeWhirCheckpointAccounting {
+    checkpoint_ordinal: u32,
+    boundary_code: u16,
+    boundary_name: String,
+    phase_code: Option<u8>,
+    round_ordinal: Option<u32>,
+    next_transcript_operation_ordinal: u32,
+    next_proof_section_ordinal: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RowCodeWhirQueryEpochAccounting {
+    epoch_ordinal: u32,
+    bit_length: u32,
+    domain_size: u64,
+    query_count: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1774,16 +1824,11 @@ fn selected_target_share_proof_byte_length_ceiling(
 
 fn derive_target_release_accounting(
     target_share_proof_byte_length_ceiling: u64,
-    derivation_errors: &mut Vec<DerivationErrorRow>,
+    _derivation_errors: &mut Vec<DerivationErrorRow>,
 ) -> Result<SelectedTargetReleaseStaticAccounting, String> {
     let accounting =
         derive_selected_target_release_static_accounting(target_share_proof_byte_length_ceiling)
             .map_err(|error| format!("selected target-release accounting failed: {error:?}"))?;
-    derivation_errors.extend(
-        accounting.gaps.iter().copied().map(|gap| {
-            derivation_error(gap.dimension(), gap.reason_code(), gap.required_carrier())
-        }),
-    );
     Ok(accounting)
 }
 
@@ -1801,6 +1846,137 @@ fn proof_variant_selector(
             Err("proof variant cannot carry both a schedule position and a top count".to_owned())
         }
     }
+}
+
+fn row_code_whir_construction_accounting(
+    accounting: &SelectedRowCodeWhirConstructionResourceAccounting,
+) -> Result<RowCodeWhirConstructionAccounting, String> {
+    let ordered_proof_sections = accounting
+        .ordered_proof_sections()
+        .iter()
+        .copied()
+        .map(|section| RowCodeWhirProofSectionAccounting {
+            section_ordinal: section.section_ordinal(),
+            role_code: section.role_code(),
+            role_name: section.role_name().to_owned(),
+            phase_code: section.phase_code(),
+            associated_ordinal: section.associated_ordinal(),
+            item_count: section.item_count(),
+        })
+        .collect::<Vec<_>>();
+    let ordered_checkpoints = accounting
+        .ordered_checkpoints()
+        .iter()
+        .copied()
+        .map(|checkpoint| RowCodeWhirCheckpointAccounting {
+            checkpoint_ordinal: checkpoint.checkpoint_ordinal(),
+            boundary_code: checkpoint.boundary_code(),
+            boundary_name: checkpoint.boundary_name().to_owned(),
+            phase_code: checkpoint.phase_code(),
+            round_ordinal: checkpoint.round_ordinal(),
+            next_transcript_operation_ordinal: checkpoint.next_transcript_operation_ordinal(),
+            next_proof_section_ordinal: checkpoint.next_proof_section_ordinal(),
+        })
+        .collect::<Vec<_>>();
+    let ordered_query_epochs = accounting
+        .ordered_query_epochs()
+        .iter()
+        .copied()
+        .map(|epoch| RowCodeWhirQueryEpochAccounting {
+            epoch_ordinal: epoch.epoch_ordinal(),
+            bit_length: epoch.bit_length(),
+            domain_size: epoch.domain_size(),
+            query_count: epoch.query_count(),
+        })
+        .collect::<Vec<_>>();
+    let retained_oracle = accounting.retained_oracle_external_memory();
+    let retained_oracle_external_memory = ProofExternalMemoryRequirement {
+        step_count: retained_oracle.step_count(),
+        maximum_chunk_byte_length: retained_oracle.maximum_chunk_byte_length(),
+        maximum_transaction_payload_byte_length: retained_oracle
+            .maximum_transaction_payload_byte_length(),
+        distinct_physical_object_count: retained_oracle.distinct_physical_object_count(),
+        object_lifecycle_count: retained_oracle.object_lifecycle_count(),
+        peak_stored_byte_length: retained_oracle.peak_stored_byte_length(),
+        total_written_byte_length: retained_oracle.total_written_byte_length(),
+        total_read_byte_length: retained_oracle.total_read_byte_length(),
+        transaction_count: retained_oracle.transaction_count(),
+        local_record_seal_invocation_count: retained_oracle.local_record_seal_invocation_count(),
+        local_record_sealed_plaintext_byte_length: retained_oracle
+            .local_record_sealed_plaintext_byte_length(),
+    };
+    let proof_section_count = u32::try_from(ordered_proof_sections.len())
+        .map_err(|_| "row-code proof-section count does not fit u32".to_owned())?;
+    let transcript_operation_count = accounting.transcript_operation_count();
+    if accounting.construction_identity_hash() == [0; 64]
+        || accounting.outer_query_count() == 0
+        || accounting.direct_bound_query_count() > accounting.outer_query_count()
+        || accounting.prior_vss_bound_query_count() > accounting.direct_bound_query_count()
+        || accounting.aggregate_table_width() == 0
+        || accounting.opening_batch_count() == 0
+        || transcript_operation_count == 0
+        || ordered_proof_sections.is_empty()
+        || ordered_checkpoints.is_empty()
+        || ordered_query_epochs.is_empty()
+        || ordered_proof_sections
+            .iter()
+            .enumerate()
+            .any(|(ordinal, section)| {
+                u32::try_from(ordinal).ok() != Some(section.section_ordinal)
+                    || section.role_code == 0
+                    || section.role_name.is_empty()
+                    || section.item_count == 0
+            })
+        || ordered_checkpoints
+            .iter()
+            .enumerate()
+            .any(|(ordinal, checkpoint)| {
+                u32::try_from(ordinal).ok() != Some(checkpoint.checkpoint_ordinal)
+                    || checkpoint.boundary_code == 0
+                    || checkpoint.boundary_name.is_empty()
+                    || checkpoint.next_transcript_operation_ordinal > transcript_operation_count
+                    || checkpoint.next_proof_section_ordinal > proof_section_count
+            })
+        || ordered_checkpoints.last().is_none_or(|checkpoint| {
+            checkpoint.boundary_name != "completed-proof-stream"
+                || checkpoint.next_transcript_operation_ordinal != transcript_operation_count
+                || checkpoint.next_proof_section_ordinal != proof_section_count
+        })
+        || ordered_query_epochs
+            .iter()
+            .enumerate()
+            .any(|(ordinal, epoch)| {
+                u32::try_from(ordinal).ok() != Some(epoch.epoch_ordinal)
+                    || epoch.bit_length == 0
+                    || epoch.domain_size != 1_u64.checked_shl(epoch.bit_length).unwrap_or(0)
+                    || epoch.query_count == 0
+                    || u64::from(epoch.query_count) > epoch.domain_size
+            })
+        || ordered_query_epochs
+            .first()
+            .is_none_or(|epoch| epoch.query_count != accounting.outer_query_count())
+        || retained_oracle_external_memory.step_count == 0
+        || retained_oracle_external_memory.distinct_physical_object_count
+            != u32::try_from(ordered_query_epochs.len())
+                .map_err(|_| "row-code query-epoch count does not fit u32".to_owned())?
+        || retained_oracle_external_memory.object_lifecycle_count
+            != retained_oracle_external_memory.distinct_physical_object_count
+    {
+        return Err("row-code WHIR construction accounting does not recompute".to_owned());
+    }
+    Ok(RowCodeWhirConstructionAccounting {
+        construction_identity_hash: to_hex(&accounting.construction_identity_hash()),
+        outer_query_count: accounting.outer_query_count(),
+        direct_bound_query_count: accounting.direct_bound_query_count(),
+        prior_vss_bound_query_count: accounting.prior_vss_bound_query_count(),
+        aggregate_table_width: accounting.aggregate_table_width(),
+        opening_batch_count: accounting.opening_batch_count(),
+        transcript_operation_count,
+        ordered_proof_sections,
+        ordered_checkpoints,
+        ordered_query_epochs,
+        retained_oracle_external_memory,
+    })
 }
 
 fn proof_variant_requirement(
@@ -1838,6 +2014,8 @@ fn proof_variant_requirement(
         requirement.maximum_combined_wasm_resident_byte_length(),
         requirement.maximum_copied_buffer_byte_length(),
     )?;
+    let row_code_whir_construction =
+        row_code_whir_construction_accounting(requirement.row_code_whir_construction())?;
     Ok(ProofVariantRequirement {
         complete_action_application_multiplicity: requirement
             .complete_action_application_multiplicity(),
@@ -1857,6 +2035,7 @@ fn proof_variant_requirement(
             fri_fold_count: requirement.fri_fold_count(),
             terminal_coefficient_count: requirement.terminal_coefficient_count(),
         },
+        row_code_whir_construction,
         proof_byte_length_ceiling: u64::try_from(requirement.proof_byte_length_ceiling())
             .map_err(|_| "proof byte length does not fit u64".to_owned())?,
         canonical_header_byte_length_ceiling: requirement.canonical_header_byte_length_ceiling(),
@@ -2719,7 +2898,7 @@ mod tests {
             to_hex(&hash_framed_parts_512(RECORD_HASH_DOMAIN, &[&record_bytes]));
     }
 
-    const DEFERRED_PHASE_LIVENESS_CARRIER_INVENTORY: [(&str, &str); 20] = [
+    const DEFERRED_PHASE_LIVENESS_CARRIER_INVENTORY: [(&str, &str); 14] = [
         (
             "canonical-material-transport",
             "remaining-material-transport-carriers-absent",
@@ -2738,36 +2917,12 @@ mod tests {
         ),
         ("browser-boundary-memory", "browser-copy-carrier-absent"),
         (
-            "target-release-proof-output-store",
-            "proof-output-store-lifetime-not-production-fixed",
-        ),
-        (
-            "target-release-partial-output-store",
-            "partial-output-store-lifetime-not-production-fixed",
-        ),
-        (
-            "target-release-state-certification-traffic",
-            "state-certification-traffic-not-production-fixed",
-        ),
-        (
-            "target-release-public-share-distribution",
-            "public-share-distribution-fanout-not-production-fixed",
-        ),
-        (
-            "target-release-result-transition",
-            "reconstructed-result-transition-not-production-fixed",
-        ),
-        (
             "evaluator-replay-exact-public-carrier",
             "missing-generated-evaluator-replay-descriptors",
         ),
         (
             "evaluator-replay-exact-canonical-transport",
             "missing-generated-evaluator-replay-descriptors",
-        ),
-        (
-            "remaining-complete-action-canonical-transport-catalog",
-            "missing-production-carrier-constructors",
         ),
         (
             "remaining-complete-action-host-boundary-storage-lifetimes",

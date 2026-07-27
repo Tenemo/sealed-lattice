@@ -126,7 +126,6 @@ pub(crate) use encoding::{
     common_proof_query_section_byte_length, encode_common_proof_query_tree_fragment,
     write_common_proof_prefix,
 };
-pub(crate) use fri::construct_opening_batch_mask;
 #[cfg(test)]
 pub(crate) use generation_state::common_proof_source_provider_is_live_during_phase;
 #[cfg(test)]
@@ -141,6 +140,7 @@ pub(crate) use generation_storage::{
     CommonProofResidentMemoryConfiguration, CommonProofResidentMemoryPhase,
     CommonProofResidentMemoryPlan, GeneratedCommonProofStoragePlanError,
     MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, common_proof_resident_memory_plan,
+    validate_generation_relation_trees,
 };
 #[cfg(test)]
 pub(crate) use generation_storage::{
@@ -190,10 +190,12 @@ pub(crate) use relation_columns::{
     CommonProofSourcePolynomialProvider, CommonProofSourcePolynomialProviderPoll,
     CommonProofSourcePolynomialReplayIdentity, CommonProofSourcePolynomialRequest,
     CommonProofSourcePolynomialRequestContext, CommonProofSourceProviderMemoryAccounting,
-    ProvidedCommonProofSourcePolynomial, apply_trace_mask, construct_reversed_relation_column,
-    maximum_auxiliary_synthesis_trace_vector_count, proof_created_tree_roles_by_column,
-    relation_column_replay_requirements, requested_pre_challenge_source_column_ordinals,
-    sample_private_extension_polynomial,
+    ProvidedCommonProofSourcePolynomial, apply_trace_mask,
+    authenticated_pre_challenge_source_coefficient_position_counts, construct_opening_batch_mask,
+    construct_reversed_relation_column, maximum_auxiliary_synthesis_trace_vector_count,
+    persisted_pre_challenge_column_coefficient_position_counts, proof_created_tree_roles_by_column,
+    relation_column_replay_requirements, relation_reversed_column_bindings,
+    requested_pre_challenge_source_column_ordinals, sample_private_extension_polynomial,
 };
 
 pub(in crate::bgv::proof_suite) use encoding::opened_leaf_indexes;
@@ -208,17 +210,22 @@ use generation_storage::CompletedCommonProofGenerationResult;
 use generation_storage::common_tree_materialization_write_transaction_count;
 use generation_storage::{
     CommonProofGenerationPollResult, CommonProofReplayPolynomialKey,
-    CommonProofReplayPolynomialPlan, CommonProofReplayPolynomialReader,
-    CommonProofReplayPolynomialRef, CommonProofReplayPolynomialWriter,
     generated_common_proof_storage_plan, insert_materialized_tree,
     map_private_coin_generation_error, statement_owned_tree_root, unique_catalog_entry,
-    validate_generation_relation_trees,
+};
+pub(crate) use generation_storage::{
+    CommonProofReplayPolynomialPlan, CommonProofReplayPolynomialRangeDestination,
+    CommonProofReplayPolynomialRangeReader, CommonProofReplayPolynomialReader,
+    CommonProofReplayPolynomialRef, CommonProofReplayPolynomialWriter,
 };
 use merkle_storage::{canonical_common_proof_leaf_byte_length, common_proof_tree_value_type};
 use quotient::{
-    COMMON_PROOF_RELATION_EVALUATION_BLOCK_LENGTH, CommonProofConstraintStreamQuotientBuilder,
-    CommonProofQuotientConstraintTransformKey, CommonProofQuotientEvaluationProgress,
-    rotated_relation_evaluation_position,
+    COMMON_PROOF_RELATION_EVALUATION_BLOCK_LENGTH, rotated_relation_evaluation_position,
+};
+pub(crate) use quotient::{
+    CommonProofConstraintStreamQuotientBuilder, CommonProofQuotientConstraintTransformKey,
+    CommonProofQuotientEvaluationProgress, CommonProofQuotientEvaluationReadRequest,
+    common_proof_quotient_constraint_catalog,
 };
 #[cfg(test)]
 use relation_columns::{

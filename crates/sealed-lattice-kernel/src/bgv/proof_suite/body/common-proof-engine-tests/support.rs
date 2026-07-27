@@ -839,6 +839,19 @@ fn common_proof_engine_fixture() -> CommonProofEngineFixture {
     )
 }
 
+fn fixture_row_code_whir_construction_plan_identity_hash(
+    fixture: &CommonProofEngineFixture,
+) -> [u8; 64] {
+    CommonProofRelationPlanCapability::from_checked_fixture_plan(
+        &fixture.relation_plan,
+        &fixture.relation_context,
+        fixture.schedule_position,
+        fixture.top_count,
+    )
+    .expect("the checked fixture mints one row-code WHIR construction plan")
+    .row_code_whir_construction_plan_identity_hash()
+}
+
 fn verify_fixture_proof_capability(
     fixture: &CommonProofEngineFixture,
     proof_bytes: &[u8],
@@ -854,6 +867,8 @@ fn verify_fixture_proof_capability(
             relation_context: &fixture.relation_context,
             schedule_position: fixture.schedule_position,
             top_count: fixture.top_count,
+            row_code_whir_construction_plan_identity_hash:
+                fixture_row_code_whir_construction_plan_identity_hash(fixture),
             statement_owned_trees,
             evaluator_auxiliary_roots: &[],
             proof_source: proof_bytes,
@@ -957,6 +972,8 @@ fn fixture_incremental_verifier(
             relation_context: &fixture.relation_context,
             schedule_position: fixture.schedule_position,
             top_count: fixture.top_count,
+            row_code_whir_construction_plan_identity_hash:
+                fixture_row_code_whir_construction_plan_identity_hash(fixture),
             statement_owned_trees,
             evaluator_auxiliary_roots: &[],
             declared_proof_byte_length,
@@ -1065,12 +1082,12 @@ fn prepared_verification_worker_fixture() -> PreparedCommonProofVerification {
     let proof_application = CommonProofApplicationBinding::new(
         [0x41; 64],
         [0x42; 64],
+        relation_plan_capability.row_code_whir_construction_plan_identity_hash(),
         APPLICATION_STATEMENT_SCHEMA_IDENTIFIER,
         proof_header_hash,
         stream_domain,
         proof_stream_descriptor.full_object_digest.into_bytes(),
         proof_byte_length as u64,
-        PUBLIC_AGGREGATE_TEST_PACKED_FRI_QUERY_COUNT,
     )
     .expect("the fixture application fits the worker safety bound");
     let verification_binding = CommonProofVerificationBinding::new(

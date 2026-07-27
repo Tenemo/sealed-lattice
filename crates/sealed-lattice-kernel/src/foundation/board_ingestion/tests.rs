@@ -7,10 +7,13 @@ use fips204::{
     traits::{KeyGen as SignatureKeyGen, SerDes as SignatureSerDes, Signer},
 };
 
+use super::super::schemas::{
+    BALLOT_PACKAGE_PAYLOAD_SCHEMA_IDENTIFIER, PRIVATE_SHARE_ACCEPTANCE_PAYLOAD_SCHEMA_IDENTIFIER,
+};
 use super::*;
 use crate::foundation::{
-    RosterEntry, VerifiedBoardApplicationSource, selected_sharing_data_prime_coordinates,
-    signature_message,
+    BallotCandidateViewInput, CandidateEntry, CandidateListInput, RosterEntry,
+    VerifiedBoardApplicationSource, selected_sharing_data_prime_coordinates, signature_message,
 };
 
 const OBJECT_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/object-signature/v1";
@@ -25,6 +28,7 @@ struct BoardFixture {
     suite_id: Hash512,
     ceremony_context_hash: Hash512,
     action_context_hash: Hash512,
+    submission_cutoff_hash: Hash512,
     roster: Roster,
     roster_hash: Hash512,
     participant_identities: Vec<ParticipantIdentity>,
@@ -70,6 +74,7 @@ impl BoardFixture {
             suite_id: Hash512::from_bytes([0x11; Hash512::BYTE_LENGTH]),
             ceremony_context_hash: Hash512::from_bytes([0x22; Hash512::BYTE_LENGTH]),
             action_context_hash: Hash512::from_bytes([0x33; Hash512::BYTE_LENGTH]),
+            submission_cutoff_hash: Hash512::from_bytes([0x44; Hash512::BYTE_LENGTH]),
             roster,
             roster_hash,
             participant_identities,
@@ -85,20 +90,25 @@ impl BoardFixture {
         &self,
         maximum_retained_canonical_carrier_byte_length: u64,
     ) -> CanonicalBoardVerifier {
-        CanonicalBoardVerifier::new(
+        let mut verifier = CanonicalBoardVerifier::new(
             self.suite_id,
             self.ceremony_context_hash,
             self.action_context_hash,
             &self.roster,
             CanonicalBoardLimits {
                 maximum_ballot_attempts_per_participant: 4,
+                maximum_candidate_packages_per_action: 20,
                 maximum_retained_canonical_carrier_byte_length,
                 maximum_unordered_carriers_per_batch: 128,
                 maximum_retained_transcript_objects: 512,
             },
             CanonicalDecodeLimits::default(),
         )
-        .expect("test board verifier constructs")
+        .expect("test board verifier constructs");
+        verifier
+            .bind_submission_cutoff_hash(self.submission_cutoff_hash)
+            .expect("test submission cutoff binds once");
+        verifier
     }
 
     fn envelope(
@@ -228,6 +238,15 @@ impl BoardFixture {
         producer_roster_position: usize,
         verified_setup_source_hash: Hash512,
     ) -> Vec<u8> {
+        self.ballot_package_at_sequence(producer_roster_position, 0, verified_setup_source_hash)
+    }
+
+    fn ballot_package_at_sequence(
+        &self,
+        producer_roster_position: usize,
+        producer_sequence: u64,
+        verified_setup_source_hash: Hash512,
+    ) -> Vec<u8> {
         let payload = CanonicalTuple::new(
             BALLOT_PACKAGE_PAYLOAD_SCHEMA_IDENTIFIER,
             FOUNDATION_SCHEMA_VERSION,
@@ -243,13 +262,49 @@ impl BoardFixture {
             self.envelope(
                 producer_roster_position,
                 FoundationObjectType::BallotPackage,
-                0,
+                producer_sequence,
                 vec![verified_setup_source_hash],
                 payload,
             ),
-            0x60_u8.wrapping_add(
-                u8::try_from(producer_roster_position).expect("test roster position fits u8"),
+            0x60_u8
+                .wrapping_add(
+                    u8::try_from(producer_roster_position).expect("test roster position fits u8"),
+                )
+                .wrapping_add(u8::try_from(producer_sequence).expect("test sequence fits u8")),
+        )
+    }
+
+    fn ballot_candidate_list(
+        &self,
+        producer_roster_position: usize,
+        packages: &[Vec<u8>],
+        submission_cutoff_hash: Hash512,
+        signature_seed_byte: u8,
+    ) -> Vec<u8> {
+        let entries = packages
+            .iter()
+            .enumerate()
+            .map(|(producer_sequence, package)| {
+                CandidateEntry::new(
+                    u64::try_from(producer_sequence).expect("test sequence fits u64"),
+                    carrier_object_hash(package),
+                )
+            })
+            .collect();
+        let payload = BallotCandidateListPayload::new(submission_cutoff_hash, entries)
+            .expect("test candidate-list payload is valid")
+            .encode()
+            .expect("test candidate-list payload encodes");
+        self.sign_envelope(
+            producer_roster_position,
+            self.envelope(
+                producer_roster_position,
+                FoundationObjectType::BallotCandidateList,
+                0,
+                Vec::new(),
+                payload,
             ),
+            signature_seed_byte,
         )
     }
 
@@ -560,6 +615,7 @@ fn board_authority_rejects_a_nonselected_structural_roster() {
         &roster,
         CanonicalBoardLimits {
             maximum_ballot_attempts_per_participant: 4,
+            maximum_candidate_packages_per_action: 20,
             maximum_retained_canonical_carrier_byte_length: 8 * 1024 * 1024,
             maximum_unordered_carriers_per_batch: 128,
             maximum_retained_transcript_objects: 512,
@@ -1285,4 +1341,159 @@ fn retained_carrier_limit_is_exact_and_semantic_replay_costs_no_extra_bytes() {
         .into_result()
         .expect("semantic replay does not consume retained-byte capacity");
     assert_eq!(replay.objects()[0].canonical_carrier_bytes(), first);
+}
+
+#[test]
+fn candidate_list_board_object_and_authenticated_view_bind_exact_transport_semantics() {
+    let fixture = BoardFixture::new();
+    let setup_source_hash = Hash512::from_bytes([0x91; Hash512::BYTE_LENGTH]);
+    let first_packages = vec![
+        fixture.ballot_package_at_sequence(0, 0, setup_source_hash),
+        fixture.ballot_package_at_sequence(0, 1, setup_source_hash),
+    ];
+    let second_packages = vec![
+        fixture.ballot_package_at_sequence(3, 0, setup_source_hash),
+        fixture.ballot_package_at_sequence(3, 1, setup_source_hash),
+    ];
+    let first_list =
+        fixture.ballot_candidate_list(0, &first_packages, fixture.submission_cutoff_hash, 0xa1);
+    let second_list =
+        fixture.ballot_candidate_list(3, &second_packages, fixture.submission_cutoff_hash, 0xa2);
+
+    let mut board_verifier = fixture.verifier();
+    board_verifier
+        .verify_unordered_carriers(&[first_list.clone(), second_list.clone()])
+        .into_result()
+        .expect("signed candidate-list board objects verify");
+
+    let input = BallotCandidateViewInput::new(vec![
+        CandidateListInput::new(first_list.clone(), first_packages.clone())
+            .expect("first candidate input is canonical"),
+        CandidateListInput::new(second_list.clone(), second_packages.clone())
+            .expect("second candidate input is canonical"),
+    ])
+    .expect("candidate-view transport is bounded");
+    let authenticated = board_verifier
+        .authenticate_ballot_candidate_view(&input)
+        .into_result()
+        .expect("candidate transport authenticates");
+    assert_eq!(
+        authenticated.submission_cutoff_hash(),
+        fixture.submission_cutoff_hash
+    );
+    assert_eq!(authenticated.setup_source_hash(), setup_source_hash);
+    assert_eq!(authenticated.ordered_candidate_lists().len(), 2);
+    assert_eq!(
+        authenticated.ordered_candidate_lists()[0].producer_roster_position(),
+        0
+    );
+    assert_eq!(
+        authenticated.ordered_candidate_lists()[1].producer_roster_position(),
+        3
+    );
+    assert_eq!(
+        authenticated.ordered_candidate_lists()[0].packages()[1].producer_sequence(),
+        1
+    );
+    assert_eq!(
+        authenticated.candidate_view_root(),
+        authenticated
+            .semantic_view()
+            .candidate_view_root(fixture.action_context_hash)
+            .expect("semantic view root derives")
+    );
+
+    let alternate_first_list =
+        fixture.ballot_candidate_list(0, &first_packages, fixture.submission_cutoff_hash, 0xb1);
+    assert_ne!(alternate_first_list, first_list);
+    let alternate_input = BallotCandidateViewInput::new(vec![
+        CandidateListInput::new(alternate_first_list, first_packages)
+            .expect("alternate signature transport is canonical"),
+        CandidateListInput::new(second_list, second_packages)
+            .expect("second candidate input remains canonical"),
+    ])
+    .expect("alternate transport is bounded");
+    let alternate_authenticated = board_verifier
+        .authenticate_ballot_candidate_view(&alternate_input)
+        .into_result()
+        .expect("another valid carrier signature authenticates");
+    assert_eq!(
+        alternate_authenticated.candidate_view_root(),
+        authenticated.candidate_view_root(),
+        "transport signatures do not enter the semantic candidate-view root"
+    );
+}
+
+#[test]
+fn candidate_view_refuses_wrong_cutoff_roster_order_and_package_order() {
+    let fixture = BoardFixture::new();
+    let setup_source_hash = Hash512::from_bytes([0x92; Hash512::BYTE_LENGTH]);
+    let first_packages = vec![
+        fixture.ballot_package_at_sequence(0, 0, setup_source_hash),
+        fixture.ballot_package_at_sequence(0, 1, setup_source_hash),
+    ];
+    let second_packages = vec![fixture.ballot_package_at_sequence(2, 0, setup_source_hash)];
+    let first_list =
+        fixture.ballot_candidate_list(0, &first_packages, fixture.submission_cutoff_hash, 0xc1);
+    let second_list =
+        fixture.ballot_candidate_list(2, &second_packages, fixture.submission_cutoff_hash, 0xc2);
+    let wrong_cutoff_list = fixture.ballot_candidate_list(
+        0,
+        &first_packages,
+        Hash512::from_bytes([0xff; Hash512::BYTE_LENGTH]),
+        0xc3,
+    );
+    let verifier = fixture.verifier();
+
+    let mut board_verifier = fixture.verifier();
+    assert_eq!(
+        board_verifier
+            .verify_unordered_carriers(&[wrong_cutoff_list.clone()])
+            .into_result()
+            .expect_err("candidate-list board ingestion rejects another cutoff"),
+        RefusalReason::WrongHashOrRoot
+    );
+
+    let wrong_cutoff = BallotCandidateViewInput::new(vec![
+        CandidateListInput::new(wrong_cutoff_list, first_packages.clone())
+            .expect("wrong-cutoff transport still encodes"),
+    ])
+    .expect("wrong-cutoff view input encodes");
+    assert_eq!(
+        verifier
+            .authenticate_ballot_candidate_view(&wrong_cutoff)
+            .into_result()
+            .expect_err("a caller-selected cutoff refuses"),
+        RefusalReason::WrongHashOrRoot
+    );
+
+    let reversed_lists = BallotCandidateViewInput::new(vec![
+        CandidateListInput::new(second_list.clone(), second_packages.clone())
+            .expect("second input encodes"),
+        CandidateListInput::new(first_list.clone(), first_packages.clone())
+            .expect("first input encodes"),
+    ])
+    .expect("reversed transport still encodes");
+    assert_eq!(
+        verifier
+            .authenticate_ballot_candidate_view(&reversed_lists)
+            .into_result()
+            .expect_err("candidate lists outside roster order refuse"),
+        RefusalReason::DuplicateIdentity
+    );
+
+    let mut reversed_packages = first_packages;
+    reversed_packages.reverse();
+    let reversed_package_input = BallotCandidateViewInput::new(vec![
+        CandidateListInput::new(first_list, reversed_packages)
+            .expect("reversed package transport still encodes"),
+    ])
+    .expect("reversed package view input encodes");
+    assert_eq!(
+        verifier
+            .authenticate_ballot_candidate_view(&reversed_package_input)
+            .into_result()
+            .expect_err("package carriers outside signed entry order refuse"),
+        RefusalReason::WrongContext
+    );
 }

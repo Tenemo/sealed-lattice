@@ -3,8 +3,8 @@ import type { TranscriptCoreKernelCommandRuntime } from '../transcript-core-brid
 export type CommonProofGenerationCheckpoint = Readonly<{
     /** Fixed canonical Rust-owned state. It contains no secret coin bytes. */
     canonicalStateBytes: Uint8Array<ArrayBuffer>;
-    /** Canonical compact cursor manifest produced and authenticated by Rust. */
-    privateRandomCursorManifestBytes: Uint8Array<ArrayBuffer>;
+    /** Canonical private-coin and transcript cursor manifest from Rust. */
+    generationCursorManifestBytes: Uint8Array<ArrayBuffer>;
     /** Shared reset-safe attempt identity embedded once, even at zero cursors. */
     privateRandomnessStreamAttemptIdentifier: Uint8Array<ArrayBuffer>;
     safeBoundaryOrdinal: number;

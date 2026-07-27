@@ -1,5 +1,8 @@
 //! Sumcheck protocol implementation for multilinear polynomial verification.
 //!
+//! Local modification: the unused zero-knowledge module and its dependencies
+//! are available only through the default-off `zk` feature. See `UPSTREAM.md`.
+//!
 //! # The Sumcheck Protocol
 //!
 //! The sumcheck protocol verifies a claimed sum of the form:
@@ -41,6 +44,7 @@ pub mod table;
 pub mod test_util;
 #[cfg(test)]
 mod tests;
+#[cfg(feature = "zk")]
 pub mod zk;
 
 pub use data::{SumcheckData, verify_final_sumcheck_rounds};

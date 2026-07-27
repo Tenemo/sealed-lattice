@@ -9,7 +9,6 @@ use sha3::{
     Shake256,
     digest::{ExtendableOutput, Update, XofReader},
 };
-#[cfg(test)]
 use tiny_keccak::keccakf;
 
 // The project security ledger models Fiat-Shamir with 512-bit random-oracle
@@ -18,18 +17,13 @@ use tiny_keccak::keccakf;
 // multi-proof compiler loss is considered.
 pub(super) const COLUMN_DIGEST_WORD_LENGTH: usize = 8;
 pub(super) const COLUMN_DIGEST_BYTE_LENGTH: usize = COLUMN_DIGEST_WORD_LENGTH * size_of::<u64>();
-#[cfg(test)]
 const SHAKE256_STATE_WORD_LENGTH: usize = 25;
-#[cfg(test)]
 const SHAKE256_RATE_WORD_LENGTH: usize = 17;
-#[cfg(test)]
 const SHAKE256_DELIMITER: u64 = 0x1f;
-#[cfg(test)]
 const SHAKE256_FINAL_RATE_BYTE: u64 = 0x80_u64 << 56;
 
 pub(super) type ColumnDigest = [u64; COLUMN_DIGEST_WORD_LENGTH];
 
-#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct StreamingColumnCommitment {
     pub(super) root: ColumnDigest,
@@ -41,7 +35,6 @@ pub(super) struct StreamingColumnCommitment {
 /// All states have the same byte offset. Keeping that offset once, rather
 /// than inside every hasher object, makes the exact resident state 200 bytes
 /// per column.
-#[cfg(test)]
 pub(super) struct StreamingColumnHasher {
     states: Vec<[u64; SHAKE256_STATE_WORD_LENGTH]>,
     next_rate_word: usize,
@@ -49,11 +42,33 @@ pub(super) struct StreamingColumnHasher {
     absorbed_row_count: usize,
 }
 
-#[cfg(test)]
+impl Drop for StreamingColumnHasher {
+    fn drop(&mut self) {
+        for state in &mut self.states {
+            state.fill(0);
+        }
+        self.next_rate_word = 0;
+        self.absorbed_row_count = 0;
+    }
+}
+
 impl StreamingColumnHasher {
+    #[cfg(test)]
     pub(super) fn new(
         expected_row_count: usize,
         encoded_column_count: usize,
+    ) -> Result<Self, String> {
+        Self::new_stripe(
+            expected_row_count,
+            encoded_column_count,
+            encoded_column_count,
+        )
+    }
+
+    fn new_stripe(
+        expected_row_count: usize,
+        encoded_column_count: usize,
+        stripe_column_count: usize,
     ) -> Result<Self, String> {
         if expected_row_count == 0 {
             return Err("column commitment requires at least one row".to_owned());
@@ -63,14 +78,24 @@ impl StreamingColumnHasher {
                 "encoded column count {encoded_column_count} is not a non-zero power of two"
             ));
         }
+        if stripe_column_count == 0 || stripe_column_count > encoded_column_count {
+            return Err(format!(
+                "column commitment stripe has {stripe_column_count} columns for an encoded width of {encoded_column_count}"
+            ));
+        }
 
         let mut base_state = [0_u64; SHAKE256_STATE_WORD_LENGTH];
         let mut next_rate_word = 0_usize;
         for word in column_hash_preamble(expected_row_count, encoded_column_count) {
             absorb_word(&mut base_state, &mut next_rate_word, word);
         }
+        let mut states = Vec::new();
+        states
+            .try_reserve_exact(stripe_column_count)
+            .map_err(|_| "column commitment stripe state allocation failed".to_owned())?;
+        states.resize(stripe_column_count, base_state);
         Ok(Self {
-            states: vec![base_state; encoded_column_count],
+            states,
             next_rate_word,
             expected_row_count,
             absorbed_row_count: 0,
@@ -108,31 +133,22 @@ impl StreamingColumnHasher {
     }
 
     #[cfg(test)]
-    pub(super) fn finalize(mut self) -> Result<Vec<ColumnDigest>, String> {
-        if self.absorbed_row_count != self.expected_row_count {
-            return Err(format!(
-                "column commitment received {} rows, expected {}",
-                self.absorbed_row_count, self.expected_row_count
-            ));
-        }
-        let delimiter_word = self.next_rate_word;
-        Ok(self
-            .states
-            .drain(..)
-            .map(|mut state| {
-                state[delimiter_word] ^= SHAKE256_DELIMITER;
-                state[SHAKE256_RATE_WORD_LENGTH - 1] ^= SHAKE256_FINAL_RATE_BYTE;
-                keccakf(&mut state);
-                core::array::from_fn(|word_index| state[word_index])
-            })
-            .collect())
+    pub(super) fn finalize(self) -> Result<Vec<ColumnDigest>, String> {
+        let mut digests = Vec::with_capacity(self.states.len());
+        self.finalize_digests(|digest| {
+            digests.push(digest);
+            Ok(())
+        })?;
+        Ok(digests)
     }
 
+    #[cfg(test)]
     pub(super) fn finalize_root(self) -> Result<ColumnDigest, String> {
         self.finalize_commitment(&[])
             .map(|commitment| commitment.root)
     }
 
+    #[cfg(test)]
     pub(super) fn finalize_commitment(
         mut self,
         opened_column_indices: &[usize],
@@ -143,32 +159,182 @@ impl StreamingColumnHasher {
                 self.absorbed_row_count, self.expected_row_count
             ));
         }
-        let opened_columns = if opened_column_indices.is_empty() {
-            BTreeSet::new()
-        } else {
-            canonical_column_index_set(opened_column_indices, self.states.len())?
-        };
         let delimiter_word = self.next_rate_word;
-        let mut builder = StreamingMerkleBuilder::new(self.states.len(), opened_columns)?;
+        let mut builder = StreamingMerkleBuilder::new(self.states.len(), opened_column_indices)?;
         for (column_index, mut state) in self.states.drain(..).enumerate() {
             state[delimiter_word] ^= SHAKE256_DELIMITER;
             state[SHAKE256_RATE_WORD_LENGTH - 1] ^= SHAKE256_FINAL_RATE_BYTE;
             keccakf(&mut state);
-            builder.push_leaf(
-                column_index,
-                core::array::from_fn(|word_index| state[word_index]),
-            )?;
+            let digest = core::array::from_fn(|word_index| state[word_index]);
+            state.fill(0);
+            builder.push_leaf(column_index, digest)?;
         }
         builder.finish()
     }
 
-    #[cfg(test)]
     pub(super) const fn exact_state_byte_length(encoded_column_count: usize) -> Option<usize> {
         encoded_column_count.checked_mul(size_of::<[u64; SHAKE256_STATE_WORD_LENGTH]>())
     }
+
+    fn finalize_digests(
+        mut self,
+        mut consume_digest: impl FnMut(ColumnDigest) -> Result<(), String>,
+    ) -> Result<(), String> {
+        if self.absorbed_row_count != self.expected_row_count {
+            return Err(format!(
+                "column commitment received {} rows, expected {}",
+                self.absorbed_row_count, self.expected_row_count
+            ));
+        }
+        let delimiter_word = self.next_rate_word;
+        for mut state in self.states.drain(..) {
+            state[delimiter_word] ^= SHAKE256_DELIMITER;
+            state[SHAKE256_RATE_WORD_LENGTH - 1] ^= SHAKE256_FINAL_RATE_BYTE;
+            keccakf(&mut state);
+            let digest = core::array::from_fn(|word_index| state[word_index]);
+            state.fill(0);
+            consume_digest(digest)?;
+        }
+        Ok(())
+    }
 }
 
-#[cfg(test)]
+/// Builds the canonical column commitment with a bounded number of live
+/// SHAKE256 states. The caller replays the encoded rows once per stripe; the
+/// stripe width is an implementation choice and does not enter the root.
+pub(super) struct StripedColumnCommitmentBuilder {
+    expected_row_count: usize,
+    encoded_column_count: usize,
+    maximum_stripe_column_count: usize,
+    next_column_index: usize,
+    active_stripe_hasher: Option<StreamingColumnHasher>,
+    merkle_builder: StreamingMerkleBuilder,
+}
+
+impl StripedColumnCommitmentBuilder {
+    pub(super) fn new(
+        expected_row_count: usize,
+        encoded_column_count: usize,
+        maximum_stripe_column_count: usize,
+    ) -> Result<Self, String> {
+        Self::new_with_opened_columns(
+            expected_row_count,
+            encoded_column_count,
+            maximum_stripe_column_count,
+            &[],
+        )
+    }
+
+    pub(super) fn new_with_opened_columns(
+        expected_row_count: usize,
+        encoded_column_count: usize,
+        maximum_stripe_column_count: usize,
+        opened_column_indices: &[usize],
+    ) -> Result<Self, String> {
+        if maximum_stripe_column_count == 0 {
+            return Err("column commitment stripe width must be positive".to_owned());
+        }
+        let merkle_builder =
+            StreamingMerkleBuilder::new(encoded_column_count, opened_column_indices)?;
+        let first_stripe_column_count = maximum_stripe_column_count.min(encoded_column_count);
+        let active_stripe_hasher = StreamingColumnHasher::new_stripe(
+            expected_row_count,
+            encoded_column_count,
+            first_stripe_column_count,
+        )?;
+        Ok(Self {
+            expected_row_count,
+            encoded_column_count,
+            maximum_stripe_column_count,
+            next_column_index: 0,
+            active_stripe_hasher: Some(active_stripe_hasher),
+            merkle_builder,
+        })
+    }
+
+    pub(super) fn active_column_range(&self) -> Option<core::ops::Range<usize>> {
+        self.active_stripe_hasher
+            .as_ref()
+            .map(|hasher| self.next_column_index..self.next_column_index + hasher.states.len())
+    }
+
+    pub(super) fn absorb_active_stripe_row(
+        &mut self,
+        row_index: usize,
+        encoded_row_stripe: &[Goldilocks],
+    ) -> Result<(), String> {
+        let hasher = self
+            .active_stripe_hasher
+            .as_mut()
+            .ok_or_else(|| "column commitment has no active stripe".to_owned())?;
+        if row_index != hasher.absorbed_row_count {
+            return Err(format!(
+                "column commitment received row {row_index}, expected {}",
+                hasher.absorbed_row_count
+            ));
+        }
+        hasher.absorb_row(encoded_row_stripe)
+    }
+
+    /// Completes the current stripe after every row was replayed. Returns
+    /// `true` only after the final encoded column entered the Merkle root.
+    pub(super) fn complete_active_stripe(&mut self) -> Result<bool, String> {
+        let hasher = self
+            .active_stripe_hasher
+            .take()
+            .ok_or_else(|| "column commitment has no active stripe".to_owned())?;
+        let stripe_column_count = hasher.states.len();
+        let expected_column_start = self.next_column_index;
+        let merkle_builder = &mut self.merkle_builder;
+        let mut column_index = expected_column_start;
+        hasher.finalize_digests(|digest| {
+            merkle_builder.push_leaf(column_index, digest)?;
+            column_index = column_index
+                .checked_add(1)
+                .ok_or_else(|| "column commitment column index overflowed".to_owned())?;
+            Ok(())
+        })?;
+        let expected_column_end = expected_column_start
+            .checked_add(stripe_column_count)
+            .ok_or_else(|| "column commitment stripe end overflowed".to_owned())?;
+        if column_index != expected_column_end || expected_column_end > self.encoded_column_count {
+            return Err("column commitment stripe produced the wrong leaf count".to_owned());
+        }
+        self.next_column_index = expected_column_end;
+        if self.next_column_index == self.encoded_column_count {
+            return Ok(true);
+        }
+        let remaining_column_count = self.encoded_column_count - self.next_column_index;
+        self.active_stripe_hasher = Some(StreamingColumnHasher::new_stripe(
+            self.expected_row_count,
+            self.encoded_column_count,
+            self.maximum_stripe_column_count.min(remaining_column_count),
+        )?);
+        Ok(false)
+    }
+
+    pub(super) fn finish(self) -> Result<ColumnDigest, String> {
+        self.finish_commitment().map(|commitment| commitment.root)
+    }
+
+    pub(super) fn finish_commitment(self) -> Result<StreamingColumnCommitment, String> {
+        if self.active_stripe_hasher.is_some()
+            || self.next_column_index != self.encoded_column_count
+        {
+            return Err("column commitment is incomplete".to_owned());
+        }
+        self.merkle_builder.finish()
+    }
+
+    pub(super) fn maximum_hash_state_byte_length(&self) -> Result<usize, String> {
+        StreamingColumnHasher::exact_state_byte_length(
+            self.maximum_stripe_column_count
+                .min(self.encoded_column_count),
+        )
+        .ok_or_else(|| "column commitment stripe state byte length overflowed".to_owned())
+    }
+}
+
 struct StreamingMerkleNode {
     level: usize,
     index: usize,
@@ -176,30 +342,42 @@ struct StreamingMerkleNode {
     contains_opened_column: bool,
 }
 
-#[cfg(test)]
 struct StreamingMerkleBuilder {
     leaf_count: usize,
-    opened_columns: BTreeSet<usize>,
+    opened_columns: Vec<usize>,
     stack: Vec<StreamingMerkleNode>,
     frontier_by_level_and_index: Vec<(usize, usize, ColumnDigest)>,
+    expected_frontier_node_count: usize,
     next_leaf_index: usize,
 }
 
-#[cfg(test)]
 impl StreamingMerkleBuilder {
-    fn new(leaf_count: usize, opened_columns: BTreeSet<usize>) -> Result<Self, String> {
-        if !leaf_count.is_power_of_two()
-            || opened_columns
-                .last()
-                .is_some_and(|column_index| *column_index >= leaf_count)
-        {
-            return Err("streaming Merkle geometry is invalid".to_owned());
-        }
+    fn new(leaf_count: usize, opened_column_indices: &[usize]) -> Result<Self, String> {
+        let frontier_node_count =
+            canonical_frontier_node_count_from_sorted_indices(opened_column_indices, leaf_count)?;
+        let tree_depth = leaf_count.ilog2() as usize;
+        let stack_capacity = tree_depth
+            .checked_add(1)
+            .ok_or_else(|| "streaming Merkle stack capacity overflowed".to_owned())?;
+        let mut opened_columns = Vec::new();
+        opened_columns
+            .try_reserve_exact(opened_column_indices.len())
+            .map_err(|_| "streaming Merkle opening index allocation failed".to_owned())?;
+        opened_columns.extend_from_slice(opened_column_indices);
+        let mut stack = Vec::new();
+        stack
+            .try_reserve_exact(stack_capacity)
+            .map_err(|_| "streaming Merkle stack allocation failed".to_owned())?;
+        let mut frontier_by_level_and_index = Vec::new();
+        frontier_by_level_and_index
+            .try_reserve_exact(frontier_node_count)
+            .map_err(|_| "streaming Merkle frontier allocation failed".to_owned())?;
         Ok(Self {
             leaf_count,
             opened_columns,
-            stack: Vec::with_capacity(leaf_count.ilog2() as usize + 1),
-            frontier_by_level_and_index: Vec::new(),
+            stack,
+            frontier_by_level_and_index,
+            expected_frontier_node_count: frontier_node_count,
             next_leaf_index: 0,
         })
     }
@@ -213,7 +391,7 @@ impl StreamingMerkleBuilder {
             level: 0,
             index: column_index,
             digest,
-            contains_opened_column: self.opened_columns.contains(&column_index),
+            contains_opened_column: self.opened_columns.binary_search(&column_index).is_ok(),
         });
         while self.stack.len() >= 2 {
             let right_position = self.stack.len() - 1;
@@ -232,6 +410,9 @@ impl StreamingMerkleBuilder {
                 } else {
                     &left
                 };
+                if self.frontier_by_level_and_index.len() == self.expected_frontier_node_count {
+                    return Err("streaming Merkle frontier exceeded its checked size".to_owned());
+                }
                 self.frontier_by_level_and_index.push((
                     frontier_node.level,
                     frontier_node.index,
@@ -258,15 +439,16 @@ impl StreamingMerkleBuilder {
         }
         self.frontier_by_level_and_index
             .sort_unstable_by_key(|(level, index, _)| (*level, *index));
-        let frontier = self
-            .frontier_by_level_and_index
-            .into_iter()
-            .map(|(_, _, digest)| digest)
-            .collect::<Vec<_>>();
-        if !self.opened_columns.is_empty()
-            && frontier.len()
-                != canonical_frontier_node_count_from_set(self.opened_columns, self.leaf_count)
-        {
+        let mut frontier = Vec::new();
+        frontier
+            .try_reserve_exact(self.frontier_by_level_and_index.len())
+            .map_err(|_| "streaming Merkle result frontier allocation failed".to_owned())?;
+        frontier.extend(
+            self.frontier_by_level_and_index
+                .into_iter()
+                .map(|(_, _, digest)| digest),
+        );
+        if frontier.len() != self.expected_frontier_node_count {
             return Err("streaming Merkle frontier has the wrong size".to_owned());
         }
         Ok(StreamingColumnCommitment {
@@ -289,7 +471,6 @@ fn column_hash_preamble(expected_row_count: usize, encoded_column_count: usize) 
     words
 }
 
-#[cfg(test)]
 fn absorb_word(
     state: &mut [u64; SHAKE256_STATE_WORD_LENGTH],
     next_rate_word: &mut usize,
@@ -392,10 +573,12 @@ impl ColumnMerkleTree {
         column_indices: &[usize],
     ) -> Result<Vec<ColumnDigest>, String> {
         let mut active = canonical_column_index_set(column_indices, self.levels[0].len())?;
-        let mut frontier = Vec::with_capacity(canonical_frontier_node_count_from_set(
-            active.clone(),
-            self.levels[0].len(),
-        ));
+        let frontier_node_count =
+            canonical_frontier_node_count_from_set(active.clone(), self.levels[0].len())?;
+        let mut frontier = Vec::new();
+        frontier
+            .try_reserve_exact(frontier_node_count)
+            .map_err(|_| "column Merkle frontier allocation failed".to_owned())?;
         for level in &self.levels[..self.levels.len() - 1] {
             for sibling_index in missing_sibling_indices(&active) {
                 frontier.push(level[sibling_index]);
@@ -420,40 +603,91 @@ pub(super) fn canonical_frontier_node_count(
     encoded_column_count: usize,
 ) -> Result<usize, String> {
     let active = canonical_column_index_set(column_indices, encoded_column_count)?;
-    Ok(canonical_frontier_node_count_from_set(
-        active,
-        encoded_column_count,
-    ))
+    canonical_frontier_node_count_from_set(active, encoded_column_count)
 }
 
 fn canonical_frontier_node_count_from_set(
     mut active: BTreeSet<usize>,
     encoded_column_count: usize,
-) -> usize {
+) -> Result<usize, String> {
     let mut count = 0_usize;
     for _ in 0..encoded_column_count.ilog2() {
-        count += missing_sibling_indices(&active).len();
+        count = count
+            .checked_add(missing_sibling_indices(&active).len())
+            .ok_or_else(|| "column Merkle frontier node count overflowed".to_owned())?;
         active = active.into_iter().map(|position| position >> 1).collect();
     }
-    count
+    Ok(count)
+}
+
+fn canonical_frontier_node_count_from_sorted_indices(
+    column_indices: &[usize],
+    encoded_column_count: usize,
+) -> Result<usize, String> {
+    validate_optional_column_indices(column_indices, encoded_column_count)?;
+    let mut active_indices = Vec::new();
+    active_indices
+        .try_reserve_exact(column_indices.len())
+        .map_err(|_| "column Merkle active-index allocation failed".to_owned())?;
+    active_indices.extend_from_slice(column_indices);
+    let mut parent_indices = Vec::new();
+    parent_indices
+        .try_reserve_exact(column_indices.len())
+        .map_err(|_| "column Merkle parent-index allocation failed".to_owned())?;
+    let mut frontier_node_count = 0_usize;
+    for _ in 0..encoded_column_count.ilog2() {
+        for position in &active_indices {
+            if active_indices.binary_search(&(*position ^ 1)).is_err() {
+                frontier_node_count = frontier_node_count
+                    .checked_add(1)
+                    .ok_or_else(|| "column Merkle frontier node count overflowed".to_owned())?;
+            }
+        }
+        parent_indices.clear();
+        for position in &active_indices {
+            let parent_index = *position >> 1;
+            if parent_indices.last().copied() != Some(parent_index) {
+                parent_indices.push(parent_index);
+            }
+        }
+        core::mem::swap(&mut active_indices, &mut parent_indices);
+    }
+    Ok(frontier_node_count)
 }
 
 fn canonical_column_index_set(
     column_indices: &[usize],
     encoded_column_count: usize,
 ) -> Result<BTreeSet<usize>, String> {
-    if !encoded_column_count.is_power_of_two() || column_indices.is_empty() {
+    if column_indices.is_empty() {
         return Err("column frontier geometry is invalid".to_owned());
     }
-    let active = column_indices.iter().copied().collect::<BTreeSet<_>>();
-    if active.len() != column_indices.len()
-        || active
+    canonical_optional_column_index_set(column_indices, encoded_column_count)
+}
+
+fn canonical_optional_column_index_set(
+    column_indices: &[usize],
+    encoded_column_count: usize,
+) -> Result<BTreeSet<usize>, String> {
+    validate_optional_column_indices(column_indices, encoded_column_count)?;
+    Ok(column_indices.iter().copied().collect())
+}
+
+fn validate_optional_column_indices(
+    column_indices: &[usize],
+    encoded_column_count: usize,
+) -> Result<(), String> {
+    if !encoded_column_count.is_power_of_two() {
+        return Err("column frontier geometry is invalid".to_owned());
+    }
+    if column_indices.windows(2).any(|pair| pair[0] >= pair[1])
+        || column_indices
             .last()
             .is_some_and(|column_index| *column_index >= encoded_column_count)
     {
-        return Err("column frontier indices are duplicated or out of range".to_owned());
+        return Err("column frontier indices are not sorted, distinct, and in range".to_owned());
     }
-    Ok(active)
+    Ok(())
 }
 
 fn missing_sibling_indices(active: &BTreeSet<usize>) -> Vec<usize> {
@@ -499,27 +733,14 @@ pub(super) fn verify_column_opening(
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn verify_column_frontier(
     root: &ColumnDigest,
     encoded_column_count: usize,
     opened_columns: &[(usize, &[Goldilocks])],
     frontier: &[ColumnDigest],
 ) -> Result<(), String> {
-    let column_indices = opened_columns
-        .iter()
-        .map(|(column_index, _)| *column_index)
-        .collect::<Vec<_>>();
-    let mut active_indices = canonical_column_index_set(&column_indices, encoded_column_count)?;
-    let expected_frontier_node_count =
-        canonical_frontier_node_count_from_set(active_indices.clone(), encoded_column_count);
-    if frontier.len() != expected_frontier_node_count {
-        return Err(format!(
-            "column Merkle frontier has {} nodes, expected {expected_frontier_node_count}",
-            frontier.len()
-        ));
-    }
-
-    let mut active_digests = opened_columns
+    let opened_column_digests = opened_columns
         .iter()
         .map(|(column_index, values)| {
             (
@@ -527,8 +748,42 @@ pub(super) fn verify_column_frontier(
                 hash_opened_column(values, encoded_column_count),
             )
         })
+        .collect::<Vec<_>>();
+    verify_prehashed_column_frontier(root, encoded_column_count, &opened_column_digests, frontier)
+}
+
+/// Verifies a canonical frontier after the caller has recomputed every leaf
+/// digest from its canonical opened values. This keeps large opened columns
+/// out of resident verifier state without accepting producer-supplied leaf
+/// digests from the proof wire.
+pub(super) fn verify_prehashed_column_frontier(
+    root: &ColumnDigest,
+    encoded_column_count: usize,
+    opened_column_digests: &[(usize, ColumnDigest)],
+    frontier: &[ColumnDigest],
+) -> Result<(), String> {
+    let column_indices = opened_column_digests
+        .iter()
+        .map(|(column_index, _)| *column_index)
+        .collect::<Vec<_>>();
+    if column_indices.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err("column frontier indices are not in canonical order".to_owned());
+    }
+    let mut active_indices = canonical_column_index_set(&column_indices, encoded_column_count)?;
+    let expected_frontier_node_count =
+        canonical_frontier_node_count_from_set(active_indices.clone(), encoded_column_count)?;
+    if frontier.len() != expected_frontier_node_count {
+        return Err(format!(
+            "column Merkle frontier has {} nodes, expected {expected_frontier_node_count}",
+            frontier.len()
+        ));
+    }
+
+    let mut active_digests = opened_column_digests
+        .iter()
+        .copied()
         .collect::<BTreeMap<_, _>>();
-    if active_digests.len() != opened_columns.len() {
+    if active_digests.len() != opened_column_digests.len() {
         return Err("column frontier contains a duplicated opening".to_owned());
     }
     let mut frontier_cursor = 0_usize;
@@ -587,6 +842,31 @@ mod tests {
                     .collect()
             })
             .collect()
+    }
+
+    fn build_striped_commitment(
+        rows: &[Vec<Goldilocks>],
+        maximum_stripe_column_count: usize,
+        opened_column_indices: &[usize],
+    ) -> StreamingColumnCommitment {
+        let mut builder = StripedColumnCommitmentBuilder::new_with_opened_columns(
+            rows.len(),
+            rows[0].len(),
+            maximum_stripe_column_count,
+            opened_column_indices,
+        )
+        .expect("valid striped geometry");
+        while let Some(active_range) = builder.active_column_range() {
+            for (row_index, row) in rows.iter().enumerate() {
+                builder
+                    .absorb_active_stripe_row(row_index, &row[active_range.clone()])
+                    .expect("valid striped row");
+            }
+            builder.complete_active_stripe().expect("complete stripe");
+        }
+        builder
+            .finish_commitment()
+            .expect("complete striped commitment")
     }
 
     #[test]
@@ -698,6 +978,44 @@ mod tests {
         assert!(frontier.len() < indices.len() * 6);
         verify_column_frontier(&tree.root(), 64, &opened, &frontier)
             .expect("genuine frontier verifies");
+        let opened_digests = opened
+            .iter()
+            .map(|(column_index, values)| (*column_index, hash_opened_column(values, 64)))
+            .collect::<Vec<_>>();
+        verify_prehashed_column_frontier(&tree.root(), 64, &opened_digests, &frontier)
+            .expect("genuine prehashed frontier verifies");
+
+        let mut changed_digest = opened_digests.clone();
+        changed_digest[2].1[0] ^= 1;
+        assert!(
+            verify_prehashed_column_frontier(&tree.root(), 64, &changed_digest, &frontier).is_err()
+        );
+        let mut duplicated_digest = opened_digests.clone();
+        duplicated_digest[1].0 = duplicated_digest[0].0;
+        assert!(
+            verify_prehashed_column_frontier(&tree.root(), 64, &duplicated_digest, &frontier)
+                .is_err()
+        );
+        let mut unsorted_digests = opened_digests.clone();
+        unsorted_digests.swap(1, 2);
+        assert!(
+            verify_prehashed_column_frontier(&tree.root(), 64, &unsorted_digests, &frontier)
+                .is_err()
+        );
+        let mut wrong_root = tree.root();
+        wrong_root[0] ^= 1;
+        assert!(
+            verify_prehashed_column_frontier(&wrong_root, 64, &opened_digests, &frontier).is_err()
+        );
+        assert!(
+            verify_prehashed_column_frontier(
+                &tree.root(),
+                64,
+                &opened_digests,
+                &frontier[..frontier.len() - 1],
+            )
+            .is_err()
+        );
 
         let mut changed_values = values.clone();
         changed_values[3][4] += Goldilocks::ONE;
@@ -774,6 +1092,189 @@ mod tests {
     }
 
     #[test]
+    fn striped_commitment_matches_the_complete_state_across_irregular_boundaries() {
+        for row_count in [1, 2, 7, 31] {
+            for column_count in [2, 8, 64, 256] {
+                let rows = sample_rows(row_count, column_count);
+                let mut complete_hasher =
+                    StreamingColumnHasher::new(row_count, column_count).expect("valid geometry");
+                for row in &rows {
+                    complete_hasher.absorb_row(row).expect("valid complete row");
+                }
+                let expected_root = complete_hasher
+                    .finalize_root()
+                    .expect("complete commitment");
+
+                for maximum_stripe_column_count in [1, 2, 3, 7, 17, column_count + 3] {
+                    let mut builder = StripedColumnCommitmentBuilder::new(
+                        row_count,
+                        column_count,
+                        maximum_stripe_column_count,
+                    )
+                    .expect("valid striped geometry");
+                    while let Some(active_range) = builder.active_column_range() {
+                        for (row_index, row) in rows.iter().enumerate() {
+                            builder
+                                .absorb_active_stripe_row(row_index, &row[active_range.clone()])
+                                .expect("valid striped row");
+                        }
+                        builder.complete_active_stripe().expect("complete stripe");
+                    }
+                    assert_eq!(
+                        builder.finish().expect("complete striped commitment"),
+                        expected_root,
+                        "row count {row_count}, column count {column_count}, stripe width {maximum_stripe_column_count}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn striped_opening_frontier_matches_the_materialized_tree_at_boundaries() {
+        let cases = [
+            (1, 1, 1, vec![0]),
+            (1, 2, 1, Vec::new()),
+            (2, 8, 3, vec![0]),
+            (7, 8, 3, vec![7]),
+            (17, 64, 7, vec![6, 7, 13, 14, 63]),
+        ];
+        for (row_count, column_count, stripe_width, opened_column_indices) in cases {
+            let rows = sample_rows(row_count, column_count);
+            let mut complete_hasher =
+                StreamingColumnHasher::new(row_count, column_count).expect("valid geometry");
+            for row in &rows {
+                complete_hasher.absorb_row(row).expect("valid complete row");
+            }
+            let tree = ColumnMerkleTree::new(
+                complete_hasher
+                    .finalize()
+                    .expect("complete materialized hashes"),
+            )
+            .expect("valid materialized tree");
+            let commitment = build_striped_commitment(&rows, stripe_width, &opened_column_indices);
+            assert_eq!(commitment.root, tree.root());
+            if opened_column_indices.is_empty() {
+                assert!(commitment.frontier.is_empty());
+                continue;
+            }
+            assert_eq!(
+                commitment.frontier,
+                tree.canonical_frontier(&opened_column_indices)
+                    .expect("canonical materialized frontier")
+            );
+            let opened_values = opened_column_indices
+                .iter()
+                .map(|column_index| {
+                    (
+                        *column_index,
+                        rows.iter()
+                            .map(|row| row[*column_index])
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let opened_columns = opened_values
+                .iter()
+                .map(|(column_index, values)| (*column_index, values.as_slice()))
+                .collect::<Vec<_>>();
+            verify_column_frontier(
+                &commitment.root,
+                column_count,
+                &opened_columns,
+                &commitment.frontier,
+            )
+            .expect("striped frontier verifies");
+        }
+    }
+
+    #[test]
+    fn selected_row_geometry_keeps_opening_capture_bounded_and_root_identical() {
+        let row_count = 247;
+        let column_count = 256;
+        let stripe_width = 31;
+        let opened_column_indices = [0, 30, 31, 127, 128, 247, 248, 255];
+        let rows = sample_rows(row_count, column_count);
+        let commitment = build_striped_commitment(&rows, stripe_width, &opened_column_indices);
+
+        let mut complete_hasher =
+            StreamingColumnHasher::new(row_count, column_count).expect("valid geometry");
+        for row in &rows {
+            complete_hasher.absorb_row(row).expect("valid complete row");
+        }
+        let tree = ColumnMerkleTree::new(
+            complete_hasher
+                .finalize()
+                .expect("complete materialized hashes"),
+        )
+        .expect("valid materialized tree");
+        assert_eq!(commitment.root, tree.root());
+        assert_eq!(
+            commitment.frontier,
+            tree.canonical_frontier(&opened_column_indices)
+                .expect("canonical materialized frontier")
+        );
+        assert_eq!(
+            commitment.frontier.len(),
+            canonical_frontier_node_count(&opened_column_indices, column_count)
+                .expect("valid frontier geometry")
+        );
+        assert!(
+            commitment.frontier.len()
+                <= opened_column_indices.len() * column_count.ilog2() as usize
+        );
+    }
+
+    #[test]
+    fn striped_opening_capture_refuses_noncanonical_indices() {
+        assert!(StripedColumnCommitmentBuilder::new_with_opened_columns(3, 8, 3, &[1, 1]).is_err());
+        assert!(StripedColumnCommitmentBuilder::new_with_opened_columns(3, 8, 3, &[2, 1]).is_err());
+        assert!(StripedColumnCommitmentBuilder::new_with_opened_columns(3, 8, 3, &[8]).is_err());
+        assert!(canonical_frontier_node_count(&[2, 1], 8).is_err());
+
+        let mut merkle_builder = StreamingMerkleBuilder::new(8, &[1]).expect("valid capture");
+        assert!(
+            merkle_builder
+                .push_leaf(1, [0; COLUMN_DIGEST_WORD_LENGTH])
+                .is_err()
+        );
+        assert!(merkle_builder.finish().is_err());
+    }
+
+    #[test]
+    fn striped_commitment_refuses_incomplete_reordered_and_wrong_width_rows() {
+        assert!(StripedColumnCommitmentBuilder::new(3, 8, 0).is_err());
+        assert!(StripedColumnCommitmentBuilder::new(0, 8, 2).is_err());
+        assert!(StripedColumnCommitmentBuilder::new(3, 7, 2).is_err());
+
+        let rows = sample_rows(3, 8);
+        let mut reordered =
+            StripedColumnCommitmentBuilder::new(3, 8, 3).expect("valid striped geometry");
+        let first_range = reordered
+            .active_column_range()
+            .expect("first stripe exists");
+        assert!(
+            reordered
+                .absorb_active_stripe_row(1, &rows[1][first_range.clone()])
+                .is_err()
+        );
+        assert!(
+            reordered
+                .absorb_active_stripe_row(0, &rows[0][first_range.start..first_range.end - 1])
+                .is_err()
+        );
+        reordered
+            .absorb_active_stripe_row(0, &rows[0][first_range.clone()])
+            .expect("first canonical row");
+        assert!(reordered.complete_active_stripe().is_err());
+        assert!(reordered.finish().is_err());
+
+        let incomplete =
+            StripedColumnCommitmentBuilder::new(3, 8, 3).expect("valid striped geometry");
+        assert!(incomplete.finish().is_err());
+    }
+
+    #[test]
     fn target_state_and_tree_accounting_is_exact() {
         let encoded_column_count = 1_usize << 19;
         assert_eq!(size_of::<[u64; SHAKE256_STATE_WORD_LENGTH]>(), 200);
@@ -791,6 +1292,15 @@ mod tests {
         assert_eq!(
             (2 * encoded_column_count - 1) * COLUMN_DIGEST_BYTE_LENGTH,
             64 * 1_024 * 1_024 - COLUMN_DIGEST_BYTE_LENGTH
+        );
+
+        let selected_width_builder = StripedColumnCommitmentBuilder::new(247, 1 << 21, 1 << 15)
+            .expect("selected striped geometry");
+        assert_eq!(
+            selected_width_builder
+                .maximum_hash_state_byte_length()
+                .expect("bounded state byte length"),
+            6_400 * 1_024
         );
     }
 

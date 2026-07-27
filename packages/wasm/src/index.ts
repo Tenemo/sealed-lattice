@@ -1,57 +1,57 @@
 import {
     beginAcceptedSetupEvaluatorSourceCatalog,
     bindAcceptedSetupEvaluatorGeneratedProofsToPackage,
-} from './accepted-setup-assembly-runtime.js';
+} from "./accepted-setup-assembly-runtime.js";
 import {
     generateGaloisKeyShareBatchInClosedWorker,
     verifyGaloisKeyShareBatchInClosedWorker,
-} from './accepted-setup-galois-key-share-runtime.js';
+} from "./accepted-setup-galois-key-share-runtime.js";
 import {
     generateAcceptedSetupPublicKeyShareInClosedWorker,
     generateAcceptedSetupSameSecretInClosedWorker,
     verifyGeneratedAcceptedSetupPublicKeyShareInClosedWorker,
     verifyGeneratedAcceptedSetupSameSecretInClosedWorker,
-} from './accepted-setup-key-relation-generation-runtime.js';
-import { beginAcceptedSetupPackageBuilder } from './accepted-setup-package-builder-runtime.js';
+} from "./accepted-setup-key-relation-generation-runtime.js";
+import { beginAcceptedSetupPackageBuilder } from "./accepted-setup-package-builder-runtime.js";
 import {
     verifyAcceptedSetupPublicKeyShareInClosedWorker,
     verifyAcceptedSetupSameSecretInClosedWorker,
-} from './accepted-setup-proof-verification-runtime.js';
-import { generateRelinearizationRoundOneAggregateInClosedWorker } from './accepted-setup-relinearization-aggregate-runtime.js';
+} from "./accepted-setup-proof-verification-runtime.js";
+import { generateRelinearizationRoundOneAggregateInClosedWorker } from "./accepted-setup-relinearization-aggregate-runtime.js";
 import {
     activateRelinearizationRoundTwoInClosedWorker,
     generateRelinearizationRoundOneInClosedWorker,
     generateRelinearizationRoundTwoInClosedWorker,
-} from './accepted-setup-relinearization-generation-runtime.js';
+} from "./accepted-setup-relinearization-generation-runtime.js";
 import {
     verifyAcceptedSetupRelinearizationRoundOneAggregateInClosedWorker,
     verifyAcceptedSetupRelinearizationRoundOneInClosedWorker,
     verifyAcceptedSetupRelinearizationRoundTwoInClosedWorker,
-} from './accepted-setup-relinearization-verification-runtime.js';
+} from "./accepted-setup-relinearization-verification-runtime.js";
 import {
     resolveAggregateThresholdShareAuthenticatedRecipientConsumer,
     type AggregateThresholdShareAuthenticatedRecipientConsumer,
     type AggregateThresholdShareRecipientAuthority,
     type AggregateThresholdShareRecipientAuthorityInput,
     type ClosedWorkerAggregateThresholdShareRecipientAuthorityInput,
-} from './aggregate-threshold-share-authenticated-recipient.js';
+} from "./aggregate-threshold-share-authenticated-recipient.js";
 import {
     generateAggregateThresholdShareInClosedWorker,
     verifyAggregateThresholdShareInClosedWorker,
-} from './aggregate-threshold-share-proof-runtime.js';
+} from "./aggregate-threshold-share-proof-runtime.js";
 import {
     openVerifiedBallotAggregationInClosedWorker,
     resumeVerifiedBallotAggregationFromCheckpointInClosedWorker,
-} from './ballot-aggregation-runtime.js';
+} from "./ballot-aggregation-runtime.js";
 import {
     generateBallotValidityInClosedWorker,
     verifyBallotValidityInClosedWorker,
-} from './ballot-validity-runtime.js';
+} from "./ballot-validity-runtime.js";
 import {
     foundationObjectTypes,
     openCanonicalBoardVerifierSession,
-} from './canonical-board-runtime.js';
-import { beginCollectivePublicKeyAggregate } from './collective-public-key-aggregate-runtime.js';
+} from "./canonical-board-runtime.js";
+import { beginCollectivePublicKeyAggregate } from "./collective-public-key-aggregate-runtime.js";
 import {
     CommonProofWorkerRuntimeError,
     describeClosedWorkerCommonProofGenerationFamilyAdapter,
@@ -60,20 +60,20 @@ import {
     releaseClosedWorkerCommonProofVerificationFamilyAdapter,
     runClosedWorkerCommonProofGenerationFamilyAdapter,
     runClosedWorkerCommonProofVerificationFamilyAdapter,
-} from './common-proof-worker-runtime.js';
-import { constructEvaluatorAggregateInClosedWorker } from './evaluator-aggregate-runtime.js';
-import { prepareEvaluatorReplayInClosedWorker } from './evaluator-replay-runtime.js';
+} from "./common-proof-worker-runtime.js";
+import { constructEvaluatorAggregateInClosedWorker } from "./evaluator-aggregate-runtime.js";
+import { prepareEvaluatorReplayInClosedWorker } from "./evaluator-replay-runtime.js";
 import {
     openFinalityVerifierSession,
     releaseVerifiedEvaluatorReplay,
-} from './finality-verifier-runtime.js';
+} from "./finality-verifier-runtime.js";
 import {
     FoundationBootstrapInternalError,
     FoundationBootstrapRefusalError,
     FoundationBootstrapResourceError,
-} from './foundation-bootstrap-errors.js';
-import { openFoundationCeremonyRuntime } from './foundation-ceremony-runtime.js';
-import { encodeCanonicalFoundationRoster } from './foundation-roster-runtime.js';
+} from "./foundation-bootstrap-errors.js";
+import { openFoundationCeremonyRuntime } from "./foundation-ceremony-runtime.js";
+import { encodeCanonicalFoundationRoster } from "./foundation-roster-runtime.js";
 import {
     certifyClosedWorkerActionRandomnessReservation,
     createWasmBrowserActionStorageWorkerKernel,
@@ -89,19 +89,19 @@ import {
     type ClosedWorkerCommonProofScratchRecordIdentifierInput,
     type ClosedWorkerCommonProofScratchStorage,
     type ClosedWorkerSetupMailboxRandomnessOperations,
-} from './local-storage-root-worker-kernel.js';
-import { openMailboxGcmRuntime } from './mailbox-gcm-runtime.js';
+} from "./local-storage-root-worker-kernel.js";
+import { openMailboxGcmRuntime } from "./mailbox-gcm-runtime.js";
 import {
     activateSelectedSuiteRecordSource,
     copySelectedSuiteRecordSourceBytes,
     releaseSelectedSuiteRecordSource,
-} from './selected-suite-record-source.js';
-import { openBrowserOwnedSetupGenerationAuthorityInClosedWorker } from './setup-generation-recipient-payload.js';
+} from "./selected-suite-record-source.js";
+import { openBrowserOwnedSetupGenerationAuthorityInClosedWorker } from "./setup-generation-recipient-payload.js";
 import {
     generateTargetReleaseInClosedWorker,
     reconstructTargetReleaseInClosedWorker,
     verifyTargetReleaseInClosedWorker,
-} from './target-release-runtime.js';
+} from "./target-release-runtime.js";
 import {
     createTranscriptCoreKernelLoader,
     TranscriptCoreKernelCommandError,
@@ -111,15 +111,17 @@ import {
     type SetupMailboxSlot,
     type TranscriptCoreKernelLoaderOptions,
     type TranscriptCoreKernel,
-} from './transcript-core-bridge.js';
-import { generateVssShareLinkageInClosedWorker } from './vss-share-linkage-generation-runtime.js';
+} from "./transcript-core-bridge.js";
+import { generateVssShareLinkageInClosedWorker } from "./vss-share-linkage-generation-runtime.js";
 import {
+    verifyVssLowDegreeEvidenceInClosedWorker,
     verifyVssShareLinkageInClosedWorker,
+    type VerifiedVssLowDegreeEvidence,
     type VerifiedVssShareLinkageTerminal,
-} from './vss-share-linkage-verification-runtime.js';
+} from "./vss-share-linkage-verification-runtime.js";
 
 const transcriptCoreKernelUrl = new URL(
-    '../dist/sealed-lattice-kernel.wasm',
+    "../dist/sealed-lattice-kernel.wasm",
     import.meta.url,
 );
 
@@ -189,28 +191,29 @@ export {
     verifyGaloisKeyShareBatchInClosedWorker,
     verifyBallotValidityInClosedWorker,
     verifyTargetReleaseInClosedWorker,
+    verifyVssLowDegreeEvidenceInClosedWorker,
     verifyVssShareLinkageInClosedWorker,
 };
 export type {
     AcceptedSetupEvaluatorSourceCatalogSession,
     AcceptedSetupVerificationSession,
-} from './accepted-setup-assembly-runtime.js';
-export type { AcceptedSetupPackageBuilder } from './accepted-setup-package-builder-runtime.js';
+} from "./accepted-setup-assembly-runtime.js";
+export type { AcceptedSetupPackageBuilder } from "./accepted-setup-package-builder-runtime.js";
 export type {
     AcceptedSetupProofVerificationInput,
     AcceptedSetupSameSecretProofVerificationInput,
-} from './accepted-setup-proof-verification-runtime.js';
+} from "./accepted-setup-proof-verification-runtime.js";
 export type {
     AcceptedSetupRelinearizationComponentDescription,
     AcceptedSetupRelinearizationVerificationInput,
-} from './accepted-setup-relinearization-verification-runtime.js';
+} from "./accepted-setup-relinearization-verification-runtime.js";
 export type {
     GeneratedRelinearizationAggregateProof,
     RelinearizationAggregateComponentDescription,
     RelinearizationAggregateComponentStore,
     RelinearizationAggregateGenerationInput,
     RelinearizationAggregateGenerationMode,
-} from './accepted-setup-relinearization-aggregate-runtime.js';
+} from "./accepted-setup-relinearization-aggregate-runtime.js";
 export type {
     GeneratedRelinearizationParticipantProof,
     RelinearizationComponentDescription,
@@ -218,22 +221,27 @@ export type {
     RelinearizationGenerationMode,
     RelinearizationParticipantGenerationInput,
     RelinearizationRoundTwoActivationInput,
-} from './accepted-setup-relinearization-generation-runtime.js';
+} from "./accepted-setup-relinearization-generation-runtime.js";
 export type {
     AcceptedSetupKeyRelationGenerationInput,
+    AcceptedSetupSameSecretGenerationInput,
     AcceptedSetupKeyRelationGenerationMode,
     GeneratedAcceptedSetupKeyRelationProof,
     GeneratedAcceptedSetupKeyRelationProofVerificationInput,
     GeneratedAcceptedSetupSameSecretProofVerificationInput,
-} from './accepted-setup-key-relation-generation-runtime.js';
-export type { AggregateThresholdShareGenerationMode } from './aggregate-threshold-share-proof-runtime.js';
+} from "./accepted-setup-key-relation-generation-runtime.js";
+export type { CommonProofGenerationExternalMemoryAccounting } from "./common-proof-worker-runtime/kernel-boundaries.js";
+export type {
+    AggregateThresholdShareGenerationMode,
+    PrivateShareAcceptanceSignatureOperation,
+} from "./aggregate-threshold-share-proof-runtime.js";
 export type {
     GaloisKeyShareBatchGenerationMode,
     GaloisKeyShareComponentDescription,
     GaloisKeyShareComponentStore,
     GeneratedGaloisKeyShareBatch,
-} from './accepted-setup-galois-key-share-runtime.js';
-export type { VerifiedAcceptedSetupAuthority } from './accepted-setup-verification-runtime.js';
+} from "./accepted-setup-galois-key-share-runtime.js";
+export type { VerifiedAcceptedSetupAuthority } from "./accepted-setup-verification-runtime.js";
 export type {
     BallotAggregationCheckpointBoundary,
     BallotAggregationCheckpointCustody,
@@ -250,40 +258,40 @@ export type {
     VerifiedBallotAggregationInput,
     VerifiedBallotAggregationSession,
     VerifiedEvaluatorAggregateAuthority,
-} from './ballot-aggregation-runtime.js';
+} from "./ballot-aggregation-runtime.js";
 export type {
     BallotValidityGenerationMode,
     GeneratedBallotValidityTransport,
     VerifiedBallotOutput,
-} from './ballot-validity-runtime.js';
-export type { PreparedEvaluatorReplay } from './evaluator-replay-runtime.js';
+} from "./ballot-validity-runtime.js";
+export type { PreparedEvaluatorReplay } from "./evaluator-replay-runtime.js";
 export type {
     EvaluatorAggregateConstructionOptions,
     EvaluatorAggregateGenerationMode,
     EvaluatorAggregateSession,
     EvaluatorKeyStoreDescription,
-} from './evaluator-aggregate-runtime.js';
+} from "./evaluator-aggregate-runtime.js";
 export type {
     CollectivePublicKeyAggregate,
     CollectivePublicKeyDescription,
     CollectivePublicKeyGenerationMode,
     CollectivePublicKeyParticipantSource,
-} from './collective-public-key-aggregate-runtime.js';
+} from "./collective-public-key-aggregate-runtime.js";
 export type {
     CanonicalFoundationActionDefinition,
     CanonicalFoundationBoardPolicy,
     CanonicalFoundationManifest,
     FoundationCeremonyRuntime,
     FoundationManifestInput,
-} from './foundation-ceremony-runtime.js';
-export type { FoundationRosterEntryInput } from './foundation-roster-runtime.js';
-export type { SelectedSuiteRecordSource } from './selected-suite-record-source.js';
+} from "./foundation-ceremony-runtime.js";
+export type { FoundationRosterEntryInput } from "./foundation-roster-runtime.js";
+export type { SelectedSuiteRecordSource } from "./selected-suite-record-source.js";
 export type {
     BrowserOwnedSetupGenerationAuthority,
     BrowserOwnedSetupGenerationAuthorityInput,
     SetupGenerationPublicKeyShareBodySource,
     SetupGenerationRecipientPayloadSource,
-} from './setup-generation-recipient-payload.js';
+} from "./setup-generation-recipient-payload.js";
 export type {
     GeneratedTargetReleaseTransport,
     ReconstructedTargetRelease,
@@ -291,7 +299,7 @@ export type {
     TargetReleasePartialOutputStoreResolver,
     TargetReleasePartialRole,
     VerifiedTargetReleaseShare,
-} from './target-release-runtime.js';
+} from "./target-release-runtime.js";
 export type {
     AggregateThresholdShareAuthenticatedRecipientConsumer,
     AggregateThresholdShareRecipientAuthority,
@@ -307,12 +315,13 @@ export type {
     PrivateRandomCursor,
     SetupMailboxSlot,
     TranscriptCoreKernelLoaderOptions,
+    VerifiedVssLowDegreeEvidence,
     VerifiedVssShareLinkageTerminal,
 };
 export type {
     VerifiedVssShareLinkageBoardCatalog,
     VssShareLinkageGenerationMode,
-} from './vss-share-linkage-generation-runtime.js';
+} from "./vss-share-linkage-generation-runtime.js";
 export type {
     AuthenticatedCommonProofInputStore,
     ClosedWorkerCommonProofGenerationFamilyAdapter,
@@ -329,18 +338,18 @@ export type {
     CommonProofApplicationFreshnessCoordinate,
     CommonProofVerificationWorkerOptions,
     VerifiedCommonProofCapability,
-} from './common-proof-worker-runtime.js';
+} from "./common-proof-worker-runtime.js";
 export {
     canonicalStreamDomains,
     openCanonicalStreamWorkerRuntime,
-} from './canonical-stream-runtime.js';
+} from "./canonical-stream-runtime.js";
 export type {
     AuthenticatedMailboxPlaintextCapability,
     MailboxGcmEncryptorLease,
     MailboxGcmLeaseState,
     MailboxGcmRuntime,
     MailboxGcmVerifierLease,
-} from './mailbox-gcm-runtime.js';
+} from "./mailbox-gcm-runtime.js";
 export type {
     CanonicalStreamChunkPull,
     CanonicalStreamChunkSink,
@@ -349,22 +358,24 @@ export type {
     CanonicalStreamVerifierLease,
     CanonicalStreamWorkerRuntime,
     CanonicalStreamWriterLease,
-} from './canonical-stream-runtime.js';
+} from "./canonical-stream-runtime.js";
 export type {
+    BallotCandidateListSignatureOperation,
     CanonicalBoardContextInput,
     CanonicalBoardVerifierSession,
     CanonicalBoardVerifierSessionState,
     FoundationObjectType,
+    ProducedBallotCandidateListCarrier,
     UntrustedCanonicalBoardCarrier,
     VerifiedTranscriptObject,
     VerifiedTranscriptObjectDescription,
-} from './canonical-board-runtime.js';
+} from "./canonical-board-runtime.js";
 export {
     copyVerifiedStateDurableBinding,
     openStateVerifierSession,
     stateCapabilityKinds,
     stateWitnessVoteKinds,
-} from './state-verifier-runtime.js';
+} from "./state-verifier-runtime.js";
 export type {
     FinalityVerification,
     FinalityVerifierConfiguration,
@@ -372,7 +383,7 @@ export type {
     VerifiedEvaluatorReplay,
     VerifiedFinality,
     VerifiedFinalityDescription,
-} from './finality-verifier-runtime.js';
+} from "./finality-verifier-runtime.js";
 export type {
     StateDurableBindingDescription,
     StateOutputIntentVerification,
@@ -391,22 +402,23 @@ export type {
     VerifiedStateOutputIntent,
     VerifiedStateReservation,
     VerifiedStateReservationIntent,
-} from './state-verifier-runtime.js';
+} from "./state-verifier-runtime.js";
 export {
     compileRuntimeBuildBootstrap,
     copyRuntimeBuildAuthorityBindingDescription,
+    createRuntimeBuildKernelWorkerPreflight,
     createBrowserRuntimeBuildFetcher,
     openBrowserRuntimeBuildCache,
     RuntimeBuildPreflightError,
-} from './runtime-build-preflight.js';
+} from "./runtime-build-preflight.js";
 export {
     CommonProofCheckpointCursorManifestError,
     decodeCommonProofCheckpointCursorManifest,
-} from './common-proof-checkpoint-cursor-manifest.js';
+} from "./common-proof-checkpoint-cursor-manifest.js";
 export {
     isAssignedRuntimeCheckpointRandomUse,
     isPublicOnlyCommonProofCheckpointFamily,
-} from './runtime-build-canonical.js';
+} from "./runtime-build-canonical.js";
 export type {
     RuntimeBuildActivation,
     RuntimeBuildAuthorityBinding,
@@ -416,11 +428,13 @@ export type {
     RuntimeBuildCache,
     RuntimeBuildFetcher,
     RuntimeBuildFetchResponse,
+    RuntimeBuildKernelWorkerLifecycle,
     RuntimeBuildPreflightEnvironment,
+    RuntimeBuildVerifiedKernelOwner,
     RuntimeBuildWorkerPreflight,
-} from './runtime-build-preflight.js';
-export type { DecodedCommonProofCheckpointCursorManifest } from './common-proof-checkpoint-cursor-manifest.js';
-export type { RuntimeBuildManifest } from './runtime-build-canonical.js';
+} from "./runtime-build-preflight.js";
+export type { DecodedCommonProofCheckpointCursorManifest } from "./common-proof-checkpoint-cursor-manifest.js";
+export type { RuntimeBuildManifest } from "./runtime-build-canonical.js";
 // Workspace builds use an unpinned kernel; the published SDK verifies its normalized hash.
 export const loadTranscriptCoreKernel: () => Promise<TranscriptCoreKernel> =
     createTranscriptCoreKernelLoader(transcriptCoreKernelUrl, {

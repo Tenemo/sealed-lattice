@@ -641,7 +641,6 @@ struct SelectedEvaluatorProofRuntimePlan {
     compiled_relation_plan: super::CompiledRelationPlan,
     relation_plan: CommonProofRelationPlanCapability,
     limits: CommonProofRuntimeLimits,
-    proof_query_count: u32,
 }
 
 fn selected_evaluator_proof_runtime_plan(
@@ -666,12 +665,10 @@ fn selected_evaluator_proof_runtime_plan(
         None,
         Some(FOUNDATION_PROFILE.option_count),
     )?;
-    let proof_query_count = relation_plan.proof_query_count()?;
     Ok(SelectedEvaluatorProofRuntimePlan {
         compiled_relation_plan,
         relation_plan,
         limits,
-        proof_query_count,
     })
 }
 
@@ -679,7 +676,6 @@ fn resolve_evaluator_prepared_attempt(
     action_randomness_handle: u32,
     verified_reservation_binding: VerifiedStateReservationRuntimeBinding,
     session_handle: u32,
-    runtime_plan: &SelectedEvaluatorProofRuntimePlan,
     checkpoint_continuation: AuthenticatedCheckpointContinuationSource,
 ) -> Result<PreparedPublicOnlyProofAttemptSource, EvaluatorAggregateRuntimeError> {
     let (
@@ -726,9 +722,6 @@ fn resolve_evaluator_prepared_attempt(
         Hash512::from_bytes(roster_hash),
         application_slot,
         statement_hash,
-        u64::try_from(runtime_plan.limits.proof_byte_length())
-            .map_err(|_| EvaluatorAggregateRuntimeError::InvalidInput)?,
-        runtime_plan.proof_query_count,
         checkpoint_continuation,
     )
     .map_err(EvaluatorAggregateRuntimeError::ActionRandomnessRuntime)
@@ -765,7 +758,6 @@ fn prepare_evaluator_common_generation(
         &runtime_plan.relation_plan,
         FOUNDATION_PROFILE.protocol_version,
         &canonical_statement,
-        runtime_plan.limits,
     )?;
     let sources = CommonProofGenerationSources::public_only(
         prepared_attempt.application_statement_schema_identifier(),
@@ -844,9 +836,7 @@ fn prepare_evaluator_generation(
         })
     })?;
     let runtime_plan = selected_evaluator_proof_runtime_plan(&canonical_statement)?;
-    let checkpoint_schedule_digest = runtime_plan
-        .relation_plan
-        .checkpoint_schedule_digest(runtime_plan.limits)?;
+    let checkpoint_schedule_digest = runtime_plan.relation_plan.checkpoint_schedule_digest()?;
     let fresh_continuation =
         AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
             checkpoint_lineage_identifier,
@@ -856,7 +846,6 @@ fn prepare_evaluator_generation(
         action_randomness_handle,
         verified_reservation_binding,
         session_handle,
-        &runtime_plan,
         fresh_continuation,
     )?;
     let adapter = match generation_mode {
@@ -898,7 +887,6 @@ fn prepare_evaluator_generation(
                         action_randomness_handle,
                         verified_reservation_binding,
                         session_handle,
-                        &runtime_plan,
                         continuation,
                     )
                     .map_err(resumed_generation_error)?;

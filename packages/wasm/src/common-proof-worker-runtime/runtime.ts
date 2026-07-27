@@ -1,5 +1,9 @@
 import { byteArraysEqual } from '../byte-array.js';
 import {
+    decodeCommonProofGenerationCursorManifest,
+    maximumCommonProofGenerationCursorManifestByteLength,
+} from '../common-proof-generation-cursor-manifest.js';
+import {
     resolveNumberExport,
     type TranscriptCoreKernelCommandRuntime,
 } from '../transcript-core-bridge/kernel-runtime.js';
@@ -13,7 +17,8 @@ import {
     CommonProofWorkerRuntimeError,
     clearCommonProofExternalMemoryRequest,
     decodeCommonProofExternalMemoryRequest,
-    encodeCommonProofExternalMemoryResponse,
+    encodeCommonProofExternalMemoryResponseInto,
+    maximumEncodedResponseByteLength,
     maximumWorkerOperationCount,
     type CommonProofDiscardExportName,
     type CommonProofExternalMemoryOperation,
@@ -79,7 +84,12 @@ type CommonProofGenerationCheckpointCustody = Readonly<{
     publishAuthenticatedCheckpoint(
         checkpoint: CommonProofGenerationCheckpoint,
     ): Promise<void>;
-    restoreAuthenticatedCheckpointState(): Promise<Uint8Array>;
+    restoreAuthenticatedCheckpoint(): Promise<
+        Readonly<{
+            canonicalStateBytes: Uint8Array;
+            generationCursorManifestBytes: Uint8Array;
+        }>
+    >;
 }>;
 
 type CommonProofGenerationResume = Readonly<{
@@ -126,6 +136,10 @@ export type CommonProofGenerationExecutionOpener = (
           options?: CommonProofGenerationWorkerOptions;
           outputStore: CommonProofCanonicalOutputStore;
       }>;
+
+type CommonProofGenerationAuthenticatedTranscriptPrefixAuthority = Readonly<{
+    supply(operationHandle: number): void;
+}>;
 
 type ClosedWorkerGeneratedCommonProofExecution = Readonly<{
     externalMemoryAccounting: CommonProofGenerationExternalMemoryAccounting;
@@ -711,7 +725,7 @@ const clearGenerationCheckpoint = (
 ): void => {
     checkpoint.canonicalStateBytes.fill(0);
     checkpoint.stableAttemptBindingHash.fill(0);
-    checkpoint.privateRandomCursorManifestBytes.fill(0);
+    checkpoint.generationCursorManifestBytes.fill(0);
     checkpoint.privateRandomnessStreamAttemptIdentifier.fill(0);
 };
 
@@ -1011,25 +1025,52 @@ export const releaseClosedWorkerCommonProofVerificationFamilyAdapter = (
     destroyClosedWorkerCommonProofVerificationFamilyAdapterRecord(record);
 };
 
-const restoreAuthenticatedGenerationCheckpointState = async (
+type AuthenticatedCommonProofGenerationCheckpoint = Readonly<{
+    canonicalStateBytes: Uint8Array<ArrayBuffer>;
+    generationCursorManifestBytes: Uint8Array<ArrayBuffer>;
+}>;
+
+const restoreAuthenticatedGenerationCheckpoint = async (
     kernel: CommonProofFamilyAdapterKernelBoundary,
     checkpointCustody: CommonProofGenerationCheckpointCustody,
-): Promise<Uint8Array<ArrayBuffer>> => {
-    let restoredState: Uint8Array | undefined;
+): Promise<AuthenticatedCommonProofGenerationCheckpoint> => {
+    let restoredCheckpoint:
+        | Readonly<{
+              canonicalStateBytes: Uint8Array;
+              generationCursorManifestBytes: Uint8Array;
+          }>
+        | undefined;
     try {
-        restoredState =
-            await checkpointCustody.restoreAuthenticatedCheckpointState();
+        restoredCheckpoint =
+            await checkpointCustody.restoreAuthenticatedCheckpoint();
         const exactByteLength = kernel.checkpointStateByteLength();
         if (
-            !(restoredState instanceof Uint8Array) ||
-            restoredState.byteLength !== exactByteLength
+            typeof restoredCheckpoint !== 'object' ||
+            restoredCheckpoint === null ||
+            !(restoredCheckpoint.canonicalStateBytes instanceof Uint8Array) ||
+            restoredCheckpoint.canonicalStateBytes.byteLength !==
+                exactByteLength ||
+            !(
+                restoredCheckpoint.generationCursorManifestBytes instanceof
+                Uint8Array
+            ) ||
+            restoredCheckpoint.generationCursorManifestBytes.byteLength === 0 ||
+            restoredCheckpoint.generationCursorManifestBytes.byteLength >
+                maximumCommonProofGenerationCursorManifestByteLength
         ) {
             throw new CommonProofWorkerRuntimeError(
                 'WrongStorageResult',
-                'Authenticated checkpoint custody returned state with the wrong canonical length.',
+                'Authenticated checkpoint custody returned an inconsistent state and generation cursor manifest.',
             );
         }
-        return restoredState.slice();
+        decodeCommonProofGenerationCursorManifest(
+            restoredCheckpoint.generationCursorManifestBytes,
+        );
+        return Object.freeze({
+            canonicalStateBytes: restoredCheckpoint.canonicalStateBytes.slice(),
+            generationCursorManifestBytes:
+                restoredCheckpoint.generationCursorManifestBytes.slice(),
+        });
     } catch (error) {
         throw error instanceof CommonProofWorkerRuntimeError &&
             error.code === 'StorageFailure'
@@ -1040,7 +1081,15 @@ const restoreAuthenticatedGenerationCheckpointState = async (
                   error,
               );
     } finally {
-        restoredState?.fill(0);
+        if (restoredCheckpoint?.canonicalStateBytes instanceof Uint8Array) {
+            restoredCheckpoint.canonicalStateBytes.fill(0);
+        }
+        if (
+            restoredCheckpoint?.generationCursorManifestBytes instanceof
+            Uint8Array
+        ) {
+            restoredCheckpoint.generationCursorManifestBytes.fill(0);
+        }
     }
 };
 
@@ -1050,13 +1099,16 @@ export const runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGenerated
         externalMemory: CommonProofExternalMemoryTransactionExecutor,
         outputStore: CommonProofCanonicalOutputStore,
         options: CommonProofGenerationWorkerOptions = {},
+        authenticatedTranscriptPrefixAuthority?: CommonProofGenerationAuthenticatedTranscriptPrefixAuthority,
     ): Promise<ClosedWorkerGeneratedCommonProofCapability> => {
         const record = consumeClosedWorkerCommonProofFamilyAdapterRecord(
             closedWorkerCommonProofGenerationFamilyAdapterRecords,
             familyAdapter,
         );
         let kernel: CommonProofFamilyAdapterKernelBoundary | undefined;
-        let authenticatedCheckpointState: Uint8Array<ArrayBuffer> | undefined;
+        let authenticatedCheckpoint:
+            | AuthenticatedCommonProofGenerationCheckpoint
+            | undefined;
         let checkpointRestorationCompleted = false;
         let optionSnapshotCompleted = false;
         let resumedContinuationExpected = false;
@@ -1099,8 +1151,8 @@ export const runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGenerated
             checkpointRestorationCompleted = resume === undefined;
             kernel = new CommonProofFamilyAdapterKernelBoundary(record.context);
             if (resume !== undefined) {
-                authenticatedCheckpointState =
-                    await restoreAuthenticatedGenerationCheckpointState(
+                authenticatedCheckpoint =
+                    await restoreAuthenticatedGenerationCheckpoint(
                         kernel,
                         resumeCheckpointCustody!,
                     );
@@ -1108,7 +1160,8 @@ export const runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGenerated
             }
             preparedGenerationHandle = kernel.prepareGeneration(
                 record.adapterHandle,
-                authenticatedCheckpointState,
+                authenticatedCheckpoint?.canonicalStateBytes,
+                authenticatedCheckpoint?.generationCursorManifestBytes,
             );
             generatedCapability =
                 await runPreparedCommonProofGenerationWorkerWithAuthenticatedState(
@@ -1117,7 +1170,7 @@ export const runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGenerated
                     externalMemory,
                     outputStore,
                     ownedOptions,
-                    authenticatedCheckpointState,
+                    authenticatedCheckpoint,
                     Object.freeze({
                         applicationStatementSchemaIdentifier:
                             record.applicationStatementSchemaIdentifier,
@@ -1126,6 +1179,7 @@ export const runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGenerated
                         stableAttemptBindingHash:
                             record.commonProofRuntimeBindingHash,
                     }),
+                    authenticatedTranscriptPrefixAuthority,
                 );
             return generatedCapability;
         } catch (error) {
@@ -1184,7 +1238,8 @@ export const runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGenerated
             }
             throw error;
         } finally {
-            authenticatedCheckpointState?.fill(0);
+            authenticatedCheckpoint?.canonicalStateBytes.fill(0);
+            authenticatedCheckpoint?.generationCursorManifestBytes.fill(0);
             destroyClosedWorkerCommonProofGenerationFamilyAdapterRecord(record);
         }
     };
@@ -1199,6 +1254,7 @@ export const runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpene
     async (
         familyAdapter: ClosedWorkerCommonProofGenerationFamilyAdapter,
         openExecution: CommonProofGenerationExecutionOpener,
+        authenticatedTranscriptPrefixAuthority?: CommonProofGenerationAuthenticatedTranscriptPrefixAuthority,
     ): Promise<ClosedWorkerGeneratedCommonProofExecution> => {
         const description =
             describeClosedWorkerCommonProofGenerationFamilyAdapter(
@@ -1255,6 +1311,7 @@ export const runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpene
                 execution.externalMemory,
                 trackedOutputStore,
                 execution.options,
+                authenticatedTranscriptPrefixAuthority,
             );
         const externalMemoryAccounting =
             generatedCommonProofCapabilityRecords.get(
@@ -1370,6 +1427,7 @@ export const runPreparedCommonProofGenerationWorker = async (
         options,
         undefined,
         undefined,
+        undefined,
     );
 
 const runPreparedCommonProofGenerationWorkerWithAuthenticatedState = async (
@@ -1378,14 +1436,20 @@ const runPreparedCommonProofGenerationWorkerWithAuthenticatedState = async (
     externalMemory: CommonProofExternalMemoryTransactionExecutor,
     outputStore: CommonProofCanonicalOutputStore,
     options: CommonProofGenerationWorkerOptions,
-    previouslyAuthenticatedCheckpointState: Uint8Array<ArrayBuffer> | undefined,
+    previouslyAuthenticatedCheckpoint:
+        | AuthenticatedCommonProofGenerationCheckpoint
+        | undefined,
     expectedCheckpointIdentity:
         | CommonProofGenerationCheckpointIdentityExpectation
+        | undefined,
+    authenticatedTranscriptPrefixAuthority:
+        | CommonProofGenerationAuthenticatedTranscriptPrefixAuthority
         | undefined,
 ): Promise<ClosedWorkerGeneratedCommonProofCapability> => {
     let kernel: CommonProofGenerationKernelBoundary | undefined;
     let operationHandle: number | undefined;
     let operationTerminal = false;
+    let reusableStorageResponseBuffer: Uint8Array<ArrayBuffer> | undefined;
 
     try {
         const resume = options.resume;
@@ -1401,6 +1465,7 @@ const runPreparedCommonProofGenerationWorkerWithAuthenticatedState = async (
         let browserToWasmCopyCount = 0n;
         let committedOutputByteLength = 0;
         let deterministicPrefixReplayComplete = resume === undefined;
+        let authenticatedTranscriptPrefixSupplied = false;
         let cancellationRequested = false;
         let readResultTransferByteLength = 0n;
         let readResultTransferCount = 0n;
@@ -1410,20 +1475,27 @@ const runPreparedCommonProofGenerationWorkerWithAuthenticatedState = async (
         if (resume === undefined) {
             operationHandle = kernel.begin(preparedGenerationHandle);
         } else {
-            const authenticatedCheckpointState =
-                previouslyAuthenticatedCheckpointState === undefined
-                    ? await restoreAuthenticatedGenerationCheckpointState(
+            const authenticatedCheckpoint =
+                previouslyAuthenticatedCheckpoint === undefined
+                    ? await restoreAuthenticatedGenerationCheckpoint(
                           new CommonProofFamilyAdapterKernelBoundary(context),
                           resume.checkpointCustody,
                       )
-                    : previouslyAuthenticatedCheckpointState.slice();
+                    : Object.freeze({
+                          canonicalStateBytes:
+                              previouslyAuthenticatedCheckpoint.canonicalStateBytes.slice(),
+                          generationCursorManifestBytes:
+                              previouslyAuthenticatedCheckpoint.generationCursorManifestBytes.slice(),
+                      });
             try {
                 operationHandle = kernel.resume(
                     preparedGenerationHandle,
-                    authenticatedCheckpointState,
+                    authenticatedCheckpoint.canonicalStateBytes,
+                    authenticatedCheckpoint.generationCursorManifestBytes,
                 );
             } finally {
-                authenticatedCheckpointState.fill(0);
+                authenticatedCheckpoint.canonicalStateBytes.fill(0);
+                authenticatedCheckpoint.generationCursorManifestBytes.fill(0);
             }
         }
         const liveOperationHandle = operationHandle;
@@ -1482,6 +1554,20 @@ const runPreparedCommonProofGenerationWorkerWithAuthenticatedState = async (
                     deterministicPrefixReplayComplete = true;
                     await yieldControl();
                     break;
+                case 'authenticated-transcript-prefix-required':
+                    if (
+                        authenticatedTranscriptPrefixAuthority === undefined ||
+                        authenticatedTranscriptPrefixSupplied
+                    ) {
+                        throw kernelFailure(
+                            'The common-proof kernel requested unavailable or repeated authenticated transcript-prefix authority.',
+                        );
+                    }
+                    authenticatedTranscriptPrefixAuthority.supply(
+                        liveOperationHandle,
+                    );
+                    authenticatedTranscriptPrefixSupplied = true;
+                    break;
                 case 'storage-request-ready': {
                     const encodedRequest = kernel.copyStorageRequest(
                         liveOperationHandle,
@@ -1538,10 +1624,14 @@ const runPreparedCommonProofGenerationWorkerWithAuthenticatedState = async (
                                 error,
                             );
                         }
+                        reusableStorageResponseBuffer ??= new Uint8Array(
+                            maximumEncodedResponseByteLength,
+                        );
                         encodedResponse =
-                            encodeCommonProofExternalMemoryResponse(
+                            encodeCommonProofExternalMemoryResponseInto(
                                 request,
                                 readResults,
+                                reusableStorageResponseBuffer,
                             );
                         browserToWasmCopyCount += 1n;
                         browserToWasmCopyByteLength += BigInt(
@@ -1558,7 +1648,7 @@ const runPreparedCommonProofGenerationWorkerWithAuthenticatedState = async (
                         }
                         destroyTransferredWorkerBuffer(encodedRequest);
                         if (encodedResponse !== undefined) {
-                            destroyTransferredWorkerBuffer(encodedResponse);
+                            reusableStorageResponseBuffer?.fill(0);
                         }
                     }
                     break;
@@ -1840,6 +1930,10 @@ const runPreparedCommonProofGenerationWorkerWithAuthenticatedState = async (
             error,
             'The common-proof generation authority was permanently retired after an unexpected failure.',
         );
+    } finally {
+        if (reusableStorageResponseBuffer !== undefined) {
+            destroyTransferredWorkerBuffer(reusableStorageResponseBuffer);
+        }
     }
 };
 

@@ -1,10 +1,10 @@
+import {
+    parseDesktopBrowserProofEvidenceWorkerStartMessage,
+    type DesktopBrowserProofEvidenceWorkerStartMessage,
+} from './selected-proof-runtime-evidence-transport.js';
+
 import { loadFreshTranscriptCoreKernel } from '#packages/wasm/src/index';
 import { resolveCommonProofKernelContext } from '#packages/wasm/src/transcript-core-bridge/common-proof-kernel-context';
-
-type StartMessage = Readonly<{
-    command: 'run-selected-proof-runtime-evidence';
-    wasmSha256Hex: string;
-}>;
 
 const workerScope = globalThis as unknown as Readonly<{
     addEventListener(
@@ -14,28 +14,8 @@ const workerScope = globalThis as unknown as Readonly<{
     postMessage(message: unknown): void;
 }>;
 
-const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-    typeof value === 'object' && value !== null && !Array.isArray(value);
-
-const parseStartMessage = (value: unknown): StartMessage => {
-    if (
-        !isRecord(value) ||
-        value.command !== 'run-selected-proof-runtime-evidence' ||
-        typeof value.wasmSha256Hex !== 'string' ||
-        !/^[0-9a-f]{64}$/u.test(value.wasmSha256Hex)
-    ) {
-        throw new TypeError(
-            'The desktop proof-evidence worker received a malformed start message.',
-        );
-    }
-    return Object.freeze({
-        command: value.command,
-        wasmSha256Hex: value.wasmSha256Hex,
-    });
-};
-
 const runSelectedProofRuntimeEvidence = async (
-    _message: StartMessage,
+    message: DesktopBrowserProofEvidenceWorkerStartMessage,
 ): Promise<void> => {
     const kernel = await loadFreshTranscriptCoreKernel();
     const context = resolveCommonProofKernelContext(kernel);
@@ -45,13 +25,14 @@ const runSelectedProofRuntimeEvidence = async (
         );
     }
 
-    // The production kernel intentionally refuses every selected proof until
-    // one exact suite record and its six real artifact references are frozen.
-    // The evidence workload must consume that record and construct genuine
-    // setup, ballot, aggregate, and replay authorities; a synthetic suite or
-    // fixture acknowledgement is not an evidence substitute.
+    if (message.ownershipRole === 'generation') {
+        throw new Error(
+            'Desktop proof generation evidence is blocked because the production worker does not expose one frozen canonical suite record and the authenticated setup intent, VSS terminal, evaluator source, and package-assembly authorities required to generate genuine same-secret and relinearization-round-two proofs.',
+        );
+    }
+
     throw new Error(
-        'Desktop proof evidence is blocked until the production kernel freezes and exposes the exact selected suite record with its six real artifact references.',
+        'Desktop proof verification evidence is blocked because the production worker does not expose the canonical application records and verified prerequisite authorities required to reconstruct and freshly verify the transported suite-bound same-secret and relinearization-round-two statements.',
     );
 };
 
@@ -60,15 +41,17 @@ workerScope.addEventListener('message', (event) => {
     if (started) {
         workerScope.postMessage({
             failureMessage:
-                'The desktop proof-evidence worker accepts exactly one workload.',
+                'The desktop proof-evidence worker accepts exactly one role-specific operation.',
             messageKind: 'failure',
         });
         return;
     }
     started = true;
-    let message: StartMessage;
+    let message: DesktopBrowserProofEvidenceWorkerStartMessage;
     try {
-        message = parseStartMessage(event.data);
+        message = parseDesktopBrowserProofEvidenceWorkerStartMessage(
+            event.data,
+        );
     } catch (error) {
         workerScope.postMessage({
             failureMessage:

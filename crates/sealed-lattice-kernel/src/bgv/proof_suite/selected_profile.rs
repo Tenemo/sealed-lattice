@@ -67,6 +67,8 @@ use super::{
 #[cfg(test)]
 use super::ProofProfileSet;
 use super::profile::FirstProfileRootTopology;
+#[cfg(test)]
+use super::row_code_whir::RowCodeWhirSelectedParameters;
 
 #[cfg(test)]
 use crate::bgv::evaluator::program::selected_evaluator_program_set;
@@ -119,9 +121,14 @@ fn expected_product_sampler_total_xof_query_count_ceiling(
         return Err(ProofProfileError::InvalidSchedule);
     }
     let candidate_block_count = candidate_byte_length / oracle_answer_byte_length;
-    u64::from(sampler_accounting.maximum_candidate_draw_count())
+    let expansion_block_query_count = u64::from(sampler_accounting.maximum_candidate_draw_count())
         .checked_mul(candidate_block_count)
-        .and_then(|candidate_query_count| candidate_query_count.checked_add(1))
+        .ok_or(ProofProfileError::CountOverflow)?;
+    if sampler_accounting.candidate_xof_query_count_ceiling() != expansion_block_query_count {
+        return Err(ProofProfileError::InvalidSchedule);
+    }
+    expansion_block_query_count
+        .checked_add(1)
         .ok_or(ProofProfileError::CountOverflow)
 }
 
@@ -1652,12 +1659,16 @@ mod tests {
             .expect("selected same-secret variant");
         assert_eq!(
             same_secret_variant.quotient_decomposition_stride(&same_secret_context),
-            Ok(17_266)
+            Ok(17_152)
         );
         assert!(same_secret_variant.ordered_masks().iter().all(|mask| {
             match mask.mask_kind() {
-                RelationMaskKind::Trace => mask.mask_degree_bound_exclusive() == 784,
-                RelationMaskKind::Telescoping => mask.mask_degree_bound_exclusive() == 16_784,
+                RelationMaskKind::Trace => {
+                    mask.mask_degree_bound_exclusive()
+                        == RowCodeWhirSelectedParameters::selected()
+                            .trace_mask_degree_bound_exclusive
+                }
+                RelationMaskKind::Telescoping => mask.mask_degree_bound_exclusive() == 16_898,
                 RelationMaskKind::OpeningBatch => mask.mask_degree_bound_exclusive() == 262_143,
             }
         }));
@@ -1674,12 +1685,16 @@ mod tests {
             .expect("selected ballot variant");
         assert_eq!(
             ballot_variant.quotient_decomposition_stride(&ballot_context),
-            Ok(33_662)
+            Ok(33_536)
         );
         assert!(ballot_variant.ordered_masks().iter().all(|mask| {
             match mask.mask_kind() {
-                RelationMaskKind::Trace => mask.mask_degree_bound_exclusive() == 794,
-                RelationMaskKind::Telescoping => mask.mask_degree_bound_exclusive() == 388,
+                RelationMaskKind::Trace => {
+                    mask.mask_degree_bound_exclusive()
+                        == RowCodeWhirSelectedParameters::selected()
+                            .trace_mask_degree_bound_exclusive
+                }
+                RelationMaskKind::Telescoping => mask.mask_degree_bound_exclusive() == 514,
                 RelationMaskKind::OpeningBatch => mask.mask_degree_bound_exclusive() == 262_143,
             }
         }));

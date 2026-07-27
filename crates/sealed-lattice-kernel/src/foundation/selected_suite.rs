@@ -598,7 +598,7 @@ fn derive_selected_fixed_algebra_candidate_record() -> SchemaResult<SuiteRecord>
 }
 
 #[cfg(test)]
-fn derive_selected_suite_candidate_record() -> SchemaResult<SuiteRecord> {
+pub(super) fn derive_selected_suite_candidate_record() -> SchemaResult<SuiteRecord> {
     require_selected_foundation_geometry()?;
     require_selected_evaluator_catalog()?;
     require_selected_release_margins()?;

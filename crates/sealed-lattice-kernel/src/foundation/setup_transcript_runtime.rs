@@ -1,5 +1,3 @@
-use std::{cell::RefCell, collections::HashMap};
-
 use zeroize::Zeroizing;
 
 use crate::bgv::setup::{
@@ -15,6 +13,9 @@ use super::board_ingestion_runtime::{
     BOARD_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, VerifiedBoardApplicationSource,
     resolve_verified_board_application_sources,
 };
+use super::prepared_signed_carrier::{
+    cancel_prepared_signed_carrier, finish_prepared_signed_carrier, retain_prepared_signed_carrier,
+};
 use super::private_randomness_runtime::with_authenticated_setup_object_source;
 use super::runtime_input::{RuntimeInputReader as InputReader, refusal_status};
 use super::state_runtime::{
@@ -24,8 +25,8 @@ use super::{
     ActionPrivateRandomness, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType,
     CanonicalTuple, FOUNDATION_PROFILE, FoundationObjectType, Hash512,
     ML_DSA_65_SIGNATURE_BYTE_LENGTH, ObjectEnvelope, ParticipantIdentity, PrivateRandomnessDomain,
-    RefusalReason, Roster, SignedCarrier, StreamDescriptor, VerifiedStateReservationRuntimeBinding,
-    hash_foundation_tuple_512, signature_message,
+    RefusalReason, Roster, StreamDescriptor, VerifiedStateReservationRuntimeBinding,
+    hash_foundation_tuple_512,
 };
 
 pub(crate) const COMMAND_PREPARE_SETUP_INTENT_CARRIER: u32 = 17;
@@ -38,56 +39,12 @@ pub(crate) const COMMAND_PREPARE_DEALER_PUBLIC_RECORD_CARRIER: u32 = 22;
 const HANDLE_BYTE_LENGTH: usize = size_of::<u32>();
 const PUBLIC_RANDOMNESS_COMPONENT_BYTE_LENGTH: usize = 32;
 const PREPARED_CARRIER_DESCRIPTION_BYTE_LENGTH: usize = HANDLE_BYTE_LENGTH + Hash512::BYTE_LENGTH;
-const MAXIMUM_PREPARED_CARRIER_COUNT: usize = 64;
 const PUBLIC_RANDOMNESS_COMMITMENT_DOMAIN: &str =
     "sealed-lattice/setup/public-randomness-commitment/v1";
 const PUBLIC_RANDOMNESS_PRIVATE_SOURCE_DOMAIN: &str =
     "sealed-lattice/setup/public-randomness-private-source/v1";
 
 type RuntimeResult<Value> = Result<Value, u32>;
-
-#[derive(Clone)]
-struct PreparedSetupTranscriptCarrier {
-    envelope: ObjectEnvelope,
-    roster: Roster,
-}
-
-#[derive(Default)]
-struct PreparedSetupTranscriptCarrierRegistry {
-    next_handle: u32,
-    records: HashMap<u32, PreparedSetupTranscriptCarrier>,
-}
-
-impl PreparedSetupTranscriptCarrierRegistry {
-    fn retain(&mut self, record: PreparedSetupTranscriptCarrier) -> RuntimeResult<u32> {
-        if self.records.len() >= MAXIMUM_PREPARED_CARRIER_COUNT {
-            return Err(refusal_status(RefusalReason::OutsideSupportedProfile));
-        }
-        self.next_handle = self
-            .next_handle
-            .checked_add(1)
-            .ok_or_else(|| refusal_status(RefusalReason::OutsideSupportedProfile))?;
-        self.records.insert(self.next_handle, record);
-        Ok(self.next_handle)
-    }
-
-    fn get(&self, handle: u32) -> RuntimeResult<&PreparedSetupTranscriptCarrier> {
-        self.records
-            .get(&handle)
-            .ok_or_else(|| refusal_status(RefusalReason::ConsumedState))
-    }
-
-    fn remove(&mut self, handle: u32) -> RuntimeResult<PreparedSetupTranscriptCarrier> {
-        self.records
-            .remove(&handle)
-            .ok_or_else(|| refusal_status(RefusalReason::ConsumedState))
-    }
-}
-
-thread_local! {
-    static PREPARED_CARRIER_REGISTRY: RefCell<PreparedSetupTranscriptCarrierRegistry> =
-        RefCell::new(PreparedSetupTranscriptCarrierRegistry::default());
-}
 
 pub(crate) fn run_setup_transcript_command(command: u32, input: &[u8]) -> RuntimeResult<Vec<u8>> {
     match command {
@@ -582,18 +539,11 @@ fn retain_prepared_carrier(
     roster: &Roster,
     roster_hash: Hash512,
 ) -> RuntimeResult<Vec<u8>> {
-    let message = signature_message(&envelope, roster_hash).map_err(codec_status)?;
-    let handle = PREPARED_CARRIER_REGISTRY.with(|registry| {
-        registry
-            .borrow_mut()
-            .retain(PreparedSetupTranscriptCarrier {
-                envelope,
-                roster: roster.clone(),
-            })
-    })?;
+    let description =
+        retain_prepared_signed_carrier(envelope, roster, roster_hash).map_err(refusal_status)?;
     let mut output = Vec::with_capacity(PREPARED_CARRIER_DESCRIPTION_BYTE_LENGTH);
-    output.extend_from_slice(&handle.to_le_bytes());
-    output.extend_from_slice(message.as_bytes());
+    output.extend_from_slice(&description.handle().to_le_bytes());
+    output.extend_from_slice(description.signature_message().as_bytes());
     Ok(output)
 }
 
@@ -602,29 +552,14 @@ fn finish_prepared_carrier(input: &[u8]) -> RuntimeResult<Vec<u8>> {
     let handle = reader.read_u32()?;
     let signature = reader.read_array::<ML_DSA_65_SIGNATURE_BYTE_LENGTH>()?;
     reader.finish()?;
-    let carrier = PREPARED_CARRIER_REGISTRY.with(|registry| -> RuntimeResult<SignedCarrier> {
-        let registry = registry.borrow();
-        let record = registry.get(handle)?;
-        let carrier = SignedCarrier {
-            envelope: record.envelope.clone(),
-            signature,
-        };
-        carrier
-            .verify_signature(&record.roster)
-            .into_result()
-            .map_err(refusal_status)?;
-        Ok(carrier)
-    })?;
-    let encoded = carrier.encode().map_err(codec_status)?;
-    PREPARED_CARRIER_REGISTRY.with(|registry| registry.borrow_mut().remove(handle).map(drop))?;
-    Ok(encoded)
+    finish_prepared_signed_carrier(handle, signature).map_err(refusal_status)
 }
 
 fn cancel_prepared_carrier(input: &[u8]) -> RuntimeResult<Vec<u8>> {
     let mut reader = InputReader::new(input);
     let handle = reader.read_u32()?;
     reader.finish()?;
-    PREPARED_CARRIER_REGISTRY.with(|registry| registry.borrow_mut().remove(handle).map(drop))?;
+    cancel_prepared_signed_carrier(handle).map_err(refusal_status)?;
     Ok(Vec::new())
 }
 

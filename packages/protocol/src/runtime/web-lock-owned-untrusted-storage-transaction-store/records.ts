@@ -43,7 +43,7 @@ export const commonProofLiveObjectCount = 4_096;
 const commonProofDataChunkByteLength = BigInt(
     foundationProfile.streamChunkByteLength,
 );
-const commonProofSecretRecordOverheadByteLength = 968n;
+export const commonProofSecretRecordOverheadByteLength = 968n;
 const commonProofObjectHeaderPayloadByteLength = 9n;
 const commonProofCanonicalOutputChunkByteLength = 1_048_576n;
 const commonProofMaximumOutputChunkCount = 5n;

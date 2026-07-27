@@ -6,18 +6,19 @@
 //! root edge prevents artifact generation.
 
 #[cfg(test)]
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
-use crate::foundation::{FOUNDATION_PROFILE, ProofApplicationSlotCeilings as ProofFamilies};
+use crate::foundation::{
+    CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple, FOUNDATION_PROFILE,
+    ProofApplicationSlotCeilings as ProofFamilies,
+};
 
 #[cfg(test)]
 use crate::{
     bgv::evaluator::candidate_evidence::EvaluatorCandidateInput,
     bgv::setup::SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
-    foundation::{
-        ArtifactKind, ArtifactReference, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType,
-        CanonicalTuple,
-    },
+    foundation::{ArtifactKind, ArtifactReference},
 };
 
 #[cfg(test)]
@@ -26,63 +27,49 @@ use super::relation_plan::{
 };
 
 #[cfg(test)]
+use super::row_code_whir::RowCodeWhirConstructionPlan;
 use super::row_code_whir::{
     ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN, ROW_CODE_WHIR_AGGREGATE_NODE_DOMAIN,
     ROW_CODE_WHIR_PHASE_COLUMN_LEAF_DOMAIN, ROW_CODE_WHIR_PHASE_COLUMN_NODE_DOMAIN,
-    ROW_CODE_WHIR_PHASE_COLUMN_QUERY_COORDINATE_COUNT, ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN,
-    RowCodeWhirConstructionPlan, RowCodeWhirSelectedParameters, RowCodeWhirSoundnessAssumption,
+    ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN, RowCodeWhirSelectedParameters,
+    RowCodeWhirSoundnessAssumption,
 };
 
-#[cfg(test)]
 use super::transcript::{
     TRANSCRIPT_ABSORB_DOMAIN_BYTES, TRANSCRIPT_ACCEPTED_CHALLENGE_DOMAIN_BYTES,
-    TRANSCRIPT_CHALLENGE_HANDLE_DOMAIN_BYTES, TRANSCRIPT_DISTINCT_QUERY_BLOCK_DOMAIN_BYTES,
-    TRANSCRIPT_INITIAL_DOMAIN_BYTES, TRANSCRIPT_PRODUCT_RESIDUE_BLOCK_DOMAIN_BYTES,
-    TRANSCRIPT_RESPONSE_BINDING_DOMAIN_BYTES,
+    TRANSCRIPT_CHALLENGE_EXPANSION_ACCUMULATOR_DOMAIN_BYTES,
+    TRANSCRIPT_CHALLENGE_HANDLE_DOMAIN_BYTES, TRANSCRIPT_INITIAL_DOMAIN_BYTES,
+    TRANSCRIPT_RESPONSE_BINDING_DOMAIN_BYTES, TRANSCRIPT_RESPONSE_ROOT_DOMAIN_BYTES,
 };
 
+use super::field::PROOF_CHALLENGE_EXTENSION_POLYNOMIAL_COEFFICIENTS;
 use super::{
-    CompiledRelationPlan, RelationPlanCheckContext, RelationPlanError, SelectedEvaluatorEntryKind,
+    CompiledRelationPlan, PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR, PROOF_BASE_FIELD_MODULUS,
+    RelationPlanCheckContext, RelationPlanError, SelectedEvaluatorEntryKind,
     selected_evaluator_entry_positions, selected_relation_plan_check_context,
 };
 
 #[cfg(test)]
 use super::{
-    PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR, PROOF_BASE_FIELD_MODULUS,
-    PROOF_CHALLENGE_EXTENSION_DEGREE, PROOF_CHALLENGE_EXTENSION_POLYNOMIAL_COEFFICIENTS,
-    RelationPlanVariant, SuiteModulusReference, validate_proof_field_profile,
+    PROOF_CHALLENGE_EXTENSION_DEGREE, RelationPlanVariant, SuiteModulusReference,
+    validate_proof_field_profile,
     zero_knowledge::{TraceMaskObservationCoordinateCatalog, TraceMaskSurjectivityCertificate},
 };
 
-#[cfg(test)]
 const PROOF_PROFILE_SET_SCHEMA_IDENTIFIER: u16 = 0x2200;
-#[cfg(test)]
 const PROOF_FIELD_PROFILE_SCHEMA_IDENTIFIER: u16 = 0x2201;
-#[cfg(test)]
 const PROOF_FAMILY_PROFILE_SCHEMA_IDENTIFIER: u16 = 0x2202;
-#[cfg(test)]
 const RELATION_PLAN_REFERENCE_SCHEMA_IDENTIFIER: u16 = 0x222c;
-#[cfg(test)]
 const RELATION_ROOT_COMPATIBILITY_EDGE_SCHEMA_IDENTIFIER: u16 = 0x222a;
-#[cfg(test)]
 const RELATION_ROOT_ENDPOINT_SCHEMA_IDENTIFIER: u16 = 0x222b;
-#[cfg(test)]
 const ROW_CODE_WHIR_CONSTRUCTION_PROFILE_SCHEMA_IDENTIFIER: u16 = 0x2254;
-#[cfg(test)]
 const ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_SCHEMA_IDENTIFIER: u16 = 0x2255;
-#[cfg(test)]
 const ROW_CODE_WHIR_HASH_PROFILE_SCHEMA_IDENTIFIER: u16 = 0x2256;
-#[cfg(test)]
 const SCHEMA_VERSION: u16 = 1;
-#[cfg(test)]
 const PROOF_FAMILY_PROFILE_SCHEMA_VERSION: u16 = 2;
-#[cfg(test)]
 const PROOF_PROFILE_SET_VERSION: u16 = 4;
-#[cfg(test)]
 const SELECTED_ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_COUNT: usize = 31;
-#[cfg(test)]
 const ROW_CODE_WHIR_HASH_ALGORITHM_IDENTIFIER: &str = "SHAKE256";
-#[cfg(test)]
 const ROW_CODE_WHIR_DIGEST_BYTE_LENGTH: u16 = 64;
 
 pub(crate) const FIRST_PROFILE_APPLICATION_FAMILIES: [u16; 12] = [
@@ -95,6 +82,14 @@ pub(crate) const FIRST_PROFILE_APPLICATION_FAMILIES: [u16; 12] = [
     ProofFamilies::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
     ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
     ProofFamilies::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
+    ProofFamilies::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER,
+    ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+    ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+];
+
+#[cfg(test)]
+const PERSISTENT_COMMITTED_MATERIAL_APPLICATION_FAMILIES: [u16; 4] = [
+    ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
     ProofFamilies::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER,
     ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
     ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
@@ -504,6 +499,681 @@ impl FirstProfileRootTopology {
     }
 }
 
+pub(crate) fn verify_canonical_proof_profile_set(
+    canonical_bytes: &[u8],
+    maximum_ballot_attempts_per_participant: u16,
+) -> Result<(), ProofProfileError> {
+    if maximum_ballot_attempts_per_participant == 0 {
+        return Err(ProofProfileError::InvalidRootTopology);
+    }
+    let limits = CanonicalDecodeLimits::default();
+    let tuple = CanonicalTuple::decode(canonical_bytes, &limits)
+        .map_err(|_| ProofProfileError::CanonicalEncoding)?;
+    require_profile_tuple(
+        &tuple,
+        PROOF_PROFILE_SET_SCHEMA_IDENTIFIER,
+        PROOF_PROFILE_SET_VERSION,
+        5,
+    )?;
+
+    verify_proof_fields(&profile_nested_tuples(&tuple.items[0], &limits, 1)?)?;
+    verify_proof_families(&profile_nested_tuples(
+        &tuple.items[1],
+        &limits,
+        FIRST_PROFILE_APPLICATION_FAMILIES.len(),
+    )?)?;
+    verify_relation_plan_references(&profile_nested_tuples(
+        &tuple.items[2],
+        &limits,
+        FIRST_PROFILE_APPLICATION_FAMILIES.len(),
+    )?)?;
+    verify_root_compatibility_edges(
+        &profile_nested_tuples(&tuple.items[3], &limits, limits.maximum_item_count)?,
+        maximum_ballot_attempts_per_participant,
+    )?;
+    let construction_profile = profile_nested_tuple(&tuple.items[4], &limits)?;
+    verify_row_code_whir_construction_profile(&construction_profile, &limits)?;
+
+    let reencoded = tuple
+        .encode_with_limits(&limits)
+        .map_err(|_| ProofProfileError::CanonicalEncoding)?;
+    if reencoded != canonical_bytes {
+        return Err(ProofProfileError::CanonicalEncoding);
+    }
+    Ok(())
+}
+
+fn verify_proof_fields(fields: &[CanonicalTuple]) -> Result<(), ProofProfileError> {
+    let [field] = fields else {
+        return Err(ProofProfileError::InvalidSchedule);
+    };
+    require_profile_tuple(
+        field,
+        PROOF_FIELD_PROFILE_SCHEMA_IDENTIFIER,
+        SCHEMA_VERSION,
+        3,
+    )?;
+    if profile_u64(&field.items[0])? != PROOF_BASE_FIELD_MODULUS
+        || profile_u64(&field.items[1])? != PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR
+        || profile_u64_list(&field.items[2])? != PROOF_CHALLENGE_EXTENSION_POLYNOMIAL_COEFFICIENTS
+    {
+        return Err(ProofProfileError::InvalidSchedule);
+    }
+    Ok(())
+}
+
+fn verify_proof_families(families: &[CanonicalTuple]) -> Result<(), ProofProfileError> {
+    if families.len() != FIRST_PROFILE_APPLICATION_FAMILIES.len() {
+        return Err(ProofProfileError::InvalidSchedule);
+    }
+    for (family, expected_family) in families.iter().zip(FIRST_PROFILE_APPLICATION_FAMILIES) {
+        require_profile_tuple(
+            family,
+            PROOF_FAMILY_PROFILE_SCHEMA_IDENTIFIER,
+            PROOF_FAMILY_PROFILE_SCHEMA_VERSION,
+            2,
+        )?;
+        if profile_u16(&family.items[0])? != expected_family || profile_u16(&family.items[1])? != 0
+        {
+            return Err(ProofProfileError::InvalidSchedule);
+        }
+    }
+    Ok(())
+}
+
+fn verify_relation_plan_references(references: &[CanonicalTuple]) -> Result<(), ProofProfileError> {
+    if references.len() != FIRST_PROFILE_APPLICATION_FAMILIES.len() {
+        return Err(ProofProfileError::InvalidRelationPlan);
+    }
+    let mut hashes = BTreeSet::new();
+    for (reference, expected_family) in references.iter().zip(FIRST_PROFILE_APPLICATION_FAMILIES) {
+        require_profile_tuple(
+            reference,
+            RELATION_PLAN_REFERENCE_SCHEMA_IDENTIFIER,
+            SCHEMA_VERSION,
+            3,
+        )?;
+        if profile_u16(&reference.items[0])? != expected_family
+            || profile_u64(&reference.items[1])? == 0
+            || !hashes.insert(profile_hash(&reference.items[2])?)
+        {
+            return Err(ProofProfileError::InvalidRelationPlan);
+        }
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct DecodedRootEndpoint {
+    family: u16,
+    roster_position: Option<u16>,
+    schedule_position: Option<u32>,
+    top_count: Option<u16>,
+    producer_sequence: Option<u64>,
+    verifier_source_ordinal: u32,
+}
+
+fn verify_root_compatibility_edges(
+    edges: &[CanonicalTuple],
+    maximum_ballot_attempts_per_participant: u16,
+) -> Result<(), ProofProfileError> {
+    if edges.is_empty() {
+        return Err(ProofProfileError::InvalidRootTopology);
+    }
+    let mut previous_bytes: Option<Vec<u8>> = None;
+    let mut consumers = BTreeSet::new();
+    for edge in edges {
+        require_profile_tuple(
+            edge,
+            RELATION_ROOT_COMPATIBILITY_EDGE_SCHEMA_IDENTIFIER,
+            SCHEMA_VERSION,
+            3,
+        )?;
+        let encoded = edge
+            .encode()
+            .map_err(|_| ProofProfileError::CanonicalEncoding)?;
+        if previous_bytes
+            .as_ref()
+            .is_some_and(|previous| previous >= &encoded)
+        {
+            return Err(ProofProfileError::InvalidRootTopology);
+        }
+        previous_bytes = Some(encoded);
+
+        let producer = decode_root_endpoint(
+            &profile_nested_tuple(&edge.items[0], &CanonicalDecodeLimits::default())?,
+            maximum_ballot_attempts_per_participant,
+        )?;
+        let consumer = decode_root_endpoint(
+            &profile_nested_tuple(&edge.items[1], &CanonicalDecodeLimits::default())?,
+            maximum_ballot_attempts_per_participant,
+        )?;
+        let construction_kind = profile_u16(&edge.items[2])?;
+        if producer == consumer
+            || !matches!(construction_kind, 1 | 2)
+            || !allowed_decoded_root_transition(producer.family, consumer.family)
+            || !decoded_root_scopes_are_compatible(producer, consumer)
+            || !consumers.insert(consumer)
+        {
+            return Err(ProofProfileError::InvalidRootTopology);
+        }
+    }
+    Ok(())
+}
+
+fn decode_root_endpoint(
+    tuple: &CanonicalTuple,
+    maximum_ballot_attempts_per_participant: u16,
+) -> Result<DecodedRootEndpoint, ProofProfileError> {
+    require_profile_tuple(
+        tuple,
+        RELATION_ROOT_ENDPOINT_SCHEMA_IDENTIFIER,
+        SCHEMA_VERSION,
+        6,
+    )?;
+    let endpoint = DecodedRootEndpoint {
+        family: profile_u16(&tuple.items[0])?,
+        roster_position: profile_optional_u16(&tuple.items[1])?,
+        schedule_position: profile_optional_u32(&tuple.items[2])?,
+        top_count: profile_optional_u16(&tuple.items[3])?,
+        producer_sequence: profile_optional_u64(&tuple.items[4])?,
+        verifier_source_ordinal: profile_u32(&tuple.items[5])?,
+    };
+    let roster_expected = matches!(
+        endpoint.family,
+        ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+            | ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+            | ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER
+            | ProofFamilies::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+            | ProofFamilies::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER
+            | ProofFamilies::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER
+            | ProofFamilies::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+            | ProofFamilies::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER
+            | ProofFamilies::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER
+    );
+    let schedule_expected = decoded_family_has_schedule(endpoint.family);
+    let top_count_expected =
+        endpoint.family == ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER;
+    let producer_sequence_expected =
+        endpoint.family == ProofFamilies::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER;
+    if !FIRST_PROFILE_APPLICATION_FAMILIES.contains(&endpoint.family)
+        || endpoint.roster_position.is_some() != roster_expected
+        || endpoint.schedule_position.is_some() != schedule_expected
+        || endpoint.top_count.is_some() != top_count_expected
+        || endpoint.producer_sequence.is_some() != producer_sequence_expected
+        || endpoint
+            .roster_position
+            .is_some_and(|position| position >= FOUNDATION_PROFILE.participant_count)
+        || endpoint
+            .schedule_position
+            .is_some_and(|position| position != 0)
+        || endpoint
+            .top_count
+            .is_some_and(|top_count| !(1..=FOUNDATION_PROFILE.option_count).contains(&top_count))
+        || endpoint
+            .producer_sequence
+            .is_some_and(|sequence| sequence >= u64::from(maximum_ballot_attempts_per_participant))
+    {
+        return Err(ProofProfileError::InvalidRootTopology);
+    }
+    Ok(endpoint)
+}
+
+fn decoded_family_has_schedule(family: u16) -> bool {
+    matches!(
+        family,
+        ProofFamilies::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER
+            | ProofFamilies::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+            | ProofFamilies::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER
+            | ProofFamilies::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+    )
+}
+
+fn allowed_decoded_root_transition(producer_family: u16, consumer_family: u16) -> bool {
+    matches!(
+        (producer_family, consumer_family),
+        (
+            ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+        ) | (
+            ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofFamilies::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER,
+        ) | (
+            ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofFamilies::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofFamilies::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofFamilies::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofFamilies::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+        ) | (
+            ProofFamilies::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofFamilies::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+        ) | (
+            ProofFamilies::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofFamilies::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofFamilies::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER,
+        ) | (
+            ProofFamilies::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofFamilies::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofFamilies::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+        ) | (
+            ProofFamilies::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofFamilies::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+    )
+}
+
+fn decoded_root_scopes_are_compatible(
+    producer: DecodedRootEndpoint,
+    consumer: DecodedRootEndpoint,
+) -> bool {
+    let families = (producer.family, consumer.family);
+    let roster_matches = match families {
+        (
+            ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        | (
+            ProofFamilies::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofFamilies::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        | (
+            ProofFamilies::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofFamilies::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        | (
+            ProofFamilies::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER
+            | ProofFamilies::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+        ) => true,
+        _ => producer
+            .roster_position
+            .zip(consumer.roster_position)
+            .is_none_or(|(left, right)| left == right),
+    };
+    let schedule_matches = matches!(
+        families,
+        (
+            ProofFamilies::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofFamilies::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+    ) || producer
+        .schedule_position
+        .zip(consumer.schedule_position)
+        .is_none_or(|(left, right)| left == right);
+    roster_matches && schedule_matches
+}
+
+fn verify_row_code_whir_construction_profile(
+    tuple: &CanonicalTuple,
+    limits: &CanonicalDecodeLimits,
+) -> Result<(), ProofProfileError> {
+    require_profile_tuple(
+        tuple,
+        ROW_CODE_WHIR_CONSTRUCTION_PROFILE_SCHEMA_IDENTIFIER,
+        SCHEMA_VERSION,
+        19,
+    )?;
+    let selected = RowCodeWhirSelectedParameters::selected();
+    let expected_parameters = [
+        u64::try_from(selected.logical_polynomial_coefficient_count)
+            .map_err(|_| ProofProfileError::CountOverflow)?,
+        u64::try_from(selected.logical_polynomials_per_physical_row)
+            .map_err(|_| ProofProfileError::CountOverflow)?,
+        u64::try_from(selected.physical_row_witness_variable_count)
+            .map_err(|_| ProofProfileError::CountOverflow)?,
+        u64::try_from(selected.row_code_log_inverse_rate)
+            .map_err(|_| ProofProfileError::CountOverflow)?,
+        u64::try_from(selected.table_variable_count)
+            .map_err(|_| ProofProfileError::CountOverflow)?,
+        u64::try_from(selected.polynomial_commitment_variable_count)
+            .map_err(|_| ProofProfileError::CountOverflow)?,
+        u64::try_from(selected.starting_log_inverse_rate)
+            .map_err(|_| ProofProfileError::CountOverflow)?,
+        u64::try_from(selected.folding_factor).map_err(|_| ProofProfileError::CountOverflow)?,
+    ];
+    for (item, expected) in tuple.items[..8].iter().zip(expected_parameters) {
+        if profile_u64(item)? != expected {
+            return Err(ProofProfileError::InvalidSchedule);
+        }
+    }
+    if selected.soundness_assumption != RowCodeWhirSoundnessAssumption::UniqueDecoding
+        || profile_u16(&tuple.items[8])? != 1
+        || profile_u64(&tuple.items[9])?
+            != u64::try_from(selected.security_level)
+                .map_err(|_| ProofProfileError::CountOverflow)?
+        || profile_u64(&tuple.items[10])?
+            != u64::try_from(selected.proof_of_work_bits)
+                .map_err(|_| ProofProfileError::CountOverflow)?
+        || profile_u64(&tuple.items[11])?
+            != u64::try_from(selected.outer_query_count)
+                .map_err(|_| ProofProfileError::CountOverflow)?
+        || profile_u64(&tuple.items[12])? != selected.trace_mask_degree_bound_exclusive
+        || profile_u64(&tuple.items[13])?
+            != u64::try_from(selected.direct_bound_query_count)
+                .map_err(|_| ProofProfileError::CountOverflow)?
+        || profile_u64(&tuple.items[14])?
+            != u64::try_from(selected.verified_vss_bound_query_count)
+                .map_err(|_| ProofProfileError::CountOverflow)?
+        || profile_u32(&tuple.items[15])? != selected.maximum_fiat_shamir_candidate_draws_per_output
+        || profile_u64(&tuple.items[16])? != PROOF_EVALUATION_COSET_OFFSET
+    {
+        return Err(ProofProfileError::InvalidSchedule);
+    }
+
+    verify_row_code_whir_hash_profile(&profile_nested_tuple(&tuple.items[17], limits)?)?;
+    verify_row_code_whir_construction_references(&profile_nested_tuples(
+        &tuple.items[18],
+        limits,
+        SELECTED_ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_COUNT,
+    )?)
+}
+
+fn verify_row_code_whir_hash_profile(tuple: &CanonicalTuple) -> Result<(), ProofProfileError> {
+    require_profile_tuple(
+        tuple,
+        ROW_CODE_WHIR_HASH_PROFILE_SCHEMA_IDENTIFIER,
+        SCHEMA_VERSION,
+        14,
+    )?;
+    let algorithm = tuple.items[0]
+        .variable_value_bytes()
+        .map_err(|_| ProofProfileError::CanonicalEncoding)?;
+    let domains: [&[u8]; 12] = [
+        ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN,
+        ROW_CODE_WHIR_PHASE_COLUMN_LEAF_DOMAIN,
+        ROW_CODE_WHIR_PHASE_COLUMN_NODE_DOMAIN,
+        ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN,
+        ROW_CODE_WHIR_AGGREGATE_NODE_DOMAIN,
+        TRANSCRIPT_INITIAL_DOMAIN_BYTES,
+        TRANSCRIPT_ABSORB_DOMAIN_BYTES,
+        TRANSCRIPT_CHALLENGE_HANDLE_DOMAIN_BYTES,
+        TRANSCRIPT_ACCEPTED_CHALLENGE_DOMAIN_BYTES,
+        TRANSCRIPT_RESPONSE_BINDING_DOMAIN_BYTES,
+        TRANSCRIPT_RESPONSE_ROOT_DOMAIN_BYTES,
+        TRANSCRIPT_CHALLENGE_EXPANSION_ACCUMULATOR_DOMAIN_BYTES,
+    ];
+    if tuple.items[0].item_type() != CanonicalItemType::Ascii
+        || algorithm != ROW_CODE_WHIR_HASH_ALGORITHM_IDENTIFIER.as_bytes()
+        || profile_u16(&tuple.items[1])? != ROW_CODE_WHIR_DIGEST_BYTE_LENGTH
+        || tuple.items[2..]
+            .iter()
+            .zip(domains)
+            .any(|(item, expected)| {
+                item.item_type() != CanonicalItemType::RawBytes
+                    || item.canonical_bytes() != expected
+            })
+    {
+        return Err(ProofProfileError::InvalidSchedule);
+    }
+    Ok(())
+}
+
+fn verify_row_code_whir_construction_references(
+    references: &[CanonicalTuple],
+) -> Result<(), ProofProfileError> {
+    let expected_coordinates = expected_row_code_whir_construction_coordinates();
+    if references.len() != expected_coordinates.len() {
+        return Err(ProofProfileError::InvalidSchedule);
+    }
+    let mut identity_hashes = BTreeSet::new();
+    for (reference, expected) in references.iter().zip(expected_coordinates) {
+        require_profile_tuple(
+            reference,
+            ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_SCHEMA_IDENTIFIER,
+            SCHEMA_VERSION,
+            5,
+        )?;
+        let observed = (
+            profile_u16(&reference.items[0])?,
+            profile_optional_u32(&reference.items[1])?,
+            profile_optional_u16(&reference.items[2])?,
+        );
+        if observed != expected
+            || profile_u64(&reference.items[3])? == 0
+            || !identity_hashes.insert(profile_hash(&reference.items[4])?)
+        {
+            return Err(ProofProfileError::InvalidSchedule);
+        }
+    }
+    Ok(())
+}
+
+fn expected_row_code_whir_construction_coordinates() -> Vec<(u16, Option<u32>, Option<u16>)> {
+    let mut coordinates = Vec::with_capacity(SELECTED_ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_COUNT);
+    for family in FIRST_PROFILE_APPLICATION_FAMILIES {
+        if family == ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER {
+            coordinates.extend(
+                (1..=FOUNDATION_PROFILE.option_count)
+                    .map(|top_count| (family, None, Some(top_count))),
+            );
+        } else {
+            coordinates.push((
+                family,
+                decoded_family_has_schedule(family).then_some(0),
+                None,
+            ));
+        }
+    }
+    coordinates
+}
+
+fn profile_nested_tuples(
+    item: &CanonicalItem,
+    limits: &CanonicalDecodeLimits,
+    maximum_count: usize,
+) -> Result<Vec<CanonicalTuple>, ProofProfileError> {
+    let (count, bytes) = profile_list_header(item, CanonicalItemType::NestedTuple)?;
+    if count > maximum_count {
+        return Err(ProofProfileError::InvalidSchedule);
+    }
+    let mut tuples = Vec::with_capacity(count);
+    let mut offset = 0_usize;
+    for _ in 0..count {
+        let byte_length = profile_tuple_prefix_byte_length(&bytes[offset..])?;
+        let end = offset
+            .checked_add(byte_length)
+            .ok_or(ProofProfileError::CountOverflow)?;
+        let bytes = bytes
+            .get(offset..end)
+            .ok_or(ProofProfileError::CanonicalEncoding)?;
+        tuples.push(
+            CanonicalTuple::decode(bytes, limits)
+                .map_err(|_| ProofProfileError::CanonicalEncoding)?,
+        );
+        offset = end;
+    }
+    if offset != bytes.len() {
+        return Err(ProofProfileError::CanonicalEncoding);
+    }
+    Ok(tuples)
+}
+
+fn profile_nested_tuple(
+    item: &CanonicalItem,
+    limits: &CanonicalDecodeLimits,
+) -> Result<CanonicalTuple, ProofProfileError> {
+    if item.item_type() != CanonicalItemType::NestedTuple {
+        return Err(ProofProfileError::CanonicalEncoding);
+    }
+    CanonicalTuple::decode(item.canonical_bytes(), limits)
+        .map_err(|_| ProofProfileError::CanonicalEncoding)
+}
+
+fn profile_tuple_prefix_byte_length(bytes: &[u8]) -> Result<usize, ProofProfileError> {
+    let item_count = profile_raw_u32(bytes, 4).ok_or(ProofProfileError::CanonicalEncoding)?;
+    let mut offset = 8_usize;
+    for _ in 0..item_count {
+        let item_length_offset = offset
+            .checked_add(2)
+            .ok_or(ProofProfileError::CountOverflow)?;
+        let item_byte_length = profile_raw_u32(bytes, item_length_offset)
+            .ok_or(ProofProfileError::CanonicalEncoding)?;
+        offset = offset
+            .checked_add(6)
+            .and_then(|value| value.checked_add(item_byte_length as usize))
+            .filter(|end| *end <= bytes.len())
+            .ok_or(ProofProfileError::CanonicalEncoding)?;
+    }
+    Ok(offset)
+}
+
+fn require_profile_tuple(
+    tuple: &CanonicalTuple,
+    schema_identifier: u16,
+    schema_version: u16,
+    item_count: usize,
+) -> Result<(), ProofProfileError> {
+    if tuple.schema_identifier != schema_identifier
+        || tuple.schema_version != schema_version
+        || tuple.items.len() != item_count
+    {
+        return Err(ProofProfileError::InvalidSchedule);
+    }
+    Ok(())
+}
+
+fn profile_list_header(
+    item: &CanonicalItem,
+    expected_element_type: CanonicalItemType,
+) -> Result<(usize, &[u8]), ProofProfileError> {
+    let bytes = item.canonical_bytes();
+    if item.item_type() != CanonicalItemType::HomogeneousList
+        || bytes.len() < 6
+        || profile_raw_u16(bytes, 0) != Some(expected_element_type.canonical_code())
+    {
+        return Err(ProofProfileError::CanonicalEncoding);
+    }
+    let count = profile_raw_u32(bytes, 2).ok_or(ProofProfileError::CanonicalEncoding)?;
+    Ok((count as usize, &bytes[6..]))
+}
+
+fn profile_u64_list(item: &CanonicalItem) -> Result<Vec<u64>, ProofProfileError> {
+    let (count, bytes) = profile_list_header(item, CanonicalItemType::Unsigned64)?;
+    if bytes.len()
+        != count
+            .checked_mul(8)
+            .ok_or(ProofProfileError::CountOverflow)?
+    {
+        return Err(ProofProfileError::CanonicalEncoding);
+    }
+    bytes
+        .chunks_exact(8)
+        .map(|bytes| {
+            let value: [u8; 8] = bytes
+                .try_into()
+                .map_err(|_| ProofProfileError::CanonicalEncoding)?;
+            Ok(u64::from_le_bytes(value))
+        })
+        .collect()
+}
+
+fn profile_u16(item: &CanonicalItem) -> Result<u16, ProofProfileError> {
+    if item.item_type() != CanonicalItemType::Unsigned16 {
+        return Err(ProofProfileError::CanonicalEncoding);
+    }
+    let bytes: [u8; 2] = item
+        .canonical_bytes()
+        .try_into()
+        .map_err(|_| ProofProfileError::CanonicalEncoding)?;
+    Ok(u16::from_le_bytes(bytes))
+}
+
+fn profile_u32(item: &CanonicalItem) -> Result<u32, ProofProfileError> {
+    if item.item_type() != CanonicalItemType::Unsigned32 {
+        return Err(ProofProfileError::CanonicalEncoding);
+    }
+    let bytes: [u8; 4] = item
+        .canonical_bytes()
+        .try_into()
+        .map_err(|_| ProofProfileError::CanonicalEncoding)?;
+    Ok(u32::from_le_bytes(bytes))
+}
+
+fn profile_u64(item: &CanonicalItem) -> Result<u64, ProofProfileError> {
+    if item.item_type() != CanonicalItemType::Unsigned64 {
+        return Err(ProofProfileError::CanonicalEncoding);
+    }
+    let bytes: [u8; 8] = item
+        .canonical_bytes()
+        .try_into()
+        .map_err(|_| ProofProfileError::CanonicalEncoding)?;
+    Ok(u64::from_le_bytes(bytes))
+}
+
+fn profile_hash(item: &CanonicalItem) -> Result<[u8; 64], ProofProfileError> {
+    if item.item_type() != CanonicalItemType::Hash512 {
+        return Err(ProofProfileError::CanonicalEncoding);
+    }
+    item.canonical_bytes()
+        .try_into()
+        .map_err(|_| ProofProfileError::CanonicalEncoding)
+}
+
+fn profile_optional_u16(item: &CanonicalItem) -> Result<Option<u16>, ProofProfileError> {
+    profile_optional_bytes(item, CanonicalItemType::Unsigned16, 2)?
+        .map(|bytes| {
+            let value: [u8; 2] = bytes
+                .try_into()
+                .map_err(|_| ProofProfileError::CanonicalEncoding)?;
+            Ok(u16::from_le_bytes(value))
+        })
+        .transpose()
+}
+
+fn profile_optional_u32(item: &CanonicalItem) -> Result<Option<u32>, ProofProfileError> {
+    profile_optional_bytes(item, CanonicalItemType::Unsigned32, 4)?
+        .map(|bytes| {
+            let value: [u8; 4] = bytes
+                .try_into()
+                .map_err(|_| ProofProfileError::CanonicalEncoding)?;
+            Ok(u32::from_le_bytes(value))
+        })
+        .transpose()
+}
+
+fn profile_optional_u64(item: &CanonicalItem) -> Result<Option<u64>, ProofProfileError> {
+    profile_optional_bytes(item, CanonicalItemType::Unsigned64, 8)?
+        .map(|bytes| {
+            let value: [u8; 8] = bytes
+                .try_into()
+                .map_err(|_| ProofProfileError::CanonicalEncoding)?;
+            Ok(u64::from_le_bytes(value))
+        })
+        .transpose()
+}
+
+fn profile_optional_bytes(
+    item: &CanonicalItem,
+    expected_type: CanonicalItemType,
+    value_byte_length: usize,
+) -> Result<Option<&[u8]>, ProofProfileError> {
+    let bytes = item.canonical_bytes();
+    if item.item_type() != CanonicalItemType::Optional
+        || bytes.len() < 3
+        || profile_raw_u16(bytes, 0) != Some(expected_type.canonical_code())
+    {
+        return Err(ProofProfileError::CanonicalEncoding);
+    }
+    match bytes[2] {
+        0 if bytes.len() == 3 => Ok(None),
+        1 if bytes.len() == 3 + value_byte_length => Ok(Some(&bytes[3..])),
+        _ => Err(ProofProfileError::CanonicalEncoding),
+    }
+}
+
+fn profile_raw_u16(bytes: &[u8], offset: usize) -> Option<u16> {
+    let end = offset.checked_add(2)?;
+    Some(u16::from_le_bytes(bytes.get(offset..end)?.try_into().ok()?))
+}
+
+fn profile_raw_u32(bytes: &[u8], offset: usize) -> Option<u32> {
+    let end = offset.checked_add(4)?;
+    Some(u32::from_le_bytes(bytes.get(offset..end)?.try_into().ok()?))
+}
+
 #[cfg(test)]
 use canonical_profile_artifact::canonical_u64_list;
 
@@ -675,6 +1345,7 @@ mod canonical_profile_artifact {
         security_level: u64,
         proof_of_work_bits: u64,
         outer_query_count: u64,
+        trace_mask_degree_bound_exclusive: u64,
         direct_bound_query_count: u64,
         verified_vss_bound_query_count: u64,
         maximum_fiat_shamir_candidate_draws_per_output: u32,
@@ -714,6 +1385,7 @@ mod canonical_profile_artifact {
                 security_level: convert_count(parameters.security_level)?,
                 proof_of_work_bits: convert_count(parameters.proof_of_work_bits)?,
                 outer_query_count: convert_count(parameters.outer_query_count)?,
+                trace_mask_degree_bound_exclusive: parameters.trace_mask_degree_bound_exclusive,
                 direct_bound_query_count: convert_count(parameters.direct_bound_query_count)?,
                 verified_vss_bound_query_count: convert_count(
                     parameters.verified_vss_bound_query_count,
@@ -745,6 +1417,7 @@ mod canonical_profile_artifact {
                 CanonicalItem::unsigned64(self.security_level),
                 CanonicalItem::unsigned64(self.proof_of_work_bits),
                 CanonicalItem::unsigned64(self.outer_query_count),
+                CanonicalItem::unsigned64(self.trace_mask_degree_bound_exclusive),
                 CanonicalItem::unsigned64(self.direct_bound_query_count),
                 CanonicalItem::unsigned64(self.verified_vss_bound_query_count),
                 CanonicalItem::unsigned32(self.maximum_fiat_shamir_candidate_draws_per_output),
@@ -767,8 +1440,8 @@ mod canonical_profile_artifact {
         transcript_challenge_handle_domain: Vec<u8>,
         transcript_accepted_challenge_domain: Vec<u8>,
         transcript_response_binding_domain: Vec<u8>,
-        transcript_product_residue_block_domain: Vec<u8>,
-        transcript_distinct_query_block_domain: Vec<u8>,
+        transcript_response_root_domain: Vec<u8>,
+        transcript_challenge_expansion_accumulator_domain: Vec<u8>,
     }
 
     impl RowCodeWhirHashProfile {
@@ -789,10 +1462,9 @@ mod canonical_profile_artifact {
                     .to_vec(),
                 transcript_response_binding_domain: TRANSCRIPT_RESPONSE_BINDING_DOMAIN_BYTES
                     .to_vec(),
-                transcript_product_residue_block_domain:
-                    TRANSCRIPT_PRODUCT_RESIDUE_BLOCK_DOMAIN_BYTES.to_vec(),
-                transcript_distinct_query_block_domain:
-                    TRANSCRIPT_DISTINCT_QUERY_BLOCK_DOMAIN_BYTES.to_vec(),
+                transcript_response_root_domain: TRANSCRIPT_RESPONSE_ROOT_DOMAIN_BYTES.to_vec(),
+                transcript_challenge_expansion_accumulator_domain:
+                    TRANSCRIPT_CHALLENGE_EXPANSION_ACCUMULATOR_DOMAIN_BYTES.to_vec(),
             }
         }
 
@@ -832,10 +1504,12 @@ mod canonical_profile_artifact {
                         .map_err(canonical_encoding_error)?,
                     CanonicalItem::fixed_bytes(&self.transcript_response_binding_domain)
                         .map_err(canonical_encoding_error)?,
-                    CanonicalItem::fixed_bytes(&self.transcript_product_residue_block_domain)
+                    CanonicalItem::fixed_bytes(&self.transcript_response_root_domain)
                         .map_err(canonical_encoding_error)?,
-                    CanonicalItem::fixed_bytes(&self.transcript_distinct_query_block_domain)
-                        .map_err(canonical_encoding_error)?,
+                    CanonicalItem::fixed_bytes(
+                        &self.transcript_challenge_expansion_accumulator_domain,
+                    )
+                    .map_err(canonical_encoding_error)?,
                 ],
             ))
         }
@@ -1278,6 +1952,17 @@ mod canonical_profile_artifact {
                 .folding_factor -= 1;
 
             self.row_code_whir_construction_profile
+                .parameters
+                .trace_mask_degree_bound_exclusive += 1;
+            assert_eq!(
+                self.canonical_bytes(),
+                Err(ProofProfileError::InvalidConstructionProfile)
+            );
+            self.row_code_whir_construction_profile
+                .parameters
+                .trace_mask_degree_bound_exclusive -= 1;
+
+            self.row_code_whir_construction_profile
                 .hash_profile
                 .protocol_hash_domain[0] ^= 1;
             assert_eq!(
@@ -1491,19 +2176,37 @@ mod canonical_profile_artifact {
         Ok(())
     }
 
+    fn validate_persistent_committed_material_relation_plan_catalog(
+        relation_plans: &[ValidatedRelationPlanArtifact],
+    ) -> Result<(), ProofProfileError> {
+        if relation_plans.len() != PERSISTENT_COMMITTED_MATERIAL_APPLICATION_FAMILIES.len() {
+            return Err(ProofProfileError::MissingFamily);
+        }
+        for (artifact, expected_family) in relation_plans
+            .iter()
+            .zip(PERSISTENT_COMMITTED_MATERIAL_APPLICATION_FAMILIES)
+        {
+            if artifact.application_statement_schema_identifier() != expected_family {
+                return Err(ProofProfileError::NonCanonicalOrder);
+            }
+        }
+        Ok(())
+    }
+
     fn relation_plan_artifact(
         relation_plans: &[ValidatedRelationPlanArtifact],
         application_statement_schema_identifier: u16,
     ) -> Result<&ValidatedRelationPlanArtifact, ProofProfileError> {
-        let index = FIRST_PROFILE_APPLICATION_FAMILIES
-            .binary_search(&application_statement_schema_identifier)
-            .map_err(|_| ProofProfileError::UnsupportedFamily)?;
+        if !FIRST_PROFILE_APPLICATION_FAMILIES.contains(&application_statement_schema_identifier) {
+            return Err(ProofProfileError::UnsupportedFamily);
+        }
+        let index = relation_plans
+            .binary_search_by_key(&application_statement_schema_identifier, |artifact| {
+                artifact.application_statement_schema_identifier()
+            })
+            .map_err(|_| ProofProfileError::MissingFamily)?;
         relation_plans
             .get(index)
-            .filter(|artifact| {
-                artifact.application_statement_schema_identifier()
-                    == application_statement_schema_identifier
-            })
             .ok_or(ProofProfileError::MissingFamily)
     }
 
@@ -1708,11 +2411,47 @@ mod canonical_profile_artifact {
             .ok_or(ProofProfileError::CountOverflow)
     }
 
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum RelationRootCompatibilityScope {
+        CompleteProfile,
+        PersistentCommittedMaterial,
+    }
+
     fn derive_root_compatibility_edges(
         relation_plans: &[ValidatedRelationPlanArtifact],
         topology: &FirstProfileRootTopology,
     ) -> Result<Vec<RelationRootCompatibilityEdge>, ProofProfileError> {
-        validate_relation_plan_catalog(relation_plans)?;
+        derive_root_compatibility_edges_for_scope(
+            relation_plans,
+            topology,
+            RelationRootCompatibilityScope::CompleteProfile,
+        )
+    }
+
+    fn derive_persistent_committed_material_root_compatibility_edges(
+        relation_plans: &[ValidatedRelationPlanArtifact],
+        topology: &FirstProfileRootTopology,
+    ) -> Result<Vec<RelationRootCompatibilityEdge>, ProofProfileError> {
+        derive_root_compatibility_edges_for_scope(
+            relation_plans,
+            topology,
+            RelationRootCompatibilityScope::PersistentCommittedMaterial,
+        )
+    }
+
+    fn derive_root_compatibility_edges_for_scope(
+        relation_plans: &[ValidatedRelationPlanArtifact],
+        topology: &FirstProfileRootTopology,
+        scope: RelationRootCompatibilityScope,
+    ) -> Result<Vec<RelationRootCompatibilityEdge>, ProofProfileError> {
+        match scope {
+            RelationRootCompatibilityScope::CompleteProfile => {
+                validate_relation_plan_catalog(relation_plans)?;
+            }
+            RelationRootCompatibilityScope::PersistentCommittedMaterial => {
+                validate_persistent_committed_material_relation_plan_catalog(relation_plans)?;
+            }
+        }
         topology.validate()?;
         let roster_size = usize::from(topology.roster_size);
         let mut edges = Vec::new();
@@ -1887,6 +2626,10 @@ mod canonical_profile_artifact {
                     RelationRootConstructionKind::CommittedMaterial,
                 )?;
             }
+        }
+
+        if scope == RelationRootCompatibilityScope::PersistentCommittedMaterial {
+            return finish_root_compatibility_edges(relation_plans, topology, edges);
         }
 
         // Same-secret anchors are consumed by the public-key-share relation in
@@ -2095,8 +2838,15 @@ mod canonical_profile_artifact {
             }
         }
 
-        validate_persistent_committed_material_mask_images(relation_plans, topology, &edges)?;
+        finish_root_compatibility_edges(relation_plans, topology, edges)
+    }
 
+    fn finish_root_compatibility_edges(
+        relation_plans: &[ValidatedRelationPlanArtifact],
+        topology: &FirstProfileRootTopology,
+        edges: Vec<RelationRootCompatibilityEdge>,
+    ) -> Result<Vec<RelationRootCompatibilityEdge>, ProofProfileError> {
+        validate_persistent_committed_material_mask_images(relation_plans, topology, &edges)?;
         let mut encoded_edges = edges
             .into_iter()
             .map(|edge| {
@@ -2118,8 +2868,45 @@ mod canonical_profile_artifact {
         Ok(encoded_edges.into_iter().map(|(_, edge)| edge).collect())
     }
 
+    type RowCodeWhirConstructionPlanCoordinates = (u16, Option<u32>, Option<u16>);
+
+    fn row_code_whir_construction_plans_by_coordinates(
+        relation_plans: &[ValidatedRelationPlanArtifact],
+    ) -> Result<
+        BTreeMap<RowCodeWhirConstructionPlanCoordinates, RowCodeWhirConstructionPlan>,
+        ProofProfileError,
+    > {
+        let mut construction_plans = BTreeMap::new();
+        for relation_plan_artifact in relation_plans {
+            for variant in relation_plan_artifact.compiled_plan().variants() {
+                let coordinates = (
+                    relation_plan_artifact.application_statement_schema_identifier(),
+                    variant.schedule_position(),
+                    variant.top_count(),
+                );
+                let construction_plan = RowCodeWhirConstructionPlan::for_selected_variant(
+                    relation_plan_artifact,
+                    variant.schedule_position(),
+                    variant.top_count(),
+                )
+                .map_err(|_| ProofProfileError::InvalidConstructionProfile)?;
+                if construction_plans
+                    .insert(coordinates, construction_plan)
+                    .is_some()
+                {
+                    return Err(ProofProfileError::InvalidConstructionProfile);
+                }
+            }
+        }
+        Ok(construction_plans)
+    }
+
     fn committed_material_root_view_catalogs(
         relation_plans: &[ValidatedRelationPlanArtifact],
+        construction_plans: &BTreeMap<
+            RowCodeWhirConstructionPlanCoordinates,
+            RowCodeWhirConstructionPlan,
+        >,
         endpoint: RelationRootEndpoint,
         root_use: BoundTreeRootUse,
     ) -> Result<Vec<TraceMaskObservationCoordinateCatalog>, ProofProfileError> {
@@ -2129,25 +2916,41 @@ mod canonical_profile_artifact {
             RelationRootConstructionKind::CommittedMaterial,
             root_use,
         )?;
-        let variant = relation_plan_artifact(
+        let relation_plan_artifact = relation_plan_artifact(
             relation_plans,
             endpoint.application_statement_schema_identifier,
-        )?
-        .compiled_plan()
-        .select_variant(endpoint.schedule_position, endpoint.top_count)?;
+        )?;
+        let variant = relation_plan_artifact
+            .compiled_plan()
+            .select_variant(endpoint.schedule_position, endpoint.top_count)?;
         let challenge_extension_degree = u16::try_from(PROOF_CHALLENGE_EXTENSION_DEGREE)
             .map_err(|_| ProofProfileError::CountOverflow)?;
-        ProofFamilyProfile::selected(endpoint.application_statement_schema_identifier)?;
-        let phase_column_query_coordinate_count = ROW_CODE_WHIR_PHASE_COLUMN_QUERY_COORDINATE_COUNT;
+        let construction_plan = construction_plans
+            .get(&(
+                endpoint.application_statement_schema_identifier,
+                endpoint.schedule_position,
+                endpoint.top_count,
+            ))
+            .ok_or(ProofProfileError::InvalidConstructionProfile)?;
+        let bound_tree_query_count = construction_plan
+            .bound_tree_query_count(
+                BoundTreeConstructionKind::CommittedMaterial,
+                root_use,
+                endpoint.verifier_source_ordinal,
+            )
+            .map_err(|_| ProofProfileError::InvalidConstructionProfile)
+            .and_then(|query_count| {
+                u32::try_from(query_count).map_err(|_| ProofProfileError::CountOverflow)
+            })?;
         let catalogs = root
             .ordered_column_ordinals
             .into_iter()
             .map(|column_ordinal| {
-                TraceMaskObservationCoordinateCatalog::derive(
+                TraceMaskObservationCoordinateCatalog::derive_for_bound_tree(
                     variant,
                     column_ordinal,
                     challenge_extension_degree,
-                    phase_column_query_coordinate_count,
+                    bound_tree_query_count,
                 )
                 .map_err(ProofProfileError::from)
             })
@@ -2182,11 +2985,26 @@ mod canonical_profile_artifact {
         Ok(counts)
     }
 
-    fn validate_persistent_committed_material_mask_images(
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct PersistentCommittedMaterialMaskImageAccounting {
+        producer_endpoint: RelationRootEndpoint,
+        consumer_endpoints: Vec<RelationRootEndpoint>,
+        physical_column_demands: Vec<PersistentCommittedMaterialPhysicalColumnDemand>,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct PersistentCommittedMaterialPhysicalColumnDemand {
+        mask_coefficient_count: u64,
+        evaluation_image_rank_ceiling: u64,
+    }
+
+    fn persistent_committed_material_mask_image_accounting(
         relation_plans: &[ValidatedRelationPlanArtifact],
         topology: &FirstProfileRootTopology,
         edges: &[RelationRootCompatibilityEdge],
-    ) -> Result<(), ProofProfileError> {
+    ) -> Result<Vec<PersistentCommittedMaterialMaskImageAccounting>, ProofProfileError> {
+        let construction_plans = row_code_whir_construction_plans_by_coordinates(relation_plans)?;
+        let mut accounting = Vec::new();
         for producer in all_bound_root_slots(relation_plans, topology, BoundTreeRootUse::Output)?
             .into_iter()
             .filter(|root| {
@@ -2195,6 +3013,7 @@ mod canonical_profile_artifact {
         {
             let producer_catalogs = committed_material_root_view_catalogs(
                 relation_plans,
+                &construction_plans,
                 producer.endpoint,
                 BoundTreeRootUse::Output,
             )?;
@@ -2202,12 +3021,17 @@ mod canonical_profile_artifact {
                 .into_iter()
                 .map(|catalog| vec![catalog])
                 .collect::<Vec<_>>();
-            for edge in edges.iter().filter(|edge| {
-                edge.construction_kind == RelationRootConstructionKind::CommittedMaterial
-                    && edge.producer_endpoint == producer.endpoint
-            }) {
+            let consumer_edges = edges
+                .iter()
+                .filter(|edge| {
+                    edge.construction_kind == RelationRootConstructionKind::CommittedMaterial
+                        && edge.producer_endpoint == producer.endpoint
+                })
+                .collect::<Vec<_>>();
+            for edge in &consumer_edges {
                 let consumer_catalogs = committed_material_root_view_catalogs(
                     relation_plans,
+                    &construction_plans,
                     edge.consumer_endpoint,
                     BoundTreeRootUse::Input,
                 )?;
@@ -2225,18 +3049,46 @@ mod canonical_profile_artifact {
             if mask_coefficient_counts.len() != joint_catalogs_by_physical_column.len() {
                 return Err(ProofProfileError::IncompatibleRoot);
             }
+            let mut physical_column_demands = Vec::new();
+            physical_column_demands
+                .try_reserve_exact(mask_coefficient_counts.len())
+                .map_err(|_| ProofProfileError::CountOverflow)?;
             for (mask_coefficient_count, joint_catalogs) in mask_coefficient_counts
                 .into_iter()
                 .zip(&joint_catalogs_by_physical_column)
             {
-                TraceMaskSurjectivityCertificate::derive(mask_coefficient_count, joint_catalogs)
-                    .map_err(|error| match error {
-                        RelationPlanError::CountOverflow => ProofProfileError::CountOverflow,
-                        _ => ProofProfileError::InsufficientRootMaskImage,
-                    })?;
+                let certificate = TraceMaskSurjectivityCertificate::derive(
+                    mask_coefficient_count,
+                    joint_catalogs,
+                )
+                .map_err(|error| match error {
+                    RelationPlanError::CountOverflow => ProofProfileError::CountOverflow,
+                    _ => ProofProfileError::InsufficientRootMaskImage,
+                })?;
+                physical_column_demands.push(PersistentCommittedMaterialPhysicalColumnDemand {
+                    mask_coefficient_count: certificate.mask_coefficient_count(),
+                    evaluation_image_rank_ceiling: certificate.evaluation_image_rank_ceiling(),
+                });
             }
+            accounting.push(PersistentCommittedMaterialMaskImageAccounting {
+                producer_endpoint: producer.endpoint,
+                consumer_endpoints: consumer_edges
+                    .into_iter()
+                    .map(|edge| edge.consumer_endpoint)
+                    .collect(),
+                physical_column_demands,
+            });
         }
-        Ok(())
+        Ok(accounting)
+    }
+
+    fn validate_persistent_committed_material_mask_images(
+        relation_plans: &[ValidatedRelationPlanArtifact],
+        topology: &FirstProfileRootTopology,
+        edges: &[RelationRootCompatibilityEdge],
+    ) -> Result<(), ProofProfileError> {
+        persistent_committed_material_mask_image_accounting(relation_plans, topology, edges)
+            .map(|_| ())
     }
 
     fn derive_rkg_aggregate_edges(
@@ -2727,6 +3579,47 @@ mod canonical_profile_artifact {
             }
         }
 
+        fn selected_persistent_committed_material_relation_plans()
+        -> Result<Vec<ValidatedRelationPlanArtifact>, ProofProfileError> {
+            let ordinary_context = selected_relation_plan_check_context(
+                ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+            )
+            .ok_or(ProofProfileError::InvalidSchedule)?;
+            let committed_material_context = selected_relation_plan_check_context(
+                ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+            )
+            .ok_or(ProofProfileError::InvalidSchedule)?;
+            let committed_material_input =
+                crate::bgv::proof_suite::selected_profile::selected_committed_material_relation_plan_input()?;
+            let compiled_plans = vec![
+                crate::bgv::proof_suite::compile_same_secret_relation_plan(
+                    &crate::bgv::proof_suite::selected_same_secret_relation_plan_input()?,
+                    &ordinary_context,
+                )?,
+                crate::bgv::proof_suite::selected_profile::selected_target_release_relation()?
+                    .relation_plan()
+                    .clone(),
+                crate::bgv::proof_suite::compile_vss_share_linkage_relation_plan(
+                    &committed_material_input,
+                    &committed_material_context,
+                )?,
+                crate::bgv::proof_suite::compile_aggregate_threshold_share_relation_plan(
+                    &committed_material_input,
+                    &committed_material_context,
+                )?,
+            ];
+            compiled_plans
+                .into_iter()
+                .map(|plan| {
+                    let context = selected_relation_plan_check_context(
+                        plan.application_statement_schema_identifier(),
+                    )
+                    .ok_or(ProofProfileError::InvalidSchedule)?;
+                    ValidatedRelationPlanArtifact::from_owned_compiled_plan(plan, &context)
+                })
+                .collect()
+        }
+
         #[test]
         fn selected_field_and_family_mapping_are_canonical_and_nonnegotiable() {
             let field = ProofFieldProfile::selected().expect("selected field is valid");
@@ -2895,10 +3788,14 @@ mod canonical_profile_artifact {
                             .expect("accepted-challenge domain fits the canonical byte limit"),
                         CanonicalItem::fixed_bytes(TRANSCRIPT_RESPONSE_BINDING_DOMAIN_BYTES)
                             .expect("response-binding domain fits the canonical byte limit"),
-                        CanonicalItem::fixed_bytes(TRANSCRIPT_PRODUCT_RESIDUE_BLOCK_DOMAIN_BYTES)
-                            .expect("product-residue block domain fits the canonical byte limit"),
-                        CanonicalItem::fixed_bytes(TRANSCRIPT_DISTINCT_QUERY_BLOCK_DOMAIN_BYTES)
-                            .expect("distinct-query block domain fits the canonical byte limit"),
+                        CanonicalItem::fixed_bytes(TRANSCRIPT_RESPONSE_ROOT_DOMAIN_BYTES)
+                            .expect("response-root domain fits the canonical byte limit"),
+                        CanonicalItem::fixed_bytes(
+                            TRANSCRIPT_CHALLENGE_EXPANSION_ACCUMULATOR_DOMAIN_BYTES,
+                        )
+                        .expect(
+                            "challenge-expansion accumulator domain fits the canonical byte limit",
+                        ),
                     ],
                 ),
             );
@@ -3122,21 +4019,229 @@ mod canonical_profile_artifact {
             }
         }
 
-        #[test]
-        fn persistent_root_views_use_the_successor_phase_query_geometry() {
-            assert_eq!(ROW_CODE_WHIR_PHASE_COLUMN_QUERY_COORDINATE_COUNT, 387);
-            for family in FIRST_PROFILE_APPLICATION_FAMILIES {
-                assert_eq!(
-                    ProofFamilyProfile::selected(family)
-                        .map(|_| ROW_CODE_WHIR_PHASE_COLUMN_QUERY_COORDINATE_COUNT),
-                    Ok(387),
-                );
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        #[repr(usize)]
+        enum PersistentCommittedMaterialRootClass {
+            CoefficientZero = 0,
+            OtherCoefficient = 1,
+            RecipientShare = 2,
+            ConsumedAggregate = 3,
+            OtherAggregate = 4,
+        }
+
+        fn persistent_committed_material_root_class(
+            accounting: &PersistentCommittedMaterialMaskImageAccounting,
+        ) -> PersistentCommittedMaterialRootClass {
+            let consumer_families = accounting
+                .consumer_endpoints
+                .iter()
+                .map(|endpoint| endpoint.application_statement_schema_identifier)
+                .collect::<BTreeSet<_>>();
+            match accounting
+                .producer_endpoint
+                .application_statement_schema_identifier
+            {
+                ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+                    if consumer_families
+                        .contains(&ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER) =>
+                {
+                    PersistentCommittedMaterialRootClass::CoefficientZero
+                }
+                ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+                    if consumer_families.contains(
+                        &ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+                    ) =>
+                {
+                    PersistentCommittedMaterialRootClass::RecipientShare
+                }
+                ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+                    if consumer_families.is_empty() =>
+                {
+                    PersistentCommittedMaterialRootClass::OtherCoefficient
+                }
+                ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+                    if consumer_families.contains(
+                        &ProofFamilies::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER,
+                    ) =>
+                {
+                    PersistentCommittedMaterialRootClass::ConsumedAggregate
+                }
+                ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+                    if consumer_families.is_empty() =>
+                {
+                    PersistentCommittedMaterialRootClass::OtherAggregate
+                }
+                _ => panic!("unexpected persistent committed-material root topology"),
             }
-            assert_eq!(
-                ProofFamilyProfile::selected(0x9999)
-                    .map(|_| ROW_CODE_WHIR_PHASE_COLUMN_QUERY_COORDINATE_COUNT),
-                Err(ProofProfileError::UnsupportedFamily),
+        }
+
+        #[test]
+        fn selected_persistent_root_mask_accounting_uses_each_checked_bound_catalog() {
+            let relation_plans = selected_persistent_committed_material_relation_plans()
+                .expect("selected persistent committed-material relation plans");
+            let construction_plans =
+                row_code_whir_construction_plans_by_coordinates(&relation_plans)
+                    .expect("selected persistent construction plans");
+            let topology = FirstProfileRootTopology::selected(
+                crate::foundation::SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT,
+            )
+            .expect("selected root topology");
+            let edges = derive_persistent_committed_material_root_compatibility_edges(
+                &relation_plans,
+                &topology,
+            )
+            .expect("selected persistent committed-material root compatibility edges");
+            let accounting = persistent_committed_material_mask_image_accounting(
+                &relation_plans,
+                &topology,
+                &edges,
+            )
+            .expect("selected persistent-mask accounting");
+
+            let coefficient_zero_root = accounting
+                .iter()
+                .find(|root_accounting| {
+                    persistent_committed_material_root_class(root_accounting)
+                        == PersistentCommittedMaterialRootClass::CoefficientZero
+                })
+                .expect("selected topology contains coefficient-zero roots");
+            assert!(
+                committed_material_root_view_catalogs(
+                    &relation_plans,
+                    &construction_plans,
+                    coefficient_zero_root.producer_endpoint,
+                    BoundTreeRootUse::Output,
+                )
+                .expect("checked direct bound-tree catalogs")
+                .iter()
+                .all(|catalog| catalog.base_coordinate_count() == Ok(537)),
             );
+            let prior_vss_consumer = coefficient_zero_root
+                .consumer_endpoints
+                .iter()
+                .copied()
+                .find(|endpoint| {
+                    endpoint.application_statement_schema_identifier
+                        == ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER
+                })
+                .expect("coefficient-zero root has its same-secret consumer");
+            assert!(
+                committed_material_root_view_catalogs(
+                    &relation_plans,
+                    &construction_plans,
+                    prior_vss_consumer,
+                    BoundTreeRootUse::Input,
+                )
+                .expect("checked prior-VSS bound-tree catalogs")
+                .iter()
+                .all(|catalog| catalog.base_coordinate_count() == Ok(85)),
+            );
+
+            let expected_rank_ceiling_by_class = [622_u64, 537, 1_074, 1_074, 537];
+            let expected_logical_root_count_by_class = [80_usize, 240, 800, 80, 0];
+            let consumed_aggregate_root = accounting
+                .iter()
+                .find(|root_accounting| {
+                    persistent_committed_material_root_class(root_accounting)
+                        == PersistentCommittedMaterialRootClass::ConsumedAggregate
+                })
+                .expect("selected topology contains consumed aggregate roots");
+            assert!(
+                committed_material_root_view_catalogs(
+                    &relation_plans,
+                    &construction_plans,
+                    consumed_aggregate_root.producer_endpoint,
+                    BoundTreeRootUse::Output,
+                )
+                .expect("checked aggregate-output bound-tree catalogs")
+                .iter()
+                .all(|catalog| {
+                    catalog.base_coordinate_count()
+                        == Ok(expected_rank_ceiling_by_class
+                            [PersistentCommittedMaterialRootClass::OtherAggregate as usize])
+                }),
+                "an aggregate output with no consumer would require only its direct catalog",
+            );
+            let mut observed_logical_root_count_by_class = [0_usize; 5];
+            let mut observed_rank_ceilings_by_class: [BTreeSet<u64>; 5] =
+                std::array::from_fn(|_| BTreeSet::new());
+            let mut physical_column_count = 0_usize;
+            let mut minimum_mask_headroom = u64::MAX;
+
+            for root_accounting in &accounting {
+                let root_class = persistent_committed_material_root_class(root_accounting);
+                let class_index = root_class as usize;
+                observed_logical_root_count_by_class[class_index] += 1;
+                assert_eq!(root_accounting.physical_column_demands.len(), 4);
+                physical_column_count = physical_column_count
+                    .checked_add(root_accounting.physical_column_demands.len())
+                    .expect("selected physical-column count fits usize");
+                for demand in &root_accounting.physical_column_demands {
+                    observed_rank_ceilings_by_class[class_index]
+                        .insert(demand.evaluation_image_rank_ceiling);
+                    assert_eq!(demand.mask_coefficient_count, 2_048);
+                    minimum_mask_headroom = minimum_mask_headroom.min(
+                        demand
+                            .mask_coefficient_count
+                            .checked_sub(demand.evaluation_image_rank_ceiling)
+                            .expect("validated demand does not exceed the selected mask"),
+                    );
+                }
+            }
+
+            assert_eq!(
+                observed_logical_root_count_by_class,
+                expected_logical_root_count_by_class,
+            );
+            let target_root_count = relation_plan_artifact(
+                &relation_plans,
+                ProofFamilies::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER,
+            )
+            .expect("selected target relation plan")
+            .compiled_plan()
+            .select_variant(None, None)
+            .expect("selected target relation variant")
+            .ordered_trees()
+            .iter()
+            .filter(|tree| {
+                matches!(
+                    tree,
+                    RelationTreeDescriptor::BoundPublic {
+                        construction_kind: BoundTreeConstructionKind::CommittedMaterial,
+                        root_use: BoundTreeRootUse::Input,
+                        ..
+                    }
+                )
+            })
+            .count();
+            assert_eq!(target_root_count, 8);
+            assert_eq!(
+                observed_logical_root_count_by_class
+                    [PersistentCommittedMaterialRootClass::ConsumedAggregate as usize],
+                usize::from(topology.roster_size()) * target_root_count,
+                "all ten target proof slots consume all eight selected modulus roots",
+            );
+            assert_eq!(
+                observed_logical_root_count_by_class
+                    [PersistentCommittedMaterialRootClass::OtherAggregate as usize],
+                0,
+                "aggregate-root consumption is roster-wide rather than quorum-scoped",
+            );
+            for (class_index, observed_rank_ceilings) in
+                observed_rank_ceilings_by_class.iter().enumerate()
+            {
+                if expected_logical_root_count_by_class[class_index] == 0 {
+                    assert!(observed_rank_ceilings.is_empty());
+                } else {
+                    assert_eq!(
+                        observed_rank_ceilings,
+                        &BTreeSet::from([expected_rank_ceiling_by_class[class_index]]),
+                    );
+                }
+            }
+            assert_eq!(accounting.len(), 1_200);
+            assert_eq!(physical_column_count, 4_800);
+            assert_eq!(minimum_mask_headroom, 974);
         }
     }
 }

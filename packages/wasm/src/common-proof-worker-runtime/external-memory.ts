@@ -15,6 +15,10 @@ const operationHeaderByteLength = 32;
 const readResultHeaderByteLength = 88;
 export const requestHeaderByteLength = 156;
 const responseHeaderByteLength = 80;
+export const maximumEncodedResponseByteLength =
+    responseHeaderByteLength +
+    maximumWorkerOperationCount * readResultHeaderByteLength +
+    Number(maximumWorkerPayloadByteLength);
 export const maximumEncodedRequestByteLength =
     requestHeaderByteLength +
     maximumWorkerOperationCount * operationHeaderByteLength +
@@ -680,10 +684,12 @@ const encodeStorageResponse = (
         offset += 4;
         view.setUint32(offset, 0, true);
         offset += 4;
-        response.set(
-            readDigest(request.requestDigest, operation, bytes),
-            offset,
-        );
+        const digest = readDigest(request.requestDigest, operation, bytes);
+        try {
+            response.set(digest, offset);
+        } finally {
+            digest.fill(0);
+        }
         offset += hashByteLength;
         response.set(bytes, offset);
         offset += bytes.byteLength;

@@ -1,47 +1,9 @@
 use super::{
-    CommonProofPrivateCoinCoordinate, CommonProofPrivateCoinError, CommonProofPrivateCoinSource,
     CommonProofProverError, CommonProofReplayPolynomialKey, CommonProofSourcePolynomial,
-    ProofBaseFieldElement, ProofChallengeExtensionElement, ProofPrivacyMode,
-    RelationColumnValueType, RelationMaskKind, RelationMaskTargetClass,
-    RelationOpeningClaimDescriptor, RelationOpeningSourceClass, RelationPlanVariant, Zeroizing,
-    divide_extension_polynomial_by_linear_in_place, sample_private_extension_polynomial,
+    ProofBaseFieldElement, ProofChallengeExtensionElement, RelationColumnValueType,
+    RelationOpeningClaimDescriptor, RelationOpeningSourceClass, Zeroizing,
+    divide_extension_polynomial_by_linear_in_place,
 };
-
-/// Samples the separately committed opening-batch polynomial in secret mode.
-pub(crate) fn construct_opening_batch_mask<Coins>(
-    variant: &RelationPlanVariant,
-    coins: &mut Coins,
-    maximum_candidate_draws_per_output: u32,
-) -> Result<
-    Option<Zeroizing<Vec<ProofChallengeExtensionElement>>>,
-    CommonProofPrivateCoinError<Coins::Error>,
->
-where
-    Coins: CommonProofPrivateCoinSource,
-{
-    if variant.proof_privacy_mode() == ProofPrivacyMode::PublicOnly {
-        return Ok(None);
-    }
-    let mut descriptors = variant.ordered_masks().iter().copied().filter(|mask| {
-        mask.mask_kind() == RelationMaskKind::OpeningBatch
-            && mask.target_class() == RelationMaskTargetClass::Batch
-            && mask.target_ordinal() == 0
-    });
-    let descriptor = descriptors
-        .next()
-        .ok_or_else(|| CommonProofPrivateCoinError::Prover(CommonProofProverError::InvalidMask))?;
-    if descriptors.next().is_some() {
-        return Err(CommonProofPrivateCoinError::Prover(
-            CommonProofProverError::InvalidMask,
-        ));
-    }
-    Ok(Some(sample_private_extension_polynomial(
-        coins,
-        CommonProofPrivateCoinCoordinate::from_mask(descriptor.mask_coordinate()),
-        descriptor.mask_degree_bound_exclusive(),
-        maximum_candidate_draws_per_output,
-    )?))
-}
 
 pub(super) fn replay_polynomial_key_for_claim(
     claim: &RelationOpeningClaimDescriptor,

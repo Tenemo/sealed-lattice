@@ -10,6 +10,7 @@ import {
     openAuthenticatedCheckpointStore,
     type CheckpointBoundaryPolicy,
     type CheckpointOperationIdentity,
+    type AuthenticatedCheckpointPhysicalAccountingScope,
     type TransferableAuthenticatedCheckpointStore,
 } from '#packages/protocol/src/runtime/authenticated-checkpoint-store';
 import {
@@ -23,9 +24,11 @@ import type {
     UntrustedStorageTransactionStore,
 } from '#packages/protocol/src/runtime/untrusted-storage-transaction-store';
 import {
+    commonProofSecretRecordOverheadByteLength,
     commonProofStorageCapacityProfile,
     requireCommonProofStorageCapacity,
 } from '#packages/protocol/src/runtime/web-lock-owned-untrusted-storage-transaction-store';
+import { commonProofScratchByteLength } from '#packages/protocol/src/runtime/web-lock-owned-untrusted-storage-transaction-store/records';
 import {
     generateRuntimeStorageEncryptionKey,
     InMemoryRuntimeStorageAdapter,
@@ -293,6 +296,7 @@ describe('Common-proof browser custody', () => {
         ) => UntrustedStorageExclusiveCapacityReservation;
         checkpointStore?: TransferableAuthenticatedCheckpointStore;
         commonProofEnvironmentIdentifier?: Uint8Array;
+        maximumExternalMemoryByteLength?: bigint;
         resumeDescriptor?: ReturnType<
             CommonProofBrowserCustody['copyCheckpointResumeDescriptor']
         >;
@@ -360,6 +364,36 @@ describe('Common-proof browser custody', () => {
                 throw error;
             }
         }
+        let checkpointPhysicalAccountingScope:
+            | AuthenticatedCheckpointPhysicalAccountingScope
+            | undefined;
+        if (input?.checkpointStore !== undefined) {
+            const checkpointLineageIdentifier =
+                input.resumeDescriptor?.checkpointLineageIdentifier.slice() ??
+                freshCheckpointOperationIdentity?.checkpointLineageIdentifier;
+            if (checkpointLineageIdentifier === undefined) {
+                await ownedCapacityReservation.release();
+                throw new Error(
+                    'The checkpoint fixture did not produce a lineage identifier.',
+                );
+            }
+            try {
+                checkpointPhysicalAccountingScope =
+                    await input.checkpointStore.openPhysicalAccountingScope(
+                        checkpointLineageIdentifier,
+                    );
+            } catch (error) {
+                if (freshCheckpointOperationIdentity !== undefined) {
+                    await input.checkpointStore.releaseOperationIdentity(
+                        freshCheckpointOperationIdentity,
+                    );
+                }
+                await ownedCapacityReservation.release();
+                throw error;
+            } finally {
+                checkpointLineageIdentifier.fill(0);
+            }
+        }
         let custody: CommonProofBrowserCustody;
         try {
             custody = openCommonProofBrowserCustody({
@@ -382,12 +416,15 @@ describe('Common-proof browser custody', () => {
                                             input.resumeDescriptor,
                                     }),
                               store: input.checkpointStore,
+                              physicalAccountingScope:
+                                  checkpointPhysicalAccountingScope!,
                           },
                       }),
                 commonProofEnvironmentIdentifier,
                 commonProofRuntimeBindingHash: runtimeBindingHash,
                 limits: {
-                    maximumExternalMemoryByteLength: 5_242_880n,
+                    maximumExternalMemoryByteLength:
+                        input?.maximumExternalMemoryByteLength ?? 5_242_880n,
                     maximumExternalMemoryObjectCount: 32,
                     maximumExternalMemoryRecordCount: 512,
                     transactionLifetimeMilliseconds: 5_000,
@@ -403,6 +440,14 @@ describe('Common-proof browser custody', () => {
             ) {
                 await input.checkpointStore.releaseOperationIdentity(
                     freshCheckpointOperationIdentity,
+                );
+            }
+            if (
+                checkpointPhysicalAccountingScope !== undefined &&
+                input?.checkpointStore !== undefined
+            ) {
+                await input.checkpointStore.releasePhysicalAccountingScope(
+                    checkpointPhysicalAccountingScope,
                 );
             }
             await ownedCapacityReservation.release();
@@ -442,7 +487,18 @@ describe('Common-proof browser custody', () => {
                 checkpointStore,
                 resumeDescriptor: {
                     ...descriptorBase,
-                    privateRandomCursorManifestBytes: new Uint8Array(1_048_577),
+                    generationCursorManifestBytes: new Uint8Array(1_048_577),
+                },
+                workerKernel,
+            }),
+        ).rejects.toMatchObject({ code: 'InvalidInput' });
+
+        await expect(
+            openFixture({
+                checkpointStore,
+                resumeDescriptor: {
+                    ...descriptorBase,
+                    generationCursorManifestBytes: new Uint8Array(),
                 },
                 workerKernel,
             }),
@@ -454,7 +510,7 @@ describe('Common-proof browser custody', () => {
                 checkpointStore,
                 resumeDescriptor: {
                     ...descriptorBase,
-                    privateRandomCursorManifestBytes: new Uint8Array(),
+                    generationCursorManifestBytes: new Uint8Array(),
                     privateRandomnessStreamAttemptIdentifier:
                         malformedAttemptIdentifier,
                 },
@@ -540,6 +596,116 @@ describe('Common-proof browser custody', () => {
         expect(ownedStorageRecordKeys(adapter)).toEqual([]);
     });
 
+    it('reports authenticated physical storage, buffer custody, and terminal cleanup from production owners', async () => {
+        const { custody, store } = await openFixture();
+        const secretBytes = Uint8Array.from(
+            { length: 8_193 },
+            (_unused, byteIndex) => (byteIndex * 31 + 19) & 0xff,
+        );
+        await custody.externalMemory.executeTransaction(
+            request([createOperation(17, BigInt(secretBytes.byteLength))]),
+        );
+        for (const appendRequest of canonicalAppendRequests(17, secretBytes)) {
+            await custody.externalMemory.executeTransaction(appendRequest);
+        }
+        await custody.externalMemory.executeTransaction(
+            request([sealOperation(17)]),
+        );
+        await expect(
+            custody.externalMemory.executeTransaction(
+                request([readOperation(17, 101n, 4_097)]),
+            ),
+        ).resolves.toEqual([
+            expect.objectContaining({
+                bytes: secretBytes.slice(101, 4_198),
+                objectOrdinal: 17,
+                offset: 101n,
+            }),
+        ]);
+        await custody.externalMemory.executeTransaction(
+            request([deleteOperation(17)]),
+        );
+        await custody.outputStore.commitChunk(
+            0,
+            new Uint8Array(1_033).fill(0x5c),
+        );
+        custody.sealCanonicalOutput();
+
+        const browserStorageAccounting =
+            custody.externalMemory.copyBrowserStorageAccounting?.();
+        if (browserStorageAccounting === undefined) {
+            throw new Error(
+                'Production common-proof custody omitted browser-storage accounting.',
+            );
+        }
+        const beforeCleanup = custody.copyPhysicalStorageAccounting();
+        expect(beforeCleanup.cleanupCompleted).toBe(false);
+        expect(beforeCleanup.physicalStoredEndByteLength).toBeGreaterThan(
+            beforeCleanup.physicalStoredStartByteLength,
+        );
+
+        await custody.completeVerifiedOutput();
+        openedCustodies.splice(openedCustodies.indexOf(custody), 1);
+        const terminal = custody.copyPhysicalStorageAccounting();
+
+        expect(terminal).toMatchObject({
+            cleanupCompleted: true,
+            openCallCount: Number(
+                browserStorageAccounting.secretRecordOpenCount,
+            ),
+            openCiphertextByteLength: Number(
+                browserStorageAccounting.secretRecordOpenByteLength,
+            ),
+            sealCallCount: Number(
+                browserStorageAccounting.secretRecordSealCount,
+            ),
+            sealPlaintextByteLength: Number(
+                browserStorageAccounting.secretRecordSealByteLength,
+            ),
+        });
+        expect(terminal.commitReadbackCallCount).toBeGreaterThan(0);
+        expect(terminal.commitReadbackByteLength).toBeGreaterThan(1_033);
+        expect(terminal.ciphertextReadByteLength).toBeGreaterThan(4_097);
+        expect(terminal.ciphertextWriteByteLength).toBeGreaterThan(
+            secretBytes.byteLength,
+        );
+        expect(terminal.plaintextReadByteLength).toBeGreaterThanOrEqual(4_097);
+        expect(terminal.plaintextWriteByteLength).toBeGreaterThan(
+            secretBytes.byteLength,
+        );
+        expect(terminal.deletionCount).toBeGreaterThan(0);
+        expect(terminal.deletedByteLength).toBeGreaterThan(secretBytes.length);
+        expect(terminal.storageRequestCount).toBeGreaterThanOrEqual(
+            terminal.storageTransactionCount,
+        );
+        expect(terminal.storageTransactionCount).toBeGreaterThan(0);
+        expect(terminal.physicalStoredPeakByteLength).toBeGreaterThanOrEqual(
+            terminal.physicalStoredStartByteLength,
+        );
+        expect(terminal.physicalStoredPeakByteLength).toBeGreaterThanOrEqual(
+            terminal.physicalStoredEndByteLength,
+        );
+        expect(terminal.physicalStoredPeakByteLength).toBeLessThanOrEqual(
+            terminal.physicalQuotaReservedByteLength,
+        );
+        expect(
+            terminal.physicalQuotaReservedByteLength +
+                terminal.physicalQuotaHeadroomByteLength,
+        ).toBe(terminal.physicalQuotaByteLength);
+
+        const unrelatedTransaction = await store.beginTransaction({
+            lifetimeMilliseconds: 5_000,
+        });
+        const unrelatedLease = await unrelatedTransaction.issueWriteLease({
+            declaredByteLength: 3,
+            logicalRecordKey: 'foundation/post-proof-accounting-write',
+        });
+        await unrelatedLease.write(Uint8Array.of(1, 2, 3));
+        await unrelatedLease.seal(() => undefined);
+        await unrelatedTransaction.commit();
+        expect(custody.copyPhysicalStorageAccounting()).toEqual(terminal);
+    });
+
     it('rejects append-after-seal, cross-object aliases, and mutated committed records', async () => {
         const { adapter, custody } = await openFixture();
         const bytes = new Uint8Array(80_000).fill(0xa5);
@@ -613,6 +779,7 @@ describe('Common-proof browser custody', () => {
         const { adapter, custody } = await openFixture();
         const bytes = new Uint8Array(257).fill(0x3d);
         const recordsBefore = ownedStorageRecordKeys(adapter);
+        const accountingBefore = custody.copyPhysicalStorageAccounting();
 
         await expect(
             custody.externalMemory.executeTransaction(
@@ -623,6 +790,15 @@ describe('Common-proof browser custody', () => {
             ),
         ).rejects.toMatchObject({ code: 'InvalidInput' });
         expect(ownedStorageRecordKeys(adapter)).toEqual(recordsBefore);
+        expect(custody.copyPhysicalStorageAccounting()).toMatchObject({
+            deletionCount: accountingBefore.deletionCount,
+            physicalStoredEndByteLength:
+                accountingBefore.physicalStoredEndByteLength,
+            physicalStoredPeakByteLength:
+                accountingBefore.physicalStoredPeakByteLength,
+            storageRequestCount: accountingBefore.storageRequestCount,
+            storageTransactionCount: accountingBefore.storageTransactionCount,
+        });
 
         await custody.externalMemory.executeTransaction(
             request([createOperation(21, BigInt(bytes.byteLength))]),
@@ -649,6 +825,7 @@ describe('Common-proof browser custody', () => {
     it('enforces custody quotas and removes partial writes after storage failure and retirement', async () => {
         const adapter = new InMemoryRuntimeStorageAdapter();
         const { custody } = await openFixture({ adapter });
+        const accountingBeforeFailure = custody.copyPhysicalStorageAccounting();
         adapter.failAtomicMutationAfter(1);
         await expect(
             custody.externalMemory.executeTransaction(
@@ -658,15 +835,38 @@ describe('Common-proof browser custody', () => {
         await custody.retire();
         openedCustodies.splice(openedCustodies.indexOf(custody), 1);
         expect(ownedStorageRecordKeys(adapter)).toEqual([]);
+        const accountingAfterRetirement =
+            custody.copyPhysicalStorageAccounting();
+        expect(accountingAfterRetirement.cleanupCompleted).toBe(true);
+        expect(
+            accountingAfterRetirement.physicalStoredEndByteLength,
+        ).toBeLessThanOrEqual(
+            accountingBeforeFailure.physicalStoredStartByteLength,
+        );
 
         const quotaFixture = await openFixture({
             commonProofEnvironmentIdentifier: new Uint8Array(32).fill(0xaa),
         });
+        const accountingBeforeQuotaRefusal =
+            quotaFixture.custody.copyPhysicalStorageAccounting();
         await expect(
             quotaFixture.custody.externalMemory.executeTransaction(
                 request([createOperation(2, 5_242_881n)]),
             ),
         ).rejects.toMatchObject({ code: 'InvalidState' });
+        expect(
+            quotaFixture.custody.copyPhysicalStorageAccounting(),
+        ).toMatchObject({
+            deletionCount: accountingBeforeQuotaRefusal.deletionCount,
+            physicalStoredEndByteLength:
+                accountingBeforeQuotaRefusal.physicalStoredEndByteLength,
+            physicalStoredPeakByteLength:
+                accountingBeforeQuotaRefusal.physicalStoredPeakByteLength,
+            storageRequestCount:
+                accountingBeforeQuotaRefusal.storageRequestCount,
+            storageTransactionCount:
+                accountingBeforeQuotaRefusal.storageTransactionCount,
+        });
     });
 
     it('holds exclusive live capacity until terminal retirement', async () => {
@@ -830,7 +1030,7 @@ describe('Common-proof browser custody', () => {
         await expect(
             first.custody.checkpointCustody?.publishAuthenticatedCheckpoint({
                 canonicalStateBytes: checkpointState,
-                privateRandomCursorManifestBytes: cursorBytes,
+                generationCursorManifestBytes: cursorBytes,
                 privateRandomnessStreamAttemptIdentifier:
                     proofAttemptLineageIdentifier.slice(),
                 safeBoundaryOrdinal: 6,
@@ -841,7 +1041,7 @@ describe('Common-proof browser custody', () => {
         expect(first.custody.copyCheckpointResumeDescriptor()).toBeUndefined();
         await first.custody.checkpointCustody?.publishAuthenticatedCheckpoint({
             canonicalStateBytes: checkpointState,
-            privateRandomCursorManifestBytes: cursorBytes,
+            generationCursorManifestBytes: cursorBytes,
             privateRandomnessStreamAttemptIdentifier:
                 proofAttemptLineageIdentifier.slice(),
             safeBoundaryOrdinal: 6,
@@ -850,12 +1050,30 @@ describe('Common-proof browser custody', () => {
         expect(publishedOperationKinds).toEqual([
             applicationStatementSchemaIdentifier,
         ]);
+        const checkpointWriteAccounting =
+            first.custody.copyPhysicalStorageAccounting();
+        expect(checkpointWriteAccounting.sealCallCount).toBeGreaterThan(0);
+        expect(
+            checkpointWriteAccounting.sealCiphertextByteLength,
+        ).toBeGreaterThan(checkpointState.byteLength);
+        expect(
+            checkpointWriteAccounting.physicalWriteByteLength,
+        ).toBeGreaterThan(checkpointState.byteLength);
+        expect(
+            checkpointWriteAccounting.physicalWriteCallCount,
+        ).toBeGreaterThan(checkpointWriteAccounting.sealCallCount);
         const resumeDescriptor = first.custody.copyCheckpointResumeDescriptor();
         expect(resumeDescriptor).toBeDefined();
         if (resumeDescriptor === undefined) {
             throw new Error('Expected an authenticated checkpoint descriptor.');
         }
         await first.custody.suspendForAuthenticatedResume();
+        const suspendedPhysicalAccounting =
+            first.custody.copyPhysicalStorageAccounting();
+        expect(suspendedPhysicalAccounting.cleanupCompleted).toBe(true);
+        expect(
+            suspendedPhysicalAccounting.physicalStoredEndByteLength,
+        ).toBeGreaterThan(0);
 
         const mismatchedResumeBindingHash =
             resumeDescriptor.stableAttemptBindingHash.slice();
@@ -884,6 +1102,9 @@ describe('Common-proof browser custody', () => {
                 workerKernel: first.workerKernel,
             }),
         ).rejects.toMatchObject({ code: 'RecordAuthenticationFailed' });
+        expect(first.custody.copyPhysicalStorageAccounting()).toEqual(
+            suspendedPhysicalAccounting,
+        );
 
         const resumed = await openFixture({
             adapter,
@@ -893,8 +1114,11 @@ describe('Common-proof browser custody', () => {
             workerKernel: first.workerKernel,
         });
         await expect(
-            resumed.custody.checkpointCustody?.restoreAuthenticatedCheckpointState(),
-        ).resolves.toEqual(checkpointState);
+            resumed.custody.checkpointCustody?.restoreAuthenticatedCheckpoint(),
+        ).resolves.toEqual({
+            canonicalStateBytes: checkpointState,
+            generationCursorManifestBytes: cursorBytes,
+        });
         expect(resumedOperationKinds).toEqual([
             applicationStatementSchemaIdentifier,
         ]);
@@ -925,6 +1149,29 @@ describe('Common-proof browser custody', () => {
                 ),
             ).toBe(true);
         }
+        const resumedAccounting =
+            resumed.custody.copyPhysicalStorageAccounting();
+        expect(
+            resumedAccounting.deterministicRegenerationCallCount,
+        ).toBeGreaterThan(0);
+        expect(
+            resumedAccounting.deterministicRegeneratedByteLength,
+        ).toBeGreaterThanOrEqual(replayBytes.byteLength);
+        expect(
+            resumedAccounting.plaintextReadByteLength,
+        ).toBeGreaterThanOrEqual(replayRead[0]?.bytes.byteLength ?? 0);
+        expect(resumedAccounting.physicalReadByteLength).toBe(
+            resumedAccounting.ciphertextReadByteLength,
+        );
+        expect(resumedAccounting.physicalReadCallCount).toBe(
+            resumedAccounting.ciphertextReadCallCount,
+        );
+        expect(resumedAccounting.openCallCount).toBeGreaterThan(
+            Number(
+                resumed.custody.externalMemory.copyBrowserStorageAccounting?.()
+                    .secretRecordOpenCount ?? 0n,
+            ),
+        );
         await resumed.custody.suspendForAuthenticatedResume();
 
         const changedReplay = await openFixture({
@@ -934,7 +1181,7 @@ describe('Common-proof browser custody', () => {
             store: openedStore.store,
             workerKernel: first.workerKernel,
         });
-        await changedReplay.custody.checkpointCustody?.restoreAuthenticatedCheckpointState();
+        await changedReplay.custody.checkpointCustody?.restoreAuthenticatedCheckpoint();
         await changedReplay.custody.prefixReplayExternalMemory.executeDeterministicPrefixReplayTransaction(
             replayRequests[0],
         );
@@ -987,8 +1234,7 @@ describe('Common-proof browser custody', () => {
         });
         await first.custody.checkpointCustody?.publishAuthenticatedCheckpoint({
             canonicalStateBytes: new Uint8Array(97).fill(0x3a),
-            privateRandomCursorManifestBytes:
-                emptyPrivateRandomCursorManifest(),
+            generationCursorManifestBytes: emptyPrivateRandomCursorManifest(),
             privateRandomnessStreamAttemptIdentifier:
                 proofAttemptLineageIdentifier.slice(),
             safeBoundaryOrdinal: 2,
@@ -1010,7 +1256,7 @@ describe('Common-proof browser custody', () => {
             workerKernel: first.workerKernel,
         });
         await expect(
-            mismatched.custody.checkpointCustody?.restoreAuthenticatedCheckpointState(),
+            mismatched.custody.checkpointCustody?.restoreAuthenticatedCheckpoint(),
         ).rejects.toMatchObject({ code: 'AuthenticationFailed' });
     });
 
@@ -1041,8 +1287,7 @@ describe('Common-proof browser custody', () => {
         });
         await first.custody.checkpointCustody?.publishAuthenticatedCheckpoint({
             canonicalStateBytes: new Uint8Array(64).fill(0x17),
-            privateRandomCursorManifestBytes:
-                emptyPrivateRandomCursorManifest(),
+            generationCursorManifestBytes: emptyPrivateRandomCursorManifest(),
             privateRandomnessStreamAttemptIdentifier:
                 proofAttemptLineageIdentifier.slice(),
             safeBoundaryOrdinal: 2,
@@ -1086,7 +1331,7 @@ describe('Common-proof browser custody', () => {
             workerKernel: first.workerKernel,
         });
         await expect(
-            resumed.custody.checkpointCustody?.restoreAuthenticatedCheckpointState(),
+            resumed.custody.checkpointCustody?.restoreAuthenticatedCheckpoint(),
         ).rejects.toMatchObject({ code: 'StorageFailure' });
         expect(ownedStorageRecordKeys(adapter)).toEqual([]);
         await expect(
@@ -1121,8 +1366,7 @@ describe('Common-proof browser custody', () => {
         });
         await first.custody.checkpointCustody?.publishAuthenticatedCheckpoint({
             canonicalStateBytes: new Uint8Array(128).fill(0x41),
-            privateRandomCursorManifestBytes:
-                emptyPrivateRandomCursorManifest(),
+            generationCursorManifestBytes: emptyPrivateRandomCursorManifest(),
             privateRandomnessStreamAttemptIdentifier:
                 proofAttemptLineageIdentifier.slice(),
             safeBoundaryOrdinal: 3,
@@ -1143,7 +1387,7 @@ describe('Common-proof browser custody', () => {
             store: openedStore.store,
             workerKernel: first.workerKernel,
         });
-        await resumed.custody.checkpointCustody?.restoreAuthenticatedCheckpointState();
+        await resumed.custody.checkpointCustody?.restoreAuthenticatedCheckpoint();
         await resumed.custody.outputStore.commitChunk(0, committedChunk);
         resumed.custody.sealCanonicalOutput();
         await expect(
@@ -1160,7 +1404,7 @@ describe('Common-proof browser custody', () => {
             store: openedStore.store,
             workerKernel: first.workerKernel,
         });
-        await changedResume.custody.checkpointCustody?.restoreAuthenticatedCheckpointState();
+        await changedResume.custody.checkpointCustody?.restoreAuthenticatedCheckpoint();
         const changedChunk = committedChunk.slice();
         changedChunk[0] ^= 1;
         await expect(
@@ -1227,6 +1471,8 @@ describe('Common-proof browser custody', () => {
         const { adapter, custody, store } = await openFixture({
             decorateCapacityReservation: (reservation) =>
                 Object.freeze({
+                    copyPhysicalStorageAccounting: () =>
+                        reservation.copyPhysicalStorageAccounting(),
                     copyAuthenticatedLogicalRecordKeys: (prefix) =>
                         reservation.copyAuthenticatedLogicalRecordKeys(prefix),
                     deleteAuthenticatedLogicalRecords: async (prefix) => {
@@ -1333,6 +1579,8 @@ describe('Common-proof browser custody', () => {
             checkpointStore: retryingCheckpointStore,
             decorateCapacityReservation: (reservation) =>
                 Object.freeze({
+                    copyPhysicalStorageAccounting: () =>
+                        reservation.copyPhysicalStorageAccounting(),
                     copyAuthenticatedLogicalRecordKeys: (prefix) =>
                         reservation.copyAuthenticatedLogicalRecordKeys(prefix),
                     deleteAuthenticatedLogicalRecords: async (prefix) => {
@@ -1349,8 +1597,7 @@ describe('Common-proof browser custody', () => {
         });
         await custody.checkpointCustody?.publishAuthenticatedCheckpoint({
             canonicalStateBytes: new Uint8Array(97).fill(0x61),
-            privateRandomCursorManifestBytes:
-                emptyPrivateRandomCursorManifest(),
+            generationCursorManifestBytes: emptyPrivateRandomCursorManifest(),
             privateRandomnessStreamAttemptIdentifier:
                 proofAttemptLineageIdentifier.slice(),
             safeBoundaryOrdinal: 4,
@@ -1524,6 +1771,38 @@ describe('Common-proof browser custody', () => {
         }
     });
 
+    it('matches the Rust payload-only scratch boundary while charging physical record overhead separately', async () => {
+        const { custody } = await openFixture({
+            maximumExternalMemoryByteLength: commonProofScratchByteLength,
+        });
+
+        await custody.externalMemory.executeTransaction(
+            request([createOperation(71, commonProofScratchByteLength)]),
+        );
+        const afterExactBoundaryCreate =
+            custody.copyPhysicalStorageAccounting();
+        expect(
+            afterExactBoundaryCreate.physicalStoredEndByteLength -
+                afterExactBoundaryCreate.physicalStoredStartByteLength,
+        ).toBeGreaterThan(9);
+        await expect(
+            custody.externalMemory.executeTransaction(
+                request([createOperation(72, 1n)]),
+            ),
+        ).rejects.toMatchObject({ code: 'StorageFailure' });
+
+        await custody.externalMemory.executeTransaction(
+            request([deleteOperation(71)]),
+        );
+        await expect(
+            custody.externalMemory.executeTransaction(
+                request([
+                    createOperation(73, commonProofScratchByteLength + 1n),
+                ]),
+            ),
+        ).rejects.toMatchObject({ code: 'InvalidState' });
+    });
+
     it('opens one partial terminal secret chunk once and accounts every ownership transition', async () => {
         const workerKernel = createWasmBrowserActionStorageWorkerKernel({
             kernel: await loadFreshTranscriptCoreKernel(),
@@ -1665,5 +1944,23 @@ describe('Common-proof browser custody', () => {
         );
 
         expect(readResults[0]?.bytes).toEqual(expectedTerminalBytes);
+        const storedObjectByteLengths = ownedStorageRecordKeys(adapter)
+            .filter((key) => key.includes('/objects/'))
+            .map((key) => adapter.rawRead(key)?.byteLength)
+            .filter(
+                (byteLength): byteLength is number => byteLength !== undefined,
+            );
+        const maximumStoredObjectByteLength = Math.max(
+            ...storedObjectByteLengths,
+        );
+        const exactSecretRecordCeiling =
+            chunkByteLength + Number(commonProofSecretRecordOverheadByteLength);
+        expect(maximumStoredObjectByteLength).toBeGreaterThan(chunkByteLength);
+        expect(maximumStoredObjectByteLength).toBeLessThanOrEqual(
+            exactSecretRecordCeiling,
+        );
+        expect(commonProofStorageCapacityProfile.maximumLeaseByteLength).toBe(
+            exactSecretRecordCeiling,
+        );
     });
 });

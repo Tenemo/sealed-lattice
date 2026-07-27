@@ -152,17 +152,40 @@ export const createResetSafeCommonProofCursorManifest = (
     }
     const prefixByteLength = 19;
     const identityByteLength = 98;
-    const manifest = new Uint8Array(prefixByteLength + identityByteLength);
-    manifest.set(Uint8Array.of(0x53, 0x4c, 0x43, 0x50, 0x43, 0x4d, 0x30, 0x33));
-    const view = new DataView(manifest.buffer);
-    view.setUint16(8, 3, true);
-    manifest[10] = 1;
-    view.setUint32(11, 0, true);
-    view.setUint32(15, 0, true);
-    view.setUint16(19, familySchemaIdentifier, true);
-    manifest.set(derivationBindingHash, 21);
-    manifest.set(streamAttemptIdentifier, 85);
-    return manifest;
+    const privateCoinCursorManifest = new Uint8Array(
+        prefixByteLength + identityByteLength,
+    );
+    privateCoinCursorManifest.set(
+        Uint8Array.of(0x53, 0x4c, 0x43, 0x50, 0x43, 0x4d, 0x30, 0x33),
+    );
+    const privateCoinView = new DataView(privateCoinCursorManifest.buffer);
+    privateCoinView.setUint16(8, 3, true);
+    privateCoinCursorManifest[10] = 1;
+    privateCoinView.setUint32(11, 0, true);
+    privateCoinView.setUint32(15, 0, true);
+    privateCoinView.setUint16(19, familySchemaIdentifier, true);
+    privateCoinCursorManifest.set(derivationBindingHash, 21);
+    privateCoinCursorManifest.set(streamAttemptIdentifier, 85);
+
+    const generationManifestPrefixByteLength = 88;
+    const generationCursorManifest = new Uint8Array(
+        generationManifestPrefixByteLength + privateCoinCursorManifest.length,
+    );
+    generationCursorManifest.set(
+        Uint8Array.of(0x53, 0x4c, 0x43, 0x47, 0x43, 0x4d, 0x30, 0x31),
+    );
+    const generationView = new DataView(generationCursorManifest.buffer);
+    generationView.setUint16(8, 1, true);
+    generationView.setUint16(10, 0, true);
+    generationView.setUint32(12, generationCursorManifest.byteLength, true);
+    generationView.setUint32(16, privateCoinCursorManifest.byteLength, true);
+    generationView.setUint32(20, 0, true);
+    generationCursorManifest.set(
+        privateCoinCursorManifest,
+        generationManifestPrefixByteLength,
+    );
+    privateCoinCursorManifest.fill(0);
+    return generationCursorManifest;
 };
 
 export const createCheckpointGenerationKernelFixture = (
@@ -250,11 +273,15 @@ export const createCheckpointGenerationKernelFixture = (
             adapterHandle,
             checkpointStatePointer,
             checkpointStateByteLength,
+            generationCursorManifestPointer,
+            generationCursorManifestByteLength,
             statusPointer,
         ) => {
             expect(adapterHandle).toBe(71);
             expect(checkpointStatePointer).toBe(0);
             expect(checkpointStateByteLength).toBe(0);
+            expect(generationCursorManifestPointer).toBe(0);
+            expect(generationCursorManifestByteLength).toBe(0);
             writeUnsigned32(memory, statusPointer, 0);
             return 81;
         },
@@ -412,7 +439,7 @@ export const createVerifiedApplicationFixture = async (input?: {
     }>
 > => {
     const authorizationFrame = Uint8Array.from(
-        { length: 746 },
+        { length: 742 },
         (_unused, byteIndex) => (byteIndex * 29 + 17) & 0xff,
     );
     const proofApplicationSlotHash = new Uint8Array(hashByteLength).fill(0x71);

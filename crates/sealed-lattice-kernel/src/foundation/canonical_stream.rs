@@ -6,16 +6,14 @@ use sha3::{
 use super::state::StateExactOutputHasher;
 use super::{
     CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalDecodeLimits,
-    CanonicalItemType, CanonicalTuple, FOUNDATION_PROFILE, FoundationObjectType, Hash512,
-    ML_DSA_65_SIGNATURE_BYTE_LENGTH, RefusalReason, SIGNED_CARRIER_SCHEMA_IDENTIFIER,
-    SignedCarrier, StateCapabilityKind, StreamDescriptor, VerificationResult,
+    CanonicalItem, CanonicalItemType, CanonicalTuple, FOUNDATION_PROFILE, FoundationObjectType,
+    FoundationSchemaError, Hash512, ML_DSA_65_SIGNATURE_BYTE_LENGTH, RefusalReason,
+    SIGNED_CARRIER_SCHEMA_IDENTIFIER, SignedCarrier, StateCapabilityKind, StreamDescriptor,
+    VerificationResult,
 };
 
 #[cfg(test)]
-use super::{
-    CanonicalItem, FoundationSchemaError, ObjectEnvelope, ParticipantIdentity,
-    hash_foundation_tuple_512 as hash512,
-};
+use super::{ObjectEnvelope, ParticipantIdentity, hash_foundation_tuple_512 as hash512};
 
 const CHUNK_DIGEST_DOMAIN: &str = "sealed-lattice/transport/chunk/v1";
 const FULL_OBJECT_DIGEST_DOMAIN: &str = "sealed-lattice/transport/full-object/v1";
@@ -250,6 +248,36 @@ pub(crate) struct TargetReleaseOutputBundleByteLengths {
     total: u64,
 }
 
+pub(crate) fn canonical_target_release_output_payload(
+    finality_hash: Hash512,
+    reservation_intent_object_hash: Hash512,
+    target_identifier_descriptor: &StreamDescriptor,
+    target_order_descriptor: &StreamDescriptor,
+    malicious_share_proof_descriptor: &StreamDescriptor,
+) -> Result<Vec<u8>, FoundationSchemaError> {
+    fn descriptor_item(
+        descriptor: &StreamDescriptor,
+    ) -> Result<CanonicalItem, FoundationSchemaError> {
+        let canonical_descriptor = descriptor.encode()?;
+        let descriptor_tuple =
+            CanonicalTuple::decode(&canonical_descriptor, &CanonicalDecodeLimits::default())?;
+        Ok(CanonicalItem::nested_tuple(&descriptor_tuple)?)
+    }
+
+    Ok(CanonicalTuple::new(
+        TARGET_DECRYPTION_SHARE_PAYLOAD_SCHEMA_IDENTIFIER,
+        TARGET_RELEASE_OUTPUT_BUNDLE_VERSION,
+        vec![
+            CanonicalItem::hash512(finality_hash.into_bytes()),
+            CanonicalItem::hash512(reservation_intent_object_hash.into_bytes()),
+            descriptor_item(target_identifier_descriptor)?,
+            descriptor_item(target_order_descriptor)?,
+            descriptor_item(malicious_share_proof_descriptor)?,
+        ],
+    )
+    .encode()?)
+}
+
 /// Derives the exact target-share carrier and bundle lengths without
 /// materializing the three potentially large child streams. The placeholder
 /// hashes, participant identity, and signature all occupy fixed-width
@@ -262,27 +290,13 @@ pub(crate) fn canonical_target_release_output_bundle_byte_lengths_for_accounting
     target_order_descriptor: &StreamDescriptor,
     malicious_share_proof_descriptor: &StreamDescriptor,
 ) -> Result<TargetReleaseOutputBundleByteLengths, FoundationSchemaError> {
-    fn descriptor_item(
-        descriptor: &StreamDescriptor,
-    ) -> Result<CanonicalItem, FoundationSchemaError> {
-        let canonical_descriptor = descriptor.encode()?;
-        let descriptor_tuple =
-            CanonicalTuple::decode(&canonical_descriptor, &CanonicalDecodeLimits::default())?;
-        Ok(CanonicalItem::nested_tuple(&descriptor_tuple)?)
-    }
-
-    let payload = CanonicalTuple::new(
-        TARGET_DECRYPTION_SHARE_PAYLOAD_SCHEMA_IDENTIFIER,
-        TARGET_RELEASE_OUTPUT_BUNDLE_VERSION,
-        vec![
-            CanonicalItem::hash512([0x31; Hash512::BYTE_LENGTH]),
-            CanonicalItem::hash512([0x32; Hash512::BYTE_LENGTH]),
-            descriptor_item(target_identifier_descriptor)?,
-            descriptor_item(target_order_descriptor)?,
-            descriptor_item(malicious_share_proof_descriptor)?,
-        ],
-    )
-    .encode()?;
+    let payload = canonical_target_release_output_payload(
+        Hash512::from_bytes([0x31; Hash512::BYTE_LENGTH]),
+        Hash512::from_bytes([0x32; Hash512::BYTE_LENGTH]),
+        target_identifier_descriptor,
+        target_order_descriptor,
+        malicious_share_proof_descriptor,
+    )?;
     let signed_carrier = SignedCarrier {
         envelope: ObjectEnvelope {
             suite_id: Hash512::from_bytes([0x11; Hash512::BYTE_LENGTH]),
@@ -1506,39 +1520,28 @@ pub(super) fn canonical_target_release_exact_output_fixture(
     target_order_bytes: &[u8],
     malicious_share_proof_bytes: &[u8],
 ) -> Vec<u8> {
-    let descriptor_item = |stream_domain: CanonicalStreamDomain, canonical_bytes: &[u8]| {
-        let descriptor = derive_canonical_stream_descriptor(stream_domain, canonical_bytes)
-            .expect("test target-release child descriptor derives");
-        CanonicalItem::nested_tuple(
-            &CanonicalTuple::decode(
-                &descriptor.encode().expect("test descriptor encodes"),
-                &CanonicalDecodeLimits::default(),
-            )
-            .expect("test descriptor tuple decodes"),
-        )
-        .expect("test nested descriptor constructs")
-    };
-    let payload = CanonicalTuple::new(
-        TARGET_DECRYPTION_SHARE_PAYLOAD_SCHEMA_IDENTIFIER,
-        TARGET_RELEASE_OUTPUT_BUNDLE_VERSION,
-        vec![
-            CanonicalItem::hash512([0x31; Hash512::BYTE_LENGTH]),
-            CanonicalItem::hash512([0x32; Hash512::BYTE_LENGTH]),
-            descriptor_item(
-                CanonicalStreamDomain::TargetIdentifierPartialDecryption,
-                target_identifier_bytes,
-            ),
-            descriptor_item(
-                CanonicalStreamDomain::TargetOrderPartialDecryption,
-                target_order_bytes,
-            ),
-            descriptor_item(
-                CanonicalStreamDomain::MaliciousTargetShareProof,
-                malicious_share_proof_bytes,
-            ),
-        ],
+    let target_identifier_descriptor = derive_canonical_stream_descriptor(
+        CanonicalStreamDomain::TargetIdentifierPartialDecryption,
+        target_identifier_bytes,
     )
-    .encode()
+    .expect("test target-identifier descriptor derives");
+    let target_order_descriptor = derive_canonical_stream_descriptor(
+        CanonicalStreamDomain::TargetOrderPartialDecryption,
+        target_order_bytes,
+    )
+    .expect("test target-order descriptor derives");
+    let malicious_share_proof_descriptor = derive_canonical_stream_descriptor(
+        CanonicalStreamDomain::MaliciousTargetShareProof,
+        malicious_share_proof_bytes,
+    )
+    .expect("test target-share proof descriptor derives");
+    let payload = canonical_target_release_output_payload(
+        Hash512::from_bytes([0x31; Hash512::BYTE_LENGTH]),
+        Hash512::from_bytes([0x32; Hash512::BYTE_LENGTH]),
+        &target_identifier_descriptor,
+        &target_order_descriptor,
+        &malicious_share_proof_descriptor,
+    )
     .expect("test target-release payload encodes");
     let carrier = SignedCarrier {
         envelope: ObjectEnvelope {

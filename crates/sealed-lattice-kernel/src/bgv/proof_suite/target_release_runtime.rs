@@ -37,16 +37,19 @@ use crate::{
     foundation::{
         BOARD_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, CanonicalDecodeLimits,
         FINALITY_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, FOUNDATION_PROFILE, FoundationObjectType,
-        FoundationSchemaError, Hash512, ParticipantIdentity, PreparedActionProofAttemptSource,
+        FoundationSchemaError, Hash512, ML_DSA_65_SIGNATURE_BYTE_LENGTH, ObjectEnvelope,
+        ParticipantIdentity, PreparedActionProofAttemptSource, PreparedSignedCarrierDescription,
         ProofApplicationBinding, ProofApplicationSlot, ProofApplicationSlotCeilings,
         ProofObjectHeader, RefusalReason, STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH,
         StateCapabilityKind, StateVerifier, StreamDescriptor, VerifiedBoardApplicationSource,
         VerifiedFinality, VerifiedStateOutput, VerifiedStateReservation,
-        VerifiedStateReservationRuntimeBinding, resolve_prepared_action_proof_attempt_source,
+        VerifiedStateReservationRuntimeBinding, cancel_prepared_signed_carrier,
+        canonical_target_release_output_payload, finish_prepared_signed_carrier,
+        prepared_signed_carrier_byte_length, resolve_prepared_action_proof_attempt_source,
         resolve_verified_board_application_sources,
-        retain_action_private_randomness_for_exact_family, verified_state_reservation_binding,
-        with_verified_finality, with_verified_state_reservation,
-        with_verified_state_reservation_and_output,
+        retain_action_private_randomness_for_exact_family, retain_prepared_signed_carrier,
+        verified_state_reservation_binding, with_verified_finality,
+        with_verified_state_reservation, with_verified_state_reservation_and_output,
     },
 };
 
@@ -62,8 +65,9 @@ use super::runtime_ffi::{
 use super::{
     CommonProofGenerationPreparationError, CommonProofRelationPlanCapability,
     CommonProofRelationPlanCapabilityError, CommonProofRuntimeError, CommonProofRuntimeLimits,
-    CommonProofSelectedSuiteCapabilityHandle, PreparedCommonProofGeneration, ProofProfileError,
-    RelationPlanError, SelectedProofAccountingError, VerifiedCommonProofCapabilityHandle,
+    CommonProofSelectedSuiteCapabilityHandle, MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
+    PreparedCommonProofGeneration, ProofProfileError, RelationPlanError,
+    SelectedProofAccountingError, VerifiedCommonProofCapabilityHandle,
     VerifiedCommonProofStatementSource, VerifiedStatementOwnedTree,
     canonical_selected_target_share_statement, selected_proof_runtime_limits,
     selected_relation_plan_check_context, selected_target_release_relation,
@@ -617,7 +621,6 @@ thread_local! {
 struct SelectedTargetReleaseRuntimePlan {
     relation_plan: CommonProofRelationPlanCapability,
     limits: CommonProofRuntimeLimits,
-    proof_query_count: u32,
 }
 
 fn selected_target_release_runtime_plan(
@@ -641,11 +644,9 @@ fn selected_target_release_runtime_plan(
         None,
         None,
     )?;
-    let proof_query_count = relation_plan.proof_query_count()?;
     Ok(SelectedTargetReleaseRuntimePlan {
         relation_plan,
         limits,
-        proof_query_count,
     })
 }
 
@@ -806,19 +807,14 @@ fn resolve_target_release_prepared_attempt(
     verified_reservation_binding: VerifiedStateReservationRuntimeBinding,
     reservation_intent_source: &VerifiedBoardApplicationSource,
     witness_source: &KllpsTargetReleaseWitnessSource,
-    runtime_plan: &SelectedTargetReleaseRuntimePlan,
     checkpoint_continuation: crate::foundation::AuthenticatedCheckpointContinuationSource,
 ) -> Result<PreparedActionProofAttemptSource, TargetReleaseRuntimeError> {
-    let proof_byte_length = u64::try_from(runtime_plan.limits.proof_byte_length())
-        .map_err(|_| TargetReleaseRuntimeError::InvalidInput)?;
     resolve_prepared_action_proof_attempt_source(
         action_randomness_handle,
         verified_reservation_binding,
         reservation_intent_source,
         witness_source.application_slot(),
         Hash512::from_bytes(witness_source.application_statement_hash()),
-        proof_byte_length,
-        runtime_plan.proof_query_count,
         checkpoint_continuation,
     )
     .map_err(TargetReleaseRuntimeError::ActionRandomnessRuntime)
@@ -924,9 +920,7 @@ fn prepare_target_release_generation(
         .to_vec();
     let runtime_plan =
         selected_target_release_runtime_plan(&canonical_application_statement_bytes)?;
-    let checkpoint_schedule_digest = runtime_plan
-        .relation_plan
-        .checkpoint_schedule_digest(runtime_plan.limits)?;
+    let checkpoint_schedule_digest = runtime_plan.relation_plan.checkpoint_schedule_digest()?;
     let reservation_intent_source = resolve_single_board_source(
         board_verifier_session_handle,
         &board_verifier_session_capability,
@@ -956,7 +950,6 @@ fn prepare_target_release_generation(
         verified_reservation_binding,
         &reservation_intent_source,
         &witness_source,
-        &runtime_plan,
         fresh_continuation,
     )?;
     let (initial_common_generation, target_identifier_stream, target_order_stream) =
@@ -1017,7 +1010,7 @@ fn prepare_target_release_generation(
                     .map_err(resumed_generation_preparation_error)?;
                     if resumed_runtime_plan
                         .relation_plan
-                        .checkpoint_schedule_digest(resumed_runtime_plan.limits)
+                        .checkpoint_schedule_digest()
                         .map_err(CommonProofGenerationPreparationError::Runtime)?
                         != checkpoint_schedule_digest
                     {
@@ -1030,7 +1023,6 @@ fn prepare_target_release_generation(
                         verified_reservation_binding,
                         &resumed_reservation_intent_source,
                         &witness_source,
-                        &resumed_runtime_plan,
                         authenticated_continuation,
                     )
                     .map_err(resumed_generation_preparation_error)?;
@@ -1093,17 +1085,114 @@ fn prepare_target_release_generation(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn require_state_output_matches_release(
+fn decode_exact_target_release_proof_descriptor(
+    canonical_bytes: &[u8],
+) -> Result<StreamDescriptor, TargetReleaseRuntimeError> {
+    if canonical_bytes.is_empty()
+        || canonical_bytes.len() > FOUNDATION_PROFILE.maximum_copied_buffer_byte_length
+    {
+        return Err(TargetReleaseRuntimeError::Refusal(
+            if canonical_bytes.is_empty() {
+                RefusalReason::WrongTypeOrLength
+            } else {
+                RefusalReason::OutsideSupportedProfile
+            },
+        ));
+    }
+    let descriptor = StreamDescriptor::decode(canonical_bytes, &CanonicalDecodeLimits::default())?;
+    if descriptor.encode()?.as_slice() != canonical_bytes {
+        return Err(TargetReleaseRuntimeError::Refusal(
+            RefusalReason::MalformedEncoding,
+        ));
+    }
+    let maximum_proof_byte_length = u64::try_from(MAXIMUM_COMMON_PROOF_BYTE_LENGTH)
+        .map_err(|_| TargetReleaseRuntimeError::InvalidInput)?;
+    if descriptor.total_byte_length > maximum_proof_byte_length {
+        return Err(TargetReleaseRuntimeError::Refusal(
+            RefusalReason::OutsideSupportedProfile,
+        ));
+    }
+    Ok(descriptor)
+}
+
+fn prepare_target_release_output_carrier(
+    generation_source_handle: u32,
+    canonical_proof_descriptor_bytes: &[u8],
+) -> Result<PreparedSignedCarrierDescription, TargetReleaseRuntimeError> {
+    let proof_descriptor =
+        decode_exact_target_release_proof_descriptor(canonical_proof_descriptor_bytes)?;
+    TARGET_RELEASE_GENERATION_SOURCE_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let source = registry.source(generation_source_handle)?;
+        if !source.all_role_streams_read() {
+            return Err(TargetReleaseRuntimeError::Runtime(
+                CommonProofRuntimeError::WrongOperationPhase,
+            ));
+        }
+        with_verified_state_reservation(
+            source.state_verifier_session_handle,
+            &source.state_verifier_session_capability[..],
+            source.verified_reservation_handle,
+            |state_verifier, verified_reservation| {
+                with_verified_finality(
+                    source.finality_verifier_session_handle,
+                    &source.finality_verifier_session_capability[..],
+                    source.verified_finality_handle,
+                    |verified_finality| {
+                        require_release_authorities_match(
+                            state_verifier,
+                            verified_reservation,
+                            verified_finality,
+                            &source.release_binding,
+                            &source.participant_binding,
+                        )
+                        .map_err(refusal_status)?;
+                        let payload = canonical_target_release_output_payload(
+                            Hash512::from_bytes(source.release_binding.finality_hash),
+                            Hash512::from_bytes(
+                                source.participant_binding.reservation_intent_object_hash,
+                            ),
+                            &source.role_stream_descriptors[0],
+                            &source.role_stream_descriptors[1],
+                            &proof_descriptor,
+                        )
+                        .map_err(|error| refusal_status(error.refusal_reason))?;
+                        let envelope = ObjectEnvelope {
+                            suite_id: Hash512::from_bytes(source.release_binding.suite_id),
+                            object_type: FoundationObjectType::TargetDecryptionShare,
+                            ceremony_context_hash: Hash512::from_bytes(
+                                source.release_binding.ceremony_context_hash,
+                            ),
+                            action_context_hash: Hash512::from_bytes(
+                                source.release_binding.action_context_hash,
+                            ),
+                            producer_participant_id: Some(ParticipantIdentity::from_bytes(
+                                source.participant_binding.subject_participant_id,
+                            )),
+                            producer_sequence: 0,
+                            ordered_prerequisite_hashes: Vec::new(),
+                            payload_bytes: payload,
+                        };
+                        retain_prepared_signed_carrier(
+                            envelope,
+                            state_verifier.roster(),
+                            Hash512::from_bytes(source.release_binding.roster_hash),
+                        )
+                        .map_err(refusal_status)
+                    },
+                )
+            },
+        )
+        .map_err(TargetReleaseRuntimeError::AuthorityRuntime)
+    })
+}
+
+fn require_release_authorities_match(
     state_verifier: &StateVerifier,
     verified_reservation: &VerifiedStateReservation,
-    verified_output: &VerifiedStateOutput,
     verified_finality: &VerifiedFinality,
-    target_share_source: &VerifiedBoardApplicationSource,
     release_binding: &KllpsReleaseBinding,
     participant_binding: &KllpsParticipantReleaseBinding,
-    roster_position: u16,
-    role_stream_descriptors: &[StreamDescriptor; TARGET_ROLE_COUNT],
 ) -> Result<(), RefusalReason> {
     let finality_statement = verified_finality.statement();
     if state_verifier
@@ -1146,7 +1235,32 @@ fn require_state_output_matches_release(
         || verified_reservation.state_key().into_bytes() != participant_binding.state_key
         || verified_reservation.authorization_hash().into_bytes()
             != release_binding.authorization_hash
-        || verified_output.capability_kind() != verified_reservation.capability_kind()
+    {
+        return Err(RefusalReason::WrongContext);
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn require_state_output_matches_release(
+    state_verifier: &StateVerifier,
+    verified_reservation: &VerifiedStateReservation,
+    verified_output: &VerifiedStateOutput,
+    verified_finality: &VerifiedFinality,
+    target_share_source: &VerifiedBoardApplicationSource,
+    release_binding: &KllpsReleaseBinding,
+    participant_binding: &KllpsParticipantReleaseBinding,
+    roster_position: u16,
+    role_stream_descriptors: &[StreamDescriptor; TARGET_ROLE_COUNT],
+) -> Result<(), RefusalReason> {
+    require_release_authorities_match(
+        state_verifier,
+        verified_reservation,
+        verified_finality,
+        release_binding,
+        participant_binding,
+    )?;
+    if verified_output.capability_kind() != verified_reservation.capability_kind()
         || verified_output.suite_id() != verified_reservation.suite_id()
         || verified_output.ceremony_context_hash() != verified_reservation.ceremony_context_hash()
         || verified_output.action_context_hash() != verified_reservation.action_context_hash()
@@ -2204,6 +2318,117 @@ pub unsafe extern "C" fn sealed_lattice_target_release_read_partial_chunk(
             status
         }
     }
+}
+
+/// Retains the exact target-share envelope after both Rust-owned partial
+/// streams have been copied. The finality and reservation hashes, participant,
+/// suite, action, and partial descriptors come only from the live generation
+/// source; the caller contributes only the generated proof descriptor.
+///
+/// # Safety
+///
+/// The proof descriptor pointer must name its declared non-empty readable
+/// range. The carrier-length output must name one writable `u32`; the
+/// signature-message output must name exactly 64 writable bytes. A non-null
+/// status pointer must name one writable `u32`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_target_release_prepare_output_carrier(
+    generation_source_handle: u32,
+    proof_descriptor_pointer: *const u8,
+    proof_descriptor_byte_length: usize,
+    canonical_carrier_byte_length_output_pointer: *mut u32,
+    signature_message_output_pointer: *mut u8,
+    signature_message_output_byte_length: usize,
+    status_pointer: *mut u32,
+) -> u32 {
+    let result = (|| {
+        if proof_descriptor_pointer.is_null()
+            || canonical_carrier_byte_length_output_pointer.is_null()
+            || signature_message_output_pointer.is_null()
+            || signature_message_output_byte_length != Hash512::BYTE_LENGTH
+        {
+            return Err(TargetReleaseRuntimeError::InvalidInput);
+        }
+        let proof_descriptor_bytes = unsafe {
+            slice::from_raw_parts(proof_descriptor_pointer, proof_descriptor_byte_length)
+        };
+        let description = prepare_target_release_output_carrier(
+            generation_source_handle,
+            proof_descriptor_bytes,
+        )?;
+        let canonical_carrier_byte_length =
+            u32::try_from(description.canonical_carrier_byte_length())
+                .map_err(|_| TargetReleaseRuntimeError::InvalidInput)?;
+        unsafe {
+            canonical_carrier_byte_length_output_pointer.write(canonical_carrier_byte_length);
+            slice::from_raw_parts_mut(
+                signature_message_output_pointer,
+                signature_message_output_byte_length,
+            )
+            .copy_from_slice(description.signature_message().as_bytes());
+        }
+        Ok(description.handle())
+    })();
+    match result {
+        Ok(handle) => {
+            unsafe { write_status(status_pointer, 0) };
+            handle
+        }
+        Err(error) => {
+            unsafe { write_status(status_pointer, runtime_error_status(error)) };
+            0
+        }
+    }
+}
+
+/// Completes one prepared target-share carrier only after the participant
+/// signature verifies against the source-bound state-verifier roster.
+///
+/// # Safety
+///
+/// The signature pointer must name exactly one ML-DSA-65 signature. The output
+/// pointer must name the exact writable length returned by preparation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_target_release_finish_output_carrier(
+    prepared_carrier_handle: u32,
+    signature_pointer: *const u8,
+    signature_byte_length: usize,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+) -> u32 {
+    let result = (|| {
+        if output_pointer.is_null() {
+            return Err(TargetReleaseRuntimeError::InvalidInput);
+        }
+        let expected_output_byte_length =
+            prepared_signed_carrier_byte_length(prepared_carrier_handle)?;
+        if output_byte_length != expected_output_byte_length {
+            return Err(TargetReleaseRuntimeError::InvalidInput);
+        }
+        let signature = unsafe {
+            fixed_input::<ML_DSA_65_SIGNATURE_BYTE_LENGTH>(signature_pointer, signature_byte_length)
+        }?;
+        let canonical_carrier = finish_prepared_signed_carrier(prepared_carrier_handle, signature)?;
+        if canonical_carrier.len() != output_byte_length {
+            return Err(TargetReleaseRuntimeError::InvalidInput);
+        }
+        unsafe { slice::from_raw_parts_mut(output_pointer, output_byte_length) }
+            .copy_from_slice(&canonical_carrier);
+        Ok(())
+    })();
+    result.map_or_else(runtime_error_status, |()| 0)
+}
+
+/// Cancels a prepared target-share carrier after signing, state-output
+/// construction, board ingestion, or another caller-owned step fails.
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_target_release_cancel_output_carrier(
+    prepared_carrier_handle: u32,
+) -> u32 {
+    cancel_prepared_signed_carrier(prepared_carrier_handle).map_or_else(
+        |reason| runtime_error_status(TargetReleaseRuntimeError::Refusal(reason)),
+        |()| 0,
+    )
 }
 
 /// Retires one generated common proof only after the exact state-certified

@@ -61,6 +61,7 @@ import {
     type CommonProofApplicationHandoff,
     type CommonProofCheckpointCustody,
     type CommonProofBrowserCustody,
+    type CommonProofBrowserCustodyPhysicalAccountingSnapshot,
     type CommonProofPayloadBufferOwnership,
     type CommonProofPayloadBufferAccounting,
     CommonProofPayloadBufferOwnershipLedger,
@@ -74,6 +75,7 @@ export {
 export type {
     CommonProofApplicationHandoff,
     CommonProofBrowserCustody,
+    CommonProofBrowserCustodyPhysicalAccountingSnapshot,
     CommonProofCheckpointResumeDescriptor,
 } from './records.js';
 
@@ -82,7 +84,10 @@ const storedRecordDigestDomain =
 const storedPayloadDigestDomain =
     'sealed-lattice/common-proof/stored-payload-digest/v1';
 
-const destroyOwnedPayloadBuffer = (bytes: Uint8Array): void => {
+const destroyOwnedPayloadBuffer = (bytes: Uint8Array | undefined): void => {
+    if (bytes === undefined) {
+        return;
+    }
     if (!(bytes.buffer instanceof ArrayBuffer)) {
         bytes.fill(0);
         return;
@@ -289,6 +294,11 @@ export const openCommonProofBrowserCustody = (
             }
             boundProofAttemptLineageIdentifier.fill(0);
         }
+        if (input.checkpoint !== undefined) {
+            input.checkpoint.store.copyPhysicalAccounting(
+                input.checkpoint.physicalAccountingScope,
+            );
+        }
     } catch (error) {
         actionRandomnessCommitment?.fill(0);
         commonProofEnvironmentIdentifier?.fill(0);
@@ -301,17 +311,34 @@ export const openCommonProofBrowserCustody = (
     }
     const objects = new Map<number, ExternalMemoryObjectState>();
     const outputChunks = new Map<number, CanonicalOutputChunk>();
-    let externalMemoryByteLength = 0n;
+    let externalMemoryPayloadByteLength = 0n;
     let externalMemoryRecordCount = 0;
     let payloadBufferAccounting = emptyPayloadBufferAccounting();
     let secretRecordOpenByteLength = 0n;
     let secretRecordOpenCount = 0n;
+    let secretRecordOpenPlaintextByteLength = 0n;
     let secretRecordSealByteLength = 0n;
     let secretRecordSealCount = 0n;
+    let secretRecordSealCiphertextByteLength = 0n;
+    let ciphertextReadByteLength = 0;
+    let ciphertextReadCallCount = 0;
+    let ciphertextWriteByteLength = 0;
+    let ciphertextWriteCallCount = 0;
+    let commitReadbackByteLength = 0;
+    let commitReadbackCallCount = 0;
+    let deterministicRegeneratedByteLength = 0;
+    let deterministicRegenerationCallCount = 0;
+    let plaintextReadByteLength = 0;
+    let plaintextReadCallCount = 0;
+    let plaintextWriteByteLength = 0;
+    let plaintextWriteCallCount = 0;
+    let cleanupDurationMilliseconds = 0;
     let outputByteLength = 0;
     let outputSealed = false;
     let outputTerminalChunkIndex: number | undefined;
     let capacityReservationReleased = false;
+    let checkpointPhysicalAccountingScopeReleased =
+        input.checkpoint === undefined;
     let checkpointEvictionCompleted = false;
     let durableProofRecordsDeleted = false;
     let terminalCheckpointLineageIdentifier:
@@ -326,6 +353,96 @@ export const openCommonProofBrowserCustody = (
         'open';
     let checkpointOperationIdentity = initialCheckpointOperationIdentity;
     let checkpointRestoreAttempted = false;
+    const checkedAccountingAdd = (
+        currentValue: number,
+        increment: number,
+        label: string,
+    ): number => {
+        const result = currentValue + increment;
+        if (!Number.isSafeInteger(result) || result < 0) {
+            throw new BrowserActionStorageCustodyError(
+                'StorageFailure',
+                `${label} exceeded the safe accounting range.`,
+            );
+        }
+        return result;
+    };
+    const monotonicMilliseconds = (): number =>
+        globalThis.performance?.now() ?? Date.now();
+    const recordStorageRead = (
+        storedByteLength: number,
+        payloadByteLength: number,
+    ): void => {
+        ciphertextReadCallCount = checkedAccountingAdd(
+            ciphertextReadCallCount,
+            1,
+            'Common-proof ciphertext read count',
+        );
+        ciphertextReadByteLength = checkedAccountingAdd(
+            ciphertextReadByteLength,
+            storedByteLength,
+            'Common-proof ciphertext read bytes',
+        );
+        plaintextReadCallCount = checkedAccountingAdd(
+            plaintextReadCallCount,
+            1,
+            'Common-proof plaintext read count',
+        );
+        plaintextReadByteLength = checkedAccountingAdd(
+            plaintextReadByteLength,
+            payloadByteLength,
+            'Common-proof plaintext read bytes',
+        );
+    };
+    const recordStoredBytesRead = (storedByteLength: number): void => {
+        ciphertextReadCallCount = checkedAccountingAdd(
+            ciphertextReadCallCount,
+            1,
+            'Common-proof ciphertext read count',
+        );
+        ciphertextReadByteLength = checkedAccountingAdd(
+            ciphertextReadByteLength,
+            storedByteLength,
+            'Common-proof ciphertext read bytes',
+        );
+    };
+    const recordStorageWrite = (
+        storedByteLength: number,
+        payloadByteLength: number,
+    ): void => {
+        ciphertextWriteCallCount = checkedAccountingAdd(
+            ciphertextWriteCallCount,
+            1,
+            'Common-proof ciphertext write count',
+        );
+        ciphertextWriteByteLength = checkedAccountingAdd(
+            ciphertextWriteByteLength,
+            storedByteLength,
+            'Common-proof ciphertext write bytes',
+        );
+        plaintextWriteCallCount = checkedAccountingAdd(
+            plaintextWriteCallCount,
+            1,
+            'Common-proof plaintext write count',
+        );
+        plaintextWriteByteLength = checkedAccountingAdd(
+            plaintextWriteByteLength,
+            payloadByteLength,
+            'Common-proof plaintext write bytes',
+        );
+    };
+    const recordCommitReadback = (byteLength: number): void => {
+        commitReadbackCallCount = checkedAccountingAdd(
+            commitReadbackCallCount,
+            1,
+            'Common-proof commit-readback count',
+        );
+        commitReadbackByteLength = checkedAccountingAdd(
+            commitReadbackByteLength,
+            byteLength,
+            'Common-proof commit-readback bytes',
+        );
+    };
     const assertOpen = (): void => {
         if (state !== 'open') {
             throw new BrowserActionStorageCustodyError(
@@ -382,7 +499,7 @@ export const openCommonProofBrowserCustody = (
     const checkpointBoundary = (inputValue: {
         canonicalStateBytes?: Uint8Array;
         commonProofEnvironmentIdentifier: Uint8Array;
-        privateRandomCursorManifestBytes: Uint8Array;
+        generationCursorManifestBytes: Uint8Array;
         privateRandomnessStreamAttemptIdentifier?: Uint8Array;
         safeBoundaryOrdinal: number;
         stableAttemptBindingHash: Uint8Array;
@@ -407,7 +524,7 @@ export const openCommonProofBrowserCustody = (
                 environmentBindingHash,
             ]),
             privateRandomCursorManifestBytes:
-                inputValue.privateRandomCursorManifestBytes.slice(),
+                inputValue.generationCursorManifestBytes.slice(),
             ...(inputValue.privateRandomnessStreamAttemptIdentifier ===
             undefined
                 ? {}
@@ -452,11 +569,12 @@ export const openCommonProofBrowserCustody = (
                           checkpoint.stableAttemptBindingHash.byteLength !==
                               foundationHashByteLength ||
                           !(
-                              checkpoint.privateRandomCursorManifestBytes instanceof
+                              checkpoint.generationCursorManifestBytes instanceof
                               Uint8Array
                           ) ||
-                          checkpoint.privateRandomCursorManifestBytes
-                              .byteLength >
+                          checkpoint.generationCursorManifestBytes
+                              .byteLength === 0 ||
+                          checkpoint.generationCursorManifestBytes.byteLength >
                               maximumCheckpointCursorManifestByteLength ||
                           (checkpoint.privateRandomnessStreamAttemptIdentifier !==
                               undefined &&
@@ -497,8 +615,8 @@ export const openCommonProofBrowserCustody = (
                               'A common-proof checkpoint changed its stable attempt binding.',
                           );
                       }
-                      const privateRandomCursorManifestBytes = Uint8Array.from(
-                          checkpoint.privateRandomCursorManifestBytes,
+                      const generationCursorManifestBytes = Uint8Array.from(
+                          checkpoint.generationCursorManifestBytes,
                       );
                       const privateRandomnessStreamAttemptIdentifier =
                           checkpoint.privateRandomnessStreamAttemptIdentifier?.slice();
@@ -507,7 +625,7 @@ export const openCommonProofBrowserCustody = (
                               canonicalStateBytes:
                                   checkpoint.canonicalStateBytes,
                               commonProofEnvironmentIdentifier,
-                              privateRandomCursorManifestBytes,
+                              generationCursorManifestBytes,
                               ...(privateRandomnessStreamAttemptIdentifier ===
                               undefined
                                   ? {}
@@ -537,7 +655,7 @@ export const openCommonProofBrowserCustody = (
                                   checkpointLineageIdentifier:
                                       checkpointOperationIdentity.checkpointLineageIdentifier,
                                   commonProofEnvironmentIdentifier,
-                                  privateRandomCursorManifestBytes,
+                                  generationCursorManifestBytes,
                                   ...(privateRandomnessStreamAttemptIdentifier ===
                                   undefined
                                       ? {}
@@ -557,102 +675,115 @@ export const openCommonProofBrowserCustody = (
                           latestCheckpointResumeDescriptor =
                               nextResumeDescriptor;
                       } finally {
-                          privateRandomCursorManifestBytes.fill(0);
+                          generationCursorManifestBytes.fill(0);
                           privateRandomnessStreamAttemptIdentifier?.fill(0);
                       }
                   },
-                  restoreAuthenticatedCheckpointState:
-                      async (): Promise<Uint8Array> => {
-                          assertOpen();
-                          if (
-                              checkpointRestoreAttempted ||
-                              latestCheckpointResumeDescriptor === undefined
-                          ) {
+                  restoreAuthenticatedCheckpoint: async (): Promise<
+                      Readonly<{
+                          canonicalStateBytes: Uint8Array;
+                          generationCursorManifestBytes: Uint8Array;
+                      }>
+                  > => {
+                      assertOpen();
+                      if (
+                          checkpointRestoreAttempted ||
+                          latestCheckpointResumeDescriptor === undefined
+                      ) {
+                          throw new BrowserActionStorageCustodyError(
+                              'InvalidState',
+                              'The common-proof checkpoint cannot be restored in its current state.',
+                          );
+                      }
+                      checkpointRestoreAttempted = true;
+                      try {
+                          const resumeDescriptor =
+                              latestCheckpointResumeDescriptor;
+                          const expectedBoundary = checkpointBoundary({
+                              commonProofEnvironmentIdentifier:
+                                  resumeDescriptor.commonProofEnvironmentIdentifier,
+                              generationCursorManifestBytes:
+                                  resumeDescriptor.generationCursorManifestBytes,
+                              ...(resumeDescriptor.privateRandomnessStreamAttemptIdentifier ===
+                              undefined
+                                  ? {}
+                                  : {
+                                        privateRandomnessStreamAttemptIdentifier:
+                                            resumeDescriptor.privateRandomnessStreamAttemptIdentifier,
+                                    }),
+                              safeBoundaryOrdinal:
+                                  resumeDescriptor.safeBoundaryOrdinal,
+                              stableAttemptBindingHash:
+                                  resumeDescriptor.stableAttemptBindingHash,
+                          });
+                          const resumed = await input.checkpoint!.store.resume({
+                              checkpointLineageIdentifier:
+                                  resumeDescriptor.checkpointLineageIdentifier,
+                              expectedBoundary,
+                          });
+                          checkpointOperationIdentity =
+                              resumed.operationIdentity;
+                          const restoredChunks: Uint8Array[] = [];
+                          try {
+                              await resumed.restoreState(
+                                  (chunkIndex, chunkBytes) => {
+                                      if (
+                                          chunkIndex !== restoredChunks.length
+                                      ) {
+                                          throw new BrowserActionStorageCustodyError(
+                                              'RecordAuthenticationFailed',
+                                              'Authenticated common-proof checkpoint chunks are reordered.',
+                                          );
+                                      }
+                                      restoredChunks.push(chunkBytes.slice());
+                                  },
+                              );
+                              const totalByteLength = restoredChunks.reduce(
+                                  (sum, chunk) => sum + chunk.byteLength,
+                                  0,
+                              );
+                              const restoredState = new Uint8Array(
+                                  totalByteLength,
+                              );
+                              let offset = 0;
+                              for (const chunk of restoredChunks) {
+                                  restoredState.set(chunk, offset);
+                                  offset += chunk.byteLength;
+                              }
+                              let generationCursorManifestBytes =
+                                  new Uint8Array(0);
+                              try {
+                                  generationCursorManifestBytes =
+                                      resumeDescriptor.generationCursorManifestBytes.slice();
+                                  return Object.freeze({
+                                      canonicalStateBytes: restoredState,
+                                      generationCursorManifestBytes,
+                                  });
+                              } catch (error) {
+                                  restoredState.fill(0);
+                                  generationCursorManifestBytes.fill(0);
+                                  throw error;
+                              }
+                          } finally {
+                              for (const chunk of restoredChunks) {
+                                  chunk.fill(0);
+                              }
+                          }
+                      } catch (error) {
+                          state = 'retiring';
+                          const cleanupFailures =
+                              await cleanupTerminalProofAuthority();
+                          permanentlyRetireInMemory();
+                          if (cleanupFailures.length !== 0) {
                               throw new BrowserActionStorageCustodyError(
-                                  'InvalidState',
-                                  'The common-proof checkpoint cannot be restored in its current state.',
+                                  'StorageFailure',
+                                  'Common-proof checkpoint restoration failed and durable retirement was incomplete.',
+                                  [error, ...cleanupFailures],
                               );
                           }
-                          checkpointRestoreAttempted = true;
-                          try {
-                              const resumeDescriptor =
-                                  latestCheckpointResumeDescriptor;
-                              const expectedBoundary = checkpointBoundary({
-                                  commonProofEnvironmentIdentifier:
-                                      resumeDescriptor.commonProofEnvironmentIdentifier,
-                                  privateRandomCursorManifestBytes:
-                                      resumeDescriptor.privateRandomCursorManifestBytes,
-                                  ...(resumeDescriptor.privateRandomnessStreamAttemptIdentifier ===
-                                  undefined
-                                      ? {}
-                                      : {
-                                            privateRandomnessStreamAttemptIdentifier:
-                                                resumeDescriptor.privateRandomnessStreamAttemptIdentifier,
-                                        }),
-                                  safeBoundaryOrdinal:
-                                      resumeDescriptor.safeBoundaryOrdinal,
-                                  stableAttemptBindingHash:
-                                      resumeDescriptor.stableAttemptBindingHash,
-                              });
-                              const resumed =
-                                  await input.checkpoint!.store.resume({
-                                      checkpointLineageIdentifier:
-                                          resumeDescriptor.checkpointLineageIdentifier,
-                                      expectedBoundary,
-                                  });
-                              checkpointOperationIdentity =
-                                  resumed.operationIdentity;
-                              const restoredChunks: Uint8Array[] = [];
-                              try {
-                                  await resumed.restoreState(
-                                      (chunkIndex, chunkBytes) => {
-                                          if (
-                                              chunkIndex !==
-                                              restoredChunks.length
-                                          ) {
-                                              throw new BrowserActionStorageCustodyError(
-                                                  'RecordAuthenticationFailed',
-                                                  'Authenticated common-proof checkpoint chunks are reordered.',
-                                              );
-                                          }
-                                          restoredChunks.push(
-                                              chunkBytes.slice(),
-                                          );
-                                      },
-                                  );
-                                  const totalByteLength = restoredChunks.reduce(
-                                      (sum, chunk) => sum + chunk.byteLength,
-                                      0,
-                                  );
-                                  const restoredState = new Uint8Array(
-                                      totalByteLength,
-                                  );
-                                  let offset = 0;
-                                  for (const chunk of restoredChunks) {
-                                      restoredState.set(chunk, offset);
-                                      offset += chunk.byteLength;
-                                  }
-                                  return restoredState;
-                              } finally {
-                                  for (const chunk of restoredChunks) {
-                                      chunk.fill(0);
-                                  }
-                              }
-                          } catch (error) {
-                              state = 'retiring';
-                              const cleanupFailures =
-                                  await cleanupTerminalProofAuthority();
-                              permanentlyRetireInMemory();
-                              if (cleanupFailures.length !== 0) {
-                                  throw new BrowserActionStorageCustodyError(
-                                      'StorageFailure',
-                                      'Common-proof checkpoint restoration failed and durable retirement was incomplete.',
-                                      [error, ...cleanupFailures],
-                                  );
-                              }
-                              throw error;
-                          }
-                      },
+                          throw error;
+                      }
+                  },
               });
 
     const identifierInput = (inputValue: {
@@ -736,6 +867,7 @@ export const openCommonProofBrowserCustody = (
                     'The worker kernel returned malformed common-proof external-memory plaintext.',
                 );
             }
+            secretRecordOpenPlaintextByteLength += BigInt(plaintext.byteLength);
             if (!(plaintext.buffer instanceof ArrayBuffer)) {
                 plaintext.fill(0);
                 throw new BrowserActionStorageCustodyError(
@@ -797,6 +929,7 @@ export const openCommonProofBrowserCustody = (
                     'The worker kernel returned a malformed secret common-proof external-memory envelope.',
                 );
             }
+            secretRecordSealCiphertextByteLength += BigInt(envelope.byteLength);
             if (
                 !(envelope.buffer instanceof ArrayBuffer) ||
                 envelope.byteLength === 0
@@ -886,19 +1019,131 @@ export const openCommonProofBrowserCustody = (
         descriptor: ExternalMemoryRecordDescriptor,
         expectedPayloadDigest?: Uint8Array,
         beforeAuthentication?: () => void,
+        retainStoredBytes = false,
     ): Promise<
         | Readonly<{
               payload: Uint8Array<ArrayBuffer>;
-              storedBytes: Uint8Array<ArrayBuffer>;
+              storedBytes?: Uint8Array<ArrayBuffer>;
           }>
         | undefined
     > => {
         let authenticationFailure: unknown;
         let authenticatedPayload: Uint8Array<ArrayBuffer> | undefined;
+        let authenticatedStoredByteLength = 0;
+        let retainedStoredBytes: Uint8Array<ArrayBuffer> | undefined;
+        if (descriptor.protection === 'secret-authenticated-encryption') {
+            try {
+                const found = await input.store.consumeAuthenticated({
+                    consume: async ({ bytes, logicalRecordKey }) => {
+                        try {
+                            if (
+                                logicalRecordKey !== descriptor.logicalRecordKey
+                            ) {
+                                throw new BrowserActionStorageCustodyError(
+                                    'RecordAuthenticationFailed',
+                                    'A common-proof record was returned under the wrong logical key.',
+                                );
+                            }
+                            if (authenticatedPayload !== undefined) {
+                                throw new BrowserActionStorageCustodyError(
+                                    'StorageFailure',
+                                    'A common-proof record was authenticated more than once during one logical read.',
+                                );
+                            }
+                            if (
+                                !(bytes.buffer instanceof ArrayBuffer) ||
+                                bytes.byteOffset !== 0 ||
+                                bytes.byteLength !== bytes.buffer.byteLength
+                            ) {
+                                throw new BrowserActionStorageCustodyError(
+                                    'RecordAuthenticationFailed',
+                                    'A common-proof secret record was not returned with exact owned browser bytes.',
+                                );
+                            }
+                            beforeAuthentication?.();
+                            authenticatedStoredByteLength = bytes.byteLength;
+                            if (retainStoredBytes) {
+                                retainedStoredBytes = bytes.slice();
+                            }
+                            let payload: Uint8Array<ArrayBuffer> | undefined;
+                            try {
+                                payload = await openSecretRecord(
+                                    descriptor,
+                                    bytes as Uint8Array<ArrayBuffer>,
+                                );
+                                if (expectedPayloadDigest !== undefined) {
+                                    const digest = custodyDigest(
+                                        storedPayloadDigestDomain,
+                                        payload,
+                                    );
+                                    try {
+                                        if (
+                                            !bytesEqual(
+                                                digest,
+                                                expectedPayloadDigest,
+                                            )
+                                        ) {
+                                            throw new BrowserActionStorageCustodyError(
+                                                'RecordAuthenticationFailed',
+                                                'A replayed common-proof record differs from its committed payload.',
+                                            );
+                                        }
+                                    } finally {
+                                        digest.fill(0);
+                                    }
+                                }
+                                authenticatedPayload = payload;
+                                payload = undefined;
+                            } finally {
+                                if (payload !== undefined) {
+                                    destroyOwnedPayloadBuffer(payload);
+                                }
+                            }
+                        } catch (error) {
+                            authenticationFailure = error;
+                            throw error;
+                        }
+                    },
+                    logicalRecordKey: descriptor.logicalRecordKey,
+                });
+                if (!found) {
+                    return undefined;
+                }
+            } catch (error) {
+                if (authenticatedPayload !== undefined) {
+                    destroyOwnedPayloadBuffer(authenticatedPayload);
+                }
+                destroyOwnedPayloadBuffer(retainedStoredBytes);
+                if (
+                    authenticationFailure instanceof
+                    BrowserActionStorageCustodyError
+                ) {
+                    throw authenticationFailure;
+                }
+                throw error;
+            }
+            if (authenticatedPayload === undefined) {
+                destroyOwnedPayloadBuffer(retainedStoredBytes);
+                throw new BrowserActionStorageCustodyError(
+                    'RecordAuthenticationFailed',
+                    'A common-proof secret record was consumed without one authenticated payload.',
+                );
+            }
+            recordStorageRead(
+                authenticatedStoredByteLength,
+                authenticatedPayload.byteLength,
+            );
+            return Object.freeze({
+                payload: authenticatedPayload,
+                ...(retainedStoredBytes === undefined
+                    ? {}
+                    : { storedBytes: retainedStoredBytes }),
+            });
+        }
         let storedBytes: Uint8Array | undefined;
         try {
             storedBytes = await input.store.readAuthenticated({
-                authenticate: async ({ bytes, logicalRecordKey }) => {
+                authenticate: ({ bytes, logicalRecordKey }) => {
                     try {
                         if (logicalRecordKey !== descriptor.logicalRecordKey) {
                             throw new BrowserActionStorageCustodyError(
@@ -915,16 +1160,10 @@ export const openCommonProofBrowserCustody = (
                         beforeAuthentication?.();
                         let payload: Uint8Array<ArrayBuffer> | undefined;
                         try {
-                            payload =
-                                descriptor.protection === 'public-integrity'
-                                    ? decodePublicRecord(
-                                          descriptor.logicalRecordKey,
-                                          bytes,
-                                      )
-                                    : await openSecretRecord(
-                                          descriptor,
-                                          bytes.slice(),
-                                      );
+                            payload = decodePublicRecord(
+                                descriptor.logicalRecordKey,
+                                bytes,
+                            );
                             if (expectedPayloadDigest !== undefined) {
                                 const digest = custodyDigest(
                                     storedPayloadDigestDomain,
@@ -1003,6 +1242,10 @@ export const openCommonProofBrowserCustody = (
         if (ownedStoredBytes !== storedBytes) {
             destroyOwnedPayloadBuffer(storedBytes);
         }
+        recordStorageRead(
+            ownedStoredBytes.byteLength,
+            authenticatedPayload.byteLength,
+        );
         return Object.freeze({
             payload: authenticatedPayload,
             storedBytes: ownedStoredBytes,
@@ -1044,14 +1287,18 @@ export const openCommonProofBrowserCustody = (
                 'A common-proof record was not returned in owned browser memory.',
             );
         }
+        let ownedStoredBytes: Uint8Array<ArrayBuffer>;
         if (
             storedBytes.byteOffset === 0 &&
             storedBytes.byteLength === storedBytes.buffer.byteLength
         ) {
-            return storedBytes as Uint8Array<ArrayBuffer>;
+            ownedStoredBytes = storedBytes as Uint8Array<ArrayBuffer>;
+        } else {
+            ownedStoredBytes = storedBytes.slice();
+            destroyOwnedPayloadBuffer(storedBytes);
         }
-        const ownedStoredBytes = storedBytes.slice();
-        destroyOwnedPayloadBuffer(storedBytes);
+        recordStoredBytesRead(ownedStoredBytes.byteLength);
+        recordCommitReadback(ownedStoredBytes.byteLength);
         return ownedStoredBytes;
     };
 
@@ -1100,9 +1347,20 @@ export const openCommonProofBrowserCustody = (
         let encodedRecord: Uint8Array<ArrayBuffer> | undefined;
         let expectedCurrentValue: Uint8Array<ArrayBuffer> | null = null;
         let expectedPayloadDigest: Uint8Array<ArrayBuffer> | undefined;
+        const payloadByteLength = payload.byteLength;
         let payloadConsumed = false;
         try {
             if (shadow.replay) {
+                deterministicRegenerationCallCount = checkedAccountingAdd(
+                    deterministicRegenerationCallCount,
+                    1,
+                    'Common-proof deterministic regeneration count',
+                );
+                deterministicRegeneratedByteLength = checkedAccountingAdd(
+                    deterministicRegeneratedByteLength,
+                    payloadByteLength,
+                    'Common-proof deterministic regeneration bytes',
+                );
                 expectedPayloadDigest = custodyDigest(
                     storedPayloadDigestDomain,
                     payload,
@@ -1117,9 +1375,16 @@ export const openCommonProofBrowserCustody = (
                         destroyOwnedPayloadBuffer(payload);
                         payloadConsumed = true;
                     },
+                    true,
                 );
                 if (authenticatedRecord !== undefined) {
                     destroyOwnedPayloadBuffer(authenticatedRecord.payload);
+                    if (authenticatedRecord.storedBytes === undefined) {
+                        throw new BrowserActionStorageCustodyError(
+                            'StorageFailure',
+                            'A replayed common-proof record did not retain its authenticated canonical bytes.',
+                        );
+                    }
                     encodedRecord = authenticatedRecord.storedBytes;
                     expectedCurrentValue = encodedRecord;
                 }
@@ -1143,6 +1408,7 @@ export const openCommonProofBrowserCustody = (
                         descriptor,
                         encodedRecord,
                         expectedCurrentValue,
+                        payloadByteLength,
                         payloadOwnership,
                     },
                 }),
@@ -1264,6 +1530,10 @@ export const openCommonProofBrowserCustody = (
                             change.write.descriptor.logicalRecordKey,
                     });
                     await lease.write(encodedRecord);
+                    recordStorageWrite(
+                        encodedRecord.byteLength,
+                        change.write.payloadByteLength,
+                    );
                     await lease.seal(
                         authenticateRecordBytes(
                             change.write.descriptor,
@@ -1393,22 +1663,29 @@ export const openCommonProofBrowserCustody = (
         return object;
     };
 
-    const reserveRecord = (
-        shadow: ExternalMemoryShadowState,
-        payloadByteLength: number,
-    ): void => {
-        if (
-            shadow.recordCount >= limits.maximumExternalMemoryRecordCount ||
-            shadow.byteLength + BigInt(payloadByteLength) >
-                limits.maximumExternalMemoryByteLength
-        ) {
+    const reserveRecord = (shadow: ExternalMemoryShadowState): void => {
+        if (shadow.recordCount >= limits.maximumExternalMemoryRecordCount) {
             throw new BrowserActionStorageCustodyError(
                 'StorageFailure',
-                'Common-proof external-memory custody exceeds its fixed quota.',
+                'Common-proof external-memory record custody exceeds its fixed quota.',
             );
         }
         shadow.recordCount += 1;
-        shadow.byteLength += BigInt(payloadByteLength);
+    };
+
+    const reserveObjectPayload = (
+        shadow: ExternalMemoryShadowState,
+        exactByteLength: bigint,
+    ): void => {
+        const nextPayloadByteLength =
+            shadow.payloadByteLength + exactByteLength;
+        if (nextPayloadByteLength > limits.maximumExternalMemoryByteLength) {
+            throw new BrowserActionStorageCustodyError(
+                'StorageFailure',
+                'Common-proof external-memory payload custody exceeds its fixed quota.',
+            );
+        }
+        shadow.payloadByteLength = nextPayloadByteLength;
     };
 
     const createObject = async (
@@ -1435,7 +1712,8 @@ export const openCommonProofBrowserCustody = (
             operation.exactByteLength,
             true,
         );
-        reserveRecord(shadow, headerPayload.byteLength);
+        reserveObjectPayload(shadow, operation.exactByteLength);
+        reserveRecord(shadow);
         const header = await createDescriptor(
             identifierInput({
                 byteOffset: 0n,
@@ -1503,7 +1781,7 @@ export const openCommonProofBrowserCustody = (
             'decoded-append',
         );
         try {
-            reserveRecord(shadow, chunkByteLength);
+            reserveRecord(shadow);
             const descriptor = await createDescriptor(
                 identifierInput({
                     byteOffset,
@@ -1552,7 +1830,7 @@ export const openCommonProofBrowserCustody = (
                 'A common-proof seal operation violates the object lifecycle.',
             );
         }
-        reserveRecord(shadow, 0);
+        reserveRecord(shadow);
         const sealMarker = await createDescriptor(
             identifierInput({
                 byteOffset: object.exactByteLength,
@@ -1721,7 +1999,7 @@ export const openCommonProofBrowserCustody = (
             stageRecordDeletion(shadow, descriptor);
         }
         shadow.recordCount -= allObjectDescriptors(object).length;
-        shadow.byteLength -= object.appendedByteLength + 9n;
+        shadow.payloadByteLength -= object.exactByteLength;
         shadow.objects.delete(objectOrdinal);
     };
 
@@ -1761,7 +2039,6 @@ export const openCommonProofBrowserCustody = (
             ),
         );
         const shadow: ExternalMemoryShadowState = {
-            byteLength: externalMemoryByteLength,
             changes: new Map(),
             createdDescriptors: new Set(),
             objects: new Map(
@@ -1773,6 +2050,7 @@ export const openCommonProofBrowserCustody = (
                     },
                 ]),
             ),
+            payloadByteLength: externalMemoryPayloadByteLength,
             recordCount: externalMemoryRecordCount,
             replay,
         };
@@ -1820,7 +2098,7 @@ export const openCommonProofBrowserCustody = (
             for (const [objectOrdinal, object] of shadow.objects) {
                 objects.set(objectOrdinal, object);
             }
-            externalMemoryByteLength = shadow.byteLength;
+            externalMemoryPayloadByteLength = shadow.payloadByteLength;
             externalMemoryRecordCount = shadow.recordCount;
             shadow.createdDescriptors.clear();
             return Object.freeze(readResults);
@@ -1861,6 +2139,7 @@ export const openCommonProofBrowserCustody = (
 
     const readStoredOutputChunk = async (
         chunkIndex: number,
+        commitReadback = false,
     ): Promise<
         | Readonly<{
               logicalRecordKey: string;
@@ -1896,6 +2175,10 @@ export const openCommonProofBrowserCustody = (
         }
         const ownedStoredBytes = Uint8Array.from(storedBytes);
         storedBytes.fill(0);
+        recordStorageRead(ownedStoredBytes.byteLength, payload.byteLength);
+        if (commitReadback) {
+            recordCommitReadback(ownedStoredBytes.byteLength);
+        }
         return Object.freeze({
             logicalRecordKey,
             payload,
@@ -2035,6 +2318,7 @@ export const openCommonProofBrowserCustody = (
                     logicalRecordKey,
                 });
                 await lease.write(record);
+                recordStorageWrite(record.byteLength, chunkBytes.byteLength);
                 await lease.seal(({ bytes }) => {
                     const opened = decodePublicRecord(logicalRecordKey, bytes);
                     try {
@@ -2068,7 +2352,7 @@ export const openCommonProofBrowserCustody = (
                 record.fill(0);
             }
             try {
-                const committed = await readStoredOutputChunk(chunkIndex);
+                const committed = await readStoredOutputChunk(chunkIndex, true);
                 if (committed === undefined) {
                     throw new BrowserActionStorageCustodyError(
                         'RecordAuthenticationFailed',
@@ -2143,6 +2427,7 @@ export const openCommonProofBrowserCustody = (
                     'A common-proof output chunk changed length.',
                 );
             }
+            recordStorageRead(record.byteLength, opened.byteLength);
             return opened;
         },
     });
@@ -2159,7 +2444,7 @@ export const openCommonProofBrowserCustody = (
             }
         }
         objects.clear();
-        externalMemoryByteLength = 0n;
+        externalMemoryPayloadByteLength = 0n;
         externalMemoryRecordCount = 0;
         if (failures.length !== 0) {
             throw new BrowserActionStorageCustodyError(
@@ -2190,7 +2475,7 @@ export const openCommonProofBrowserCustody = (
             destroyExternalMemoryObjectInMemory(object);
         }
         objects.clear();
-        externalMemoryByteLength = 0n;
+        externalMemoryPayloadByteLength = 0n;
         externalMemoryRecordCount = 0;
         outputChunks.clear();
         outputByteLength = 0;
@@ -2236,7 +2521,24 @@ export const openCommonProofBrowserCustody = (
         capacityReservationReleased = true;
     }
 
+    async function releaseCheckpointPhysicalAccountingScope(): Promise<void> {
+        if (checkpointPhysicalAccountingScopeReleased) {
+            return;
+        }
+        if (input.checkpoint === undefined) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidState',
+                'Common-proof checkpoint physical accounting lost its authenticated owner.',
+            );
+        }
+        await input.checkpoint.store.releasePhysicalAccountingScope(
+            input.checkpoint.physicalAccountingScope,
+        );
+        checkpointPhysicalAccountingScopeReleased = true;
+    }
+
     async function cleanupTerminalProofAuthority(): Promise<unknown[]> {
+        const cleanupStartedAtMilliseconds = monotonicMilliseconds();
         preserveCheckpointLineageForTerminalCleanup();
         const failures: unknown[] = [];
         try {
@@ -2249,6 +2551,13 @@ export const openCommonProofBrowserCustody = (
         } catch (error) {
             failures.push(error);
         }
+        if (checkpointEvictionCompleted) {
+            try {
+                await releaseCheckpointPhysicalAccountingScope();
+            } catch (error) {
+                failures.push(error);
+            }
+        }
         if (durableProofRecordsDeleted) {
             try {
                 await releaseTerminalCapacityReservation();
@@ -2259,7 +2568,12 @@ export const openCommonProofBrowserCustody = (
         retirementCleanupCompleted =
             durableProofRecordsDeleted &&
             checkpointEvictionCompleted &&
+            checkpointPhysicalAccountingScopeReleased &&
             capacityReservationReleased;
+        cleanupDurationMilliseconds += Math.max(
+            0,
+            monotonicMilliseconds() - cleanupStartedAtMilliseconds,
+        );
         return failures;
     }
 
@@ -2271,7 +2585,7 @@ export const openCommonProofBrowserCustody = (
                 !outputSealed ||
                 outputByteLength === 0 ||
                 objects.size !== 0 ||
-                externalMemoryByteLength !== 0n ||
+                externalMemoryPayloadByteLength !== 0n ||
                 externalMemoryRecordCount !== 0
             ) {
                 throw new BrowserActionStorageCustodyError(
@@ -2302,6 +2616,10 @@ export const openCommonProofBrowserCustody = (
                     logicalRecordKey: applicationHandoffLogicalRecordKey,
                 });
                 await lease.write(canonicalMarkerRecordBytes);
+                recordStorageWrite(
+                    canonicalMarkerRecordBytes.byteLength,
+                    markerPayload.byteLength,
+                );
                 await lease.seal(({ bytes }) => {
                     const opened = decodePublicRecord(
                         applicationHandoffLogicalRecordKey,
@@ -2347,6 +2665,11 @@ export const openCommonProofBrowserCustody = (
                         'The committed common-proof handoff marker is unavailable or differs from its exact bytes.',
                     );
                 }
+                recordStorageRead(
+                    committedRecord.byteLength,
+                    markerPayload.byteLength,
+                );
+                recordCommitReadback(committedRecord.byteLength);
                 applicationHandoffArmed = true;
                 return Object.freeze({
                     canonicalMarkerRecordBytes:
@@ -2362,6 +2685,213 @@ export const openCommonProofBrowserCustody = (
             }
         };
 
+    const requireAccountingNumber = (value: bigint, label: string): number => {
+        const number = Number(value);
+        if (!Number.isSafeInteger(number) || number < 0) {
+            throw new BrowserActionStorageCustodyError(
+                'StorageFailure',
+                `${label} exceeded the safe accounting range.`,
+            );
+        }
+        return number;
+    };
+
+    const copyPhysicalStorageAccounting =
+        (): CommonProofBrowserCustodyPhysicalAccountingSnapshot => {
+            const reservationAccounting =
+                input.capacityReservation.copyPhysicalStorageAccounting();
+            const checkpointAccounting =
+                input.checkpoint === undefined
+                    ? undefined
+                    : input.checkpoint.store.copyPhysicalAccounting(
+                          input.checkpoint.physicalAccountingScope,
+                      );
+            const accountingSum = (
+                mainValue: number,
+                checkpointValue: number | undefined,
+                label: string,
+            ): number =>
+                checkedAccountingAdd(mainValue, checkpointValue ?? 0, label);
+            const physicalReadByteLength = accountingSum(
+                reservationAccounting.physicalReadByteLength,
+                checkpointAccounting?.physicalReadByteLength,
+                'Physical storage read bytes',
+            );
+            const physicalReadCallCount = accountingSum(
+                reservationAccounting.physicalReadCallCount,
+                checkpointAccounting?.physicalReadCallCount,
+                'Physical storage read calls',
+            );
+            const physicalWriteByteLength = accountingSum(
+                reservationAccounting.physicalWriteByteLength,
+                checkpointAccounting?.physicalWriteByteLength,
+                'Physical storage write bytes',
+            );
+            const physicalWriteCallCount = accountingSum(
+                reservationAccounting.physicalWriteCallCount,
+                checkpointAccounting?.physicalWriteCallCount,
+                'Physical storage write calls',
+            );
+            if (
+                physicalReadByteLength < ciphertextReadByteLength ||
+                physicalReadCallCount < ciphertextReadCallCount ||
+                physicalWriteByteLength < ciphertextWriteByteLength ||
+                physicalWriteCallCount < ciphertextWriteCallCount
+            ) {
+                throw new BrowserActionStorageCustodyError(
+                    'StorageFailure',
+                    'Physical storage accounting fell below observed common-proof record traffic.',
+                );
+            }
+            return Object.freeze({
+                deletedByteLength: accountingSum(
+                    reservationAccounting.deletedByteLength,
+                    checkpointAccounting?.deletedByteLength,
+                    'Physical storage deleted bytes',
+                ),
+                deletionCount: accountingSum(
+                    reservationAccounting.deletionCount,
+                    checkpointAccounting?.deletionCount,
+                    'Physical storage deletion count',
+                ),
+                deletionDurationMilliseconds:
+                    reservationAccounting.deletionDurationMilliseconds +
+                    (checkpointAccounting?.deletionDurationMilliseconds ?? 0),
+                cleanupCompleted: retirementCleanupCompleted,
+                cleanupDurationMilliseconds,
+                commitReadbackByteLength,
+                commitReadbackCallCount,
+                ciphertextReadByteLength: physicalReadByteLength,
+                ciphertextReadCallCount: physicalReadCallCount,
+                ciphertextWriteByteLength: physicalWriteByteLength,
+                ciphertextWriteCallCount: physicalWriteCallCount,
+                deterministicRegeneratedByteLength,
+                deterministicRegenerationCallCount,
+                openCallCount: accountingSum(
+                    requireAccountingNumber(
+                        secretRecordOpenCount,
+                        'Secret-record open count',
+                    ),
+                    checkpointAccounting?.openCallCount,
+                    'Authenticated record open count',
+                ),
+                openCiphertextByteLength: accountingSum(
+                    requireAccountingNumber(
+                        secretRecordOpenByteLength,
+                        'Secret-record open ciphertext bytes',
+                    ),
+                    checkpointAccounting?.openCiphertextByteLength,
+                    'Authenticated record open ciphertext bytes',
+                ),
+                openPlaintextByteLength: accountingSum(
+                    requireAccountingNumber(
+                        secretRecordOpenPlaintextByteLength,
+                        'Secret-record open plaintext bytes',
+                    ),
+                    checkpointAccounting?.openPlaintextByteLength,
+                    'Authenticated record open plaintext bytes',
+                ),
+                physicalQuotaByteLength: accountingSum(
+                    reservationAccounting.physicalQuotaByteLength,
+                    checkpointAccounting?.physicalQuotaByteLength,
+                    'Physical storage quota bytes',
+                ),
+                physicalQuotaHeadroomByteLength: accountingSum(
+                    reservationAccounting.physicalQuotaHeadroomByteLength,
+                    checkpointAccounting?.physicalQuotaHeadroomByteLength,
+                    'Physical storage quota headroom bytes',
+                ),
+                physicalQuotaReservedByteLength: accountingSum(
+                    reservationAccounting.physicalQuotaReservedByteLength,
+                    checkpointAccounting?.physicalQuotaReservedByteLength,
+                    'Physical storage reserved quota bytes',
+                ),
+                physicalReadByteLength,
+                physicalReadCallCount,
+                physicalStoredEndByteLength: accountingSum(
+                    reservationAccounting.physicalStoredEndByteLength,
+                    checkpointAccounting?.physicalStoredEndByteLength,
+                    'Physical stored terminal bytes',
+                ),
+                physicalStoredPeakByteLength: accountingSum(
+                    reservationAccounting.physicalStoredPeakByteLength,
+                    checkpointAccounting?.physicalStoredPeakByteLength,
+                    'Physical stored peak bytes',
+                ),
+                physicalStoredStartByteLength: accountingSum(
+                    reservationAccounting.physicalStoredStartByteLength,
+                    checkpointAccounting?.physicalStoredStartByteLength,
+                    'Physical stored initial bytes',
+                ),
+                physicalWriteByteLength,
+                physicalWriteCallCount,
+                plaintextReadByteLength: accountingSum(
+                    plaintextReadByteLength,
+                    checkpointAccounting?.openPlaintextByteLength,
+                    'Plaintext read bytes',
+                ),
+                plaintextReadCallCount: accountingSum(
+                    plaintextReadCallCount,
+                    checkpointAccounting?.openCallCount,
+                    'Plaintext read calls',
+                ),
+                plaintextWriteByteLength: accountingSum(
+                    plaintextWriteByteLength,
+                    checkpointAccounting?.sealPlaintextByteLength,
+                    'Plaintext write bytes',
+                ),
+                plaintextWriteCallCount: accountingSum(
+                    plaintextWriteCallCount,
+                    checkpointAccounting?.sealCallCount,
+                    'Plaintext write calls',
+                ),
+                repairHashCallCount: accountingSum(
+                    reservationAccounting.repairHashCallCount,
+                    checkpointAccounting?.repairHashCallCount,
+                    'Repair hash calls',
+                ),
+                repairHashedByteLength: accountingSum(
+                    reservationAccounting.repairHashedByteLength,
+                    checkpointAccounting?.repairHashedByteLength,
+                    'Repair hash bytes',
+                ),
+                sealCallCount: accountingSum(
+                    requireAccountingNumber(
+                        secretRecordSealCount,
+                        'Secret-record seal count',
+                    ),
+                    checkpointAccounting?.sealCallCount,
+                    'Authenticated record seal count',
+                ),
+                sealCiphertextByteLength: accountingSum(
+                    requireAccountingNumber(
+                        secretRecordSealCiphertextByteLength,
+                        'Secret-record seal ciphertext bytes',
+                    ),
+                    checkpointAccounting?.sealCiphertextByteLength,
+                    'Authenticated record seal ciphertext bytes',
+                ),
+                sealPlaintextByteLength: accountingSum(
+                    requireAccountingNumber(
+                        secretRecordSealByteLength,
+                        'Secret-record seal plaintext bytes',
+                    ),
+                    checkpointAccounting?.sealPlaintextByteLength,
+                    'Authenticated record seal plaintext bytes',
+                ),
+                storageRequestCount: accountingSum(
+                    reservationAccounting.storageRequestCount,
+                    checkpointAccounting?.storageRequestCount,
+                    'Physical storage requests',
+                ),
+                storageTransactionCount: accountingSum(
+                    reservationAccounting.storageTransactionCount,
+                    checkpointAccounting?.storageTransactionCount,
+                    'Physical storage transactions',
+                ),
+            });
+        };
+
     return Object.freeze({
         armApplicationHandoff,
         ...(configuredCheckpointCustody === undefined
@@ -2373,7 +2903,7 @@ export const openCommonProofBrowserCustody = (
                 !outputSealed ||
                 outputByteLength === 0 ||
                 objects.size !== 0 ||
-                externalMemoryByteLength !== 0n ||
+                externalMemoryPayloadByteLength !== 0n ||
                 externalMemoryRecordCount !== 0
             ) {
                 throw new BrowserActionStorageCustodyError(
@@ -2392,6 +2922,7 @@ export const openCommonProofBrowserCustody = (
                 );
             }
         },
+        copyPhysicalStorageAccounting,
         copyCheckpointResumeDescriptor: () =>
             latestCheckpointResumeDescriptor === undefined
                 ? undefined
@@ -2486,12 +3017,13 @@ export const openCommonProofBrowserCustody = (
                 );
                 checkpointOperationIdentity = undefined;
             }
+            await releaseCheckpointPhysicalAccountingScope();
             await releaseTerminalCapacityReservation();
             for (const object of objects.values()) {
                 destroyExternalMemoryObjectInMemory(object);
             }
             objects.clear();
-            externalMemoryByteLength = 0n;
+            externalMemoryPayloadByteLength = 0n;
             externalMemoryRecordCount = 0;
             outputChunks.clear();
             outputByteLength = 0;

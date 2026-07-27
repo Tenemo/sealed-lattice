@@ -62,6 +62,9 @@
 //! Both modes end at the same residual product polynomial; the binding order
 //! only decides which fast-path tricks apply on the first rounds.
 //!
+//! Local modifications expose explicit-point and move-only interleaved witness
+//! APIs used by the sealed-lattice bounded WHIR prover. See `UPSTREAM.md`.
+//!
 //! # References
 //!
 //! - Stacking construction: "Minimal zkVM for Lean Ethereum", section 3.7.
@@ -80,9 +83,9 @@ pub use opening::{
     ProverMultiClaim, ProverVirtualClaim, VerifierMultiClaim, VerifierOpening,
     VerifierVirtualClaim,
 };
-pub use prover::{Layout, PrefixProver, StackedClaims, SuffixProver};
+pub use prover::{Layout, PrefixInitialSumcheckProver, PrefixProver, StackedClaims, SuffixProver};
 pub use verifier::Verifier;
-pub use witness::{Selector, Table, TablePlacement, Witness};
+pub use witness::{InterleavedWitnessError, Selector, Table, TablePlacement, Witness};
 
 use crate::strategy::VariableOrder;
 pub use crate::table::TableShape;

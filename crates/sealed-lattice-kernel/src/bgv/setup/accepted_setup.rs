@@ -46,7 +46,7 @@ pub(crate) use self::collective_and_relinearization_verification_population::{
 };
 pub(in crate::bgv) use self::evaluator_source::VerifiedAcceptedSetupEvaluatorSourceCatalog;
 #[cfg(all(test, not(target_arch = "wasm32")))]
-pub(crate) use self::generation_authority::ExactSameSecretEvidenceSources;
+pub(crate) use self::generation_authority::PreparedExactSameSecretGenerationSources;
 pub(in crate::bgv) use self::generation_authority::{
     SetupGaloisGenerationPreparationError, SetupGeneratedCommittedMaterial,
     SetupGeneratedGaloisEntry, SetupGeneratedGaloisSourceAuthority,

@@ -48,13 +48,15 @@ export const createReplaceableCommonProofBrowserCustody = (
                 requireCheckpointCustody(
                     requireCurrentCustody(),
                 ).publishAuthenticatedCheckpoint(checkpoint),
-            restoreAuthenticatedCheckpointState: () =>
+            restoreAuthenticatedCheckpoint: () =>
                 requireCheckpointCustody(
                     requireCurrentCustody(),
-                ).restoreAuthenticatedCheckpointState(),
+                ).restoreAuthenticatedCheckpoint(),
         }),
         completeVerifiedOutput: () =>
             requireCurrentCustody().completeVerifiedOutput(),
+        copyPhysicalStorageAccounting: () =>
+            requireCurrentCustody().copyPhysicalStorageAccounting(),
         copyCheckpointResumeDescriptor: () =>
             requireCurrentCustody().copyCheckpointResumeDescriptor(),
         externalMemory: Object.freeze({

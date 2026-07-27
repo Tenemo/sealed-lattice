@@ -4,7 +4,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     generateAggregateThresholdShareInClosedWorker,
     verifyAggregateThresholdShareInClosedWorker,
+    type PrivateShareAcceptanceSignatureOperation,
 } from '#packages/wasm/src/aggregate-threshold-share-proof-runtime';
+import { mlDsa65SignatureByteLength } from '#packages/wasm/src/state-verifier-runtime/contracts';
 import { registerCommonProofKernelContext } from '#packages/wasm/src/transcript-core-bridge/common-proof-kernel-context';
 import type { TranscriptCoreKernelCommandRuntime } from '#packages/wasm/src/transcript-core-bridge/kernel-runtime';
 import type { TranscriptCoreKernel } from '#packages/wasm/src/transcript-core-bridge/kernel-types';
@@ -213,6 +215,17 @@ type FakeAggregateThresholdShareRuntime = Readonly<{
     finishStatus: { value: number };
     generationModes: GenerationMode[];
     kernel: TranscriptCoreKernel;
+    privateShareAcceptanceCancellations: number[];
+    privateShareAcceptanceFinishes: number[];
+    privateShareAcceptanceFinishStatus: { value: number };
+    privateShareAcceptancePreparations: Array<
+        Readonly<{
+            boardBindingSourceHandle: number;
+            canonicalRosterBytes: Uint8Array;
+            generatedProofHandle: number;
+            signatureMessage: Uint8Array;
+        }>
+    >;
     verificationFinishes: Array<
         Readonly<{
             terminalSourceHandle: number;
@@ -239,6 +252,13 @@ const createFakeRuntime = (): FakeAggregateThresholdShareRuntime => {
     const discardedTerminalSources: number[] = [];
     const finishStatus = { value: 0 };
     const generationModes: GenerationMode[] = [];
+    const privateShareAcceptanceCancellations: number[] = [];
+    const privateShareAcceptanceFinishes: number[] = [];
+    const privateShareAcceptanceFinishStatus = { value: 0 };
+    const privateShareAcceptancePreparations: FakeAggregateThresholdShareRuntime['privateShareAcceptancePreparations'] =
+        [];
+    let privateShareAcceptanceCarrierState: 'available' | 'prepared' | 'spent' =
+        'available';
     const verificationFinishes: FakeAggregateThresholdShareRuntime['verificationFinishes'] =
         [];
     let nextPointer = 2_048;
@@ -321,6 +341,22 @@ const createFakeRuntime = (): FakeAggregateThresholdShareRuntime => {
                 });
                 return bindingStatus.value;
             },
+        sealed_lattice_aggregate_threshold_share_cancel_private_share_acceptance_carrier:
+            (
+                boardBindingSourceHandle: number,
+                preparedCarrierHandle: number,
+            ): number => {
+                if (
+                    boardBindingSourceHandle !== 21 ||
+                    preparedCarrierHandle !== 71 ||
+                    privateShareAcceptanceCarrierState !== 'prepared'
+                ) {
+                    return refusalReasonCodes.consumedState;
+                }
+                privateShareAcceptanceCarrierState = 'available';
+                privateShareAcceptanceCancellations.push(preparedCarrierHandle);
+                return 0;
+            },
         sealed_lattice_aggregate_threshold_share_discard_generation_board_binding_source:
             (sourceHandle: number): number => {
                 discardedBoardBindingSources.push(sourceHandle);
@@ -343,6 +379,44 @@ const createFakeRuntime = (): FakeAggregateThresholdShareRuntime => {
             writeStatus(memory, statusPointer, finishStatus.value);
             return completionFlag.value;
         },
+        sealed_lattice_aggregate_threshold_share_finish_private_share_acceptance_carrier:
+            (
+                boardBindingSourceHandle: number,
+                preparedCarrierHandle: number,
+                signaturePointer: number,
+                signatureByteLength: number,
+                outputPointer: number,
+                outputByteLength: number,
+            ): number => {
+                if (
+                    boardBindingSourceHandle !== 21 ||
+                    preparedCarrierHandle !== 71 ||
+                    privateShareAcceptanceCarrierState !== 'prepared'
+                ) {
+                    return refusalReasonCodes.consumedState;
+                }
+                privateShareAcceptanceCarrierState = 'spent';
+                privateShareAcceptanceFinishes.push(preparedCarrierHandle);
+                if (
+                    signatureByteLength !== mlDsa65SignatureByteLength ||
+                    outputByteLength !== 5 ||
+                    new Uint8Array(
+                        memory.buffer,
+                        signaturePointer,
+                        signatureByteLength,
+                    ).some((byte) => byte !== 0x6a)
+                ) {
+                    return refusalReasonCodes.wrongTypeOrLength;
+                }
+                if (privateShareAcceptanceFinishStatus.value !== 0) {
+                    return privateShareAcceptanceFinishStatus.value;
+                }
+                new Uint8Array(memory.buffer).set(
+                    [0xe1, 0xe2, 0xe3, 0xe4, 0xe5],
+                    outputPointer,
+                );
+                return 0;
+            },
         sealed_lattice_aggregate_threshold_share_prepare_generation: (
             ...parameters: Parameters<typeof prepareGeneration> extends [
                 unknown,
@@ -351,6 +425,63 @@ const createFakeRuntime = (): FakeAggregateThresholdShareRuntime => {
                 ? Remaining
                 : never
         ) => prepareGeneration('fresh', ...parameters),
+        sealed_lattice_aggregate_threshold_share_prepare_private_share_acceptance_carrier:
+            (
+                generatedProofHandle: number,
+                boardBindingSourceHandle: number,
+                canonicalRosterPointer: number,
+                canonicalRosterByteLength: number,
+                canonicalCarrierByteLengthOutputPointer: number,
+                signatureMessageOutputPointer: number,
+                signatureMessageOutputByteLength: number,
+                statusPointer: number,
+            ): number => {
+                if (privateShareAcceptanceCarrierState !== 'available') {
+                    writeStatus(
+                        memory,
+                        statusPointer,
+                        refusalReasonCodes.consumedState,
+                    );
+                    return 0;
+                }
+                if (
+                    generatedProofHandle !== 51 ||
+                    boardBindingSourceHandle !== 21 ||
+                    signatureMessageOutputByteLength !== 64
+                ) {
+                    writeStatus(
+                        memory,
+                        statusPointer,
+                        refusalReasonCodes.wrongTypeOrLength,
+                    );
+                    return 0;
+                }
+                const signatureMessage = new Uint8Array(64).fill(0xb5);
+                privateShareAcceptancePreparations.push(
+                    Object.freeze({
+                        boardBindingSourceHandle,
+                        canonicalRosterBytes: new Uint8Array(
+                            memory.buffer,
+                            canonicalRosterPointer,
+                            canonicalRosterByteLength,
+                        ).slice(),
+                        generatedProofHandle,
+                        signatureMessage: signatureMessage.slice(),
+                    }),
+                );
+                privateShareAcceptanceCarrierState = 'prepared';
+                new DataView(memory.buffer).setUint32(
+                    canonicalCarrierByteLengthOutputPointer,
+                    5,
+                    true,
+                );
+                new Uint8Array(memory.buffer).set(
+                    signatureMessage,
+                    signatureMessageOutputPointer,
+                );
+                writeStatus(memory, statusPointer, 0);
+                return 71;
+            },
         sealed_lattice_aggregate_threshold_share_prepare_resumed_generation: (
             ...parameters: Parameters<typeof prepareGeneration> extends [
                 unknown,
@@ -435,6 +566,10 @@ const createFakeRuntime = (): FakeAggregateThresholdShareRuntime => {
         finishStatus,
         generationModes,
         kernel,
+        privateShareAcceptanceCancellations,
+        privateShareAcceptanceFinishes,
+        privateShareAcceptanceFinishStatus,
+        privateShareAcceptancePreparations,
         verificationFinishes,
     });
 };
@@ -443,6 +578,7 @@ const generationInput = (
     runtime: FakeAggregateThresholdShareRuntime,
     generationMode: GenerationMode,
 ) => ({
+    canonicalRosterBytes: Uint8Array.of(0xa1, 0xa2, 0xa3),
     canonicalSuiteRecordBytes: Uint8Array.of(1, 2, 3),
     checkpointLineageIdentifier: new Uint8Array(32).fill(0x71),
     generationMode,
@@ -465,13 +601,27 @@ const generationInput = (
     }),
     recipientAuthority: Object.freeze({}),
     resolveVerifiedPrivateShareAcceptance: vi.fn(
-        (input: { proofDescriptorBytes: Uint8Array }) => {
+        (input: {
+            canonicalPrivateShareAcceptanceCarrier: Uint8Array;
+            proofDescriptorBytes: Uint8Array;
+        }) => {
+            expect(input.canonicalPrivateShareAcceptanceCarrier).toEqual(
+                Uint8Array.of(0xe1, 0xe2, 0xe3, 0xe4, 0xe5),
+            );
             expect(input.proofDescriptorBytes).toEqual(
                 Uint8Array.of(0xd1, 0xd2),
             );
             return Promise.resolve(Object.freeze({}));
         },
     ),
+    signatureOperation: Object.freeze({
+        signPrivateShareAcceptanceMessage: (
+            signatureMessageHash: Uint8Array,
+        ) => {
+            expect(signatureMessageHash).toEqual(new Uint8Array(64).fill(0xb5));
+            return new Uint8Array(mlDsa65SignatureByteLength).fill(0x6a);
+        },
+    }) satisfies PrivateShareAcceptanceSignatureOperation,
     setupIntentObject: Object.freeze({}),
     workerKernel: Object.freeze({}),
 });
@@ -498,12 +648,56 @@ describe('aggregate-threshold-share proof runtime', () => {
                     generatedProofHandle: 51,
                 },
             ]);
+            expect(runtime.privateShareAcceptancePreparations).toEqual([
+                {
+                    boardBindingSourceHandle: 21,
+                    canonicalRosterBytes: Uint8Array.of(0xa1, 0xa2, 0xa3),
+                    generatedProofHandle: 51,
+                    signatureMessage: new Uint8Array(64).fill(0xb5),
+                },
+            ]);
+            expect(runtime.privateShareAcceptanceFinishes).toEqual([71]);
+            expect(runtime.privateShareAcceptanceCancellations).toEqual([]);
             expect(
                 boundaryMocks.generatedCapabilityRelease,
             ).not.toHaveBeenCalled();
             expect(runtime.discardedBoardBindingSources).toEqual([]);
         },
     );
+
+    it('cancels an unsigned acceptance but spends an exact refused signature', async () => {
+        const cancelledRuntime = createFakeRuntime();
+        const cancelledInput = generationInput(cancelledRuntime, 'fresh');
+        await expect(
+            generateAggregateThresholdShareInClosedWorker({
+                ...cancelledInput,
+                signatureOperation: {
+                    signPrivateShareAcceptanceMessage: () =>
+                        new Uint8Array(mlDsa65SignatureByteLength - 1),
+                },
+            } as never),
+        ).rejects.toMatchObject({ refusalReason: 'wrongTypeOrLength' });
+        expect(cancelledRuntime.privateShareAcceptanceCancellations).toEqual([
+            71,
+        ]);
+        expect(cancelledRuntime.privateShareAcceptanceFinishes).toEqual([]);
+        expect(cancelledRuntime.discardedBoardBindingSources).toEqual([21]);
+        expect(boundaryMocks.generatedCapabilityRelease).toHaveBeenCalledOnce();
+
+        vi.clearAllMocks();
+        const refusedRuntime = createFakeRuntime();
+        refusedRuntime.privateShareAcceptanceFinishStatus.value =
+            refusalReasonCodes.invalidSignature;
+        await expect(
+            generateAggregateThresholdShareInClosedWorker(
+                generationInput(refusedRuntime, 'fresh') as never,
+            ),
+        ).rejects.toMatchObject({ refusalReason: 'invalidSignature' });
+        expect(refusedRuntime.privateShareAcceptanceFinishes).toEqual([71]);
+        expect(refusedRuntime.privateShareAcceptanceCancellations).toEqual([]);
+        expect(refusedRuntime.discardedBoardBindingSources).toEqual([21]);
+        expect(boundaryMocks.generatedCapabilityRelease).toHaveBeenCalledOnce();
+    });
 
     it('returns only the Rust qualification-completion bit after positive verification', async () => {
         const runtime = createFakeRuntime();

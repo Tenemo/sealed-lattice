@@ -36,18 +36,16 @@ export const classifyRustTestInventory = (input: {
     }));
 };
 
-const listFocusedTests = async (input: {
+const listRustTests = async (input: {
     readonly environment?: NodeJS.ProcessEnv;
     readonly ignoredOnly: boolean;
     readonly runLog?: ActiveLocalRunLog;
-    readonly testFilter: string;
 }): Promise<readonly string[]> => {
     const arguments_ = [
         'test',
         '--locked',
         '-p',
         'sealed-lattice-kernel',
-        input.testFilter,
         '--',
         ...(input.ignoredOnly ? ['--ignored'] : ['--include-ignored']),
         '--list',
@@ -58,7 +56,7 @@ const listFocusedTests = async (input: {
         {
             args: arguments_,
             command: 'cargo',
-            description: `list focused Rust tests (${input.testFilter})`,
+            description: 'list complete Rust test inventory',
             env: input.environment,
             logFileSlug: 'cargo-test-inventory',
             workingDirectoryPath: repositoryRoot,
@@ -74,16 +72,15 @@ const listFocusedTests = async (input: {
     return parseLibtestListOutput(result.stdout);
 };
 
-export const collectFocusedRustKernelTestInventory = async (input: {
+export const collectRustKernelTestInventory = async (input: {
     readonly environment?: NodeJS.ProcessEnv;
     readonly runLog?: ActiveLocalRunLog;
-    readonly testFilter: string;
 }): Promise<readonly RustTestInventoryEntry[]> => {
-    const allTests = await listFocusedTests({
+    const allTests = await listRustTests({
         ...input,
         ignoredOnly: false,
     });
-    const ignoredTests = await listFocusedTests({
+    const ignoredTests = await listRustTests({
         ...input,
         ignoredOnly: true,
     });

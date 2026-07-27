@@ -4,11 +4,65 @@ import {
     fullProfileEvidenceRustTests,
     measurementRustTests,
     phaseLivenessEvidenceRustTests,
+    validateCompleteRustLaneOwnership,
     validateFocusedRustLaneSelection,
 } from '#tools/ci/rust-focused-lane-selection';
 import { heavyRustKernelTestNamePrefix } from '#tools/ci/rust-kernel-test-arguments';
 
 describe('focused Rust lane selection', () => {
+    it('assigns every discovered Rust test to exactly one lane', () => {
+        expect(() =>
+            validateCompleteRustLaneOwnership([
+                {
+                    ignored: false,
+                    testName: 'foundation::tests::ordinary',
+                },
+                {
+                    ignored: true,
+                    testName:
+                        'bgv::tests::heavy_rust_kernel_expensive_relation',
+                },
+                {
+                    ignored: true,
+                    testName: fullProfileEvidenceRustTests[0],
+                },
+                {
+                    ignored: true,
+                    testName: measurementRustTests[0],
+                },
+                {
+                    ignored: true,
+                    testName: phaseLivenessEvidenceRustTests[0],
+                },
+            ]),
+        ).not.toThrow();
+    });
+
+    it('rejects an empty inventory and every discovered ignored test without an owner', () => {
+        expect(() => validateCompleteRustLaneOwnership([])).toThrow(
+            'inventory is empty',
+        );
+        expect(() =>
+            validateCompleteRustLaneOwnership([
+                {
+                    ignored: true,
+                    testName: 'foundation::tests::ignored_without_owner',
+                },
+            ]),
+        ).toThrow('belongs to no guarded Rust lane');
+    });
+
+    it('rejects test metadata that assigns one test to multiple lanes', () => {
+        expect(() =>
+            validateCompleteRustLaneOwnership([
+                {
+                    ignored: false,
+                    testName: measurementRustTests[0],
+                },
+            ]),
+        ).toThrow('belongs to multiple Rust lanes');
+    });
+
     it.each([
         ['rust-kernel-fast' as const, false, 'foundation::tests::ordinary'],
         [
@@ -16,16 +70,14 @@ describe('focused Rust lane selection', () => {
             true,
             'bgv::tests::heavy_rust_kernel_expensive_relation',
         ],
-        [
-            'rust-full-profile-evidence' as const,
-            true,
-            fullProfileEvidenceRustTests[0],
-        ],
-        [
-            'rust-full-profile-evidence' as const,
-            true,
-            fullProfileEvidenceRustTests[1],
-        ],
+        ...fullProfileEvidenceRustTests.map(
+            (testName) =>
+                ['rust-full-profile-evidence', true, testName] as [
+                    'rust-full-profile-evidence',
+                    boolean,
+                    string,
+                ],
+        ),
         ['rust-measurements' as const, true, measurementRustTests[0]],
         [
             'rust-phase-liveness-evidence' as const,
@@ -45,30 +97,34 @@ describe('focused Rust lane selection', () => {
         },
     );
 
-    it('keeps the evaluator covering matrix exclusively in the full-profile lane', () => {
-        const evaluatorCoveringMatrixTest = fullProfileEvidenceRustTests[0];
-        const inventoryEntry = {
-            ignored: true,
-            testName: evaluatorCoveringMatrixTest,
-        } as const;
+    it('keeps long evaluator evidence exclusively in the full-profile lane', () => {
+        for (const evaluatorEvidenceTest of fullProfileEvidenceRustTests.slice(
+            0,
+            2,
+        )) {
+            const inventoryEntry = {
+                ignored: true,
+                testName: evaluatorEvidenceTest,
+            } as const;
 
-        expect(evaluatorCoveringMatrixTest).not.toContain(
-            heavyRustKernelTestNamePrefix,
-        );
-        expect(() =>
-            validateFocusedRustLaneSelection({
-                lane: 'rust-full-profile-evidence',
-                testFilter: evaluatorCoveringMatrixTest,
-                tests: [inventoryEntry],
-            }),
-        ).not.toThrow();
-        expect(() =>
-            validateFocusedRustLaneSelection({
-                lane: 'rust-kernel-heavy',
-                testFilter: evaluatorCoveringMatrixTest,
-                tests: [inventoryEntry],
-            }),
-        ).toThrow('test:rust:kernel:full-profile-evidence');
+            expect(evaluatorEvidenceTest).not.toContain(
+                heavyRustKernelTestNamePrefix,
+            );
+            expect(() =>
+                validateFocusedRustLaneSelection({
+                    lane: 'rust-full-profile-evidence',
+                    testFilter: evaluatorEvidenceTest,
+                    tests: [inventoryEntry],
+                }),
+            ).not.toThrow();
+            expect(() =>
+                validateFocusedRustLaneSelection({
+                    lane: 'rust-kernel-heavy',
+                    testFilter: evaluatorEvidenceTest,
+                    tests: [inventoryEntry],
+                }),
+            ).toThrow('test:rust:kernel:full-profile-evidence');
+        }
     });
 
     it('fails closed for zero matches and cross-lane selections', () => {

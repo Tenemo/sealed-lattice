@@ -4,7 +4,10 @@ use std::collections::HashMap;
 use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 
-use super::local_encrypted_storage::LocalRecordSealWithIdentifierInput;
+use super::local_encrypted_storage::{
+    BorrowedLocalRecordEnvelope, LOCAL_RECORD_ENVELOPE_MAXIMUM_BYTE_LENGTH,
+    LocalRecordOpenWithIdentifierInput, LocalRecordSealWithIdentifierInput,
+};
 use super::runtime_input::{RuntimeInputReader as InputReader, refusal_status};
 use super::{
     ACTION_RANDOMNESS_ROOT_BYTE_LENGTH, ActionStorageRoot, CanonicalDecodeLimits,
@@ -656,21 +659,17 @@ fn open_record_request(
     if envelope_bytes.is_empty() {
         return Err(malformed_status());
     }
-    let envelope = LocalRecordEnvelope::decode(envelope_bytes, &CanonicalDecodeLimits::default())
-        .map_err(schema_status)?;
+    if envelope_bytes.len() > LOCAL_RECORD_ENVELOPE_MAXIMUM_BYTE_LENGTH {
+        return Err(outside_supported_profile_status());
+    }
+    let envelope =
+        BorrowedLocalRecordEnvelope::decode(envelope_bytes, &CanonicalDecodeLimits::default())
+            .map_err(schema_status)?;
     ROOT_REGISTRY.with(|registry| {
         let registry = registry.borrow();
         let lease = registry.active(request.handle, &request.capability)?;
-        open_record_with_active_lease(
-            lease,
-            request.action_randomness_commitment,
-            request.record_type,
-            request.identifier_context,
-            request.record_version,
-            request.predecessor_record_hash,
-            &envelope,
-        )
-        .map(|mut plaintext| core::mem::take(&mut *plaintext))
+        open_borrowed_record_with_active_lease(lease, request, &envelope)
+            .map(|mut plaintext| core::mem::take(&mut *plaintext))
     })
 }
 
@@ -755,9 +754,9 @@ fn seal_record_with_identifier_and_active_lease_budget(
     {
         return Err(outside_supported_profile_status());
     }
-    let envelope = lease
+    let encoded_envelope = lease
         .root
-        .seal_local_record_with_identifier(LocalRecordSealWithIdentifierInput {
+        .seal_local_record_with_identifier_canonical(LocalRecordSealWithIdentifierInput {
             action_randomness_commitment,
             record_type,
             record_identifier,
@@ -767,7 +766,6 @@ fn seal_record_with_identifier_and_active_lease_budget(
             plaintext,
         })
         .map_err(schema_status)?;
-    let encoded_envelope = envelope.encode().map_err(schema_status)?;
     lease.local_record_seal_invocation_count = next_seal_invocation_count;
     lease.local_record_sealed_plaintext_byte_length = next_sealed_plaintext_byte_length;
     Ok(encoded_envelope)
@@ -796,6 +794,32 @@ fn open_record_with_active_lease(
             record_identifier,
             record_version,
             predecessor_record_hash,
+            envelope,
+        )
+        .into_result()
+        .map_err(refusal_status)
+}
+
+fn open_borrowed_record_with_active_lease(
+    lease: &RootLease,
+    request: &RecordRequest<'_>,
+    envelope: &BorrowedLocalRecordEnvelope<'_>,
+) -> RuntimeResult<Zeroizing<Vec<u8>>> {
+    let record_identifier = derive_record_identifier_from_context(
+        lease.root.binding(),
+        request.record_type,
+        request.identifier_context,
+    )?;
+    lease
+        .root
+        .open_borrowed_local_record_with_identifier(
+            LocalRecordOpenWithIdentifierInput {
+                action_randomness_commitment: request.action_randomness_commitment,
+                record_type: request.record_type,
+                expected_identifier: record_identifier,
+                record_version: request.record_version,
+                predecessor_record_hash: request.predecessor_record_hash,
+            },
             envelope,
         )
         .into_result()

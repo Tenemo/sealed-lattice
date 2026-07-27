@@ -8,19 +8,33 @@
 use crate::{
     bgv::{
         proof_suite::{
-            CommonProofRelationPlanCapability, CommonProofTranscript, ProofTreeRole,
+            BorrowedVerifiedCommonProofCapability, CommonProofProverError,
+            CommonProofRelationPlanCapability, CommonProofRuntimeError, CommonProofRuntimeLimits,
+            CommonProofTranscript, IncrementalExpectedProofObjectHeaderComparator,
+            MAXIMUM_COMMON_PROOF_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
+            MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH, ProofTreeRole,
             SelectedApplicationStatementContext, VerifiedCommonProofStatementSource,
-            VerifiedStatementOwnedTree, compile_same_secret_relation_plan,
-            decode_selected_same_secret_statement, sample_relation_application_challenges,
+            VerifiedStatementOwnedTree, canonical_proof_object_header_bytes,
+            compile_same_secret_relation_plan, decode_application_statement,
+            decode_selected_same_secret_statement, derive_relation_tree_inputs,
+            sample_relation_application_challenges,
             selected_committed_material_relation_plan_input, selected_relation_plan_check_context,
-            selected_same_secret_relation_plan_input,
+            selected_same_secret_relation_plan_input, verified_application_statement_hash,
         },
-        setup::{SetupKeyRelationProofFamily, VerifiedVssShareLinkageTerminal},
+        setup::{
+            SetupGenerationKeyRelationPreparationSource, SetupKeyRelationProofFamily,
+            VerifiedVssShareLinkageTerminal,
+        },
     },
-    foundation::{Hash512, RefusalReason},
-    hashing::StreamingHash512,
+    foundation::{
+        CanonicalDecodeLimits, Hash512, ProofApplicationSlot, ProofApplicationSlotCeilings,
+        ProofObjectHeader, RefusalReason,
+    },
     hashing::hash_framed_parts_512,
 };
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+use crate::hashing::StreamingHash512;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 use crate::{
@@ -29,14 +43,13 @@ use crate::{
             CommonProofAuxiliaryColumnSynthesisCursor, CommonProofPreChallengeSourceCursor,
             CommonProofPreChallengeSourcePoll, CommonProofPrivateCoinCoordinate,
             CommonProofPrivateCoinSamplingCatalog, CommonProofPrivateCoinSamplingOperation,
-            CommonProofPrivateCoinSource, CommonProofRuntimeLimits, CommonProofSourcePolynomial,
-            MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+            CommonProofPrivateCoinSource, CommonProofSourcePolynomial,
             PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
             RecordingCommonProofPrivateCoinSource, RelationProofTreeInput,
-            construct_reversed_relation_column, verified_application_statement_hash,
+            construct_reversed_relation_column,
         },
         setup::{
-            ExactSameSecretEvidenceSources, SetupGenerationAuthorityHandle,
+            PreparedExactSameSecretGenerationSources, SetupGenerationAuthorityHandle,
             SetupGenerationKeyRelationApplication, populate_exact_same_secret_evidence_authority,
             release_setup_generation_authority,
             resolve_setup_generation_key_relation_preparation_source,
@@ -44,7 +57,6 @@ use crate::{
         },
     },
     foundation::{
-        ProofApplicationSlot, ProofApplicationSlotCeilings,
         SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
         prepare_exact_same_secret_evidence_attempt,
     },
@@ -59,10 +71,23 @@ use super::protocol::{RecomputableRowSource, commit_streaming_witness};
 use super::{column_commitment::ColumnDigest, row_encoding::RowEncodingGeometry};
 use crate::bgv::proof_suite::relation_plan::{RelationOpeningSourceClass, RelationTreeDescriptor};
 
+mod aggregate_source;
 mod exact_proof;
 
-pub(crate) use exact_proof::ExactSameSecretVerificationMetrics;
-pub(super) use exact_proof::verify_exact_same_secret_proof_bytes;
+pub(in crate::bgv::proof_suite::row_code_whir) use aggregate_source::{
+    ExactSameSecretAggregateMetadata, ExactSameSecretAggregateSource,
+    ExactSameSecretAggregateSourceAction, ExactSameSecretAggregateSourceTarget,
+};
+pub(in crate::bgv::proof_suite::row_code_whir) use exact_proof::{
+    EXACT_BOUND_TREE_ROW_WIDTH, ExactBoundLeafOpening, ExactBoundTreeAuthentication,
+    ExactSameSecretOpeningSchedule, ExactSameSecretPhaseOpenings, ExactSameSecretProof,
+    ExactSameSecretProofEncodingProgress, ExactSameSecretProofSinkEncoder,
+    ExactSameSecretProofSinkEncodingError, checked_exact_same_secret_proof_shape,
+    exact_same_secret_bound_tree_catalog_entries,
+};
+pub(crate) use exact_proof::{
+    ExactSameSecretFinalProofVerification, ExactSameSecretIncrementalVerification,
+};
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 const SOURCE_POLYNOMIAL_DIGEST_DOMAIN: &str =
@@ -72,19 +97,18 @@ const SOURCE_CATALOG_DIGEST_DOMAIN: &str = "sealed-lattice/exact-same-secret/sou
 #[cfg(all(test, not(target_arch = "wasm32")))]
 const EXACT_SAME_SECRET_EVIDENCE_REVISION: u8 = 4;
 const EXACT_TRANSCRIPT_HEADER_DOMAIN: &[u8] =
-    b"sealed-lattice/exact-same-secret/transcript-header/v1";
+    b"sealed-lattice/exact-same-secret/transcript-header/v2";
 const LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT: usize = 32_768;
 const PHYSICAL_ROW_WITNESS_VARIABLE_COUNT: usize = 18;
 const LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW: usize = 8;
 const EXACT_ROW_CODE_LOG_INVERSE_RATE: usize = 2;
 const VERIFIED_SAME_SECRET_LOW_DEGREE_PREREQUISITE_DOMAIN: &str =
-    "sealed-lattice/same-secret/verified-low-degree-prerequisite/v1";
+    "sealed-lattice/same-secret/verified-low-degree-prerequisite/v2";
 #[cfg(test)]
 const TEST_VERIFIED_VSS_PROOF_RESULT_DIGEST: [u8; Hash512::BYTE_LENGTH] =
     [0x76; Hash512::BYTE_LENGTH];
 #[cfg(test)]
 const QUOTIENT_COMPONENT_CHUNK_COUNT: usize = 2;
-#[cfg(test)]
 const OPENING_BATCH_MASK_CHUNK_COUNT: usize = 8;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 const EXACT_ROW_PAD_SEED_BYTE_LENGTH: usize = core::mem::size_of::<[[u8; 32]; 3]>();
@@ -97,115 +121,306 @@ const EXACT_ROW_PAD_SEED_BYTE_LENGTH: usize = core::mem::size_of::<[[u8; 32]; 3]
 pub(in crate::bgv) struct VerifiedSameSecretLowDegreePrerequisite {
     protocol_version: u16,
     suite_identifier: [u8; Hash512::BYTE_LENGTH],
+    ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
     action_context_hash: [u8; Hash512::BYTE_LENGTH],
+    roster_hash: [u8; Hash512::BYTE_LENGTH],
     public_setup_seed: [u8; Hash512::BYTE_LENGTH],
+    setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
     participant_identity: [u8; Hash512::BYTE_LENGTH],
     roster_position: u16,
     ordered_input_roots: [[u8; Hash512::BYTE_LENGTH]; 8],
     binding_digest: [u8; Hash512::BYTE_LENGTH],
 }
 
+struct VerifiedVssLowDegreeEvidenceBinding {
+    protocol_version: u16,
+    suite_identifier: [u8; Hash512::BYTE_LENGTH],
+    ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
+    action_context_hash: [u8; Hash512::BYTE_LENGTH],
+    roster_hash: [u8; Hash512::BYTE_LENGTH],
+    public_setup_seed: [u8; Hash512::BYTE_LENGTH],
+    setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
+    participant_identity: [u8; Hash512::BYTE_LENGTH],
+    roster_position: u16,
+    vss_application_statement_hash: [u8; Hash512::BYTE_LENGTH],
+    vss_application_slot_hash: [u8; Hash512::BYTE_LENGTH],
+    vss_canonical_application_binding_hash: [u8; Hash512::BYTE_LENGTH],
+    vss_relation_plan_hash: [u8; Hash512::BYTE_LENGTH],
+    vss_relation_plan_variant_hash: [u8; Hash512::BYTE_LENGTH],
+    vss_construction_plan_identity_hash: [u8; Hash512::BYTE_LENGTH],
+    vss_certificate_geometry_digest: [u8; Hash512::BYTE_LENGTH],
+    owning_verification_binding_hash: [u8; Hash512::BYTE_LENGTH],
+    owning_proof_header_hash: [u8; Hash512::BYTE_LENGTH],
+    owning_proof_stream_digest: [u8; Hash512::BYTE_LENGTH],
+    ordered_input_roots: [[u8; Hash512::BYTE_LENGTH]; 8],
+}
+
+#[derive(Clone)]
+struct ExactSameSecretVerificationContext {
+    protocol_version: u16,
+    application_slot: ProofApplicationSlot,
+    canonical_application_statement_bytes: Vec<u8>,
+    statement_owned_trees: Vec<VerifiedStatementOwnedTree>,
+    canonical_proof_object_header_bytes: Vec<u8>,
+}
+
+impl ExactSameSecretVerificationContext {
+    fn new(
+        protocol_version: u16,
+        application_slot: ProofApplicationSlot,
+        canonical_application_statement_bytes: Vec<u8>,
+        statement_owned_trees: Vec<VerifiedStatementOwnedTree>,
+    ) -> Result<Self, String> {
+        if protocol_version == 0 || statement_owned_trees.is_empty() {
+            return Err("exact same-secret verification context is incomplete".to_owned());
+        }
+        let canonical_proof_object_header_bytes =
+            canonical_proof_object_header_bytes(&canonical_application_statement_bytes)
+                .map_err(|error| format!("encode exact proof-object header: {error:?}"))?;
+        Ok(Self {
+            protocol_version,
+            application_slot,
+            canonical_application_statement_bytes,
+            statement_owned_trees,
+            canonical_proof_object_header_bytes,
+        })
+    }
+}
+
 pub(crate) struct PreparedExactSameSecretVerification {
     prerequisite: VerifiedSameSecretLowDegreePrerequisite,
-    canonical_public_input: Vec<u8>,
+    context: ExactSameSecretVerificationContext,
+    header_comparator: IncrementalExpectedProofObjectHeaderComparator,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ExactSameSecretVerificationResidentMemoryAccounting {
+    maximum_resident_byte_length: u64,
+}
+
+impl ExactSameSecretVerificationResidentMemoryAccounting {
+    pub(crate) const fn new(maximum_resident_byte_length: u64) -> Self {
+        Self {
+            maximum_resident_byte_length,
+        }
+    }
+
+    pub(crate) const fn maximum_resident_byte_length(self) -> u64 {
+        self.maximum_resident_byte_length
+    }
 }
 
 impl PreparedExactSameSecretVerification {
-    pub(crate) fn verify(
-        &self,
-        canonical_proof: &[u8],
-    ) -> Result<ExactSameSecretVerificationMetrics, String> {
-        verify_exact_same_secret_proof_bytes(
-            &self.prerequisite,
-            &self.canonical_public_input,
-            canonical_proof,
+    pub(crate) fn into_incremental(self) -> Result<ExactSameSecretIncrementalVerification, String> {
+        ExactSameSecretIncrementalVerification::new(
+            self.prerequisite,
+            self.context,
+            self.header_comparator,
         )
     }
+}
+
+/// Derives verifier limits from the selected exact construction and the proof
+/// stream descriptor committed by the accepted package. Cryptographic
+/// admission uses the common anti-exhaustion ceiling; the selected proof-size
+/// target is enforced only by generation and evidence.
+pub(crate) fn exact_same_secret_verification_runtime_limits(
+    relation_plan: &CommonProofRelationPlanCapability,
+    canonical_proof_byte_length: u64,
+) -> Result<CommonProofRuntimeLimits, CommonProofRuntimeError> {
+    exact_proof::validate_exact_same_secret_verification_construction(relation_plan)
+        .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+    let canonical_proof_byte_length_usize = usize::try_from(canonical_proof_byte_length)
+        .map_err(|_| CommonProofRuntimeError::InvalidLimits)?;
+    if canonical_proof_byte_length_usize == 0
+        || canonical_proof_byte_length_usize > MAXIMUM_COMMON_PROOF_BYTE_LENGTH
+    {
+        return Err(CommonProofRuntimeError::WrongVerificationBinding);
+    }
+    let prefetched_proof_byte_length =
+        canonical_proof_byte_length_usize.min(MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH);
+    CommonProofRuntimeLimits::new(
+        MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
+        MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+        u64::try_from(prefetched_proof_byte_length)
+            .map_err(|_| CommonProofRuntimeError::InvalidLimits)?,
+    )
+}
+
+pub(crate) fn exact_same_secret_verification_resident_memory_accounting(
+    relation_plan: &CommonProofRelationPlanCapability,
+    canonical_proof_byte_length: u64,
+    canonical_application_statement_bytes: &[u8],
+) -> Result<ExactSameSecretVerificationResidentMemoryAccounting, CommonProofRuntimeError> {
+    exact_same_secret_verification_runtime_limits(relation_plan, canonical_proof_byte_length)?;
+    if canonical_application_statement_bytes.is_empty() {
+        return Err(CommonProofRuntimeError::WrongVerificationBinding);
+    }
+    let canonical_proof_byte_length = usize::try_from(canonical_proof_byte_length)
+        .map_err(|_| CommonProofRuntimeError::InvalidLimits)?;
+    let canonical_proof_object_header_byte_length =
+        canonical_proof_object_header_bytes(canonical_application_statement_bytes)
+            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?
+            .len();
+    if canonical_proof_object_header_byte_length >= canonical_proof_byte_length {
+        return Err(CommonProofRuntimeError::WrongVerificationBinding);
+    }
+    exact_proof::derive_exact_same_secret_verification_resident_memory_accounting(
+        relation_plan,
+        canonical_application_statement_bytes.len(),
+        canonical_proof_object_header_byte_length,
+        canonical_proof_byte_length,
+    )
+    .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)
 }
 
 pub(crate) fn prepare_exact_same_secret_verification(
     prerequisite: VerifiedSameSecretLowDegreePrerequisite,
     statement_source: &VerifiedCommonProofStatementSource,
-    statement_trees: &[VerifiedStatementOwnedTree],
+    statement_trees: Vec<VerifiedStatementOwnedTree>,
 ) -> Result<PreparedExactSameSecretVerification, String> {
-    let application_slot = statement_source
-        .proof_application_binding()
-        .application_slot();
-    let public_input = exact_proof::ExactSameSecretPublicInput {
-        protocol_version: prerequisite.protocol_version(),
-        suite_identifier: application_slot.suite_identifier().into_bytes(),
-        action_context_hash: application_slot.action_context_hash().into_bytes(),
-        statement_schema_identifier: application_slot.application_statement_schema_identifier(),
-        canonical_application_statement_bytes: statement_source
+    let proof_application_binding = statement_source.proof_application_binding();
+    let application_slot = proof_application_binding.application_slot();
+    let context = ExactSameSecretVerificationContext::new(
+        prerequisite.protocol_version(),
+        application_slot,
+        statement_source
             .canonical_application_statement_bytes()
             .to_vec(),
-        public_relation_trees: statement_trees
-            .iter()
-            .map(|tree| tree.statement_owned_tree_input().clone())
-            .collect(),
-    };
-    let canonical_public_input = exact_proof::encode_exact_same_secret_public_input(&public_input)?;
-    validate_prepared_same_secret_public_input(&prerequisite, &canonical_public_input)?;
+        statement_trees,
+    )?;
+    let expected_proof_header_hash = ProofObjectHeader::decode(
+        &context.canonical_proof_object_header_bytes,
+        &CanonicalDecodeLimits::default(),
+    )
+    .and_then(|header| header.proof_header_hash())
+    .map_err(|error| format!("hash exact proof-object header: {error:?}"))?;
+    if expected_proof_header_hash != proof_application_binding.proof_header_hash() {
+        return Err(
+            "exact proof-object header does not match the authenticated binding".to_owned(),
+        );
+    }
+    exact_proof::validate_verification_context_bindings(&prerequisite, &context)?;
+    let expected_canonical_proof_byte_length = usize::try_from(
+        proof_application_binding
+            .proof_stream_descriptor()
+            .total_byte_length,
+    )
+    .map_err(|_| "exact same-secret proof byte length exceeds usize".to_owned())?;
+    if expected_canonical_proof_byte_length == 0
+        || expected_canonical_proof_byte_length > MAXIMUM_COMMON_PROOF_BYTE_LENGTH
+    {
+        return Err("exact same-secret proof byte length exceeds the common hard limit".to_owned());
+    }
+    let header_comparator = IncrementalExpectedProofObjectHeaderComparator::new(
+        context.canonical_proof_object_header_bytes.clone(),
+        expected_canonical_proof_byte_length,
+        MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
+    )
+    .map_err(|error| format!("validate exact proof-object framing: {error:?}"))?;
     Ok(PreparedExactSameSecretVerification {
         prerequisite,
-        canonical_public_input,
+        context,
+        header_comparator,
     })
 }
 
-fn validate_prepared_same_secret_public_input(
-    prerequisite: &VerifiedSameSecretLowDegreePrerequisite,
-    canonical_public_input: &[u8],
-) -> Result<(), String> {
-    let public_input = exact_proof::decode_exact_same_secret_public_input(canonical_public_input)?;
-    exact_proof::validate_public_input_bindings(prerequisite, &public_input)
-}
-
 impl VerifiedSameSecretLowDegreePrerequisite {
-    pub(in crate::bgv) fn from_verified_vss_share_linkage_terminal(
+    pub(in crate::bgv) fn from_positive_verified_vss_share_linkage(
         terminal: &VerifiedVssShareLinkageTerminal,
+        verified_proof: BorrowedVerifiedCommonProofCapability<'_>,
+        relation_plan: &CommonProofRelationPlanCapability,
     ) -> Result<Self, RefusalReason> {
         let ordered_input_roots = selected_vss_degree_zero_coefficient_roots(
             terminal.ordered_coefficient_material_roots(),
         )?;
+        let vss_certificate_geometry_digest = relation_plan
+            .row_code_whir_construction_plan()
+            .selected_vss_low_degree_certificate_geometry_digest()
+            .map_err(|_| RefusalReason::WrongTypeOrLength)?;
         let canonical_prior_proof_descriptor = terminal
             .proof_stream_descriptor()
             .encode()
             .map_err(|_| RefusalReason::WrongTypeOrLength)?;
+        let vss_construction_plan_identity_hash =
+            relation_plan.row_code_whir_construction_plan_identity_hash();
+        if relation_plan.application_statement_schema_identifier()
+            != ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+            || relation_plan.relation_plan_hash() != verified_proof.relation_plan_hash()
+            || relation_plan.relation_plan_variant_hash()
+                != verified_proof.relation_plan_variant_hash()
+            || verified_proof.schedule_position().is_some()
+            || verified_proof.top_count().is_some()
+            || verified_proof.protocol_version() != terminal.protocol_version()
+            || verified_proof.suite_identifier() != terminal.suite_identifier()
+            || verified_proof.ceremony_context_hash() != terminal.ceremony_context_hash()
+            || verified_proof.action_context_hash() != terminal.action_context_hash()
+            || verified_proof.board_object_hash() != terminal.board_object_hash()
+            || verified_proof.proof_stream_descriptor() != terminal.proof_stream_descriptor()
+            || verified_proof.proof_stream_full_object_digest()
+                != terminal
+                    .proof_stream_descriptor()
+                    .full_object_digest
+                    .into_bytes()
+            || vss_construction_plan_identity_hash == [0_u8; Hash512::BYTE_LENGTH]
+        {
+            return Err(RefusalReason::WrongHashOrRoot);
+        }
         Self::new(
-            terminal.protocol_version(),
-            terminal.suite_identifier(),
-            terminal.action_context_hash(),
-            terminal.public_setup_seed(),
-            terminal.participant_identity(),
-            terminal.roster_position(),
+            VerifiedVssLowDegreeEvidenceBinding {
+                protocol_version: terminal.protocol_version(),
+                suite_identifier: terminal.suite_identifier(),
+                ceremony_context_hash: terminal.ceremony_context_hash(),
+                action_context_hash: terminal.action_context_hash(),
+                roster_hash: terminal.roster_hash(),
+                public_setup_seed: terminal.public_setup_seed(),
+                setup_proof_context_hash: terminal.setup_proof_context_hash(),
+                participant_identity: terminal.participant_identity(),
+                roster_position: terminal.roster_position(),
+                vss_application_statement_hash: verified_proof.application_statement_hash(),
+                vss_application_slot_hash: verified_proof.proof_application_slot_hash(),
+                vss_canonical_application_binding_hash: verified_proof
+                    .canonical_proof_application_binding_hash(),
+                vss_relation_plan_hash: relation_plan.relation_plan_hash(),
+                vss_relation_plan_variant_hash: relation_plan.relation_plan_variant_hash(),
+                vss_construction_plan_identity_hash,
+                vss_certificate_geometry_digest,
+                owning_verification_binding_hash: verified_proof.verification_binding_hash(),
+                owning_proof_header_hash: verified_proof.proof_header_hash(),
+                owning_proof_stream_digest: verified_proof.proof_stream_full_object_digest(),
+                ordered_input_roots,
+            },
             ordered_input_roots,
-            terminal
-                .proof_stream_descriptor()
-                .full_object_digest
-                .into_bytes(),
             &canonical_prior_proof_descriptor,
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn new(
-        protocol_version: u16,
-        suite_identifier: [u8; Hash512::BYTE_LENGTH],
-        action_context_hash: [u8; Hash512::BYTE_LENGTH],
-        public_setup_seed: [u8; Hash512::BYTE_LENGTH],
-        participant_identity: [u8; Hash512::BYTE_LENGTH],
-        roster_position: u16,
+        evidence: VerifiedVssLowDegreeEvidenceBinding,
         ordered_input_roots: [[u8; Hash512::BYTE_LENGTH]; 8],
-        prior_proof_result_digest: [u8; Hash512::BYTE_LENGTH],
         canonical_prior_proof_descriptor: &[u8],
     ) -> Result<Self, RefusalReason> {
-        if protocol_version == 0
-            || suite_identifier == [0_u8; Hash512::BYTE_LENGTH]
-            || action_context_hash == [0_u8; Hash512::BYTE_LENGTH]
-            || public_setup_seed == [0_u8; Hash512::BYTE_LENGTH]
-            || participant_identity == [0_u8; Hash512::BYTE_LENGTH]
+        let zero_hash = [0_u8; Hash512::BYTE_LENGTH];
+        if evidence.protocol_version == 0
+            || evidence.suite_identifier == zero_hash
+            || evidence.ceremony_context_hash == zero_hash
+            || evidence.action_context_hash == zero_hash
+            || evidence.roster_hash == zero_hash
+            || evidence.public_setup_seed == zero_hash
+            || evidence.setup_proof_context_hash == zero_hash
+            || evidence.participant_identity == zero_hash
+            || evidence.vss_application_statement_hash == zero_hash
+            || evidence.vss_application_slot_hash == zero_hash
+            || evidence.vss_canonical_application_binding_hash == zero_hash
+            || evidence.vss_relation_plan_hash == zero_hash
+            || evidence.vss_relation_plan_variant_hash == zero_hash
+            || evidence.vss_construction_plan_identity_hash == zero_hash
+            || evidence.vss_certificate_geometry_digest == zero_hash
+            || evidence.owning_verification_binding_hash == zero_hash
+            || evidence.owning_proof_header_hash == zero_hash
+            || evidence.owning_proof_stream_digest == zero_hash
             || ordered_input_roots.contains(&[0_u8; Hash512::BYTE_LENGTH])
-            || prior_proof_result_digest == [0_u8; Hash512::BYTE_LENGTH]
+            || ordered_input_roots != evidence.ordered_input_roots
             || canonical_prior_proof_descriptor.is_empty()
         {
             return Err(RefusalReason::WrongTypeOrLength);
@@ -226,25 +441,40 @@ impl VerifiedSameSecretLowDegreePrerequisite {
         let binding_digest = hash_framed_parts_512(
             VERIFIED_SAME_SECRET_LOW_DEGREE_PREREQUISITE_DOMAIN,
             &[
-                &protocol_version.to_le_bytes(),
-                &suite_identifier,
-                &action_context_hash,
-                &public_setup_seed,
-                &participant_identity,
-                &roster_position.to_le_bytes(),
+                &evidence.protocol_version.to_le_bytes(),
+                &evidence.suite_identifier,
+                &evidence.ceremony_context_hash,
+                &evidence.action_context_hash,
+                &evidence.roster_hash,
+                &evidence.public_setup_seed,
+                &evidence.setup_proof_context_hash,
+                &evidence.participant_identity,
+                &evidence.roster_position.to_le_bytes(),
                 &input_root_bytes,
                 &row_code_parameters,
-                &prior_proof_result_digest,
+                &evidence.vss_application_statement_hash,
+                &evidence.vss_application_slot_hash,
+                &evidence.vss_canonical_application_binding_hash,
+                &evidence.vss_relation_plan_hash,
+                &evidence.vss_relation_plan_variant_hash,
+                &evidence.vss_construction_plan_identity_hash,
+                &evidence.vss_certificate_geometry_digest,
+                &evidence.owning_verification_binding_hash,
+                &evidence.owning_proof_header_hash,
+                &evidence.owning_proof_stream_digest,
                 canonical_prior_proof_descriptor,
             ],
         );
         Ok(Self {
-            protocol_version,
-            suite_identifier,
-            action_context_hash,
-            public_setup_seed,
-            participant_identity,
-            roster_position,
+            protocol_version: evidence.protocol_version,
+            suite_identifier: evidence.suite_identifier,
+            ceremony_context_hash: evidence.ceremony_context_hash,
+            action_context_hash: evidence.action_context_hash,
+            roster_hash: evidence.roster_hash,
+            public_setup_seed: evidence.public_setup_seed,
+            setup_proof_context_hash: evidence.setup_proof_context_hash,
+            participant_identity: evidence.participant_identity,
+            roster_position: evidence.roster_position,
             ordered_input_roots,
             binding_digest,
         })
@@ -255,22 +485,40 @@ impl VerifiedSameSecretLowDegreePrerequisite {
     fn for_test(
         protocol_version: u16,
         suite_identifier: [u8; Hash512::BYTE_LENGTH],
+        ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
         action_context_hash: [u8; Hash512::BYTE_LENGTH],
         public_setup_seed: [u8; Hash512::BYTE_LENGTH],
+        setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
         participant_identity: [u8; Hash512::BYTE_LENGTH],
         roster_position: u16,
         ordered_input_roots: [[u8; Hash512::BYTE_LENGTH]; 8],
         prior_proof_result_digest: [u8; Hash512::BYTE_LENGTH],
     ) -> Result<Self, RefusalReason> {
+        let nonzero_test_binding = prior_proof_result_digest;
         Self::new(
-            protocol_version,
-            suite_identifier,
-            action_context_hash,
-            public_setup_seed,
-            participant_identity,
-            roster_position,
+            VerifiedVssLowDegreeEvidenceBinding {
+                protocol_version,
+                suite_identifier,
+                ceremony_context_hash,
+                action_context_hash,
+                roster_hash: nonzero_test_binding,
+                public_setup_seed,
+                setup_proof_context_hash,
+                participant_identity,
+                roster_position,
+                vss_application_statement_hash: nonzero_test_binding,
+                vss_application_slot_hash: nonzero_test_binding,
+                vss_canonical_application_binding_hash: nonzero_test_binding,
+                vss_relation_plan_hash: nonzero_test_binding,
+                vss_relation_plan_variant_hash: nonzero_test_binding,
+                vss_construction_plan_identity_hash: nonzero_test_binding,
+                vss_certificate_geometry_digest: nonzero_test_binding,
+                owning_verification_binding_hash: nonzero_test_binding,
+                owning_proof_header_hash: nonzero_test_binding,
+                owning_proof_stream_digest: nonzero_test_binding,
+                ordered_input_roots,
+            },
             ordered_input_roots,
-            prior_proof_result_digest,
             &prior_proof_result_digest,
         )
     }
@@ -283,12 +531,20 @@ impl VerifiedSameSecretLowDegreePrerequisite {
         self.suite_identifier
     }
 
+    const fn ceremony_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.ceremony_context_hash
+    }
+
     const fn action_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
         self.action_context_hash
     }
 
     const fn public_setup_seed(&self) -> [u8; Hash512::BYTE_LENGTH] {
         self.public_setup_seed
+    }
+
+    const fn setup_proof_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.setup_proof_context_hash
     }
 
     const fn participant_identity(&self) -> [u8; Hash512::BYTE_LENGTH] {
@@ -305,6 +561,411 @@ impl VerifiedSameSecretLowDegreePrerequisite {
 
     const fn binding_digest(&self) -> [u8; Hash512::BYTE_LENGTH] {
         self.binding_digest
+    }
+
+    pub(in crate::bgv) fn matches_same_secret_generation_source(
+        &self,
+        source: &SetupGenerationKeyRelationPreparationSource,
+        ordered_degree_zero_roots: &[[u8; Hash512::BYTE_LENGTH]],
+    ) -> bool {
+        source.family() == SetupKeyRelationProofFamily::SameSecret
+            && self.protocol_version == source.protocol_version()
+            && self.suite_identifier == source.suite_identifier()
+            && self.ceremony_context_hash == source.ceremony_context_hash()
+            && self.action_context_hash == source.action_context_hash()
+            && self.roster_hash == source.roster_hash()
+            && self.public_setup_seed == source.public_setup_seed()
+            && self.setup_proof_context_hash == source.setup_proof_context_hash()
+            && self.participant_identity == source.participant_identity()
+            && self.roster_position == source.roster_position()
+            && ordered_degree_zero_roots == self.ordered_input_roots
+    }
+}
+
+/// Public Fiat-Shamir facts that a fresh exact verifier recomputes from the
+/// canonical application, the checked relation, and the selected
+/// construction. Attempt lineage, proof coins, checkpoint state, and proof
+/// transport coordinates are deliberately absent.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::bgv::proof_suite) struct ExactSameSecretFiatShamirBinding {
+    protocol_version: u16,
+    suite_identifier: [u8; Hash512::BYTE_LENGTH],
+    ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
+    action_context_hash: [u8; Hash512::BYTE_LENGTH],
+    participant_identity: [u8; Hash512::BYTE_LENGTH],
+    roster_position: u16,
+    proof_application_slot_hash: [u8; Hash512::BYTE_LENGTH],
+    application_statement_schema_identifier: u16,
+    application_statement_hash: [u8; Hash512::BYTE_LENGTH],
+    proof_header_hash: [u8; Hash512::BYTE_LENGTH],
+    relation_plan_hash: [u8; Hash512::BYTE_LENGTH],
+    relation_plan_variant_hash: [u8; Hash512::BYTE_LENGTH],
+    construction_plan_identity_hash: [u8; Hash512::BYTE_LENGTH],
+    oracle_equation_catalog_hash: [u8; Hash512::BYTE_LENGTH],
+    setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
+    ordered_source_roots: [[u8; Hash512::BYTE_LENGTH]; 11],
+}
+
+impl ExactSameSecretFiatShamirBinding {
+    pub(in crate::bgv::proof_suite) fn derive(
+        protocol_version: u16,
+        suite_identifier: [u8; Hash512::BYTE_LENGTH],
+        ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
+        action_context_hash: [u8; Hash512::BYTE_LENGTH],
+        canonical_application_statement_bytes: &[u8],
+        relation_plan: &CommonProofRelationPlanCapability,
+    ) -> Result<Self, String> {
+        let application_statement_schema_identifier =
+            SetupKeyRelationProofFamily::SameSecret.statement_schema_identifier();
+        if protocol_version == 0
+            || suite_identifier == [0_u8; Hash512::BYTE_LENGTH]
+            || ceremony_context_hash == [0_u8; Hash512::BYTE_LENGTH]
+            || action_context_hash == [0_u8; Hash512::BYTE_LENGTH]
+            || relation_plan.application_statement_schema_identifier()
+                != application_statement_schema_identifier
+        {
+            return Err("exact same-secret transcript authority has the wrong context".to_owned());
+        }
+        let statement = decode_selected_same_secret_statement(
+            canonical_application_statement_bytes,
+            SelectedApplicationStatementContext::new(
+                protocol_version,
+                suite_identifier,
+                None,
+                None,
+            ),
+        )
+        .map_err(|error| format!("decode exact same-secret transcript statement: {error:?}"))?;
+        let mut ordered_source_roots = statement.ordered_degree_zero_commitment_roots().to_vec();
+        ordered_source_roots.extend_from_slice(&statement.anchor_commitment_roots());
+        let ordered_source_roots: [[u8; Hash512::BYTE_LENGTH]; 11] = ordered_source_roots
+            .try_into()
+            .map_err(|_| "exact same-secret transcript source-root count is wrong".to_owned())?;
+        if ordered_source_roots.contains(&[0_u8; Hash512::BYTE_LENGTH])
+            || statement.setup_proof_context_hash() == [0_u8; Hash512::BYTE_LENGTH]
+            || statement.participant_identity() == [0_u8; Hash512::BYTE_LENGTH]
+        {
+            return Err("exact same-secret transcript statement is empty".to_owned());
+        }
+        let proof_application_slot = ProofApplicationSlot::new(
+            Hash512::from_bytes(suite_identifier),
+            Hash512::from_bytes(ceremony_context_hash),
+            Hash512::from_bytes(action_context_hash),
+            application_statement_schema_identifier,
+            Some(statement.roster_position()),
+            None,
+            None,
+        )
+        .map_err(|error| format!("construct exact same-secret application slot: {error:?}"))?;
+        let proof_application_slot_hash = proof_application_slot
+            .hash()
+            .map_err(|error| format!("hash exact same-secret application slot: {error:?}"))?
+            .into_bytes();
+        let application_statement_hash = verified_application_statement_hash(
+            protocol_version,
+            suite_identifier,
+            application_statement_schema_identifier,
+            canonical_application_statement_bytes,
+        );
+        let proof_header_hash = ProofObjectHeader::from_canonical_application_statement(
+            canonical_application_statement_bytes.to_vec(),
+            &CanonicalDecodeLimits::default(),
+        )
+        .and_then(|header| header.proof_header_hash())
+        .map_err(|error| format!("hash exact same-secret proof header: {error:?}"))?
+        .into_bytes();
+        let construction_plan = relation_plan.row_code_whir_construction_plan();
+        let construction_plan_identity_hash = construction_plan
+            .canonical_identity_hash()
+            .map_err(|error| format!("hash exact same-secret construction: {error:?}"))?;
+        let oracle_equation_catalog_hash = construction_plan
+            .oracle_equation_catalog_hash()
+            .map_err(|error| format!("hash exact same-secret oracle catalog: {error:?}"))?;
+        if construction_plan_identity_hash
+            != relation_plan.row_code_whir_construction_plan_identity_hash()
+            || construction_plan.relation_plan_hash() != relation_plan.relation_plan_hash()
+            || construction_plan.relation_plan_variant_hash()
+                != relation_plan.relation_plan_variant_hash()
+            || oracle_equation_catalog_hash == [0_u8; Hash512::BYTE_LENGTH]
+        {
+            return Err("exact same-secret transcript construction binding is wrong".to_owned());
+        }
+        Ok(Self {
+            protocol_version,
+            suite_identifier,
+            ceremony_context_hash,
+            action_context_hash,
+            participant_identity: statement.participant_identity(),
+            roster_position: statement.roster_position(),
+            proof_application_slot_hash,
+            application_statement_schema_identifier,
+            application_statement_hash,
+            proof_header_hash,
+            relation_plan_hash: relation_plan.relation_plan_hash(),
+            relation_plan_variant_hash: relation_plan.relation_plan_variant_hash(),
+            construction_plan_identity_hash,
+            oracle_equation_catalog_hash,
+            setup_proof_context_hash: statement.setup_proof_context_hash(),
+            ordered_source_roots,
+        })
+    }
+
+    pub(in crate::bgv::proof_suite) const fn protocol_version(&self) -> u16 {
+        self.protocol_version
+    }
+
+    pub(in crate::bgv::proof_suite) const fn suite_identifier(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.suite_identifier
+    }
+
+    pub(in crate::bgv::proof_suite) const fn ceremony_context_hash(
+        &self,
+    ) -> [u8; Hash512::BYTE_LENGTH] {
+        self.ceremony_context_hash
+    }
+
+    pub(in crate::bgv::proof_suite) const fn action_context_hash(
+        &self,
+    ) -> [u8; Hash512::BYTE_LENGTH] {
+        self.action_context_hash
+    }
+
+    pub(in crate::bgv::proof_suite) const fn participant_identity(
+        &self,
+    ) -> [u8; Hash512::BYTE_LENGTH] {
+        self.participant_identity
+    }
+
+    pub(in crate::bgv::proof_suite) const fn roster_position(&self) -> u16 {
+        self.roster_position
+    }
+
+    pub(in crate::bgv::proof_suite) const fn proof_application_slot_hash(
+        &self,
+    ) -> [u8; Hash512::BYTE_LENGTH] {
+        self.proof_application_slot_hash
+    }
+
+    pub(in crate::bgv::proof_suite) const fn application_statement_schema_identifier(&self) -> u16 {
+        self.application_statement_schema_identifier
+    }
+
+    pub(in crate::bgv::proof_suite) const fn application_statement_hash(
+        &self,
+    ) -> [u8; Hash512::BYTE_LENGTH] {
+        self.application_statement_hash
+    }
+
+    pub(in crate::bgv::proof_suite) const fn proof_header_hash(
+        &self,
+    ) -> [u8; Hash512::BYTE_LENGTH] {
+        self.proof_header_hash
+    }
+
+    pub(in crate::bgv::proof_suite) const fn relation_plan_hash(
+        &self,
+    ) -> [u8; Hash512::BYTE_LENGTH] {
+        self.relation_plan_hash
+    }
+
+    pub(in crate::bgv::proof_suite) const fn relation_plan_variant_hash(
+        &self,
+    ) -> [u8; Hash512::BYTE_LENGTH] {
+        self.relation_plan_variant_hash
+    }
+
+    pub(in crate::bgv::proof_suite) const fn construction_plan_identity_hash(
+        &self,
+    ) -> [u8; Hash512::BYTE_LENGTH] {
+        self.construction_plan_identity_hash
+    }
+
+    pub(in crate::bgv::proof_suite) const fn oracle_equation_catalog_hash(
+        &self,
+    ) -> [u8; Hash512::BYTE_LENGTH] {
+        self.oracle_equation_catalog_hash
+    }
+
+    pub(in crate::bgv::proof_suite) const fn setup_proof_context_hash(
+        &self,
+    ) -> [u8; Hash512::BYTE_LENGTH] {
+        self.setup_proof_context_hash
+    }
+
+    pub(in crate::bgv::proof_suite) const fn ordered_source_roots(
+        &self,
+    ) -> &[[u8; Hash512::BYTE_LENGTH]; 11] {
+        &self.ordered_source_roots
+    }
+}
+
+/// Attempt-scoped authority retained only inside Rust. The private fields
+/// prevent a prefix prepared for one attempt or checkpoint lineage from being
+/// replayed into another operation, but they never enter Fiat-Shamir state.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::bgv::proof_suite) struct ExactSameSecretTranscriptPrefixAuthorityBinding {
+    fiat_shamir_binding: ExactSameSecretFiatShamirBinding,
+    generation_binding_hash: [u8; Hash512::BYTE_LENGTH],
+    attempt_identifier: [u8; 32],
+}
+
+impl ExactSameSecretTranscriptPrefixAuthorityBinding {
+    pub(in crate::bgv::proof_suite) fn new(
+        fiat_shamir_binding: ExactSameSecretFiatShamirBinding,
+        generation_binding_hash: [u8; Hash512::BYTE_LENGTH],
+        attempt_identifier: [u8; 32],
+    ) -> Result<Self, CommonProofProverError> {
+        if generation_binding_hash == [0_u8; Hash512::BYTE_LENGTH]
+            || attempt_identifier == [0_u8; 32]
+        {
+            return Err(CommonProofProverError::InvalidInput);
+        }
+        Ok(Self {
+            fiat_shamir_binding,
+            generation_binding_hash,
+            attempt_identifier,
+        })
+    }
+
+    pub(in crate::bgv::proof_suite) const fn fiat_shamir_binding(
+        &self,
+    ) -> &ExactSameSecretFiatShamirBinding {
+        &self.fiat_shamir_binding
+    }
+
+    pub(in crate::bgv::proof_suite) const fn generation_binding_hash(
+        &self,
+    ) -> [u8; Hash512::BYTE_LENGTH] {
+        self.generation_binding_hash
+    }
+
+    pub(in crate::bgv::proof_suite) const fn attempt_identifier(&self) -> [u8; 32] {
+        self.attempt_identifier
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::bgv::proof_suite) struct ExactSameSecretAuthenticatedTranscriptPrefixRequest {
+    authority_binding: ExactSameSecretTranscriptPrefixAuthorityBinding,
+    source_replay_identity_digest: [u8; Hash512::BYTE_LENGTH],
+    committed_base_root: [u8; Hash512::BYTE_LENGTH],
+}
+
+impl ExactSameSecretAuthenticatedTranscriptPrefixRequest {
+    pub(in crate::bgv::proof_suite) fn new(
+        authority_binding: ExactSameSecretTranscriptPrefixAuthorityBinding,
+        source_replay_identity_digest: [u8; Hash512::BYTE_LENGTH],
+        committed_base_root: [u8; Hash512::BYTE_LENGTH],
+    ) -> Result<Self, CommonProofProverError> {
+        if source_replay_identity_digest == [0_u8; Hash512::BYTE_LENGTH]
+            || committed_base_root == [0_u8; Hash512::BYTE_LENGTH]
+        {
+            return Err(CommonProofProverError::InvalidInput);
+        }
+        Ok(Self {
+            authority_binding,
+            source_replay_identity_digest,
+            committed_base_root,
+        })
+    }
+
+    pub(in crate::bgv::proof_suite) const fn authority_binding(
+        &self,
+    ) -> &ExactSameSecretTranscriptPrefixAuthorityBinding {
+        &self.authority_binding
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::bgv::proof_suite) struct ExactSameSecretAuthenticatedTranscriptPrefixBinding {
+    request: ExactSameSecretAuthenticatedTranscriptPrefixRequest,
+    verified_prerequisite_binding: [u8; Hash512::BYTE_LENGTH],
+}
+
+pub(in crate::bgv::proof_suite) struct PreparedExactSameSecretTranscriptPrefix {
+    binding: ExactSameSecretAuthenticatedTranscriptPrefixBinding,
+    transcript: CommonProofTranscript,
+}
+
+impl PreparedExactSameSecretTranscriptPrefix {
+    pub(in crate::bgv::proof_suite) fn prepare(
+        request: ExactSameSecretAuthenticatedTranscriptPrefixRequest,
+        prerequisite: &VerifiedSameSecretLowDegreePrerequisite,
+        relation_plan: &CommonProofRelationPlanCapability,
+    ) -> Result<Self, CommonProofProverError> {
+        let fiat_shamir_binding = request.authority_binding.fiat_shamir_binding();
+        let construction_plan = relation_plan.row_code_whir_construction_plan();
+        if prerequisite.protocol_version() != fiat_shamir_binding.protocol_version
+            || prerequisite.suite_identifier() != fiat_shamir_binding.suite_identifier
+            || prerequisite.ceremony_context_hash() != fiat_shamir_binding.ceremony_context_hash
+            || prerequisite.action_context_hash() != fiat_shamir_binding.action_context_hash
+            || prerequisite.setup_proof_context_hash()
+                != fiat_shamir_binding.setup_proof_context_hash
+            || prerequisite.participant_identity() != fiat_shamir_binding.participant_identity
+            || prerequisite.roster_position() != fiat_shamir_binding.roster_position
+            || prerequisite.ordered_input_roots() != &fiat_shamir_binding.ordered_source_roots[..8]
+            || relation_plan.relation_plan_hash() != fiat_shamir_binding.relation_plan_hash
+            || relation_plan.relation_plan_variant_hash()
+                != fiat_shamir_binding.relation_plan_variant_hash
+            || relation_plan.row_code_whir_construction_plan_identity_hash()
+                != fiat_shamir_binding.construction_plan_identity_hash
+            || construction_plan
+                .oracle_equation_catalog_hash()
+                .map_err(|_| CommonProofProverError::InvalidInput)?
+                != fiat_shamir_binding.oracle_equation_catalog_hash
+        {
+            return Err(CommonProofProverError::InvalidInput);
+        }
+        let verified_prerequisite_binding = prerequisite.binding_digest();
+        let header = exact_transcript_header(fiat_shamir_binding, verified_prerequisite_binding);
+        let mut transcript = CommonProofTranscript::new_relation_prefix_for_construction_plan(
+            fiat_shamir_binding.protocol_version,
+            fiat_shamir_binding.suite_identifier,
+            construction_plan,
+            fiat_shamir_binding.application_statement_schema_identifier,
+            &header,
+            construction_plan.relation_prefix_schedule().clone(),
+        )
+        .map_err(|_| CommonProofProverError::InvalidInput)?;
+        for tree_ordinal in construction_plan
+            .relation_prefix_schedule()
+            .ordered_base_tree_ordinals()
+        {
+            transcript
+                .absorb_base_root(*tree_ordinal, request.committed_base_root)
+                .map_err(|_| CommonProofProverError::InvalidInput)?;
+        }
+        Ok(Self {
+            binding: ExactSameSecretAuthenticatedTranscriptPrefixBinding {
+                request,
+                verified_prerequisite_binding,
+            },
+            transcript,
+        })
+    }
+
+    pub(in crate::bgv::proof_suite) const fn binding(
+        &self,
+    ) -> &ExactSameSecretAuthenticatedTranscriptPrefixBinding {
+        &self.binding
+    }
+
+    pub(in crate::bgv::proof_suite) fn into_transcript(self) -> CommonProofTranscript {
+        self.transcript
+    }
+}
+
+impl ExactSameSecretAuthenticatedTranscriptPrefixBinding {
+    pub(in crate::bgv::proof_suite) const fn request(
+        &self,
+    ) -> &ExactSameSecretAuthenticatedTranscriptPrefixRequest {
+        &self.request
+    }
+
+    pub(in crate::bgv::proof_suite) const fn verified_prerequisite_binding(
+        &self,
+    ) -> [u8; Hash512::BYTE_LENGTH] {
+        self.verified_prerequisite_binding
     }
 }
 
@@ -442,37 +1103,43 @@ impl ExactBasePhaseLayout {
 }
 
 fn exact_transcript_header(
-    protocol_version: u16,
-    suite_identifier: [u8; 64],
-    statement_schema_identifier: u16,
-    relation_plan_hash: [u8; 64],
-    relation_plan_variant_hash: [u8; 64],
-    verified_prerequisite_binding: [u8; 64],
-    canonical_application_statement_bytes: &[u8],
-) -> Result<Vec<u8>, String> {
-    let statement_byte_length = u64::try_from(canonical_application_statement_bytes.len())
-        .map_err(|_| "application statement byte length exceeds u64".to_owned())?;
+    binding: &ExactSameSecretFiatShamirBinding,
+    verified_prerequisite_binding: [u8; Hash512::BYTE_LENGTH],
+) -> Vec<u8> {
     let mut header = Vec::with_capacity(
         EXACT_TRANSCRIPT_HEADER_DOMAIN.len()
             + 2
-            + 64
+            + 15 * Hash512::BYTE_LENGTH
             + 2
-            + 64
-            + 64
-            + 64
-            + 8
-            + canonical_application_statement_bytes.len(),
+            + 2
+            + 11 * Hash512::BYTE_LENGTH,
     );
     header.extend_from_slice(EXACT_TRANSCRIPT_HEADER_DOMAIN);
-    header.extend_from_slice(&protocol_version.to_le_bytes());
-    header.extend_from_slice(&suite_identifier);
-    header.extend_from_slice(&statement_schema_identifier.to_le_bytes());
-    header.extend_from_slice(&relation_plan_hash);
-    header.extend_from_slice(&relation_plan_variant_hash);
+    header.extend_from_slice(&binding.protocol_version.to_le_bytes());
+    header.extend_from_slice(&binding.suite_identifier);
+    header.extend_from_slice(&binding.ceremony_context_hash);
+    header.extend_from_slice(&binding.action_context_hash);
+    header.extend_from_slice(&binding.participant_identity);
+    header.extend_from_slice(&binding.roster_position.to_le_bytes());
+    header.extend_from_slice(&binding.proof_application_slot_hash);
+    header.extend_from_slice(
+        &binding
+            .application_statement_schema_identifier
+            .to_le_bytes(),
+    );
+    header.extend_from_slice(&binding.application_statement_hash);
+    header.extend_from_slice(&binding.proof_header_hash);
+    header.extend_from_slice(&binding.relation_plan_hash);
+    header.extend_from_slice(&binding.relation_plan_variant_hash);
+    header.extend_from_slice(&binding.construction_plan_identity_hash);
+    header.extend_from_slice(&binding.oracle_equation_catalog_hash);
+    header.extend_from_slice(&binding.setup_proof_context_hash);
+    header.extend_from_slice(&(binding.ordered_source_roots.len() as u16).to_le_bytes());
+    for source_root in &binding.ordered_source_roots {
+        header.extend_from_slice(source_root);
+    }
     header.extend_from_slice(&verified_prerequisite_binding);
-    header.extend_from_slice(&statement_byte_length.to_le_bytes());
-    header.extend_from_slice(canonical_application_statement_bytes);
-    Ok(header)
+    header
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -574,6 +1241,7 @@ fn production_same_secret_relation() -> Result<
 fn test_same_secret_low_degree_prerequisite(
     protocol_version: u16,
     suite_identifier: [u8; Hash512::BYTE_LENGTH],
+    ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
     action_context_hash: [u8; Hash512::BYTE_LENGTH],
     public_setup_seed: [u8; Hash512::BYTE_LENGTH],
     canonical_application_statement_bytes: &[u8],
@@ -590,8 +1258,10 @@ fn test_same_secret_low_degree_prerequisite(
     VerifiedSameSecretLowDegreePrerequisite::for_test(
         protocol_version,
         suite_identifier,
+        ceremony_context_hash,
         action_context_hash,
         public_setup_seed,
+        statement.setup_proof_context_hash(),
         statement.participant_identity(),
         statement.roster_position(),
         ordered_input_roots,
@@ -602,7 +1272,7 @@ fn test_same_secret_low_degree_prerequisite(
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 fn production_same_secret_prerequisite(
-    sources: &ExactSameSecretEvidenceSources,
+    sources: &PreparedExactSameSecretGenerationSources,
 ) -> Result<VerifiedSameSecretLowDegreePrerequisite, String> {
     let request_context = sources
         .source_polynomials
@@ -610,6 +1280,7 @@ fn production_same_secret_prerequisite(
     test_same_secret_low_degree_prerequisite(
         request_context.protocol_version(),
         request_context.suite_identifier(),
+        sources.authorization.ceremony_context_hash(),
         sources.action_context_hash,
         sources.public_setup_seed,
         &sources.canonical_application_statement_bytes,
@@ -618,7 +1289,7 @@ fn production_same_secret_prerequisite(
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 struct ProductionSameSecretEvidenceSources {
-    sources: ExactSameSecretEvidenceSources,
+    sources: PreparedExactSameSecretGenerationSources,
     authority_handle: SetupGenerationAuthorityHandle,
 }
 
@@ -644,15 +1315,6 @@ fn production_same_secret_sources() -> Result<ProductionSameSecretEvidenceSource
         .map_err(|error| format!("resolve production same-secret statement: {error:?}"))?;
         let statement_schema_identifier =
             SetupKeyRelationProofFamily::SameSecret.statement_schema_identifier();
-        let expected_query_count = relation_plan
-            .proof_query_count()
-            .map_err(|error| format!("derive production relation query count: {error:?}"))?;
-        let limits = CommonProofRuntimeLimits::new(
-            MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH,
-            MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
-            MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH as u64,
-        )
-        .map_err(|error| format!("construct exact backend runtime limits: {error:?}"))?;
         let application_slot = ProofApplicationSlot::new(
             Hash512::from_bytes(preparation_source.suite_identifier()),
             Hash512::from_bytes(preparation_source.ceremony_context_hash()),
@@ -673,8 +1335,6 @@ fn production_same_secret_sources() -> Result<ProductionSameSecretEvidenceSource
             &authority.action_private_randomness,
             application_slot,
             application_statement_hash,
-            MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH as u64,
-            expected_query_count,
         )
         .map_err(|error| format!("bind production proof attempt: {error:?}"))?;
         let decoded_statement = decode_selected_same_secret_statement(
@@ -697,7 +1357,7 @@ fn production_same_secret_sources() -> Result<ProductionSameSecretEvidenceSource
             preparation_source.roster_position(),
         );
         with_setup_generation_key_relation(&authority.authority_handle, &application, |source| {
-            source.prepare_exact_same_secret_evidence_sources(relation_plan, limits)
+            source.prepare_exact_same_secret_generation_sources(relation_plan)
         })
         .map_err(|error| format!("prepare production same-secret sources: {error:?}"))
     })();
@@ -729,6 +1389,31 @@ fn exact_private_coin_sampling_catalog(
         )
         .map_err(|error| format!("add exact row-pad seed fill to catalog: {error:?}"))?;
     Ok(catalog)
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+fn derive_exact_row_pad_seeds(
+    sources: &mut PreparedExactSameSecretGenerationSources,
+) -> Result<[[u8; 32]; 3], String> {
+    let mut seed_bytes = zeroize::Zeroizing::new([0_u8; EXACT_ROW_PAD_SEED_BYTE_LENGTH]);
+    sources
+        .private_coins
+        .fill_raw_bytes(
+            CommonProofPrivateCoinCoordinate::proof_salt(),
+            seed_bytes.as_mut(),
+        )
+        .map_err(|error| format!("derive production-private row-pad seeds: {error:?}"))?;
+    Ok([
+        seed_bytes[0..32]
+            .try_into()
+            .map_err(|_| "base row-pad seed has the wrong length".to_owned())?,
+        seed_bytes[32..64]
+            .try_into()
+            .map_err(|_| "auxiliary row-pad seed has the wrong length".to_owned())?,
+        seed_bytes[64..96]
+            .try_into()
+            .map_err(|_| "quotient row-pad seed has the wrong length".to_owned())?,
+    ])
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -805,9 +1490,6 @@ mod native_checkpoint {
         pub(super) stored_relation_column_count: usize,
         pub(super) total_source_coefficient_count: u64,
         pub(super) maximum_source_coefficient_count: usize,
-        pub(super) base_row_pad_seed: Vec<u8>,
-        pub(super) auxiliary_row_pad_seed: Vec<u8>,
-        pub(super) quotient_row_pad_seed: Vec<u8>,
     }
 
     impl SourceCheckpointManifest {
@@ -823,7 +1505,6 @@ mod native_checkpoint {
             stored_relation_column_count: usize,
             total_source_coefficient_count: u64,
             maximum_source_coefficient_count: usize,
-            row_pad_seeds: [[u8; 32]; 3],
         ) -> Self {
             Self {
                 schema: MANIFEST_SCHEMA.to_owned(),
@@ -837,27 +1518,7 @@ mod native_checkpoint {
                 stored_relation_column_count,
                 total_source_coefficient_count,
                 maximum_source_coefficient_count,
-                base_row_pad_seed: row_pad_seeds[0].to_vec(),
-                auxiliary_row_pad_seed: row_pad_seeds[1].to_vec(),
-                quotient_row_pad_seed: row_pad_seeds[2].to_vec(),
             }
-        }
-
-        pub(super) fn row_pad_seeds(&self) -> Result<[[u8; 32]; 3], String> {
-            Ok([
-                self.base_row_pad_seed
-                    .as_slice()
-                    .try_into()
-                    .map_err(|_| "base row-pad seed has the wrong length".to_owned())?,
-                self.auxiliary_row_pad_seed
-                    .as_slice()
-                    .try_into()
-                    .map_err(|_| "auxiliary row-pad seed has the wrong length".to_owned())?,
-                self.quotient_row_pad_seed
-                    .as_slice()
-                    .try_into()
-                    .map_err(|_| "quotient row-pad seed has the wrong length".to_owned())?,
-            ])
         }
     }
 
@@ -1622,8 +2283,97 @@ mod tests {
     use crate::bgv::proof_suite::{
         CommonProofQuotientComponentCursor, ProofBaseFieldElement, ProofChallengeExtensionElement,
         ProofEvaluationDomain, RelationPlanError, construct_opening_batch_mask,
+        selected_relation_plans,
     };
     use crate::transcript_core::encode_hex;
+
+    fn selected_relation_plan_capability(
+        family: SetupKeyRelationProofFamily,
+    ) -> CommonProofRelationPlanCapability {
+        let statement_schema_identifier = family.statement_schema_identifier();
+        let relation_context = selected_relation_plan_check_context(statement_schema_identifier)
+            .expect("the selected family has a relation context");
+        let relation_plan_artifact = selected_relation_plans()
+            .expect("selected relation plans compile")
+            .into_iter()
+            .find(|artifact| {
+                artifact.application_statement_schema_identifier() == statement_schema_identifier
+            })
+            .expect("the selected family has a relation plan");
+        CommonProofRelationPlanCapability::from_compiled_plan(
+            relation_plan_artifact.compiled_plan(),
+            &relation_context,
+            None,
+            None,
+        )
+        .expect("the selected family construction plan validates")
+    }
+
+    #[test]
+    fn exact_verification_sizing_routes_validated_same_secret_construction() {
+        let relation_plan =
+            selected_relation_plan_capability(SetupKeyRelationProofFamily::SameSecret);
+        let canonical_proof_byte_length =
+            u64::try_from(MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH + 1)
+                .expect("the selection proof-size target fits u64");
+
+        let limits = exact_same_secret_verification_runtime_limits(
+            &relation_plan,
+            canonical_proof_byte_length,
+        )
+        .expect("a bounded exact proof routes to the WHIR verifier");
+
+        assert_eq!(
+            limits.maximum_proof_byte_length(),
+            MAXIMUM_COMMON_PROOF_BYTE_LENGTH
+        );
+        assert_eq!(
+            limits.prefetched_query_byte_length(),
+            u64::try_from(MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH)
+                .expect("the canonical proof chunk length fits u64")
+        );
+        assert_eq!(
+            limits.external_memory_chunk_byte_length(),
+            MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH
+        );
+    }
+
+    #[test]
+    fn exact_verification_sizing_refuses_oversized_proof_stream() {
+        let relation_plan =
+            selected_relation_plan_capability(SetupKeyRelationProofFamily::SameSecret);
+        let oversized_proof_byte_length = u64::try_from(MAXIMUM_COMMON_PROOF_BYTE_LENGTH)
+            .expect("the common proof hard limit fits u64")
+            + 1;
+
+        assert!(matches!(
+            exact_same_secret_verification_runtime_limits(
+                &relation_plan,
+                oversized_proof_byte_length,
+            ),
+            Err(CommonProofRuntimeError::WrongVerificationBinding)
+        ));
+        assert!(matches!(
+            exact_same_secret_verification_runtime_limits(&relation_plan, 0),
+            Err(CommonProofRuntimeError::WrongVerificationBinding)
+        ));
+    }
+
+    #[test]
+    fn exact_verification_sizing_refuses_wrong_construction() {
+        let wrong_relation_plan =
+            selected_relation_plan_capability(SetupKeyRelationProofFamily::PublicKeyShare);
+        let bounded_proof_byte_length = u64::try_from(MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH - 1)
+            .expect("the selected proof-size target fits u64");
+
+        assert!(matches!(
+            exact_same_secret_verification_runtime_limits(
+                &wrong_relation_plan,
+                bounded_proof_byte_length,
+            ),
+            Err(CommonProofRuntimeError::WrongVerificationBinding)
+        ));
+    }
 
     #[test]
     fn verified_vss_prerequisite_selects_each_limb_degree_zero_root() {
@@ -1666,6 +2416,144 @@ mod tests {
         let mut extra_roots = exact_roots;
         extra_roots.push([0xa5; 64]);
         assert!(selected_vss_degree_zero_coefficient_roots(&extra_roots).is_err());
+    }
+
+    #[test]
+    fn authenticated_transcript_prefix_binds_prerequisite_construction_and_committed_root() {
+        let relation_plan =
+            selected_relation_plan_capability(SetupKeyRelationProofFamily::SameSecret);
+        let construction_plan = relation_plan.row_code_whir_construction_plan();
+        let mut ordered_source_roots = [[0_u8; Hash512::BYTE_LENGTH]; 11];
+        for (source_ordinal, source_root) in ordered_source_roots.iter_mut().enumerate() {
+            source_root.fill(
+                u8::try_from(source_ordinal + 1).expect("source-root ordinal fits test byte"),
+            );
+        }
+        let ordered_input_roots: [[u8; Hash512::BYTE_LENGTH]; 8] = ordered_source_roots[..8]
+            .try_into()
+            .expect("the exact source catalog starts with eight VSS roots");
+        let protocol_version = 1;
+        let suite_identifier = [0x11; Hash512::BYTE_LENGTH];
+        let ceremony_context_hash = [0x22; Hash512::BYTE_LENGTH];
+        let action_context_hash = [0x33; Hash512::BYTE_LENGTH];
+        let setup_proof_context_hash = [0x44; Hash512::BYTE_LENGTH];
+        let participant_identity = [0x55; Hash512::BYTE_LENGTH];
+        let roster_position = 2;
+        let fiat_shamir_binding = ExactSameSecretFiatShamirBinding {
+            protocol_version,
+            suite_identifier,
+            ceremony_context_hash,
+            action_context_hash,
+            participant_identity,
+            roster_position,
+            proof_application_slot_hash: [0x66; Hash512::BYTE_LENGTH],
+            application_statement_schema_identifier: SetupKeyRelationProofFamily::SameSecret
+                .statement_schema_identifier(),
+            application_statement_hash: [0x77; Hash512::BYTE_LENGTH],
+            proof_header_hash: [0x88; Hash512::BYTE_LENGTH],
+            relation_plan_hash: relation_plan.relation_plan_hash(),
+            relation_plan_variant_hash: relation_plan.relation_plan_variant_hash(),
+            construction_plan_identity_hash: relation_plan
+                .row_code_whir_construction_plan_identity_hash(),
+            oracle_equation_catalog_hash: construction_plan
+                .oracle_equation_catalog_hash()
+                .expect("the selected construction has a canonical oracle catalog"),
+            setup_proof_context_hash,
+            ordered_source_roots,
+        };
+        let prerequisite = VerifiedSameSecretLowDegreePrerequisite::for_test(
+            protocol_version,
+            suite_identifier,
+            ceremony_context_hash,
+            action_context_hash,
+            [0x99; Hash512::BYTE_LENGTH],
+            setup_proof_context_hash,
+            participant_identity,
+            roster_position,
+            ordered_input_roots,
+            [0xaa; Hash512::BYTE_LENGTH],
+        )
+        .expect("construct matching VSS prerequisite");
+        let authority_binding = ExactSameSecretTranscriptPrefixAuthorityBinding::new(
+            fiat_shamir_binding,
+            [0xbb; Hash512::BYTE_LENGTH],
+            [0xcc; 32],
+        )
+        .expect("construct attempt-scoped transcript authority");
+        let first_request = ExactSameSecretAuthenticatedTranscriptPrefixRequest::new(
+            authority_binding.clone(),
+            [0xdd; Hash512::BYTE_LENGTH],
+            [0xee; Hash512::BYTE_LENGTH],
+        )
+        .expect("construct first transcript-prefix request");
+        let second_request = ExactSameSecretAuthenticatedTranscriptPrefixRequest::new(
+            authority_binding,
+            [0xdd; Hash512::BYTE_LENGTH],
+            [0xef; Hash512::BYTE_LENGTH],
+        )
+        .expect("construct second transcript-prefix request");
+
+        let first_prepared = PreparedExactSameSecretTranscriptPrefix::prepare(
+            first_request.clone(),
+            &prerequisite,
+            &relation_plan,
+        )
+        .expect("prepare the authenticated transcript prefix");
+        assert_eq!(first_prepared.binding().request(), &first_request);
+        assert_eq!(
+            first_prepared.binding().verified_prerequisite_binding(),
+            prerequisite.binding_digest()
+        );
+        let schedule = construction_plan.relation_prefix_schedule().clone();
+        let first_challenges = sample_relation_application_challenges(
+            &mut first_prepared.into_transcript(),
+            &schedule,
+        )
+        .expect("sample challenges from the first authenticated prefix");
+        let second_challenges = sample_relation_application_challenges(
+            &mut PreparedExactSameSecretTranscriptPrefix::prepare(
+                second_request,
+                &prerequisite,
+                &relation_plan,
+            )
+            .expect("prepare a prefix for the changed committed root")
+            .into_transcript(),
+            &schedule,
+        )
+        .expect("sample challenges from the changed authenticated prefix");
+        assert_ne!(first_challenges, second_challenges);
+
+        let wrong_prerequisite = VerifiedSameSecretLowDegreePrerequisite::for_test(
+            protocol_version,
+            suite_identifier,
+            ceremony_context_hash,
+            [0xf0; Hash512::BYTE_LENGTH],
+            [0x99; Hash512::BYTE_LENGTH],
+            setup_proof_context_hash,
+            participant_identity,
+            roster_position,
+            ordered_input_roots,
+            [0xaa; Hash512::BYTE_LENGTH],
+        )
+        .expect("construct mismatched VSS prerequisite");
+        assert!(
+            PreparedExactSameSecretTranscriptPrefix::prepare(
+                first_request.clone(),
+                &wrong_prerequisite,
+                &relation_plan,
+            )
+            .is_err()
+        );
+        let wrong_relation_plan =
+            selected_relation_plan_capability(SetupKeyRelationProofFamily::PublicKeyShare);
+        assert!(
+            PreparedExactSameSecretTranscriptPrefix::prepare(
+                first_request,
+                &prerequisite,
+                &wrong_relation_plan,
+            )
+            .is_err()
+        );
     }
 
     fn fixed_hash(bytes: &[u8], label: &str) -> [u8; 64] {
@@ -1731,7 +2619,7 @@ mod tests {
     }
 
     fn validate_checkpoint_binding(
-        sources: &ExactSameSecretEvidenceSources,
+        sources: &PreparedExactSameSecretGenerationSources,
         manifest: &SourceCheckpointManifest,
     ) {
         assert_eq!(
@@ -1763,7 +2651,7 @@ mod tests {
     }
 
     fn exact_transcript_through_composition(
-        sources: &ExactSameSecretEvidenceSources,
+        sources: &PreparedExactSameSecretGenerationSources,
         phase_manifest: &ExactPhaseCommitmentManifest,
     ) -> (
         CommonProofTranscript,
@@ -1795,25 +2683,25 @@ mod tests {
             .expect("derive production transcript schedule")
             .into_row_code_whir_successor()
             .expect("derive production successor transcript schedule");
+        let transcript_authority = sources
+            .authorization
+            .exact_same_secret_transcript_prefix_authority_binding(
+                &sources.canonical_application_statement_bytes,
+                &sources.relation_plan,
+            )
+            .expect("derive exact transcript authority");
         let header = exact_transcript_header(
-            request_context.protocol_version(),
-            request_context.suite_identifier(),
-            statement_schema_identifier,
-            sources.relation_plan.relation_plan_hash(),
-            sources.relation_plan.relation_plan_variant_hash(),
+            transcript_authority.fiat_shamir_binding(),
             production_same_secret_prerequisite(sources)
                 .expect("construct verified VSS prerequisite")
                 .binding_digest(),
-            &sources.canonical_application_statement_bytes,
-        )
-        .expect("derive exact transcript header");
+        );
         let mut transcript = CommonProofTranscript::new_relation_prefix(
             request_context.protocol_version(),
             request_context.suite_identifier(),
             sources
                 .relation_plan
-                .row_code_whir_construction_plan_identity_hash()
-                .expect("derive exact construction-plan identity"),
+                .row_code_whir_construction_plan_identity_hash(),
             statement_schema_identifier,
             &header,
             schedule.clone(),
@@ -1854,7 +2742,7 @@ mod tests {
     }
 
     fn ensure_exact_verifier_sequence_columns(
-        sources: &mut ExactSameSecretEvidenceSources,
+        sources: &mut PreparedExactSameSecretGenerationSources,
         store: &ExactPolynomialStore,
     ) {
         for column_ordinal in 0..sources.relation_plan_variant.ordered_columns().len() {
@@ -2047,7 +2935,7 @@ mod tests {
     }
 
     fn construct_exact_composed_quotient(
-        sources: &ExactSameSecretEvidenceSources,
+        sources: &PreparedExactSameSecretGenerationSources,
         store: &ExactPolynomialStore,
         phase_manifest: &ExactPhaseCommitmentManifest,
         application_challenges: &[crate::bgv::proof_suite::RelationApplicationChallengeAssignment],
@@ -2375,7 +3263,7 @@ mod tests {
         let expected_private_coin_catalog = exact_trace_private_coin_catalog_for_tree_role(
             &sources.relation_plan_variant,
             ProofTreeRole::BaseOracle,
-            true,
+            false,
         );
         let mut observed_private_coin_catalog = CommonProofPrivateCoinSamplingCatalog::default();
         let request_context = sources
@@ -2387,7 +3275,6 @@ mod tests {
         let mut maximum_coefficient_count = 0_usize;
         let source_replay_identity_digest;
         let catalog_digest;
-        let mut row_pad_seed_bytes = [0_u8; EXACT_ROW_PAD_SEED_BYTE_LENGTH];
         {
             let mut recording_private_coins = RecordingCommonProofPrivateCoinSource::new(
                 &mut sources.private_coins,
@@ -2468,28 +3355,11 @@ mod tests {
                 catalog_hasher.absorb_part(digest);
             }
             catalog_digest = catalog_hasher.finalize();
-            recording_private_coins
-                .fill_raw_bytes(
-                    CommonProofPrivateCoinCoordinate::proof_salt(),
-                    &mut row_pad_seed_bytes,
-                )
-                .expect("derive production-private row-pad seeds");
         }
         assert_eq!(
             observed_private_coin_catalog, expected_private_coin_catalog,
             "the exact base-source generator must consume its source-derived private-coin catalog exactly"
         );
-        let row_pad_seeds = [
-            row_pad_seed_bytes[0..32]
-                .try_into()
-                .expect("fixed seed slice"),
-            row_pad_seed_bytes[32..64]
-                .try_into()
-                .expect("fixed seed slice"),
-            row_pad_seed_bytes[64..96]
-                .try_into()
-                .expect("fixed seed slice"),
-        ];
         let manifest = SourceCheckpointManifest::new(
             sources.relation_plan.relation_plan_hash(),
             sources.relation_plan.relation_plan_variant_hash(),
@@ -2501,7 +3371,6 @@ mod tests {
             polynomial_digests.len() + reversed_column_bindings.len(),
             total_coefficient_count,
             maximum_coefficient_count,
-            row_pad_seeds,
         );
         store
             .write_manifest(&manifest)
@@ -2541,9 +3410,8 @@ mod tests {
             .expect("read production source manifest")
             .expect("production source gate must run first");
         validate_checkpoint_binding(&sources, &source_manifest);
-        let row_pad_seeds = source_manifest
-            .row_pad_seeds()
-            .expect("read exact row-pad seeds");
+        let row_pad_seeds =
+            derive_exact_row_pad_seeds(&mut sources).expect("derive exact row-pad seeds");
 
         let base_layout = ExactBasePhaseLayout::for_tree_role(
             &sources.relation_plan_variant,
@@ -2601,25 +3469,25 @@ mod tests {
             .relation_plan_variant
             .common_proof_relation_prefix_schedule(&sources.relation_context)
             .expect("derive production transcript schedule");
+        let transcript_authority = sources
+            .authorization
+            .exact_same_secret_transcript_prefix_authority_binding(
+                &sources.canonical_application_statement_bytes,
+                &sources.relation_plan,
+            )
+            .expect("derive exact transcript authority");
         let header = exact_transcript_header(
-            request_context.protocol_version(),
-            request_context.suite_identifier(),
-            statement_schema_identifier,
-            sources.relation_plan.relation_plan_hash(),
-            sources.relation_plan.relation_plan_variant_hash(),
+            transcript_authority.fiat_shamir_binding(),
             production_same_secret_prerequisite(&sources)
                 .expect("construct verified VSS prerequisite")
                 .binding_digest(),
-            &sources.canonical_application_statement_bytes,
-        )
-        .expect("derive exact transcript header");
+        );
         let mut transcript = CommonProofTranscript::new_relation_prefix(
             request_context.protocol_version(),
             request_context.suite_identifier(),
             sources
                 .relation_plan
-                .row_code_whir_construction_plan_identity_hash()
-                .expect("derive exact construction-plan identity"),
+                .row_code_whir_construction_plan_identity_hash(),
             statement_schema_identifier,
             &header,
             schedule.clone(),
@@ -2849,9 +3717,7 @@ mod tests {
         let quotient_root = commit_streaming_witness(
             &quotient_source,
             quotient_geometry,
-            &source_manifest
-                .row_pad_seeds()
-                .expect("read exact row-pad seeds")[2],
+            &derive_exact_row_pad_seeds(&mut sources).expect("derive exact row-pad seeds")[2],
         )
         .expect("commit exact quotient phase")
         .column_root;

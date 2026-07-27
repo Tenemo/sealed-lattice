@@ -267,6 +267,91 @@ describe('Authenticated checkpoint store', () => {
         );
     });
 
+    it('owns exact lineage-scoped physical accounting through publish, resume, eviction, and release', async () => {
+        const checkpointStore = openStore();
+        const identity = await checkpointStore.beginOperation();
+        const lineageIdentifier = identity.checkpointLineageIdentifier;
+        const accountingScope =
+            await checkpointStore.openPhysicalAccountingScope(
+                lineageIdentifier,
+            );
+        const initialAccounting =
+            checkpointStore.copyPhysicalAccounting(accountingScope);
+        expect(
+            initialAccounting.physicalQuotaReservedByteLength,
+        ).toBeGreaterThan(initialAccounting.physicalStoredStartByteLength);
+        expect(initialAccounting.physicalReadCallCount).toBeGreaterThan(0);
+
+        await expect(
+            checkpointStore.repair(new Uint8Array(32).fill(0xa5)),
+        ).rejects.toMatchObject({ code: 'InvalidInput' });
+
+        const stateBytes = Uint8Array.from(
+            { length: 65_537 },
+            (_unused, byteIndex) => (byteIndex * 43 + 7) & 0xff,
+        );
+        const boundary = deterministicBoundaryFor({ stateBytes });
+        await checkpointStore.publish({
+            boundary,
+            identity,
+            stateChunks: chunkState(stateBytes),
+        });
+        const afterPublish =
+            checkpointStore.copyPhysicalAccounting(accountingScope);
+        expect(afterPublish.sealCallCount).toBeGreaterThanOrEqual(3);
+        expect(afterPublish.sealPlaintextByteLength).toBeGreaterThan(
+            stateBytes.byteLength,
+        );
+        expect(afterPublish.physicalWriteCallCount).toBeGreaterThan(
+            afterPublish.sealCallCount,
+        );
+        expect(afterPublish.physicalStoredPeakByteLength).toBeGreaterThan(
+            initialAccounting.physicalStoredPeakByteLength,
+        );
+
+        const resumed = await checkpointStore.resume({
+            checkpointLineageIdentifier: lineageIdentifier,
+            expectedBoundary: expectedBoundary(boundary),
+        });
+        expect(await restoreBytes(resumed)).toEqual(stateBytes);
+        const afterResume =
+            checkpointStore.copyPhysicalAccounting(accountingScope);
+        expect(afterResume.openCallCount).toBeGreaterThan(0);
+        expect(afterResume.openPlaintextByteLength).toBeGreaterThan(
+            stateBytes.byteLength,
+        );
+
+        await checkpointStore.releaseOperationIdentity(
+            resumed.operationIdentity,
+        );
+        await checkpointStore.evict(lineageIdentifier);
+        await checkpointStore.releaseOperationIdentity(identity);
+        await checkpointStore.releasePhysicalAccountingScope(accountingScope);
+        const terminalAccounting =
+            checkpointStore.copyPhysicalAccounting(accountingScope);
+        expect(terminalAccounting.deletionCount).toBeGreaterThan(0);
+        expect(terminalAccounting.deletedByteLength).toBeGreaterThan(
+            stateBytes.byteLength,
+        );
+        expect(terminalAccounting.physicalStoredEndByteLength).toBeLessThan(
+            terminalAccounting.physicalStoredPeakByteLength,
+        );
+
+        const unrelatedIdentity = await checkpointStore.beginOperation();
+        const unrelatedLineageIdentifier =
+            unrelatedIdentity.checkpointLineageIdentifier;
+        const unrelatedScope =
+            await checkpointStore.openPhysicalAccountingScope(
+                unrelatedLineageIdentifier,
+            );
+        await checkpointStore.releasePhysicalAccountingScope(unrelatedScope);
+        await checkpointStore.releaseOperationIdentity(unrelatedIdentity);
+        expect(checkpointStore.copyPhysicalAccounting(accountingScope)).toEqual(
+            terminalAccounting,
+        );
+        await checkpointStore.close();
+    });
+
     it('retries failed protection cleanup without exposing half-closed state', async () => {
         let closeAttemptCount = 0;
         let sampledIdentifierByte = 0x40;

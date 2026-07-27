@@ -290,26 +290,132 @@ pub(super) fn rotated_relation_evaluation_position(
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) struct CommonProofQuotientConstraintTransformKey {
+pub(crate) struct CommonProofQuotientConstraintTransformKey {
     constraint_ordinal: u32,
     column_ordinal: u32,
 }
 
 impl CommonProofQuotientConstraintTransformKey {
-    pub(super) const fn new(constraint_ordinal: u32, column_ordinal: u32) -> Self {
+    pub(crate) const fn new(constraint_ordinal: u32, column_ordinal: u32) -> Self {
         Self {
             constraint_ordinal,
             column_ordinal,
         }
     }
 
-    pub(super) const fn column_ordinal(self) -> u32 {
+    pub(crate) const fn constraint_ordinal(self) -> u32 {
+        self.constraint_ordinal
+    }
+
+    pub(crate) const fn column_ordinal(self) -> u32 {
         self.column_ordinal
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct CommonProofQuotientEvaluationReadRequest {
+pub(crate) struct CommonProofQuotientConstraintColumnInterval {
+    first_constraint_ordinal: u32,
+    last_constraint_ordinal: u32,
+    constraint_use_count: usize,
+}
+
+impl CommonProofQuotientConstraintColumnInterval {
+    pub(crate) const fn first_constraint_ordinal(self) -> u32 {
+        self.first_constraint_ordinal
+    }
+
+    pub(crate) const fn last_constraint_ordinal(self) -> u32 {
+        self.last_constraint_ordinal
+    }
+
+    pub(crate) const fn constraint_use_count(self) -> usize {
+        self.constraint_use_count
+    }
+}
+
+/// The canonical constraint-to-column schedule consumed by both quotient
+/// arithmetic and external transform planning.
+pub(crate) struct CommonProofQuotientConstraintCatalog {
+    constraint_queries: Vec<Vec<RelationConstraintColumnQuery>>,
+    constraint_columns: Vec<Vec<u32>>,
+    column_intervals: BTreeMap<u32, CommonProofQuotientConstraintColumnInterval>,
+}
+
+impl CommonProofQuotientConstraintCatalog {
+    pub(crate) fn constraint_columns(&self) -> &[Vec<u32>] {
+        &self.constraint_columns
+    }
+
+    pub(crate) fn column_intervals(
+        &self,
+    ) -> &BTreeMap<u32, CommonProofQuotientConstraintColumnInterval> {
+        &self.column_intervals
+    }
+}
+
+pub(crate) fn common_proof_quotient_constraint_catalog(
+    variant: &RelationPlanVariant,
+) -> Result<CommonProofQuotientConstraintCatalog, CommonProofProverError> {
+    let mut constraint_queries = Vec::new();
+    let mut constraint_columns = Vec::new();
+    let mut column_intervals = BTreeMap::new();
+    constraint_queries
+        .try_reserve_exact(variant.constraint_count())
+        .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
+    constraint_columns
+        .try_reserve_exact(variant.constraint_count())
+        .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
+
+    for constraint_index in 0..variant.constraint_count() {
+        let constraint_ordinal =
+            u32::try_from(constraint_index).map_err(|_| CommonProofProverError::CountOverflow)?;
+        let queries = variant.constraint_column_queries(constraint_index)?;
+        let columns = queries
+            .iter()
+            .map(|query| query.column_ordinal())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        if columns.is_empty() {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        for column_ordinal in &columns {
+            variant
+                .ordered_columns()
+                .get(
+                    usize::try_from(*column_ordinal)
+                        .map_err(|_| CommonProofProverError::CountOverflow)?,
+                )
+                .ok_or(CommonProofProverError::InvalidColumn)?;
+            let interval = column_intervals.entry(*column_ordinal).or_insert(
+                CommonProofQuotientConstraintColumnInterval {
+                    first_constraint_ordinal: constraint_ordinal,
+                    last_constraint_ordinal: constraint_ordinal,
+                    constraint_use_count: 0,
+                },
+            );
+            interval.last_constraint_ordinal = constraint_ordinal;
+            interval.constraint_use_count = interval
+                .constraint_use_count
+                .checked_add(1)
+                .ok_or(CommonProofProverError::CountOverflow)?;
+        }
+        constraint_queries.push(queries);
+        constraint_columns.push(columns);
+    }
+    if column_intervals.is_empty() {
+        return Err(CommonProofProverError::InvalidColumn);
+    }
+
+    Ok(CommonProofQuotientConstraintCatalog {
+        constraint_queries,
+        constraint_columns,
+        column_intervals,
+    })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CommonProofQuotientEvaluationReadRequest {
     transform_key: CommonProofQuotientConstraintTransformKey,
     query_ordinal: usize,
     logical_value_offset: usize,
@@ -319,26 +425,26 @@ pub(super) struct CommonProofQuotientEvaluationReadRequest {
 }
 
 impl CommonProofQuotientEvaluationReadRequest {
-    pub(super) const fn vector(self) -> ExternalPolynomialVector {
+    pub(crate) const fn vector(self) -> ExternalPolynomialVector {
         self.vector
     }
 
-    pub(super) const fn element_offset(self) -> usize {
+    pub(crate) const fn element_offset(self) -> usize {
         self.element_offset
     }
 
-    pub(super) const fn element_count(self) -> usize {
+    pub(crate) const fn element_count(self) -> usize {
         self.element_count
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum CommonProofQuotientEvaluationProgress {
+pub(crate) enum CommonProofQuotientEvaluationProgress {
     BlockComplete,
     ConstraintComplete,
 }
 
-pub(super) struct CommonProofConstraintStreamQuotientBuilder {
+pub(crate) struct CommonProofConstraintStreamQuotientBuilder {
     evaluation_domain: ProofEvaluationDomain,
     trace_domain_size: usize,
     trace_rotation_stride: usize,
@@ -360,7 +466,7 @@ pub(super) struct CommonProofConstraintStreamQuotientBuilder {
 }
 
 impl CommonProofConstraintStreamQuotientBuilder {
-    pub(super) fn new(
+    pub(crate) fn new(
         variant: &RelationPlanVariant,
         context: &RelationPlanCheckContext,
         evaluation_domain: ProofEvaluationDomain,
@@ -395,24 +501,17 @@ impl CommonProofConstraintStreamQuotientBuilder {
             .iter()
             .map(|column| column.value_type())
             .collect::<Vec<_>>();
-        let mut constraint_queries = Vec::new();
-        let mut constraint_columns = Vec::new();
-        let mut remaining_constraint_use_counts = BTreeMap::new();
-        constraint_queries
-            .try_reserve_exact(variant.constraint_count())
-            .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
-        constraint_columns
-            .try_reserve_exact(variant.constraint_count())
-            .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
-        for constraint_ordinal in 0..variant.constraint_count() {
-            let queries = variant.constraint_column_queries(constraint_ordinal)?;
-            let columns = queries
-                .iter()
-                .map(|query| query.column_ordinal())
-                .collect::<BTreeSet<_>>()
-                .into_iter()
-                .collect::<Vec<_>>();
-            for column_ordinal in &columns {
+        let CommonProofQuotientConstraintCatalog {
+            constraint_queries,
+            constraint_columns,
+            column_intervals,
+        } = common_proof_quotient_constraint_catalog(variant)?;
+        let remaining_constraint_use_counts = column_intervals
+            .iter()
+            .map(|(column_ordinal, interval)| (*column_ordinal, interval.constraint_use_count()))
+            .collect::<BTreeMap<_, _>>();
+        for columns in &constraint_columns {
+            for column_ordinal in columns {
                 let value_type = column_value_types
                     .get(
                         usize::try_from(*column_ordinal)
@@ -428,15 +527,7 @@ impl CommonProofConstraintStreamQuotientBuilder {
                 {
                     return Err(CommonProofProverError::InvalidInput);
                 }
-                let use_count = remaining_constraint_use_counts
-                    .entry(*column_ordinal)
-                    .or_insert(0usize);
-                *use_count = use_count
-                    .checked_add(1)
-                    .ok_or(CommonProofProverError::CountOverflow)?;
             }
-            constraint_queries.push(queries);
-            constraint_columns.push(columns);
         }
         validate_seeded_transformed_columns(
             &column_value_types,
@@ -479,7 +570,7 @@ impl CommonProofConstraintStreamQuotientBuilder {
         })
     }
 
-    pub(super) fn next_transform_key(
+    pub(crate) fn next_transform_key(
         &mut self,
     ) -> Result<Option<CommonProofQuotientConstraintTransformKey>, CommonProofProverError> {
         if self.current_constraint_ordinal >= self.constraint_columns.len() {
@@ -504,7 +595,7 @@ impl CommonProofConstraintStreamQuotientBuilder {
         )))
     }
 
-    pub(super) fn accept_transformed_column(
+    pub(crate) fn accept_transformed_column(
         &mut self,
         transform_key: CommonProofQuotientConstraintTransformKey,
         vector: ExternalPolynomialVector,
@@ -554,7 +645,7 @@ impl CommonProofConstraintStreamQuotientBuilder {
         Ok(block_end)
     }
 
-    pub(super) fn next_read_request(
+    pub(crate) fn next_read_request(
         &self,
     ) -> Result<Option<CommonProofQuotientEvaluationReadRequest>, CommonProofProverError> {
         if self.current_constraint_ordinal >= self.constraint_queries.len() {
@@ -624,7 +715,7 @@ impl CommonProofConstraintStreamQuotientBuilder {
         }))
     }
 
-    pub(super) fn accept_read_values(
+    pub(crate) fn accept_read_values(
         &mut self,
         request: CommonProofQuotientEvaluationReadRequest,
         values: Zeroizing<Vec<ProofChallengeExtensionElement>>,
@@ -663,7 +754,7 @@ impl CommonProofConstraintStreamQuotientBuilder {
         Ok(())
     }
 
-    pub(super) fn evaluate_ready_block(
+    pub(crate) fn evaluate_ready_block(
         &mut self,
         variant: &RelationPlanVariant,
         context: &RelationPlanCheckContext,
@@ -748,7 +839,7 @@ impl CommonProofConstraintStreamQuotientBuilder {
         })
     }
 
-    pub(super) fn complete_constraint(&mut self) -> Result<bool, CommonProofProverError> {
+    pub(crate) fn complete_constraint(&mut self) -> Result<bool, CommonProofProverError> {
         if self.current_constraint_ordinal >= self.constraint_queries.len()
             || self.block_start != self.evaluation_domain.size()
             || !self.block_values_by_query.is_empty()
@@ -775,7 +866,7 @@ impl CommonProofConstraintStreamQuotientBuilder {
         Ok(self.current_constraint_ordinal == self.constraint_queries.len())
     }
 
-    pub(super) fn finish(
+    pub(crate) fn finish(
         mut self,
     ) -> Result<Zeroizing<Vec<ProofChallengeExtensionElement>>, CommonProofProverError> {
         if self.current_constraint_ordinal != self.constraint_queries.len()

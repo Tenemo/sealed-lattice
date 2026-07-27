@@ -1872,7 +1872,7 @@ impl<'context> BallotValidityPlanBuilder<'context> {
         if !used_rotations.contains(&(false, 0)) {
             return Err(RelationPlanError::InvalidOpening);
         }
-        let trace_mask_degree_bound_exclusive = self
+        let minimum_direct_view_rank = self
             .ordered_columns
             .iter()
             .enumerate()
@@ -1899,15 +1899,19 @@ impl<'context> BallotValidityPlanBuilder<'context> {
                         ))
                     })
                     .ok_or(RelationPlanError::DegreeBoundExceeded)?;
-                view_count
-                    .checked_mul(2)
-                    .ok_or(RelationPlanError::DegreeBoundExceeded)
+                Ok(view_count)
             })
             .collect::<Result<Vec<_>, RelationPlanError>>()?
             .into_iter()
             .max()
-            .filter(|degree| *degree != 0 && *degree <= self.input.ring_degree)
             .ok_or(RelationPlanError::DegreeBoundExceeded)?;
+        let trace_mask_degree_bound_exclusive =
+            super::key_relation::construction_owned_trace_mask_degree_bound(
+                BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
+                minimum_direct_view_rank,
+                self.input.ring_degree,
+                self.context,
+            )?;
         let prover_column_degree_bound_exclusive = self
             .input
             .ring_degree
@@ -3175,11 +3179,9 @@ mod tests {
             })
             .max()
             .expect("the secret-bearing plan has prover columns");
-        let expected_trace_mask_degree = 2_u64
-            * (u64::from(context.challenge_extension_degree)
-                * u64::try_from(maximum_translated_opening_count)
-                    .expect("the opening count fits u64")
-                + u64::from(context.phase_column_query_coordinate_count));
+        let expected_trace_mask_degree = u64::from(context.challenge_extension_degree)
+            * u64::try_from(maximum_translated_opening_count).expect("the opening count fits u64")
+            + u64::from(context.phase_column_query_coordinate_count);
         assert!(expected_trace_mask_degree > 0 && expected_trace_mask_degree <= TEST_RING_DEGREE);
         assert!(variant.ordered_masks.iter().all(|mask| {
             mask.mask_kind != RelationMaskKind::Trace

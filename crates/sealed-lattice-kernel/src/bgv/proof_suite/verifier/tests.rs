@@ -70,6 +70,129 @@ fn proof_header_preflight_enforces_declared_and_profile_lengths() {
 }
 
 #[test]
+fn incremental_expected_header_accepts_one_byte_fragments_and_exposes_only_the_body() {
+    let expected_header = (0..=u16::MAX)
+        .cycle()
+        .take(769)
+        .map(|value| value as u8)
+        .collect::<Vec<_>>();
+    let family_body = b"SLXPRF05canonical-family-body";
+    let mut complete_proof = expected_header.clone();
+    complete_proof.extend_from_slice(family_body);
+    let mut comparator = IncrementalExpectedProofObjectHeaderComparator::new(
+        expected_header.clone(),
+        complete_proof.len(),
+        complete_proof.len(),
+    )
+    .expect("the locally derived header layout is valid");
+
+    for available_end_offset in 1..=expected_header.len() {
+        let required_range = comparator
+            .required_byte_range(1)
+            .expect("derive the next one-byte comparison range")
+            .expect("the header comparison is incomplete");
+        assert_eq!(required_range.offset(), available_end_offset - 1);
+        assert_eq!(required_range.byte_length(), 1);
+        comparator
+            .compare_available(&complete_proof, available_end_offset)
+            .expect("each exact header byte matches");
+    }
+
+    assert!(comparator.is_complete());
+    assert_eq!(
+        comparator.compared_header_byte_length(),
+        expected_header.len()
+    );
+    assert_eq!(comparator.family_body_byte_length(), family_body.len());
+    assert_eq!(comparator.required_byte_range(1), Ok(None));
+    let body = comparator
+        .body_source(&complete_proof)
+        .expect("a complete header exposes the offset body");
+    let mut copied_body = vec![0_u8; body.byte_length()];
+    assert!(body.copy_bytes(0, &mut copied_body));
+    assert_eq!(copied_body, family_body);
+}
+
+#[test]
+fn incremental_expected_header_accepts_exact_boundaries_and_a_final_fragment_crossing_into_body() {
+    let expected_header = vec![0x53; 1_049];
+    let family_body = b"SLXPRF05body";
+    let mut complete_proof = expected_header.clone();
+    complete_proof.extend_from_slice(family_body);
+    let mut comparator = IncrementalExpectedProofObjectHeaderComparator::new(
+        expected_header.clone(),
+        complete_proof.len(),
+        complete_proof.len(),
+    )
+    .expect("construct the incremental header comparator");
+
+    for available_end_offset in [1, 255, 256, 257, 512, 1_024, complete_proof.len()] {
+        comparator
+            .compare_available(&complete_proof, available_end_offset)
+            .expect("the adversarial header boundary matches");
+    }
+
+    assert!(comparator.is_complete());
+    assert_eq!(
+        comparator.expected_header_byte_length(),
+        expected_header.len()
+    );
+}
+
+#[test]
+fn incremental_expected_header_refuses_mutation_truncation_and_early_body_access() {
+    let expected_header = vec![0x4d; 513];
+    let family_body = b"SLXPRF05body";
+    let mut complete_proof = expected_header.clone();
+    complete_proof.extend_from_slice(family_body);
+
+    let mut incomplete = IncrementalExpectedProofObjectHeaderComparator::new(
+        expected_header.clone(),
+        complete_proof.len(),
+        complete_proof.len(),
+    )
+    .expect("construct the incomplete comparator");
+    incomplete
+        .compare_available(&complete_proof, expected_header.len() - 1)
+        .expect("the available prefix matches");
+    assert_eq!(
+        incomplete.body_source(&complete_proof).err(),
+        Some(CommonProofVerifierError::InvalidProofHeader)
+    );
+
+    let mut mutated_proof = complete_proof.clone();
+    mutated_proof[256] ^= 1;
+    let mut mutated = IncrementalExpectedProofObjectHeaderComparator::new(
+        expected_header.clone(),
+        mutated_proof.len(),
+        mutated_proof.len(),
+    )
+    .expect("construct the mutation comparator");
+    assert_eq!(
+        mutated
+            .compare_available(&mutated_proof, expected_header.len())
+            .err(),
+        Some(CommonProofVerifierError::InvalidProofHeader)
+    );
+
+    let truncated_proof = &complete_proof[..complete_proof.len() - 1];
+    let mut truncated = IncrementalExpectedProofObjectHeaderComparator::new(
+        expected_header,
+        complete_proof.len(),
+        complete_proof.len(),
+    )
+    .expect("construct the truncation comparator");
+    assert_eq!(
+        truncated
+            .compare_available(truncated_proof, truncated_proof.len())
+            .err(),
+        Some(CommonProofVerifierError::Body(ProofBodyError::Decode(
+            super::super::ProofDecodeError::DeclaredLengthMismatch,
+        )))
+    );
+}
+
+#[test]
 fn evaluator_linkage_rejects_relinearization_auxiliary_root_mutation() {
     let capabilities = selected_evaluator_auxiliary_capabilities();
     let runtime_capabilities = selected_evaluator_runtime_capabilities();
@@ -508,6 +631,7 @@ fn build_selected_evaluator_auxiliary_capabilities() -> Vec<VerifiedEvaluatorAux
         .expect("round-one proof header hashes"),
         proof_byte_length: 1,
         verified_query_count: 1,
+        row_code_whir_construction_plan_identity_hash: [0x53; 64],
         relation_plan_variant_hash: [0x52; 64],
         schedule_position: Some(0),
         top_count: None,
@@ -684,6 +808,7 @@ fn selected_evaluator_verified_proof(
         proof_header_hash: [0x65; 64],
         proof_byte_length: 1,
         verified_query_count: 1,
+        row_code_whir_construction_plan_identity_hash: [0x67; 64],
         relation_plan_variant_hash: [0x66; 64],
         schedule_position,
         top_count,

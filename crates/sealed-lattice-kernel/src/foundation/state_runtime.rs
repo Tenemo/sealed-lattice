@@ -1350,8 +1350,7 @@ mod tests {
     use super::*;
     use crate::bgv::proof_suite::{
         CommonProofGenerationAuthorization, CommonProofRelationPlanCapability,
-        CommonProofRuntimeError, CommonProofRuntimeLimits,
-        MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH, compile_same_secret_relation_plan,
+        CommonProofRuntimeError, compile_same_secret_relation_plan,
         selected_relation_plan_check_context, selected_same_secret_relation_plan_input,
     };
     use crate::foundation::{
@@ -1778,8 +1777,6 @@ mod tests {
                 fixture.roster_hash,
                 application_slot,
                 application_statement_hash,
-                1,
-                1,
                 AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
                     checkpoint_lineage_identifier,
                     checkpoint_schedule_digest,
@@ -1792,8 +1789,6 @@ mod tests {
                 fixture.roster_hash,
                 application_slot,
                 application_statement_hash,
-                1,
-                1,
                 AuthenticatedCheckpointContinuationSource::from_authenticated_common_proof_checkpoint(
                     checkpoint_lineage_identifier,
                     checkpoint_schedule_digest,
@@ -1809,8 +1804,6 @@ mod tests {
             );
             assert_eq!(fresh_attempt.application_slot(), application_slot);
             assert_eq!(fresh_attempt.application_statement_hash(), application_statement_hash);
-            assert_eq!(fresh_attempt.expected_proof_byte_length(), 1);
-            assert_eq!(fresh_attempt.expected_query_count(), 1);
             assert_eq!(fresh_attempt.checkpoint_continuation().next_event_index(), 0);
             assert_eq!(resumed_attempt.checkpoint_continuation().next_event_index(), 1);
             public_family_lineages.push((
@@ -1825,8 +1818,6 @@ mod tests {
                     fixture.roster_hash,
                     application_slot,
                     application_statement_hash,
-                    1,
-                    1,
                     AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
                         checkpoint_lineage_identifier,
                         checkpoint_schedule_digest,
@@ -1861,8 +1852,6 @@ mod tests {
             fixture.roster_hash,
             collective_application_slot,
             Hash512::from_bytes([0x71; Hash512::BYTE_LENGTH]),
-            1,
-            1,
             AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
                 checkpoint_lineage_identifier,
                 checkpoint_schedule_digest,
@@ -1899,8 +1888,6 @@ mod tests {
                     fixture.roster_hash,
                     collective_application_slot,
                     Hash512::from_bytes([0x70; Hash512::BYTE_LENGTH]),
-                    1,
-                    1,
                     AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
                         checkpoint_lineage_identifier,
                         checkpoint_schedule_digest,
@@ -1927,8 +1914,6 @@ mod tests {
                 fixture.roster_hash,
                 secret_bearing_application_slot,
                 Hash512::from_bytes([0x70; Hash512::BYTE_LENGTH]),
-                1,
-                1,
                 AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
                     checkpoint_lineage_identifier,
                     checkpoint_schedule_digest,
@@ -1957,8 +1942,6 @@ mod tests {
                     fixture.roster_hash,
                     wrong_context_application_slot,
                     Hash512::from_bytes([0x70; Hash512::BYTE_LENGTH]),
-                    1,
-                    1,
                     AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
                         checkpoint_lineage_identifier,
                         checkpoint_schedule_digest,
@@ -1975,8 +1958,6 @@ mod tests {
                 Hash512::from_bytes([0x99; Hash512::BYTE_LENGTH]),
                 collective_application_slot,
                 Hash512::from_bytes([0x70; Hash512::BYTE_LENGTH]),
-                1,
-                1,
                 AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
                     checkpoint_lineage_identifier,
                     checkpoint_schedule_digest,
@@ -2039,8 +2020,6 @@ mod tests {
             fixture.roster_hash,
             collective_application_slot,
             Hash512::from_bytes([0x70; Hash512::BYTE_LENGTH]),
-            1,
-            1,
             AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
                 [0x82; 32],
                 Hash512::from_bytes([0x81; Hash512::BYTE_LENGTH]),
@@ -2075,20 +2054,12 @@ mod tests {
             mismatched_relation_plan.application_statement_schema_identifier(),
             same_secret_schema_identifier,
         );
-        let limits = CommonProofRuntimeLimits::new(
-            1,
-            MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
-            1,
-        )
-        .expect("the minimal worker limits are canonical");
-
         assert_eq!(
             CommonProofGenerationAuthorization::from_public_only_authenticated_attempt(
                 prepared_attempt,
                 &mismatched_relation_plan,
                 1,
                 &[],
-                limits,
             ),
             Err(CommonProofRuntimeError::WrongVerificationBinding),
         );

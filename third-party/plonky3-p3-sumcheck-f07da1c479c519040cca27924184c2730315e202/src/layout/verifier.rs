@@ -7,15 +7,15 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::marker::PhantomData;
 
-use p3_field::{ExtensionField, Field, dot_product};
+use p3_field::{dot_product, ExtensionField, Field};
 use p3_multilinear_util::point::Point;
 
 use crate::constraints::statement::{EqStatement, NextStatement};
 use crate::constraints::{Constraint, Statements};
-use crate::layout::LayoutStrategy;
 use crate::layout::opening::{VerifierMultiClaim, VerifierOpening, VerifierVirtualClaim};
-use crate::layout::plan::{LayoutShape, plan_layout};
+use crate::layout::plan::{plan_layout, LayoutShape};
 use crate::layout::witness::{Selector, TablePlacement};
+use crate::layout::LayoutStrategy;
 use crate::strategy::VariableOrder;
 use crate::table::{OpeningEvals, OpeningRequest, TableShape};
 use crate::{Claim, SumcheckError};
@@ -162,15 +162,12 @@ impl<F: Field, EF: ExtensionField<F>> Verifier<F, EF> {
             });
         }
         // Every requested column must address an existing slot in this table.
-        assert!(
-            current
-                .iter()
-                .all(|&poly_idx| poly_idx < placement.num_polys())
-        );
-        assert!(
-            next.iter()
-                .all(|&poly_idx| poly_idx < placement.num_polys())
-        );
+        assert!(current
+            .iter()
+            .all(|&poly_idx| poly_idx < placement.num_polys()));
+        assert!(next
+            .iter()
+            .all(|&poly_idx| poly_idx < placement.num_polys()));
 
         // Sample the local-frame opening point from the transcript.
         let point = Point::expand_from_univariate(
@@ -235,18 +232,14 @@ impl<F: Field, EF: ExtensionField<F>> Verifier<F, EF> {
                 actual_next: evals.next().len(),
             });
         }
-        assert!(
-            batch
-                .current()
-                .iter()
-                .all(|&poly_idx| poly_idx < placement.num_polys())
-        );
-        assert!(
-            batch
-                .next()
-                .iter()
-                .all(|&poly_idx| poly_idx < placement.num_polys())
-        );
+        assert!(batch
+            .current()
+            .iter()
+            .all(|&poly_idx| poly_idx < placement.num_polys()));
+        assert!(batch
+            .next()
+            .iter()
+            .all(|&poly_idx| poly_idx < placement.num_polys()));
         assert_eq!(point.num_variables(), self.num_variables_table(table_idx));
         challenger.observe_algebra_slice(point.as_slice());
         challenger.observe_algebra_slice(evals.current());
@@ -446,7 +439,7 @@ mod tests {
     use super::*;
     use crate::strategy::VariableOrder;
     use crate::table::OpeningBatch;
-    use crate::tests::{EF, F, challenger};
+    use crate::tests::{challenger, EF, F};
 
     const fn prefix_strategy() -> LayoutStrategy {
         LayoutStrategy::new(false, VariableOrder::Prefix)

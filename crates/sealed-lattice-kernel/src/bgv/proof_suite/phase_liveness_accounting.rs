@@ -327,7 +327,7 @@ pub(crate) enum SelectedProofGenerationResumePrefixExecution {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum SelectedProofGenerationResumeStateRestoration {
-    CheckpointTargetComparisonWithoutCryptographicStateRestoration,
+    CheckpointTargetComparisonAndAuthenticatedTranscriptCursorRestoration,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -473,16 +473,11 @@ fn derive_target_release_phase_path(
             );
         }
     };
-    let missing_carriers = accounting
-        .gaps
-        .iter()
-        .map(|gap| missing_carrier(gap.dimension(), gap.reason_code(), gap.required_carrier()))
-        .collect();
     (
         SelectedTargetReleasePhasePathOutcome::Accounting {
             accounting: Box::new(accounting),
         },
-        missing_carriers,
+        Vec::new(),
     )
 }
 
@@ -889,8 +884,8 @@ fn derive_proof_generation_attempt_topology() -> SelectedProofGenerationAttemptT
             }
         },
         resumed_state_restoration: match topology.resumed_state_restoration() {
-            CommonProofGenerationResumeStateRestoration::CheckpointTargetComparisonWithoutCryptographicStateRestoration => {
-                SelectedProofGenerationResumeStateRestoration::CheckpointTargetComparisonWithoutCryptographicStateRestoration
+            CommonProofGenerationResumeStateRestoration::CheckpointTargetComparisonAndAuthenticatedTranscriptCursorRestoration => {
+                SelectedProofGenerationResumeStateRestoration::CheckpointTargetComparisonAndAuthenticatedTranscriptCursorRestoration
             }
         },
         cumulative_work_rule: match topology.cumulative_work_rule() {
@@ -965,14 +960,9 @@ fn proof_diagnostic_missing_carrier(
 fn missing_cross_subsystem_carriers() -> Vec<SelectedMissingPhaseLivenessCarrier> {
     vec![
         missing_carrier(
-            "remaining-complete-action-canonical-transport-catalog",
-            "missing-production-carrier-constructors",
-            "production constructors for private-share acceptance object 0x0011, ballot package object 0x0020 with payload 0x1301, candidate list/view schemas 0x1400/0x1401/0x1402/0x1403/0x1405 and their board object, and the production target-output carrier encoder; the exact VSS mailbox and unsigned aggregate carriers are already reported",
-        ),
-        missing_carrier(
             "remaining-complete-action-host-boundary-storage-lifetimes",
             "missing-production-cross-runtime-state-transitions",
-            "production JavaScript/WebAssembly/IndexedDB state transitions for every carrier whose constructor is absent from the remaining canonical transport catalog, including exact buffer ownership across serialization, commit, readback, and release; the known VSS per-operation copy peaks are already reported",
+            "production JavaScript/WebAssembly/IndexedDB state transitions for the complete canonical carrier catalog, including exact buffer ownership across serialization, commit, readback, and release; Rust/WASM constructors and the known VSS per-operation copy peaks are already reported",
         ),
         missing_carrier(
             "two-stream-product-allocation-volume",
@@ -1163,7 +1153,7 @@ mod tests {
             accounting
                 .proof_generation_attempt_topology
                 .resumed_state_restoration,
-            SelectedProofGenerationResumeStateRestoration::CheckpointTargetComparisonWithoutCryptographicStateRestoration
+            SelectedProofGenerationResumeStateRestoration::CheckpointTargetComparisonAndAuthenticatedTranscriptCursorRestoration
         );
         assert_eq!(
             accounting
@@ -1220,7 +1210,16 @@ mod tests {
                 .valid_subset_count,
             210
         );
-        assert_eq!(target_release.gaps.len(), 5);
+        assert_eq!(target_release.proof_output_store.store_count, 1);
+        assert_eq!(target_release.partial_output_store.store_count, 2);
+        assert_eq!(
+            target_release
+                .state_certification_transport
+                .certification_round_count,
+            2
+        );
+        assert_eq!(target_release.public_distribution.publication_count, 10);
+        assert_eq!(target_release.result_transition.transition_count, 1);
 
         let missing_dimensions = accounting
             .missing_carriers
@@ -1229,11 +1228,11 @@ mod tests {
             .collect::<std::collections::BTreeSet<_>>();
         assert!(missing_dimensions.contains("fresh-proof-generation-work"));
         assert!(missing_dimensions.contains("resumed-proof-generation-work"));
-        assert!(missing_dimensions.contains("target-release-proof-output-store"));
-        assert!(missing_dimensions.contains("target-release-partial-output-store"));
-        assert!(missing_dimensions.contains("target-release-state-certification-traffic"));
-        assert!(missing_dimensions.contains("target-release-public-share-distribution"));
-        assert!(missing_dimensions.contains("target-release-result-transition"));
+        assert!(!missing_dimensions.contains("target-release-proof-output-store"));
+        assert!(!missing_dimensions.contains("target-release-partial-output-store"));
+        assert!(!missing_dimensions.contains("target-release-state-certification-traffic"));
+        assert!(!missing_dimensions.contains("target-release-public-share-distribution"));
+        assert!(!missing_dimensions.contains("target-release-result-transition"));
         assert!(!missing_dimensions.contains("fresh-resumed-work-partition"));
         assert!(!missing_dimensions.contains("two-stream-product-evaluator-handoff-live-set"));
     }

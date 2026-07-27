@@ -68,7 +68,6 @@ use crate::{
     },
 };
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
 use crate::bgv::proof_suite::{RelationPlanCheckContext, RelationProofTreeInput};
 
 const MAXIMUM_RETAINED_SETUP_GENERATION_AUTHORITY_COUNT: usize = 16;
@@ -2121,10 +2120,12 @@ impl SetupGenerationAuthority {
             ceremony_context_hash: self.ceremony_context_hash,
             action_context_hash: self.action_context_hash,
             roster_hash: self.roster_hash,
+            setup_proof_context_hash: self.setup_proof_context_hash,
             source_setup_intent_object_hash: self.source_setup_intent_object_hash,
             participant_identity: self.participant_identity,
             roster_position: self.roster_position,
             action_randomness_authorization_hash: self.action_randomness_authorization_hash,
+            public_setup_seed: self.public_setup_seed,
             canonical_application_statement_bytes: self.canonical_key_relation_statement(family)?,
         })
     }
@@ -2426,6 +2427,7 @@ impl SetupGenerationAuthority {
             ceremony_context_hash: self.ceremony_context_hash,
             action_context_hash: self.action_context_hash,
             roster_hash: self.roster_hash,
+            setup_proof_context_hash: self.setup_proof_context_hash,
             source_setup_intent_object_hash: self.source_setup_intent_object_hash,
             participant_identity: self.participant_identity,
             roster_position: self.roster_position,
@@ -3172,6 +3174,7 @@ pub(crate) struct SetupGenerationGaloisPreparationSource {
     ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
     action_context_hash: [u8; Hash512::BYTE_LENGTH],
     roster_hash: [u8; Hash512::BYTE_LENGTH],
+    setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
     source_setup_intent_object_hash: [u8; Hash512::BYTE_LENGTH],
     participant_identity: [u8; Hash512::BYTE_LENGTH],
     roster_position: u16,
@@ -3204,6 +3207,10 @@ impl SetupGenerationGaloisPreparationSource {
 
     pub(crate) const fn roster_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
         self.roster_hash
+    }
+
+    pub(crate) const fn setup_proof_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.setup_proof_context_hash
     }
 
     pub(crate) const fn source_setup_intent_object_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
@@ -3321,10 +3328,12 @@ pub(crate) struct SetupGenerationKeyRelationPreparationSource {
     ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
     action_context_hash: [u8; Hash512::BYTE_LENGTH],
     roster_hash: [u8; Hash512::BYTE_LENGTH],
+    setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
     source_setup_intent_object_hash: [u8; Hash512::BYTE_LENGTH],
     participant_identity: [u8; Hash512::BYTE_LENGTH],
     roster_position: u16,
     action_randomness_authorization_hash: [u8; Hash512::BYTE_LENGTH],
+    public_setup_seed: [u8; Hash512::BYTE_LENGTH],
     canonical_application_statement_bytes: Vec<u8>,
 }
 
@@ -3357,6 +3366,10 @@ impl SetupGenerationKeyRelationPreparationSource {
         self.roster_hash
     }
 
+    pub(crate) const fn setup_proof_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.setup_proof_context_hash
+    }
+
     pub(crate) const fn source_setup_intent_object_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
         self.source_setup_intent_object_hash
     }
@@ -3371,6 +3384,10 @@ impl SetupGenerationKeyRelationPreparationSource {
 
     pub(crate) const fn action_randomness_authorization_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
         self.action_randomness_authorization_hash
+    }
+
+    pub(crate) const fn public_setup_seed(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.public_setup_seed
     }
 
     pub(crate) fn canonical_application_statement_bytes(&self) -> &[u8] {
@@ -3421,8 +3438,8 @@ pub(crate) struct SetupGenerationKeyRelationSource<'authority, 'statement> {
     application: &'authority SetupGenerationKeyRelationApplication<'statement>,
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
-pub(crate) struct ExactSameSecretEvidenceSources {
+pub(crate) struct PreparedExactSameSecretGenerationSources {
+    pub(crate) authorization: CommonProofGenerationAuthorization,
     pub(crate) relation_plan: CommonProofRelationPlanCapability,
     pub(crate) relation_plan_variant: RelationPlanVariant,
     pub(crate) relation_context: RelationPlanCheckContext,
@@ -3456,7 +3473,6 @@ impl SetupGenerationKeyRelationSource<'_, '_> {
         self.authority.roster_hash
     }
 
-    #[cfg(all(test, not(target_arch = "wasm32")))]
     pub(crate) const fn action_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
         self.authority.action_context_hash
     }
@@ -3743,12 +3759,11 @@ impl SetupGenerationKeyRelationSource<'_, '_> {
         .map_err(|_| RefusalReason::WrongContext)
     }
 
-    #[cfg(all(test, not(target_arch = "wasm32")))]
-    pub(crate) fn prepare_exact_same_secret_evidence_sources(
+    pub(crate) fn prepare_exact_same_secret_generation_sources(
         &self,
         relation_plan: CommonProofRelationPlanCapability,
-        limits: CommonProofRuntimeLimits,
-    ) -> Result<ExactSameSecretEvidenceSources, SetupKeyRelationGenerationPreparationError> {
+    ) -> Result<PreparedExactSameSecretGenerationSources, SetupKeyRelationGenerationPreparationError>
+    {
         if self.family() != SetupKeyRelationProofFamily::SameSecret {
             return Err(RefusalReason::WrongContext.into());
         }
@@ -3785,7 +3800,6 @@ impl SetupGenerationKeyRelationSource<'_, '_> {
                 &relation_plan,
                 self.protocol_version(),
                 self.canonical_application_statement_bytes(),
-                limits,
             )?;
         let generation_binding_hash = authorization.binding_hash();
         let private_coins = self.private_coin_source(
@@ -3793,7 +3807,8 @@ impl SetupGenerationKeyRelationSource<'_, '_> {
             &relation_plan_variant,
             witness_bound_attempt,
         )?;
-        Ok(ExactSameSecretEvidenceSources {
+        Ok(PreparedExactSameSecretGenerationSources {
+            authorization,
             relation_plan,
             relation_plan_variant,
             relation_context,
@@ -3814,65 +3829,65 @@ impl SetupGenerationKeyRelationSource<'_, '_> {
         relation_plan: CommonProofRelationPlanCapability,
         limits: CommonProofRuntimeLimits,
     ) -> Result<PreparedCommonProofGeneration, SetupKeyRelationGenerationPreparationError> {
+        if self.family() == SetupKeyRelationProofFamily::SameSecret {
+            let prepared = self.prepare_exact_same_secret_generation_sources(relation_plan)?;
+            if prepared.generation_binding_hash != prepared.authorization.binding_hash()
+                || prepared.action_context_hash != self.action_context_hash()
+                || prepared.public_setup_seed != self.public_setup_seed()
+                || prepared
+                    .relation_plan_variant
+                    .canonical_hash()
+                    .map_err(|_| CommonProofProverError::InvalidInput)?
+                    != prepared.relation_plan.relation_plan_variant_hash()
+                || &prepared.relation_context
+                    != selected_relation_plan_check_context(
+                        SetupKeyRelationProofFamily::SameSecret.statement_schema_identifier(),
+                    )
+                    .as_ref()
+                    .ok_or(RefusalReason::UnsupportedVersionOrSuite)?
+            {
+                return Err(RefusalReason::WrongContext.into());
+            }
+            return PreparedCommonProofGeneration::from_row_code_whir_sources(
+                prepared.authorization,
+                prepared.relation_plan,
+                prepared.canonical_application_statement_bytes,
+                prepared.relation_trees,
+                limits,
+                CommonProofGenerationSources::new(
+                    prepared.private_coins,
+                    prepared.source_polynomials,
+                ),
+            )
+            .map_err(SetupKeyRelationGenerationPreparationError::from);
+        }
         let statement_schema_identifier = self.family().statement_schema_identifier();
         let relation_context = selected_relation_plan_check_context(statement_schema_identifier)
             .ok_or(RefusalReason::UnsupportedVersionOrSuite)?;
         let ring_degree = self.ring_degree();
-        let (relation_plan_variant, relation_trees, source_polynomials) = match self.family() {
-            SetupKeyRelationProofFamily::SameSecret => {
-                let input = selected_same_secret_relation_plan_input()
-                    .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
-                let compiled_relation =
-                    compile_same_secret_relation_with_source_layout(&input, &relation_context)
-                        .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
-                let relation_plan_variant = compiled_relation
-                    .relation_plan
-                    .select_variant(None, None)
-                    .map_err(|_| CommonProofProverError::InvalidColumn)?
-                    .clone();
-                let relation_trees = same_secret_relation_tree_inputs(
-                    self,
-                    &relation_plan_variant,
-                    &compiled_relation.source_layout,
-                )?;
-                let source_polynomials = SetupKeyRelationSourcePolynomialAdapter::new_same_secret(
-                    self,
-                    &relation_plan,
-                    relation_plan_variant.clone(),
-                    relation_context,
-                    ring_degree,
-                    compiled_relation.source_layout,
-                )?;
-                (relation_plan_variant, relation_trees, source_polynomials)
-            }
-            SetupKeyRelationProofFamily::PublicKeyShare => {
-                let input = selected_public_key_share_relation_plan_input()
-                    .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
-                let compiled_relation =
-                    compile_public_key_share_relation_with_source_layout(&input, &relation_context)
-                        .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
-                let relation_plan_variant = compiled_relation
-                    .relation_plan
-                    .select_variant(None, None)
-                    .map_err(|_| CommonProofProverError::InvalidColumn)?
-                    .clone();
-                let relation_trees = public_key_share_relation_tree_inputs(
-                    self,
-                    &relation_plan_variant,
-                    &compiled_relation.source_layout,
-                )?;
-                let source_polynomials =
-                    SetupKeyRelationSourcePolynomialAdapter::new_public_key_share(
-                        self,
-                        &relation_plan,
-                        relation_plan_variant.clone(),
-                        relation_context,
-                        ring_degree,
-                        compiled_relation.source_layout,
-                    )?;
-                (relation_plan_variant, relation_trees, source_polynomials)
-            }
-        };
+        let input = selected_public_key_share_relation_plan_input()
+            .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+        let compiled_relation =
+            compile_public_key_share_relation_with_source_layout(&input, &relation_context)
+                .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+        let relation_plan_variant = compiled_relation
+            .relation_plan
+            .select_variant(None, None)
+            .map_err(|_| CommonProofProverError::InvalidColumn)?
+            .clone();
+        let relation_trees = public_key_share_relation_tree_inputs(
+            self,
+            &relation_plan_variant,
+            &compiled_relation.source_layout,
+        )?;
+        let source_polynomials = SetupKeyRelationSourcePolynomialAdapter::new_public_key_share(
+            self,
+            &relation_plan,
+            relation_plan_variant.clone(),
+            relation_context,
+            ring_degree,
+            compiled_relation.source_layout,
+        )?;
         let witness_bound_attempt = self.witness_bound_attempt()?;
         let authorization =
             CommonProofGenerationAuthorization::from_witness_bound_authenticated_attempt(
@@ -3880,7 +3895,6 @@ impl SetupGenerationKeyRelationSource<'_, '_> {
                 &relation_plan,
                 self.protocol_version(),
                 self.canonical_application_statement_bytes(),
-                limits,
             )?;
         let private_coins = self.private_coin_source(
             authorization.binding_hash(),
@@ -4222,7 +4236,6 @@ impl SetupGenerationVssSource<'_, '_> {
                 &relation_plan,
                 self.protocol_version(),
                 self.canonical_application_statement_bytes(),
-                limits,
             )?;
         let relation_trees = source_polynomials.relation_tree_inputs()?;
         let private_coins =
@@ -4505,7 +4518,6 @@ impl SetupGenerationRelinearizationRoundOneSource<'_, '_> {
                 &relation_plan,
                 self.protocol_version(),
                 self.canonical_application_statement_bytes(),
-                limits,
             )?;
         let private_coins = self.private_coin_source(
             authorization.binding_hash(),
@@ -4926,7 +4938,6 @@ impl SetupGenerationRelinearizationRoundTwoSource<'_, '_> {
                 &relation_plan,
                 self.protocol_version(),
                 self.canonical_application_statement_bytes(),
-                limits,
             )?;
         let private_coins = self.private_coin_source(
             authorization.binding_hash(),
@@ -5542,7 +5553,6 @@ impl SetupGenerationGaloisBatchSource<'_, '_> {
                 &relation_plan,
                 self.protocol_version(),
                 self.canonical_application_statement_bytes(),
-                limits,
             )?;
         let private_coins = self.private_coin_source(
             authorization.binding_hash(),

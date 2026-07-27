@@ -47,16 +47,40 @@ pub(crate) struct SymbolicCiphertextBound {
 }
 
 impl SymbolicCiphertextBound {
-    fn from_state(state: SymbolicState, collective_secret_coefficient_bound: u64) -> Self {
+    fn from_state(state: &SymbolicState, collective_secret_coefficient_bound: u64) -> Self {
         Self {
             level: state.level,
             decrypt_scaling: 1,
-            message_coefficient_bound: state.message_bound,
-            error_coefficient_bound: state.error_bound,
+            message_coefficient_bound: state.message_bound.clone(),
+            error_coefficient_bound: state.error_bound.clone(),
             component_count: 2,
             collective_secret_coefficient_bound,
-            minimum_decryption_margin: state.minimum_margin,
+            minimum_decryption_margin: state.minimum_margin.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SelectedEvaluatorStreamNoiseTrace {
+    top_count: u16,
+    pair_character_input_bounds: [SymbolicCiphertextBound; 2],
+    register_bounds: Vec<SymbolicCiphertextBound>,
+}
+
+#[cfg(test)]
+impl SelectedEvaluatorStreamNoiseTrace {
+    pub(crate) const fn top_count(&self) -> u16 {
+        self.top_count
+    }
+
+    pub(crate) fn pair_character_input_bounds(&self) -> &[SymbolicCiphertextBound; 2] {
+        &self.pair_character_input_bounds
+    }
+
+    pub(crate) fn register_bound(&self, register_ordinal: u32) -> Option<&SymbolicCiphertextBound> {
+        self.register_bounds
+            .get(usize::try_from(register_ordinal).ok()?)
     }
 }
 
@@ -85,6 +109,128 @@ impl DirectBallotTargetNoiseBound {
             .is_positive()
             && self.target_order.minimum_decryption_margin.is_positive()
     }
+}
+
+/// Ordered release stages that extend the evaluator recurrence through the
+/// selected threshold-four target decoder. Bounds use four times the centered
+/// reconstruction error so the `p / 4` conversion-rounding term stays exact.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TargetReleaseNoiseStage {
+    PositiveMessageConversion,
+    PartialShare,
+    Flooding,
+    AuthorizedInterpolation,
+    Reconstruction,
+    Decode,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TargetReleaseNoiseStageBound {
+    pub(crate) stage: TargetReleaseNoiseStage,
+    pub(crate) four_times_reconstruction_error_bound: BigUint,
+    pub(crate) scaled_no_wrap_margin: BigInt,
+}
+
+/// Continues the exact evaluator target bound through positive BGV-to-BFV
+/// conversion, one partial share, flooding, authorized interpolation, full
+/// reconstruction, and plaintext decode. The final margin is exactly
+/// `2q - p * (4 * E)`, so positivity is equivalent to the strict C2 bound.
+pub(crate) fn direct_ballot_target_release_noise_trace(
+    participant_count: u64,
+    ballot_count: usize,
+    option_count: usize,
+    minimum_score: u64,
+    maximum_score: u64,
+    denominator_clearing_factor: u64,
+    reconstruction_threshold: usize,
+    maximum_authorized_coefficient_norm: u64,
+    flooding_coefficient_bound: &BigUint,
+) -> CanonicalResult<Vec<TargetReleaseNoiseStageBound>> {
+    if denominator_clearing_factor == 0
+        || reconstruction_threshold == 0
+        || maximum_authorized_coefficient_norm == 0
+        || flooding_coefficient_bound.is_zero()
+    {
+        return Err(invalid_recurrence(
+            "target release recurrence requires positive selected parameters",
+        ));
+    }
+    let target_bounds = direct_ballot_target_noise_bounds(
+        participant_count,
+        ballot_count,
+        option_count,
+        minimum_score,
+        maximum_score,
+    )?;
+    let evaluation_error_bound = target_bounds
+        .iter()
+        .map(DirectBallotTargetNoiseBound::maximum_error_coefficient_bound)
+        .max()
+        .cloned()
+        .ok_or_else(|| invalid_recurrence("target release recurrence has no evaluator target"))?;
+    let target_level = target_bounds
+        .first()
+        .map(|bound| bound.target_identifier.level)
+        .ok_or_else(|| invalid_recurrence("target release recurrence has no target level"))?;
+    if target_bounds.iter().any(|bound| {
+        bound.target_identifier.level != target_level || bound.target_order.level != target_level
+    }) {
+        return Err(invalid_recurrence(
+            "target release recurrence targets do not share one basis",
+        ));
+    }
+    let target_modulus = DATA_PRIMES[..=target_level]
+        .iter()
+        .map(|prime| BigUint::from(*prime))
+        .product::<BigUint>();
+    let clearing_factor = BigUint::from(denominator_clearing_factor);
+    let four = BigUint::from(4_u8);
+    let plaintext_modulus = BigUint::from(PLAINTEXT_MODULUS);
+    let converted_error = &four * &clearing_factor * evaluation_error_bound;
+    let one_share_flooding_error = &four * flooding_coefficient_bound;
+    let interpolated_flooding_error = &one_share_flooding_error
+        * BigUint::from(reconstruction_threshold)
+        * BigUint::from(maximum_authorized_coefficient_norm);
+    let conversion_rounding_error = &plaintext_modulus * (&clearing_factor + BigUint::one());
+
+    let stage_bounds = [
+        (
+            TargetReleaseNoiseStage::PositiveMessageConversion,
+            converted_error.clone(),
+        ),
+        (
+            TargetReleaseNoiseStage::PartialShare,
+            converted_error.clone(),
+        ),
+        (
+            TargetReleaseNoiseStage::Flooding,
+            &converted_error + &one_share_flooding_error,
+        ),
+        (
+            TargetReleaseNoiseStage::AuthorizedInterpolation,
+            &converted_error + &interpolated_flooding_error,
+        ),
+        (
+            TargetReleaseNoiseStage::Reconstruction,
+            &converted_error + &interpolated_flooding_error + &conversion_rounding_error,
+        ),
+        (
+            TargetReleaseNoiseStage::Decode,
+            &converted_error + &interpolated_flooding_error + &conversion_rounding_error,
+        ),
+    ];
+    Ok(stage_bounds
+        .into_iter()
+        .map(|(stage, four_times_reconstruction_error_bound)| {
+            let scaled_no_wrap_margin = BigInt::from(&target_modulus << 1_usize)
+                - BigInt::from(&plaintext_modulus * &four_times_reconstruction_error_bound);
+            TargetReleaseNoiseStageBound {
+                stage,
+                four_times_reconstruction_error_bound,
+                scaled_no_wrap_margin,
+            }
+        })
+        .collect())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -285,6 +431,47 @@ pub(crate) fn direct_ballot_target_noise_bounds(
     minimum_score: u64,
     maximum_score: u64,
 ) -> CanonicalResult<Vec<DirectBallotTargetNoiseBound>> {
+    Ok(derive_direct_ballot_noise_bounds(
+        participant_count,
+        ballot_count,
+        option_count,
+        minimum_score,
+        maximum_score,
+    )?
+    .target_bounds)
+}
+
+#[cfg(test)]
+pub(crate) fn direct_ballot_evaluator_noise_traces(
+    participant_count: u64,
+    ballot_count: usize,
+    option_count: usize,
+    minimum_score: u64,
+    maximum_score: u64,
+) -> CanonicalResult<Vec<SelectedEvaluatorStreamNoiseTrace>> {
+    Ok(derive_direct_ballot_noise_bounds(
+        participant_count,
+        ballot_count,
+        option_count,
+        minimum_score,
+        maximum_score,
+    )?
+    .stream_traces)
+}
+
+struct DerivedDirectBallotNoiseBounds {
+    target_bounds: Vec<DirectBallotTargetNoiseBound>,
+    #[cfg(test)]
+    stream_traces: Vec<SelectedEvaluatorStreamNoiseTrace>,
+}
+
+fn derive_direct_ballot_noise_bounds(
+    participant_count: u64,
+    ballot_count: usize,
+    option_count: usize,
+    minimum_score: u64,
+    maximum_score: u64,
+) -> CanonicalResult<DerivedDirectBallotNoiseBounds> {
     if participant_count != u64::from(FOUNDATION_PROFILE.participant_count)
         || ballot_count == 0
         || ballot_count > usize::from(FOUNDATION_PROFILE.participant_count)
@@ -301,9 +488,17 @@ pub(crate) fn direct_ballot_target_noise_bounds(
         ));
     }
 
-    let aggregate_character_bound =
+    let first_aggregate_character_bound =
         selected_pair_character_product_bound(participant_count, ballot_count)?;
-    if aggregate_character_bound.level != CHARACTER_OUTPUT_LEVEL {
+    let second_aggregate_character_bound = first_aggregate_character_bound.clone();
+    let aggregate_character_bounds = [
+        first_aggregate_character_bound,
+        second_aggregate_character_bound,
+    ];
+    if aggregate_character_bounds
+        .iter()
+        .any(|bound| bound.level != CHARACTER_OUTPUT_LEVEL)
+    {
         return Err(invalid_recurrence(
             "pair-character product reached the wrong selected level",
         ));
@@ -315,26 +510,45 @@ pub(crate) fn direct_ballot_target_noise_bounds(
         .map(|constant| Ok((*constant.constant_hash()?.as_bytes(), constant.values())))
         .collect::<CanonicalResult<BTreeMap<_, _>>>()?;
 
-    program
-        .streams()
-        .iter()
-        .map(|stream| {
-            let (target_identifier, target_order) = evaluate_selected_stream(
-                stream.instructions(),
-                &constants_by_hash,
-                &aggregate_character_bound,
+    let mut target_bounds = Vec::with_capacity(program.streams().len());
+    #[cfg(test)]
+    let mut stream_traces = Vec::with_capacity(program.streams().len());
+    for stream in program.streams() {
+        let evaluated_stream = evaluate_selected_stream(
+            stream.instructions(),
+            &constants_by_hash,
+            &aggregate_character_bounds,
+            participant_count,
+        )?;
+        target_bounds.push(DirectBallotTargetNoiseBound {
+            top_count: usize::from(stream.top_count()),
+            target_identifier: SymbolicCiphertextBound::from_state(
+                &evaluated_stream.target_identifier,
                 participant_count,
-            )?;
-            Ok(DirectBallotTargetNoiseBound {
-                top_count: usize::from(stream.top_count()),
-                target_identifier: SymbolicCiphertextBound::from_state(
-                    target_identifier,
-                    participant_count,
-                ),
-                target_order: SymbolicCiphertextBound::from_state(target_order, participant_count),
-            })
-        })
-        .collect()
+            ),
+            target_order: SymbolicCiphertextBound::from_state(
+                &evaluated_stream.target_order,
+                participant_count,
+            ),
+        });
+        #[cfg(test)]
+        stream_traces.push(SelectedEvaluatorStreamNoiseTrace {
+            top_count: stream.top_count(),
+            pair_character_input_bounds: aggregate_character_bounds
+                .clone()
+                .map(|state| SymbolicCiphertextBound::from_state(&state, participant_count)),
+            register_bounds: evaluated_stream
+                .register_bounds
+                .iter()
+                .map(|state| SymbolicCiphertextBound::from_state(state, participant_count))
+                .collect(),
+        });
+    }
+    Ok(DerivedDirectBallotNoiseBounds {
+        target_bounds,
+        #[cfg(test)]
+        stream_traces,
+    })
 }
 
 fn selected_pair_character_product_bound(
@@ -442,13 +656,16 @@ fn selected_pair_character_product_bound(
 fn evaluate_selected_stream(
     instructions: &[EvaluatorInstruction],
     constants_by_hash: &BTreeMap<[u8; Hash512::BYTE_LENGTH], &[u32]>,
-    aggregate_character_bound: &SymbolicState,
+    aggregate_character_bounds: &[SymbolicState; 2],
     participant_count: u64,
-) -> CanonicalResult<(SymbolicState, SymbolicState)> {
-    let mut registers = vec![
-        Some(aggregate_character_bound.clone()),
-        Some(aggregate_character_bound.clone()),
-    ];
+) -> CanonicalResult<EvaluatedSelectedStream> {
+    let mut registers = aggregate_character_bounds
+        .iter()
+        .cloned()
+        .map(Some)
+        .collect::<Vec<_>>();
+    #[cfg(test)]
+    let mut register_bounds = aggregate_character_bounds.to_vec();
     let mut target_identifier = None;
     let mut target_order = None;
     for instruction in instructions {
@@ -518,6 +735,8 @@ fn evaluate_selected_stream(
                     "symbolic evaluator registers are not consecutive",
                 ));
             }
+            #[cfg(test)]
+            register_bounds.push(output.clone());
             registers.push(Some(output));
         }
     }
@@ -532,7 +751,19 @@ fn evaluate_selected_stream(
             "symbolic evaluator targets reached the wrong selected level",
         ));
     }
-    Ok((target_identifier, target_order))
+    Ok(EvaluatedSelectedStream {
+        target_identifier,
+        target_order,
+        #[cfg(test)]
+        register_bounds,
+    })
+}
+
+struct EvaluatedSelectedStream {
+    target_identifier: SymbolicState,
+    target_order: SymbolicState,
+    #[cfg(test)]
+    register_bounds: Vec<SymbolicState>,
 }
 
 fn instruction_constant<'a>(
@@ -672,7 +903,10 @@ fn invalid_recurrence(message: impl Into<String>) -> CanonicalError {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::*;
+    use crate::bgv::evaluator::program::selected_evaluator_program_set_with_stage_registers;
 
     #[test]
     fn selected_recurrence_pins_the_exact_worst_target_error() {
@@ -752,6 +986,124 @@ mod tests {
     }
 
     #[test]
+    fn selected_recurrence_covers_both_inputs_and_every_compiler_stage() {
+        let (program, compiler_streams) = selected_evaluator_program_set_with_stage_registers()
+            .expect("selected compiler stage catalog");
+        assert_eq!(program.streams().len(), 20);
+        assert_eq!(compiler_streams.len(), program.streams().len());
+
+        let expected_stages = compiler_streams
+            .iter()
+            .flat_map(|stream| stream.stage_registers())
+            .map(|entry| entry.stage())
+            .collect::<BTreeSet<_>>();
+        assert!(!expected_stages.is_empty());
+
+        for ballot_count in 1..=10 {
+            let traces = direct_ballot_evaluator_noise_traces(10, ballot_count, 20, 1, 10)
+                .expect("selected evaluator noise traces");
+            assert_eq!(traces.len(), program.streams().len());
+            let mut observed_stages = BTreeSet::new();
+
+            for ((trace, stream), compiler_stream) in
+                traces.iter().zip(program.streams()).zip(&compiler_streams)
+            {
+                assert_eq!(trace.top_count(), stream.top_count());
+                assert_eq!(trace.top_count(), compiler_stream.top_count());
+                for input_bound in trace.pair_character_input_bounds() {
+                    assert_eq!(input_bound.level, CHARACTER_OUTPUT_LEVEL);
+                    assert_eq!(input_bound.decrypt_scaling, 1);
+                    assert_eq!(input_bound.component_count, 2);
+                    assert_eq!(input_bound.collective_secret_coefficient_bound, 10);
+                    assert!(input_bound.minimum_decryption_margin.is_positive());
+                }
+                assert_eq!(
+                    trace.pair_character_input_bounds()[0],
+                    trace.pair_character_input_bounds()[1],
+                    "both production ballot streams must enter the evaluator under the same checked schedule",
+                );
+
+                for instruction in stream.instructions() {
+                    if let Some(output_register) = instruction.output_register() {
+                        let bound = trace.register_bound(output_register).unwrap_or_else(|| {
+                            panic!(
+                                "missing symbolic bound for top count {} register {output_register}",
+                                trace.top_count(),
+                            )
+                        });
+                        assert!(bound.minimum_decryption_margin.is_positive());
+                    }
+                }
+                for stage_register in compiler_stream.stage_registers() {
+                    let stage_bound = trace
+                        .register_bound(stage_register.register_ordinal())
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "missing symbolic stage bound for top count {} and stage {:?}",
+                                trace.top_count(),
+                                stage_register.stage(),
+                            )
+                        });
+                    assert!(stage_bound.minimum_decryption_margin.is_positive());
+                    observed_stages.insert(stage_register.stage());
+                }
+            }
+            assert_eq!(observed_stages, expected_stages);
+        }
+    }
+
+    #[test]
+    fn hostile_centered_carries_and_negacyclic_products_fit_the_symbolic_bounds() {
+        for message_residue in 0..PLAINTEXT_MODULUS {
+            let centered_message = independent_centered_lift(BigInt::from(message_residue));
+            for added_residue in 0..PLAINTEXT_MODULUS {
+                let centered_addend = independent_centered_lift(BigInt::from(added_residue));
+                let unreduced = &centered_message + centered_addend;
+                let centered_output = independent_centered_lift(unreduced.clone());
+                let exact_carry = (&unreduced - &centered_output) / BigInt::from(PLAINTEXT_MODULUS);
+                let state =
+                    SymbolicState::new(0, centered_message.magnitude().clone(), BigUint::zero())
+                        .plaintext_add(&[
+                            u32::try_from(added_residue).expect("field residue fits u32")
+                        ]);
+                assert!(centered_output.magnitude() <= &state.message_bound);
+                assert!(exact_carry.magnitude() <= &state.error_bound);
+            }
+        }
+
+        let message = [128_i64, -128, 127, -127, 1, -1, 64, -64].map(BigInt::from);
+        let error = [2_i64, -2, -2, 2, 1, -1, 0, 2].map(BigInt::from);
+        let constant_residues = [128_u32, 129, 256, 1, 0, 127, 130, 2];
+        let centered_constant =
+            constant_residues.map(|residue| independent_centered_lift(BigInt::from(residue)));
+        let unreduced_message = independent_negacyclic_product(&message, &centered_constant);
+        let centered_message = unreduced_message
+            .iter()
+            .cloned()
+            .map(independent_centered_lift)
+            .collect::<Vec<_>>();
+        let carries = unreduced_message
+            .iter()
+            .zip(&centered_message)
+            .map(|(unreduced, centered)| (unreduced - centered) / BigInt::from(PLAINTEXT_MODULUS))
+            .collect::<Vec<_>>();
+        let exact_error = independent_negacyclic_product(&error, &centered_constant)
+            .into_iter()
+            .zip(carries)
+            .map(|(product, carry)| product + carry)
+            .collect::<Vec<_>>();
+        let symbolic = SymbolicState::new(
+            7,
+            independent_infinity_norm(&message),
+            independent_infinity_norm(&error),
+        )
+        .plaintext_multiply(&constant_residues);
+        assert!(independent_infinity_norm(&centered_message) <= symbolic.message_bound);
+        assert!(independent_infinity_norm(&exact_error) <= symbolic.error_bound);
+        assert!(symbolic.minimum_margin.is_positive());
+    }
+
+    #[test]
     fn selected_recurrence_rejects_each_nonselected_dimension() {
         for arguments in [
             (9, 10, 20, 1, 10),
@@ -773,5 +1125,45 @@ mod tests {
                 .is_err()
             );
         }
+    }
+
+    fn independent_centered_lift(value: BigInt) -> BigInt {
+        let plaintext_modulus = BigInt::from(PLAINTEXT_MODULUS);
+        let mut residue = value % &plaintext_modulus;
+        if residue.is_negative() {
+            residue += &plaintext_modulus;
+        }
+        if residue > BigInt::from(CENTERED_PLAINTEXT_BOUND) {
+            residue -= plaintext_modulus;
+        }
+        residue
+    }
+
+    fn independent_negacyclic_product<const RING_DEGREE: usize>(
+        left: &[BigInt; RING_DEGREE],
+        right: &[BigInt; RING_DEGREE],
+    ) -> Vec<BigInt> {
+        let mut product = vec![BigInt::zero(); RING_DEGREE];
+        for (left_ordinal, left_coefficient) in left.iter().enumerate() {
+            for (right_ordinal, right_coefficient) in right.iter().enumerate() {
+                let unreduced_ordinal = left_ordinal + right_ordinal;
+                let term = left_coefficient * right_coefficient;
+                if unreduced_ordinal < RING_DEGREE {
+                    product[unreduced_ordinal] += term;
+                } else {
+                    product[unreduced_ordinal - RING_DEGREE] -= term;
+                }
+            }
+        }
+        product
+    }
+
+    fn independent_infinity_norm(coefficients: &[BigInt]) -> BigUint {
+        coefficients
+            .iter()
+            .map(|coefficient| coefficient.magnitude())
+            .max()
+            .cloned()
+            .unwrap_or_else(BigUint::zero)
     }
 }

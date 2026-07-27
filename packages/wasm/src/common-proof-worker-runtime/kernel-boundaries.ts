@@ -1,6 +1,10 @@
 import { byteArraysEqual } from '../byte-array.js';
 import { decodeCommonProofCheckpointCursorManifest } from '../common-proof-checkpoint-cursor-manifest.js';
 import {
+    decodeCommonProofGenerationCursorManifest,
+    maximumCommonProofGenerationCursorManifestByteLength,
+} from '../common-proof-generation-cursor-manifest.js';
+import {
     resolveNumberExport,
     type TranscriptCoreKernelCommandRuntime,
 } from '../transcript-core-bridge/kernel-runtime.js';
@@ -33,6 +37,7 @@ const generationPollComplete = 5;
 const generationPollCancelled = 6;
 const generationPollResumeComplete = 7;
 const generationPollAuthenticatedSourceReadReady = 8;
+const generationPollAuthenticatedTranscriptPrefixRequired = 9;
 const authenticatedSourceRequestByteLength = 160;
 const generationExternalMemoryAccountingByteLength = 20 * 8;
 const verificationReadbackAccountingByteLength = 4 * 8;
@@ -50,7 +55,6 @@ const verificationPollComplete = 5;
 export const maximumCommonProofByteLength = 268_435_456;
 export const canonicalCommonProofChunkByteLength = 1_048_576;
 const maximumGenerationCheckpointStateByteLength = 4_096;
-const maximumGenerationCheckpointCursorManifestByteLength = 1_048_576;
 
 const destroyOwnedKernelBoundaryInput = (bytes: Uint8Array): void => {
     if (!(bytes.buffer instanceof ArrayBuffer)) {
@@ -82,7 +86,11 @@ const copyCheckpointPrivateRandomnessStreamAttemptIdentifier = (
 ): Uint8Array<ArrayBuffer> => {
     let decoded;
     try {
-        decoded = decodeCommonProofCheckpointCursorManifest(manifestBytes);
+        const generationCursorManifest =
+            decodeCommonProofGenerationCursorManifest(manifestBytes);
+        decoded = decodeCommonProofCheckpointCursorManifest(
+            generationCursorManifest.privateCoinCursorManifestBytes,
+        );
     } catch (error) {
         throw new CommonProofWorkerRuntimeError(
             'KernelFailure',
@@ -227,6 +235,7 @@ type CommonProofGenerationKernelPoll =
           kind: 'authenticated-source-read-ready';
           sourceByteLength: number;
       }>
+    | Readonly<{ kind: 'authenticated-transcript-prefix-required' }>
     | Readonly<{
           chunkByteLength: number;
           chunkIndex: number;
@@ -571,19 +580,29 @@ export class CommonProofFamilyAdapterKernelBoundary {
     public prepareGeneration(
         adapterHandle: number,
         authenticatedCheckpointState?: Uint8Array,
+        authenticatedGenerationCursorManifest?: Uint8Array,
     ): number {
         requireLiveHandle(
             adapterHandle,
             'The common-proof generation family-adapter handle',
         );
         if (
-            authenticatedCheckpointState !== undefined &&
-            (!(authenticatedCheckpointState instanceof Uint8Array) ||
-                authenticatedCheckpointState.byteLength !==
-                    this.checkpointStateByteLength())
+            (authenticatedCheckpointState === undefined) !==
+                (authenticatedGenerationCursorManifest === undefined) ||
+            (authenticatedCheckpointState !== undefined &&
+                (!(authenticatedCheckpointState instanceof Uint8Array) ||
+                    authenticatedCheckpointState.byteLength !==
+                        this.checkpointStateByteLength())) ||
+            (authenticatedGenerationCursorManifest !== undefined &&
+                (!(
+                    authenticatedGenerationCursorManifest instanceof Uint8Array
+                ) ||
+                    authenticatedGenerationCursorManifest.byteLength === 0 ||
+                    authenticatedGenerationCursorManifest.byteLength >
+                        maximumCommonProofGenerationCursorManifestByteLength))
         ) {
             throw resourceFailure(
-                'The authenticated common-proof checkpoint state has the wrong canonical length.',
+                'The authenticated common-proof checkpoint state and generation cursor manifest are inconsistent.',
             );
         }
         return this.#context.runExclusive(
@@ -597,6 +616,12 @@ export class CommonProofFamilyAdapterKernelBoundary {
                         : this.#memoryBoundary.copy(
                               authenticatedCheckpointState,
                           );
+                const generationCursorManifestPointer =
+                    authenticatedGenerationCursorManifest === undefined
+                        ? 0
+                        : this.#memoryBoundary.copy(
+                              authenticatedGenerationCursorManifest,
+                          );
                 try {
                     const preparedHandle = resolveNumberExport(
                         this.#context.wasmExports,
@@ -605,6 +630,8 @@ export class CommonProofFamilyAdapterKernelBoundary {
                         adapterHandle,
                         checkpointPointer,
                         authenticatedCheckpointState?.byteLength ?? 0,
+                        generationCursorManifestPointer,
+                        authenticatedGenerationCursorManifest?.byteLength ?? 0,
                         statusPointer,
                     );
                     const [status] = this.#memoryBoundary.readWords(
@@ -627,6 +654,15 @@ export class CommonProofFamilyAdapterKernelBoundary {
                         this.#memoryBoundary.zeroAndDeallocate(
                             checkpointPointer,
                             authenticatedCheckpointState.byteLength,
+                        );
+                    }
+                    if (
+                        generationCursorManifestPointer !== 0 &&
+                        authenticatedGenerationCursorManifest !== undefined
+                    ) {
+                        this.#memoryBoundary.zeroAndDeallocate(
+                            generationCursorManifestPointer,
+                            authenticatedGenerationCursorManifest.byteLength,
                         );
                     }
                     this.#memoryBoundary.zeroAndDeallocate(
@@ -780,14 +816,22 @@ export class CommonProofGenerationKernelBoundary {
     public resume(
         preparedGenerationHandle: number,
         authenticatedCheckpointState: Uint8Array,
+        authenticatedGenerationCursorManifest: Uint8Array,
     ): number {
         requireLiveHandle(
             preparedGenerationHandle,
             'The prepared common-proof generation handle',
         );
-        if (!(authenticatedCheckpointState instanceof Uint8Array)) {
+        if (
+            !(authenticatedCheckpointState instanceof Uint8Array) ||
+            !(authenticatedGenerationCursorManifest instanceof Uint8Array) ||
+            authenticatedCheckpointState.byteLength === 0 ||
+            authenticatedGenerationCursorManifest.byteLength === 0 ||
+            authenticatedGenerationCursorManifest.byteLength >
+                maximumCommonProofGenerationCursorManifestByteLength
+        ) {
             throw resourceFailure(
-                'The authenticated common-proof checkpoint state must be a byte array.',
+                'The authenticated common-proof checkpoint state and generation cursor manifest must be bounded byte arrays.',
             );
         }
         return this.#context.runExclusive(
@@ -805,11 +849,17 @@ export class CommonProofGenerationKernelBoundary {
                         : this.#memoryBoundary.copy(
                               authenticatedCheckpointState,
                           );
+                const generationCursorManifestPointer =
+                    this.#memoryBoundary.copy(
+                        authenticatedGenerationCursorManifest,
+                    );
                 try {
                     const operationHandle = resume(
                         preparedGenerationHandle,
                         checkpointPointer,
                         authenticatedCheckpointState.byteLength,
+                        generationCursorManifestPointer,
+                        authenticatedGenerationCursorManifest.byteLength,
                         statusPointer,
                     );
                     const [status] = this.#memoryBoundary.readWords(
@@ -828,6 +878,10 @@ export class CommonProofGenerationKernelBoundary {
                             authenticatedCheckpointState.byteLength,
                         );
                     }
+                    this.#memoryBoundary.zeroAndDeallocate(
+                        generationCursorManifestPointer,
+                        authenticatedGenerationCursorManifest.byteLength,
+                    );
                     this.#memoryBoundary.zeroAndDeallocate(
                         statusPointer,
                         wasm32WordByteLength,
@@ -946,7 +1000,7 @@ export class CommonProofGenerationKernelBoundary {
             stateByteLength !== canonicalStateByteLength ||
             cursorManifestByteLength === 0 ||
             cursorManifestByteLength >
-                maximumGenerationCheckpointCursorManifestByteLength
+                maximumCommonProofGenerationCursorManifestByteLength
         ) {
             throw kernelFailure(
                 'The common-proof kernel exposed a checkpoint description beyond the absolute safety bound.',
@@ -961,12 +1015,10 @@ export class CommonProofGenerationKernelBoundary {
                     'sealed_lattice_common_proof_generation_copy_checkpoint_state',
                 )(operationHandle, outputPointer, stateByteLength),
         );
-        let privateRandomCursorManifestBytes:
-            | Uint8Array<ArrayBuffer>
-            | undefined;
+        let generationCursorManifestBytes: Uint8Array<ArrayBuffer> | undefined;
         let stableAttemptBindingHash: Uint8Array<ArrayBuffer> | undefined;
         try {
-            privateRandomCursorManifestBytes = this.#copyKernelBytes(
+            generationCursorManifestBytes = this.#copyKernelBytes(
                 cursorManifestByteLength,
                 'generation checkpoint cursor manifest',
                 (outputPointer) =>
@@ -986,13 +1038,13 @@ export class CommonProofGenerationKernelBoundary {
             );
             const privateRandomnessStreamAttemptIdentifier =
                 copyCheckpointPrivateRandomnessStreamAttemptIdentifier(
-                    privateRandomCursorManifestBytes,
+                    generationCursorManifestBytes,
                     stableAttemptBindingHash,
                     expectedIdentity,
                 );
             return Object.freeze({
                 canonicalStateBytes,
-                privateRandomCursorManifestBytes,
+                generationCursorManifestBytes,
                 privateRandomnessStreamAttemptIdentifier,
                 stableAttemptBindingHash,
                 safeBoundaryOrdinal,
@@ -1000,7 +1052,7 @@ export class CommonProofGenerationKernelBoundary {
         } catch (error) {
             canonicalStateBytes.fill(0);
             stableAttemptBindingHash?.fill(0);
-            privateRandomCursorManifestBytes?.fill(0);
+            generationCursorManifestBytes?.fill(0);
             throw error;
         }
     }
@@ -1593,6 +1645,16 @@ export class CommonProofGenerationKernelBoundary {
                         authenticationChunkIndex: secondaryValue,
                         kind: 'authenticated-source-read-ready',
                         sourceByteLength: primaryValue,
+                    });
+                }
+                break;
+            case generationPollAuthenticatedTranscriptPrefixRequired:
+                if (
+                    primaryValue === 0 &&
+                    secondaryValue === noSecondPollValue
+                ) {
+                    return Object.freeze({
+                        kind: 'authenticated-transcript-prefix-required',
                     });
                 }
                 break;

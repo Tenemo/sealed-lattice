@@ -136,7 +136,7 @@ pub(crate) enum CommonProofGenerationStage {
     MaterializingQuotientTrees = 6,
     DerivingOutOfDomainOpenings = 7,
     MaterializingOpeningMask = 8,
-    FoldingFri = 9,
+    ReducingCommittedOracles = 9,
     EmittingPrefix = 10,
     EmittingQueries = 11,
     Finalizing = 12,
@@ -148,6 +148,7 @@ pub(crate) enum CommonProofGenerationStage {
 pub(crate) enum CommonProofGenerationPoll {
     ArithmeticStepCompleted,
     StorageTransactionCompleted,
+    AuthenticatedTranscriptPrefixRequired,
     OutputFragmentAccepted,
     Complete,
 }
@@ -157,24 +158,60 @@ pub(crate) enum CommonProofGenerationPoll {
 /// recomputed from the exact phase position and every tree-root slot; it is
 /// evidence for deterministic reconstruction, not a producer-supplied
 /// acceptance field.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CommonProofGenerationCheckpointBoundary {
     safe_boundary_ordinal: u32,
     position: [u8; 16],
     committed_state_digest: [u8; HASH_BYTE_LENGTH],
+    canonical_transcript_cursor_bytes: Vec<u8>,
+    canonical_transcript_cursor_digest: Option<[u8; HASH_BYTE_LENGTH]>,
 }
 
 impl CommonProofGenerationCheckpointBoundary {
-    pub(crate) const fn safe_boundary_ordinal(self) -> u32 {
+    pub(crate) const fn new(
+        safe_boundary_ordinal: u32,
+        position: [u8; 16],
+        committed_state_digest: [u8; HASH_BYTE_LENGTH],
+    ) -> Self {
+        Self {
+            safe_boundary_ordinal,
+            position,
+            committed_state_digest,
+            canonical_transcript_cursor_bytes: Vec::new(),
+            canonical_transcript_cursor_digest: None,
+        }
+    }
+
+    pub(crate) fn with_canonical_transcript_cursor(
+        mut self,
+        canonical_transcript_cursor_bytes: Vec<u8>,
+        canonical_transcript_cursor_digest: [u8; HASH_BYTE_LENGTH],
+    ) -> Self {
+        self.canonical_transcript_cursor_bytes = canonical_transcript_cursor_bytes;
+        self.canonical_transcript_cursor_digest = Some(canonical_transcript_cursor_digest);
+        self
+    }
+
+    pub(crate) const fn safe_boundary_ordinal(&self) -> u32 {
         self.safe_boundary_ordinal
     }
 
-    pub(crate) const fn position(self) -> [u8; 16] {
+    pub(crate) const fn position(&self) -> [u8; 16] {
         self.position
     }
 
-    pub(crate) const fn committed_state_digest(self) -> [u8; HASH_BYTE_LENGTH] {
+    pub(crate) const fn committed_state_digest(&self) -> [u8; HASH_BYTE_LENGTH] {
         self.committed_state_digest
+    }
+
+    pub(crate) fn canonical_transcript_cursor_bytes(&self) -> &[u8] {
+        &self.canonical_transcript_cursor_bytes
+    }
+
+    pub(crate) const fn canonical_transcript_cursor_digest(
+        &self,
+    ) -> Option<[u8; HASH_BYTE_LENGTH]> {
+        self.canonical_transcript_cursor_digest
     }
 }
 
@@ -493,6 +530,7 @@ pub(crate) struct CommonProofGenerationStateMachine {
     transcript: Option<CommonProofTranscript>,
     query_opening_absorber: Option<CommonProofQueryOpeningAbsorber>,
     query_section_byte_length: Option<usize>,
+    canonical_output_byte_length: Option<usize>,
     opening_prefetcher: Option<CommonProofOpeningPrefetcher>,
     pending_output_fragment: Option<Vec<u8>>,
 }
@@ -1107,6 +1145,7 @@ impl CommonProofGenerationStateMachine {
             transcript: None,
             query_opening_absorber: None,
             query_section_byte_length: None,
+            canonical_output_byte_length: None,
             opening_prefetcher: None,
             pending_output_fragment: None,
         })
@@ -1154,7 +1193,9 @@ impl CommonProofGenerationStateMachine {
             CommonProofGenerationPhase::PreparingFri
             | CommonProofGenerationPhase::ConstructingInitialFri { .. }
             | CommonProofGenerationPhase::FoldingFri { .. }
-            | CommonProofGenerationPhase::FinishingFri => CommonProofGenerationStage::FoldingFri,
+            | CommonProofGenerationPhase::FinishingFri => {
+                CommonProofGenerationStage::ReducingCommittedOracles
+            }
             CommonProofGenerationPhase::EmittingPrefix => {
                 CommonProofGenerationStage::EmittingPrefix
             }
@@ -1166,6 +1207,10 @@ impl CommonProofGenerationStateMachine {
             CommonProofGenerationPhase::Complete => CommonProofGenerationStage::Complete,
             CommonProofGenerationPhase::Cancelled => CommonProofGenerationStage::Cancelled,
         }
+    }
+
+    pub(crate) const fn canonical_output_byte_length(&self) -> Option<usize> {
+        self.canonical_output_byte_length
     }
 
     #[cfg(test)]
@@ -1318,11 +1363,11 @@ impl CommonProofGenerationStateMachine {
             hasher.absorb_raw(&[u8::from(*present)]);
             hasher.absorb_raw(root);
         }
-        Some(CommonProofGenerationCheckpointBoundary {
+        Some(CommonProofGenerationCheckpointBoundary::new(
             safe_boundary_ordinal,
             position,
-            committed_state_digest: hasher.finalize(),
-        })
+            hasher.finalize(),
+        ))
     }
 
     fn setup_polynomial_replay_binding(
@@ -4123,7 +4168,16 @@ impl CommonProofGenerationStateMachine {
                 self.terminal_coefficients = terminal_coefficients;
                 self.sorted_query_representatives = sorted_query_representatives;
                 self.query_section_byte_length = Some(query_section_byte_length);
-                self.pending_output_fragment = Some(prefix_sink.finish());
+                let prefix_bytes = prefix_sink.finish();
+                self.canonical_output_byte_length = Some(
+                    prefix_bytes
+                        .len()
+                        .checked_add(query_section_byte_length)
+                        .ok_or(CommonProofGenerationError::Prover(
+                            CommonProofProverError::CountOverflow,
+                        ))?,
+                );
+                self.pending_output_fragment = Some(prefix_bytes);
                 self.out_of_domain_evaluations.clear();
                 self.phase = CommonProofGenerationPhase::EmittingPrefix;
                 Ok(CommonProofGenerationPoll::ArithmeticStepCompleted)
@@ -4142,7 +4196,7 @@ impl CommonProofGenerationStateMachine {
                         ))?;
                 self.query_opening_absorber = Some(
                     self.transcript
-                        .as_ref()
+                        .as_mut()
                         .ok_or(CommonProofGenerationError::Prover(
                             CommonProofProverError::InvalidInput,
                         ))?
@@ -4607,6 +4661,7 @@ where
             Ok(
                 CommonProofGenerationPoll::ArithmeticStepCompleted
                 | CommonProofGenerationPoll::StorageTransactionCompleted
+                | CommonProofGenerationPoll::AuthenticatedTranscriptPrefixRequired
                 | CommonProofGenerationPoll::OutputFragmentAccepted,
             ) => {}
             Err(error) => break Err(error),
