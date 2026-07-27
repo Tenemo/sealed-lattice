@@ -5167,9 +5167,7 @@ mod tests {
         assert_ne!(mutated_plan, *plan, "mutation did not change {description}");
         let mutated_identity = mutated_plan
             .canonical_identity_hash()
-            .unwrap_or_else(|error| {
-                panic!("mutated plan identity for {description}: {error:?}")
-            });
+            .unwrap_or_else(|error| panic!("mutated plan identity for {description}: {error:?}"));
         assert_ne!(
             mutated_identity, expected_identity,
             "construction identity omitted {description}",

@@ -1679,10 +1679,7 @@ impl RowCodeWhirGenerationStateMachine {
             || self.active_phase_commitment.is_some()
             || self.active_phase_materialization_purpose.is_some()
             || self.active_phase_authenticated_columns.is_some()
-            || self
-                .phase_authenticated_columns
-                .iter()
-                .any(Option::is_some)
+            || self.phase_authenticated_columns.iter().any(Option::is_some)
             || self.phase_opening_frontiers.iter().any(Option::is_some)
             || self.exact_same_secret_phase_openings.is_some()
             || self.auxiliary_materialization.is_some()
@@ -2412,7 +2409,7 @@ impl RowCodeWhirGenerationStateMachine {
                     RowCodeWhirPhase::Base,
                     RowCodeWhirPhaseMaterializationPurpose::InitialCommitment,
                 )
-                    .map_err(CommonProofGenerationError::Prover)?;
+                .map_err(CommonProofGenerationError::Prover)?;
                 self.row_pad_seeds = row_pad_seeds;
                 self.phase = RowCodeWhirGenerationPhase::CommittingBasePhase;
                 Ok(CommonProofGenerationPoll::ArithmeticStepCompleted)
@@ -2508,7 +2505,7 @@ impl RowCodeWhirGenerationStateMachine {
                             RowCodeWhirPhase::Auxiliary,
                             RowCodeWhirPhaseMaterializationPurpose::InitialCommitment,
                         )
-                            .map_err(CommonProofGenerationError::Prover)?;
+                        .map_err(CommonProofGenerationError::Prover)?;
                         self.phase = RowCodeWhirGenerationPhase::CommittingAuxiliaryPhase;
                     }
                 }
@@ -2721,7 +2718,7 @@ impl RowCodeWhirGenerationStateMachine {
                     self.prepare_quotient_phase_materialization(
                         RowCodeWhirPhaseMaterializationPurpose::InitialCommitment,
                     )
-                        .map_err(CommonProofGenerationError::Prover)?;
+                    .map_err(CommonProofGenerationError::Prover)?;
                 }
                 self.poll_quotient_phase_commitment()
                     .map_err(CommonProofGenerationError::Prover)
@@ -3497,9 +3494,8 @@ impl RowCodeWhirGenerationStateMachine {
                 RowCodeWhirPhaseMaterializationPurpose::AuthenticatedOpenings => {
                     self.phase_root(phase_role).is_none()
                         || self.exact_same_secret_opening_schedule.is_none()
-                        || self.phase_authenticated_columns
-                            [row_code_whir_phase_index(phase_role)]
-                        .is_some()
+                        || self.phase_authenticated_columns[row_code_whir_phase_index(phase_role)]
+                            .is_some()
                         || self.phase_opening_frontiers[row_code_whir_phase_index(phase_role)]
                             .is_some()
                         || self.exact_same_secret_phase_openings.is_some()
@@ -3528,10 +3524,8 @@ impl RowCodeWhirGenerationStateMachine {
         {
             return Err(CommonProofProverError::InvalidColumn);
         }
-        let opened_column_indices = self.phase_opening_traversal_indices(
-            purpose,
-            phase.geometry.encoded_column_count,
-        )?;
+        let opened_column_indices =
+            self.phase_opening_traversal_indices(purpose, phase.geometry.encoded_column_count)?;
         let builder = StripedColumnCommitmentBuilder::new_with_opened_columns(
             phase.geometry.row_count,
             phase.geometry.encoded_column_count,
@@ -3580,12 +3574,12 @@ impl RowCodeWhirGenerationStateMachine {
         }
         let active_phase_authenticated_columns = match purpose {
             RowCodeWhirPhaseMaterializationPurpose::InitialCommitment => None,
-            RowCodeWhirPhaseMaterializationPurpose::AuthenticatedOpenings => Some(
-                allocate_authenticated_phase_columns(
+            RowCodeWhirPhaseMaterializationPurpose::AuthenticatedOpenings => {
+                Some(allocate_authenticated_phase_columns(
                     opened_column_indices.len(),
                     phase.geometry.row_count,
-                )?,
-            ),
+                )?)
+            }
         };
         self.phase_row_witness = vec![Goldilocks::ZERO; phase.geometry.witness_values_per_row];
         self.phase_commitment_builder = Some(builder);
@@ -3728,8 +3722,7 @@ impl RowCodeWhirGenerationStateMachine {
                         self.prepare_quotient_phase_materialization(
                             RowCodeWhirPhaseMaterializationPurpose::AuthenticatedOpenings,
                         )?;
-                        self.phase =
-                            RowCodeWhirGenerationPhase::MaterializingQuotientPhaseOpenings;
+                        self.phase = RowCodeWhirGenerationPhase::MaterializingQuotientPhaseOpenings;
                     }
                     (_, RowCodeWhirPhase::Quotient) => {
                         return Err(CommonProofProverError::InvalidInput);
@@ -3871,10 +3864,8 @@ impl RowCodeWhirGenerationStateMachine {
         {
             return Err(CommonProofProverError::InvalidColumn);
         }
-        let opened_column_indices = self.phase_opening_traversal_indices(
-            purpose,
-            phase.geometry.encoded_column_count,
-        )?;
+        let opened_column_indices =
+            self.phase_opening_traversal_indices(purpose, phase.geometry.encoded_column_count)?;
         let builder = StripedColumnCommitmentBuilder::new_with_opened_columns(
             phase.geometry.row_count,
             phase.geometry.encoded_column_count,
@@ -3923,12 +3914,12 @@ impl RowCodeWhirGenerationStateMachine {
         }
         let active_phase_authenticated_columns = match purpose {
             RowCodeWhirPhaseMaterializationPurpose::InitialCommitment => None,
-            RowCodeWhirPhaseMaterializationPurpose::AuthenticatedOpenings => Some(
-                allocate_authenticated_phase_columns(
+            RowCodeWhirPhaseMaterializationPurpose::AuthenticatedOpenings => {
+                Some(allocate_authenticated_phase_columns(
                     opened_column_indices.len(),
                     phase.geometry.row_count,
-                )?,
-            ),
+                )?)
+            }
         };
         self.phase_row_witness = vec![Goldilocks::ZERO; phase.geometry.witness_values_per_row];
         self.phase_commitment_builder = Some(builder);
@@ -4148,9 +4139,7 @@ impl RowCodeWhirGenerationStateMachine {
                     .outer_traversal_query_indices();
                 if traversal_indices.len() != self.construction_plan.parameters.outer_query_count
                     || traversal_indices.is_empty()
-                    || traversal_indices
-                        .windows(2)
-                        .any(|pair| pair[0] >= pair[1])
+                    || traversal_indices.windows(2).any(|pair| pair[0] >= pair[1])
                     || traversal_indices
                         .last()
                         .is_some_and(|column_index| *column_index >= encoded_column_count)
@@ -4192,10 +4181,10 @@ impl RowCodeWhirGenerationStateMachine {
         if traversal_indices.len() != authenticated_columns.len() {
             return Err(CommonProofProverError::InvalidOpening);
         }
-        let first_active_position =
-            traversal_indices.partition_point(|column_index| *column_index < active_column_range.start);
-        let following_active_position =
-            traversal_indices.partition_point(|column_index| *column_index < active_column_range.end);
+        let first_active_position = traversal_indices
+            .partition_point(|column_index| *column_index < active_column_range.start);
+        let following_active_position = traversal_indices
+            .partition_point(|column_index| *column_index < active_column_range.end);
         for active_position in first_active_position..following_active_position {
             let column_index = traversal_indices[active_position];
             let value = encoded_row
@@ -4220,7 +4209,8 @@ impl RowCodeWhirGenerationStateMachine {
         &mut self,
         phase_role: RowCodeWhirPhase,
         expected_row_count: usize,
-    ) -> Result<(RowCodeWhirPhaseMaterializationPurpose, ColumnDigest), CommonProofProverError> {
+    ) -> Result<(RowCodeWhirPhaseMaterializationPurpose, ColumnDigest), CommonProofProverError>
+    {
         if self.active_phase_commitment != Some(phase_role)
             || self.active_phase_polynomial_reader.is_some()
             || self.active_phase_polynomial_binding.is_some()
@@ -4258,7 +4248,8 @@ impl RowCodeWhirGenerationStateMachine {
                     .active_phase_authenticated_columns
                     .take()
                     .ok_or(CommonProofProverError::InvalidInput)?;
-                if authenticated_columns.len() != self.construction_plan.parameters.outer_query_count
+                if authenticated_columns.len()
+                    != self.construction_plan.parameters.outer_query_count
                     || authenticated_columns
                         .iter()
                         .any(|column| column.values.len() != expected_row_count)

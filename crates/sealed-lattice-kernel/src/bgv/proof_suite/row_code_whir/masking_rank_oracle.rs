@@ -1367,19 +1367,20 @@ fn every_query_functional_becomes_known_only_after_the_aggregate_commitment() {
             )
         })
         .expect("the plan observes the aggregate commitment");
-    let query_draw_ordinals = operations
-        .iter()
-        .enumerate()
-        .filter(|(_, operation)| {
-            matches!(
+    let query_draw_ordinals =
+        operations
+            .iter()
+            .enumerate()
+            .filter(|(_, operation)| {
+                matches!(
                 operation,
                 super::construction_plan::RowCodeWhirTranscriptOperation::SampleDistinctIndices {
                     ..
                 }
             )
-        })
-        .map(|(ordinal, _)| ordinal)
-        .collect::<Vec<_>>();
+            })
+            .map(|(ordinal, _)| ordinal)
+            .collect::<Vec<_>>();
     assert!(
         !query_draw_ordinals.is_empty(),
         "the plan draws at least one query vector"

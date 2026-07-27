@@ -2785,8 +2785,7 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
             * &certificate.cms19_arithmetic.compiler_query_bound
             * &certificate.cms19_arithmetic.compiler_query_bound
             * &certificate.cms19_arithmetic.compiler_query_bound
-            + BigUint::from(2_u8)
-                * BigUint::from(verifier_ledger.complete_equation_count_ceiling),
+            + BigUint::from(2_u8) * BigUint::from(verifier_ledger.complete_equation_count_ceiling),
     );
     assert_eq!(
         certificate

@@ -14,8 +14,9 @@ pub(super) mod construction_plan;
 mod exact_same_secret;
 mod generation_state;
 #[cfg(test)]
-mod literal_bcs_merkle;
+mod hiding_whir;
 #[cfg(test)]
+mod literal_bcs_merkle;
 mod masking_rank_oracle;
 mod plain_whir;
 mod plain_whir_wire;
