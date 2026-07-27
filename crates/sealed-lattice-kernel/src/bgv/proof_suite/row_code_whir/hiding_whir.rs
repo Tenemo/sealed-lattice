@@ -11,6 +11,8 @@
 //! bind is a derived quantity rather than a chosen one. It does not yet replace
 //! the operative opening argument.
 
+mod static_accounting;
+
 use p3_whir::{FoldingFactor, ProtocolParameters, ZkParameters, ZkWhirConfig};
 
 use super::construction_plan::{RowCodeWhirSelectedParameters, RowCodeWhirSoundnessAssumption};
@@ -71,6 +73,18 @@ pub(super) const fn selected_hiding_parameters() -> ZkParameters {
 pub(super) fn selected_hiding_whir_config(
     parameters: RowCodeWhirSelectedParameters,
 ) -> Result<SelectedHidingWhirConfig, HidingWhirConfigurationError> {
+    hiding_whir_config_with_mask_parameters(parameters, selected_hiding_parameters())
+}
+
+/// Derives a hiding configuration for explicitly chosen mask parameters.
+///
+/// The admissible-parameter search needs to instantiate candidates other than
+/// the selected one. Every non-mask parameter still comes from the construction
+/// plan, so a candidate differs from the selection only in its mask budgets.
+pub(super) fn hiding_whir_config_with_mask_parameters(
+    parameters: RowCodeWhirSelectedParameters,
+    mask_parameters: ZkParameters,
+) -> Result<SelectedHidingWhirConfig, HidingWhirConfigurationError> {
     if parameters.polynomial_commitment_variable_count == 0 {
         return Err(HidingWhirConfigurationError::UnsupportedVariableCount);
     }
@@ -89,14 +103,227 @@ pub(super) fn selected_hiding_whir_config(
             security_level: parameters.security_level,
             pow_bits: parameters.proof_of_work_bits,
         },
-        selected_hiding_parameters(),
+        mask_parameters,
     )
     .map_err(|_| HidingWhirConfigurationError::Vendored)
 }
 
+/// The pipeline move that commits one carried mask group.
+///
+/// Ownership is chronological: a group is committed by the move named here, and
+/// every challenge drawn after that move is bound to its root.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum HidingMaskGroupOwner {
+    /// The masked sumcheck batch that folds committed oracle `oracle_ordinal`.
+    ///
+    /// One mask codeword is stacked per folded variable, so the group width is
+    /// that oracle's folding factor.
+    SumcheckBatch { oracle_ordinal: usize },
+    /// The code switch that produces the oracle committed after `round_ordinal`.
+    ///
+    /// The switch commits one mask carrying the previous oracle's folded
+    /// randomness together with one pad coordinate per out-of-domain answer.
+    CodeSwitch { round_ordinal: usize },
+}
+
+/// One instantiated carried mask group.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct HidingMaskGroupCensusEntry {
+    /// Position of this group in the pipeline's chronological commit order.
+    pub(super) commit_ordinal: usize,
+    /// The move that commits the group.
+    pub(super) owner: HidingMaskGroupOwner,
+    /// Mask codewords stacked under one root.
+    pub(super) width: usize,
+    /// Message coefficients per stacked codeword.
+    pub(super) message_length: usize,
+    /// Encoding-randomness coefficients per stacked codeword.
+    pub(super) randomness_length: usize,
+    /// Codeword coordinates per stacked codeword.
+    pub(super) codeword_domain_size: usize,
+}
+
+impl HidingMaskGroupCensusEntry {
+    /// Codeword coordinates the whole group instantiates.
+    pub(super) const fn codeword_coordinate_count(&self) -> usize {
+        self.width * self.codeword_domain_size
+    }
+
+    /// Authentication nodes on one opening path into this group's root.
+    ///
+    /// Every stacked codeword shares one row per opened position, so a group
+    /// opening authenticates one row rather than one path per member.
+    pub(super) const fn merkle_path_node_count(&self) -> usize {
+        self.codeword_domain_size.trailing_zeros() as usize
+    }
+}
+
+/// The folded source code the base case checks, shared by the fresh main mask.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct HidingSourceCodeCensus {
+    /// Message coefficients of the terminal folded word.
+    pub(super) message_length: usize,
+    /// Encoding-randomness coefficients carried by the terminal oracle.
+    pub(super) randomness_length: usize,
+    /// Coordinates of the folded source domain.
+    pub(super) codeword_domain_size: usize,
+}
+
+impl HidingSourceCodeCensus {
+    pub(super) const fn merkle_path_node_count(&self) -> usize {
+        self.codeword_domain_size.trailing_zeros() as usize
+    }
+}
+
+/// The complete instantiated mask inventory of one hiding configuration.
+///
+/// The carried groups are the masks committed while the rounds run. The base
+/// case then mirrors every carried group with one freshly committed blind of the
+/// same shape, and adds one fresh main mask in the folded source code. Counting
+/// only the distinct code shapes, or counting a group as one codeword,
+/// understates the inventory, so every derived total here multiplies by group
+/// width and by the carried/fresh mirror.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct SelectedHidingMaskCensus {
+    /// Carried groups in chronological commit order.
+    pub(super) carried_groups: Vec<HidingMaskGroupCensusEntry>,
+    /// The folded source code shared by the source oracle and the fresh main mask.
+    pub(super) source_code: HidingSourceCodeCensus,
+    /// Spot checks the base case draws against the source and fresh main codewords.
+    pub(super) source_spot_check_count: usize,
+    /// Spot checks the base case draws against each mask group.
+    pub(super) mask_spot_check_count: usize,
+}
+
+impl SelectedHidingMaskCensus {
+    /// Derives the census from an instantiated configuration.
+    pub(super) fn derive(configuration: &SelectedHidingWhirConfig) -> Self {
+        let round_count = configuration.inner.n_rounds();
+        let mut carried_groups = Vec::with_capacity(2 * round_count + 1);
+        let push_sumcheck_batch =
+            |groups: &mut Vec<HidingMaskGroupCensusEntry>, oracle_ordinal: usize| {
+                groups.push(HidingMaskGroupCensusEntry {
+                    commit_ordinal: groups.len(),
+                    owner: HidingMaskGroupOwner::SumcheckBatch { oracle_ordinal },
+                    width: configuration.inner.round_folding_factor(oracle_ordinal),
+                    message_length: configuration.sumcheck_mask.message_len,
+                    randomness_length: configuration.sumcheck_mask.randomness_len,
+                    codeword_domain_size: configuration.sumcheck_mask.domain_size,
+                });
+            };
+        push_sumcheck_batch(&mut carried_groups, 0);
+        for round_ordinal in 0..round_count {
+            let switch_mask = configuration.switch_masks[round_ordinal];
+            carried_groups.push(HidingMaskGroupCensusEntry {
+                commit_ordinal: carried_groups.len(),
+                owner: HidingMaskGroupOwner::CodeSwitch { round_ordinal },
+                width: 1,
+                message_length: switch_mask.message_len,
+                randomness_length: switch_mask.randomness_len,
+                codeword_domain_size: switch_mask.domain_size,
+            });
+            push_sumcheck_batch(&mut carried_groups, round_ordinal + 1);
+        }
+
+        // The base case checks the virtual folded oracle, so the fresh main mask
+        // lives in that oracle's code rather than in a mask code.
+        let final_round = configuration.inner.final_round_config();
+        let source_code = HidingSourceCodeCensus {
+            message_length: 1 << final_round.num_variables,
+            randomness_length: configuration.oracle_randomness[round_count],
+            codeword_domain_size: final_round.domain_size >> final_round.folding_factor,
+        };
+
+        Self {
+            carried_groups,
+            source_code,
+            source_spot_check_count: configuration.inner.final_queries,
+            mask_spot_check_count: configuration.mask_queries,
+        }
+    }
+
+    /// Carried mask groups, which is also the number of committed group roots.
+    pub(super) fn carried_group_count(&self) -> usize {
+        self.carried_groups.len()
+    }
+
+    /// Individual carried mask codewords across every group.
+    pub(super) fn carried_codeword_count(&self) -> usize {
+        self.carried_groups.iter().map(|group| group.width).sum()
+    }
+
+    /// Codeword coordinates the carried masks instantiate.
+    pub(super) fn carried_codeword_coordinate_count(&self) -> usize {
+        self.carried_groups
+            .iter()
+            .map(HidingMaskGroupCensusEntry::codeword_coordinate_count)
+            .sum()
+    }
+
+    /// Fresh mirror groups the base case commits.
+    ///
+    /// Move 1b commits one blind per carried mask, grouped exactly as the
+    /// carried masks were, so the mirror inventory equals the carried inventory
+    /// group for group.
+    pub(super) fn fresh_mirror_group_count(&self) -> usize {
+        self.carried_group_count()
+    }
+
+    pub(super) fn fresh_mirror_codeword_count(&self) -> usize {
+        self.carried_codeword_count()
+    }
+
+    pub(super) fn fresh_mirror_codeword_coordinate_count(&self) -> usize {
+        self.carried_codeword_coordinate_count()
+    }
+
+    /// Roots the hiding layer adds: one per carried group, one per mirror group,
+    /// and one for the fresh main mask.
+    pub(super) fn committed_root_count(&self) -> usize {
+        self.carried_group_count() + self.fresh_mirror_group_count() + 1
+    }
+
+    /// Blinded reveal coefficients the base case sends.
+    ///
+    /// Each carried codeword reveals its message and its encoding randomness
+    /// once, and the source reveals its own message and randomness once.
+    pub(super) fn blinded_reveal_coefficient_count(&self) -> usize {
+        let mask_reveals: usize = self
+            .carried_groups
+            .iter()
+            .map(|group| group.width * (group.message_length + group.randomness_length))
+            .sum();
+        mask_reveals + self.source_code.message_length + self.source_code.randomness_length
+    }
+
+    /// Authentication nodes a literal per-opening encoding would carry.
+    ///
+    /// This is the direct-port cost: one independent Merkle path for every
+    /// opened row, with no node sharing between the paths of one root. It is the
+    /// number the canonical multiproof has to beat, not a lower bound.
+    pub(super) fn literal_authentication_node_count(&self) -> usize {
+        let mask_nodes: usize = self
+            .carried_groups
+            .iter()
+            .map(|group| 2 * self.mask_spot_check_count * group.merkle_path_node_count())
+            .sum();
+        mask_nodes + 2 * self.source_spot_check_count * self.source_code.merkle_path_node_count()
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::super::MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH;
     use super::*;
+
+    /// Digest bytes of one authentication node in the production Merkle tree.
+    const PRODUCTION_MERKLE_NODE_BYTE_LENGTH: usize = 64;
+
+    fn selected_census() -> SelectedHidingMaskCensus {
+        let configuration = selected_hiding_whir_config(RowCodeWhirSelectedParameters::selected())
+            .expect("the selected parameters admit a hiding configuration");
+        SelectedHidingMaskCensus::derive(&configuration)
+    }
 
     /// Pins the mask geometry the construction plan will have to bind.
     ///
@@ -197,16 +424,147 @@ mod tests {
                 .iter()
                 .all(|round| round.ood_samples == 0)
         );
-        let total_mask_codeword_coordinates: usize =
-            core::iter::once(configuration.sumcheck_mask.domain_size)
-                .chain(
-                    configuration
-                        .switch_masks
-                        .iter()
-                        .map(|mask| mask.domain_size),
-                )
-                .sum();
-        assert_eq!(total_mask_codeword_coordinates, 18_432);
+    }
+
+    /// Derives every instantiated mask group, not just the distinct code shapes.
+    ///
+    /// The distinct shapes are one sumcheck code and four switch codes. The
+    /// instantiated schedule stacks the sumcheck code once per folded variable
+    /// and repeats it after every code switch, so counting shapes understates
+    /// the inventory by the sumcheck width and by four repetitions.
+    #[test]
+    fn selected_hiding_census_derives_every_instantiated_carried_group() {
+        let census = selected_census();
+
+        // Nine groups: one sumcheck batch per committed oracle, one code switch
+        // per round, interleaved in commit order.
+        assert_eq!(census.carried_group_count(), 9);
+        assert_eq!(
+            census
+                .carried_groups
+                .iter()
+                .map(|group| (group.commit_ordinal, group.owner, group.width))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    0,
+                    HidingMaskGroupOwner::SumcheckBatch { oracle_ordinal: 0 },
+                    3
+                ),
+                (1, HidingMaskGroupOwner::CodeSwitch { round_ordinal: 0 }, 1),
+                (
+                    2,
+                    HidingMaskGroupOwner::SumcheckBatch { oracle_ordinal: 1 },
+                    3
+                ),
+                (3, HidingMaskGroupOwner::CodeSwitch { round_ordinal: 1 }, 1),
+                (
+                    4,
+                    HidingMaskGroupOwner::SumcheckBatch { oracle_ordinal: 2 },
+                    3
+                ),
+                (5, HidingMaskGroupOwner::CodeSwitch { round_ordinal: 2 }, 1),
+                (
+                    6,
+                    HidingMaskGroupOwner::SumcheckBatch { oracle_ordinal: 3 },
+                    3
+                ),
+                (7, HidingMaskGroupOwner::CodeSwitch { round_ordinal: 3 }, 1),
+                (
+                    8,
+                    HidingMaskGroupOwner::SumcheckBatch { oracle_ordinal: 4 },
+                    3
+                ),
+            ],
+        );
+
+        // Nineteen carried codewords: fifteen sumcheck masks over the 2,048
+        // coordinate mask domain and four switch masks over 4,096 coordinates.
+        assert_eq!(census.carried_codeword_count(), 19);
+        assert_eq!(
+            census
+                .carried_groups
+                .iter()
+                .filter(|group| matches!(group.owner, HidingMaskGroupOwner::SumcheckBatch { .. }))
+                .map(|group| group.codeword_coordinate_count())
+                .sum::<usize>(),
+            30_720
+        );
+        assert_eq!(
+            census
+                .carried_groups
+                .iter()
+                .filter(|group| matches!(group.owner, HidingMaskGroupOwner::CodeSwitch { .. }))
+                .map(|group| group.codeword_coordinate_count())
+                .sum::<usize>(),
+            16_384
+        );
+        assert_eq!(census.carried_codeword_coordinate_count(), 47_104);
+
+        // The base case mirrors every carried group with one fresh blind of the
+        // same shape, so the fresh inventory is a second copy of the carried one.
+        assert_eq!(census.fresh_mirror_group_count(), 9);
+        assert_eq!(census.fresh_mirror_codeword_count(), 19);
+        assert_eq!(census.fresh_mirror_codeword_coordinate_count(), 47_104);
+
+        // The fresh main mask lives in the folded source code, whose terminal
+        // word has dimension 64 over a 65,536 coordinate domain.
+        assert_eq!(
+            census.source_code,
+            HidingSourceCodeCensus {
+                message_length: 64,
+                randomness_length: 263,
+                codeword_domain_size: 65_536,
+            }
+        );
+        assert_eq!(census.source_code.merkle_path_node_count(), 16);
+        assert_eq!(census.source_spot_check_count, 263);
+        assert_eq!(census.mask_spot_check_count, 393);
+
+        // Nineteen committed roots: nine carried, nine mirrors, one fresh main.
+        assert_eq!(census.committed_root_count(), 19);
+    }
+
+    /// Reproduces the direct-port refusal from the derived census.
+    ///
+    /// A literal per-opening encoding authenticates one independent path per
+    /// opened row. The resulting payload already exceeds the proof selection
+    /// gate before roots, opened values, blinded reveals, sumchecks, rounds,
+    /// framing, or the existing phase-value payload are counted, which is why a
+    /// canonical construction-aware multiproof is a porting prerequisite.
+    #[test]
+    fn literal_authentication_encoding_exceeds_the_proof_selection_gate() {
+        let census = selected_census();
+
+        let sumcheck_group_nodes: usize = census
+            .carried_groups
+            .iter()
+            .filter(|group| matches!(group.owner, HidingMaskGroupOwner::SumcheckBatch { .. }))
+            .map(|group| 2 * census.mask_spot_check_count * group.merkle_path_node_count())
+            .sum();
+        let switch_group_nodes: usize = census
+            .carried_groups
+            .iter()
+            .filter(|group| matches!(group.owner, HidingMaskGroupOwner::CodeSwitch { .. }))
+            .map(|group| 2 * census.mask_spot_check_count * group.merkle_path_node_count())
+            .sum();
+        let source_nodes =
+            2 * census.source_spot_check_count * census.source_code.merkle_path_node_count();
+
+        assert_eq!(
+            sumcheck_group_nodes * PRODUCTION_MERKLE_NODE_BYTE_LENGTH,
+            2_766_720
+        );
+        assert_eq!(
+            switch_group_nodes * PRODUCTION_MERKLE_NODE_BYTE_LENGTH,
+            2_414_592
+        );
+        assert_eq!(source_nodes * PRODUCTION_MERKLE_NODE_BYTE_LENGTH, 538_624);
+
+        let literal_authentication_bytes =
+            census.literal_authentication_node_count() * PRODUCTION_MERKLE_NODE_BYTE_LENGTH;
+        assert_eq!(literal_authentication_bytes, 5_719_936);
+        assert!(literal_authentication_bytes > MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH);
     }
 
     #[test]
