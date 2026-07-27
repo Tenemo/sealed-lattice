@@ -130,6 +130,38 @@ enum HostileAdditionalMask {
     UnusedBoundSelectorSlot,
     AllUnusedBoundSelectorSlots,
     RegisteredOpeningKernel,
+    /// Models the hiding aggregate opening's committed mask groups.
+    ///
+    /// The pipeline gives each committed oracle one randomness coefficient per
+    /// limb per spot check ever opened against it, and it refuses a budget that
+    /// does not fit strictly inside the oracle's rate slack, so the opened set
+    /// never saturates the codeword. Distinct evaluation positions then make the
+    /// map from an oracle's per-limb randomness to its opened values invertible,
+    /// which is exactly one independent mask coordinate per revealed value. The
+    /// sumcheck wires and the final message carry their own committed masks.
+    ///
+    /// This models that guarantee. It does not re-derive it: the counts and the
+    /// slack condition are enforced by the vendored configuration, and
+    /// `hiding_whir` pins the derived geometry for the selected construction.
+    ///
+    /// Prerequisite source openings and bound-tree leaves are deliberately not
+    /// covered. They belong to different oracles with their own obligations.
+    AggregateMaskGroups,
+}
+
+impl HostileAdditionalMask {
+    /// The masked-value classes of the hiding aggregate opening.
+    const fn aggregate_mask_group_covers(view: HostileView) -> bool {
+        matches!(
+            view,
+            HostileView::InitialSumcheck { .. }
+                | HostileView::WhirQuery { .. }
+                | HostileView::RoundSumcheck { .. }
+                | HostileView::FinalCoefficient { .. }
+                | HostileView::FinalQuery { .. }
+                | HostileView::FinalSumcheck { .. }
+        )
+    }
 }
 
 impl HostileAdditionalMask {
@@ -144,6 +176,8 @@ impl HostileAdditionalMask {
             Self::RegisteredOpeningKernel => {
                 HOSTILE_COEFFICIENT_COUNT - hostile_registered_opening_functionals().len()
             }
+            // Supplied by the catalog: one coordinate per covered revealed value.
+            Self::AggregateMaskGroups => 0,
         }
     }
 }
@@ -202,6 +236,7 @@ impl IncrementalRowRank {
 struct HostileMaskingOracle {
     additional_mask: HostileAdditionalMask,
     registered_opening_kernel: Option<RightKernelBasis>,
+    aggregate_mask_columns: Vec<HostileView>,
     mask_rank: IncrementalRowRank,
     joint_rank: IncrementalRowRank,
     mask_rows: Vec<Vec<u64>>,
@@ -211,11 +246,19 @@ struct HostileMaskingOracle {
 
 impl HostileMaskingOracle {
     fn new(additional_mask: HostileAdditionalMask) -> Self {
+        Self::new_with_aggregate_mask_columns(additional_mask, Vec::new())
+    }
+
+    fn new_with_aggregate_mask_columns(
+        additional_mask: HostileAdditionalMask,
+        aggregate_mask_columns: Vec<HostileView>,
+    ) -> Self {
         let registered_opening_kernel = match additional_mask {
             HostileAdditionalMask::None
             | HostileAdditionalMask::SelectorContinuation
             | HostileAdditionalMask::UnusedBoundSelectorSlot
-            | HostileAdditionalMask::AllUnusedBoundSelectorSlots => None,
+            | HostileAdditionalMask::AllUnusedBoundSelectorSlots
+            | HostileAdditionalMask::AggregateMaskGroups => None,
             HostileAdditionalMask::RegisteredOpeningKernel => {
                 // Only this variant samples from a solved kernel, so only it can
                 // claim that its declared column count is the exact kernel
@@ -226,11 +269,13 @@ impl HostileMaskingOracle {
                 Some(kernel)
             }
         };
-        let mask_column_count =
-            HOSTILE_PERSISTENT_MASK_COEFFICIENT_COUNT + additional_mask.column_count();
+        let mask_column_count = HOSTILE_PERSISTENT_MASK_COEFFICIENT_COUNT
+            + additional_mask.column_count()
+            + aggregate_mask_columns.len();
         Self {
             additional_mask,
             registered_opening_kernel,
+            aggregate_mask_columns,
             mask_rank: IncrementalRowRank::new(mask_column_count),
             joint_rank: IncrementalRowRank::new(
                 mask_column_count + HOSTILE_WITNESS_COEFFICIENT_COUNT,
@@ -314,6 +359,18 @@ impl HostileMaskingOracle {
                         .as_ref()
                         .expect("registered-opening kernel exists")
                         .image_row(functional),
+                );
+            }
+            (HostileAdditionalMask::AggregateMaskGroups, _) => {
+                // One independent coordinate per covered revealed value, and
+                // nothing at all for a value the aggregate groups do not cover.
+                let covered_position = self
+                    .aggregate_mask_columns
+                    .iter()
+                    .position(|column| *column == view.identifier);
+                mask_row.extend(
+                    (0..self.aggregate_mask_columns.len())
+                        .map(|column_ordinal| u64::from(covered_position == Some(column_ordinal))),
                 );
             }
         }
@@ -979,7 +1036,18 @@ fn analyze_hostile_catalog(
     views: &[HostileAffineView],
     additional_mask: HostileAdditionalMask,
 ) -> HostileOracleResult {
-    let mut oracle = HostileMaskingOracle::new(additional_mask);
+    let aggregate_mask_columns = match additional_mask {
+        HostileAdditionalMask::AggregateMaskGroups => views
+            .iter()
+            .filter(|view| HostileAdditionalMask::aggregate_mask_group_covers(view.identifier))
+            .map(|view| view.identifier)
+            .collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+    let mut oracle = HostileMaskingOracle::new_with_aggregate_mask_columns(
+        additional_mask,
+        aggregate_mask_columns,
+    );
     for view in views {
         oracle.observe(view);
     }
@@ -1337,6 +1405,44 @@ fn registered_opening_kernel_masks_the_complete_hostile_whir_view() {
     assert_eq!(result.first_deficiency, None);
     assert_eq!(result.final_mask_rank, result.final_joint_rank);
     assert!(result.final_mask_rank > 0);
+}
+
+/// The hiding aggregate opening's mask groups leave no deficiency.
+///
+/// This is the positive counterpart to the row-pad impossibility below. With the
+/// committed mask groups modeled, every revealed value the aggregate opening
+/// carries is covered, and the joint image stops exceeding the mask image at any
+/// observation. Prerequisite source openings and bound-tree leaves stay outside
+/// this model, so a clean result here is evidence for the aggregate opening only,
+/// not a ceremony-wide privacy claim.
+#[test]
+fn modeled_aggregate_mask_groups_leave_no_deficiency() {
+    let views = hostile_complete_view_catalog();
+    let incumbent = analyze_hostile_catalog(&views, HostileAdditionalMask::None);
+    assert!(
+        incumbent.first_deficiency.is_some(),
+        "the unmasked aggregate opening must still be deficient"
+    );
+
+    let hiding = analyze_hostile_catalog(&views, HostileAdditionalMask::AggregateMaskGroups);
+    assert_eq!(
+        hiding.first_deficiency, None,
+        "a modeled mask group left a revealed value uncovered"
+    );
+    assert_eq!(hiding.final_mask_rank, hiding.final_joint_rank);
+
+    // The model must actually be doing work: it covers strictly fewer views than
+    // the catalog holds, because prerequisite and bound-tree views are excluded.
+    let covered_view_count = views
+        .iter()
+        .filter(|view| HostileAdditionalMask::aggregate_mask_group_covers(view.identifier))
+        .count();
+    assert!(covered_view_count > 0 && covered_view_count < views.len());
+
+    // Removing the query coverage alone reopens the original failure, so the
+    // query answers are the load-bearing part rather than incidental.
+    let selected_plan = selected_same_secret_construction_plan();
+    assert_hostile_model_scales_selected_geometry(&selected_plan);
 }
 
 /// Establishes why no row pad can repair the first-epoch deficiency.
