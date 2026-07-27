@@ -36,6 +36,8 @@ use super::row_encoding::RowEncodingGeometry;
 
 #[cfg(test)]
 mod linear_bcs_transcript;
+#[cfg(test)]
+mod shared_query_partition;
 
 pub(super) const ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT: usize = 32_768;
 pub(super) const ROW_CODE_WHIR_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW: usize = 8;
