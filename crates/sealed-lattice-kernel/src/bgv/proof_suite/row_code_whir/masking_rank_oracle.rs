@@ -1339,6 +1339,62 @@ fn registered_opening_kernel_masks_the_complete_hostile_whir_view() {
     assert!(result.final_mask_rank > 0);
 }
 
+/// Establishes why no row pad can repair the first-epoch deficiency.
+///
+/// The deficient view is a WHIR query answer. Every query vector is drawn from
+/// the transcript only after the aggregate commitment has been observed, and the
+/// aggregate is committed only after all three phase roots, which the relation
+/// prefix schedule owns and which therefore precede every row-code WHIR
+/// operation in the catalog. A row pad is fixed inside the phase rows it masks,
+/// so it is committed strictly before the functional it would have to cancel
+/// even exists. A registered-opening kernel cannot be sampled for these views at
+/// any point in the production chronology, whatever its rank properties are in
+/// the reduced hostile model. The repair belongs to the mask groups that are
+/// committed with the aggregate, which is where the construction already
+/// reserves a hiding-WHIR soundness component.
+#[test]
+fn every_query_functional_becomes_known_only_after_the_aggregate_commitment() {
+    let plan = selected_same_secret_construction_plan();
+    let operations = plan.transcript_operations();
+    let aggregate_commitment_ordinal = operations
+        .iter()
+        .position(|operation| {
+            matches!(
+                operation,
+                super::construction_plan::RowCodeWhirTranscriptOperation::ObserveCommitment {
+                    role: super::construction_plan::RowCodeWhirCommitmentRole::Aggregate,
+                }
+            )
+        })
+        .expect("the plan observes the aggregate commitment");
+    let query_draw_ordinals = operations
+        .iter()
+        .enumerate()
+        .filter(|(_, operation)| {
+            matches!(
+                operation,
+                super::construction_plan::RowCodeWhirTranscriptOperation::SampleDistinctIndices {
+                    ..
+                }
+            )
+        })
+        .map(|(ordinal, _)| ordinal)
+        .collect::<Vec<_>>();
+    assert!(
+        !query_draw_ordinals.is_empty(),
+        "the plan draws at least one query vector"
+    );
+    assert!(
+        query_draw_ordinals
+            .iter()
+            .all(|ordinal| *ordinal > aggregate_commitment_ordinal),
+        "the aggregate commitment is observed at operation {aggregate_commitment_ordinal},          but query vectors are drawn at {query_draw_ordinals:?}",
+    );
+    // The three phase roots belong to the relation prefix schedule, so they are
+    // absorbed before any row-code WHIR operation exists.
+    assert_eq!(plan.phase_order.len(), 3);
+}
+
 #[test]
 fn continuation_pad_is_in_every_registered_selector_three_point_kernel() {
     let bound_evaluation_points = hostile_bound_evaluation_points();
