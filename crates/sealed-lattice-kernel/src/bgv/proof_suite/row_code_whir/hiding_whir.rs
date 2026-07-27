@@ -200,17 +200,17 @@ impl SelectedHidingMaskCensus {
     pub(super) fn derive(configuration: &SelectedHidingWhirConfig) -> Self {
         let round_count = configuration.inner.n_rounds();
         let mut carried_groups = Vec::with_capacity(2 * round_count + 1);
-        let push_sumcheck_batch =
-            |groups: &mut Vec<HidingMaskGroupCensusEntry>, oracle_ordinal: usize| {
-                groups.push(HidingMaskGroupCensusEntry {
-                    commit_ordinal: groups.len(),
-                    owner: HidingMaskGroupOwner::SumcheckBatch { oracle_ordinal },
-                    width: configuration.inner.round_folding_factor(oracle_ordinal),
-                    message_length: configuration.sumcheck_mask.message_len,
-                    randomness_length: configuration.sumcheck_mask.randomness_len,
-                    codeword_domain_size: configuration.sumcheck_mask.domain_size,
-                });
-            };
+        let push_sumcheck_batch = |groups: &mut Vec<HidingMaskGroupCensusEntry>,
+                                   oracle_ordinal: usize| {
+            groups.push(HidingMaskGroupCensusEntry {
+                commit_ordinal: groups.len(),
+                owner: HidingMaskGroupOwner::SumcheckBatch { oracle_ordinal },
+                width: configuration.inner.round_folding_factor(oracle_ordinal),
+                message_length: configuration.sumcheck_mask.message_len,
+                randomness_length: configuration.sumcheck_mask.randomness_len,
+                codeword_domain_size: configuration.sumcheck_mask.domain_size,
+            });
+        };
         push_sumcheck_batch(&mut carried_groups, 0);
         for round_ordinal in 0..round_count {
             let switch_mask = configuration.switch_masks[round_ordinal];

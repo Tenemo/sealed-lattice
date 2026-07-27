@@ -1445,6 +1445,58 @@ fn modeled_aggregate_mask_groups_leave_no_deficiency() {
     assert_hostile_model_scales_selected_geometry(&selected_plan);
 }
 
+/// Separates this algebraic game from the generator that deploys it.
+///
+/// Every rank statement in this module treats mask coordinates as uniform and
+/// independent. Deployment does not supply that: one 64-byte action root keys a
+/// KMAC256 hierarchy, whose stream key keys every 64-byte block, which a bounded
+/// rejection sampler reduces to field elements. The foundation hop ledger names
+/// the replacement steps between the two, and this test binds that ledger to the
+/// game so a rank result here can never be read as information-theoretic
+/// independence.
+#[test]
+fn the_modeled_mask_coordinates_depend_on_the_deployed_generator_hybrid() {
+    let ledger = crate::foundation::deployed_mask_generator_hybrid();
+
+    // The chain starts at one sampled secret, so nothing downstream is
+    // independent of it in an information-theoretic sense.
+    assert_eq!(
+        ledger[0].0,
+        crate::foundation::MaskGeneratorHybridHop::ActionRootEntropy
+    );
+    let (root_byte_length, hierarchy_byte_length, block_byte_length) =
+        crate::foundation::action_root_expansion_summary();
+    assert_eq!((root_byte_length, hierarchy_byte_length), (64, 192));
+    assert!(block_byte_length > 0);
+
+    // At least one hop is a computational reduction rather than a statistical
+    // step, which is exactly why the modeled independence is conditional.
+    let computational_hop_count = ledger
+        .iter()
+        .filter(|(_, loss)| {
+            matches!(
+                loss,
+                crate::foundation::MaskGeneratorHybridLoss::ComputationalReduction { .. }
+            )
+        })
+        .count();
+    assert!(computational_hop_count >= 2);
+
+    // The quantum ledger is strictly stronger, so a QROM masking argument built
+    // on this game inherits a different assumption than a classical one.
+    assert_ne!(ledger, crate::foundation::quantum_mask_generator_hybrid());
+
+    // The sampler hop defers its only cost to the honest-failure ledger, so a
+    // rank failure and a sampler exhaustion stay distinct abort events here.
+    assert!(ledger.iter().any(|(_, loss)| matches!(
+        loss,
+        crate::foundation::MaskGeneratorHybridLoss::ExactGivenHonestAbort {
+            abort_event:
+                crate::foundation::MaskGeneratorHonestAbortEvent::RejectionSamplerExhaustion,
+        }
+    )));
+}
+
 /// Establishes why no row pad can repair the first-epoch deficiency.
 ///
 /// The deficient view is a WHIR query answer. Every query vector is drawn from

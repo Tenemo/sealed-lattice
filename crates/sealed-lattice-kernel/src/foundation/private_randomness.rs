@@ -61,12 +61,19 @@ const PUBLIC_ONLY_PROOF_FAMILIES: [u16; 3] =
     ProofFamilyIdentifiers::PUBLIC_ONLY_FAMILY_SCHEMA_IDENTIFIERS;
 
 mod domain;
+#[cfg(test)]
+mod generator_hybrid;
 mod material;
 mod proof_coins;
 mod stream;
 mod validation;
 
 pub use domain::PrivateRandomnessDomain;
+#[cfg(test)]
+pub(crate) use generator_hybrid::{
+    MaskGeneratorHonestAbortEvent, MaskGeneratorHybridHop, MaskGeneratorHybridLoss,
+    action_root_expansion_summary, deployed_mask_generator_hybrid, quantum_mask_generator_hybrid,
+};
 pub(crate) use material::PersistentProofWitnessCoinBinding;
 pub use material::{
     ActionPrivateRandomness, ActionRandomnessDerivationInput, ActionRandomnessRoot,

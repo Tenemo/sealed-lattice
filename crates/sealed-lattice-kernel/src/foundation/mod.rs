@@ -162,6 +162,11 @@ pub use private_randomness::{
     SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_SCHEMA_IDENTIFIER,
     SetupStructuredCommitmentOpeningContext,
 };
+#[cfg(test)]
+pub(crate) use private_randomness::{
+    MaskGeneratorHonestAbortEvent, MaskGeneratorHybridHop, MaskGeneratorHybridLoss,
+    action_root_expansion_summary, deployed_mask_generator_hybrid, quantum_mask_generator_hybrid,
+};
 #[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) use private_randomness_runtime::prepare_exact_same_secret_evidence_attempt;
 pub(crate) use private_randomness_runtime::{
