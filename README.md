@@ -56,6 +56,12 @@ Not yet:
   production browser proving, exact transcript-to-theorem correspondence,
   complete construction-level masking evidence, all-family cutover, suite
   freeze, and fresh release evidence remain unfinished.
+- The replacement's aggregate opening still has no selected masking
+  subconstruction. Static accounting refuses the hiding candidate that commits
+  and spot-checks one mask oracle per fold batch and per code switch, because
+  its canonical opening exceeds the internal proof-size gate at every admissible
+  mask parameter. Published development proofs therefore remain non-hiding and
+  must be assumed to leak beyond their public statements.
 - No exact `n = 10` suite is frozen, no complete accepted vote runs end to end,
   and ballot, evaluator, and target-release operations are not public APIs.
 - No physical-phone profile is qualified. Desktop-browser, Node.js, native, and
