@@ -16,10 +16,12 @@ use p3_multilinear_util::split_eq::SplitEq;
 use p3_util::log2_strict_usize;
 
 use crate::lagrange::lagrange_weights_01inf_multi;
-use crate::layout::opening::Opening;
+use crate::layout::opening::{EqSvoPartials, NextSvoPartials, Opening};
 use crate::layout::prover::{Layout, StackedClaims};
 use crate::layout::witness::Table;
-use crate::layout::{LayoutStrategy, ProverMultiClaim, Witness};
+use crate::layout::{
+    InterleavedWitnessError, LayoutStrategy, ProverMultiClaim, TableShape, Witness,
+};
 use crate::product_polynomial::ProductPolynomial;
 use crate::strategy::{SumcheckProver, VariableOrder};
 use crate::svo::{calculate_accumulators_batch, SvoAccumulators, SvoPoint};
@@ -40,7 +42,80 @@ pub struct PrefixProver<F: Field, EF: ExtensionField<F>> {
     ///
     /// - Prefix binding folds this polynomial directly.
     /// - It is kept here, beside the shared claim state.
-    pub(crate) poly: Poly<F>,
+    pub(crate) poly: Option<Poly<F>>,
+}
+
+/// Incrementally prepared opening batch for a detached prefix prover.
+///
+/// Source columns may be loaded one at a time. The builder retains only the
+/// small SVO payloads needed by the initial sumcheck, never a complete table or
+/// stacked polynomial.
+#[derive(Debug)]
+pub struct PrefixOpeningBatchBuilder<F: Field, EF: ExtensionField<F>> {
+    table_index: usize,
+    transcript_point: Point<EF>,
+    point: SvoPoint<F, EF>,
+    request: OpeningRequest,
+    current_openings: Vec<Option<Opening<EF, EqSvoPartials<EF>>>>,
+    next_openings: Vec<Option<Opening<EF, NextSvoPartials<EF>>>>,
+}
+
+impl<F: TwoAdicField, EF: ExtensionField<F>> PrefixOpeningBatchBuilder<F, EF> {
+    /// Supplies one source column to every requested side of this batch.
+    ///
+    /// Returns `true` when the column occurs in the request. Supplying a
+    /// requested side twice or supplying a polynomial with the wrong arity is
+    /// rejected.
+    pub fn absorb_column(
+        &mut self,
+        column_index: usize,
+        polynomial: &Poly<F>,
+    ) -> Result<bool, &'static str> {
+        if polynomial.num_variables() != self.transcript_point.num_variables() {
+            return Err("detached prefix source column has the wrong arity");
+        }
+        let mut consumed = false;
+        for (request_column, destination) in self
+            .request
+            .current()
+            .iter()
+            .zip(&mut self.current_openings)
+        {
+            if *request_column == column_index {
+                if destination.is_some() {
+                    return Err("detached prefix current column was supplied twice");
+                }
+                let (evaluation, partial_evaluations) = self.point.eval(polynomial);
+                *destination = Some(Opening::new_with_data(
+                    column_index,
+                    evaluation,
+                    partial_evaluations,
+                ));
+                consumed = true;
+            }
+        }
+        for (request_column, destination) in self
+            .request
+            .next()
+            .iter()
+            .zip(&mut self.next_openings)
+        {
+            if *request_column == column_index {
+                if destination.is_some() {
+                    return Err("detached prefix next column was supplied twice");
+                }
+                let (evaluation, partial_evaluations) =
+                    self.point.eval_next_prefix(polynomial);
+                *destination = Some(Opening::new_with_data(
+                    column_index,
+                    evaluation,
+                    partial_evaluations,
+                ));
+                consumed = true;
+            }
+        }
+        Ok(consumed)
+    }
 }
 
 /// Owned prefix-layout state before the residual product sumcheck is formed.
@@ -73,23 +148,16 @@ impl<F: TwoAdicField, EF: ExtensionField<F>> PrefixInitialSumcheckProver<F, EF> 
             .saturating_sub(self.completed_round_count())
     }
 
-    /// Advances exactly one initial sumcheck round when one remains.
+    /// Returns the current plain quadratic coefficients without advancing the
+    /// transcript or folding the witness.
     ///
-    /// Returns `true` when a round was emitted and `false` after the initial
-    /// sumcheck is already complete. A `false` return has no transcript side
-    /// effects.
-    pub fn advance_round<Ch>(
-        &mut self,
-        sumcheck_data: &mut SumcheckData<F, EF>,
-        pow_bits: usize,
-        challenger: &mut Ch,
-    ) -> bool
-    where
-        Ch: FieldChallenger<F> + GrindingChallenger<Witness = F>,
-    {
+    /// A masked driver uses these coefficients as the plain component of its
+    /// higher-degree round polynomial. `None` means every configured initial
+    /// round is already complete.
+    pub fn round_coefficients(&self) -> Option<(EF, EF)> {
         let round_index = self.completed_round_count();
         if round_index >= self.prover.claims.folding {
-            return false;
+            return None;
         }
 
         let lagrange_weights = lagrange_weights_01inf_multi(&self.folding_randomness);
@@ -124,12 +192,21 @@ impl<F: TwoAdicField, EF: ExtensionField<F>> PrefixInitialSumcheckProver<F, EF> 
                 );
         }
 
-        let round_challenge = sumcheck_data.observe_and_sample(
-            challenger,
-            constant_coefficient,
-            leading_coefficient,
-            pow_bits,
-        );
+        Some((constant_coefficient, leading_coefficient))
+    }
+
+    /// Folds one current plain round after an enclosing transcript driver has
+    /// sampled its challenge.
+    ///
+    /// The supplied coefficients must be the pair returned by the immediately
+    /// preceding [`Self::round_coefficients`] call.
+    pub fn fold_round_with_coefficients(
+        &mut self,
+        constant_coefficient: EF,
+        leading_coefficient: EF,
+        round_challenge: EF,
+    ) {
+        assert!(self.remaining_round_count() > 0);
         self.claimed_sum = extrapolate_01inf(
             constant_coefficient,
             self.claimed_sum - constant_coefficient,
@@ -137,6 +214,37 @@ impl<F: TwoAdicField, EF: ExtensionField<F>> PrefixInitialSumcheckProver<F, EF> 
             round_challenge,
         );
         self.folding_randomness.push(round_challenge);
+    }
+
+    /// Advances exactly one initial sumcheck round when one remains.
+    ///
+    /// Returns `true` when a round was emitted and `false` after the initial
+    /// sumcheck is already complete. A `false` return has no transcript side
+    /// effects.
+    pub fn advance_round<Ch>(
+        &mut self,
+        sumcheck_data: &mut SumcheckData<F, EF>,
+        pow_bits: usize,
+        challenger: &mut Ch,
+    ) -> bool
+    where
+        Ch: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+    {
+        let Some((constant_coefficient, leading_coefficient)) = self.round_coefficients() else {
+            return false;
+        };
+
+        let round_challenge = sumcheck_data.observe_and_sample(
+            challenger,
+            constant_coefficient,
+            leading_coefficient,
+            pow_bits,
+        );
+        self.fold_round_with_coefficients(
+            constant_coefficient,
+            leading_coefficient,
+            round_challenge,
+        );
         true
     }
 
@@ -145,16 +253,56 @@ impl<F: TwoAdicField, EF: ExtensionField<F>> PrefixInitialSumcheckProver<F, EF> 
     /// When rounds remain, ownership is returned unchanged so a caller cannot
     /// accidentally discard the live witness while probing completion.
     pub fn try_finish(self) -> Result<(SumcheckProver<F, EF>, Point<EF>), Self> {
-        if self.remaining_round_count() != 0 {
+        if self.remaining_round_count() != 0 || self.prover.poly.is_none() {
             return Err(self);
         }
 
-        let folding_randomness = Point::new(self.folding_randomness);
+        let folding_randomness = Point::new(self.folding_randomness.clone());
         let compressed = tracing::info_span!("compress_prefix_to_packed").in_scope(|| {
             self.prover
                 .poly
+                .as_ref()
+                .expect("a resident prefix prover has a stacked polynomial")
                 .compress_prefix_to_packed(&folding_randomness, EF::ONE)
         });
+        Ok(self.finish_with_packed(compressed, folding_randomness))
+    }
+
+    /// Converts a completed detached initial state using a caller-supplied
+    /// scalar residual polynomial.
+    ///
+    /// The residual must be the exact prefix compression of the committed
+    /// stacked polynomial at [`Self::folding_randomness`]. This API changes
+    /// storage scheduling only; the resulting product polynomial and claim are
+    /// identical to [`Self::try_finish`].
+    pub fn try_finish_with_compressed(
+        self,
+        compressed: Poly<EF>,
+    ) -> Result<(SumcheckProver<F, EF>, Point<EF>), Self> {
+        if self.remaining_round_count() != 0
+            || self.prover.poly.is_some()
+            || compressed.num_variables()
+                != self.prover.claims.num_variables - self.prover.claims.folding
+        {
+            return Err(self);
+        }
+
+        let folding_randomness = Point::new(self.folding_randomness.clone());
+        let compressed = compressed.pack::<F, EF>();
+        Ok(self.finish_with_packed(compressed, folding_randomness))
+    }
+
+    /// Returns the prefix challenges that define the detached source
+    /// compression point.
+    pub fn folding_randomness(&self) -> &[EF] {
+        &self.folding_randomness
+    }
+
+    fn finish_with_packed(
+        self,
+        compressed: Poly<EF::ExtensionPacking>,
+        folding_randomness: Point<EF>,
+    ) -> (SumcheckProver<F, EF>, Point<EF>) {
         let weights = self
             .prover
             .residual_weights_packed(&folding_randomness, self.batching_challenge);
@@ -162,10 +310,10 @@ impl<F: TwoAdicField, EF: ExtensionField<F>> PrefixInitialSumcheckProver<F, EF> 
             ProductPolynomial::<F, EF>::new_packed(VariableOrder::Prefix, compressed, weights);
         debug_assert_eq!(product_polynomial.dot_product(), self.claimed_sum);
 
-        Ok((
+        (
             SumcheckProver::new(product_polynomial, self.claimed_sum),
             folding_randomness,
-        ))
+        )
     }
 }
 
@@ -180,7 +328,7 @@ impl<F: TwoAdicField, EF: ExtensionField<F>> Layout<F, EF> for PrefixProver<F, E
                 parts.num_variables,
                 parts.folding,
             ),
-            poly: parts.poly,
+            poly: Some(parts.poly),
         }
     }
 
@@ -359,7 +507,11 @@ impl<F: TwoAdicField, EF: ExtensionField<F>> Layout<F, EF> for PrefixProver<F, E
         );
 
         let full_svo = SvoPoint::new_packed(self.claims.folding, &point);
-        let (eval, partial_evals) = full_svo.eval(&self.poly);
+        let (eval, partial_evals) = full_svo.eval(
+            self.poly
+                .as_ref()
+                .expect("virtual prefix openings require a resident stacked polynomial"),
+        );
 
         let accumulators = calculate_accumulators_batch(
             &ProverMultiClaim::new(
@@ -432,6 +584,127 @@ impl<F: TwoAdicField, EF: ExtensionField<F>> Layout<F, EF> for PrefixProver<F, E
 }
 
 impl<F: TwoAdicField, EF: ExtensionField<F>> PrefixProver<F, EF> {
+    /// Creates a prefix prover with layout metadata but no resident stacked
+    /// polynomial.
+    ///
+    /// Opening payloads are supplied through
+    /// [`Self::prepare_opening_batch`] and [`Self::record_prepared_opening`],
+    /// and the first residual is supplied through
+    /// [`PrefixInitialSumcheckProver::try_finish_with_compressed`].
+    pub fn new_detached(
+        table_shapes: Vec<TableShape>,
+        folding: usize,
+    ) -> Result<Self, InterleavedWitnessError> {
+        let (num_variables, placements) =
+            Witness::<F>::plan_interleaved_layout(&table_shapes, folding)?;
+        Ok(Self {
+            claims: StackedClaims::new_without_tables(
+                table_shapes,
+                placements,
+                num_variables,
+                folding,
+            ),
+            poly: None,
+        })
+    }
+
+    /// Starts a detached opening batch at one explicit transcript point.
+    pub fn prepare_opening_batch(
+        &self,
+        table_index: usize,
+        request: OpeningRequest,
+        point: Point<EF>,
+    ) -> Result<PrefixOpeningBatchBuilder<F, EF>, &'static str> {
+        if self.poly.is_some()
+            || table_index >= self.claims.table_shapes.len()
+            || point.num_variables() != self.claims.num_variables_table(table_index)
+            || request.is_empty()
+            || request
+                .current()
+                .iter()
+                .chain(request.next())
+                .any(|column_index| {
+                    *column_index >= self.claims.table_shapes[table_index].width()
+                })
+            || request
+                .current()
+                .iter()
+                .enumerate()
+                .any(|(index, column)| request.current()[..index].contains(column))
+            || request
+                .next()
+                .iter()
+                .enumerate()
+                .any(|(index, column)| request.next()[..index].contains(column))
+        {
+            return Err("detached prefix opening has an invalid shape");
+        }
+        let svo_point = SvoPoint::new_packed(self.claims.folding, &point);
+        let current_openings = (0..request.current().len()).map(|_| None).collect();
+        let next_openings = (0..request.next().len()).map(|_| None).collect();
+        Ok(PrefixOpeningBatchBuilder {
+            table_index,
+            transcript_point: point,
+            point: svo_point,
+            request,
+            current_openings,
+            next_openings,
+        })
+    }
+
+    /// Records a completely prepared detached batch in canonical transcript
+    /// order.
+    pub fn record_prepared_opening<Ch>(
+        &mut self,
+        prepared: PrefixOpeningBatchBuilder<F, EF>,
+        challenger: &mut Ch,
+    ) -> Result<OpeningEvals<EF>, &'static str>
+    where
+        Ch: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+    {
+        if self.poly.is_some()
+            || prepared.table_index >= self.claims.table_shapes.len()
+            || prepared.transcript_point.num_variables()
+                != self.claims.num_variables_table(prepared.table_index)
+        {
+            return Err("prepared detached prefix opening has an invalid shape");
+        }
+        let current_openings = prepared
+            .current_openings
+            .into_iter()
+            .zip(prepared.request.current())
+            .map(|(opening, expected_column)| {
+                opening
+                    .filter(|opening| opening.poly_idx() == Some(*expected_column))
+                    .ok_or("prepared detached prefix current opening is incomplete")
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let next_openings = prepared
+            .next_openings
+            .into_iter()
+            .zip(prepared.request.next())
+            .map(|(opening, expected_column)| {
+                opening
+                    .filter(|opening| opening.poly_idx() == Some(*expected_column))
+                    .ok_or("prepared detached prefix next opening is incomplete")
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let current_evaluations = current_openings.iter().map(Opening::eval).collect::<Vec<_>>();
+        let next_evaluations = next_openings.iter().map(Opening::eval).collect::<Vec<_>>();
+        challenger.observe_algebra_slice(prepared.transcript_point.as_slice());
+        challenger.observe_algebra_slice(&current_evaluations);
+        challenger.observe_algebra_slice(&next_evaluations);
+        self.claims.claim_map[prepared.table_index].push(ProverMultiClaim::new(
+            prepared.point,
+            current_openings,
+            next_openings,
+        ));
+        Ok(OpeningBatch::new(
+            current_evaluations,
+            next_evaluations,
+        ))
+    }
+
     /// Reconstructs one source column from the interleaved committed
     /// polynomial. The temporary owns only one column and is released after
     /// its opening claim is recorded.
@@ -446,7 +719,10 @@ impl<F: TwoAdicField, EF: ExtensionField<F>> PrefixProver<F, EF> {
         let selector = &placement.selectors()[column_index];
         let values = (0..1_usize << table_variable_count)
             .map(|local_index| {
-                self.poly.as_slice()[(local_index << selector.num_variables()) | selector.index()]
+                self.poly
+                    .as_ref()
+                    .expect("resident prefix openings require a stacked polynomial")
+                    .as_slice()[(local_index << selector.num_variables()) | selector.index()]
             })
             .collect();
         Poly::new(values)
@@ -892,6 +1168,77 @@ mod tests {
             residual_prover.num_variables(),
             PrefixProver::<F, EF>::new_witness(build_tables(), FOLDING).num_variables() - FOLDING
         );
+    }
+
+    #[test]
+    fn detached_openings_and_compressed_handoff_match_the_resident_path() {
+        let detached_tables = build_tables();
+        let table_shapes = detached_tables.iter().map(Table::shape).collect::<Vec<_>>();
+        let resident_witness = PrefixProver::<F, EF>::new_witness(build_tables(), FOLDING);
+        let resident_stacked_polynomial = resident_witness.poly().clone();
+        let mut resident = PrefixProver::<F, EF>::from_witness(resident_witness);
+        let mut detached =
+            PrefixProver::<F, EF>::new_detached(table_shapes, FOLDING).expect("valid layout");
+        let request = OpeningBatch::new(vec![0, 1], vec![1]);
+        let point = Point::expand_from_univariate(EF::from_u64(17), 9);
+        let mut resident_challenger = challenger();
+        let mut detached_challenger = challenger();
+
+        let resident_evaluations = resident.eval_at_point(
+            0,
+            &request,
+            point.clone(),
+            &mut resident_challenger,
+        );
+        let mut prepared = detached
+            .prepare_opening_batch(0, request, point)
+            .expect("valid detached batch");
+        assert!(prepared
+            .absorb_column(0, detached_tables[0].poly(0))
+            .expect("first column"));
+        assert!(prepared
+            .absorb_column(1, detached_tables[0].poly(1))
+            .expect("second column"));
+        let detached_evaluations = detached
+            .record_prepared_opening(prepared, &mut detached_challenger)
+            .expect("complete detached batch");
+        assert_eq!(detached_evaluations, resident_evaluations);
+
+        let mut resident_state = resident.begin_initial_sumcheck(&mut resident_challenger);
+        let mut detached_state = detached.begin_initial_sumcheck(&mut detached_challenger);
+        let mut resident_proof = SumcheckData::default();
+        let mut detached_proof = SumcheckData::default();
+        loop {
+            let resident_advanced = resident_state.advance_round(
+                &mut resident_proof,
+                0,
+                &mut resident_challenger,
+            );
+            let detached_advanced = detached_state.advance_round(
+                &mut detached_proof,
+                0,
+                &mut detached_challenger,
+            );
+            assert_eq!(detached_advanced, resident_advanced);
+            if !resident_advanced {
+                break;
+            }
+        }
+        assert_eq!(detached_proof.polynomial_evaluations, resident_proof.polynomial_evaluations);
+        let compression_point = Point::new(detached_state.folding_randomness().to_vec());
+        let compressed = resident_stacked_polynomial.compress_prefix(
+            &compression_point,
+            EF::ONE,
+        );
+        let (resident_residual, resident_randomness) =
+            resident_state.try_finish().expect("resident handoff");
+        let (detached_residual, detached_randomness) = detached_state
+            .try_finish_with_compressed(compressed)
+            .expect("detached handoff");
+        assert_eq!(detached_randomness, resident_randomness);
+        assert_eq!(detached_residual.claimed_sum(), resident_residual.claimed_sum());
+        assert_eq!(detached_residual.evals(), resident_residual.evals());
+        assert_eq!(detached_residual.weights(), resident_residual.weights());
     }
 
     proptest! {

@@ -2486,18 +2486,6 @@ fn derive_aggregate_threshold_share_trace_witness_layout(
     })
 }
 
-#[cfg(test)]
-pub(crate) fn aggregate_threshold_share_trace_witness_structure_memory_accounting(
-    input: &CommittedMaterialRelationPlanInput,
-    context: &RelationPlanCheckContext,
-) -> Result<CommittedMaterialTraceWitnessStructureMemoryAccounting, RelationPlanError> {
-    let layout = derive_aggregate_threshold_share_trace_witness_layout(input, context)?;
-    CommittedMaterialTraceWitnessStructureMemoryAccounting::from_catalog_dimensions(
-        layout.resolved_moduli.len(),
-        &layout.ordered_recipes,
-    )
-}
-
 pub(crate) fn derive_aggregate_threshold_share_trace_witness_provider(
     input: &CommittedMaterialRelationPlanInput,
     context: &RelationPlanCheckContext,

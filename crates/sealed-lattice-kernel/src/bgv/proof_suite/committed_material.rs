@@ -904,11 +904,6 @@ impl CommittedMaterialTree {
     }
 
     #[cfg(test)]
-    pub(crate) const fn material_context_hash(&self) -> [u8; 64] {
-        self.material_context_hash
-    }
-
-    #[cfg(test)]
     pub(crate) fn masked_coefficients_by_physical_column(
         &self,
     ) -> &[Zeroizing<Vec<ProofBaseFieldElement>>] {

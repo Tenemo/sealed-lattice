@@ -200,7 +200,6 @@ pub(super) fn encode_row<'seed>(
     Ok(Radix2Bowers.coset_dft(coefficients, Goldilocks::GENERATOR))
 }
 
-#[cfg(test)]
 pub(super) fn padded_row_coefficients<'seed>(
     geometry: RowEncodingGeometry,
     row_index: usize,

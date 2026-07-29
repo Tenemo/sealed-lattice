@@ -13,6 +13,8 @@ const PROOF_MASK_RANDOMNESS_PURPOSE_CLASSES: [u16; 3] = [
     TELESCOPING_MASK_RANDOMNESS_PURPOSE_CLASS,
     OPENING_MASK_RANDOMNESS_PURPOSE_CLASS,
 ];
+#[cfg(test)]
+pub(crate) const HIDING_ARGUMENT_RANDOMNESS_PURPOSE_CLASS: u16 = 4;
 
 #[derive(Clone, Copy)]
 struct ProofRandomnessAssignment {
@@ -21,7 +23,7 @@ struct ProofRandomnessAssignment {
 
 impl ProofRandomnessAssignment {
     const fn contains(self, purpose: u16) -> bool {
-        purpose == PRIVATE_PROOF_SALT_PURPOSE || matches!(purpose, 1..=3)
+        purpose == PRIVATE_PROOF_SALT_PURPOSE || matches!(purpose, 1..=4)
     }
 }
 
@@ -102,6 +104,7 @@ mod tests {
     #[serde(rename_all = "camelCase")]
     struct ProofRandomnessCoordinatesVector {
         private_proof_salt_purpose: u16,
+        hiding_argument_purpose: u16,
         mask_purpose_classes: ProofRandomnessPurposeClassesVector,
         families: Vec<ProofRandomnessAssignmentVector>,
     }
@@ -123,7 +126,15 @@ mod tests {
             ));
             assert!(common_proof_randomness_purpose_is_assigned(
                 assignment.family_schema_identifier,
+                HIDING_ARGUMENT_RANDOMNESS_PURPOSE_CLASS,
+            ));
+            assert!(common_proof_randomness_purpose_is_assigned(
+                assignment.family_schema_identifier,
                 PRIVATE_PROOF_SALT_PURPOSE,
+            ));
+            assert!(!common_proof_randomness_purpose_is_assigned(
+                assignment.family_schema_identifier,
+                5,
             ));
             assert!(!common_proof_randomness_purpose_is_assigned(
                 assignment.family_schema_identifier,
@@ -144,7 +155,8 @@ mod tests {
             ));
         }
         assert!(!common_proof_randomness_purpose_is_assigned(0xffff, 1));
-        assert!(!common_proof_randomness_purpose_is_assigned(0x1211, 4));
+        assert!(!common_proof_randomness_purpose_is_assigned(0x1212, 4));
+        assert!(!common_proof_randomness_purpose_is_assigned(0x1211, 5));
         assert!(!common_proof_randomness_purpose_is_assigned(0x1217, 41));
     }
 
@@ -166,6 +178,10 @@ mod tests {
                 vector.mask_purpose_classes.opening,
             ],
             PROOF_MASK_RANDOMNESS_PURPOSE_CLASSES,
+        );
+        assert_eq!(
+            vector.hiding_argument_purpose,
+            HIDING_ARGUMENT_RANDOMNESS_PURPOSE_CLASS,
         );
         assert_eq!(vector.families.len(), PROOF_RANDOMNESS_ASSIGNMENTS.len());
 

@@ -12,7 +12,6 @@ use crate::{
 
 use super::{
     authority::{
-        PreparedVerifiedAcceptedSetupAuthorityDestination,
         VerifiedAcceptedSetupAuthorityBorrowedInput, VerifiedAcceptedSetupAuthorityHandle,
         VerifiedAcceptedSetupAuthorityInput, VerifiedAcceptedSetupParticipantReleaseMaterial,
         VerifiedAcceptedSetupParticipantTargetReleaseSource,
@@ -44,7 +43,6 @@ pub(in crate::bgv) struct VerifiedAcceptedSetupFinalizationInput {
 }
 
 struct VerifiedAcceptedSetupFinalizationPreflight {
-    destination: Option<PreparedVerifiedAcceptedSetupAuthorityDestination>,
     expected_terminal_package_authorization_hash: Hash512,
     expected_action_randomness_authorizations: Vec<Hash512>,
     ordered_participant_identities: Vec<ParticipantIdentity>,
@@ -76,7 +74,7 @@ pub(in crate::bgv) fn finalize_verified_accepted_setup(
     terminal_package_reservation_handles: &[u32],
     input: &RefCell<Option<VerifiedAcceptedSetupFinalizationInput>>,
 ) -> Result<VerifiedAcceptedSetupAuthorityHandle, u32> {
-    let mut preflight = preflight_verified_accepted_setup_finalization(input)?;
+    let preflight = preflight_verified_accepted_setup_finalization(input)?;
 
     commit_accepted_setup_state_reservations(
         state_session_handle,
@@ -130,42 +128,40 @@ pub(in crate::bgv) fn finalize_verified_accepted_setup(
                 return Err(refusal_status(RefusalReason::WrongContext));
             }
 
-            {
+            let destination = {
                 let borrowed_input = input.borrow();
                 let borrowed_input = borrowed_input
                     .as_ref()
                     .ok_or_else(|| refusal_status(RefusalReason::ConsumedState))?;
                 let vss_qualification = &borrowed_input.vss_qualification;
                 let public_proof_catalog = &borrowed_input.public_proof_catalog;
-                preflight.destination = Some(
-                    preflight_verified_accepted_setup_authority_destination(
-                        VerifiedAcceptedSetupAuthorityBorrowedInput {
-                            protocol_version: preflight.protocol_version,
-                            suite_identifier: preflight.suite_identifier,
-                            ceremony_context_hash: preflight.ceremony_context_hash,
-                            action_context_hash: preflight.action_context_hash,
-                            manifest_hash: preflight.manifest_hash,
-                            roster_hash: preflight.roster_hash,
-                            setup_proof_context_hash: preflight.setup_proof_context_hash,
-                            ring_degree: POLYNOMIAL_DEGREE,
-                            ordered_data_modulus_indices: &preflight.ordered_data_modulus_indices,
-                            ordered_data_moduli: &preflight.ordered_data_moduli,
-                            participant_release_materials: vss_qualification
-                                .participant_release_materials(),
-                            participant_target_release_sources: slice::from_ref(
-                                vss_qualification.local_target_release_source(),
-                            ),
-                            collective_public_key_full_object_digest: preflight
-                                .collective_public_key_full_object_digest,
-                            collective_public_key_b_polynomials: &preflight
-                                .collective_public_key_b_polynomials,
-                            public_setup_seed: preflight.public_setup_seed,
-                        },
-                        public_proof_catalog.verified_evaluator_key_store(),
-                    )
-                    .map_err(|_| refusal_status(RefusalReason::WrongContext))?,
-                );
-            }
+                preflight_verified_accepted_setup_authority_destination(
+                    VerifiedAcceptedSetupAuthorityBorrowedInput {
+                        protocol_version: preflight.protocol_version,
+                        suite_identifier: preflight.suite_identifier,
+                        ceremony_context_hash: preflight.ceremony_context_hash,
+                        action_context_hash: preflight.action_context_hash,
+                        manifest_hash: preflight.manifest_hash,
+                        roster_hash: preflight.roster_hash,
+                        setup_proof_context_hash: preflight.setup_proof_context_hash,
+                        ring_degree: POLYNOMIAL_DEGREE,
+                        ordered_data_modulus_indices: &preflight.ordered_data_modulus_indices,
+                        ordered_data_moduli: &preflight.ordered_data_moduli,
+                        participant_release_materials: vss_qualification
+                            .participant_release_materials(),
+                        participant_target_release_sources: slice::from_ref(
+                            vss_qualification.local_target_release_source(),
+                        ),
+                        collective_public_key_full_object_digest: preflight
+                            .collective_public_key_full_object_digest,
+                        collective_public_key_b_polynomials: &preflight
+                            .collective_public_key_b_polynomials,
+                        public_setup_seed: preflight.public_setup_seed,
+                    },
+                    public_proof_catalog.verified_evaluator_key_store(),
+                )
+                .map_err(|_| refusal_status(RefusalReason::WrongContext))?
+            };
 
             let VerifiedAcceptedSetupFinalizationInput {
                 package: _,
@@ -206,11 +202,7 @@ pub(in crate::bgv) fn finalize_verified_accepted_setup(
                 public_setup_seed: preflight.public_setup_seed,
             };
             Ok((
-                preflight
-                    .destination
-                    .take()
-                    .expect("authority destination was reserved before source consumption")
-                    .complete(authority_input, verified_evaluator_key_store),
+                destination.complete(authority_input, verified_evaluator_key_store),
                 complaint_resolution_handle,
             ))
         },
@@ -307,7 +299,6 @@ fn preflight_verified_accepted_setup_finalization(
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(VerifiedAcceptedSetupFinalizationPreflight {
-        destination: None,
         expected_terminal_package_authorization_hash,
         expected_action_randomness_authorizations,
         ordered_participant_identities: public_randomness.ordered_participant_identities().to_vec(),

@@ -373,7 +373,7 @@ pub(crate) struct CommonProofBoundTreeLeafSaltRequest {
 }
 
 impl CommonProofBoundTreeLeafSaltRequest {
-    pub(super) const fn new(
+    pub(crate) const fn new(
         request_context: CommonProofSourcePolynomialRequestContext,
         tree_catalog_index: u16,
         leaf_index: u64,
@@ -413,16 +413,6 @@ impl ProvidedCommonProofSourcePolynomial {
             polynomial,
             replay_identity,
         }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn into_parts_for_test(
-        self,
-    ) -> (
-        CommonProofSourcePolynomial,
-        CommonProofSourcePolynomialReplayIdentity,
-    ) {
-        (self.polynomial, self.replay_identity)
     }
 }
 
@@ -525,87 +515,6 @@ pub(crate) trait CommonProofSourcePolynomialProvider {
 
     fn finish_bound_tree_leaf_salts(&mut self) -> Result<(), CommonProofProverError> {
         Ok(())
-    }
-
-    /// Rewinds only the authenticated persistent-salt traversal after one
-    /// exact completed pass. Providers without committed-material trees have
-    /// no salt state and therefore complete this operation trivially.
-    fn rewind_bound_tree_leaf_salts(&mut self) -> Result<(), CommonProofProverError> {
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-pub(crate) struct ResidentCommonProofSourcePolynomialProvider {
-    columns: BTreeMap<u32, CommonProofSourcePolynomial>,
-}
-
-#[cfg(test)]
-impl ResidentCommonProofSourcePolynomialProvider {
-    pub(crate) const fn new(columns: BTreeMap<u32, CommonProofSourcePolynomial>) -> Self {
-        Self { columns }
-    }
-}
-
-#[cfg(test)]
-impl CommonProofSourcePolynomialProvider for ResidentCommonProofSourcePolynomialProvider {
-    fn memory_accounting(
-        &self,
-    ) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
-        let maximum_returned_source_polynomial_byte_length = self
-            .columns
-            .values()
-            .map(CommonProofSourcePolynomial::resident_payload_byte_length)
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .max()
-            .unwrap_or(0);
-        let retained_polynomial_byte_length =
-            self.columns.values().try_fold(0_u64, |total, polynomial| {
-                total
-                    .checked_add(polynomial.resident_payload_byte_length()?)
-                    .ok_or(CommonProofProverError::CountOverflow)
-            })?;
-        Ok(CommonProofSourceProviderMemoryAccounting::new(
-            retained_polynomial_byte_length,
-            0,
-            0,
-            maximum_returned_source_polynomial_byte_length,
-        ))
-    }
-
-    fn poll_source_polynomial(
-        &mut self,
-        request: CommonProofSourcePolynomialRequest<'_>,
-    ) -> Result<CommonProofSourcePolynomialProviderPoll, CommonProofProverError> {
-        const TEST_SOURCE_REPLAY_IDENTITY_DOMAIN: &str =
-            "sealed-lattice/common-proof/test-source-replay-identity/v1";
-        let polynomial = self
-            .columns
-            .remove(&request.column_ordinal())
-            .ok_or(CommonProofProverError::InvalidColumn)?;
-        let replay_identity = CommonProofSourcePolynomialReplayIdentity::from_authenticated_source(
-            crate::hashing::hash_framed_parts_512(
-                TEST_SOURCE_REPLAY_IDENTITY_DOMAIN,
-                &[
-                    &request.suite_identifier(),
-                    &request.application_statement_hash(),
-                    &request.relation_plan_variant_hash(),
-                    &request.column_ordinal().to_le_bytes(),
-                ],
-            ),
-        )?;
-        Ok(CommonProofSourcePolynomialProviderPoll::Ready(
-            ProvidedCommonProofSourcePolynomial::new(polynomial, replay_identity),
-        ))
-    }
-
-    fn finish(&mut self) -> Result<(), CommonProofProverError> {
-        if self.columns.is_empty() {
-            Ok(())
-        } else {
-            Err(CommonProofProverError::InvalidColumn)
-        }
     }
 }
 
@@ -1339,11 +1248,6 @@ where
                     ));
                 }
             }
-            Some(_) => {
-                return Err(CommonProofPrivateCoinError::Prover(
-                    CommonProofProverError::InvalidTree,
-                ));
-            }
             None => {
                 if columns[column_index].is_none() {
                     return Err(CommonProofPrivateCoinError::Prover(
@@ -1494,6 +1398,58 @@ pub(crate) fn integer_lift_derived_columns(
         return Err(CommonProofProverError::InvalidColumn);
     }
     Ok((reversed_columns_by_source, auxiliary_columns))
+}
+
+pub(crate) fn ordered_integer_lift_auxiliary_column_ordinals(
+    variant: &RelationPlanVariant,
+) -> Result<Vec<u32>, CommonProofProverError> {
+    let mut ordered_columns = Vec::new();
+    let mut unique_columns = BTreeSet::new();
+    let mut append = |column_ordinal| {
+        if unique_columns.insert(column_ordinal) {
+            ordered_columns.push(column_ordinal);
+        }
+        Ok::<(), CommonProofProverError>(())
+    };
+    for batch in variant.ordered_integer_lift_batches() {
+        for descriptor in &batch.ordered_negacyclic_automorphism_permutations {
+            for column_ordinal in [
+                descriptor.source_product_before_column_ordinal,
+                descriptor.source_low_product_column_ordinal,
+                descriptor.target_product_before_column_ordinal,
+                descriptor.target_low_product_column_ordinal,
+            ] {
+                append(column_ordinal)?;
+            }
+        }
+        for binding in &batch.ordered_reversed_column_bindings {
+            append(binding.source_prefix_evaluation_column_ordinal)?;
+            append(binding.reversed_suffix_evaluation_column_ordinal)?;
+        }
+        for component in &batch.ordered_components {
+            for descriptor in &component.ordered_convolution_products {
+                append(descriptor.suffix_evaluation_column_ordinal)?;
+                append(descriptor.reversed_transpose_column_ordinal)?;
+            }
+            for descriptor in &component.ordered_full_ring_negacyclic_products {
+                for column_ordinal in [
+                    descriptor.multiplicand_low_suffix_evaluation_column_ordinal,
+                    descriptor.multiplicand_high_suffix_evaluation_column_ordinal,
+                    descriptor.reversed_multiplier_low_transpose_column_ordinal,
+                    descriptor.reversed_multiplier_high_transpose_column_ordinal,
+                ] {
+                    append(column_ordinal)?;
+                }
+            }
+            append(component.linear_evaluation_column_ordinal)?;
+            append(component.product_accumulator_column_ordinal)?;
+        }
+    }
+    let expected_columns = integer_lift_derived_columns(variant)?.1;
+    if unique_columns != expected_columns {
+        return Err(CommonProofProverError::InvalidColumn);
+    }
+    Ok(ordered_columns)
 }
 
 fn trace_masks_by_column(
@@ -1929,23 +1885,6 @@ pub(super) fn convolution_transpose_rows(
                     .subtract(wrap_factor.multiply(multiplicand_rows[row_ordinal]));
             }
         }
-        #[cfg(test)]
-        RelationIntegerLiftConvolutionKind::OrdinaryLowHalf => {
-            transpose_rows[last] = suffix_rows[0];
-            for row_ordinal in (0..last).rev() {
-                transpose_rows[row_ordinal] = theta
-                    .multiply(transpose_rows[row_ordinal + 1])
-                    .subtract(theta_to_row_count.multiply(multiplicand_rows[row_ordinal + 1]));
-            }
-        }
-        #[cfg(test)]
-        RelationIntegerLiftConvolutionKind::OrdinaryHighHalf => {
-            transpose_rows[last] = ProofBaseFieldElement::ZERO;
-            for row_ordinal in (0..last).rev() {
-                transpose_rows[row_ordinal] = multiplicand_rows[row_ordinal + 1]
-                    .add(theta.multiply(transpose_rows[row_ordinal + 1]));
-            }
-        }
     }
     Ok(transpose_rows)
 }
@@ -2115,6 +2054,1013 @@ impl AuxiliaryColumnSynthesisTask {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AuxiliaryColumnReconstructionKind {
+    NegacyclicAutomorphismPermutation {
+        permutation_index: usize,
+        output_index: u8,
+    },
+    ReversedBindingPrefix {
+        binding_index: usize,
+    },
+    ReversedBindingSuffix {
+        binding_index: usize,
+    },
+    ConvolutionSuffix {
+        component_index: usize,
+        product_index: usize,
+    },
+    ConvolutionTranspose {
+        component_index: usize,
+        product_index: usize,
+    },
+    FullRingSuffix {
+        component_index: usize,
+        product_index: usize,
+        high_half: bool,
+    },
+    FullRingTranspose {
+        component_index: usize,
+        product_index: usize,
+        high_coordinate: bool,
+    },
+    LinearEvaluation {
+        component_index: usize,
+    },
+    ProductAccumulator {
+        component_index: usize,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct AuxiliaryColumnReconstructionLocator {
+    batch_index: usize,
+    kind: AuxiliaryColumnReconstructionKind,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum AuxiliaryColumnReconstructionDependency {
+    Unique,
+    FullRingSuffix {
+        batch_key: (SuiteModulusReference, u16),
+        source_column_ordinal: u32,
+    },
+    FullRingTranspose {
+        batch_key: (SuiteModulusReference, u16),
+        selected_half: RelationIntegerLiftFullRingHalf,
+        multiplicand_columns: [u32; 2],
+        low_coordinate: bool,
+    },
+    LinearEvaluation {
+        batch_key: (SuiteModulusReference, u16),
+        ordered_terms: Vec<RelationIntegerLiftLinearTermDescriptor>,
+    },
+    ProductAccumulator {
+        batch_key: (SuiteModulusReference, u16),
+        ordered_convolution_products: Vec<RelationIntegerLiftConvolutionProductDescriptor>,
+        ordered_full_ring_products: Vec<RelationIntegerLiftFullRingNegacyclicProductDescriptor>,
+    },
+}
+
+impl AuxiliaryColumnReconstructionDependency {
+    const fn is_shareable(&self) -> bool {
+        !matches!(self, Self::Unique)
+    }
+}
+
+/// Compact, checked locators for reconstructing challenge-derived auxiliary
+/// columns from their persisted pre-challenge dependencies. The catalog owns
+/// no witness rows and does not contain private mask material.
+#[derive(Clone)]
+pub(crate) struct CommonProofAuxiliaryColumnReconstructionCatalog {
+    locators: BTreeMap<u32, AuxiliaryColumnReconstructionLocator>,
+}
+
+impl CommonProofAuxiliaryColumnReconstructionCatalog {
+    pub(crate) fn new(variant: &RelationPlanVariant) -> Result<Self, CommonProofProverError> {
+        let (_, expected_auxiliary_columns) = integer_lift_derived_columns(variant)?;
+        let mut locators = BTreeMap::new();
+        let mut dependencies = BTreeMap::new();
+        let mut register = |column_ordinal,
+                            locator,
+                            dependency: AuxiliaryColumnReconstructionDependency|
+         -> Result<(), CommonProofProverError> {
+            match dependencies.get(&column_ordinal) {
+                None => {
+                    dependencies.insert(column_ordinal, dependency);
+                    if locators.insert(column_ordinal, locator).is_some() {
+                        return Err(CommonProofProverError::InvalidColumn);
+                    }
+                }
+                Some(observed) if dependency.is_shareable() && observed == &dependency => {}
+                Some(_) => return Err(CommonProofProverError::InvalidColumn),
+            }
+            Ok(())
+        };
+
+        for (batch_index, batch) in variant.ordered_integer_lift_batches().iter().enumerate() {
+            let batch_key = (batch.modulus_reference(), batch.challenge_ordinal());
+            for (permutation_index, descriptor) in batch
+                .ordered_negacyclic_automorphism_permutations
+                .iter()
+                .enumerate()
+            {
+                for (output_index, column_ordinal) in [
+                    descriptor.source_product_before_column_ordinal,
+                    descriptor.source_low_product_column_ordinal,
+                    descriptor.target_product_before_column_ordinal,
+                    descriptor.target_low_product_column_ordinal,
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    register(
+                        column_ordinal,
+                        AuxiliaryColumnReconstructionLocator {
+                            batch_index,
+                            kind: AuxiliaryColumnReconstructionKind::NegacyclicAutomorphismPermutation {
+                                permutation_index,
+                                output_index: u8::try_from(output_index)
+                                    .map_err(|_| CommonProofProverError::CountOverflow)?,
+                            },
+                        },
+                        AuxiliaryColumnReconstructionDependency::Unique,
+                    )?;
+                }
+            }
+            for (binding_index, binding) in
+                batch.ordered_reversed_column_bindings.iter().enumerate()
+            {
+                register(
+                    binding.source_prefix_evaluation_column_ordinal,
+                    AuxiliaryColumnReconstructionLocator {
+                        batch_index,
+                        kind: AuxiliaryColumnReconstructionKind::ReversedBindingPrefix {
+                            binding_index,
+                        },
+                    },
+                    AuxiliaryColumnReconstructionDependency::Unique,
+                )?;
+                register(
+                    binding.reversed_suffix_evaluation_column_ordinal,
+                    AuxiliaryColumnReconstructionLocator {
+                        batch_index,
+                        kind: AuxiliaryColumnReconstructionKind::ReversedBindingSuffix {
+                            binding_index,
+                        },
+                    },
+                    AuxiliaryColumnReconstructionDependency::Unique,
+                )?;
+            }
+            for (component_index, component) in batch.ordered_components.iter().enumerate() {
+                for (product_index, descriptor) in
+                    component.ordered_convolution_products.iter().enumerate()
+                {
+                    for (column_ordinal, kind) in [
+                        (
+                            descriptor.suffix_evaluation_column_ordinal,
+                            AuxiliaryColumnReconstructionKind::ConvolutionSuffix {
+                                component_index,
+                                product_index,
+                            },
+                        ),
+                        (
+                            descriptor.reversed_transpose_column_ordinal,
+                            AuxiliaryColumnReconstructionKind::ConvolutionTranspose {
+                                component_index,
+                                product_index,
+                            },
+                        ),
+                    ] {
+                        register(
+                            column_ordinal,
+                            AuxiliaryColumnReconstructionLocator { batch_index, kind },
+                            AuxiliaryColumnReconstructionDependency::Unique,
+                        )?;
+                    }
+                }
+                for (product_index, descriptor) in component
+                    .ordered_full_ring_negacyclic_products
+                    .iter()
+                    .enumerate()
+                {
+                    for (column_ordinal, high_half, source_column_ordinal) in [
+                        (
+                            descriptor.multiplicand_low_suffix_evaluation_column_ordinal,
+                            false,
+                            descriptor.multiplicand_low_column_ordinal,
+                        ),
+                        (
+                            descriptor.multiplicand_high_suffix_evaluation_column_ordinal,
+                            true,
+                            descriptor.multiplicand_high_column_ordinal,
+                        ),
+                    ] {
+                        register(
+                            column_ordinal,
+                            AuxiliaryColumnReconstructionLocator {
+                                batch_index,
+                                kind: AuxiliaryColumnReconstructionKind::FullRingSuffix {
+                                    component_index,
+                                    product_index,
+                                    high_half,
+                                },
+                            },
+                            AuxiliaryColumnReconstructionDependency::FullRingSuffix {
+                                batch_key,
+                                source_column_ordinal,
+                            },
+                        )?;
+                    }
+                    for (column_ordinal, high_coordinate) in [
+                        (
+                            descriptor.reversed_multiplier_low_transpose_column_ordinal,
+                            false,
+                        ),
+                        (
+                            descriptor.reversed_multiplier_high_transpose_column_ordinal,
+                            true,
+                        ),
+                    ] {
+                        register(
+                            column_ordinal,
+                            AuxiliaryColumnReconstructionLocator {
+                                batch_index,
+                                kind: AuxiliaryColumnReconstructionKind::FullRingTranspose {
+                                    component_index,
+                                    product_index,
+                                    high_coordinate,
+                                },
+                            },
+                            AuxiliaryColumnReconstructionDependency::FullRingTranspose {
+                                batch_key,
+                                selected_half: descriptor.selected_half,
+                                multiplicand_columns: [
+                                    descriptor.multiplicand_low_column_ordinal,
+                                    descriptor.multiplicand_high_column_ordinal,
+                                ],
+                                low_coordinate: !high_coordinate,
+                            },
+                        )?;
+                    }
+                }
+                register(
+                    component.linear_evaluation_column_ordinal,
+                    AuxiliaryColumnReconstructionLocator {
+                        batch_index,
+                        kind: AuxiliaryColumnReconstructionKind::LinearEvaluation {
+                            component_index,
+                        },
+                    },
+                    AuxiliaryColumnReconstructionDependency::LinearEvaluation {
+                        batch_key,
+                        ordered_terms: component.ordered_linear_terms.clone(),
+                    },
+                )?;
+                register(
+                    component.product_accumulator_column_ordinal,
+                    AuxiliaryColumnReconstructionLocator {
+                        batch_index,
+                        kind: AuxiliaryColumnReconstructionKind::ProductAccumulator {
+                            component_index,
+                        },
+                    },
+                    AuxiliaryColumnReconstructionDependency::ProductAccumulator {
+                        batch_key,
+                        ordered_convolution_products: component
+                            .ordered_convolution_products
+                            .clone(),
+                        ordered_full_ring_products: component
+                            .ordered_full_ring_negacyclic_products
+                            .clone(),
+                    },
+                )?;
+            }
+        }
+        if locators.keys().copied().collect::<BTreeSet<_>>() != expected_auxiliary_columns
+            || dependencies.keys().copied().collect::<BTreeSet<_>>() != expected_auxiliary_columns
+        {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        Ok(Self { locators })
+    }
+
+    pub(crate) fn contains(&self, column_ordinal: u32) -> bool {
+        self.locators.contains_key(&column_ordinal)
+    }
+
+    pub(crate) fn ordered_column_ordinals(&self) -> impl Iterator<Item = u32> + '_ {
+        self.locators.keys().copied()
+    }
+
+    fn locator(
+        &self,
+        column_ordinal: u32,
+    ) -> Result<AuxiliaryColumnReconstructionLocator, CommonProofProverError> {
+        self.locators
+            .get(&column_ordinal)
+            .copied()
+            .ok_or(CommonProofProverError::InvalidColumn)
+    }
+
+    pub(crate) fn input_column_ordinals(
+        &self,
+        variant: &RelationPlanVariant,
+        column_ordinal: u32,
+    ) -> Result<Vec<u32>, CommonProofProverError> {
+        auxiliary_reconstruction_input_column_ordinals(variant, self.locator(column_ordinal)?)
+    }
+}
+
+fn reconstruction_component<'variant>(
+    variant: &'variant RelationPlanVariant,
+    locator: AuxiliaryColumnReconstructionLocator,
+    component_index: usize,
+) -> Result<&'variant RelationIntegerLiftComponentDescriptor, CommonProofProverError> {
+    variant
+        .ordered_integer_lift_batches()
+        .get(locator.batch_index)
+        .and_then(|batch| batch.ordered_components.get(component_index))
+        .ok_or(CommonProofProverError::InvalidColumn)
+}
+
+fn unique_column_ordinals(columns: impl IntoIterator<Item = u32>) -> Vec<u32> {
+    let mut observed = BTreeSet::new();
+    columns
+        .into_iter()
+        .filter(|column_ordinal| observed.insert(*column_ordinal))
+        .collect()
+}
+
+fn auxiliary_reconstruction_input_column_ordinals(
+    variant: &RelationPlanVariant,
+    locator: AuxiliaryColumnReconstructionLocator,
+) -> Result<Vec<u32>, CommonProofProverError> {
+    let batch = variant
+        .ordered_integer_lift_batches()
+        .get(locator.batch_index)
+        .ok_or(CommonProofProverError::InvalidColumn)?;
+    let columns = match locator.kind {
+        AuxiliaryColumnReconstructionKind::NegacyclicAutomorphismPermutation {
+            permutation_index,
+            ..
+        } => {
+            let descriptor = batch
+                .ordered_negacyclic_automorphism_permutations
+                .get(permutation_index)
+                .ok_or(CommonProofProverError::InvalidColumn)?;
+            vec![
+                descriptor.source_low_column_ordinal,
+                descriptor.source_high_column_ordinal,
+                descriptor.target_low_column_ordinal,
+                descriptor.target_high_column_ordinal,
+                descriptor.mapped_low_position_column_ordinal,
+                descriptor.low_negation_bit_column_ordinal,
+                descriptor.mapped_high_position_column_ordinal,
+                descriptor.high_negation_bit_column_ordinal,
+                descriptor.target_low_position_column_ordinal,
+                descriptor.target_high_position_column_ordinal,
+            ]
+        }
+        AuxiliaryColumnReconstructionKind::ReversedBindingPrefix { binding_index } => {
+            vec![
+                batch
+                    .ordered_reversed_column_bindings
+                    .get(binding_index)
+                    .ok_or(CommonProofProverError::InvalidColumn)?
+                    .source_column_ordinal,
+            ]
+        }
+        AuxiliaryColumnReconstructionKind::ReversedBindingSuffix { binding_index } => {
+            vec![
+                batch
+                    .ordered_reversed_column_bindings
+                    .get(binding_index)
+                    .ok_or(CommonProofProverError::InvalidColumn)?
+                    .reversed_column_ordinal,
+            ]
+        }
+        AuxiliaryColumnReconstructionKind::ConvolutionSuffix {
+            component_index,
+            product_index,
+        }
+        | AuxiliaryColumnReconstructionKind::ConvolutionTranspose {
+            component_index,
+            product_index,
+        } => vec![
+            reconstruction_component(variant, locator, component_index)?
+                .ordered_convolution_products
+                .get(product_index)
+                .ok_or(CommonProofProverError::InvalidColumn)?
+                .multiplicand_column_ordinal,
+        ],
+        AuxiliaryColumnReconstructionKind::FullRingSuffix {
+            component_index,
+            product_index,
+            high_half,
+        } => {
+            let descriptor = reconstruction_component(variant, locator, component_index)?
+                .ordered_full_ring_negacyclic_products
+                .get(product_index)
+                .ok_or(CommonProofProverError::InvalidColumn)?;
+            vec![if high_half {
+                descriptor.multiplicand_high_column_ordinal
+            } else {
+                descriptor.multiplicand_low_column_ordinal
+            }]
+        }
+        AuxiliaryColumnReconstructionKind::FullRingTranspose {
+            component_index,
+            product_index,
+            ..
+        } => {
+            let descriptor = reconstruction_component(variant, locator, component_index)?
+                .ordered_full_ring_negacyclic_products
+                .get(product_index)
+                .ok_or(CommonProofProverError::InvalidColumn)?;
+            vec![
+                descriptor.multiplicand_low_column_ordinal,
+                descriptor.multiplicand_high_column_ordinal,
+            ]
+        }
+        AuxiliaryColumnReconstructionKind::LinearEvaluation { component_index } => {
+            reconstruction_component(variant, locator, component_index)?
+                .ordered_linear_terms
+                .iter()
+                .map(|term| term.column_ordinal)
+                .collect()
+        }
+        AuxiliaryColumnReconstructionKind::ProductAccumulator { component_index } => {
+            let component = reconstruction_component(variant, locator, component_index)?;
+            component
+                .ordered_convolution_products
+                .iter()
+                .flat_map(|product| {
+                    [
+                        product.multiplicand_column_ordinal,
+                        product.reversed_multiplier_column_ordinal,
+                    ]
+                })
+                .chain(
+                    component
+                        .ordered_full_ring_negacyclic_products
+                        .iter()
+                        .flat_map(|product| {
+                            [
+                                product.multiplicand_low_column_ordinal,
+                                product.multiplicand_high_column_ordinal,
+                                product.reversed_multiplier_low_column_ordinal,
+                                product.reversed_multiplier_high_column_ordinal,
+                            ]
+                        }),
+                )
+                .collect()
+        }
+    };
+    Ok(unique_column_ordinals(columns))
+}
+
+#[derive(Clone)]
+enum AuxiliaryColumnReconstructionProgram {
+    NegacyclicAutomorphismPermutation {
+        descriptor: RelationIntegerLiftNegacyclicAutomorphismPermutationDescriptor,
+        output_index: u8,
+        theta: ProofBaseFieldElement,
+    },
+    PrefixEvaluation {
+        source_column_ordinal: u32,
+        theta: ProofBaseFieldElement,
+    },
+    SuffixEvaluation {
+        source_column_ordinal: u32,
+        theta: ProofBaseFieldElement,
+    },
+    ConvolutionTranspose {
+        descriptor: RelationIntegerLiftConvolutionProductDescriptor,
+        theta: ProofBaseFieldElement,
+    },
+    FullRingTranspose {
+        descriptor: RelationIntegerLiftFullRingNegacyclicProductDescriptor,
+        high_coordinate: bool,
+        theta: ProofBaseFieldElement,
+    },
+    LinearEvaluation {
+        descriptor: RelationIntegerLiftComponentDescriptor,
+        theta: ProofBaseFieldElement,
+    },
+    ProductAccumulator {
+        descriptor: RelationIntegerLiftComponentDescriptor,
+        theta: ProofBaseFieldElement,
+    },
+}
+
+fn auxiliary_reconstruction_program(
+    variant: &RelationPlanVariant,
+    context: &RelationPlanCheckContext,
+    assignments: &[RelationApplicationChallengeAssignment],
+    locator: AuxiliaryColumnReconstructionLocator,
+) -> Result<AuxiliaryColumnReconstructionProgram, CommonProofProverError> {
+    let batch = variant
+        .ordered_integer_lift_batches()
+        .get(locator.batch_index)
+        .ok_or(CommonProofProverError::InvalidColumn)?;
+    let theta = integer_lift_theta(
+        variant,
+        context,
+        batch.modulus_reference(),
+        batch.challenge_ordinal(),
+        assignments,
+    )?;
+    match locator.kind {
+        AuxiliaryColumnReconstructionKind::NegacyclicAutomorphismPermutation {
+            permutation_index,
+            output_index,
+        } => Ok(
+            AuxiliaryColumnReconstructionProgram::NegacyclicAutomorphismPermutation {
+                descriptor: batch
+                    .ordered_negacyclic_automorphism_permutations
+                    .get(permutation_index)
+                    .cloned()
+                    .ok_or(CommonProofProverError::InvalidColumn)?,
+                output_index,
+                theta,
+            },
+        ),
+        AuxiliaryColumnReconstructionKind::ReversedBindingPrefix { binding_index } => {
+            Ok(AuxiliaryColumnReconstructionProgram::PrefixEvaluation {
+                source_column_ordinal: batch
+                    .ordered_reversed_column_bindings
+                    .get(binding_index)
+                    .ok_or(CommonProofProverError::InvalidColumn)?
+                    .source_column_ordinal,
+                theta,
+            })
+        }
+        AuxiliaryColumnReconstructionKind::ReversedBindingSuffix { binding_index } => {
+            Ok(AuxiliaryColumnReconstructionProgram::SuffixEvaluation {
+                source_column_ordinal: batch
+                    .ordered_reversed_column_bindings
+                    .get(binding_index)
+                    .ok_or(CommonProofProverError::InvalidColumn)?
+                    .reversed_column_ordinal,
+                theta,
+            })
+        }
+        AuxiliaryColumnReconstructionKind::ConvolutionSuffix {
+            component_index,
+            product_index,
+        } => Ok(AuxiliaryColumnReconstructionProgram::SuffixEvaluation {
+            source_column_ordinal: reconstruction_component(variant, locator, component_index)?
+                .ordered_convolution_products
+                .get(product_index)
+                .ok_or(CommonProofProverError::InvalidColumn)?
+                .multiplicand_column_ordinal,
+            theta,
+        }),
+        AuxiliaryColumnReconstructionKind::ConvolutionTranspose {
+            component_index,
+            product_index,
+        } => Ok(AuxiliaryColumnReconstructionProgram::ConvolutionTranspose {
+            descriptor: reconstruction_component(variant, locator, component_index)?
+                .ordered_convolution_products
+                .get(product_index)
+                .cloned()
+                .ok_or(CommonProofProverError::InvalidColumn)?,
+            theta,
+        }),
+        AuxiliaryColumnReconstructionKind::FullRingSuffix {
+            component_index,
+            product_index,
+            high_half,
+        } => {
+            let descriptor = reconstruction_component(variant, locator, component_index)?
+                .ordered_full_ring_negacyclic_products
+                .get(product_index)
+                .ok_or(CommonProofProverError::InvalidColumn)?;
+            Ok(AuxiliaryColumnReconstructionProgram::SuffixEvaluation {
+                source_column_ordinal: if high_half {
+                    descriptor.multiplicand_high_column_ordinal
+                } else {
+                    descriptor.multiplicand_low_column_ordinal
+                },
+                theta,
+            })
+        }
+        AuxiliaryColumnReconstructionKind::FullRingTranspose {
+            component_index,
+            product_index,
+            high_coordinate,
+        } => Ok(AuxiliaryColumnReconstructionProgram::FullRingTranspose {
+            descriptor: reconstruction_component(variant, locator, component_index)?
+                .ordered_full_ring_negacyclic_products
+                .get(product_index)
+                .cloned()
+                .ok_or(CommonProofProverError::InvalidColumn)?,
+            high_coordinate,
+            theta,
+        }),
+        AuxiliaryColumnReconstructionKind::LinearEvaluation { component_index } => {
+            Ok(AuxiliaryColumnReconstructionProgram::LinearEvaluation {
+                descriptor: reconstruction_component(variant, locator, component_index)?.clone(),
+                theta,
+            })
+        }
+        AuxiliaryColumnReconstructionKind::ProductAccumulator { component_index } => {
+            Ok(AuxiliaryColumnReconstructionProgram::ProductAccumulator {
+                descriptor: reconstruction_component(variant, locator, component_index)?.clone(),
+                theta,
+            })
+        }
+    }
+}
+
+pub(crate) fn auxiliary_private_mask_tail_coefficient_count(
+    variant: &RelationPlanVariant,
+    column_ordinal: u32,
+) -> Result<Option<usize>, CommonProofProverError> {
+    let masks = trace_masks_by_column(variant)?;
+    let mask = masks.get(&column_ordinal).copied();
+    match (variant.proof_privacy_mode(), mask) {
+        (ProofPrivacyMode::SecretBearing, Some(mask)) => {
+            usize::try_from(mask.mask_degree_bound_exclusive())
+                .map(Some)
+                .map_err(|_| CommonProofProverError::CountOverflow)
+        }
+        (ProofPrivacyMode::PublicOnly, None) => Ok(None),
+        _ => Err(CommonProofProverError::InvalidMask),
+    }
+}
+
+pub(crate) fn extract_auxiliary_private_mask_tail(
+    variant: &RelationPlanVariant,
+    column_ordinal: u32,
+    polynomial: &CommonProofSourcePolynomial,
+) -> Result<CommonProofSourcePolynomial, CommonProofProverError> {
+    let trace_value_count = usize::try_from(variant.trace_domain_size())
+        .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let mask_coefficient_count =
+        auxiliary_private_mask_tail_coefficient_count(variant, column_ordinal)?
+            .ok_or(CommonProofProverError::InvalidMask)?;
+    let CommonProofSourcePolynomial::Base(coefficients) = polynomial else {
+        return Err(CommonProofProverError::InvalidColumn);
+    };
+    let maximum_coefficient_count = trace_value_count
+        .checked_add(mask_coefficient_count)
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    if coefficients.is_empty() || coefficients.len() > maximum_coefficient_count {
+        return Err(CommonProofProverError::InvalidColumn);
+    }
+    let mut tail = Zeroizing::new(Vec::new());
+    tail.try_reserve_exact(mask_coefficient_count)
+        .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
+    for tail_index in 0..mask_coefficient_count {
+        tail.push(
+            coefficients
+                .get(trace_value_count + tail_index)
+                .copied()
+                .unwrap_or(ProofBaseFieldElement::ZERO),
+        );
+    }
+    Ok(CommonProofSourcePolynomial::from_protected_base_coefficients(tail))
+}
+
+/// Reconstructs one auxiliary column from checked pre-challenge inputs and an
+/// encrypted private-mask tail. The trace rows determine the unmasked witness;
+/// the tail restores exactly `witness + (X^H - 1) mask` without deriving any
+/// mask from public data.
+pub(crate) struct CommonProofAuxiliaryColumnReconstructionCursor {
+    program: AuxiliaryColumnReconstructionProgram,
+    ordered_input_column_ordinals: Vec<u32>,
+    next_input_index: usize,
+    input_trace_rows: BTreeMap<u32, ProtectedBaseTraceRows>,
+    trace_domain: ProofEvaluationDomain,
+    relation_context: RelationPlanCheckContext,
+    mask_coefficient_count: usize,
+}
+
+impl CommonProofAuxiliaryColumnReconstructionCursor {
+    pub(crate) fn new(
+        variant: &RelationPlanVariant,
+        relation_context: &RelationPlanCheckContext,
+        application_challenges: &[RelationApplicationChallengeAssignment],
+        catalog: &CommonProofAuxiliaryColumnReconstructionCatalog,
+        target_column_ordinal: u32,
+    ) -> Result<Self, CommonProofProverError> {
+        let locator = catalog.locator(target_column_ordinal)?;
+        let ordered_input_column_ordinals =
+            auxiliary_reconstruction_input_column_ordinals(variant, locator)?;
+        let program = auxiliary_reconstruction_program(
+            variant,
+            relation_context,
+            application_challenges,
+            locator,
+        )?;
+        let trace_domain = ProofEvaluationDomain::new_subgroup(
+            usize::try_from(variant.trace_domain_size())
+                .map_err(|_| CommonProofProverError::CountOverflow)?,
+        )?;
+        let mask_coefficient_count =
+            auxiliary_private_mask_tail_coefficient_count(variant, target_column_ordinal)?
+                .ok_or(CommonProofProverError::InvalidMask)?;
+        Ok(Self {
+            program,
+            ordered_input_column_ordinals,
+            next_input_index: 0,
+            input_trace_rows: BTreeMap::new(),
+            trace_domain,
+            relation_context: relation_context.clone(),
+            mask_coefficient_count,
+        })
+    }
+
+    pub(crate) fn ordered_input_column_ordinals(&self) -> &[u32] {
+        &self.ordered_input_column_ordinals
+    }
+
+    pub(crate) const fn mask_coefficient_count(&self) -> usize {
+        self.mask_coefficient_count
+    }
+
+    pub(crate) fn next_input_column_ordinal(&self) -> Option<u32> {
+        self.ordered_input_column_ordinals
+            .get(self.next_input_index)
+            .copied()
+    }
+
+    pub(crate) fn accept_input_column(
+        &mut self,
+        column_ordinal: u32,
+        polynomial: CommonProofSourcePolynomial,
+    ) -> Result<(), CommonProofProverError> {
+        if self.next_input_column_ordinal() != Some(column_ordinal) {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        let rows = base_trace_rows(&polynomial, self.trace_domain)?;
+        if self.input_trace_rows.insert(column_ordinal, rows).is_some() {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        self.next_input_index = self
+            .next_input_index
+            .checked_add(1)
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        Ok(())
+    }
+
+    fn rows(
+        &self,
+        column_ordinal: u32,
+    ) -> Result<&[ProofBaseFieldElement], CommonProofProverError> {
+        self.input_trace_rows
+            .get(&column_ordinal)
+            .filter(|rows| rows.len() == self.trace_domain.size())
+            .map(|rows| rows.as_slice())
+            .ok_or(CommonProofProverError::InvalidColumn)
+    }
+
+    fn reconstruct_rows(&self) -> Result<ProtectedBaseTraceRows, CommonProofProverError> {
+        if self.next_input_index != self.ordered_input_column_ordinals.len()
+            || self.input_trace_rows.len() != self.ordered_input_column_ordinals.len()
+        {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        match &self.program {
+            AuxiliaryColumnReconstructionProgram::PrefixEvaluation {
+                source_column_ordinal,
+                theta,
+            } => Ok(prefix_evaluation_rows(
+                self.rows(*source_column_ordinal)?,
+                *theta,
+            )),
+            AuxiliaryColumnReconstructionProgram::SuffixEvaluation {
+                source_column_ordinal,
+                theta,
+            } => Ok(suffix_evaluation_rows(
+                self.rows(*source_column_ordinal)?,
+                *theta,
+            )),
+            AuxiliaryColumnReconstructionProgram::ConvolutionTranspose { descriptor, theta } => {
+                let multiplicand_rows = self.rows(descriptor.multiplicand_column_ordinal)?;
+                let suffix_rows = suffix_evaluation_rows(multiplicand_rows, *theta);
+                convolution_transpose_rows(
+                    descriptor.convolution_kind,
+                    multiplicand_rows,
+                    &suffix_rows,
+                    *theta,
+                )
+            }
+            AuxiliaryColumnReconstructionProgram::FullRingTranspose {
+                descriptor,
+                high_coordinate,
+                theta,
+            } => {
+                let low_rows = self.rows(descriptor.multiplicand_low_column_ordinal)?;
+                let high_rows = self.rows(descriptor.multiplicand_high_column_ordinal)?;
+                let low_suffix_rows = suffix_evaluation_rows(low_rows, *theta);
+                let high_suffix_rows = suffix_evaluation_rows(high_rows, *theta);
+                full_ring_transpose_rows(
+                    descriptor.selected_half,
+                    !*high_coordinate,
+                    low_rows,
+                    high_rows,
+                    &low_suffix_rows,
+                    &high_suffix_rows,
+                    *theta,
+                )
+            }
+            AuxiliaryColumnReconstructionProgram::LinearEvaluation { descriptor, theta } => {
+                let mut coefficient_rows =
+                    Zeroizing::new(vec![ProofBaseFieldElement::ZERO; self.trace_domain.size()]);
+                for (row_ordinal, coefficient) in coefficient_rows.iter_mut().enumerate() {
+                    for term in &descriptor.ordered_linear_terms {
+                        *coefficient = coefficient.add(signed_linear_term_row(
+                            term,
+                            row_ordinal,
+                            &self.relation_context,
+                            &self.input_trace_rows,
+                        )?);
+                    }
+                }
+                Ok(suffix_evaluation_rows(&coefficient_rows, *theta))
+            }
+            AuxiliaryColumnReconstructionProgram::ProductAccumulator { descriptor, theta } => {
+                let mut product_sum_rows =
+                    Zeroizing::new(vec![ProofBaseFieldElement::ZERO; self.trace_domain.size()]);
+                for product in &descriptor.ordered_convolution_products {
+                    let multiplicand_rows = self.rows(product.multiplicand_column_ordinal)?;
+                    let reversed_rows = self.rows(product.reversed_multiplier_column_ordinal)?;
+                    let suffix_rows = suffix_evaluation_rows(multiplicand_rows, *theta);
+                    let transpose_rows = convolution_transpose_rows(
+                        product.convolution_kind,
+                        multiplicand_rows,
+                        &suffix_rows,
+                        *theta,
+                    )?;
+                    let offset = base_field_constant(product.multiplier_offset)?;
+                    for row_ordinal in 0..self.trace_domain.size() {
+                        let value = transpose_rows[row_ordinal]
+                            .multiply(reversed_rows[row_ordinal].subtract(offset));
+                        product_sum_rows[row_ordinal] =
+                            product_sum_rows[row_ordinal].add(if product.negative {
+                                value.negate()
+                            } else {
+                                value
+                            });
+                    }
+                }
+                for product in &descriptor.ordered_full_ring_negacyclic_products {
+                    let low_rows = self.rows(product.multiplicand_low_column_ordinal)?;
+                    let high_rows = self.rows(product.multiplicand_high_column_ordinal)?;
+                    let reversed_low_rows =
+                        self.rows(product.reversed_multiplier_low_column_ordinal)?;
+                    let reversed_high_rows =
+                        self.rows(product.reversed_multiplier_high_column_ordinal)?;
+                    let low_suffix_rows = suffix_evaluation_rows(low_rows, *theta);
+                    let high_suffix_rows = suffix_evaluation_rows(high_rows, *theta);
+                    let low_transpose_rows = full_ring_transpose_rows(
+                        product.selected_half,
+                        true,
+                        low_rows,
+                        high_rows,
+                        &low_suffix_rows,
+                        &high_suffix_rows,
+                        *theta,
+                    )?;
+                    let high_transpose_rows = full_ring_transpose_rows(
+                        product.selected_half,
+                        false,
+                        low_rows,
+                        high_rows,
+                        &low_suffix_rows,
+                        &high_suffix_rows,
+                        *theta,
+                    )?;
+                    let low_offset = base_field_constant(product.multiplier_low_offset)?;
+                    let high_offset = base_field_constant(product.multiplier_high_offset)?;
+                    for row_ordinal in 0..self.trace_domain.size() {
+                        let value =
+                            low_transpose_rows[row_ordinal]
+                                .multiply(reversed_low_rows[row_ordinal].subtract(low_offset))
+                                .add(high_transpose_rows[row_ordinal].multiply(
+                                    reversed_high_rows[row_ordinal].subtract(high_offset),
+                                ));
+                        product_sum_rows[row_ordinal] =
+                            product_sum_rows[row_ordinal].add(if product.negative {
+                                value.negate()
+                            } else {
+                                value
+                            });
+                    }
+                }
+                Ok(product_accumulator_rows(&product_sum_rows))
+            }
+            AuxiliaryColumnReconstructionProgram::NegacyclicAutomorphismPermutation {
+                descriptor,
+                output_index,
+                theta,
+            } => {
+                let source_low_rows = self.rows(descriptor.source_low_column_ordinal)?;
+                let source_high_rows = self.rows(descriptor.source_high_column_ordinal)?;
+                let target_low_rows = self.rows(descriptor.target_low_column_ordinal)?;
+                let target_high_rows = self.rows(descriptor.target_high_column_ordinal)?;
+                let mapped_low_position_rows =
+                    self.rows(descriptor.mapped_low_position_column_ordinal)?;
+                let low_negation_bit_rows =
+                    self.rows(descriptor.low_negation_bit_column_ordinal)?;
+                let mapped_high_position_rows =
+                    self.rows(descriptor.mapped_high_position_column_ordinal)?;
+                let high_negation_bit_rows =
+                    self.rows(descriptor.high_negation_bit_column_ordinal)?;
+                let target_low_position_rows =
+                    self.rows(descriptor.target_low_position_column_ordinal)?;
+                let target_high_position_rows =
+                    self.rows(descriptor.target_high_position_column_ordinal)?;
+                let one = ProofBaseFieldElement::ONE;
+                let two = one.add(one);
+                let three = two.add(one);
+                let encoded_source =
+                    |position: ProofBaseFieldElement,
+                     negation_bit: ProofBaseFieldElement,
+                     value: ProofBaseFieldElement| {
+                        position
+                            .multiply(three)
+                            .add(one)
+                            .add(value.subtract(negation_bit.multiply(two).multiply(value)))
+                    };
+                let encoded_target =
+                    |position: ProofBaseFieldElement, value: ProofBaseFieldElement| {
+                        position.multiply(three).add(one).add(value)
+                    };
+                let mut outputs = [
+                    Zeroizing::new(Vec::with_capacity(self.trace_domain.size())),
+                    Zeroizing::new(Vec::with_capacity(self.trace_domain.size())),
+                    Zeroizing::new(Vec::with_capacity(self.trace_domain.size())),
+                    Zeroizing::new(Vec::with_capacity(self.trace_domain.size())),
+                ];
+                let mut source_before = one;
+                let mut target_before = one;
+                for row_ordinal in 0..self.trace_domain.size() {
+                    outputs[0].push(source_before);
+                    outputs[2].push(target_before);
+                    let source_low_product =
+                        source_before.multiply(theta.subtract(encoded_source(
+                            mapped_low_position_rows[row_ordinal],
+                            low_negation_bit_rows[row_ordinal],
+                            source_low_rows[row_ordinal],
+                        )));
+                    outputs[1].push(source_low_product);
+                    let target_low_product =
+                        target_before.multiply(theta.subtract(encoded_target(
+                            target_low_position_rows[row_ordinal],
+                            target_low_rows[row_ordinal],
+                        )));
+                    outputs[3].push(target_low_product);
+                    source_before = source_low_product.multiply(theta.subtract(encoded_source(
+                        mapped_high_position_rows[row_ordinal],
+                        high_negation_bit_rows[row_ordinal],
+                        source_high_rows[row_ordinal],
+                    )));
+                    target_before = target_low_product.multiply(theta.subtract(encoded_target(
+                        target_high_position_rows[row_ordinal],
+                        target_high_rows[row_ordinal],
+                    )));
+                }
+                let output_index = usize::from(*output_index);
+                if output_index >= outputs.len() {
+                    return Err(CommonProofProverError::InvalidColumn);
+                }
+                Ok(core::mem::take(&mut outputs[output_index]))
+            }
+        }
+    }
+
+    pub(crate) fn finish(
+        self,
+        mut private_mask_tail: Zeroizing<Vec<ProofBaseFieldElement>>,
+    ) -> Result<CommonProofSourcePolynomial, CommonProofProverError> {
+        if private_mask_tail.len() != self.mask_coefficient_count {
+            return Err(CommonProofProverError::InvalidMask);
+        }
+        let mut coefficients = self.reconstruct_rows()?;
+        self.trace_domain
+            .interpolate_base_polynomial_in_place(&mut coefficients)?;
+        let trace_value_count = coefficients.len();
+        coefficients
+            .try_reserve_exact(self.mask_coefficient_count)
+            .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
+        coefficients.resize(
+            trace_value_count
+                .checked_add(self.mask_coefficient_count)
+                .ok_or(CommonProofProverError::CountOverflow)?,
+            ProofBaseFieldElement::ZERO,
+        );
+        for (tail_index, mask_coefficient) in private_mask_tail.drain(..).enumerate() {
+            coefficients[tail_index] = coefficients[tail_index].subtract(mask_coefficient);
+            coefficients[trace_value_count + tail_index] = mask_coefficient;
+        }
+        Ok(CommonProofSourcePolynomial::from_protected_base_coefficients(coefficients))
+    }
+}
+
 /// Descriptor-local auxiliary synthesis. Persisted relation polynomials are
 /// replayed one at a time and immediately reduced to trace rows. The cursor
 /// never owns a pre- or post-challenge polynomial catalog; its maximum live
@@ -2125,6 +3071,7 @@ pub(crate) struct CommonProofAuxiliaryColumnSynthesisCursor {
     next_input_index: usize,
     input_trace_rows: BTreeMap<u32, ProtectedBaseTraceRows>,
     pending_output_rows: Vec<ProtectedAuxiliaryColumnRows>,
+    materialized_output_columns: BTreeSet<u32>,
     component_product_sum_rows: Option<ProtectedBaseTraceRows>,
     trace_domain: ProofEvaluationDomain,
     relation_context: RelationPlanCheckContext,
@@ -2201,9 +3148,7 @@ impl CommonProofAuxiliaryColumnSynthesisCursor {
         let mut produced_auxiliary_columns = BTreeSet::new();
         for task in &tasks {
             for output_column_ordinal in task.output_column_ordinals() {
-                if !produced_auxiliary_columns.insert(output_column_ordinal) {
-                    return Err(CommonProofProverError::InvalidColumn);
-                }
+                produced_auxiliary_columns.insert(output_column_ordinal);
             }
             for input_column_ordinal in task.input_column_ordinals() {
                 if expected_auxiliary_columns.contains(&input_column_ordinal) {
@@ -2220,6 +3165,7 @@ impl CommonProofAuxiliaryColumnSynthesisCursor {
             next_input_index: 0,
             input_trace_rows: BTreeMap::new(),
             pending_output_rows: Vec::new(),
+            materialized_output_columns: BTreeSet::new(),
             component_product_sum_rows: None,
             trace_domain,
             relation_context: relation_context.clone(),
@@ -2277,6 +3223,8 @@ impl CommonProofAuxiliaryColumnSynthesisCursor {
             return Ok(false);
         }
         self.pending_output_rows = self.evaluate_task(task)?;
+        self.pending_output_rows
+            .retain(|(column_ordinal, _)| self.materialized_output_columns.insert(*column_ordinal));
         self.input_trace_rows.clear();
         self.next_input_index = 0;
         self.next_task_index = self
@@ -2565,92 +3513,6 @@ impl CommonProofAuxiliaryColumnSynthesisCursor {
     }
 }
 
-pub(crate) fn maximum_auxiliary_synthesis_trace_vector_count(
-    variant: &RelationPlanVariant,
-) -> Result<u64, CommonProofProverError> {
-    let mut maximum = 0_u64;
-    let mut include_task =
-        |input_column_ordinals: &[u32], output_count: u64, owns_component_accumulator: bool| {
-            let unique_input_count = u64::try_from(
-                input_column_ordinals
-                    .iter()
-                    .copied()
-                    .collect::<BTreeSet<_>>()
-                    .len(),
-            )
-            .map_err(|_| CommonProofProverError::CountOverflow)?;
-            let live_vector_count = unique_input_count
-                .checked_add(output_count)
-                .and_then(|count| count.checked_add(u64::from(owns_component_accumulator)))
-                .ok_or(CommonProofProverError::CountOverflow)?;
-            maximum = maximum.max(live_vector_count);
-            Ok::<(), CommonProofProverError>(())
-        };
-    for batch in variant.ordered_integer_lift_batches() {
-        for descriptor in &batch.ordered_negacyclic_automorphism_permutations {
-            include_task(
-                &[
-                    descriptor.source_low_column_ordinal,
-                    descriptor.source_high_column_ordinal,
-                    descriptor.target_low_column_ordinal,
-                    descriptor.target_high_column_ordinal,
-                    descriptor.mapped_low_position_column_ordinal,
-                    descriptor.low_negation_bit_column_ordinal,
-                    descriptor.mapped_high_position_column_ordinal,
-                    descriptor.high_negation_bit_column_ordinal,
-                    descriptor.target_low_position_column_ordinal,
-                    descriptor.target_high_position_column_ordinal,
-                ],
-                4,
-                false,
-            )?;
-        }
-        for binding in &batch.ordered_reversed_column_bindings {
-            include_task(&[binding.source_column_ordinal], 1, false)?;
-            include_task(&[binding.reversed_column_ordinal], 1, false)?;
-        }
-        for component in &batch.ordered_components {
-            for descriptor in &component.ordered_convolution_products {
-                include_task(
-                    &[
-                        descriptor.multiplicand_column_ordinal,
-                        descriptor.reversed_multiplier_column_ordinal,
-                    ],
-                    2,
-                    true,
-                )?;
-            }
-            for descriptor in &component.ordered_full_ring_negacyclic_products {
-                include_task(
-                    &[
-                        descriptor.multiplicand_low_column_ordinal,
-                        descriptor.multiplicand_high_column_ordinal,
-                        descriptor.reversed_multiplier_low_column_ordinal,
-                        descriptor.reversed_multiplier_high_column_ordinal,
-                    ],
-                    4,
-                    true,
-                )?;
-            }
-            include_task(
-                &component
-                    .ordered_linear_terms
-                    .iter()
-                    .map(|term| term.column_ordinal)
-                    .collect::<Vec<_>>(),
-                // The emitted suffix-evaluation row vector is allocated
-                // while the descriptor-local coefficient row vector remains
-                // live, so this task owns two output-sized work vectors at
-                // its peak even though it persists one column.
-                2,
-                true,
-            )?;
-            include_task(&[], 1, true)?;
-        }
-    }
-    Ok(maximum)
-}
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct RelationColumnReplayRequirement {
     pub(super) pre_challenge_read_count: u64,
@@ -2785,14 +3647,15 @@ mod requested_pre_challenge_source_column_tests {
 
     use super::{
         authenticated_pre_challenge_source_coefficient_position_counts,
-        integer_lift_derived_columns, persisted_pre_challenge_column_coefficient_position_counts,
+        integer_lift_derived_columns, ordered_integer_lift_auxiliary_column_ordinals,
+        persisted_pre_challenge_column_coefficient_position_counts,
         proof_created_tree_roles_by_column, requested_pre_challenge_source_column_ordinals,
     };
 
     fn expected_requested_source_column_count(schema_identifier: u16) -> usize {
         match schema_identifier {
             ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER => 2_018,
-            ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER => 4_528,
+            ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER => 3_302,
             ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => 506,
             ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER => 61_140,
             ProofApplicationSlotCeilings::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => 9_152,
@@ -2887,6 +3750,17 @@ mod requested_pre_challenge_source_column_tests {
                 let (reversed_columns_by_source, integer_lift_auxiliary_columns) =
                     integer_lift_derived_columns(variant)
                         .expect("selected integer-lift columns derive");
+                let ordered_integer_lift_auxiliary_columns =
+                    ordered_integer_lift_auxiliary_column_ordinals(variant)
+                        .expect("selected integer-lift auxiliary order derives");
+                assert_eq!(
+                    ordered_integer_lift_auxiliary_columns
+                        .iter()
+                        .copied()
+                        .collect::<BTreeSet<_>>(),
+                    integer_lift_auxiliary_columns,
+                    "family {schema_identifier} has one complete auxiliary-column order",
+                );
                 let derived_reversed_columns = reversed_columns_by_source
                     .into_values()
                     .collect::<BTreeSet<_>>();

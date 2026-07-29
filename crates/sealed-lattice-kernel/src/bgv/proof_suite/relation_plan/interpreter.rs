@@ -646,20 +646,6 @@ impl RelationPlanVariant {
         Ok(())
     }
 
-    pub(crate) fn verifier_sequence_out_of_domain_resolution_payload_byte_length(
-        &self,
-        context: &RelationPlanCheckContext,
-    ) -> Result<u64, RelationPlanError> {
-        let opening_count = u64::try_from(self.verifier_sequence_opening_keys(context)?.len())
-            .map_err(|_| RelationPlanError::CountOverflow)?;
-        opening_count
-            .checked_mul(
-                u64::try_from(core::mem::size_of::<ResolvedVerifierSequenceOpening>())
-                    .map_err(|_| RelationPlanError::CountOverflow)?,
-            )
-            .ok_or(RelationPlanError::CountOverflow)
-    }
-
     fn verifier_sequence_opening_keys(
         &self,
         context: &RelationPlanCheckContext,
@@ -1586,6 +1572,809 @@ fn convolve_extension_coefficients(
 }
 
 #[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum IndependentInstructionKind {
+    BaseFieldConstant,
+    NonNativeModulusConstant,
+    EvaluationVariable,
+    ColumnValue,
+    ConstantColumnVerifierSequenceProductSum,
+    TranscriptChallenge,
+    Addition,
+    Multiplication,
+    Negation,
+    NonnegativePower,
+    RadixConvolutionCoefficient,
+    TraceDomainExceptRoots,
+}
+
+#[cfg(test)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RelationCompilerInterpreterSemanticCertificate {
+    canonical_variant_hash: [u8; 64],
+    constraint_count: usize,
+    structurally_checked_program_count: usize,
+    structurally_checked_instruction_count: usize,
+    covered_instruction_kind_count: usize,
+    trace_domain_case_count: usize,
+    randomized_extension_case_count: usize,
+    compared_program_evaluation_count: usize,
+    mismatch_count: usize,
+}
+
+#[cfg(test)]
+impl RelationCompilerInterpreterSemanticCertificate {
+    pub(crate) fn is_complete(&self) -> bool {
+        let case_count = self
+            .trace_domain_case_count
+            .checked_add(self.randomized_extension_case_count);
+        self.canonical_variant_hash != [0_u8; 64]
+            && self.constraint_count > 0
+            && self.structurally_checked_program_count == self.constraint_count * 2
+            && self.structurally_checked_instruction_count > self.structurally_checked_program_count
+            && self.covered_instruction_kind_count > 0
+            && self.trace_domain_case_count > 0
+            && self.randomized_extension_case_count > 0
+            && case_count
+                .and_then(|count| self.structurally_checked_program_count.checked_mul(count))
+                == Some(self.compared_program_evaluation_count)
+            && self.mismatch_count == 0
+    }
+
+    pub(crate) const fn constraint_count(&self) -> usize {
+        self.constraint_count
+    }
+
+    pub(crate) const fn compared_program_evaluation_count(&self) -> usize {
+        self.compared_program_evaluation_count
+    }
+
+    pub(crate) const fn canonical_variant_hash(&self) -> [u8; 64] {
+        self.canonical_variant_hash
+    }
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum IndependentSemanticOracleFault {
+    None,
+    ChangeFirstEvaluation,
+}
+
+#[cfg(test)]
+enum IndependentExpression<'program> {
+    BaseFieldConstant(u64),
+    NonNativeModulusConstant {
+        modulus_reference: super::SuiteModulusReference,
+        multiplier: u16,
+    },
+    EvaluationVariable,
+    ColumnValue {
+        column_ordinal: u32,
+        rotation_is_negative: bool,
+        rotation_magnitude: u64,
+    },
+    ConstantColumnVerifierSequenceProductSum(
+        &'program [super::RelationConstantColumnVerifierSequenceProductTerm],
+    ),
+    TranscriptChallenge {
+        challenge_role: RelationChallengeRole,
+        role_coordinates: &'program [u64],
+    },
+    Addition(Box<Self>, Box<Self>),
+    Multiplication(Box<Self>, Box<Self>),
+    Negation(Box<Self>),
+    NonnegativePower(Box<Self>, u64),
+    RadixConvolutionCoefficient {
+        convolution_ordinal: u32,
+        coefficient_ordinal: u32,
+    },
+    TraceDomainExceptRoots {
+        trace_domain_size: u64,
+        ordered_excluded_roots: &'program [u64],
+    },
+}
+
+#[cfg(test)]
+fn independent_instruction_kind(
+    instruction: &RelationExpressionInstruction,
+) -> IndependentInstructionKind {
+    match instruction {
+        RelationExpressionInstruction::BaseFieldConstant(_) => {
+            IndependentInstructionKind::BaseFieldConstant
+        }
+        RelationExpressionInstruction::NonNativeModulusConstant { .. } => {
+            IndependentInstructionKind::NonNativeModulusConstant
+        }
+        RelationExpressionInstruction::EvaluationVariable => {
+            IndependentInstructionKind::EvaluationVariable
+        }
+        RelationExpressionInstruction::ColumnValue { .. } => {
+            IndependentInstructionKind::ColumnValue
+        }
+        RelationExpressionInstruction::ConstantColumnVerifierSequenceProductSum { .. } => {
+            IndependentInstructionKind::ConstantColumnVerifierSequenceProductSum
+        }
+        RelationExpressionInstruction::TranscriptChallenge { .. } => {
+            IndependentInstructionKind::TranscriptChallenge
+        }
+        RelationExpressionInstruction::Addition => IndependentInstructionKind::Addition,
+        RelationExpressionInstruction::Multiplication => IndependentInstructionKind::Multiplication,
+        RelationExpressionInstruction::Negation => IndependentInstructionKind::Negation,
+        RelationExpressionInstruction::NonnegativePower(_) => {
+            IndependentInstructionKind::NonnegativePower
+        }
+        RelationExpressionInstruction::RadixConvolutionCoefficient { .. } => {
+            IndependentInstructionKind::RadixConvolutionCoefficient
+        }
+        RelationExpressionInstruction::TraceDomainExceptRoots { .. } => {
+            IndependentInstructionKind::TraceDomainExceptRoots
+        }
+    }
+}
+
+#[cfg(test)]
+fn parse_independent_expression<'program>(
+    program: &'program [RelationExpressionInstruction],
+    zeroifier_program: bool,
+    covered_instruction_kinds: &mut BTreeSet<IndependentInstructionKind>,
+) -> Result<IndependentExpression<'program>, RelationPlanError> {
+    let mut stack = Vec::<IndependentExpression<'program>>::new();
+    for instruction in program {
+        covered_instruction_kinds.insert(independent_instruction_kind(instruction));
+        match instruction {
+            RelationExpressionInstruction::BaseFieldConstant(value) => {
+                stack.push(IndependentExpression::BaseFieldConstant(*value));
+            }
+            RelationExpressionInstruction::NonNativeModulusConstant {
+                modulus_reference,
+                multiplier,
+            } if !zeroifier_program => {
+                stack.push(IndependentExpression::NonNativeModulusConstant {
+                    modulus_reference: *modulus_reference,
+                    multiplier: *multiplier,
+                });
+            }
+            RelationExpressionInstruction::EvaluationVariable => {
+                stack.push(IndependentExpression::EvaluationVariable);
+            }
+            RelationExpressionInstruction::ColumnValue {
+                column_ordinal,
+                rotation_is_negative,
+                rotation_magnitude,
+            } if !zeroifier_program => stack.push(IndependentExpression::ColumnValue {
+                column_ordinal: *column_ordinal,
+                rotation_is_negative: *rotation_is_negative,
+                rotation_magnitude: *rotation_magnitude,
+            }),
+            RelationExpressionInstruction::ConstantColumnVerifierSequenceProductSum {
+                ordered_terms,
+                ..
+            } if !zeroifier_program => stack.push(
+                IndependentExpression::ConstantColumnVerifierSequenceProductSum(ordered_terms),
+            ),
+            RelationExpressionInstruction::TranscriptChallenge {
+                challenge_role,
+                role_coordinates,
+            } if !zeroifier_program => stack.push(IndependentExpression::TranscriptChallenge {
+                challenge_role: *challenge_role,
+                role_coordinates,
+            }),
+            RelationExpressionInstruction::RadixConvolutionCoefficient {
+                convolution_ordinal,
+                coefficient_ordinal,
+            } if !zeroifier_program => {
+                stack.push(IndependentExpression::RadixConvolutionCoefficient {
+                    convolution_ordinal: *convolution_ordinal,
+                    coefficient_ordinal: *coefficient_ordinal,
+                });
+            }
+            RelationExpressionInstruction::TraceDomainExceptRoots {
+                trace_domain_size,
+                ordered_excluded_roots,
+            } if zeroifier_program => {
+                stack.push(IndependentExpression::TraceDomainExceptRoots {
+                    trace_domain_size: *trace_domain_size,
+                    ordered_excluded_roots,
+                });
+            }
+            RelationExpressionInstruction::Addition => {
+                let right = stack.pop().ok_or(RelationPlanError::InvalidConstraint)?;
+                let left = stack.pop().ok_or(RelationPlanError::InvalidConstraint)?;
+                stack.push(IndependentExpression::Addition(
+                    Box::new(left),
+                    Box::new(right),
+                ));
+            }
+            RelationExpressionInstruction::Multiplication => {
+                let right = stack.pop().ok_or(RelationPlanError::InvalidConstraint)?;
+                let left = stack.pop().ok_or(RelationPlanError::InvalidConstraint)?;
+                stack.push(IndependentExpression::Multiplication(
+                    Box::new(left),
+                    Box::new(right),
+                ));
+            }
+            RelationExpressionInstruction::Negation => {
+                let value = stack.pop().ok_or(RelationPlanError::InvalidConstraint)?;
+                stack.push(IndependentExpression::Negation(Box::new(value)));
+            }
+            RelationExpressionInstruction::NonnegativePower(exponent) => {
+                let value = stack.pop().ok_or(RelationPlanError::InvalidConstraint)?;
+                stack.push(IndependentExpression::NonnegativePower(
+                    Box::new(value),
+                    *exponent,
+                ));
+            }
+            _ => {
+                return Err(if zeroifier_program {
+                    RelationPlanError::InvalidZeroifier
+                } else {
+                    RelationPlanError::InvalidConstraint
+                });
+            }
+        }
+    }
+    if stack.len() != 1 {
+        return Err(if zeroifier_program {
+            RelationPlanError::InvalidZeroifier
+        } else {
+            RelationPlanError::InvalidConstraint
+        });
+    }
+    stack.pop().ok_or(RelationPlanError::InvalidConstraint)
+}
+
+#[cfg(test)]
+fn independent_base_value(value: u64) -> Result<ProofChallengeExtensionElement, RelationPlanError> {
+    ProofBaseFieldElement::from_canonical(value)
+        .map(ProofChallengeExtensionElement::from_base)
+        .map_err(|_| RelationPlanError::InvalidConstraint)
+}
+
+#[cfg(test)]
+fn independent_trace_domain_except_roots(
+    evaluation_point: ProofChallengeExtensionElement,
+    trace_domain_size: u64,
+    ordered_excluded_roots: &[u64],
+) -> Result<ProofChallengeExtensionElement, RelationPlanError> {
+    if trace_domain_size == 0 || ordered_excluded_roots.is_empty() {
+        return Err(RelationPlanError::InvalidZeroifier);
+    }
+    let one = independent_base_value(1)?;
+    let roots = ordered_excluded_roots
+        .iter()
+        .copied()
+        .map(independent_base_value)
+        .collect::<Result<Vec<_>, _>>()?;
+    if let Some(matching_ordinal) = roots.iter().position(|root| *root == evaluation_point) {
+        let matching_root = roots[matching_ordinal];
+        let derivative = independent_base_value(trace_domain_size)?
+            .multiply(matching_root.power(trace_domain_size - 1));
+        let denominator = roots
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(root_ordinal, _)| *root_ordinal != matching_ordinal)
+            .fold(one, |product, (_, root)| {
+                product.multiply(matching_root.add(root.negate()))
+            });
+        return derivative
+            .divide(denominator)
+            .map_err(|_| RelationPlanError::InvalidZeroifier);
+    }
+    let numerator = evaluation_point.power(trace_domain_size).add(one.negate());
+    let denominator = roots.into_iter().fold(one, |product, root| {
+        product.multiply(evaluation_point.add(root.negate()))
+    });
+    numerator
+        .divide(denominator)
+        .map_err(|_| RelationPlanError::InvalidZeroifier)
+}
+
+#[cfg(test)]
+fn independent_radix_factor_coefficients<ColumnValue>(
+    factor: &RelationRadixFactorDescriptor,
+    maximum_coefficient_ordinal: usize,
+    column_value: &mut ColumnValue,
+) -> Result<Vec<ProofChallengeExtensionElement>, RelationPlanError>
+where
+    ColumnValue: FnMut(u32, bool, u64) -> Result<ProofChallengeExtensionElement, RelationPlanError>,
+{
+    let one = independent_base_value(1)?;
+    match factor {
+        RelationRadixFactorDescriptor::ColumnDigits {
+            ordered_column_ordinals,
+            rotation_is_negative,
+            rotation_magnitude,
+        } => ordered_column_ordinals
+            .iter()
+            .take(maximum_coefficient_ordinal + 1)
+            .map(|column_ordinal| {
+                column_value(*column_ordinal, *rotation_is_negative, *rotation_magnitude)
+            })
+            .collect(),
+        RelationRadixFactorDescriptor::ConstantDigits { ordered_digits } => ordered_digits
+            .iter()
+            .copied()
+            .take(maximum_coefficient_ordinal + 1)
+            .map(independent_base_value)
+            .collect(),
+        RelationRadixFactorDescriptor::ScalarColumn {
+            column_ordinal,
+            complement_binary_value,
+        } => {
+            let value = column_value(*column_ordinal, false, 0)?;
+            Ok(vec![if *complement_binary_value {
+                one.add(value.negate())
+            } else {
+                value
+            }])
+        }
+    }
+}
+
+#[cfg(test)]
+fn independent_truncated_polynomial_product(
+    left: &[ProofChallengeExtensionElement],
+    right: &[ProofChallengeExtensionElement],
+    maximum_coefficient_ordinal: usize,
+) -> Result<Vec<ProofChallengeExtensionElement>, RelationPlanError> {
+    let output_length = left
+        .len()
+        .checked_add(right.len())
+        .and_then(|length| length.checked_sub(1))
+        .ok_or(RelationPlanError::CountOverflow)?
+        .min(
+            maximum_coefficient_ordinal
+                .checked_add(1)
+                .ok_or(RelationPlanError::CountOverflow)?,
+        );
+    let mut result = vec![ProofChallengeExtensionElement::ZERO; output_length];
+    for output_ordinal in 0..output_length {
+        let minimum_left_ordinal = output_ordinal.saturating_sub(right.len().saturating_sub(1));
+        let maximum_left_ordinal = output_ordinal.min(left.len().saturating_sub(1));
+        for left_ordinal in minimum_left_ordinal..=maximum_left_ordinal {
+            let right_ordinal = output_ordinal - left_ordinal;
+            result[output_ordinal] =
+                result[output_ordinal].add(left[left_ordinal].multiply(right[right_ordinal]));
+        }
+    }
+    Ok(result)
+}
+
+#[cfg(test)]
+fn independent_radix_convolution_coefficient<ColumnValue>(
+    variant: &RelationPlanVariant,
+    convolution_ordinal: u32,
+    coefficient_ordinal: u32,
+    column_value: &mut ColumnValue,
+) -> Result<ProofChallengeExtensionElement, RelationPlanError>
+where
+    ColumnValue: FnMut(u32, bool, u64) -> Result<ProofChallengeExtensionElement, RelationPlanError>,
+{
+    let convolution = variant
+        .ordered_radix_convolutions
+        .get(usize::try_from(convolution_ordinal).map_err(|_| RelationPlanError::CountOverflow)?)
+        .ok_or(RelationPlanError::InvalidConstraint)?;
+    let coefficient_ordinal =
+        usize::try_from(coefficient_ordinal).map_err(|_| RelationPlanError::CountOverflow)?;
+    let one = independent_base_value(1)?;
+    let mut sum = ProofChallengeExtensionElement::ZERO;
+    for term in &convolution.ordered_terms {
+        let mut product = vec![one];
+        for factor in &term.ordered_factors {
+            let factor_coefficients =
+                independent_radix_factor_coefficients(factor, coefficient_ordinal, column_value)?;
+            product = independent_truncated_polynomial_product(
+                &product,
+                &factor_coefficients,
+                coefficient_ordinal,
+            )?;
+        }
+        let coefficient = product
+            .get(coefficient_ordinal)
+            .copied()
+            .unwrap_or(ProofChallengeExtensionElement::ZERO);
+        sum = sum.add(if term.negative {
+            coefficient.negate()
+        } else {
+            coefficient
+        });
+    }
+    Ok(sum)
+}
+
+#[cfg(test)]
+fn evaluate_independent_expression<ColumnValue>(
+    expression: &IndependentExpression<'_>,
+    variant: &RelationPlanVariant,
+    context: &RelationPlanCheckContext,
+    evaluation_point: ProofChallengeExtensionElement,
+    application_challenges: &CheckedRelationApplicationChallenges,
+    column_value: &mut ColumnValue,
+) -> Result<ProofChallengeExtensionElement, RelationPlanError>
+where
+    ColumnValue: FnMut(u32, bool, u64) -> Result<ProofChallengeExtensionElement, RelationPlanError>,
+{
+    match expression {
+        IndependentExpression::BaseFieldConstant(value) => independent_base_value(*value),
+        IndependentExpression::NonNativeModulusConstant {
+            modulus_reference,
+            multiplier,
+        } => {
+            if *multiplier == 0 {
+                return Err(RelationPlanError::InvalidModulus);
+            }
+            let value = context
+                .resolved_modulus(*modulus_reference)?
+                .checked_mul(u64::from(*multiplier))
+                .filter(|value| *value < context.base_field_modulus)
+                .ok_or(RelationPlanError::NoWrapBoundViolated)?;
+            independent_base_value(value)
+        }
+        IndependentExpression::EvaluationVariable => Ok(evaluation_point),
+        IndependentExpression::ColumnValue {
+            column_ordinal,
+            rotation_is_negative,
+            rotation_magnitude,
+        } => column_value(*column_ordinal, *rotation_is_negative, *rotation_magnitude),
+        IndependentExpression::ConstantColumnVerifierSequenceProductSum(ordered_terms) => {
+            ordered_terms
+                .iter()
+                .try_fold(ProofChallengeExtensionElement::ZERO, |sum, term| {
+                    let constant = column_value(term.constant_column_ordinal, false, 0)?;
+                    let verifier_sequence = column_value(
+                        term.verifier_sequence_column_ordinal,
+                        term.verifier_sequence_rotation_is_negative,
+                        term.verifier_sequence_rotation_magnitude,
+                    )?;
+                    Ok(sum.add(constant.multiply(verifier_sequence)))
+                })
+        }
+        IndependentExpression::TranscriptChallenge {
+            challenge_role,
+            role_coordinates,
+        } => application_challenges.get(*challenge_role, role_coordinates),
+        IndependentExpression::Addition(left, right) => Ok(evaluate_independent_expression(
+            left,
+            variant,
+            context,
+            evaluation_point,
+            application_challenges,
+            column_value,
+        )?
+        .add(evaluate_independent_expression(
+            right,
+            variant,
+            context,
+            evaluation_point,
+            application_challenges,
+            column_value,
+        )?)),
+        IndependentExpression::Multiplication(left, right) => Ok(evaluate_independent_expression(
+            left,
+            variant,
+            context,
+            evaluation_point,
+            application_challenges,
+            column_value,
+        )?
+        .multiply(evaluate_independent_expression(
+            right,
+            variant,
+            context,
+            evaluation_point,
+            application_challenges,
+            column_value,
+        )?)),
+        IndependentExpression::Negation(value) => Ok(evaluate_independent_expression(
+            value,
+            variant,
+            context,
+            evaluation_point,
+            application_challenges,
+            column_value,
+        )?
+        .negate()),
+        IndependentExpression::NonnegativePower(value, exponent) => {
+            Ok(evaluate_independent_expression(
+                value,
+                variant,
+                context,
+                evaluation_point,
+                application_challenges,
+                column_value,
+            )?
+            .power(*exponent))
+        }
+        IndependentExpression::RadixConvolutionCoefficient {
+            convolution_ordinal,
+            coefficient_ordinal,
+        } => independent_radix_convolution_coefficient(
+            variant,
+            *convolution_ordinal,
+            *coefficient_ordinal,
+            column_value,
+        ),
+        IndependentExpression::TraceDomainExceptRoots {
+            trace_domain_size,
+            ordered_excluded_roots,
+        } => independent_trace_domain_except_roots(
+            evaluation_point,
+            *trace_domain_size,
+            ordered_excluded_roots,
+        ),
+    }
+}
+
+#[cfg(test)]
+fn deterministic_semantic_oracle_column_value(
+    case_ordinal: usize,
+    column_ordinal: u32,
+    rotation_is_negative: bool,
+    rotation_magnitude: u64,
+) -> Result<ProofChallengeExtensionElement, RelationPlanError> {
+    let seed = u64::try_from(case_ordinal)
+        .map_err(|_| RelationPlanError::CountOverflow)?
+        .wrapping_mul(0x9e37_79b9_7f4a_7c15)
+        ^ u64::from(column_ordinal).wrapping_mul(0xbf58_476d_1ce4_e5b9)
+        ^ rotation_magnitude.wrapping_mul(0x94d0_49bb_1331_11eb)
+        ^ u64::from(rotation_is_negative);
+    let coordinates = core::array::from_fn(|coordinate_ordinal| {
+        seed.rotate_left(
+            u32::try_from(coordinate_ordinal * 11 + 7).expect("extension coordinate fits u32"),
+        )
+        .wrapping_add(
+            u64::try_from(coordinate_ordinal + 1)
+                .expect("extension coordinate fits u64")
+                .wrapping_mul(0xd6e8_feb8_6659_fd93),
+        ) % PROOF_BASE_FIELD_MODULUS
+    });
+    ProofChallengeExtensionElement::from_canonical_coordinates(coordinates)
+        .map_err(|_| RelationPlanError::InvalidConstraint)
+}
+
+#[cfg(test)]
+fn deterministic_semantic_oracle_application_challenges(
+    variant: &RelationPlanVariant,
+    context: &RelationPlanCheckContext,
+) -> Result<Vec<RelationApplicationChallengeAssignment>, RelationPlanError> {
+    let mut required_coordinates = BTreeMap::new();
+    for descriptor in variant.derived_relation_prefix_challenge_catalog(context)? {
+        if !matches!(
+            descriptor.role,
+            RelationChallengeRole::NonNativeTheta | RelationChallengeRole::NonNativeAlpha
+        ) {
+            continue;
+        }
+        let modulus_ordinal = u16::try_from(
+            *descriptor
+                .role_coordinates
+                .first()
+                .ok_or(RelationPlanError::InvalidChallengeCatalog)?,
+        )
+        .map_err(|_| RelationPlanError::CountOverflow)?;
+        let repetition_ordinal = u16::try_from(
+            *descriptor
+                .role_coordinates
+                .get(1)
+                .ok_or(RelationPlanError::InvalidChallengeCatalog)?,
+        )
+        .map_err(|_| RelationPlanError::CountOverflow)?;
+        let (challenge, coordinate_modulus) = match descriptor.role {
+            RelationChallengeRole::NonNativeTheta => (
+                CommonProofChallenge::Theta { modulus_ordinal },
+                context.base_field_modulus,
+            ),
+            RelationChallengeRole::NonNativeAlpha => {
+                let modulus_reference = variant
+                    .ordered_non_native_moduli
+                    .get(usize::from(modulus_ordinal))
+                    .copied()
+                    .ok_or(RelationPlanError::InvalidChallengeCatalog)?;
+                (
+                    CommonProofChallenge::Alpha { modulus_ordinal },
+                    context.resolved_modulus(modulus_reference)?,
+                )
+            }
+            _ => return Err(RelationPlanError::InvalidChallengeCatalog),
+        };
+        if coordinate_modulus <= 1 {
+            return Err(RelationPlanError::InvalidChallengeCatalog);
+        }
+        match required_coordinates.insert((challenge, repetition_ordinal), coordinate_modulus) {
+            Some(previous_modulus) if previous_modulus != coordinate_modulus => {
+                return Err(RelationPlanError::InvalidChallengeCatalog);
+            }
+            _ => {}
+        }
+    }
+    required_coordinates
+        .into_iter()
+        .map(|((challenge, repetition_ordinal), coordinate_modulus)| {
+            let value_offset = 2_u64
+                .checked_add(u64::from(repetition_ordinal))
+                .ok_or(RelationPlanError::CountOverflow)?;
+            let value = 1 + value_offset % (coordinate_modulus - 1);
+            RelationApplicationChallengeAssignment::new(challenge, repetition_ordinal, value)
+        })
+        .collect()
+}
+
+#[cfg(test)]
+fn semantic_oracle_evaluation_points(
+    variant: &RelationPlanVariant,
+    context: &RelationPlanCheckContext,
+) -> Result<(Vec<ProofChallengeExtensionElement>, usize), RelationPlanError> {
+    if variant.trace_domain_size == 0
+        || variant.evaluation_domain_size == 0
+        || !variant
+            .evaluation_domain_size
+            .is_multiple_of(variant.trace_domain_size)
+    {
+        return Err(RelationPlanError::InvalidDomain);
+    }
+    let evaluation_generator =
+        ProofBaseFieldElement::from_canonical(context.evaluation_domain_generator)
+            .map_err(|_| RelationPlanError::InvalidDomain)?;
+    let trace_generator =
+        evaluation_generator.power(variant.evaluation_domain_size / variant.trace_domain_size);
+    let trace_domain_points = [
+        independent_base_value(1)?,
+        ProofChallengeExtensionElement::from_base(trace_generator),
+        ProofChallengeExtensionElement::from_base(trace_generator.power(2)),
+    ];
+    let randomized_extension_points = [
+        [17, 11, 5, 3, 2],
+        [29, 31, 37, 41, 43],
+        [47, 53, 59, 61, 67],
+    ]
+    .map(ProofChallengeExtensionElement::from_canonical_coordinates)
+    .into_iter()
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|_| RelationPlanError::InvalidDomain)?;
+    let trace_domain_case_count = trace_domain_points.len();
+    Ok((
+        trace_domain_points
+            .into_iter()
+            .chain(randomized_extension_points)
+            .collect(),
+        trace_domain_case_count,
+    ))
+}
+
+#[cfg(test)]
+fn checked_relation_compiler_interpreter_semantics_with_fault(
+    variant: &RelationPlanVariant,
+    context: &RelationPlanCheckContext,
+    fault: IndependentSemanticOracleFault,
+) -> Result<RelationCompilerInterpreterSemanticCertificate, RelationPlanError> {
+    let assignments = deterministic_semantic_oracle_application_challenges(variant, context)?;
+    let checked_challenges = variant.checked_application_challenges(context, &assignments)?;
+    let (evaluation_points, trace_domain_case_count) =
+        semantic_oracle_evaluation_points(variant, context)?;
+    let randomized_extension_case_count = evaluation_points
+        .len()
+        .checked_sub(trace_domain_case_count)
+        .ok_or(RelationPlanError::CountOverflow)?;
+    let mut structurally_checked_instruction_count = 0_usize;
+    let mut covered_instruction_kinds = BTreeSet::new();
+    let mut compared_program_evaluation_count = 0_usize;
+    let mut injected_fault = false;
+
+    for constraint in &variant.ordered_constraints {
+        structurally_checked_instruction_count = structurally_checked_instruction_count
+            .checked_add(constraint.numerator_postfix_expression.len())
+            .and_then(|count| count.checked_add(constraint.zeroifier_postfix_expression.len()))
+            .ok_or(RelationPlanError::CountOverflow)?;
+        let independent_numerator = parse_independent_expression(
+            &constraint.numerator_postfix_expression,
+            false,
+            &mut covered_instruction_kinds,
+        )?;
+        let independent_zeroifier = parse_independent_expression(
+            &constraint.zeroifier_postfix_expression,
+            true,
+            &mut covered_instruction_kinds,
+        )?;
+        for (case_ordinal, evaluation_point) in evaluation_points.iter().copied().enumerate() {
+            let production_numerator = evaluate_program(
+                variant,
+                context,
+                &constraint.numerator_postfix_expression,
+                evaluation_point,
+                &checked_challenges,
+                &mut |column_ordinal, rotation_is_negative, rotation_magnitude| {
+                    deterministic_semantic_oracle_column_value(
+                        case_ordinal,
+                        column_ordinal,
+                        rotation_is_negative,
+                        rotation_magnitude,
+                    )
+                },
+                false,
+            )?;
+            let mut oracle_numerator = evaluate_independent_expression(
+                &independent_numerator,
+                variant,
+                context,
+                evaluation_point,
+                &checked_challenges,
+                &mut |column_ordinal, rotation_is_negative, rotation_magnitude| {
+                    deterministic_semantic_oracle_column_value(
+                        case_ordinal,
+                        column_ordinal,
+                        rotation_is_negative,
+                        rotation_magnitude,
+                    )
+                },
+            )?;
+            if fault == IndependentSemanticOracleFault::ChangeFirstEvaluation && !injected_fault {
+                oracle_numerator = oracle_numerator.add(independent_base_value(1)?);
+                injected_fault = true;
+            }
+            if production_numerator != oracle_numerator {
+                return Err(RelationPlanError::InvalidConstraint);
+            }
+
+            let production_zeroifier = evaluate_program(
+                variant,
+                context,
+                &constraint.zeroifier_postfix_expression,
+                evaluation_point,
+                &checked_challenges,
+                &mut |_, _, _| Err(RelationPlanError::InvalidZeroifier),
+                true,
+            )?;
+            let oracle_zeroifier = evaluate_independent_expression(
+                &independent_zeroifier,
+                variant,
+                context,
+                evaluation_point,
+                &checked_challenges,
+                &mut |_, _, _| Err(RelationPlanError::InvalidZeroifier),
+            )?;
+            if production_zeroifier != oracle_zeroifier {
+                return Err(RelationPlanError::InvalidConstraint);
+            }
+            compared_program_evaluation_count = compared_program_evaluation_count
+                .checked_add(2)
+                .ok_or(RelationPlanError::CountOverflow)?;
+        }
+    }
+    let constraint_count = variant.ordered_constraints.len();
+    let certificate = RelationCompilerInterpreterSemanticCertificate {
+        canonical_variant_hash: variant.canonical_hash()?,
+        constraint_count,
+        structurally_checked_program_count: constraint_count
+            .checked_mul(2)
+            .ok_or(RelationPlanError::CountOverflow)?,
+        structurally_checked_instruction_count,
+        covered_instruction_kind_count: covered_instruction_kinds.len(),
+        trace_domain_case_count,
+        randomized_extension_case_count,
+        compared_program_evaluation_count,
+        mismatch_count: 0,
+    };
+    if !certificate.is_complete() {
+        return Err(RelationPlanError::InvalidConstraint);
+    }
+    Ok(certificate)
+}
+
+#[cfg(test)]
+pub(crate) fn checked_relation_compiler_interpreter_semantics(
+    variant: &RelationPlanVariant,
+    context: &RelationPlanCheckContext,
+) -> Result<RelationCompilerInterpreterSemanticCertificate, RelationPlanError> {
+    checked_relation_compiler_interpreter_semantics_with_fault(
+        variant,
+        context,
+        IndependentSemanticOracleFault::None,
+    )
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::bgv::proof_suite::relation_plan::{
@@ -1596,10 +2385,41 @@ mod tests {
     };
     use crate::bgv::proof_suite::{
         PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR, PROOF_BASE_FIELD_MODULUS,
-        PROOF_CHALLENGE_EXTENSION_DEGREE, selected_ballot_validity_relation_compilation,
-        selected_relation_plan_check_context,
+        PROOF_CHALLENGE_EXTENSION_DEGREE, compile_same_secret_relation_plan,
+        selected_ballot_validity_relation_compilation, selected_relation_plan_check_context,
+        selected_same_secret_relation_plan_input,
     };
     use crate::foundation::ProofApplicationSlotCeilings;
+
+    #[test]
+    fn selected_same_secret_compiler_and_interpreter_match_independent_arithmetic_oracle() {
+        let context = selected_relation_plan_check_context(
+            ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        .expect("the selected same-secret context exists");
+        let compiled = compile_same_secret_relation_plan(
+            &selected_same_secret_relation_plan_input()
+                .expect("the selected same-secret relation input derives"),
+            &context,
+        )
+        .expect("the selected same-secret relation compiles");
+        let variant = compiled
+            .select_variant(None, None)
+            .expect("the selected same-secret variant exists");
+        let certificate = checked_relation_compiler_interpreter_semantics(variant, &context)
+            .expect("the independent semantic oracle matches every emitted program");
+        assert!(certificate.is_complete());
+        assert_eq!(certificate.constraint_count(), 4_406);
+        assert_eq!(certificate.compared_program_evaluation_count(), 52_872);
+        assert_eq!(
+            checked_relation_compiler_interpreter_semantics_with_fault(
+                variant,
+                &context,
+                IndependentSemanticOracleFault::ChangeFirstEvaluation,
+            ),
+            Err(RelationPlanError::InvalidConstraint),
+        );
+    }
 
     fn vss_linkage_interpreter_fixture() -> (RelationPlanVariant, RelationPlanCheckContext) {
         let ring_degree = 64_u64;

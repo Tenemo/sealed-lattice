@@ -1774,12 +1774,32 @@ mod tests {
     use super::*;
     use crate::{
         bgv::proof_suite::{
-            CommonProofVerificationStateMachine, CommonProofVerifierError,
-            PollableCommonProofVerificationInput, RelationTreeDescriptor,
-            VerifiedCommonProofStatementSource, VerifiedStatementOwnedTree,
+            CommonProofVerifierError, ProofChallengeExtensionElement, RelationTreeDescriptor,
+            VerifiedCommonProofStatementSource, VerifiedRelationColumnEvaluator,
+            VerifiedRelationColumnEvaluatorMemoryAccounting, VerifiedStatementOwnedTree,
+            row_code_whir::prepare_row_code_whir_verification,
         },
         foundation::StreamDescriptor,
     };
+
+    struct RefusingTestColumnEvaluator;
+
+    impl VerifiedRelationColumnEvaluator for RefusingTestColumnEvaluator {
+        fn memory_accounting(
+            &self,
+        ) -> Result<VerifiedRelationColumnEvaluatorMemoryAccounting, CommonProofVerifierError>
+        {
+            VerifiedRelationColumnEvaluatorMemoryAccounting::new(0, 0, 0)
+        }
+
+        fn evaluate_at_extension_point(
+            &mut self,
+            _column_ordinal: u32,
+            _point: ProofChallengeExtensionElement,
+        ) -> Option<ProofChallengeExtensionElement> {
+            None
+        }
+    }
 
     fn test_root(domain: u8, ordinal: usize) -> [u8; Hash512::BYTE_LENGTH] {
         let mut root = [domain; Hash512::BYTE_LENGTH];
@@ -1922,53 +1942,42 @@ mod tests {
             expected_roots,
             "the selected tree order remains limb-major with coefficient roots before recipient roots",
         );
-        let row_code_whir_construction_plan_identity_hash =
-            CommonProofRelationPlanCapability::from_compiled_plan(
-                &compiled_relation_plan,
-                &relation_context,
-                None,
-                None,
-            )
-            .expect("the selected VSS relation mints one row-code WHIR construction plan")
-            .row_code_whir_construction_plan_identity_hash();
-
-        CommonProofVerificationStateMachine::new(PollableCommonProofVerificationInput {
-            protocol_version: FOUNDATION_PROFILE.protocol_version,
-            suite_identifier: suite_identifier.into_bytes(),
-            canonical_application_statement_bytes: &canonical_application_statement_bytes,
-            relation_plan: &compiled_relation_plan,
-            relation_context: &relation_context,
-            schedule_position: None,
-            top_count: None,
-            row_code_whir_construction_plan_identity_hash,
-            statement_owned_trees: &statement_trees,
-            evaluator_auxiliary_roots: &[],
-            declared_proof_byte_length: proof_byte_length,
-            proof_byte_ceiling: runtime_plan.limits.maximum_proof_byte_length(),
-            maximum_resident_window_byte_length: proof_byte_length,
-        })
-        .expect("the exact selected VSS catalog initializes the current verifier");
+        prepare_row_code_whir_verification(
+            FOUNDATION_PROFILE.protocol_version,
+            statement_source
+                .proof_application_binding()
+                .application_slot(),
+            &canonical_application_statement_bytes,
+            statement_source
+                .proof_application_binding()
+                .proof_header_hash(),
+            u64::try_from(proof_byte_length).expect("the test proof length fits u64"),
+            statement_source.relation_plan_capability(),
+            statement_trees.clone(),
+            Vec::new(),
+            Box::new(RefusingTestColumnEvaluator),
+        )
+        .expect("the exact selected VSS catalog initializes the row-code WHIR verifier");
 
         let mut wrong_root_trees = statement_trees.clone();
         wrong_root_trees[0] = wrong_root_trees[0].with_test_expected_root([0xee; 64]);
-        assert_eq!(
-            CommonProofVerificationStateMachine::new(PollableCommonProofVerificationInput {
-                protocol_version: FOUNDATION_PROFILE.protocol_version,
-                suite_identifier: suite_identifier.into_bytes(),
-                canonical_application_statement_bytes: &canonical_application_statement_bytes,
-                relation_plan: &compiled_relation_plan,
-                relation_context: &relation_context,
-                schedule_position: None,
-                top_count: None,
-                row_code_whir_construction_plan_identity_hash,
-                statement_owned_trees: &wrong_root_trees,
-                evaluator_auxiliary_roots: &[],
-                declared_proof_byte_length: proof_byte_length,
-                proof_byte_ceiling: runtime_plan.limits.maximum_proof_byte_length(),
-                maximum_resident_window_byte_length: proof_byte_length,
-            })
-            .err(),
-            Some(CommonProofVerifierError::InvalidBoundTree),
+        assert!(
+            prepare_row_code_whir_verification(
+                FOUNDATION_PROFILE.protocol_version,
+                statement_source
+                    .proof_application_binding()
+                    .application_slot(),
+                &canonical_application_statement_bytes,
+                statement_source
+                    .proof_application_binding()
+                    .proof_header_hash(),
+                u64::try_from(proof_byte_length).expect("the test proof length fits u64"),
+                statement_source.relation_plan_capability(),
+                wrong_root_trees,
+                Vec::new(),
+                Box::new(RefusingTestColumnEvaluator),
+            )
+            .is_err(),
             "a tree root cannot diverge from the canonical statement root",
         );
 

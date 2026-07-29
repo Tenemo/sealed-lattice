@@ -134,10 +134,6 @@ impl RelationIntegerLiftLinearTermDescriptor {
 #[repr(u16)]
 pub(crate) enum RelationIntegerLiftConvolutionKind {
     Negacyclic = 1,
-    #[cfg(test)]
-    OrdinaryLowHalf = 2,
-    #[cfg(test)]
-    OrdinaryHighHalf = 3,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -708,6 +704,13 @@ impl RelationIntegerLiftBatchDescriptor {
                 context,
             )?);
         }
+        let mut observed_programs = std::collections::BTreeSet::new();
+        programs.retain(|program| {
+            observed_programs.insert((
+                program.numerator_postfix_expression.clone(),
+                program.zeroifier_postfix_expression.clone(),
+            ))
+        });
         Ok(programs)
     }
 }
@@ -1139,46 +1142,6 @@ pub(super) fn integer_lift_product_constraint_programs(
                     wrap_correction,
                 );
                 (boundary, recurrence, except_zero)
-            }
-            #[cfg(test)]
-            RelationIntegerLiftConvolutionKind::OrdinaryLowHalf => {
-                let boundary = subtract_integer_lift_expressions(
-                    integer_lift_column_expression(transpose, false, 0),
-                    integer_lift_column_expression(suffix, false, 1),
-                );
-                let mut theta_to_ring_degree = theta_expression.to_vec();
-                theta_to_ring_degree.push(RelationExpressionInstruction::NonnegativePower(
-                    trace_domain_size,
-                ));
-                let recurrence = add_integer_lift_expressions(
-                    subtract_integer_lift_expressions(
-                        integer_lift_column_expression(transpose, false, 0),
-                        multiply_integer_lift_expressions(
-                            theta_expression.to_vec(),
-                            integer_lift_column_expression(transpose, false, 1),
-                        ),
-                    ),
-                    multiply_integer_lift_expressions(
-                        theta_to_ring_degree,
-                        integer_lift_column_expression(multiplicand, false, 1),
-                    ),
-                );
-                (boundary, recurrence, except_last.clone())
-            }
-            #[cfg(test)]
-            RelationIntegerLiftConvolutionKind::OrdinaryHighHalf => {
-                let boundary = integer_lift_column_expression(transpose, false, 0);
-                let recurrence = subtract_integer_lift_expressions(
-                    subtract_integer_lift_expressions(
-                        integer_lift_column_expression(transpose, false, 0),
-                        integer_lift_column_expression(multiplicand, false, 1),
-                    ),
-                    multiply_integer_lift_expressions(
-                        theta_expression.to_vec(),
-                        integer_lift_column_expression(transpose, false, 1),
-                    ),
-                );
-                (boundary, recurrence, except_last.clone())
             }
         };
 

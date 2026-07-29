@@ -1,7 +1,7 @@
 use super::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TestStorageError {
+pub(crate) enum TestStorageError {
     NoTransaction,
     Duplicate,
     Missing,
@@ -17,7 +17,7 @@ struct TestObject {
 }
 
 #[derive(Default)]
-struct TestStorage {
+pub(crate) struct TestStorage {
     committed: BTreeMap<ProofExternalMemoryObject, TestObject>,
     transaction: Option<BTreeMap<ProofExternalMemoryObject, TestObject>>,
     deleted_objects: Vec<ProofExternalMemoryObject>,
@@ -405,7 +405,7 @@ fn executor_accepts_only_full_intermediate_chunks_and_the_exact_declared_tail() 
 }
 
 #[test]
-fn executor_rejects_zero_short_and_oversized_appends_without_advancing() {
+fn executor_rejects_appends_that_cannot_finish_within_the_planned_record_count() {
     let object = ProofExternalMemoryObject::new(0);
     let mut executor = ProofExternalMemoryExecutor::new(single_object_write_plan(4, 6));
     let mut storage = TestStorage::default();
@@ -414,7 +414,7 @@ fn executor_rejects_zero_short_and_oversized_appends_without_advancing() {
         .expect("the object begins");
     let transaction_count_after_create = executor.usage().transaction_count;
 
-    for rejected_bytes in [&[][..], &[1, 2, 3][..], &[1, 2, 3, 4, 5][..]] {
+    for rejected_bytes in [&[][..], &[1][..], &[1, 2, 3, 4, 5][..]] {
         assert_eq!(
             executor.append_object_bytes(&mut storage, object, rejected_bytes),
             Err(ProofExternalMemoryExecutorError::Execution(
@@ -435,30 +435,76 @@ fn executor_rejects_zero_short_and_oversized_appends_without_advancing() {
     }
 
     executor
-        .append_object_bytes(&mut storage, object, &[1, 2, 3, 4])
-        .expect("the exact intermediate chunk still appends after refusals");
+        .append_object_bytes(&mut storage, object, &[1, 2, 3])
+        .expect("a short packed segment appends within the declared record count");
     let transaction_count_after_intermediate_chunk = executor.usage().transaction_count;
     assert_eq!(
-        executor.append_object_bytes(&mut storage, object, &[5]),
+        executor.append_object_bytes(&mut storage, object, &[4, 5]),
         Err(ProofExternalMemoryExecutorError::Execution(
             ProofExternalMemoryError::WrongOffsetOrLength,
         )),
-        "a one-byte-short tail is rejected",
+        "a short final record is rejected when it cannot complete the object",
     );
     assert_eq!(
         storage
             .committed
             .get(&object)
             .map(|entry| entry.bytes.as_slice()),
-        Some(&[1, 2, 3, 4][..]),
+        Some(&[1, 2, 3][..]),
     );
     assert_eq!(
         executor.usage().transaction_count,
         transaction_count_after_intermediate_chunk,
     );
     executor
-        .append_object_bytes(&mut storage, object, &[5, 6])
+        .append_object_bytes(&mut storage, object, &[4, 5, 6])
         .expect("the exact tail still appends after refusal");
+}
+
+#[test]
+fn executor_accepts_packed_segment_boundaries_under_the_exact_append_budget() {
+    let object = ProofExternalMemoryObject::new(0);
+    let plan = ProofExternalMemoryPlan::new(
+        1,
+        4,
+        4,
+        1,
+        10,
+        10,
+        1,
+        6,
+        vec![
+            ProofExternalMemoryObjectPlan::new_with_maximum_append_count(
+                object,
+                ProofExternalMemoryProtection::SecretAuthenticatedEncryption,
+                10,
+                3,
+                0,
+                0,
+                0,
+            ),
+        ],
+    )
+    .expect("packed object plan is valid");
+    let mut executor = ProofExternalMemoryExecutor::new(plan);
+    let mut storage = TestStorage::default();
+    executor
+        .begin_object(&mut storage, object)
+        .expect("packed object begins");
+    executor
+        .append_object_bytes(&mut storage, object, &[1, 2, 3, 4])
+        .expect("first segment full chunk appends");
+    executor
+        .append_object_bytes(&mut storage, object, &[5, 6])
+        .expect("first segment tail appends at its exact boundary");
+    executor
+        .append_object_bytes(&mut storage, object, &[7, 8, 9, 10])
+        .expect("second segment appends without padding");
+    executor
+        .seal_object(&mut storage, object)
+        .expect("packed object seals");
+    assert_eq!(executor.usage().total_written_byte_length(), 10);
+    assert_eq!(executor.usage().transaction_count(), 5);
 }
 
 #[test]
@@ -652,7 +698,7 @@ fn browser_scratch_plan_accepts_exact_safety_bounds_and_refuses_one_over() {
             1,
             vec![ProofExternalMemoryObjectPlan::new(
                 ProofExternalMemoryObject::new(0),
-                ProofExternalMemoryProtection::SecretAuthenticatedEncryption,
+                ProofExternalMemoryProtection::PublicIntegrity,
                 stored_byte_length,
                 0,
                 0,

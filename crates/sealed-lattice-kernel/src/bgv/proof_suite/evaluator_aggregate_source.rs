@@ -13,11 +13,7 @@ use crate::{
     hashing::hash_framed_parts_512,
 };
 
-#[cfg(test)]
-use super::RelationPlanCheckContext;
 use super::relation_plan::RelationColumnDescriptor;
-#[cfg(test)]
-use super::relation_plan::RelationColumnValueType;
 use super::{
     BoundTreeConstructionKind, CommonProofAuthenticatedSourceReadRequest, CommonProofProverError,
     CommonProofSourcePolynomial, CommonProofSourcePolynomialProvider,
@@ -209,107 +205,6 @@ fn finish_evaluator_source_provider_memory_accounting(
         additional_loading_source_polynomials_transient_byte_length,
         maximum_returned_source_polynomial_byte_length,
     })
-}
-
-/// Derives the complete-list provider allocation from the checked relation
-/// descriptors and verifier-owned suite moduli, without constructing setup
-/// material or hand-entering a selected-profile estimate.
-#[cfg(test)]
-pub(crate) fn evaluator_aggregate_source_provider_memory_accounting(
-    variant: &RelationPlanVariant,
-    relation_context: &RelationPlanCheckContext,
-) -> Result<SelectedEvaluatorAggregateSourceProviderMemoryAccounting, CommonProofProverError> {
-    let mut visited_columns = vec![false; variant.ordered_columns().len()];
-    let mut topology_catalog_byte_length = 0_u64;
-    let mut readback_chunk_count = 0_u64;
-    let mut maximum_pending_column_byte_length = 0_u64;
-    let mut maximum_returned_source_polynomial_byte_length = 0_u64;
-    let stream_chunk_byte_length = u64::try_from(FOUNDATION_PROFILE.stream_chunk_byte_length)
-        .map_err(|_| CommonProofProverError::CountOverflow)?;
-    for tree in variant.ordered_trees() {
-        let RelationTreeDescriptor::BoundPublic {
-            construction_kind: BoundTreeConstructionKind::SetupPolynomial,
-            ordered_column_ordinals,
-            ..
-        } = tree
-        else {
-            return Err(CommonProofProverError::InvalidTree);
-        };
-        let mut distinct_modulus_references = Vec::new();
-        let mut stream_total_byte_length = 0_u64;
-        for column_ordinal in ordered_column_ordinals {
-            let column_index = usize::try_from(*column_ordinal)
-                .map_err(|_| CommonProofProverError::CountOverflow)?;
-            let visited = visited_columns
-                .get_mut(column_index)
-                .ok_or(CommonProofProverError::InvalidColumn)?;
-            let column = variant
-                .ordered_columns()
-                .get(column_index)
-                .ok_or(CommonProofProverError::InvalidColumn)?;
-            let modulus_reference = column
-                .canonical_residue_modulus()
-                .filter(|_| column.value_type() == RelationColumnValueType::BaseField)
-                .ok_or(CommonProofProverError::InvalidColumn)?;
-            if *visited {
-                return Err(CommonProofProverError::InvalidColumn);
-            }
-            *visited = true;
-            if !distinct_modulus_references.contains(&modulus_reference) {
-                distinct_modulus_references.push(modulus_reference);
-            }
-            let modulus = relation_context
-                .resolved_modulus(modulus_reference)
-                .map_err(|_| CommonProofProverError::InvalidColumn)?;
-            let residue_byte_length = u64::try_from(
-                crate::bgv::coefficient_codec::canonical_modulus_byte_length(modulus),
-            )
-            .map_err(|_| CommonProofProverError::CountOverflow)?;
-            let pending_column_byte_length = checked_provider_multiply(
-                column.source_degree_bound_exclusive(),
-                residue_byte_length,
-            )?;
-            let returned_source_polynomial_byte_length = checked_provider_multiply(
-                column.source_degree_bound_exclusive(),
-                u64::try_from(size_of::<ProofBaseFieldElement>())
-                    .map_err(|_| CommonProofProverError::CountOverflow)?,
-            )?;
-            stream_total_byte_length =
-                checked_provider_add(stream_total_byte_length, pending_column_byte_length)?;
-            maximum_pending_column_byte_length =
-                maximum_pending_column_byte_length.max(pending_column_byte_length);
-            maximum_returned_source_polynomial_byte_length =
-                maximum_returned_source_polynomial_byte_length
-                    .max(returned_source_polynomial_byte_length);
-        }
-        if distinct_modulus_references.is_empty() || stream_total_byte_length == 0 {
-            return Err(CommonProofProverError::InvalidColumn);
-        }
-        topology_catalog_byte_length = checked_provider_add(
-            topology_catalog_byte_length,
-            checked_provider_multiply(
-                u64::try_from(distinct_modulus_references.len())
-                    .map_err(|_| CommonProofProverError::CountOverflow)?,
-                u64::try_from(size_of::<u64>() + size_of::<u8>())
-                    .map_err(|_| CommonProofProverError::CountOverflow)?,
-            )?,
-        )?;
-        readback_chunk_count = checked_provider_add(
-            readback_chunk_count,
-            stream_total_byte_length.div_ceil(stream_chunk_byte_length),
-        )?;
-    }
-    if visited_columns.iter().any(|visited| !visited) {
-        return Err(CommonProofProverError::InvalidColumn);
-    }
-    finish_evaluator_source_provider_memory_accounting(
-        variant.ordered_trees().len(),
-        variant.ordered_columns().len(),
-        topology_catalog_byte_length,
-        readback_chunk_count,
-        maximum_pending_column_byte_length,
-        maximum_returned_source_polynomial_byte_length,
-    )
 }
 
 fn prepared_evaluator_source_provider_memory_accounting(

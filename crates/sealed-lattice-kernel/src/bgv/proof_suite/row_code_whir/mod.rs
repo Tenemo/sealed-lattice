@@ -1,41 +1,46 @@
-//! Streaming-interleaved row-code commitments with explicit-point WHIR.
+//! Streaming-interleaved row-code commitments with aggregate-wide masked WHIR.
 //!
-//! Witness rows are encoded at rate one quarter and committed column-wise.
-//! The enclosing relation derives its out-of-domain points only after those
-//! commitments are fixed. A plain WHIR opening then authenticates the
-//! resulting non-Boolean multilinear evaluations. Witness secrecy is supplied
-//! by the theorem-backed masks in the enclosing relation.
+//! Witness rows use the candidate-specific selected rate and are committed
+//! column-wise. The enclosing relation derives its out-of-domain points only
+//! after those commitments are fixed. A precommitted private masking
+//! polynomial hides the aggregate while the compact opening authenticates its
+//! non-Boolean multilinear evaluations.
 
+mod aggregate_source_storage;
+mod aggregate_wide_hiding;
+mod aggregate_wide_pcs;
+mod aggregate_wide_prover;
+mod aggregate_wide_verifier;
+mod aggregate_wide_wire;
 mod algebra;
+mod bounded_dft;
 mod column_commitment;
-#[cfg(test)]
-mod construction_correspondence;
+mod compact_merkle_frontier;
 pub(super) mod construction_plan;
 mod exact_same_secret;
 mod generation_state;
-#[cfg(test)]
 mod hiding_whir;
 #[cfg(test)]
 mod literal_bcs_merkle;
-mod masking_rank_oracle;
-mod plain_whir;
-mod plain_whir_wire;
-#[cfg(test)]
-mod protocol;
+mod opening_schedule;
+mod oracle_geometry;
 mod quotient_transform_storage;
+mod recomputable_oracle;
 mod relation_materialization;
-mod retained_oracle;
-mod retained_oracle_codec;
 mod row_encoding;
 mod same_secret_source_manifest;
-mod streaming_whir_prover;
+mod source_compression;
+mod verification;
 
 pub(in crate::bgv::proof_suite) use construction_plan::RowCodeWhirConstructionPlan;
 pub(in crate::bgv::proof_suite) use construction_plan::RowCodeWhirSelectedParameters;
 pub(in crate::bgv::proof_suite) use construction_plan::RowCodeWhirSoundnessAssumption;
 pub(in crate::bgv::proof_suite) use construction_plan::{
+    ROW_CODE_WHIR_BALLOT_OPENING_DEGREE_BOUND_EXCLUSIVE,
+    ROW_CODE_WHIR_COMMITTED_MATERIAL_OPENING_DEGREE_BOUND_EXCLUSIVE,
     ROW_CODE_WHIR_EVALUATION_DOMAIN_SIZE, ROW_CODE_WHIR_OPENING_DEGREE_BOUND_EXCLUSIVE,
     ROW_CODE_WHIR_PHASE_COLUMN_QUERY_COORDINATE_COUNT,
+    ROW_CODE_WHIR_TARGET_RELEASE_OPENING_DEGREE_BOUND_EXCLUSIVE,
     selected_row_code_whir_trace_mask_degree_bound_exclusive,
 };
 
@@ -49,16 +54,25 @@ pub(crate) use exact_same_secret::{
     PreparedExactSameSecretVerification, exact_same_secret_verification_resident_memory_accounting,
     exact_same_secret_verification_runtime_limits, prepare_exact_same_secret_verification,
 };
+#[cfg(test)]
+pub(in crate::bgv::proof_suite) use exact_same_secret::{
+    canonical_row_code_whir_aggregate_opening_section_byte_ledger,
+    canonical_row_code_whir_family_body_byte_length_ceiling,
+};
 pub(in crate::bgv::proof_suite) use generation_state::{
-    RowCodeWhirGenerationStateMachine, planned_row_code_whir_external_memory_requirement,
+    RowCodeWhirGenerationStateMachine, RowCodeWhirTranscriptPrefixAuthority,
+    planned_row_code_whir_external_memory_requirement,
 };
 pub(in crate::bgv::proof_suite) use quotient_transform_storage::{
+    RowCodeWhirQuotientColumnSourcePlan, RowCodeWhirQuotientColumnTransformPlan,
     RowCodeWhirQuotientTransformStoragePlan, plan_row_code_whir_quotient_transform_storage,
 };
 #[cfg(test)]
-pub(in crate::bgv::proof_suite) use retained_oracle::{
-    RetainedPlainWhirExternalMemoryAccounting,
-    selected_plain_whir_retained_oracle_external_memory_accounting,
+pub(crate) use verification::row_code_whir_verification_resident_memory_ceiling;
+pub(crate) use verification::{
+    PreparedRowCodeWhirVerification, RowCodeWhirFinalProofVerification,
+    RowCodeWhirIncrementalVerification, prepare_row_code_whir_verification,
+    prepare_setup_polynomial_bound_row_code_whir_verification,
 };
 #[cfg(test)]
 pub(crate) const MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH: usize = 5_242_880;
@@ -75,7 +89,7 @@ use p3_field::{
 };
 use p3_goldilocks::Goldilocks;
 use p3_merkle_tree::{MerkleCap, MerkleTreeMmcs};
-use p3_symmetric::{CompressionFunctionFromHasher, CryptographicHasher, SerializingHasher};
+use p3_symmetric::{CompressionFunctionFromHasher, CryptographicHasher};
 use sha3::{
     Shake256,
     digest::{ExtendableOutput, Update, XofReader},
@@ -87,15 +101,13 @@ use super::{
     ProofChallengeExtensionElement,
     transcript::{
         RowCodeWhirChallenge, RowCodeWhirProofStreamAbsorber, RowCodeWhirTranscript,
-        RowCodeWhirTranscriptSummary, TranscriptError,
+        RowCodeWhirTranscriptCheckpointCursor, RowCodeWhirTranscriptSummary, TranscriptError,
     },
 };
 
 const MERKLE_DIGEST_WORD_LENGTH: usize = 8;
 const MERKLE_DIGEST_BYTE_LENGTH: usize = MERKLE_DIGEST_WORD_LENGTH * size_of::<u64>();
 const GOLDILOCKS_MODULUS: u64 = 0xffff_ffff_0000_0001;
-#[cfg(test)]
-const PROTOCOL_SECURITY_LEVEL: usize = 260;
 pub(in crate::bgv::proof_suite) const ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN: &[u8] =
     b"sealed-lattice/row-code-whir/shake256/v1";
 pub(in crate::bgv::proof_suite) const ROW_CODE_WHIR_PHASE_COLUMN_LEAF_DOMAIN: &[u8; 32] =
@@ -103,13 +115,13 @@ pub(in crate::bgv::proof_suite) const ROW_CODE_WHIR_PHASE_COLUMN_LEAF_DOMAIN: &[
 pub(in crate::bgv::proof_suite) const ROW_CODE_WHIR_PHASE_COLUMN_NODE_DOMAIN: &[u8] =
     b"sealed-lattice/column-merkle-node/v1";
 pub(in crate::bgv::proof_suite) const ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN: &[u8] =
-    b"aggregate-plain-pcs/merkle-leaf/v1";
+    b"aggregate-wide-pcs/merkle-leaf/v2";
 pub(in crate::bgv::proof_suite) const ROW_CODE_WHIR_AGGREGATE_NODE_DOMAIN: &[u8] =
-    b"aggregate-plain-pcs/merkle-node/v1";
+    b"aggregate-wide-pcs/merkle-node/v1";
 
 type ChallengeField = BinomialExtensionField<Goldilocks, 5>;
 type ExtensionFieldChallenger = RowCodeWhirChallenger;
-type LeafHasher = SerializingHasher<DomainSeparatedShake256>;
+type LeafHasher = ColumnStreamableLeafHasher;
 type NodeCompressor =
     CompressionFunctionFromHasher<DomainSeparatedShake256, 2, MERKLE_DIGEST_WORD_LENGTH>;
 type CommitmentScheme =
@@ -124,6 +136,111 @@ struct AuthenticatedColumn {
 #[derive(Clone, Copy, Debug)]
 struct DomainSeparatedShake256 {
     domain: &'static [u8],
+}
+
+/// SHAKE256 leaf hashing with a 256-bit column-streaming chaining value.
+///
+/// The aggregate codeword is produced one complete DFT column at a time. A
+/// conventional row hasher would retain one 200-byte Keccak state per encoded
+/// row, which exceeds the browser memory ceiling at the selected domain. This
+/// domain-separated chain retains one 32-byte value per row instead. The final
+/// Merkle leaf remains a 64-byte digest; the chain therefore provides 128-bit
+/// collision security while preserving the existing Merkle-node security.
+#[derive(Clone, Copy, Debug)]
+struct ColumnStreamableLeafHasher {
+    domain: &'static [u8],
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ColumnStreamableLeafState([u64; 4]);
+
+impl ColumnStreamableLeafHasher {
+    const INITIAL_FRAME: u8 = 0;
+    const COLUMN_FRAME: u8 = 1;
+    const FINAL_FRAME: u8 = 2;
+
+    const fn new(hasher: DomainSeparatedShake256) -> Self {
+        Self {
+            domain: hasher.domain,
+        }
+    }
+
+    fn framed_state(&self, frame: u8) -> Shake256 {
+        let mut state = Shake256::default();
+        state.update(ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN);
+        state.update(&(self.domain.len() as u64).to_le_bytes());
+        state.update(self.domain);
+        state.update(&[frame]);
+        state
+    }
+
+    fn finish_words<const WORD_COUNT: usize>(state: Shake256) -> [u64; WORD_COUNT] {
+        let mut bytes = vec![0_u8; WORD_COUNT * size_of::<u64>()];
+        state.finalize_xof().read(&mut bytes);
+        core::array::from_fn(|word_index| {
+            let start = word_index * size_of::<u64>();
+            u64::from_le_bytes(
+                bytes[start..start + size_of::<u64>()]
+                    .try_into()
+                    .expect("one leaf-hash word has eight bytes"),
+            )
+        })
+    }
+
+    fn initial_state(&self, column_count: usize) -> ColumnStreamableLeafState {
+        let mut state = self.framed_state(Self::INITIAL_FRAME);
+        state.update(&(column_count as u64).to_le_bytes());
+        ColumnStreamableLeafState(Self::finish_words(state))
+    }
+
+    fn absorb_column(
+        &self,
+        state: ColumnStreamableLeafState,
+        column_index: usize,
+        value: ChallengeField,
+    ) -> ColumnStreamableLeafState {
+        let mut hasher = self.framed_state(Self::COLUMN_FRAME);
+        hasher.update(&(column_index as u64).to_le_bytes());
+        for word in state.0 {
+            hasher.update(&word.to_le_bytes());
+        }
+        for coefficient in
+            <ChallengeField as BasedVectorSpace<Goldilocks>>::as_basis_coefficients_slice(&value)
+        {
+            hasher.update(&coefficient.as_canonical_u64().to_le_bytes());
+        }
+        ColumnStreamableLeafState(Self::finish_words(hasher))
+    }
+
+    fn finish_leaf(
+        &self,
+        column_count: usize,
+        state: ColumnStreamableLeafState,
+    ) -> [u64; MERKLE_DIGEST_WORD_LENGTH] {
+        let mut hasher = self.framed_state(Self::FINAL_FRAME);
+        hasher.update(&(column_count as u64).to_le_bytes());
+        for word in state.0 {
+            hasher.update(&word.to_le_bytes());
+        }
+        Self::finish_words(hasher)
+    }
+}
+
+impl CryptographicHasher<ChallengeField, [u64; MERKLE_DIGEST_WORD_LENGTH]>
+    for ColumnStreamableLeafHasher
+{
+    fn hash_iter<Input>(&self, input: Input) -> [u64; MERKLE_DIGEST_WORD_LENGTH]
+    where
+        Input: IntoIterator<Item = ChallengeField>,
+    {
+        let values = input.into_iter().collect::<Vec<_>>();
+        let column_count = values.len();
+        let mut state = self.initial_state(column_count);
+        for (column_index, value) in values.into_iter().enumerate() {
+            state = self.absorb_column(state, column_index, value);
+        }
+        self.finish_leaf(column_count, state)
+    }
 }
 
 impl DomainSeparatedShake256 {
@@ -195,6 +312,7 @@ struct RowCodeWhirChallenger {
     query_schedule: Vec<WhirQueryEpoch>,
     next_query_epoch: usize,
     active_query_indices: Vec<usize>,
+    sampled_query_index_schedule: Vec<Vec<usize>>,
     next_active_query_index: usize,
     next_unscheduled_failure_query_index: usize,
 }
@@ -307,6 +425,7 @@ impl RowCodeWhirChallenger {
             query_schedule,
             next_query_epoch: 0,
             active_query_indices: Vec::new(),
+            sampled_query_index_schedule: Vec::new(),
             next_active_query_index: 0,
             next_unscheduled_failure_query_index: 0,
         }
@@ -413,18 +532,19 @@ impl RowCodeWhirChallenger {
         match self.sampling_failure {
             None => Ok(()),
             Some(ChallengerSamplingFailure::ExtensionChallengeCandidateDrawsExhausted) => Err(
-                "plain WHIR extension challenge sampling exhausted its candidate ceiling"
+                "aggregate-wide WHIR extension challenge sampling exhausted its candidate ceiling"
                     .to_owned(),
             ),
-            Some(ChallengerSamplingFailure::DistinctQueryCandidateDrawsExhausted) => {
-                Err("plain WHIR distinct query sampling exhausted its candidate ceiling".to_owned())
-            }
-            Some(ChallengerSamplingFailure::TranscriptStateMismatch) => {
-                Err("plain WHIR transcript state did not match the typed protocol".to_owned())
-            }
-            Some(ChallengerSamplingFailure::QueryScheduleMismatch) => {
-                Err("plain WHIR query calls did not match the PCS-owned schedule".to_owned())
-            }
+            Some(ChallengerSamplingFailure::DistinctQueryCandidateDrawsExhausted) => Err(
+                "aggregate-wide WHIR distinct query sampling exhausted its candidate ceiling"
+                    .to_owned(),
+            ),
+            Some(ChallengerSamplingFailure::TranscriptStateMismatch) => Err(
+                "aggregate-wide WHIR transcript state did not match the typed protocol".to_owned(),
+            ),
+            Some(ChallengerSamplingFailure::QueryScheduleMismatch) => Err(
+                "aggregate-wide WHIR query calls did not match the PCS-owned schedule".to_owned(),
+            ),
         }
     }
 
@@ -432,8 +552,38 @@ impl RowCodeWhirChallenger {
         if self.next_query_epoch != self.query_schedule.len()
             || self.next_active_query_index != self.active_query_indices.len()
         {
-            return Err("plain WHIR query schedule was not completely consumed".to_owned());
+            return Err(
+                "aggregate-wide WHIR query schedule was not completely consumed".to_owned(),
+            );
         }
+        Ok(())
+    }
+
+    fn sampled_query_index_schedule(&self) -> Result<Vec<Vec<usize>>, String> {
+        self.ensure_sampling_succeeded()?;
+        self.ensure_query_schedule_consumed()?;
+        if self.sampled_query_index_schedule.len() != self.query_schedule.len() {
+            return Err(
+                "aggregate-wide WHIR sampled query schedule has the wrong shape".to_owned(),
+            );
+        }
+        Ok(self.sampled_query_index_schedule.clone())
+    }
+
+    fn checkpoint_cursor(
+        &self,
+        construction_plan: &RowCodeWhirConstructionPlan,
+    ) -> Result<RowCodeWhirTranscriptCheckpointCursor, TranscriptError> {
+        self.transcript.checkpoint_cursor(construction_plan)
+    }
+
+    fn restore_checkpoint_cursor(
+        &mut self,
+        construction_plan: &RowCodeWhirConstructionPlan,
+        cursor: &RowCodeWhirTranscriptCheckpointCursor,
+    ) -> Result<(), TranscriptError> {
+        self.transcript =
+            RowCodeWhirTranscript::restore_checkpoint_cursor(construction_plan, cursor)?;
         Ok(())
     }
 
@@ -587,6 +737,9 @@ impl CanSampleUniformBits<ChallengeField> for RowCodeWhirChallenger {
                 });
             match sampled {
                 Ok(indices) => {
+                    let mut canonical_indices = indices.clone();
+                    canonical_indices.sort_unstable();
+                    self.sampled_query_index_schedule.push(canonical_indices);
                     self.active_query_indices = indices;
                     self.next_active_query_index = 0;
                     self.next_query_epoch += 1;
@@ -635,6 +788,26 @@ impl FieldChallenger<ChallengeField> for RowCodeWhirChallenger {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn aggregate_leaf_hash_matches_column_streaming_and_binds_order() {
+        let hasher = ColumnStreamableLeafHasher::new(DomainSeparatedShake256 {
+            domain: ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN,
+        });
+        let values = (1_u64..=8)
+            .map(ChallengeField::from_u64)
+            .collect::<Vec<_>>();
+        let direct = hasher.hash_iter(values.iter().copied());
+        let mut state = hasher.initial_state(values.len());
+        for (column_index, value) in values.iter().copied().enumerate() {
+            state = hasher.absorb_column(state, column_index, value);
+        }
+        assert_eq!(direct, hasher.finish_leaf(values.len(), state));
+
+        let mut reversed = values;
+        reversed.reverse();
+        assert_ne!(direct, hasher.hash_iter(reversed));
+    }
 
     #[test]
     fn bounded_goldilocks_sampling_refuses_after_the_exact_candidate_ceiling() {

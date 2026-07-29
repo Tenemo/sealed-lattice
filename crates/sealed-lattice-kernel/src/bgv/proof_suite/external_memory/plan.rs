@@ -45,9 +45,10 @@ pub(crate) enum ProofExternalMemoryProtection {
 }
 
 /// Active-root local-record custody consumed by secret external-memory object
-/// lifecycles. The browser writes one nine-byte object header, maximally sized
-/// data-chunk records, and one empty seal-marker record for each lifecycle.
-/// Public-integrity records never enter the local-record sealing path.
+/// lifecycles. The browser writes one nine-byte object header, at most the
+/// planned number of bounded data-chunk records, and one empty seal-marker
+/// record for each lifecycle. Public-integrity records never enter the
+/// local-record sealing path.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct ProofExternalMemorySecretSealCustodyRequirement {
     local_record_seal_invocation_count: u64,
@@ -55,9 +56,25 @@ pub(crate) struct ProofExternalMemorySecretSealCustodyRequirement {
 }
 
 impl ProofExternalMemorySecretSealCustodyRequirement {
+    #[cfg(test)]
     pub(crate) fn for_object_lifecycle(
         protection: ProofExternalMemoryProtection,
         exact_byte_length: u64,
+    ) -> Result<Self, ProofExternalMemoryError> {
+        let maximum_append_count = exact_byte_length.div_ceil(u64::from(
+            MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+        ));
+        Self::for_object_lifecycle_with_append_count(
+            protection,
+            exact_byte_length,
+            maximum_append_count,
+        )
+    }
+
+    fn for_object_lifecycle_with_append_count(
+        protection: ProofExternalMemoryProtection,
+        exact_byte_length: u64,
+        maximum_append_count: u64,
     ) -> Result<Self, ProofExternalMemoryError> {
         if exact_byte_length == 0 {
             return Err(ProofExternalMemoryError::InvalidPlan);
@@ -66,10 +83,13 @@ impl ProofExternalMemorySecretSealCustodyRequirement {
             return Ok(Self::default());
         }
 
-        let data_record_count = exact_byte_length.div_ceil(u64::from(
+        let minimum_append_count = exact_byte_length.div_ceil(u64::from(
             MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
         ));
-        let local_record_seal_invocation_count = data_record_count
+        if maximum_append_count < minimum_append_count {
+            return Err(ProofExternalMemoryError::InvalidPlan);
+        }
+        let local_record_seal_invocation_count = maximum_append_count
             .checked_add(COMMON_PROOF_EXTERNAL_MEMORY_SECRET_FIXED_RECORD_COUNT)
             .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
         let local_record_sealed_plaintext_byte_length = exact_byte_length
@@ -119,9 +139,10 @@ fn secret_seal_custody_requirement_for_object_lifecycles(
         ProofExternalMemorySecretSealCustodyRequirement::default(),
         |requirement, object| {
             requirement.checked_add(
-                ProofExternalMemorySecretSealCustodyRequirement::for_object_lifecycle(
+                ProofExternalMemorySecretSealCustodyRequirement::for_object_lifecycle_with_append_count(
                     object.protection,
                     object.exact_byte_length,
+                    object.maximum_append_count,
                 )?,
             )
         },
@@ -137,6 +158,7 @@ pub(crate) struct ProofExternalMemoryObjectPlan {
     pub(super) object: ProofExternalMemoryObject,
     pub(super) protection: ProofExternalMemoryProtection,
     pub(super) exact_byte_length: u64,
+    pub(super) maximum_append_count: u64,
     pub(super) issued_step: u32,
     pub(super) seal_step: u32,
     pub(super) last_use_step: u32,
@@ -151,10 +173,32 @@ impl ProofExternalMemoryObjectPlan {
         seal_step: u32,
         last_use_step: u32,
     ) -> Self {
+        Self::new_with_maximum_append_count(
+            object,
+            protection,
+            exact_byte_length,
+            exact_byte_length
+                .div_ceil(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH as u64),
+            issued_step,
+            seal_step,
+            last_use_step,
+        )
+    }
+
+    pub(crate) const fn new_with_maximum_append_count(
+        object: ProofExternalMemoryObject,
+        protection: ProofExternalMemoryProtection,
+        exact_byte_length: u64,
+        maximum_append_count: u64,
+        issued_step: u32,
+        seal_step: u32,
+        last_use_step: u32,
+    ) -> Self {
         Self {
             object,
             protection,
             exact_byte_length,
+            maximum_append_count,
             issued_step,
             seal_step,
             last_use_step,
@@ -171,6 +215,10 @@ impl ProofExternalMemoryObjectPlan {
 
     pub(crate) const fn exact_byte_length(self) -> u64 {
         self.exact_byte_length
+    }
+
+    pub(crate) const fn maximum_append_count(self) -> u64 {
+        self.maximum_append_count
     }
 
     pub(crate) const fn issued_step(self) -> u32 {
@@ -212,8 +260,17 @@ impl ProofExternalMemoryPlan {
         maximum_total_written_byte_length: u64,
         maximum_total_read_byte_length: u64,
         maximum_transaction_count: u64,
-        objects: Vec<ProofExternalMemoryObjectPlan>,
+        mut objects: Vec<ProofExternalMemoryObjectPlan>,
     ) -> Result<Self, ProofExternalMemoryError> {
+        if maximum_chunk_byte_length != 0 {
+            for object in &mut objects {
+                object.maximum_append_count = object.maximum_append_count.max(
+                    object
+                        .exact_byte_length
+                        .div_ceil(u64::from(maximum_chunk_byte_length)),
+                );
+            }
+        }
         let plan = Self {
             step_count,
             maximum_chunk_byte_length,
@@ -239,10 +296,6 @@ impl ProofExternalMemoryPlan {
 
     pub(in crate::bgv::proof_suite) const fn maximum_transaction_payload_byte_length(&self) -> u64 {
         self.maximum_transaction_payload_byte_length
-    }
-
-    pub(crate) const fn maximum_transaction_operation_count(&self) -> u32 {
-        self.maximum_transaction_operation_count
     }
 
     pub(in crate::bgv::proof_suite) const fn maximum_stored_byte_length(&self) -> u64 {
@@ -322,6 +375,10 @@ impl ProofExternalMemoryPlan {
             .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)?;
         for object in &self.objects {
             if object.exact_byte_length == 0
+                || object.maximum_append_count
+                    < object.exact_byte_length.div_ceil(u64::from(
+                        MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+                    ))
                 || object.issued_step > object.seal_step
                 || object.seal_step > object.last_use_step
                 || object.last_use_step >= self.step_count

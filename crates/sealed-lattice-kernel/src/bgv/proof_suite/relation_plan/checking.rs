@@ -119,111 +119,30 @@ impl<'context> RelationPlanChecker<'context> {
         application_statement_schema_identifier: u16,
         variant: &RelationPlanVariant,
     ) -> Result<(), RelationPlanError> {
-        #[cfg(test)]
-        let phase_started = std::time::Instant::now();
         self.check_domains(variant)?;
-        #[cfg(test)]
-        eprintln!("relation checker domains: {:?}", phase_started.elapsed());
-        #[cfg(test)]
-        let phase_started = std::time::Instant::now();
         self.check_moduli(variant)?;
-        #[cfg(test)]
-        eprintln!("relation checker moduli: {:?}", phase_started.elapsed());
-        #[cfg(test)]
-        let phase_started = std::time::Instant::now();
         self.check_sources_and_samplers(variant)?;
-        #[cfg(test)]
-        eprintln!("relation checker sources: {:?}", phase_started.elapsed());
-        #[cfg(test)]
-        let phase_started = std::time::Instant::now();
         let semantic_bounds = self.check_columns_and_semantic_cells(variant)?;
-        #[cfg(test)]
-        eprintln!(
-            "relation checker semantic bounds: {:?}",
-            phase_started.elapsed()
-        );
-        #[cfg(test)]
-        let phase_started = std::time::Instant::now();
         self.check_radix_convolutions(variant, &semantic_bounds)?;
-        #[cfg(test)]
-        eprintln!(
-            "relation checker radix convolutions: {:?}",
-            phase_started.elapsed()
-        );
-        #[cfg(test)]
-        let phase_started = std::time::Instant::now();
         self.check_trees(variant)?;
-        #[cfg(test)]
-        eprintln!("relation checker trees: {:?}", phase_started.elapsed());
-        #[cfg(test)]
-        let phase_started = std::time::Instant::now();
         self.check_constraints(variant, &semantic_bounds)?;
-        #[cfg(test)]
-        eprintln!(
-            "relation checker constraints: {:?}",
-            phase_started.elapsed()
-        );
-        #[cfg(test)]
-        let phase_started = std::time::Instant::now();
         self.check_coefficient_local_identity_batches(
             application_statement_schema_identifier,
             variant,
             &semantic_bounds,
         )?;
-        #[cfg(test)]
-        eprintln!(
-            "relation checker local identities: {:?}",
-            phase_started.elapsed()
-        );
-        #[cfg(test)]
-        let phase_started = std::time::Instant::now();
         let challenge_phase_columns = self.check_integer_lift_batches(
             application_statement_schema_identifier,
             variant,
             &semantic_bounds,
         )?;
-        #[cfg(test)]
-        eprintln!(
-            "relation checker integer lifts: {:?}",
-            phase_started.elapsed()
-        );
-        #[cfg(test)]
-        let phase_started = std::time::Instant::now();
         self.check_application_challenge_phase_ownership(variant, &challenge_phase_columns)?;
-        #[cfg(test)]
-        eprintln!(
-            "relation checker challenge-phase ownership: {:?}",
-            phase_started.elapsed()
-        );
-        #[cfg(test)]
-        let phase_started = std::time::Instant::now();
         self.check_openings(variant)?;
-        #[cfg(test)]
-        eprintln!("relation checker openings: {:?}", phase_started.elapsed());
-        #[cfg(test)]
-        let phase_started = std::time::Instant::now();
         self.check_masks(variant)?;
-        #[cfg(test)]
-        eprintln!("relation checker masks: {:?}", phase_started.elapsed());
-        #[cfg(test)]
-        let phase_started = std::time::Instant::now();
         crate::bgv::proof_suite::validate_zero_knowledge_mask_image(variant, self.context)?;
-        #[cfg(test)]
-        eprintln!("relation checker mask image: {:?}", phase_started.elapsed());
-        #[cfg(test)]
-        let phase_started = std::time::Instant::now();
         let challenge_catalog = variant.derived_relation_prefix_challenge_catalog(self.context)?;
         validate_challenge_catalog(&challenge_catalog, variant, self.context)?;
-        #[cfg(test)]
-        eprintln!(
-            "relation checker challenge catalog: {:?}",
-            phase_started.elapsed()
-        );
-        #[cfg(test)]
-        let phase_started = std::time::Instant::now();
         let _ = variant.common_proof_relation_prefix_schedule(self.context)?;
-        #[cfg(test)]
-        eprintln!("relation checker transcript: {:?}", phase_started.elapsed());
         Ok(())
     }
 }

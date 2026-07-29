@@ -4,8 +4,8 @@
 //! encoded under the proof selection gate at all. Answering it does not need a
 //! generated proof: every section of the canonical stream has a length that the
 //! instantiated configuration and the construction plan already determine, and
-//! the only position-dependent quantity is the authentication-node count, which
-//! has an exact worst-case bound over all position sets.
+//! the only position-dependent quantity is the compact authentication-frontier
+//! count, which has an exact worst-case bound over all position sets.
 //!
 //! This module derives both ledgers from one configuration: the plain aggregate
 //! opening that production currently emits, and the hiding candidate that would
@@ -25,28 +25,8 @@ const CHALLENGE_FIELD_WIRE_BYTE_LENGTH: usize = PROOF_CHALLENGE_EXTENSION_DEGREE
 /// Canonical wire length of one base-field element.
 const BASE_FIELD_WIRE_BYTE_LENGTH: usize = size_of::<u64>();
 
-/// Canonical wire length of one dictionary reference on an authentication path.
-const AUTHENTICATION_REFERENCE_WIRE_BYTE_LENGTH: usize = size_of::<u32>();
-
 /// Canonical wire length of one section element count.
 const SECTION_COUNT_WIRE_BYTE_LENGTH: usize = size_of::<u32>();
-
-/// Distinct authentication nodes a canonical dictionary encoding can need.
-///
-/// One opening contributes one sibling per level. Two openings share a sibling
-/// only when they already share the node above it, so the distinct siblings at
-/// one level are bounded both by the opening count and by that level's own node
-/// count. Summing those minima is exact for the worst-case position set, which
-/// is the bound a canonical encoding has to reserve for.
-fn saturating_authentication_node_count(leaf_count: usize, opening_count: usize) -> usize {
-    let mut node_count = 0;
-    let mut level_node_count = leaf_count;
-    while level_node_count > 1 {
-        node_count += opening_count.min(level_node_count);
-        level_node_count >>= 1;
-    }
-    node_count
-}
 
 /// One authenticated opening batch against a single committed root.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,16 +42,16 @@ struct AuthenticatedOpeningBatch {
 }
 
 impl AuthenticatedOpeningBatch {
-    fn authentication_path_length(&self) -> usize {
-        self.leaf_count.trailing_zeros() as usize
+    fn frontier_node_count(&self) -> usize {
+        crate::bgv::proof_suite::merkle::maximum_minimal_frontier_node_count(
+            self.leaf_count,
+            self.opening_count,
+        )
+        .expect("the construction-owned opening geometry is valid")
     }
 
-    fn dictionary_node_count(&self) -> usize {
-        saturating_authentication_node_count(self.leaf_count, self.opening_count)
-    }
-
-    fn dictionary_byte_length(&self) -> usize {
-        SECTION_COUNT_WIRE_BYTE_LENGTH + self.dictionary_node_count() * MERKLE_DIGEST_BYTE_LENGTH
+    fn frontier_byte_length(&self) -> usize {
+        SECTION_COUNT_WIRE_BYTE_LENGTH + self.frontier_node_count() * MERKLE_DIGEST_BYTE_LENGTH
     }
 
     fn opened_value_byte_length(&self) -> usize {
@@ -80,16 +60,8 @@ impl AuthenticatedOpeningBatch {
                 + self.base_values_per_opening * BASE_FIELD_WIRE_BYTE_LENGTH)
     }
 
-    fn reference_byte_length(&self) -> usize {
-        self.opening_count
-            * self.authentication_path_length()
-            * AUTHENTICATION_REFERENCE_WIRE_BYTE_LENGTH
-    }
-
     fn byte_length(&self) -> usize {
-        self.dictionary_byte_length()
-            + self.opened_value_byte_length()
-            + self.reference_byte_length()
+        self.frontier_byte_length() + self.opened_value_byte_length()
     }
 }
 
@@ -118,6 +90,8 @@ pub(in crate::bgv::proof_suite::row_code_whir) enum AggregateOpeningSection {
     SumcheckMaskCommitments,
     /// Commitments to the code-switch masks, one per round.
     CodeSwitchMaskCommitments,
+    /// Scalar source-minus-pad images consumed by the switch relations.
+    CodeSwitchMaskOffsets,
     /// Commitments the base case adds: fresh mirrors and the fresh main mask.
     BaseCaseFreshCommitments,
     /// The fresh-side claim the base case fixes before its blinding challenge.
@@ -132,6 +106,10 @@ pub(in crate::bgv::proof_suite::row_code_whir) enum AggregateOpeningSection {
     BaseCaseFreshMainOpenings,
     /// Authenticated paired openings of every carried mask group and its mirror.
     BaseCaseMaskGroupOpenings,
+    /// One-time-pad reveal of the aggregate-wide pad and its code randomness.
+    BaseCaseBlindedAggregateWidePadReveal,
+    /// Authenticated paired openings of the aggregate-wide pad and its mirror.
+    BaseCaseAggregateWidePadOpenings,
 }
 
 impl AggregateOpeningSection {
@@ -148,6 +126,7 @@ impl AggregateOpeningSection {
             Self::PlainFinalQueryOpenings => "plain-final-query-openings",
             Self::SumcheckMaskCommitments => "sumcheck-mask-commitments",
             Self::CodeSwitchMaskCommitments => "code-switch-mask-commitments",
+            Self::CodeSwitchMaskOffsets => "code-switch-mask-offsets",
             Self::BaseCaseFreshCommitments => "base-case-fresh-commitments",
             Self::BaseCaseMaskedClaim => "base-case-masked-claim",
             Self::BaseCaseBlindedSourceReveals => "base-case-blinded-source-reveals",
@@ -155,6 +134,10 @@ impl AggregateOpeningSection {
             Self::BaseCaseSourceOpenings => "base-case-source-openings",
             Self::BaseCaseFreshMainOpenings => "base-case-fresh-main-openings",
             Self::BaseCaseMaskGroupOpenings => "base-case-mask-group-openings",
+            Self::BaseCaseBlindedAggregateWidePadReveal => {
+                "base-case-blinded-aggregate-wide-pad-reveal"
+            }
+            Self::BaseCaseAggregateWidePadOpenings => "base-case-aggregate-wide-pad-openings",
         }
     }
 }
@@ -209,18 +192,13 @@ impl AggregateOpeningRoundGeometry {
                 AuthenticatedOpeningBatch {
                     leaf_count: parameters.domain_size >> folding_factor,
                     opening_count: parameters.num_queries,
-                    // Round zero opens the base-field row code; every later
-                    // oracle lives in the challenge field.
-                    challenge_values_per_opening: if round_ordinal == 0 {
-                        0
-                    } else {
-                        1 << folding_factor
-                    },
-                    base_values_per_opening: if round_ordinal == 0 {
-                        1 << folding_factor
-                    } else {
-                        0
-                    },
+                    // The aggregate witness is challenge-field valued from
+                    // its first committed row code onward. `QueryOpening::Base`
+                    // in round zero names the PCS input type, which is also the
+                    // five-limb challenge field for this construction; it does
+                    // not make those values eight-byte Goldilocks elements.
+                    challenge_values_per_opening: 1 << folding_factor,
+                    base_values_per_opening: 0,
                 }
             })
             .collect::<Vec<_>>();
@@ -262,7 +240,7 @@ impl AggregateOpeningRoundGeometry {
 /// This is the section-by-section length of the argument production currently
 /// emits, expressed with the same encoding rules the hiding ledger uses so the
 /// two are directly comparable.
-pub(in crate::bgv::proof_suite::row_code_whir) fn plain_aggregate_opening_byte_ledger(
+pub(in crate::bgv::proof_suite::row_code_whir) fn unmasked_aggregate_opening_byte_ledger(
     configuration: &SelectedHidingWhirConfig,
     opening_evaluation_count: usize,
 ) -> AggregateOpeningByteLedger {
@@ -441,6 +419,239 @@ pub(in crate::bgv::proof_suite::row_code_whir) fn hiding_aggregate_opening_byte_
     }
 }
 
+/// Geometry of one aggregate-wide masking pad that replaces all carried groups.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct AggregateWidePadCensus {
+    /// Disjoint pad coordinates assigned to every sumcheck and switch mask.
+    message_length: usize,
+    /// Random coordinates that hide the pad's authenticated openings.
+    randomness_length: usize,
+    /// Coordinates in the pad's Reed--Solomon codeword.
+    codeword_domain_size: usize,
+    /// Switch-mask coordinates sent as public one-time deltas.
+    code_switch_delta_count: usize,
+    /// Fixed-subspace coordinates omitted from the full logical mask space.
+    omitted_sumcheck_kernel_coordinates: usize,
+    /// Logarithm of the pad code's inverse rate.
+    log_inverse_rate: usize,
+}
+
+impl AggregateWidePadCensus {
+    fn derive(
+        configuration: &SelectedHidingWhirConfig,
+        hiding_census: &SelectedHidingMaskCensus,
+    ) -> Self {
+        let message_length: usize = hiding_census
+            .carried_groups
+            .iter()
+            .map(|group| group.width * group.message_length)
+            .sum();
+        let code_switch_delta_count: usize = hiding_census
+            .carried_groups
+            .iter()
+            .filter(|group| matches!(group.owner, HidingMaskGroupOwner::CodeSwitch { .. }))
+            .map(|group| group.width * group.message_length)
+            .sum();
+        let randomness_length = hiding_census.mask_spot_check_count;
+
+        // Keep exactly the selected mask code's inverse-rate expansion. The
+        // aggregate pad changes the message dimension, not the code family.
+        let sumcheck_unexpanded_length = (configuration.sumcheck_mask.message_len
+            + configuration.sumcheck_mask.randomness_len)
+            .next_power_of_two();
+        assert_eq!(
+            configuration.sumcheck_mask.domain_size % sumcheck_unexpanded_length,
+            0,
+        );
+        let inverse_rate_expansion =
+            configuration.sumcheck_mask.domain_size / sumcheck_unexpanded_length;
+        assert!(inverse_rate_expansion.is_power_of_two());
+        let codeword_domain_size =
+            (message_length + randomness_length).next_power_of_two() * inverse_rate_expansion;
+
+        Self {
+            message_length,
+            randomness_length,
+            codeword_domain_size,
+            code_switch_delta_count,
+            omitted_sumcheck_kernel_coordinates: 0,
+            log_inverse_rate: super::SELECTED_HIDING_MASK_LOG_INVERSE_RATE,
+        }
+    }
+
+    fn fixed_precommitted_subspace(
+        configuration: &SelectedHidingWhirConfig,
+        hiding_census: &SelectedHidingMaskCensus,
+    ) -> Self {
+        let aggregate_wide = Self::derive(configuration, hiding_census);
+        let omitted_sumcheck_kernel_coordinates = (0..=configuration.n_rounds())
+            .map(|batch_ordinal| {
+                configuration
+                    .round_folding_factor(batch_ordinal)
+                    .saturating_sub(1)
+            })
+            .sum::<usize>();
+        let message_length = aggregate_wide.message_length - omitted_sumcheck_kernel_coordinates;
+        let log_inverse_rate =
+            super::super::aggregate_wide_hiding::FIXED_SUBSPACE_PAD_LOG_INVERSE_RATE;
+        let codeword_domain_size = (message_length + aggregate_wide.randomness_length)
+            .next_power_of_two()
+            << log_inverse_rate;
+        Self {
+            message_length,
+            randomness_length: aggregate_wide.randomness_length,
+            codeword_domain_size,
+            // Verification consumes one scalar image per switch, not the
+            // producer's redundant coordinate vector.
+            code_switch_delta_count: configuration.n_rounds(),
+            omitted_sumcheck_kernel_coordinates,
+            log_inverse_rate,
+        }
+    }
+}
+
+/// Derives the canonical byte ledger of the aggregate-wide masking candidate.
+///
+/// All logical CFW masks occupy disjoint slices of one secret pad committed
+/// before the first dependent challenge. A code switch sends the affine delta
+/// from its private pad slice to the challenge-folded source randomness; the
+/// pad value itself is never sent. The base case consequently carries one mask
+/// oracle and one fresh mirror rather than one pair per logical mask group.
+fn aggregate_wide_pad_opening_byte_ledger(
+    configuration: &SelectedHidingWhirConfig,
+    hiding_census: &SelectedHidingMaskCensus,
+    opening_evaluation_count: usize,
+) -> AggregateOpeningByteLedger {
+    let geometry = AggregateOpeningRoundGeometry::derive(configuration);
+    let pad_census = AggregateWidePadCensus::derive(configuration, hiding_census);
+    masking_pad_opening_byte_ledger(
+        hiding_census,
+        opening_evaluation_count,
+        &geometry,
+        pad_census,
+    )
+}
+
+/// Derives the selected fixed-precommitted-subspace byte ledger.
+///
+/// The candidate removes the constant-shift kernel from every sumcheck batch,
+/// serializes only each switch relation's operative scalar image, and uses the
+/// theorem-checked 4,096-point pad code. The pad root is already present in the
+/// exact proof prefix and is not duplicated in this suffix ledger.
+pub(in crate::bgv::proof_suite::row_code_whir) fn fixed_subspace_pad_opening_byte_ledger(
+    configuration: &SelectedHidingWhirConfig,
+    hiding_census: &SelectedHidingMaskCensus,
+    opening_evaluation_count: usize,
+) -> AggregateOpeningByteLedger {
+    let geometry = AggregateOpeningRoundGeometry::derive(configuration);
+    let pad_census =
+        AggregateWidePadCensus::fixed_precommitted_subspace(configuration, hiding_census);
+    masking_pad_opening_byte_ledger(
+        hiding_census,
+        opening_evaluation_count,
+        &geometry,
+        pad_census,
+    )
+}
+
+fn masking_pad_opening_byte_ledger(
+    hiding_census: &SelectedHidingMaskCensus,
+    opening_evaluation_count: usize,
+    geometry: &AggregateOpeningRoundGeometry,
+    pad_census: AggregateWidePadCensus,
+) -> AggregateOpeningByteLedger {
+    let fold_batch_count = geometry.fold_batch_round_counts.len();
+    let masked_sumcheck_element_count: usize =
+        fold_batch_count + 2 * geometry.fold_batch_round_counts.iter().sum::<usize>();
+
+    let source_openings = AuthenticatedOpeningBatch {
+        leaf_count: hiding_census.source_code.codeword_domain_size,
+        opening_count: hiding_census.source_spot_check_count,
+        challenge_values_per_opening: geometry.terminal_query_batch.challenge_values_per_opening,
+        base_values_per_opening: 0,
+    };
+    let fresh_main_openings = AuthenticatedOpeningBatch {
+        leaf_count: hiding_census.source_code.codeword_domain_size,
+        opening_count: hiding_census.source_spot_check_count,
+        challenge_values_per_opening: 1,
+        base_values_per_opening: 0,
+    };
+    let pad_openings = AuthenticatedOpeningBatch {
+        leaf_count: pad_census.codeword_domain_size,
+        opening_count: hiding_census.mask_spot_check_count,
+        challenge_values_per_opening: 1,
+        base_values_per_opening: 0,
+    };
+
+    AggregateOpeningByteLedger {
+        sections: vec![
+            (
+                AggregateOpeningSection::Framing,
+                AGGREGATE_OPENING_FRAMING_BYTE_LENGTH,
+            ),
+            (
+                AggregateOpeningSection::OpeningEvaluations,
+                opening_evaluation_count * CHALLENGE_FIELD_WIRE_BYTE_LENGTH,
+            ),
+            (
+                AggregateOpeningSection::CommitmentOutOfDomainAnswers,
+                geometry.commitment_out_of_domain_answer_count * CHALLENGE_FIELD_WIRE_BYTE_LENGTH,
+            ),
+            (
+                AggregateOpeningSection::RoundCommitments,
+                geometry.round_count * MERKLE_DIGEST_BYTE_LENGTH,
+            ),
+            (
+                AggregateOpeningSection::RoundOutOfDomainAnswers,
+                geometry.round_out_of_domain_answer_count * CHALLENGE_FIELD_WIRE_BYTE_LENGTH,
+            ),
+            (
+                AggregateOpeningSection::RoundQueryOpenings,
+                geometry.round_query_byte_length(),
+            ),
+            (
+                AggregateOpeningSection::SumcheckWires,
+                masked_sumcheck_element_count * CHALLENGE_FIELD_WIRE_BYTE_LENGTH,
+            ),
+            (
+                AggregateOpeningSection::CodeSwitchMaskOffsets,
+                pad_census.code_switch_delta_count * CHALLENGE_FIELD_WIRE_BYTE_LENGTH,
+            ),
+            (
+                AggregateOpeningSection::BaseCaseFreshCommitments,
+                2 * MERKLE_DIGEST_BYTE_LENGTH,
+            ),
+            (
+                AggregateOpeningSection::BaseCaseMaskedClaim,
+                CHALLENGE_FIELD_WIRE_BYTE_LENGTH,
+            ),
+            (
+                AggregateOpeningSection::BaseCaseBlindedSourceReveals,
+                (hiding_census.source_code.message_length
+                    + hiding_census.source_code.randomness_length)
+                    * CHALLENGE_FIELD_WIRE_BYTE_LENGTH,
+            ),
+            (
+                AggregateOpeningSection::BaseCaseBlindedAggregateWidePadReveal,
+                (pad_census.message_length + pad_census.randomness_length)
+                    * CHALLENGE_FIELD_WIRE_BYTE_LENGTH,
+            ),
+            (
+                AggregateOpeningSection::BaseCaseSourceOpenings,
+                source_openings.byte_length(),
+            ),
+            (
+                AggregateOpeningSection::BaseCaseFreshMainOpenings,
+                fresh_main_openings.byte_length(),
+            ),
+            (
+                AggregateOpeningSection::BaseCaseAggregateWidePadOpenings,
+                2 * pad_openings.byte_length(),
+            ),
+        ],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::{
@@ -455,7 +666,7 @@ mod tests {
     ///
     /// The construction plan owns this value; pinning it here keeps the ledger
     /// arithmetic readable and fails loudly if the relation width moves.
-    const SELECTED_OPENING_EVALUATION_COUNT: usize = 4_217;
+    const SELECTED_OPENING_EVALUATION_COUNT: usize = 1_782;
 
     fn selected_configuration_and_census() -> (
         super::super::SelectedHidingWhirConfig,
@@ -468,34 +679,47 @@ mod tests {
     }
 
     #[test]
-    fn saturating_authentication_node_count_is_exact_on_small_trees() {
+    fn maximum_authentication_frontier_node_count_is_exact_on_small_trees() {
         // A single opening sends one sibling per level.
-        assert_eq!(saturating_authentication_node_count(8, 1), 3);
-        // Opening every leaf saturates every level below the root.
-        assert_eq!(saturating_authentication_node_count(8, 8), 8 + 4 + 2);
-        // Saturation clamps per level rather than per tree.
-        assert_eq!(saturating_authentication_node_count(8, 3), 3 + 3 + 2);
+        assert_eq!(
+            crate::bgv::proof_suite::merkle::maximum_minimal_frontier_node_count(8, 1),
+            Ok(3),
+        );
+        // Opening every leaf reconstructs the whole tree without a frontier.
+        assert_eq!(
+            crate::bgv::proof_suite::merkle::maximum_minimal_frontier_node_count(8, 8),
+            Ok(0),
+        );
+        // Three evenly spread leaves attain the four-node worst case.
+        assert_eq!(
+            crate::bgv::proof_suite::merkle::maximum_minimal_frontier_node_count(8, 3),
+            Ok(4),
+        );
         // A degenerate one-leaf tree authenticates nothing.
-        assert_eq!(saturating_authentication_node_count(1, 4), 0);
+        assert_eq!(
+            crate::bgv::proof_suite::merkle::maximum_minimal_frontier_node_count(1, 1),
+            Ok(0),
+        );
     }
 
     /// Records the exact static cost of migrating to the hiding candidate.
     ///
     /// The plain ledger is the argument production emits today. The hiding
     /// ledger is the same rounds with the masked base case in place of the
-    /// terminal direct send. Both use the canonical dictionary encoding, so the
-    /// difference is the migration cost and not an encoding artifact.
+    /// terminal direct send. Both use coordinate-derived compact frontiers, so
+    /// the difference is the migration cost and not an encoding artifact.
     #[test]
-    fn hiding_candidate_aggregate_opening_exceeds_the_plain_opening_by_its_mask_layer() {
+    fn selected_hiding_candidate_exceeds_the_complete_proof_gate_after_compact_frontiers() {
         let (configuration, census) = selected_configuration_and_census();
-        let plain =
-            plain_aggregate_opening_byte_ledger(&configuration, SELECTED_OPENING_EVALUATION_COUNT);
+        let plain = unmasked_aggregate_opening_byte_ledger(
+            &configuration,
+            SELECTED_OPENING_EVALUATION_COUNT,
+        );
         let hiding = hiding_aggregate_opening_byte_ledger(
             &configuration,
             &census,
             SELECTED_OPENING_EVALUATION_COUNT,
         );
-
         // The rounds are shared, so every round section matches exactly.
         for shared in [
             AggregateOpeningSection::Framing,
@@ -527,8 +751,8 @@ mod tests {
             0
         );
 
-        // The mask spot checks dominate the migration cost: nine carried groups
-        // and their nine mirrors are each opened at 393 positions.
+        // The mask spot checks dominate the migration cost: eleven carried groups
+        // and their eleven mirrors are each opened at 393 positions.
         let mask_group_opening_byte_length =
             hiding.section_byte_length(AggregateOpeningSection::BaseCaseMaskGroupOpenings);
         assert!(
@@ -538,40 +762,171 @@ mod tests {
 
         // The exact ledgers. The rounds are identical, so the difference is the
         // mask layer alone.
-        assert_eq!(plain.byte_length(), 1_772_880);
-        assert_eq!(hiding.byte_length(), 5_395_996);
+        assert_eq!(plain.byte_length(), 2_014_236);
+        assert_eq!(hiding.byte_length(), 4_875_464);
         let migration_byte_cost = hiding.byte_length() - plain.byte_length();
         assert_eq!(migration_byte_cost, HIDING_MIGRATION_BYTE_COST);
 
-        // The candidate's own opening argument already exceeds the complete
-        // proof selection gate, before any relation, phase, or bound-tree
-        // payload is added. This is the decisive eligibility result.
+        // Compact frontiers make the opening itself fit, but the selection gate
+        // applies to the complete proof. The relation, phase, and bound-tree
+        // prefix is unchanged by the aggregate-opening replacement.
+        let complete_plain_proof_byte_length =
+            NON_AGGREGATE_EXACT_PROOF_BYTE_LENGTH + plain.byte_length();
+        let complete_hiding_proof_byte_length =
+            NON_AGGREGATE_EXACT_PROOF_BYTE_LENGTH + hiding.byte_length();
+        assert_eq!(complete_plain_proof_byte_length, 4_774_250);
+        assert_eq!(complete_hiding_proof_byte_length, 7_635_478);
+        assert!(hiding.byte_length() < MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH);
         assert!(
-            hiding.byte_length() > MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH,
-            "hiding aggregate opening is {} bytes",
-            hiding.byte_length(),
+            complete_hiding_proof_byte_length > MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH,
+            "complete hiding proof is {complete_hiding_proof_byte_length} bytes",
         );
-        assert!(plain.byte_length() < MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH);
+        assert!(complete_plain_proof_byte_length < MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH);
 
         // The migration budget is at most the margin the plain proof already
-        // leaves under the gate, so the cost overruns it by an order of
-        // magnitude rather than by a tunable amount.
-        assert!(migration_byte_cost > 9 * PLAIN_PROOF_MARGIN_BELOW_SELECTION_GATE);
+        // leaves under the gate, so the masking layer remains structurally too
+        // large rather than missing by a small encoding constant.
+        assert!(migration_byte_cost > 6 * PLAIN_PROOF_MARGIN_BELOW_SELECTION_GATE);
+    }
+
+    /// Pins the complete proof-size ledger of the aggregate-wide pad candidate.
+    ///
+    /// This is an eligibility result, not a security selection result. The
+    /// candidate may be selected only after its affine mask substitution and
+    /// transcript chronology are covered by the construction theorem.
+    #[test]
+    fn aggregate_wide_pad_candidate_exceeds_the_complete_proof_gate() {
+        let (configuration, hiding_census) = selected_configuration_and_census();
+        let pad_census = AggregateWidePadCensus::derive(&configuration, &hiding_census);
+
+        // Eighteen three-coordinate sumcheck masks and the five switch masks
+        // occupy disjoint slices. Only switch slices need public deltas because
+        // their logical values depend on challenges sampled after the pad root.
+        assert_eq!(pad_census.message_length, 1_524);
+        assert_eq!(pad_census.code_switch_delta_count, 1_470);
+        assert_eq!(pad_census.randomness_length, 393);
+        assert_eq!(pad_census.codeword_domain_size, 8_192);
+
+        let plain = unmasked_aggregate_opening_byte_ledger(
+            &configuration,
+            SELECTED_OPENING_EVALUATION_COUNT,
+        );
+        let aggregate_wide = aggregate_wide_pad_opening_byte_ledger(
+            &configuration,
+            &hiding_census,
+            SELECTED_OPENING_EVALUATION_COUNT,
+        );
+
+        for shared in [
+            AggregateOpeningSection::Framing,
+            AggregateOpeningSection::OpeningEvaluations,
+            AggregateOpeningSection::CommitmentOutOfDomainAnswers,
+            AggregateOpeningSection::RoundCommitments,
+            AggregateOpeningSection::RoundOutOfDomainAnswers,
+            AggregateOpeningSection::RoundQueryOpenings,
+        ] {
+            assert_eq!(
+                plain.section_byte_length(shared),
+                aggregate_wide.section_byte_length(shared),
+                "{} diverged between the two ledgers",
+                shared.identifier(),
+            );
+        }
+
+        assert_eq!(
+            aggregate_wide.section_byte_length(AggregateOpeningSection::CodeSwitchMaskOffsets),
+            58_800,
+        );
+        assert_eq!(
+            aggregate_wide.section_byte_length(
+                AggregateOpeningSection::BaseCaseBlindedAggregateWidePadReveal,
+            ),
+            76_680,
+        );
+        assert_eq!(
+            aggregate_wide
+                .section_byte_length(AggregateOpeningSection::BaseCaseAggregateWidePadOpenings,),
+            247_896,
+        );
+        assert_eq!(aggregate_wide.byte_length(), 2_586_008);
+
+        let complete_proof_byte_length =
+            NON_AGGREGATE_EXACT_PROOF_BYTE_LENGTH + aggregate_wide.byte_length();
+        assert_eq!(complete_proof_byte_length, 5_346_022);
+        assert_eq!(
+            complete_proof_byte_length - MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH,
+            103_142,
+        );
+        assert!(complete_proof_byte_length > MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH);
+    }
+
+    /// Pins the complete proof-size ledger of the selected fixed subspace.
+    #[test]
+    fn fixed_precommitted_masking_subspace_fits_the_complete_proof_gate() {
+        let (configuration, hiding_census) = selected_configuration_and_census();
+        let pad_census =
+            AggregateWidePadCensus::fixed_precommitted_subspace(&configuration, &hiding_census);
+        assert_eq!(pad_census.message_length, 1_512);
+        assert_eq!(pad_census.code_switch_delta_count, 5);
+        assert_eq!(pad_census.omitted_sumcheck_kernel_coordinates, 12);
+        assert_eq!(pad_census.randomness_length, 393);
+        assert_eq!(pad_census.codeword_domain_size, 4_096);
+        assert_eq!(pad_census.log_inverse_rate, 1);
+
+        let selected = fixed_subspace_pad_opening_byte_ledger(
+            &configuration,
+            &hiding_census,
+            SELECTED_OPENING_EVALUATION_COUNT,
+        );
+        assert_eq!(
+            selected.section_byte_length(AggregateOpeningSection::CodeSwitchMaskOffsets),
+            200,
+        );
+        assert_eq!(
+            selected.section_byte_length(
+                AggregateOpeningSection::BaseCaseBlindedAggregateWidePadReveal,
+            ),
+            76_200,
+        );
+        assert_eq!(
+            selected
+                .section_byte_length(AggregateOpeningSection::BaseCaseAggregateWidePadOpenings,),
+            197_592,
+        );
+        assert_eq!(selected.byte_length(), 2_476_624);
+
+        let complete_proof_byte_length =
+            NON_AGGREGATE_EXACT_PROOF_BYTE_LENGTH + selected.byte_length();
+        assert_eq!(complete_proof_byte_length, 5_236_638);
+        assert_eq!(
+            MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH - complete_proof_byte_length,
+            6_242,
+        );
+        assert!(complete_proof_byte_length < MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH);
     }
 
     /// Bytes the hiding mask layer adds to the plain aggregate opening.
-    const HIDING_MIGRATION_BYTE_COST: usize = 3_623_116;
+    const HIDING_MIGRATION_BYTE_COST: usize = 2_861_228;
+
+    /// Exact same-secret proof bytes outside the plain aggregate opening.
+    ///
+    /// The selected fixed-subspace proof is 5,236,638 bytes and its aggregate
+    /// opening is 2,476,624 bytes. Candidate substitution changes only that
+    /// opening section, leaving this prefix byte-for-byte unchanged.
+    const NON_AGGREGATE_EXACT_PROOF_BYTE_LENGTH: usize = 2_760_014;
 
     /// Margin the recorded plain same-secret proof leaves under the gate.
     ///
-    /// The plain proof measured `4,842,836` bytes against the `5,242,880`-byte
+    /// The plain baseline is `4,774,250` bytes against the `5,242,880`-byte
     /// selection gate. Any masking layer has to fit inside that margin, because
     /// every other section of the stream is unchanged by the masking choice.
-    const PLAIN_PROOF_MARGIN_BELOW_SELECTION_GATE: usize = 400_044;
+    const PLAIN_PROOF_MARGIN_BELOW_SELECTION_GATE: usize = 468_630;
 
     /// One searched hiding-parameter candidate.
     #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
     struct SearchedHidingCandidate {
+        /// Complete exact same-secret proof bytes after replacing the aggregate opening.
+        complete_proof_byte_length: usize,
         /// Opening bytes the candidate's masking layer adds to its own plain ledger.
         migration_byte_cost: usize,
         /// Complete hiding aggregate-opening bytes.
@@ -591,7 +946,7 @@ mod tests {
     /// commitment variable count stay at their selected values, so every
     /// candidate carries the same query-count derivation the selection uses.
     #[test]
-    fn no_admissible_hiding_parameter_fits_the_plain_proof_margin() {
+    fn no_admissible_hiding_parameter_fits_the_complete_proof_gate() {
         let selected = RowCodeWhirSelectedParameters::selected();
         let mut candidates = Vec::new();
         for folding_factor in 1..=8 {
@@ -612,7 +967,7 @@ mod tests {
                         continue;
                     };
                     let census = SelectedHidingMaskCensus::derive(&configuration);
-                    let plain = plain_aggregate_opening_byte_ledger(
+                    let plain = unmasked_aggregate_opening_byte_ledger(
                         &configuration,
                         SELECTED_OPENING_EVALUATION_COUNT,
                     );
@@ -622,6 +977,8 @@ mod tests {
                         SELECTED_OPENING_EVALUATION_COUNT,
                     );
                     candidates.push(SearchedHidingCandidate {
+                        complete_proof_byte_length: NON_AGGREGATE_EXACT_PROOF_BYTE_LENGTH
+                            + hiding.byte_length(),
                         migration_byte_cost: hiding.byte_length() - plain.byte_length(),
                         hiding_opening_byte_length: hiding.byte_length(),
                         folding_factor,
@@ -637,11 +994,10 @@ mod tests {
         candidates.sort_unstable();
         let cheapest = candidates[0];
 
-        // Even the cheapest admissible masking layer costs far more than the
-        // whole margin the plain proof leaves under the gate, so no parameter
-        // choice inside this family makes the candidate eligible.
+        // Even the cheapest complete proof remains over the selection gate, so
+        // no admissible parameter choice inside this theorem family is eligible.
         assert!(
-            cheapest.migration_byte_cost > 4 * PLAIN_PROOF_MARGIN_BELOW_SELECTION_GATE,
+            cheapest.complete_proof_byte_length > MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH,
             "cheapest candidate {cheapest:?}",
         );
         assert_eq!(
@@ -650,9 +1006,11 @@ mod tests {
                 cheapest.sumcheck_mask_message_length,
                 cheapest.mask_log_inverse_rate,
             ),
-            (8, 3, 3),
+            (5, 3, 3),
         );
-        assert_eq!(cheapest.migration_byte_cost, 1_658_836);
+        assert_eq!(cheapest.hiding_opening_byte_length, 4_713_688);
+        assert_eq!(cheapest.migration_byte_cost, 2_266_756);
+        assert_eq!(cheapest.complete_proof_byte_length, 7_473_702);
 
         // The selected geometry is not an outlier inside the searched family:
         // its cost is within a small factor of the cheapest one, so the refusal
@@ -676,6 +1034,9 @@ mod tests {
             selected_candidate.migration_byte_cost,
             HIDING_MIGRATION_BYTE_COST
         );
-        assert!(selected_candidate.migration_byte_cost < 3 * cheapest.migration_byte_cost);
+        assert_eq!(selected_candidate.complete_proof_byte_length, 7_635_478);
+        assert!(
+            selected_candidate.complete_proof_byte_length > cheapest.complete_proof_byte_length
+        );
     }
 }

@@ -20,8 +20,9 @@ pub(in crate::bgv) use self::verified_public_randomness::{
     VerifiedPublicRandomness, verify_public_randomness_board_sources,
 };
 pub(in crate::bgv) use self::verified_terminals::{
-    VerifiedAggregateThresholdShareTerminal, VerifiedVssQualificationTerminals,
-    VerifiedVssShareLinkageTerminal, derive_recipient_input_root,
+    VerifiedAggregateThresholdShareTerminal, VerifiedSetupPolynomialLowDegreePrerequisite,
+    VerifiedVssQualificationTerminals, VerifiedVssShareLinkageTerminal,
+    derive_recipient_input_root,
 };
 
 pub(in crate::bgv) use self::authority::{

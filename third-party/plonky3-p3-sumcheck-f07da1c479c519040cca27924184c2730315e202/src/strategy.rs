@@ -446,14 +446,14 @@ impl<F: Field, EF: ExtensionField<F>> SumcheckProver<F, EF> {
     /// Computes the current round's plain quadratic coefficients without
     /// touching the transcript or folding the polynomial.
     #[cfg(feature = "zk")]
-    pub(crate) fn round_coefficients(&self) -> (EF, EF) {
+    pub fn round_coefficients(&self) -> (EF, EF) {
         self.poly.round_coefficients()
     }
 
     /// Folds the residual product polynomial by one challenge and updates the
     /// claimed sum with the same quadratic extrapolation as the plain path.
     #[cfg(feature = "zk")]
-    pub(crate) fn fold_round_with_coefficients(&mut self, c0: EF, c_inf: EF, gamma: EF) {
+    pub fn fold_round_with_coefficients(&mut self, c0: EF, c_inf: EF, gamma: EF) {
         self.sum = extrapolate_01inf(c0, self.sum - c0, c_inf, gamma);
         self.poly.fold_round(gamma);
         debug_assert_eq!(self.sum, self.poly.dot_product());
@@ -464,7 +464,7 @@ impl<F: Field, EF: ExtensionField<F>> SumcheckProver<F, EF> {
     /// Leaves the evaluation side untouched, so downstream reductions can
     /// reuse it as the honest folded message.
     #[cfg(feature = "zk")]
-    pub(crate) fn scale_weights_and_claim(&mut self, scale: EF) {
+    pub fn scale_weights_and_claim(&mut self, scale: EF) {
         self.poly.scale_weights(scale);
         self.sum *= scale;
     }
@@ -484,6 +484,15 @@ impl<F: Field, EF: ExtensionField<F>> SumcheckProver<F, EF> {
         self.poly.accumulate_weights(weights_delta);
         self.sum += sum_delta;
         debug_assert_eq!(self.sum, self.poly.dot_product());
+    }
+
+    /// Folds one additional constraint into the current weight polynomial.
+    ///
+    /// This is the transcript-free preparation step shared by the plain and
+    /// masked round drivers. The caller must apply it before emitting the next
+    /// sumcheck polynomial.
+    pub fn apply_constraint(&mut self, constraint: &Constraint<F, EF>) {
+        self.poly.combine(&mut self.sum, constraint);
     }
 
     /// Runs additional sumcheck rounds, optionally incorporating a new constraint.

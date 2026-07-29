@@ -46,7 +46,8 @@ use crate::{
             CommonProofPrivateCoinSource, CommonProofSourcePolynomial,
             PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
             RecordingCommonProofPrivateCoinSource, RelationProofTreeInput,
-            construct_reversed_relation_column,
+            common_proof_private_coin_coordinate_derivation_context_hash,
+            construct_reversed_relation_column, encode_common_proof_checkpoint_cursor_manifest,
         },
         setup::{
             PreparedExactSameSecretGenerationSources, SetupGenerationAuthorityHandle,
@@ -57,7 +58,7 @@ use crate::{
         },
     },
     foundation::{
-        SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+        PrivateRandomCursor, SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
         prepare_exact_same_secret_evidence_attempt,
     },
 };
@@ -66,24 +67,32 @@ use std::collections::BTreeMap;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 use super::MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH;
-#[cfg(all(test, not(target_arch = "wasm32")))]
-use super::protocol::{RecomputableRowSource, commit_streaming_witness};
 use super::{column_commitment::ColumnDigest, row_encoding::RowEncodingGeometry};
 use crate::bgv::proof_suite::relation_plan::{RelationOpeningSourceClass, RelationTreeDescriptor};
 
 mod aggregate_source;
 mod exact_proof;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod runtime_evidence_tests;
 
 pub(in crate::bgv::proof_suite::row_code_whir) use aggregate_source::{
     ExactSameSecretAggregateMetadata, ExactSameSecretAggregateSource,
-    ExactSameSecretAggregateSourceAction, ExactSameSecretAggregateSourceTarget,
+    ExactSameSecretAggregateSourceAction, ExactSameSecretAggregateSourceBatch,
+    ExactSameSecretAggregateSourceTarget, ExactSameSecretAggregateWitness,
 };
 pub(in crate::bgv::proof_suite::row_code_whir) use exact_proof::{
-    EXACT_BOUND_TREE_ROW_WIDTH, ExactBoundLeafOpening, ExactBoundTreeAuthentication,
-    ExactSameSecretOpeningSchedule, ExactSameSecretPhaseOpenings, ExactSameSecretProof,
-    ExactSameSecretProofEncodingProgress, ExactSameSecretProofSinkEncoder,
-    ExactSameSecretProofSinkEncodingError, checked_exact_same_secret_proof_shape,
-    exact_same_secret_bound_tree_catalog_entries,
+    ExactBoundLeafOpening, ExactBoundTreeAuthentication, ExactSameSecretPhaseOpenings,
+    ExactSameSecretProof, ExactSameSecretProofEncodingProgress, ExactSameSecretProofSinkEncoder,
+    ExactSameSecretProofSinkEncodingError,
+};
+#[cfg(test)]
+pub(in crate::bgv::proof_suite) use exact_proof::{
+    ExactExtractorCorrespondenceFault, ExactPointConstraintExtractorCertificate,
+    ExactPolynomialProtocolExtractorCertificate,
+    canonical_row_code_whir_aggregate_opening_section_byte_ledger,
+    canonical_row_code_whir_family_body_byte_length_ceiling,
+    checked_exact_same_secret_extractor_correspondence,
+    checked_exact_same_secret_extractor_correspondence_with_fault,
 };
 pub(crate) use exact_proof::{
     ExactSameSecretFinalProofVerification, ExactSameSecretIncrementalVerification,
@@ -98,10 +107,14 @@ const SOURCE_CATALOG_DIGEST_DOMAIN: &str = "sealed-lattice/exact-same-secret/sou
 const EXACT_SAME_SECRET_EVIDENCE_REVISION: u8 = 4;
 const EXACT_TRANSCRIPT_HEADER_DOMAIN: &[u8] =
     b"sealed-lattice/exact-same-secret/transcript-header/v2";
-const LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT: usize = 32_768;
-const PHYSICAL_ROW_WITNESS_VARIABLE_COUNT: usize = 18;
-const LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW: usize = 8;
-const EXACT_ROW_CODE_LOG_INVERSE_RATE: usize = 2;
+const LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT: usize =
+    super::construction_plan::ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT;
+const PHYSICAL_ROW_WITNESS_VARIABLE_COUNT: usize =
+    super::construction_plan::ROW_CODE_WHIR_PHYSICAL_ROW_WITNESS_VARIABLE_COUNT;
+const LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW: usize =
+    super::construction_plan::ROW_CODE_WHIR_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW;
+const EXACT_ROW_CODE_LOG_INVERSE_RATE: usize =
+    super::construction_plan::ROW_CODE_WHIR_LOG_INVERSE_RATE;
 const VERIFIED_SAME_SECRET_LOW_DEGREE_PREREQUISITE_DOMAIN: &str =
     "sealed-lattice/same-secret/verified-low-degree-prerequisite/v2";
 #[cfg(test)]
@@ -109,7 +122,6 @@ const TEST_VERIFIED_VSS_PROOF_RESULT_DIGEST: [u8; Hash512::BYTE_LENGTH] =
     [0x76; Hash512::BYTE_LENGTH];
 #[cfg(test)]
 const QUOTIENT_COMPONENT_CHUNK_COUNT: usize = 2;
-const OPENING_BATCH_MASK_CHUNK_COUNT: usize = 8;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 const EXACT_ROW_PAD_SEED_BYTE_LENGTH: usize = core::mem::size_of::<[[u8; 32]; 3]>();
 
@@ -786,12 +798,6 @@ impl ExactSameSecretFiatShamirBinding {
         self.oracle_equation_catalog_hash
     }
 
-    pub(in crate::bgv::proof_suite) const fn setup_proof_context_hash(
-        &self,
-    ) -> [u8; Hash512::BYTE_LENGTH] {
-        self.setup_proof_context_hash
-    }
-
     pub(in crate::bgv::proof_suite) const fn ordered_source_roots(
         &self,
     ) -> &[[u8; Hash512::BYTE_LENGTH]; 11] {
@@ -1198,7 +1204,6 @@ fn absorb_exact_relation_roots(
                 .map_err(|error| {
                     format!("absorb exact auxiliary root {tree_ordinal}: {error:?}")
                 })?,
-            _ => return Err("an unsupported relation phase root was requested".to_owned()),
         }
     }
     Ok(())
@@ -1388,6 +1393,25 @@ fn exact_private_coin_sampling_catalog(
             EXACT_ROW_PAD_SEED_BYTE_LENGTH,
         )
         .map_err(|error| format!("add exact row-pad seed fill to catalog: {error:?}"))?;
+    let hiding_configuration = super::hiding_whir::selected_hiding_whir_config(
+        super::construction_plan::RowCodeWhirSelectedParameters::selected(),
+    )
+    .map_err(|error| format!("derive aggregate-wide hiding configuration: {error}"))?;
+    let hiding_shape = super::aggregate_wide_hiding::AggregateWideHidingMaterialShape::derive(
+        &hiding_configuration,
+    )?;
+    let base_field_sample_count = hiding_shape
+        .total_extension_element_count()
+        .checked_mul(crate::bgv::proof_suite::PROOF_CHALLENGE_EXTENSION_DEGREE)
+        .ok_or_else(|| "aggregate-wide private-sample count overflowed".to_owned())?;
+    catalog
+        .record_modulo_samples(
+            CommonProofPrivateCoinCoordinate::hiding_argument(),
+            crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS,
+            SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+            base_field_sample_count,
+        )
+        .map_err(|error| format!("add aggregate-wide hiding samples to catalog: {error:?}"))?;
     Ok(catalog)
 }
 
@@ -1459,6 +1483,7 @@ mod native_checkpoint {
     use p3_field::PrimeCharacteristicRing;
     use p3_goldilocks::Goldilocks;
 
+    use super::super::{column_commitment::StreamingColumnHasher, row_encoding::encode_row};
     use super::*;
     use crate::bgv::proof_suite::{
         PROOF_CHALLENGE_EXTENSION_DEGREE, ProofBaseFieldElement, ProofChallengeExtensionElement,
@@ -1476,6 +1501,35 @@ mod native_checkpoint {
         usize,
         zeroize::Zeroizing<Vec<ProofChallengeExtensionElement>>,
     );
+
+    pub(super) trait RecomputableRowSource {
+        fn read_row(&self, row_index: usize) -> Result<Vec<Goldilocks>, String>;
+    }
+
+    pub(super) fn commit_phase_rows<Source: RecomputableRowSource>(
+        source: &Source,
+        geometry: RowEncodingGeometry,
+        secret_row_pad_seed: &[u8; 32],
+    ) -> Result<ColumnDigest, String> {
+        let mut column_hasher =
+            StreamingColumnHasher::new(geometry.row_count, geometry.encoded_column_count)?;
+        for row_index in 0..geometry.row_count {
+            let mut witness_values = source.read_row(row_index)?;
+            if witness_values.len() != geometry.witness_values_per_row {
+                return Err(format!(
+                    "row {row_index} has {} witness values, expected {}",
+                    witness_values.len(),
+                    geometry.witness_values_per_row
+                ));
+            }
+            let mut encoded_row =
+                encode_row(geometry, row_index, &witness_values, secret_row_pad_seed)?;
+            column_hasher.absorb_row(&encoded_row)?;
+            witness_values.fill(Goldilocks::ZERO);
+            encoded_row.fill(Goldilocks::ZERO);
+        }
+        column_hasher.finalize_root()
+    }
 
     #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
     pub(super) struct SourceCheckpointManifest {
@@ -2231,7 +2285,7 @@ mod native_checkpoint {
             } else {
                 let polynomial = self.store.read_opening_batch_mask()?;
                 let maximum_coefficient_count =
-                    LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT * OPENING_BATCH_MASK_CHUNK_COUNT;
+                    LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT * LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW;
                 if polynomial.len() > maximum_coefficient_count {
                     return Err(format!(
                         "quotient phase polynomial has {} coefficients, exceeding {}",
@@ -2239,7 +2293,7 @@ mod native_checkpoint {
                         maximum_coefficient_count
                     ));
                 }
-                for chunk_ordinal in 0..OPENING_BATCH_MASK_CHUNK_COUNT {
+                for chunk_ordinal in 0..LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW {
                     let source_start = chunk_ordinal * LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT;
                     if source_start >= polynomial.len() {
                         continue;
@@ -2277,13 +2331,15 @@ mod tests {
     use super::native_checkpoint::{
         CheckpointBasePhaseSource, CheckpointQuotientPhaseSource, ExactPhaseCommitmentManifest,
         ExactPolynomialStore, ExactQuotientCommitmentManifest, SourceCheckpointManifest,
+        commit_phase_rows,
     };
     use super::*;
     use crate::bgv::proof_suite::relation_plan::RelationMaskKind;
     use crate::bgv::proof_suite::{
-        CommonProofQuotientComponentCursor, ProofBaseFieldElement, ProofChallengeExtensionElement,
-        ProofEvaluationDomain, RelationPlanError, construct_opening_batch_mask,
-        selected_relation_plans,
+        CommonProofQuotientComponentCursor, PROOF_CHALLENGE_EXTENSION_DEGREE,
+        ProofBaseFieldElement, ProofChallengeExtensionElement, ProofEvaluationDomain,
+        RelationPlanError, common_proof_checkpoint_cursor_manifest_requirement_for_variant,
+        construct_opening_batch_mask, selected_relation_plans,
     };
     use crate::transcript_core::encode_hex;
 
@@ -2594,13 +2650,24 @@ mod tests {
             })
             .map(|mask| CommonProofPrivateCoinCoordinate::from_mask(mask.mask_coordinate()))
             .collect::<BTreeSet<_>>();
-        exact_private_coin_sampling_catalog(variant)
-            .expect("derive exact private-coin catalog")
-            .retaining_coordinates(|coordinate| {
-                phase_coordinates.contains(&coordinate)
-                    || (include_row_pad_seed_fill
-                        && coordinate == CommonProofPrivateCoinCoordinate::proof_salt())
-            })
+        let mut catalog = CommonProofPrivateCoinSamplingCatalog::from_relation_plan_variant(
+            variant,
+            SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+        )
+        .expect("derive relation private-coin catalog");
+        if include_row_pad_seed_fill {
+            catalog
+                .record_raw_byte_fill(
+                    CommonProofPrivateCoinCoordinate::proof_salt(),
+                    EXACT_ROW_PAD_SEED_BYTE_LENGTH,
+                )
+                .expect("add row-pad seeds to phase private-coin catalog");
+        }
+        catalog.retaining_coordinates(|coordinate| {
+            phase_coordinates.contains(&coordinate)
+                || (include_row_pad_seed_fill
+                    && coordinate == CommonProofPrivateCoinCoordinate::proof_salt())
+        })
     }
 
     fn exact_quotient_private_coin_catalog(
@@ -2613,9 +2680,12 @@ mod tests {
             .filter(|mask| mask.mask_kind() != RelationMaskKind::Trace)
             .map(|mask| CommonProofPrivateCoinCoordinate::from_mask(mask.mask_coordinate()))
             .collect::<BTreeSet<_>>();
-        exact_private_coin_sampling_catalog(variant)
-            .expect("derive exact private-coin catalog")
-            .retaining_coordinates(|coordinate| quotient_coordinates.contains(&coordinate))
+        CommonProofPrivateCoinSamplingCatalog::from_relation_plan_variant(
+            variant,
+            SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+        )
+        .expect("derive relation private-coin catalog")
+        .retaining_coordinates(|coordinate| quotient_coordinates.contains(&coordinate))
     }
 
     fn validate_checkpoint_binding(
@@ -2680,9 +2750,7 @@ mod tests {
         let schedule = sources
             .relation_plan_variant
             .common_proof_relation_prefix_schedule(&sources.relation_context)
-            .expect("derive production transcript schedule")
-            .into_row_code_whir_successor()
-            .expect("derive production successor transcript schedule");
+            .expect("derive production transcript schedule");
         let transcript_authority = sources
             .authorization
             .exact_same_secret_transcript_prefix_authority_binding(
@@ -2793,7 +2861,7 @@ mod tests {
     }
 
     #[test]
-    fn exact_private_coin_catalog_uses_the_exact_draw_ceiling_and_non_rejecting_raw_fill() {
+    fn exact_private_coin_catalog_covers_relation_row_pad_and_aggregate_wide_hiding() {
         let (_, variant, _) =
             production_same_secret_relation().expect("compile exact same-secret relation");
         let catalog =
@@ -2835,10 +2903,21 @@ mod tests {
                 );
             }
         }
+        let mut relation_and_row_pad_catalog =
+            CommonProofPrivateCoinSamplingCatalog::from_relation_plan_variant(
+                &variant,
+                SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+            )
+            .expect("derive relation private-coin catalog");
+        relation_and_row_pad_catalog
+            .record_raw_byte_fill(proof_salt_coordinate, EXACT_ROW_PAD_SEED_BYTE_LENGTH)
+            .expect("add exact row-pad seed fill");
         assert_eq!(
             partitioned_entries,
-            catalog.entries().collect::<BTreeMap<_, _>>(),
-            "the pairwise-disjoint exact private-coin phases must partition the complete action catalog"
+            relation_and_row_pad_catalog
+                .entries()
+                .collect::<BTreeMap<_, _>>(),
+            "the pairwise-disjoint exact relation phases must partition the relation and row-pad actions"
         );
 
         assert_eq!(
@@ -2849,14 +2928,73 @@ mod tests {
             (64, 128),
             "the exact private sampler remains authoritative at D=64; the generic transcript sampler still uses D=128"
         );
-        assert_eq!(catalog.entry_count(), variant.ordered_masks().len() + 1);
+        let hiding_configuration = super::super::hiding_whir::selected_hiding_whir_config(
+            super::super::construction_plan::RowCodeWhirSelectedParameters::selected(),
+        )
+        .expect("derive selected aggregate-wide hiding configuration");
+        let hiding_shape =
+            super::super::aggregate_wide_hiding::AggregateWideHidingMaterialShape::derive(
+                &hiding_configuration,
+            )
+            .expect("derive selected aggregate-wide private-material shape");
+        let hiding_base_field_sample_count =
+            hiding_shape.total_extension_element_count() * PROOF_CHALLENGE_EXTENSION_DEGREE;
+        assert_eq!(hiding_shape.total_extension_element_count(), 18_001);
+        assert_eq!(hiding_base_field_sample_count, 90_005);
+        assert_eq!(
+            catalog.entry(CommonProofPrivateCoinCoordinate::hiding_argument()),
+            Some(CommonProofPrivateCoinSamplingOperation::ModuloSamples {
+                modulus: crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS,
+                maximum_candidate_draws_per_output:
+                    SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+                output_count: 90_005,
+            })
+        );
+        assert_eq!(catalog.entry_count(), variant.ordered_masks().len() + 2);
+        let derivation_binding_hash = Hash512::from_bytes([0x8b_u8; Hash512::BYTE_LENGTH]);
+        let stream_attempt_identifier = [0x4e_u8; 32];
+        let checkpoint_cursors = catalog
+            .entries()
+            .enumerate()
+            .map(|(catalog_ordinal, (coordinate, _))| {
+                let cursor = PrivateRandomCursor::new(
+                    ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+                    coordinate.purpose_class(),
+                    common_proof_private_coin_coordinate_derivation_context_hash(
+                        derivation_binding_hash,
+                        coordinate,
+                    ),
+                    stream_attempt_identifier,
+                    u64::try_from(catalog_ordinal + 1).expect("catalog ordinal fits u64"),
+                    None,
+                )
+                .expect("exact private-coin catalog cursor is valid");
+                (coordinate, cursor)
+            })
+            .collect::<Vec<_>>();
+        let checkpoint_manifest = encode_common_proof_checkpoint_cursor_manifest(
+            ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+            derivation_binding_hash,
+            stream_attempt_identifier,
+            checkpoint_cursors,
+        )
+        .expect("the complete exact private-coin catalog has a canonical checkpoint manifest");
+        assert_eq!(
+            u32::from_le_bytes(
+                checkpoint_manifest[11..15]
+                    .try_into()
+                    .expect("checkpoint logical-cursor-count bytes")
+            ),
+            u32::try_from(catalog.entry_count()).expect("catalog entry count fits u32"),
+            "the exact checkpoint commitment covers every relation-mask, aggregate-hiding, and row-pad cursor"
+        );
         for (coordinate, operation) in catalog.entries() {
             if coordinate == CommonProofPrivateCoinCoordinate::proof_salt() {
                 assert_eq!(
                     operation,
                     CommonProofPrivateCoinSamplingOperation::RawByteFill {
                         byte_count: u64::try_from(EXACT_ROW_PAD_SEED_BYTE_LENGTH)
-                            .expect("row-pad seed byte count fits u64"),
+                            .expect("row-pad byte count fits u64"),
                     }
                 );
                 assert_eq!(operation.maximum_candidate_draws_per_output(), None);
@@ -2867,7 +3005,7 @@ mod tests {
                     output_count,
                 } = operation
                 else {
-                    panic!("a relation mask must use modulo sampling")
+                    panic!("relation masks and aggregate-wide hiding must use modulo sampling")
                 };
                 assert_eq!(modulus, crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS);
                 assert_eq!(
@@ -2892,6 +3030,161 @@ mod tests {
             complete_action_exhaustion.is_at_most_inverse_power_of_two(128),
             "under the uniform-private-coin or ideal-PRF premise, the source-derived exact same-secret private-coin exhaustion union must be at most 2^-128"
         );
+    }
+
+    #[test]
+    fn exact_checkpoint_private_coin_prefixes_encode_canonically() {
+        let (_, variant, _) =
+            production_same_secret_relation().expect("compile exact same-secret relation");
+        let base_phase_catalog = exact_trace_private_coin_catalog_for_tree_role(
+            &variant,
+            ProofTreeRole::BaseOracle,
+            false,
+        );
+        let auxiliary_phase_catalog = exact_trace_private_coin_catalog_for_tree_role(
+            &variant,
+            ProofTreeRole::AuxiliaryOracle,
+            false,
+        );
+        let quotient_phase_catalog = exact_quotient_private_coin_catalog(&variant);
+        let complete_catalog =
+            exact_private_coin_sampling_catalog(&variant).expect("derive exact private coins");
+        let family_schema_identifier =
+            ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER;
+        let derivation_binding_hash = Hash512::from_bytes([0x9a_u8; Hash512::BYTE_LENGTH]);
+        let stream_attempt_identifier = [0xc3_u8; 32];
+        let mut consumed_coordinates = BTreeSet::new();
+
+        let assert_checkpoint_manifest = |checkpoint_label: &str,
+                                          coordinates: &BTreeSet<
+            CommonProofPrivateCoinCoordinate,
+        >|
+         -> Vec<u8> {
+            let cursors = coordinates
+                .iter()
+                .copied()
+                .enumerate()
+                .map(|(coordinate_ordinal, coordinate)| {
+                    let cursor = PrivateRandomCursor::new(
+                        family_schema_identifier,
+                        coordinate.purpose_class(),
+                        common_proof_private_coin_coordinate_derivation_context_hash(
+                            derivation_binding_hash,
+                            coordinate,
+                        ),
+                        stream_attempt_identifier,
+                        u64::try_from(coordinate_ordinal + 1)
+                            .expect("checkpoint coordinate ordinal fits u64"),
+                        None,
+                    )
+                    .expect("checkpoint cursor is valid");
+                    (coordinate, cursor)
+                })
+                .collect::<Vec<_>>();
+            encode_common_proof_checkpoint_cursor_manifest(
+                family_schema_identifier,
+                derivation_binding_hash,
+                stream_attempt_identifier,
+                cursors,
+            )
+            .unwrap_or_else(|error| {
+                panic!(
+                    "{checkpoint_label} private-coin checkpoint is not canonical: {error:?}; coordinate_count={}; first_coordinate={:?}; last_coordinate={:?}",
+                    coordinates.len(),
+                    coordinates.first(),
+                    coordinates.last(),
+                )
+            })
+        };
+        let mut checkpoint_manifests = Vec::new();
+
+        consumed_coordinates.extend(
+            base_phase_catalog
+                .entries()
+                .map(|(coordinate, _)| coordinate),
+        );
+        checkpoint_manifests.push(assert_checkpoint_manifest(
+            "sources and construction",
+            &consumed_coordinates,
+        ));
+        consumed_coordinates.insert(CommonProofPrivateCoinCoordinate::proof_salt());
+        checkpoint_manifests.push(assert_checkpoint_manifest(
+            "base commitment",
+            &consumed_coordinates,
+        ));
+        consumed_coordinates.extend(
+            auxiliary_phase_catalog
+                .entries()
+                .map(|(coordinate, _)| coordinate),
+        );
+        checkpoint_manifests.push(assert_checkpoint_manifest(
+            "auxiliary commitment",
+            &consumed_coordinates,
+        ));
+        consumed_coordinates.extend(
+            quotient_phase_catalog
+                .entries()
+                .map(|(coordinate, _)| coordinate),
+        );
+        checkpoint_manifests.push(assert_checkpoint_manifest(
+            "quotient commitment",
+            &consumed_coordinates,
+        ));
+        consumed_coordinates.insert(CommonProofPrivateCoinCoordinate::hiding_argument());
+        assert_eq!(
+            consumed_coordinates,
+            complete_catalog
+                .entries()
+                .map(|(coordinate, _)| coordinate)
+                .collect::<BTreeSet<_>>()
+        );
+        checkpoint_manifests.push(assert_checkpoint_manifest(
+            "aggregate-wide hiding",
+            &consumed_coordinates,
+        ));
+
+        let checkpoint_requirement =
+            common_proof_checkpoint_cursor_manifest_requirement_for_variant(&variant)
+                .expect("derive the exact checkpoint cursor requirement");
+        let checkpoint_shapes = checkpoint_manifests
+            .iter()
+            .map(|manifest| {
+                let logical_cursor_count = u32::from_le_bytes(
+                    manifest[11..15]
+                        .try_into()
+                        .expect("checkpoint logical-cursor-count bytes"),
+                );
+                (manifest.len(), logical_cursor_count)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            checkpoint_requirement.logical_cursor_count(),
+            u32::try_from(consumed_coordinates.len()).expect("coordinate count fits u32")
+        );
+        assert_eq!(
+            checkpoint_requirement.canonical_manifest_byte_ceiling(),
+            u32::try_from(
+                checkpoint_shapes
+                    .iter()
+                    .map(|(byte_length, _)| *byte_length)
+                    .max()
+                    .expect("the checkpoint schedule is nonempty")
+            )
+            .expect("checkpoint byte length fits u32")
+        );
+        assert!(
+            checkpoint_manifests
+                .windows(2)
+                .all(|manifests| manifests[0] != manifests[1]),
+            "each additional consumed cursor must change the exact checkpoint commitment"
+        );
+        assert_eq!(
+            checkpoint_shapes
+                .last()
+                .map(|(_, logical_cursor_count)| *logical_cursor_count),
+            Some(checkpoint_requirement.logical_cursor_count())
+        );
+        assert!(checkpoint_requirement.fits_absolute_bounds());
     }
 
     #[test]
@@ -3052,11 +3345,6 @@ mod tests {
                     .is_none()
             );
         }
-        eprintln!(
-            "exact quotient zeroifier classes: {} for {} constraints",
-            inverse_zeroifier_evaluations.len(),
-            variant.constraint_count()
-        );
         let mut accumulator_binding_bytes = Vec::new();
         accumulator_binding_bytes.extend_from_slice(&sources.relation_plan.relation_plan_hash());
         accumulator_binding_bytes
@@ -3110,10 +3398,6 @@ mod tests {
                     Zeroizing::new(vec![ProofChallengeExtensionElement::ZERO; domain.size()]),
                 )
             });
-        eprintln!(
-            "exact quotient resumes at constraint {first_constraint_ordinal}/{}",
-            variant.constraint_count()
-        );
         let mut active_columns = std::iter::repeat_with(|| None)
             .take(variant.ordered_columns().len())
             .collect::<Vec<Option<Zeroizing<Vec<ProofBaseFieldElement>>>>>();
@@ -3221,10 +3505,6 @@ mod tests {
                         &quotient_evaluations,
                     )
                     .expect("checkpoint exact quotient accumulator");
-                eprintln!(
-                    "exact quotient checkpoint: constraints {next_constraint_ordinal}/{}",
-                    variant.constraint_count()
-                );
             }
         }
         assert_eq!(active_column_count, 0);
@@ -3452,9 +3732,8 @@ mod tests {
 
         let base_source = CheckpointBasePhaseSource::new(&store, &base_layout);
         let base_geometry = base_layout.geometry().expect("derive base geometry");
-        let base_root = commit_streaming_witness(&base_source, base_geometry, &row_pad_seeds[0])
-            .expect("commit exact base phase")
-            .column_root;
+        let base_root = commit_phase_rows(&base_source, base_geometry, &row_pad_seeds[0])
+            .expect("commit exact base phase");
 
         let request_context = sources
             .source_polynomials
@@ -3576,9 +3855,8 @@ mod tests {
             .geometry()
             .expect("derive auxiliary geometry");
         let auxiliary_root =
-            commit_streaming_witness(&auxiliary_source, auxiliary_geometry, &row_pad_seeds[1])
-                .expect("commit exact auxiliary phase")
-                .column_root;
+            commit_phase_rows(&auxiliary_source, auxiliary_geometry, &row_pad_seeds[1])
+                .expect("commit exact auxiliary phase");
         absorb_exact_relation_roots(
             &mut transcript,
             schedule.ordered_auxiliary_tree_ordinals(),
@@ -3714,13 +3992,12 @@ mod tests {
             EXACT_ROW_CODE_LOG_INVERSE_RATE,
         )
         .expect("derive quotient phase geometry");
-        let quotient_root = commit_streaming_witness(
+        let quotient_root = commit_phase_rows(
             &quotient_source,
             quotient_geometry,
             &derive_exact_row_pad_seeds(&mut sources).expect("derive exact row-pad seeds")[2],
         )
-        .expect("commit exact quotient phase")
-        .column_root;
+        .expect("commit exact quotient phase");
         transcript
             .absorb_row_code_whir_quotient_phase_root(column_digest_bytes(quotient_root))
             .expect("absorb exact quotient phase root");

@@ -21,7 +21,7 @@ use p3_dft::TwoAdicSubgroupDft;
 use p3_field::{ExtensionField, TwoAdicField};
 use p3_matrix::dense::DenseMatrix;
 use p3_multilinear_util::point::Point;
-pub use prefix::{PrefixInitialSumcheckProver, PrefixProver};
+pub use prefix::{PrefixInitialSumcheckProver, PrefixOpeningBatchBuilder, PrefixProver};
 pub use suffix::SuffixProver;
 
 use crate::commit::commit_base;

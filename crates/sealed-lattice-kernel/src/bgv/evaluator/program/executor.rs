@@ -1374,15 +1374,6 @@ fn initial_evaluator_ciphertext_coefficient_byte_count() -> Result<u64, RefusalR
         .ok_or(RefusalReason::OutsideSupportedProfile)
 }
 
-/// Exact coefficient payload moved from the prepared two-stream aggregate
-/// into evaluator input registers. The runtime transfers the two owned
-/// ciphertexts without decoding or duplicating their coefficient buffers.
-#[cfg(test)]
-pub(crate) fn selected_evaluator_initial_ciphertext_coefficient_byte_count()
--> Result<u64, RefusalReason> {
-    initial_evaluator_ciphertext_coefficient_byte_count()
-}
-
 fn evaluate_non_key_register_output(
     instruction: &EvaluatorInstruction,
     registers: &[Option<Ciphertext>],

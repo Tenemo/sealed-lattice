@@ -1,26 +1,26 @@
-use super::{
-    BoundTreeConstructionKind, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType,
-    CanonicalTuple, CommonProofTranscript, CommonProofVerifierError, CompleteProofTreeCatalog,
-    FOUNDATION_PROFILE, OutOfDomainCompositionVerificationInput, PROOF_HEADER_HASH_DOMAIN,
+use crate::foundation::{
+    CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple, FOUNDATION_PROFILE,
     PROOF_OBJECT_HEADER_SCHEMA_VERSION, ProofApplicationSlotCeilings,
-    ProofChallengeExtensionElement, ProofLeafVisibility, ProofTreeCatalogSource, ProofTreeRole,
-    RelationColumnOrigin, RelationColumnValueType, RelationPlanCheckContext, RelationPlanVariant,
-    RelationProofTreeInput, RelationSelectorPathStep, RelationTreeDescriptor,
-    SelectedApplicationStatementContext, SelectorPathStepKind, StatementOwnedProofTreeInput,
-    VERIFIED_COMMON_PROOF_STATEMENT_HASH_DOMAIN, VerifiedEvaluatorAuxiliaryRoot,
-    VerifiedStatementOwnedTree, decode_selected_application_statement, hash_foundation_tuple_512,
-    hash_framed_parts_512, selected_evaluator_aggregate_entry_roots,
-    selected_evaluator_entry_positions, selected_relation_plan_check_context,
 };
-#[cfg(test)]
-use super::{
-    CommonProofPrivacyMode, CommonProofVerificationInput, PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER,
-    ProofBodyError, ProofBodyLayout, ProofByteSource, ProofEvaluationDomain, ProofFriQueryVerifier,
-    ProofTreeCatalogInput, QueryVerificationWorkspace, SELECTED_PROOF_FIELD_INDEX,
-    ValidatedRelationPlanArtifact, VerifiedCommonProof, build_complete_proof_tree_catalog,
-    build_runtime_claim_groups, decode_proof_body_prefix, sample_relation_application_challenges,
-    verify_and_slice_proof_header,
+use crate::hashing::hash_framed_parts_512;
+
+use super::{CommonProofVerifierError, VERIFIED_COMMON_PROOF_STATEMENT_HASH_DOMAIN};
+use crate::bgv::proof_suite::application_statement::{
+    SelectedApplicationStatementContext, decode_selected_application_statement,
+    selected_evaluator_aggregate_entry_roots, selected_evaluator_entry_positions,
 };
+use crate::bgv::proof_suite::field::ProofChallengeExtensionElement;
+use crate::bgv::proof_suite::merkle::{ProofLeafVisibility, ProofTreeRole};
+use crate::bgv::proof_suite::relation_plan::{
+    BoundTreeConstructionKind, OutOfDomainCompositionVerificationInput, RelationColumnOrigin,
+    RelationColumnValueType, RelationPlanCheckContext, RelationPlanVariant,
+    RelationSelectorPathStep, RelationTreeDescriptor, SelectorPathStepKind,
+};
+use crate::bgv::proof_suite::selected_profile::selected_relation_plan_check_context;
+use crate::bgv::proof_suite::verifier::{
+    VerifiedEvaluatorAuxiliaryRoot, VerifiedStatementOwnedTree,
+};
+use crate::bgv::proof_suite::{RelationProofTreeInput, StatementOwnedProofTreeInput};
 
 /// Resolves plan-addressed verifier-sequence columns from verified statement,
 /// suite, slot, sampler, or protocol sources. Proof bytes never supply these
@@ -76,316 +76,6 @@ pub(crate) trait VerifiedRelationColumnEvaluator {
     ) -> Option<ProofChallengeExtensionElement>;
 }
 
-/// Verifies one complete checked-fixture common proof. Returning `None` from a
-/// verified-column evaluator fails closed; prover and bound-tree columns never
-/// call it.
-#[cfg(test)]
-pub(crate) fn verify_checked_fixture_common_proof<Source, ColumnEvaluator>(
-    input: CommonProofVerificationInput<'_, Source>,
-    evaluate_verified_column: &mut ColumnEvaluator,
-) -> Result<VerifiedCommonProof, CommonProofVerifierError>
-where
-    Source: ProofByteSource + ?Sized,
-    ColumnEvaluator: VerifiedRelationColumnEvaluator + ?Sized,
-{
-    ValidatedRelationPlanArtifact::from_checked_fixture_plan(
-        input.relation_plan,
-        input.relation_context,
-    )?;
-    let application_statement = decode_application_statement(
-        input.canonical_application_statement_bytes,
-        input
-            .relation_plan
-            .application_statement_schema_identifier(),
-        input.protocol_version,
-        input.suite_identifier,
-        input.schedule_position,
-        input.top_count,
-        input.relation_context,
-    )?;
-    validate_evaluator_auxiliary_root_linkage(
-        &application_statement,
-        input
-            .relation_plan
-            .application_statement_schema_identifier(),
-        input.schedule_position,
-        input.top_count,
-        input.evaluator_auxiliary_roots,
-        input.relation_context,
-    )?;
-    let canonical_proof_object_header_bytes = CanonicalTuple::new(
-        PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER,
-        PROOF_OBJECT_HEADER_SCHEMA_VERSION,
-        vec![
-            CanonicalItem::variable_bytes(input.canonical_application_statement_bytes)
-                .map_err(|_| CommonProofVerifierError::CanonicalEncoding)?,
-        ],
-    )
-    .encode()
-    .map_err(|_| CommonProofVerifierError::CanonicalEncoding)?;
-    let proof_body_source = verify_and_slice_proof_header(
-        input.proof_source,
-        input.declared_proof_byte_length,
-        input.proof_byte_ceiling,
-        &canonical_proof_object_header_bytes,
-    )?;
-    let proof_body_byte_ceiling = input
-        .proof_byte_ceiling
-        .checked_sub(canonical_proof_object_header_bytes.len())
-        .ok_or(CommonProofVerifierError::InvalidProofHeader)?;
-
-    let variant = input
-        .relation_plan
-        .select_variant(input.schedule_position, input.top_count)?;
-    let transcript_schedule =
-        super::super::packed_fri_transcript_schedule(variant, input.relation_context)?;
-    let evaluation_domain = ProofEvaluationDomain::new(
-        usize::try_from(variant.evaluation_domain_size())
-            .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
-        input.relation_context.evaluation_coset_offset,
-    )?;
-    if evaluation_domain.generator().canonical()
-        != input.relation_context.evaluation_domain_generator
-    {
-        return Err(CommonProofVerifierError::InvalidTreeLayout);
-    }
-
-    let relation_trees =
-        derive_relation_tree_inputs(variant, &application_statement, input.statement_owned_trees)?;
-    let catalog = build_complete_proof_tree_catalog(
-        ProofTreeCatalogInput {
-            suite_identifier: input.suite_identifier,
-            canonical_proof_object_header_bytes: canonical_proof_object_header_bytes.clone(),
-            application_statement_schema_identifier: input
-                .relation_plan
-                .application_statement_schema_identifier(),
-            proof_field_index: SELECTED_PROOF_FIELD_INDEX,
-            evaluation_domain_size: variant.evaluation_domain_size(),
-            relation_trees,
-        },
-        &transcript_schedule,
-    )?;
-    let layout = ProofBodyLayout::new(
-        catalog,
-        &transcript_schedule,
-        transcript_schedule.terminal_coefficient_count(),
-    )?;
-    let pending = decode_proof_body_prefix(
-        &proof_body_source,
-        proof_body_source.byte_length(),
-        proof_body_byte_ceiling,
-        &layout,
-    )?;
-
-    let mut transcript = CommonProofTranscript::new(
-        input.protocol_version,
-        input.suite_identifier,
-        input
-            .relation_plan
-            .application_statement_schema_identifier(),
-        &canonical_proof_object_header_bytes,
-        transcript_schedule.clone(),
-    )?;
-    absorb_relation_roots(
-        &mut transcript,
-        layout.catalog(),
-        pending.tree_roots(),
-        ProofTreeRole::BaseOracle,
-        transcript_schedule.ordered_base_tree_ordinals(),
-    )?;
-
-    let application_challenges = sample_relation_application_challenges(
-        &mut transcript,
-        transcript_schedule.relation_prefix_schedule(),
-    )?;
-
-    absorb_relation_roots(
-        &mut transcript,
-        layout.catalog(),
-        pending.tree_roots(),
-        ProofTreeRole::AuxiliaryOracle,
-        transcript_schedule.ordered_auxiliary_tree_ordinals(),
-    )?;
-
-    let mut composition_challenges = Vec::new();
-    let composition_challenge_count =
-        usize::try_from(transcript_schedule.composition_challenge_count())
-            .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
-    composition_challenges
-        .try_reserve_exact(composition_challenge_count)
-        .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
-    for constraint_ordinal in 0..transcript_schedule.composition_challenge_count() {
-        composition_challenges.push(transcript.sample_composition_challenge(constraint_ordinal)?);
-    }
-
-    for component_ordinal in 0..transcript_schedule.quotient_component_count() {
-        transcript.absorb_quotient_root(
-            component_ordinal,
-            catalog_root(layout.catalog(), pending.tree_roots(), |source| {
-                source == ProofTreeCatalogSource::QuotientComponent { component_ordinal }
-            })?,
-        )?;
-    }
-
-    let mut out_of_domain_points = Vec::new();
-    out_of_domain_points
-        .try_reserve_exact(usize::from(transcript_schedule.out_of_domain_point_count()))
-        .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
-    for point_ordinal in 0..transcript_schedule.out_of_domain_point_count() {
-        let mut relation_error = None;
-        let sampled =
-            transcript.sample_out_of_domain_point(point_ordinal, |candidate| {
-                match variant.out_of_domain_point_candidate_is_forbidden(
-                    input.relation_context,
-                    point_ordinal,
-                    candidate,
-                    &out_of_domain_points,
-                ) {
-                    Ok(is_forbidden) => is_forbidden,
-                    Err(error) => {
-                        relation_error = Some(error);
-                        true
-                    }
-                }
-            });
-        if let Some(error) = relation_error {
-            return Err(error.into());
-        }
-        out_of_domain_points.push(sampled?);
-    }
-    let opening_points =
-        variant.derive_opening_points(input.relation_context, &out_of_domain_points)?;
-    verify_out_of_domain_composition_with_verified_sequences(
-        variant,
-        OutOfDomainCompositionVerificationInput::new(
-            input.relation_context,
-            &application_challenges,
-            &composition_challenges,
-            &out_of_domain_points,
-            &opening_points,
-            pending.out_of_domain_evaluations(),
-        ),
-        evaluate_verified_column,
-    )?;
-    transcript.absorb_out_of_domain_evaluations(pending.out_of_domain_evaluations())?;
-
-    if transcript_schedule.privacy_mode() == CommonProofPrivacyMode::SecretBearing {
-        transcript.absorb_opening_batch_mask_root(catalog_root(
-            layout.catalog(),
-            pending.tree_roots(),
-            |source| source == ProofTreeCatalogSource::OpeningBatchMask,
-        )?)?;
-    }
-
-    let mut opening_batch_coefficients = Vec::new();
-    let opening_claim_count = usize::try_from(transcript_schedule.opening_claim_count())
-        .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
-    opening_batch_coefficients
-        .try_reserve_exact(opening_claim_count)
-        .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
-    for claim_ordinal in 0..transcript_schedule.opening_claim_count() {
-        opening_batch_coefficients.push(transcript.sample_opening_batch_challenge(claim_ordinal)?);
-    }
-
-    let mut fri_fold_challenges = Vec::new();
-    fri_fold_challenges
-        .try_reserve_exact(usize::from(transcript_schedule.fri_fold_count()))
-        .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
-    for fold_ordinal in 0..transcript_schedule.fri_fold_count() {
-        fri_fold_challenges.push(transcript.sample_fri_fold_challenge(fold_ordinal)?);
-        if fold_ordinal + 1 < transcript_schedule.fri_fold_count() {
-            transcript.absorb_fri_layer_root(
-                fold_ordinal,
-                catalog_root(layout.catalog(), pending.tree_roots(), |source| {
-                    source == ProofTreeCatalogSource::NonterminalFriLayer { fold_ordinal }
-                })?,
-            )?;
-        }
-    }
-    transcript.absorb_fri_terminal_coefficients(pending.terminal_coefficients())?;
-
-    let mut sampled_query_representatives = transcript.sample_query_representatives()?;
-    let sorted_query_representatives = transcript.sorted_query_representatives()?;
-    sampled_query_representatives.sort_unstable();
-    if sampled_query_representatives != sorted_query_representatives {
-        return Err(CommonProofVerifierError::InvalidTreeLayout);
-    }
-
-    let claim_groups = build_runtime_claim_groups(
-        variant,
-        layout.catalog(),
-        &opening_points,
-        pending.out_of_domain_evaluations(),
-        &opening_batch_coefficients,
-    )?;
-    let fri_verifier = ProofFriQueryVerifier::new(
-        evaluation_domain,
-        fri_fold_challenges,
-        pending.terminal_coefficients().to_vec(),
-        usize::try_from(transcript_schedule.terminal_coefficient_count())
-            .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
-    )?;
-    let mut workspace = QueryVerificationWorkspace::new(
-        layout.catalog().entries().len(),
-        evaluation_domain,
-        sorted_query_representatives.len(),
-        claim_groups,
-        fri_verifier,
-    )?;
-    let mut query_opening_absorber =
-        transcript.begin_query_openings(pending.query_section_byte_length()?)?;
-    let mut query_verification_error = None;
-    let decode_result = pending.decode_query_section(
-        &sorted_query_representatives,
-        &mut query_opening_absorber,
-        |opening| {
-            if let Err(error) = workspace.consume_opening(
-                opening,
-                variant,
-                layout.catalog(),
-                &sorted_query_representatives,
-            ) {
-                query_verification_error = Some(error);
-                return Err(ProofBodyError::InvalidLeaf);
-            }
-            Ok(())
-        },
-    );
-    if let Some(error) = query_verification_error {
-        return Err(error);
-    }
-    let _decoded_body = decode_result?;
-    workspace.finish(
-        layout.catalog().entries().len(),
-        &sorted_query_representatives,
-    )?;
-    transcript.finish_query_openings(query_opening_absorber)?;
-    transcript.finish()?;
-    let application_statement_schema_identifier = input
-        .relation_plan
-        .application_statement_schema_identifier();
-    Ok(VerifiedCommonProof {
-        protocol_version: input.protocol_version,
-        suite_identifier: input.suite_identifier,
-        application_statement_schema_identifier,
-        application_statement_hash: verified_application_statement_hash(
-            input.protocol_version,
-            input.suite_identifier,
-            application_statement_schema_identifier,
-            input.canonical_application_statement_bytes,
-        ),
-        proof_header_hash: verified_proof_header_hash(&canonical_proof_object_header_bytes)?,
-        proof_byte_length: u64::try_from(input.declared_proof_byte_length)
-            .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
-        verified_query_count: transcript_schedule.unique_query_count(),
-        row_code_whir_construction_plan_identity_hash: input
-            .row_code_whir_construction_plan_identity_hash,
-        relation_plan_variant_hash: variant.canonical_hash()?,
-        schedule_position: input.schedule_position,
-        top_count: input.top_count,
-    })
-}
-
 pub(crate) fn verified_application_statement_hash(
     protocol_version: u16,
     suite_identifier: [u8; 64],
@@ -401,20 +91,6 @@ pub(crate) fn verified_application_statement_hash(
             canonical_application_statement_bytes,
         ],
     )
-}
-
-pub(super) fn verified_proof_header_hash(
-    canonical_proof_object_header_bytes: &[u8],
-) -> Result<[u8; 64], CommonProofVerifierError> {
-    hash_foundation_tuple_512(
-        PROOF_HEADER_HASH_DOMAIN,
-        &[
-            CanonicalItem::variable_bytes(canonical_proof_object_header_bytes)
-                .map_err(|_| CommonProofVerifierError::CanonicalEncoding)?,
-        ],
-    )
-    .map(|hash| hash.into_bytes())
-    .map_err(|_| CommonProofVerifierError::CanonicalEncoding)
 }
 
 pub(crate) fn decode_application_statement(
@@ -461,7 +137,7 @@ pub(crate) fn decode_application_statement(
     Ok(statement)
 }
 
-pub(super) fn validate_evaluator_auxiliary_root_linkage(
+pub(crate) fn validate_evaluator_auxiliary_root_linkage(
     application_statement: &CanonicalTuple,
     application_statement_schema_identifier: u16,
     schedule_position: Option<u32>,
@@ -845,58 +521,7 @@ fn validate_tree_columns(
     Ok(())
 }
 
-pub(super) fn absorb_relation_roots(
-    transcript: &mut CommonProofTranscript,
-    catalog: &CompleteProofTreeCatalog,
-    roots: &[[u8; 64]],
-    target_role: ProofTreeRole,
-    ordered_role_ordinals: &[u16],
-) -> Result<(), CommonProofVerifierError> {
-    for role_ordinal in ordered_role_ordinals {
-        let root = catalog_root(catalog, roots, |source| {
-            source
-                == ProofTreeCatalogSource::RelationProofCreated {
-                    tree_role: target_role,
-                    tree_ordinal: *role_ordinal,
-                }
-        })?;
-        match target_role {
-            ProofTreeRole::BaseOracle => {
-                transcript.absorb_base_root(*role_ordinal, root)?;
-            }
-            ProofTreeRole::AuxiliaryOracle => {
-                transcript.absorb_auxiliary_root(*role_ordinal, root)?;
-            }
-            _ => return Err(CommonProofVerifierError::InvalidTreeLayout),
-        }
-    }
-    Ok(())
-}
-
-pub(super) fn catalog_root(
-    catalog: &CompleteProofTreeCatalog,
-    roots: &[[u8; 64]],
-    mut matches_source: impl FnMut(ProofTreeCatalogSource) -> bool,
-) -> Result<[u8; 64], CommonProofVerifierError> {
-    if roots.len() != catalog.entries().len() {
-        return Err(CommonProofVerifierError::InvalidTreeLayout);
-    }
-    let mut matches = catalog
-        .entries()
-        .iter()
-        .zip(roots)
-        .filter(|(entry, _)| matches_source(entry.source()));
-    let root = matches
-        .next()
-        .map(|(_, root)| *root)
-        .ok_or(CommonProofVerifierError::InvalidTreeLayout)?;
-    if matches.next().is_some() {
-        return Err(CommonProofVerifierError::InvalidTreeLayout);
-    }
-    Ok(root)
-}
-
-pub(super) fn verify_out_of_domain_composition_with_verified_sequences<ColumnEvaluator>(
+pub(crate) fn verify_out_of_domain_composition_with_verified_sequences<ColumnEvaluator>(
     variant: &RelationPlanVariant,
     input: OutOfDomainCompositionVerificationInput<'_>,
     evaluate_verified_column: &mut ColumnEvaluator,

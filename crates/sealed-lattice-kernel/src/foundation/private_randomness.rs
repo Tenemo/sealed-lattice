@@ -69,11 +69,6 @@ mod stream;
 mod validation;
 
 pub use domain::PrivateRandomnessDomain;
-#[cfg(test)]
-pub(crate) use generator_hybrid::{
-    MaskGeneratorHonestAbortEvent, MaskGeneratorHybridHop, MaskGeneratorHybridLoss,
-    action_root_expansion_summary, deployed_mask_generator_hybrid, quantum_mask_generator_hybrid,
-};
 pub(crate) use material::PersistentProofWitnessCoinBinding;
 pub use material::{
     ActionPrivateRandomness, ActionRandomnessDerivationInput, ActionRandomnessRoot,

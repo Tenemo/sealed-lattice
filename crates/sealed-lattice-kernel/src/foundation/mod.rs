@@ -162,11 +162,6 @@ pub use private_randomness::{
     SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_SCHEMA_IDENTIFIER,
     SetupStructuredCommitmentOpeningContext,
 };
-#[cfg(test)]
-pub(crate) use private_randomness::{
-    MaskGeneratorHonestAbortEvent, MaskGeneratorHybridHop, MaskGeneratorHybridLoss,
-    action_root_expansion_summary, deployed_mask_generator_hybrid, quantum_mask_generator_hybrid,
-};
 #[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) use private_randomness_runtime::prepare_exact_same_secret_evidence_attempt;
 pub(crate) use private_randomness_runtime::{
@@ -202,17 +197,17 @@ pub use schemas::{
 pub(crate) use selected_suite::{
     SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT,
     SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION,
-};
-#[cfg(test)]
-pub(crate) use selected_suite::{
     SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
-    selected_maximum_proof_objects_per_action, selected_suite_capability_for_tests,
 };
 pub(crate) use selected_suite::{
     SELECTED_MAXIMUM_PUBLIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
     selected_evaluator_resource_accounting,
 };
 pub(crate) use selected_suite::{SelectedSuiteCapability, select_suite_record};
+#[cfg(test)]
+pub(crate) use selected_suite::{
+    selected_maximum_proof_objects_per_action, selected_suite_capability_for_tests,
+};
 pub(crate) use setup_transcript_runtime::derive_public_randomness_contribution_commitment;
 pub(crate) use state::PreparedStateReservationIntent;
 pub use state::{

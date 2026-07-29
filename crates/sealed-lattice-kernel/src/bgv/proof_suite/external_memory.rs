@@ -87,10 +87,12 @@ pub(crate) use executor::{
     ProofExternalMemoryError, ProofExternalMemoryExecutor, ProofExternalMemoryExecutorError,
     ProofExternalMemoryUsage,
 };
+#[cfg(test)]
+pub(crate) use plan::ProofExternalMemoryTransactionOperation;
 pub(crate) use plan::{
     ProofExternalMemory, ProofExternalMemoryObject, ProofExternalMemoryObjectPlan,
     ProofExternalMemoryPlan, ProofExternalMemoryProtection,
-    ProofExternalMemorySecretSealCustodyRequirement, ProofExternalMemoryTransactionOperation,
+    ProofExternalMemorySecretSealCustodyRequirement,
 };
 pub(crate) use transaction::EXTERNAL_MEMORY_SINGLE_APPEND_RECYCLER_CAPACITY_CEILING;
 pub(crate) use transaction::{
@@ -100,4 +102,4 @@ pub(crate) use transaction::{
 
 #[cfg(test)]
 #[path = "external_memory/tests.rs"]
-mod tests;
+pub(crate) mod tests;

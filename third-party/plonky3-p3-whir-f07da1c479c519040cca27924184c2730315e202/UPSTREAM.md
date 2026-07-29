@@ -36,13 +36,26 @@ figures are dependency-selection evidence derived from the checked protocol
 configuration; they are not proof admission limits and do not replace the
 repository's absolute common-proof bound.
 
-The hiding implementation is also gated behind a default-off `zk` feature.
-That feature enables the vendored `p3-sumcheck/zk` feature and the optional
-`p3-zk-codes` and `rand` dependencies. The production plain-WHIR graph does
-not compile or link those unused hiding-only dependencies. Hiding-only
-transcript labels and shared polynomial-evaluation helpers are gated by the
-same feature, while remaining available to the complete upstream hiding
-implementation when that feature is enabled.
+The selected hiding integration also requires two bounded-prover changes that
+the upstream API does not expose. First, mask encoders and the Construction
+7.2 base case accept explicit caller-owned one-time material, so every secret
+coin is drawn by sealed-lattice's domain-separated private-coin source rather
+than by an entropy source hidden inside the dependency. Second, the base case
+can return a transcript-complete prepared state after its source positions are
+sampled, then accept exactly those authenticated source openings. This permits
+the browser worker to fetch bounded rows from authenticated external storage
+without changing commitment-before-challenge order, transcript bytes, or
+verification equations. The original convenience prover remains as an
+adapter that samples material and drives the same implementation.
+
+The hiding implementation is gated behind a default-off `zk` feature. That
+feature enables the vendored `p3-sumcheck/zk` feature and the optional
+`p3-zk-codes` and `rand` dependencies. The selected aggregate-wide masking
+path deliberately enables it. Hiding-only transcript labels and shared
+polynomial-evaluation helpers remain gated by the same feature. Although
+upstream generic bounds retain `rand`, the selected integration supplies all
+secret material through explicit caller-owned inputs drawn from
+sealed-lattice's domain-separated private-coin source.
 
 The obsolete complete-proof commitment reader and unused round proof-of-work
 getter were removed. Neither the plain prover, resumable verifier, complete
@@ -56,8 +69,13 @@ The changes are confined to:
 - `src/pcs/verifier/errors.rs`
 - `src/pcs/mod.rs`
 - `src/pcs/committer/mod.rs`
+- `src/pcs/committer/writer.rs`
 - `src/pcs/committer/reader.rs` (removed)
 - `src/pcs/proof.rs`
+- `src/pcs/zk/base_case/mod.rs`
+- `src/pcs/zk/base_case/prover.rs`
+- `src/pcs/zk/mask.rs`
+- `src/pcs/zk/mod.rs`
 - `src/fiat_shamir/domain_separator.rs`
 - `src/fiat_shamir/pattern.rs`
 - `src/lib.rs`

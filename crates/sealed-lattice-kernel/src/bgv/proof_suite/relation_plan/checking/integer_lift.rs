@@ -10,7 +10,7 @@ use super::super::{
     expressions::strictly_sorted_unique,
     integer_lift::{
         RelationIntegerLiftBatchDescriptor, RelationIntegerLiftComponentDescriptor,
-        RelationIntegerLiftConvolutionProductDescriptor,
+        RelationIntegerLiftConvolutionProductDescriptor, RelationIntegerLiftFullRingHalf,
         RelationIntegerLiftFullRingNegacyclicProductDescriptor,
         RelationIntegerLiftLinearTermDescriptor,
         RelationIntegerLiftReversedColumnBindingDescriptor,
@@ -22,6 +22,50 @@ use super::super::{
         SuiteModulusReference, validate_negacyclic_automorphism,
     },
 };
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum SharedAuxiliaryColumnDependency {
+    FullRingSuffix {
+        batch_key: (SuiteModulusReference, u16),
+        source_column_ordinal: u32,
+    },
+    FullRingTranspose {
+        batch_key: (SuiteModulusReference, u16),
+        selected_half: RelationIntegerLiftFullRingHalf,
+        multiplicand_columns: [u32; 2],
+        low_coordinate: bool,
+    },
+    LinearEvaluation {
+        batch_key: (SuiteModulusReference, u16),
+        ordered_terms: Vec<RelationIntegerLiftLinearTermDescriptor>,
+    },
+    ProductAccumulator {
+        batch_key: (SuiteModulusReference, u16),
+        ordered_convolution_products: Vec<RelationIntegerLiftConvolutionProductDescriptor>,
+        ordered_full_ring_products: Vec<RelationIntegerLiftFullRingNegacyclicProductDescriptor>,
+    },
+}
+
+fn register_shared_auxiliary_column(
+    descriptor_auxiliary_columns: &mut BTreeSet<u32>,
+    shared_dependencies: &mut BTreeMap<u32, SharedAuxiliaryColumnDependency>,
+    column_ordinal: u32,
+    dependency: SharedAuxiliaryColumnDependency,
+) -> Result<(), RelationPlanError> {
+    if descriptor_auxiliary_columns.insert(column_ordinal) {
+        if shared_dependencies
+            .insert(column_ordinal, dependency)
+            .is_some()
+        {
+            return Err(RelationPlanError::DuplicateItem);
+        }
+        return Ok(());
+    }
+    if shared_dependencies.get(&column_ordinal) != Some(&dependency) {
+        return Err(RelationPlanError::DuplicateItem);
+    }
+    Ok(())
+}
 use super::{
     ApplicationChallengePhaseColumns, RelationPlanChecker,
     integer_lift_bounds::{
@@ -62,6 +106,7 @@ impl RelationPlanChecker<'_> {
         let mut challenge_ordinals_by_modulus =
             BTreeMap::<SuiteModulusReference, BTreeSet<u16>>::new();
         let mut descriptor_auxiliary_columns = BTreeSet::new();
+        let mut shared_auxiliary_dependencies = BTreeMap::new();
         let mut derived_base_columns = BTreeSet::new();
         let mut matched_constraint_ordinals = BTreeSet::new();
         let mut constraint_ordinals_by_program = BTreeMap::new();
@@ -620,11 +665,46 @@ impl RelationPlanChecker<'_> {
                     }
                     residual_interval = residual_interval.add(product_interval)?;
 
-                    for auxiliary_column in [
-                        product.multiplicand_low_suffix_evaluation_column_ordinal,
-                        product.multiplicand_high_suffix_evaluation_column_ordinal,
-                        product.reversed_multiplier_low_transpose_column_ordinal,
-                        product.reversed_multiplier_high_transpose_column_ordinal,
+                    let batch_key = (batch.modulus_reference, batch.challenge_ordinal);
+                    for (auxiliary_column, dependency) in [
+                        (
+                            product.multiplicand_low_suffix_evaluation_column_ordinal,
+                            SharedAuxiliaryColumnDependency::FullRingSuffix {
+                                batch_key,
+                                source_column_ordinal: product.multiplicand_low_column_ordinal,
+                            },
+                        ),
+                        (
+                            product.multiplicand_high_suffix_evaluation_column_ordinal,
+                            SharedAuxiliaryColumnDependency::FullRingSuffix {
+                                batch_key,
+                                source_column_ordinal: product.multiplicand_high_column_ordinal,
+                            },
+                        ),
+                        (
+                            product.reversed_multiplier_low_transpose_column_ordinal,
+                            SharedAuxiliaryColumnDependency::FullRingTranspose {
+                                batch_key,
+                                selected_half: product.selected_half,
+                                multiplicand_columns: [
+                                    product.multiplicand_low_column_ordinal,
+                                    product.multiplicand_high_column_ordinal,
+                                ],
+                                low_coordinate: true,
+                            },
+                        ),
+                        (
+                            product.reversed_multiplier_high_transpose_column_ordinal,
+                            SharedAuxiliaryColumnDependency::FullRingTranspose {
+                                batch_key,
+                                selected_half: product.selected_half,
+                                multiplicand_columns: [
+                                    product.multiplicand_low_column_ordinal,
+                                    product.multiplicand_high_column_ordinal,
+                                ],
+                                low_coordinate: false,
+                            },
+                        ),
                     ] {
                         integer_lift_require_auxiliary_column(
                             auxiliary_column,
@@ -632,15 +712,35 @@ impl RelationPlanChecker<'_> {
                             &tree_roles_by_column,
                             &explicitly_certified_columns,
                         )?;
-                        if !descriptor_auxiliary_columns.insert(auxiliary_column) {
-                            return Err(RelationPlanError::DuplicateItem);
-                        }
+                        register_shared_auxiliary_column(
+                            &mut descriptor_auxiliary_columns,
+                            &mut shared_auxiliary_dependencies,
+                            auxiliary_column,
+                            dependency,
+                        )?;
                     }
                 }
 
-                for auxiliary_column in [
-                    component.linear_evaluation_column_ordinal,
-                    component.product_accumulator_column_ordinal,
+                for (auxiliary_column, dependency) in [
+                    (
+                        component.linear_evaluation_column_ordinal,
+                        SharedAuxiliaryColumnDependency::LinearEvaluation {
+                            batch_key: (batch.modulus_reference, batch.challenge_ordinal),
+                            ordered_terms: component.ordered_linear_terms.clone(),
+                        },
+                    ),
+                    (
+                        component.product_accumulator_column_ordinal,
+                        SharedAuxiliaryColumnDependency::ProductAccumulator {
+                            batch_key: (batch.modulus_reference, batch.challenge_ordinal),
+                            ordered_convolution_products: component
+                                .ordered_convolution_products
+                                .clone(),
+                            ordered_full_ring_products: component
+                                .ordered_full_ring_negacyclic_products
+                                .clone(),
+                        },
+                    ),
                 ] {
                     integer_lift_require_auxiliary_column(
                         auxiliary_column,
@@ -648,9 +748,12 @@ impl RelationPlanChecker<'_> {
                         &tree_roles_by_column,
                         &explicitly_certified_columns,
                     )?;
-                    if !descriptor_auxiliary_columns.insert(auxiliary_column) {
-                        return Err(RelationPlanError::DuplicateItem);
-                    }
+                    register_shared_auxiliary_column(
+                        &mut descriptor_auxiliary_columns,
+                        &mut shared_auxiliary_dependencies,
+                        auxiliary_column,
+                        dependency,
+                    )?;
                 }
 
                 if !residual_interval

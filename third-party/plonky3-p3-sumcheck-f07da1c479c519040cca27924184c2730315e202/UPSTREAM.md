@@ -49,9 +49,12 @@ sealed-lattice WHIR reduction:
   range without allocating or unpacking the complete polynomial. It rejects
   destination-length mismatches, arithmetic overflow, and out-of-bounds ranges.
 - The upstream zero-knowledge module and its `rand` and `p3-zk-codes`
-  dependencies are behind a default-off `zk` feature. The sealed-lattice
-  production WHIR path does not enable that feature; test and benchmark random
-  generation continues to use the retained development dependency on `rand`.
+  dependencies are behind a default-off `zk` feature. The selected
+  aggregate-wide masking path enables that feature through `p3-whir`, while
+  its concrete secret coins still come exclusively from sealed-lattice's
+  domain-separated private-coin source. Upstream trait bounds retain `rand` in
+  the dependency graph; no entropy-seeded generator is exposed by the selected
+  integration.
 
 The changes are confined to:
 

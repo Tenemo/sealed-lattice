@@ -27,7 +27,8 @@ use crate::{
         PreparedPublicOnlyProofAttemptSource, ProofApplicationSlot, ProofApplicationSlotCeilings,
         STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, StreamDescriptor,
         VerifiedCanonicalStreamSummary, VerifiedStateReservationRuntimeBinding,
-        resolve_prepared_public_only_proof_attempt_source, verified_state_reservation_binding,
+        resolve_prepared_public_only_proof_attempt_source,
+        retain_action_private_randomness_for_exact_family, verified_state_reservation_binding,
     },
     hashing::hash_framed_parts_512,
 };
@@ -47,13 +48,13 @@ use super::{
     AggregateThresholdShareRuntimeError, CollectivePublicKeySetupPolynomialSource,
     CollectivePublicKeySourcePolynomialProvider, CommonProofGenerationAuthorization,
     CommonProofGenerationPreparationError, CommonProofGenerationSources,
-    CommonProofRelationPlanCapability, CommonProofRuntimeError, CommonProofRuntimeLimits,
-    CommonProofSelectedSuiteCapabilityHandle, CompiledRelationPlan,
-    ExpectedCommonProofPackageBindings, PreparedCommonProofGeneration, ProofBaseFieldElement,
-    SetupPublicPolynomialContext, SetupPublicPolynomialRootBuilder, SetupPublicPolynomialTree,
-    SetupPublicPolynomialTreeInput, VerifiedStatementOwnedTree,
-    canonical_selected_collective_public_key_aggregate_statement, selected_proof_runtime_limits,
-    selected_relation_plan_check_context, selected_relation_plans,
+    CommonProofPrivateCoinCoordinateCapacity, CommonProofRelationPlanCapability,
+    CommonProofRuntimeError, CommonProofRuntimeLimits, CommonProofSelectedSuiteCapabilityHandle,
+    CompiledRelationPlan, ExpectedCommonProofPackageBindings, PreparedCommonProofGeneration,
+    PrivateRandomnessCommonProofCoinSource, ProofBaseFieldElement, SetupPublicPolynomialContext,
+    SetupPublicPolynomialRootBuilder, SetupPublicPolynomialTree, SetupPublicPolynomialTreeInput,
+    VerifiedStatementOwnedTree, canonical_selected_collective_public_key_aggregate_statement,
+    selected_proof_runtime_limits, selected_relation_plan_check_context, selected_relation_plans,
     verified_application_statement_hash, with_verified_accepted_setup_vss_package_sources,
 };
 
@@ -1317,6 +1318,7 @@ fn resolve_collective_public_key_prepared_attempt(
 
 fn prepare_common_generation(
     session_handle: u32,
+    action_randomness_handle: u32,
     prepared_attempt: PreparedPublicOnlyProofAttemptSource,
     runtime_plan: CollectiveProofRuntimePlan,
 ) -> Result<PreparedCommonProofGeneration, CommonProofRuntimeError> {
@@ -1343,14 +1345,24 @@ fn prepare_common_generation(
         &canonical_statement,
     )
     .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
-    let sources = CommonProofGenerationSources::public_only(
+    let relation_variant = runtime_plan
+        .compiled_relation_plan
+        .select_variant(None, None)
+        .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+    let coordinate_capacity =
+        CommonProofPrivateCoinCoordinateCapacity::from_relation_plan_variant(relation_variant)
+            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+    let private_coins = PrivateRandomnessCommonProofCoinSource::new(
+        retain_action_private_randomness_for_exact_family(action_randomness_handle)
+            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?,
         prepared_attempt.application_statement_schema_identifier(),
         Hash512::from_bytes(authorization.binding_hash()),
-        prepared_attempt.attempt_lineage_identifier(),
-        source_provider,
+        prepared_attempt.private_randomness_attempt_identifier(),
+        coordinate_capacity,
     )
     .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
-    PreparedCommonProofGeneration::from_exact_family_sources(
+    let sources = CommonProofGenerationSources::new(private_coins, source_provider);
+    PreparedCommonProofGeneration::from_row_code_whir_sources(
         authorization,
         runtime_plan.relation_plan,
         canonical_statement,
@@ -1421,12 +1433,21 @@ fn prepare_generation(
         fresh_continuation,
     )?;
     let adapter = match generation_mode {
-        GenerationMode::Fresh => CommonProofGenerationFamilyAdapter::fresh(
-            prepare_common_generation(session_handle, fresh_attempt, runtime_plan)?,
-        ),
+        GenerationMode::Fresh => {
+            CommonProofGenerationFamilyAdapter::fresh(prepare_common_generation(
+                session_handle,
+                action_randomness_handle,
+                fresh_attempt,
+                runtime_plan,
+            )?)
+        }
         GenerationMode::Resume => {
-            let fresh_preparation =
-                prepare_common_generation(session_handle, fresh_attempt, runtime_plan)?;
+            let fresh_preparation = prepare_common_generation(
+                session_handle,
+                action_randomness_handle,
+                fresh_attempt,
+                runtime_plan,
+            )?;
             let description = CommonProofGenerationFamilyAdapterDescription::new(
                 fresh_preparation.application_statement_schema_identifier(),
                 fresh_preparation.runtime_binding_hash(),
@@ -1454,8 +1475,13 @@ fn prepare_generation(
                         session_handle,
                         continuation,
                     )?;
-                    prepare_common_generation(session_handle, attempt, runtime_plan)
-                        .map_err(CommonProofGenerationPreparationError::from)
+                    prepare_common_generation(
+                        session_handle,
+                        action_randomness_handle,
+                        attempt,
+                        runtime_plan,
+                    )
+                    .map_err(CommonProofGenerationPreparationError::from)
                 }),
             )
         }
@@ -2483,17 +2509,6 @@ mod tests {
         assert_eq!(
             traffic.maximum_boundary_copied_buffer_byte_length(),
             1_048_576,
-        );
-
-        eprintln!(
-            "provider_loading={} provider_post={} provider_preparation={} application_loading={} application_post={} root_peak={} statement={}",
-            source_provider.loading_persistent_resident_byte_length(),
-            source_provider.post_source_polynomial_finish_persistent_resident_byte_length(),
-            source_provider.preparation_peak_resident_byte_length(),
-            application.loading_persistent_resident_byte_length(),
-            application.post_source_polynomial_finish_persistent_resident_byte_length(),
-            root_pipeline.peak_combined_wasm_resident_byte_length(),
-            canonical_statement.len(),
         );
     }
 }

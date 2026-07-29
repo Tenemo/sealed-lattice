@@ -37,10 +37,6 @@ use super::super::{
     SetupPublicPolynomialContext, SetupPublicPolynomialRootRole, SetupPublicPolynomialTree,
     StatementOwnedProofTreeInput, VerifiedEvaluatorAuxiliaryRoot,
 };
-#[cfg(test)]
-use super::trustee_evaluation_key::{
-    GaloisKeyShareRelationPlanInput, compile_galois_key_share_relation_with_source_layout,
-};
 use super::{
     BoundTreeConstructionKind, RelationBoundCertificate, RelationColumnOrigin,
     RelationIntegerLiftCoefficient, RelationIntegerLiftFullRingHalf,
@@ -113,16 +109,6 @@ pub(crate) struct GaloisKeyShareSourceProviderMemoryAccounting {
 }
 
 impl GaloisKeyShareSourceProviderMemoryAccounting {
-    #[cfg(test)]
-    pub(crate) const fn retained_original_source_byte_length(self) -> u64 {
-        self.retained_original_source_byte_length
-    }
-
-    #[cfg(test)]
-    pub(crate) const fn adapter_retained_byte_length(self) -> u64 {
-        self.adapter_retained_byte_length
-    }
-
     pub(crate) const fn loading_persistent_resident_byte_length(self) -> u64 {
         self.loading_persistent_resident_byte_length
     }
@@ -137,16 +123,6 @@ impl GaloisKeyShareSourceProviderMemoryAccounting {
 
     pub(crate) const fn maximum_returned_source_polynomial_byte_length(self) -> u64 {
         self.maximum_returned_source_polynomial_byte_length
-    }
-
-    #[cfg(test)]
-    pub(crate) const fn preparation_tree_workspace_byte_length(self) -> u64 {
-        self.preparation_tree_workspace_byte_length
-    }
-
-    #[cfg(test)]
-    pub(crate) const fn preparation_peak_resident_byte_length(self) -> u64 {
-        self.preparation_peak_resident_byte_length
     }
 }
 
@@ -1074,54 +1050,6 @@ fn galois_key_share_source_provider_memory_accounting_from_layout(
         preparation_peak_resident_byte_length,
         preparation_canonical_component_read_byte_length,
     })
-}
-
-#[cfg(test)]
-pub(crate) fn galois_key_share_topology_comparison_memory_accounting(
-    relation_plan_variant: &RelationPlanVariant,
-    relation_context: &RelationPlanCheckContext,
-    geometry: &TrusteeEvaluationKeyRelationGeometry,
-    source_layout: &GaloisKeyShareSourceLayout,
-    canonical_application_statement_byte_length: usize,
-) -> Result<GaloisKeyShareSourceProviderMemoryAccounting, CommonProofProverError> {
-    galois_key_share_source_provider_memory_accounting_from_layout(
-        relation_plan_variant,
-        relation_context,
-        geometry,
-        source_layout,
-        canonical_application_statement_byte_length,
-    )
-}
-
-#[cfg(test)]
-pub(crate) fn galois_key_share_source_provider_memory_accounting(
-    input: &GaloisKeyShareRelationPlanInput,
-    relation_plan_variant: &RelationPlanVariant,
-    relation_context: &RelationPlanCheckContext,
-    canonical_application_statement_byte_length: usize,
-) -> Result<GaloisKeyShareSourceProviderMemoryAccounting, CommonProofProverError> {
-    let compiled = compile_galois_key_share_relation_with_source_layout(input, relation_context)
-        .map_err(CommonProofProverError::Relation)?;
-    let expected_variant = compiled
-        .relation_plan
-        .select_variant(Some(input.batch_schedule_position), None)
-        .map_err(CommonProofProverError::Relation)?;
-    if expected_variant
-        .canonical_hash()
-        .map_err(CommonProofProverError::Relation)?
-        != relation_plan_variant
-            .canonical_hash()
-            .map_err(CommonProofProverError::Relation)?
-    {
-        return Err(CommonProofProverError::InvalidInput);
-    }
-    galois_key_share_source_provider_memory_accounting_from_layout(
-        relation_plan_variant,
-        relation_context,
-        &input.geometry,
-        &compiled.source_layout,
-        canonical_application_statement_byte_length,
-    )
 }
 
 pub(crate) fn galois_relation_tree_inputs(

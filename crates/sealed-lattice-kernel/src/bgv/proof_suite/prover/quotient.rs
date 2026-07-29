@@ -14,6 +14,49 @@ use super::{
     relation_columns::CommonProofColumnEvaluations,
 };
 
+fn quotient_evaluation_trace_rotation_stride(
+    variant: &RelationPlanVariant,
+    context: &RelationPlanCheckContext,
+    evaluation_domain: ProofEvaluationDomain,
+) -> Result<usize, CommonProofProverError> {
+    let trace_domain_size = usize::try_from(variant.trace_domain_size())
+        .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let relation_evaluation_domain_size = usize::try_from(variant.evaluation_domain_size())
+        .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let quotient_component_degree_bound_exclusive =
+        usize::try_from(context.quotient_component_degree_bound_exclusive)
+            .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let compact_quotient_domain_size = trace_domain_size
+        .max(quotient_component_degree_bound_exclusive)
+        .checked_next_power_of_two()
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    let relation_evaluation_domain = ProofEvaluationDomain::new(
+        relation_evaluation_domain_size,
+        context.evaluation_coset_offset,
+    )
+    .map_err(|_| CommonProofProverError::InvalidQuotient)?;
+
+    if trace_domain_size == 0
+        || !trace_domain_size.is_power_of_two()
+        || quotient_component_degree_bound_exclusive == 0
+        || compact_quotient_domain_size > relation_evaluation_domain_size
+        || !relation_evaluation_domain_size.is_multiple_of(trace_domain_size)
+        || (evaluation_domain.size() != compact_quotient_domain_size
+            && evaluation_domain.size() != relation_evaluation_domain_size)
+        || !evaluation_domain.size().is_multiple_of(trace_domain_size)
+        || evaluation_domain.coset_offset().canonical() != context.evaluation_coset_offset
+        || relation_evaluation_domain.generator().canonical() != context.evaluation_domain_generator
+    {
+        return Err(CommonProofProverError::InvalidQuotient);
+    }
+
+    evaluation_domain
+        .size()
+        .checked_div(trace_domain_size)
+        .filter(|stride| *stride != 0)
+        .ok_or(CommonProofProverError::InvalidQuotient)
+}
+
 #[cfg(test)]
 pub(super) fn validate_column_polynomials(
     variant: &RelationPlanVariant,
@@ -47,17 +90,8 @@ pub(crate) fn construct_composed_quotient_polynomial(
     composition_challenges: &[ProofChallengeExtensionElement],
 ) -> Result<Zeroizing<Vec<ProofChallengeExtensionElement>>, CommonProofProverError> {
     validate_column_polynomials(variant, columns)?;
-    if evaluation_domain.size()
-        != usize::try_from(variant.evaluation_domain_size())
-            .map_err(|_| CommonProofProverError::CountOverflow)?
-        || evaluation_domain.generator().canonical() != context.evaluation_domain_generator
-        || evaluation_domain.coset_offset().canonical() != context.evaluation_coset_offset
-        || !variant
-            .evaluation_domain_size()
-            .is_multiple_of(variant.trace_domain_size())
-    {
-        return Err(CommonProofProverError::InvalidQuotient);
-    }
+    let trace_rotation_stride =
+        quotient_evaluation_trace_rotation_stride(variant, context, evaluation_domain)?;
 
     let column_evaluations = columns
         .iter()
@@ -71,9 +105,6 @@ pub(crate) fn construct_composed_quotient_polynomial(
         })
         .collect::<Result<Vec<_>, _>>()?;
     let evaluation_size = evaluation_domain.size();
-    let trace_rotation_stride =
-        usize::try_from(variant.evaluation_domain_size() / variant.trace_domain_size())
-            .map_err(|_| CommonProofProverError::CountOverflow)?;
     let trace_domain_size = usize::try_from(variant.trace_domain_size())
         .map_err(|_| CommonProofProverError::CountOverflow)?;
 
@@ -128,166 +159,7 @@ pub(crate) fn construct_composed_quotient_polynomial(
     Ok(quotient)
 }
 
-/// Test oracle for the production constraint-at-a-time schedule. Relation
-/// columns are transformed lazily and each completed evaluation vector is
-/// reused by every later constraint that consumes the same column.
-#[cfg(test)]
-pub(crate) fn construct_constraint_stream_composed_quotient_polynomial(
-    variant: &RelationPlanVariant,
-    context: &RelationPlanCheckContext,
-    evaluation_domain: ProofEvaluationDomain,
-    columns: &[CommonProofSourcePolynomial],
-    application_challenges: &[RelationApplicationChallengeAssignment],
-    composition_challenges: &[ProofChallengeExtensionElement],
-) -> Result<Zeroizing<Vec<ProofChallengeExtensionElement>>, CommonProofProverError> {
-    validate_column_polynomials(variant, columns)?;
-    if evaluation_domain.size()
-        != usize::try_from(variant.evaluation_domain_size())
-            .map_err(|_| CommonProofProverError::CountOverflow)?
-        || evaluation_domain.generator().canonical() != context.evaluation_domain_generator
-        || evaluation_domain.coset_offset().canonical() != context.evaluation_coset_offset
-        || !variant
-            .evaluation_domain_size()
-            .is_multiple_of(variant.trace_domain_size())
-        || composition_challenges.len() != variant.constraint_count()
-    {
-        return Err(CommonProofProverError::InvalidQuotient);
-    }
-    let checked_application_challenges =
-        variant.checked_application_challenges(context, application_challenges)?;
-    let trace_domain_size = usize::try_from(variant.trace_domain_size())
-        .map_err(|_| CommonProofProverError::CountOverflow)?;
-    let trace_rotation_stride =
-        usize::try_from(variant.evaluation_domain_size() / variant.trace_domain_size())
-            .map_err(|_| CommonProofProverError::CountOverflow)?;
-    let mut quotient_evaluations = Zeroizing::new(vec![
-        ProofChallengeExtensionElement::ZERO;
-        evaluation_domain.size()
-    ]);
-    let mut transformed_column_evaluations = BTreeMap::new();
-
-    for constraint_ordinal in 0..variant.constraint_count() {
-        let queries = variant.constraint_column_queries(constraint_ordinal)?;
-        for column_ordinal in queries
-            .iter()
-            .map(|query| query.column_ordinal())
-            .collect::<BTreeSet<_>>()
-        {
-            if transformed_column_evaluations.contains_key(&column_ordinal) {
-                continue;
-            }
-            let column = columns
-                .get(
-                    usize::try_from(column_ordinal)
-                        .map_err(|_| CommonProofProverError::CountOverflow)?,
-                )
-                .ok_or(CommonProofProverError::InvalidColumn)?;
-            let evaluations = match column {
-                CommonProofSourcePolynomial::Base(coefficients) => evaluation_domain
-                    .evaluate_base_polynomial(coefficients)
-                    .map(|values| CommonProofColumnEvaluations::Base(Zeroizing::new(values)))?,
-                CommonProofSourcePolynomial::Extension(coefficients) => evaluation_domain
-                    .evaluate_extension_polynomial(coefficients)
-                    .map(|values| {
-                        CommonProofColumnEvaluations::Extension(Zeroizing::new(values))
-                    })?,
-            };
-            if transformed_column_evaluations
-                .insert(column_ordinal, evaluations)
-                .is_some()
-            {
-                return Err(CommonProofProverError::InvalidColumn);
-            }
-        }
-        let composition_challenge = composition_challenges
-            .get(constraint_ordinal)
-            .copied()
-            .ok_or(CommonProofProverError::InvalidQuotient)?;
-        for evaluation_position in 0..evaluation_domain.size() {
-            let evaluation_point = ProofChallengeExtensionElement::from_base(
-                evaluation_domain.point(evaluation_position)?,
-            );
-            let evaluation = variant.evaluate_constraint_at_point(
-                context,
-                constraint_ordinal,
-                evaluation_point,
-                &checked_application_challenges,
-                &mut |column_ordinal, rotation_is_negative, rotation_magnitude| {
-                    let rotated_position = rotated_relation_evaluation_position(
-                        evaluation_position,
-                        evaluation_domain.size(),
-                        trace_domain_size,
-                        trace_rotation_stride,
-                        rotation_is_negative,
-                        rotation_magnitude,
-                    )
-                    .map_err(|error| match error {
-                        CommonProofProverError::CountOverflow => RelationPlanError::CountOverflow,
-                        _ => RelationPlanError::InvalidOpening,
-                    })?;
-                    transformed_column_evaluations
-                        .get(&column_ordinal)
-                        .ok_or(RelationPlanError::InvalidConstraint)?
-                        .extension_value(rotated_position)
-                        .map_err(|_| RelationPlanError::InvalidConstraint)
-                },
-            )?;
-            let normalized = evaluation
-                .numerator
-                .divide(evaluation.zeroifier)
-                .map_err(|_| RelationPlanError::InvalidZeroifier)?;
-            quotient_evaluations[evaluation_position] = quotient_evaluations[evaluation_position]
-                .add(normalized.multiply(composition_challenge));
-        }
-    }
-    evaluation_domain.interpolate_extension_polynomial_in_place(&mut quotient_evaluations)?;
-    trim_extension_polynomial(&mut quotient_evaluations);
-    Ok(quotient_evaluations)
-}
-
-pub(super) const COMMON_PROOF_RELATION_EVALUATION_BLOCK_LENGTH: usize = 4_096;
-
-pub(super) fn rotated_relation_evaluation_position(
-    evaluation_position: usize,
-    evaluation_size: usize,
-    trace_domain_size: usize,
-    trace_rotation_stride: usize,
-    rotation_is_negative: bool,
-    rotation_magnitude: u64,
-) -> Result<usize, CommonProofProverError> {
-    if evaluation_size == 0
-        || trace_domain_size == 0
-        || trace_rotation_stride == 0
-        || evaluation_position >= evaluation_size
-        || trace_domain_size.checked_mul(trace_rotation_stride) != Some(evaluation_size)
-    {
-        return Err(CommonProofProverError::InvalidOpening);
-    }
-    let reduced_rotation = usize::try_from(
-        rotation_magnitude
-            % u64::try_from(trace_domain_size)
-                .map_err(|_| CommonProofProverError::CountOverflow)?,
-    )
-    .map_err(|_| CommonProofProverError::CountOverflow)?;
-    if reduced_rotation >= trace_domain_size {
-        return Err(CommonProofProverError::InvalidOpening);
-    }
-    let rotation_offset = reduced_rotation
-        .checked_mul(trace_rotation_stride)
-        .ok_or(CommonProofProverError::CountOverflow)?;
-    if rotation_is_negative {
-        evaluation_position
-            .checked_add(evaluation_size)
-            .and_then(|position| position.checked_sub(rotation_offset))
-            .map(|position| position % evaluation_size)
-            .ok_or(CommonProofProverError::CountOverflow)
-    } else {
-        evaluation_position
-            .checked_add(rotation_offset)
-            .map(|position| position % evaluation_size)
-            .ok_or(CommonProofProverError::CountOverflow)
-    }
-}
+const COMMON_PROOF_RELATION_EVALUATION_BLOCK_LENGTH: usize = 256;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct CommonProofQuotientConstraintTransformKey {
@@ -303,6 +175,7 @@ impl CommonProofQuotientConstraintTransformKey {
         }
     }
 
+    #[cfg(test)]
     pub(crate) const fn constraint_ordinal(self) -> u32 {
         self.constraint_ordinal
     }
@@ -313,32 +186,20 @@ impl CommonProofQuotientConstraintTransformKey {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct CommonProofQuotientConstraintColumnInterval {
-    first_constraint_ordinal: u32,
-    last_constraint_ordinal: u32,
+pub(crate) struct CommonProofQuotientColumnUsage {
     constraint_use_count: usize,
 }
 
-impl CommonProofQuotientConstraintColumnInterval {
-    pub(crate) const fn first_constraint_ordinal(self) -> u32 {
-        self.first_constraint_ordinal
-    }
-
-    pub(crate) const fn last_constraint_ordinal(self) -> u32 {
-        self.last_constraint_ordinal
-    }
-
+impl CommonProofQuotientColumnUsage {
     pub(crate) const fn constraint_use_count(self) -> usize {
         self.constraint_use_count
     }
 }
 
-/// The canonical constraint-to-column schedule consumed by both quotient
-/// arithmetic and external transform planning.
 pub(crate) struct CommonProofQuotientConstraintCatalog {
     constraint_queries: Vec<Vec<RelationConstraintColumnQuery>>,
     constraint_columns: Vec<Vec<u32>>,
-    column_intervals: BTreeMap<u32, CommonProofQuotientConstraintColumnInterval>,
+    column_usages: BTreeMap<u32, CommonProofQuotientColumnUsage>,
 }
 
 impl CommonProofQuotientConstraintCatalog {
@@ -346,10 +207,47 @@ impl CommonProofQuotientConstraintCatalog {
         &self.constraint_columns
     }
 
-    pub(crate) fn column_intervals(
-        &self,
-    ) -> &BTreeMap<u32, CommonProofQuotientConstraintColumnInterval> {
-        &self.column_intervals
+    pub(crate) const fn column_usages(&self) -> &BTreeMap<u32, CommonProofQuotientColumnUsage> {
+        &self.column_usages
+    }
+}
+
+fn rotated_relation_evaluation_position(
+    evaluation_position: usize,
+    evaluation_size: usize,
+    trace_domain_size: usize,
+    trace_rotation_stride: usize,
+    rotation_is_negative: bool,
+    rotation_magnitude: u64,
+) -> Result<usize, CommonProofProverError> {
+    if evaluation_size == 0
+        || trace_domain_size == 0
+        || trace_rotation_stride == 0
+        || evaluation_position >= evaluation_size
+    {
+        return Err(CommonProofProverError::InvalidQuotient);
+    }
+    let trace_domain_size_u64 =
+        u64::try_from(trace_domain_size).map_err(|_| CommonProofProverError::CountOverflow)?;
+    let reduced_rotation = usize::try_from(rotation_magnitude % trace_domain_size_u64)
+        .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let rotation_offset = reduced_rotation
+        .checked_mul(trace_rotation_stride)
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    if rotation_offset >= evaluation_size {
+        return Err(CommonProofProverError::InvalidQuotient);
+    }
+    if rotation_is_negative {
+        evaluation_position
+            .checked_add(evaluation_size)
+            .and_then(|position| position.checked_sub(rotation_offset))
+            .map(|position| position % evaluation_size)
+            .ok_or(CommonProofProverError::CountOverflow)
+    } else {
+        evaluation_position
+            .checked_add(rotation_offset)
+            .map(|position| position % evaluation_size)
+            .ok_or(CommonProofProverError::CountOverflow)
     }
 }
 
@@ -358,7 +256,7 @@ pub(crate) fn common_proof_quotient_constraint_catalog(
 ) -> Result<CommonProofQuotientConstraintCatalog, CommonProofProverError> {
     let mut constraint_queries = Vec::new();
     let mut constraint_columns = Vec::new();
-    let mut column_intervals = BTreeMap::new();
+    let mut column_usages = BTreeMap::new();
     constraint_queries
         .try_reserve_exact(variant.constraint_count())
         .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
@@ -367,8 +265,6 @@ pub(crate) fn common_proof_quotient_constraint_catalog(
         .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
 
     for constraint_index in 0..variant.constraint_count() {
-        let constraint_ordinal =
-            u32::try_from(constraint_index).map_err(|_| CommonProofProverError::CountOverflow)?;
         let queries = variant.constraint_column_queries(constraint_index)?;
         let columns = queries
             .iter()
@@ -387,15 +283,13 @@ pub(crate) fn common_proof_quotient_constraint_catalog(
                         .map_err(|_| CommonProofProverError::CountOverflow)?,
                 )
                 .ok_or(CommonProofProverError::InvalidColumn)?;
-            let interval = column_intervals.entry(*column_ordinal).or_insert(
-                CommonProofQuotientConstraintColumnInterval {
-                    first_constraint_ordinal: constraint_ordinal,
-                    last_constraint_ordinal: constraint_ordinal,
-                    constraint_use_count: 0,
-                },
-            );
-            interval.last_constraint_ordinal = constraint_ordinal;
-            interval.constraint_use_count = interval
+            let usage =
+                column_usages
+                    .entry(*column_ordinal)
+                    .or_insert(CommonProofQuotientColumnUsage {
+                        constraint_use_count: 0,
+                    });
+            usage.constraint_use_count = usage
                 .constraint_use_count
                 .checked_add(1)
                 .ok_or(CommonProofProverError::CountOverflow)?;
@@ -403,14 +297,14 @@ pub(crate) fn common_proof_quotient_constraint_catalog(
         constraint_queries.push(queries);
         constraint_columns.push(columns);
     }
-    if column_intervals.is_empty() {
+    if column_usages.is_empty() {
         return Err(CommonProofProverError::InvalidColumn);
     }
 
     Ok(CommonProofQuotientConstraintCatalog {
         constraint_queries,
         constraint_columns,
-        column_intervals,
+        column_usages,
     })
 }
 
@@ -475,17 +369,8 @@ impl CommonProofConstraintStreamQuotientBuilder {
         composition_challenges: Vec<ProofChallengeExtensionElement>,
         maximum_external_read_chunk_byte_length: u32,
     ) -> Result<Self, CommonProofProverError> {
-        if evaluation_domain.size()
-            != usize::try_from(variant.evaluation_domain_size())
-                .map_err(|_| CommonProofProverError::CountOverflow)?
-            || evaluation_domain.generator().canonical() != context.evaluation_domain_generator
-            || evaluation_domain.coset_offset().canonical() != context.evaluation_coset_offset
-            || !variant
-                .evaluation_domain_size()
-                .is_multiple_of(variant.trace_domain_size())
-        {
-            return Err(CommonProofProverError::InvalidQuotient);
-        }
+        let trace_rotation_stride =
+            quotient_evaluation_trace_rotation_stride(variant, context, evaluation_domain)?;
         if composition_challenges.len() != variant.constraint_count()
             || maximum_external_read_chunk_byte_length == 0
         {
@@ -493,9 +378,6 @@ impl CommonProofConstraintStreamQuotientBuilder {
         }
         let trace_domain_size = usize::try_from(variant.trace_domain_size())
             .map_err(|_| CommonProofProverError::CountOverflow)?;
-        let trace_rotation_stride =
-            usize::try_from(variant.evaluation_domain_size() / variant.trace_domain_size())
-                .map_err(|_| CommonProofProverError::CountOverflow)?;
         let column_value_types = variant
             .ordered_columns()
             .iter()
@@ -504,11 +386,11 @@ impl CommonProofConstraintStreamQuotientBuilder {
         let CommonProofQuotientConstraintCatalog {
             constraint_queries,
             constraint_columns,
-            column_intervals,
+            column_usages,
         } = common_proof_quotient_constraint_catalog(variant)?;
-        let remaining_constraint_use_counts = column_intervals
+        let remaining_constraint_use_counts = column_usages
             .iter()
-            .map(|(column_ordinal, interval)| (*column_ordinal, interval.constraint_use_count()))
+            .map(|(column_ordinal, usage)| (*column_ordinal, usage.constraint_use_count()))
             .collect::<BTreeMap<_, _>>();
         for columns in &constraint_columns {
             for column_ordinal in columns {
@@ -850,7 +732,7 @@ impl CommonProofConstraintStreamQuotientBuilder {
             .constraint_columns
             .get(self.current_constraint_ordinal)
             .ok_or(CommonProofProverError::InvalidQuotient)?;
-        retire_transformed_columns_after_constraint(
+        retire_constraint_local_transformed_columns(
             constraint_columns,
             &mut self.remaining_constraint_use_counts,
             &mut self.transformed_columns,
@@ -912,7 +794,7 @@ fn validate_seeded_transformed_columns(
     Ok(())
 }
 
-fn retire_transformed_columns_after_constraint(
+fn retire_constraint_local_transformed_columns(
     constraint_columns: &[u32],
     remaining_constraint_use_counts: &mut BTreeMap<u32, usize>,
     transformed_columns: &mut BTreeMap<u32, ExternalPolynomialVector>,
@@ -940,10 +822,10 @@ fn retire_transformed_columns_after_constraint(
             .ok_or(CommonProofProverError::InvalidColumn)?;
         if *remaining_use_count == 0 {
             remaining_constraint_use_counts.remove(column_ordinal);
-            transformed_columns
-                .remove(column_ordinal)
-                .ok_or(CommonProofProverError::InvalidColumn)?;
         }
+        transformed_columns
+            .remove(column_ordinal)
+            .ok_or(CommonProofProverError::InvalidColumn)?;
     }
     Ok(())
 }
@@ -1149,7 +1031,7 @@ mod reusable_transform_tests {
     use super::{
         BTreeMap, BTreeSet, CommonProofProverError, ExternalPolynomialVector,
         ProofExternalMemoryObject, RelationColumnValueType, next_untransformed_column,
-        retire_transformed_columns_after_constraint, validate_seeded_transformed_columns,
+        retire_constraint_local_transformed_columns, validate_seeded_transformed_columns,
     };
 
     fn transformed_vector(
@@ -1166,12 +1048,13 @@ mod reusable_transform_tests {
     }
 
     #[test]
-    fn transformed_columns_are_requested_once_across_nonconsecutive_constraints() {
+    fn transformed_columns_are_requested_once_per_constraint() {
         let constraint_columns = [vec![2, 4, 7], vec![9], vec![4, 7], vec![2, 9]];
         let mut transformed_columns = BTreeSet::new();
         let mut transform_requests = Vec::new();
 
         for columns in constraint_columns {
+            transformed_columns.clear();
             let mut next_column_index = 0;
             while let Some(column_ordinal) =
                 next_untransformed_column(&columns, &mut next_column_index, |column_ordinal| {
@@ -1185,30 +1068,30 @@ mod reusable_transform_tests {
             }
         }
 
-        assert_eq!(transform_requests, vec![2, 4, 7, 9]);
+        assert_eq!(transform_requests, vec![2, 4, 7, 9, 4, 7, 2, 9]);
     }
 
     #[test]
-    fn transformed_columns_retire_only_after_their_last_nonconsecutive_constraint() {
+    fn transformed_columns_retire_after_each_constraint() {
         let base_vector = transformed_vector(20, RelationColumnValueType::BaseField, 16);
         let extension_vector =
             transformed_vector(21, RelationColumnValueType::ChallengeExtension, 16);
         let mut transformed_columns = BTreeMap::from([(2, base_vector), (7, extension_vector)]);
         let mut remaining_constraint_use_counts = BTreeMap::from([(2, 2), (7, 1)]);
 
-        retire_transformed_columns_after_constraint(
+        retire_constraint_local_transformed_columns(
             &[2],
             &mut remaining_constraint_use_counts,
             &mut transformed_columns,
         )
-        .expect("the first use retains the nonconsecutive column");
+        .expect("the first use retires the constraint-local column");
         assert_eq!(
             remaining_constraint_use_counts,
             BTreeMap::from([(2, 1), (7, 1)])
         );
-        assert_eq!(transformed_columns.get(&2), Some(&base_vector));
+        assert!(!transformed_columns.contains_key(&2));
 
-        retire_transformed_columns_after_constraint(
+        retire_constraint_local_transformed_columns(
             &[7],
             &mut remaining_constraint_use_counts,
             &mut transformed_columns,
@@ -1216,9 +1099,10 @@ mod reusable_transform_tests {
         .expect("the single-use extension column retires");
         assert!(!remaining_constraint_use_counts.contains_key(&7));
         assert!(!transformed_columns.contains_key(&7));
-        assert_eq!(transformed_columns.get(&2), Some(&base_vector));
+        assert!(!transformed_columns.contains_key(&2));
 
-        retire_transformed_columns_after_constraint(
+        transformed_columns.insert(2, base_vector);
+        retire_constraint_local_transformed_columns(
             &[2],
             &mut remaining_constraint_use_counts,
             &mut transformed_columns,
@@ -1297,7 +1181,7 @@ mod reusable_transform_tests {
         let mut remaining_constraint_use_counts = BTreeMap::from([(2, 1), (7, 1)]);
 
         assert_eq!(
-            retire_transformed_columns_after_constraint(
+            retire_constraint_local_transformed_columns(
                 &[2, 7],
                 &mut remaining_constraint_use_counts,
                 &mut transformed_columns,

@@ -1234,17 +1234,9 @@ pub(super) fn resolved_modulus_multiple(
         return Err(RelationPlanError::InvalidModulus);
     }
     let modulus = context.resolved_modulus(modulus_reference)?;
-    match modulus.checked_mul(u64::from(multiplier)) {
-        Some(value) => Ok(value),
-        None => {
-            #[cfg(test)]
-            eprintln!(
-                "resolved_modulus_multiple overflow: modulus_reference={modulus_reference:?}, modulus={modulus}, multiplier={multiplier}, exact_product={}",
-                u128::from(modulus) * u128::from(multiplier)
-            );
-            Err(RelationPlanError::IntegerBoundOverflow)
-        }
-    }
+    modulus
+        .checked_mul(u64::from(multiplier))
+        .ok_or(RelationPlanError::IntegerBoundOverflow)
 }
 
 pub(super) fn fixed_radix_u64_digits(

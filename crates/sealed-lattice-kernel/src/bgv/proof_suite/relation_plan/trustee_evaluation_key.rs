@@ -1340,8 +1340,6 @@ fn compile_galois_key_share_relation_batch(
         check_context,
         sources,
     )?;
-    #[cfg(test)]
-    let relation_started = std::time::Instant::now();
     let secret = builder.add_reversible_signed_ternary_vector()?;
     let mut entry_source_layouts = Vec::with_capacity(input.ordered_entries.len());
     for (entry_ordinal, (entry, entry_geometry)) in input
@@ -1350,8 +1348,6 @@ fn compile_galois_key_share_relation_batch(
         .zip(entry_geometries)
         .enumerate()
     {
-        #[cfg(test)]
-        let entry_started = std::time::Instant::now();
         let automorphed_secret = builder.add_signed_ternary_vector()?;
         builder.add_negacyclic_automorphism_permutation(
             &KeyVerifierSourceKey::NegacyclicAutomorphismMapping {
@@ -1391,22 +1387,9 @@ fn compile_galois_key_share_relation_batch(
             errors_by_block,
             quotients_by_row,
         });
-        #[cfg(test)]
-        eprintln!(
-            "key relation Galois entry {entry_ordinal}: {:?}",
-            entry_started.elapsed()
-        );
     }
-    #[cfg(test)]
-    let anchor_started = std::time::Instant::now();
     let anchor_source_layouts =
         add_anchor_relations(&mut builder, &input.geometry, &secret, check_context)?;
-    #[cfg(test)]
-    eprintln!(
-        "key relation Galois anchors: {:?}; relations before finish: {:?}",
-        anchor_started.elapsed(),
-        relation_started.elapsed()
-    );
     let exact_radix_digits_by_column = builder
         .exact_radix_digits_by_column()
         .iter()
@@ -1427,30 +1410,6 @@ fn compile_galois_key_share_relation_batch(
             exact_radix_digits_by_column,
         },
     })
-}
-
-#[cfg(test)]
-pub(crate) fn compile_galois_key_share_relation_topology_comparison(
-    input: &GaloisKeyShareRelationPlanInput,
-    check_context: &RelationPlanCheckContext,
-) -> Result<CompiledGaloisKeyShareRelation, RelationPlanError> {
-    let expected_entries = input
-        .ordered_entries
-        .iter()
-        .map(|entry| {
-            (
-                entry.schedule_position,
-                entry.galois_element,
-                entry.selected_level,
-            )
-        })
-        .collect::<Vec<_>>();
-    compile_galois_key_share_relation_batch(
-        input,
-        check_context,
-        input.batch_schedule_position,
-        &expected_entries,
-    )
 }
 
 #[cfg(test)]
@@ -2043,50 +2002,6 @@ mod tests {
         let variant = plan
             .select_variant(Some(input.batch_schedule_position), None)
             .expect("scheduled Galois-key-share variant");
-        let mut tree_roles_by_column = BTreeMap::new();
-        for tree in variant.ordered_trees() {
-            let role = match tree {
-                RelationTreeDescriptor::ProofCreated {
-                    proof_tree_role, ..
-                } => format!("proof-created-{proof_tree_role}"),
-                RelationTreeDescriptor::BoundPublic {
-                    construction_kind,
-                    root_use,
-                    ..
-                } => format!("bound-{construction_kind:?}-{root_use:?}"),
-            };
-            for column_ordinal in tree.ordered_column_ordinals() {
-                tree_roles_by_column.insert(*column_ordinal, role.clone());
-            }
-        }
-        let mut column_groups = BTreeMap::new();
-        let mut relation_column_catalog_byte_length = 0_u64;
-        for (column_ordinal, column) in variant.ordered_columns().iter().enumerate() {
-            let column_ordinal =
-                u32::try_from(column_ordinal).expect("relation column ordinal fits u32");
-            let origin = match column.origin() {
-                RelationColumnOrigin::VerifierSequence { .. } => "verifier-sequence",
-                RelationColumnOrigin::BoundTree { .. } => "bound-tree",
-                RelationColumnOrigin::Prover => "prover",
-            };
-            let role = tree_roles_by_column
-                .get(&column_ordinal)
-                .map(String::as_str)
-                .unwrap_or("no-tree");
-            *column_groups
-                .entry((
-                    format!("{:?}", column.value_type()),
-                    column.source_degree_bound_exclusive(),
-                    origin,
-                    role.to_owned(),
-                ))
-                .or_insert(0_usize) += 1;
-            relation_column_catalog_byte_length += column.source_degree_bound_exclusive() * 8;
-        }
-        eprintln!("selected 0x1217 column groups: {column_groups:#?}");
-        eprintln!(
-            "selected 0x1217 relation column catalog byte length: {relation_column_catalog_byte_length}"
-        );
         let prover_column_ordinals = variant
             .ordered_columns()
             .iter()

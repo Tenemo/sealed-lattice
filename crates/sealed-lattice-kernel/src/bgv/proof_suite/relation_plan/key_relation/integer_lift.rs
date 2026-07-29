@@ -15,9 +15,9 @@ use super::super::{
     },
 };
 use super::{
-    AnchorEquationInputs, EXACT_INTEGER_LIFT_RADIX, KeyRelationPlanBuilder,
-    PendingFullRingNegacyclicProduct, ProofTreePhase, PublicKeyEquationInputs,
-    ReversibleShiftedSmallVector, ShiftedSmallVector, SplitIntegerVector,
+    AnchorEquationInputs, EXACT_INTEGER_LIFT_RADIX, FullRingProductAccumulatorDependency,
+    KeyRelationPlanBuilder, PendingFullRingNegacyclicProduct, ProofTreePhase,
+    PublicKeyEquationInputs, ReversibleShiftedSmallVector, ShiftedSmallVector, SplitIntegerVector,
     TrusteeAnchorOpeningWitness, TrusteeRadixThreeQuotientWitness,
     column_builder::{
         constant_linear_term, integer_lift_half, plaintext_scaled_linear_term,
@@ -202,6 +202,38 @@ impl<'context> KeyRelationPlanBuilder<'context> {
     ) -> Result<RelationIntegerLiftFullRingNegacyclicProductDescriptor, RelationPlanError> {
         let reversed = self.reversed_vector(multiplier.source.coefficients)?;
         self.ensure_reversed_vector_bindings(batch_key, multiplier.source.coefficients, reversed)?;
+        let suffix_columns = match self
+            .full_ring_suffix_columns_by_dependency
+            .get(&(batch_key, multiplicand))
+            .copied()
+        {
+            Some(columns) => columns,
+            None => {
+                let columns = [
+                    self.push_prover_column(ProofTreePhase::Auxiliary)?,
+                    self.push_prover_column(ProofTreePhase::Auxiliary)?,
+                ];
+                self.full_ring_suffix_columns_by_dependency
+                    .insert((batch_key, multiplicand), columns);
+                columns
+            }
+        };
+        let transpose_columns = match self
+            .full_ring_transpose_columns_by_dependency
+            .get(&(batch_key, pending.selected_half, multiplicand))
+            .copied()
+        {
+            Some(columns) => columns,
+            None => {
+                let columns = [
+                    self.push_prover_column(ProofTreePhase::Auxiliary)?,
+                    self.push_prover_column(ProofTreePhase::Auxiliary)?,
+                ];
+                self.full_ring_transpose_columns_by_dependency
+                    .insert((batch_key, pending.selected_half, multiplicand), columns);
+                columns
+            }
+        };
         Ok(RelationIntegerLiftFullRingNegacyclicProductDescriptor {
             negative: pending.negative,
             selected_half: pending.selected_half,
@@ -213,14 +245,10 @@ impl<'context> KeyRelationPlanBuilder<'context> {
             reversed_multiplier_high_column_ordinal: reversed.halves[1],
             multiplier_low_offset: multiplier.source.offset,
             multiplier_high_offset: multiplier.source.offset,
-            multiplicand_low_suffix_evaluation_column_ordinal: self
-                .push_prover_column(ProofTreePhase::Auxiliary)?,
-            multiplicand_high_suffix_evaluation_column_ordinal: self
-                .push_prover_column(ProofTreePhase::Auxiliary)?,
-            reversed_multiplier_low_transpose_column_ordinal: self
-                .push_prover_column(ProofTreePhase::Auxiliary)?,
-            reversed_multiplier_high_transpose_column_ordinal: self
-                .push_prover_column(ProofTreePhase::Auxiliary)?,
+            multiplicand_low_suffix_evaluation_column_ordinal: suffix_columns[0],
+            multiplicand_high_suffix_evaluation_column_ordinal: suffix_columns[1],
+            reversed_multiplier_low_transpose_column_ordinal: transpose_columns[0],
+            reversed_multiplier_high_transpose_column_ordinal: transpose_columns[1],
         })
     }
 
@@ -587,14 +615,63 @@ impl<'context> KeyRelationPlanBuilder<'context> {
             sort_canonical_items(&mut expanded_products[limb], |product| {
                 product.canonical_bytes()
             })?;
+            let linear_evaluation_key = (batch_key, expanded_linear_terms[limb].clone());
+            let linear_evaluation_column_ordinal = match self
+                .linear_evaluation_columns_by_dependency
+                .get(&linear_evaluation_key)
+                .copied()
+            {
+                Some(column_ordinal) => column_ordinal,
+                None => {
+                    let column_ordinal = self.push_prover_column(ProofTreePhase::Auxiliary)?;
+                    self.linear_evaluation_columns_by_dependency
+                        .insert(linear_evaluation_key, column_ordinal);
+                    column_ordinal
+                }
+            };
+            let product_accumulator_dependencies = expanded_products[limb]
+                .iter()
+                .map(|product| FullRingProductAccumulatorDependency {
+                    negative: product.negative,
+                    selected_half: product.selected_half,
+                    multiplicand_columns: [
+                        product.multiplicand_low_column_ordinal,
+                        product.multiplicand_high_column_ordinal,
+                    ],
+                    multiplier_columns: [
+                        product.multiplier_low_column_ordinal,
+                        product.multiplier_high_column_ordinal,
+                    ],
+                    reversed_multiplier_columns: [
+                        product.reversed_multiplier_low_column_ordinal,
+                        product.reversed_multiplier_high_column_ordinal,
+                    ],
+                    multiplier_offsets: [
+                        product.multiplier_low_offset,
+                        product.multiplier_high_offset,
+                    ],
+                })
+                .collect::<Vec<_>>();
+            let product_accumulator_key = (batch_key, product_accumulator_dependencies);
+            let product_accumulator_column_ordinal = match self
+                .product_accumulator_columns_by_dependency
+                .get(&product_accumulator_key)
+                .copied()
+            {
+                Some(column_ordinal) => column_ordinal,
+                None => {
+                    let column_ordinal = self.push_prover_column(ProofTreePhase::Auxiliary)?;
+                    self.product_accumulator_columns_by_dependency
+                        .insert(product_accumulator_key, column_ordinal);
+                    column_ordinal
+                }
+            };
             components.push(RelationIntegerLiftComponentDescriptor {
                 ordered_linear_terms: std::mem::take(&mut expanded_linear_terms[limb]),
                 ordered_convolution_products: Vec::new(),
                 ordered_full_ring_negacyclic_products: std::mem::take(&mut expanded_products[limb]),
-                linear_evaluation_column_ordinal: self
-                    .push_prover_column(ProofTreePhase::Auxiliary)?,
-                product_accumulator_column_ordinal: self
-                    .push_prover_column(ProofTreePhase::Auxiliary)?,
+                linear_evaluation_column_ordinal,
+                product_accumulator_column_ordinal,
             });
         }
         self.pending_integer_lift_batches

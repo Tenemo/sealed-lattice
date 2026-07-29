@@ -1660,3 +1660,329 @@ fn relation_plan_rejects_semantic_witness_first_committed_after_challenge() {
         Err(RelationPlanError::InvalidConstraint),
     );
 }
+
+fn compact_auxiliary_reconstruction_variant() -> RelationPlanVariant {
+    const TRACE_DOMAIN_SIZE: u64 = 8;
+    const MASK_DEGREE_BOUND_EXCLUSIVE: u64 = 3;
+    const SOURCE_COLUMN_COUNT: u32 = 20;
+    const FIRST_AUXILIARY_COLUMN_ORDINAL: u32 = SOURCE_COLUMN_COUNT;
+    const AUXILIARY_COLUMN_COUNT: u32 = 14;
+
+    let columns = (0..SOURCE_COLUMN_COUNT + AUXILIARY_COLUMN_COUNT)
+        .map(|_| RelationColumnDescriptor {
+            origin: RelationColumnOrigin::Prover,
+            value_type: RelationColumnValueType::BaseField,
+            source_degree_bound_exclusive: TRACE_DOMAIN_SIZE + MASK_DEGREE_BOUND_EXCLUSIVE,
+            canonical_residue_modulus: None,
+        })
+        .collect::<Vec<_>>();
+    let auxiliary_column_ordinals = (FIRST_AUXILIARY_COLUMN_ORDINAL
+        ..FIRST_AUXILIARY_COLUMN_ORDINAL + AUXILIARY_COLUMN_COUNT)
+        .collect::<Vec<_>>();
+    let masks = auxiliary_column_ordinals
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(mask_index, target_ordinal)| RelationMaskDescriptor {
+            mask_ordinal: u32::try_from(mask_index).expect("the compact mask ordinal fits u32"),
+            mask_kind: RelationMaskKind::Trace,
+            target_class: RelationMaskTargetClass::Column,
+            target_ordinal,
+            mask_degree_bound_exclusive: MASK_DEGREE_BOUND_EXCLUSIVE,
+        })
+        .collect::<Vec<_>>();
+    let batch = RelationIntegerLiftBatchDescriptor {
+        modulus_reference: SuiteModulusReference::data(0),
+        challenge_ordinal: 0,
+        ordered_reversed_column_bindings: vec![
+            RelationIntegerLiftReversedColumnBindingDescriptor {
+                source_column_ordinal: 10,
+                reversed_column_ordinal: 11,
+                source_prefix_evaluation_column_ordinal: 24,
+                reversed_suffix_evaluation_column_ordinal: 25,
+            },
+        ],
+        ordered_negacyclic_automorphism_permutations: vec![
+            RelationIntegerLiftNegacyclicAutomorphismPermutationDescriptor {
+                galois_element: 3,
+                mapping_verifier_source_ordinal: 0,
+                source_low_column_ordinal: 0,
+                source_high_column_ordinal: 1,
+                target_low_column_ordinal: 2,
+                target_high_column_ordinal: 3,
+                mapped_low_position_column_ordinal: 4,
+                low_negation_bit_column_ordinal: 5,
+                mapped_high_position_column_ordinal: 6,
+                high_negation_bit_column_ordinal: 7,
+                target_low_position_column_ordinal: 8,
+                target_high_position_column_ordinal: 9,
+                source_product_before_column_ordinal: 20,
+                source_low_product_column_ordinal: 21,
+                target_product_before_column_ordinal: 22,
+                target_low_product_column_ordinal: 23,
+            },
+        ],
+        ordered_components: vec![RelationIntegerLiftComponentDescriptor {
+            ordered_linear_terms: vec![
+                RelationIntegerLiftLinearTermDescriptor {
+                    negative: false,
+                    column_ordinal: 0,
+                    column_offset: 2,
+                    coefficient: RelationIntegerLiftCoefficient::Constant(3),
+                },
+                RelationIntegerLiftLinearTermDescriptor {
+                    negative: true,
+                    column_ordinal: 14,
+                    column_offset: 1,
+                    coefficient: RelationIntegerLiftCoefficient::Modulus {
+                        modulus_reference: SuiteModulusReference::data(0),
+                        multiplier: 1,
+                    },
+                },
+            ],
+            ordered_convolution_products: vec![RelationIntegerLiftConvolutionProductDescriptor {
+                negative: false,
+                convolution_kind: RelationIntegerLiftConvolutionKind::Negacyclic,
+                multiplicand_column_ordinal: 12,
+                reversed_multiplier_column_ordinal: 13,
+                multiplier_offset: 4,
+                suffix_evaluation_column_ordinal: 26,
+                reversed_transpose_column_ordinal: 27,
+            }],
+            ordered_full_ring_negacyclic_products: vec![
+                RelationIntegerLiftFullRingNegacyclicProductDescriptor {
+                    negative: true,
+                    selected_half: RelationIntegerLiftFullRingHalf::High,
+                    multiplicand_low_column_ordinal: 14,
+                    multiplicand_high_column_ordinal: 15,
+                    multiplier_low_column_ordinal: 16,
+                    multiplier_high_column_ordinal: 17,
+                    reversed_multiplier_low_column_ordinal: 18,
+                    reversed_multiplier_high_column_ordinal: 19,
+                    multiplier_low_offset: 5,
+                    multiplier_high_offset: 6,
+                    multiplicand_low_suffix_evaluation_column_ordinal: 28,
+                    multiplicand_high_suffix_evaluation_column_ordinal: 29,
+                    reversed_multiplier_low_transpose_column_ordinal: 30,
+                    reversed_multiplier_high_transpose_column_ordinal: 31,
+                },
+            ],
+            linear_evaluation_column_ordinal: 32,
+            product_accumulator_column_ordinal: 33,
+        }],
+    };
+
+    RelationPlanVariant {
+        schedule_position: None,
+        top_count: None,
+        proof_privacy_mode: ProofPrivacyMode::SecretBearing,
+        trace_domain_size: TRACE_DOMAIN_SIZE,
+        evaluation_domain_size: 32,
+        opening_degree_bound_exclusive: 16,
+        ordered_non_native_moduli: vec![SuiteModulusReference::data(0)],
+        ordered_verifier_sources: Vec::new(),
+        ordered_public_samplers: Vec::new(),
+        ordered_columns: columns,
+        ordered_semantic_cells: Vec::new(),
+        ordered_radix_convolutions: Vec::new(),
+        ordered_integer_lift_batches: vec![batch],
+        ordered_coefficient_local_identity_batches: Vec::new(),
+        ordered_trees: vec![RelationTreeDescriptor::ProofCreated {
+            proof_tree_role: crate::bgv::proof_suite::ProofTreeRole::AuxiliaryOracle as u16,
+            ordered_column_ordinals: auxiliary_column_ordinals,
+        }],
+        ordered_constraints: Vec::new(),
+        ordered_opening_points: Vec::new(),
+        ordered_opening_claims: Vec::new(),
+        ordered_masks: masks,
+    }
+}
+
+fn compact_auxiliary_source_polynomial(
+    column_ordinal: u32,
+) -> crate::bgv::proof_suite::CommonProofSourcePolynomial {
+    use crate::bgv::proof_suite::{CommonProofSourcePolynomial, ProofBaseFieldElement};
+
+    CommonProofSourcePolynomial::from_base_coefficients(
+        (0_u64..8)
+            .map(|coefficient_ordinal| {
+                ProofBaseFieldElement::from_canonical(
+                    u64::from(column_ordinal) * 97 + coefficient_ordinal * 13 + 1,
+                )
+                .expect("the compact source coefficient is canonical")
+            })
+            .collect(),
+    )
+}
+
+struct CoordinatePrivateCoins;
+
+impl crate::bgv::proof_suite::CommonProofPrivateCoinSource for CoordinatePrivateCoins {
+    type Error = core::convert::Infallible;
+
+    fn sample_modulo(
+        &mut self,
+        coordinate: crate::bgv::proof_suite::CommonProofPrivateCoinCoordinate,
+        modulus: u64,
+        _maximum_candidate_draws_per_output: u32,
+    ) -> Result<u64, Self::Error> {
+        Ok((u64::from(coordinate.purpose_class()) + u64::from(coordinate.ordinal()) + 1) % modulus)
+    }
+
+    fn fill_raw_bytes(
+        &mut self,
+        coordinate: crate::bgv::proof_suite::CommonProofPrivateCoinCoordinate,
+        destination: &mut [u8],
+    ) -> Result<(), Self::Error> {
+        destination.fill(
+            u8::try_from((u64::from(coordinate.ordinal()) + 1) % 251)
+                .expect("the compact private byte fits u8"),
+        );
+        Ok(())
+    }
+}
+
+#[test]
+fn encrypted_mask_tail_reconstruction_matches_every_auxiliary_program() {
+    use crate::bgv::proof_suite::{
+        CommonProofChallenge, CommonProofSourcePolynomial, ProofBaseFieldElement,
+        RelationApplicationChallengeAssignment,
+        prover::{
+            CommonProofAuxiliaryColumnReconstructionCatalog,
+            CommonProofAuxiliaryColumnReconstructionCursor,
+            CommonProofAuxiliaryColumnSynthesisCursor, extract_auxiliary_private_mask_tail,
+        },
+    };
+
+    let variant = compact_auxiliary_reconstruction_variant();
+    let context = check_context();
+    let challenges = vec![
+        RelationApplicationChallengeAssignment::new(
+            CommonProofChallenge::Theta { modulus_ordinal: 0 },
+            0,
+            7,
+        )
+        .expect("the compact theta assignment is canonical"),
+    ];
+    let catalog = CommonProofAuxiliaryColumnReconstructionCatalog::new(&variant)
+        .expect("the compact auxiliary reconstruction catalog is valid");
+    assert_eq!(catalog.ordered_column_ordinals().count(), 14);
+    let mut synthesis =
+        CommonProofAuxiliaryColumnSynthesisCursor::new(&variant, &context, &challenges)
+            .expect("the compact auxiliary synthesis initializes");
+    let mut private_coins = CoordinatePrivateCoins;
+    let mut reconstructed_column_count = 0_usize;
+
+    while !synthesis.is_complete() {
+        if let Some(column_ordinal) = synthesis.next_input_column_ordinal() {
+            synthesis
+                .accept_input_column(
+                    column_ordinal,
+                    compact_auxiliary_source_polynomial(column_ordinal),
+                )
+                .expect("the requested compact source is accepted");
+            continue;
+        }
+        if synthesis.has_pending_output() {
+            let (column_ordinal, expected_polynomial) = synthesis
+                .take_next_output(&variant, &mut private_coins, 128)
+                .expect("the compact masked output derives")
+                .expect("one compact masked output is pending");
+            let private_mask_tail =
+                extract_auxiliary_private_mask_tail(&variant, column_ordinal, &expected_polynomial)
+                    .expect("the exact private mask tail is extracted");
+            let CommonProofSourcePolynomial::Base(private_mask_tail_coefficients) =
+                &private_mask_tail
+            else {
+                panic!("the compact auxiliary tail must use the base field");
+            };
+            assert!(
+                private_mask_tail_coefficients
+                    .iter()
+                    .any(|coefficient| *coefficient != ProofBaseFieldElement::ZERO),
+                "the parity fixture must exercise nonzero private masking",
+            );
+
+            let mut reconstruction = CommonProofAuxiliaryColumnReconstructionCursor::new(
+                &variant,
+                &context,
+                &challenges,
+                &catalog,
+                column_ordinal,
+            )
+            .expect("the exact auxiliary reconstruction initializes");
+            if reconstruction.ordered_input_column_ordinals().len() > 1 {
+                let second_input = reconstruction.ordered_input_column_ordinals()[1];
+                assert_eq!(
+                    reconstruction.accept_input_column(
+                        second_input,
+                        compact_auxiliary_source_polynomial(second_input),
+                    ),
+                    Err(crate::bgv::proof_suite::CommonProofProverError::InvalidColumn),
+                    "out-of-order dependencies must be rejected",
+                );
+            }
+            while let Some(input_column_ordinal) = reconstruction.next_input_column_ordinal() {
+                reconstruction
+                    .accept_input_column(
+                        input_column_ordinal,
+                        compact_auxiliary_source_polynomial(input_column_ordinal),
+                    )
+                    .expect("the exact reconstruction dependency is accepted");
+            }
+            let CommonProofSourcePolynomial::Base(private_mask_tail_coefficients) =
+                private_mask_tail
+            else {
+                panic!("the compact auxiliary tail must use the base field");
+            };
+            let reconstructed_polynomial = reconstruction
+                .finish(private_mask_tail_coefficients)
+                .expect("the exact masked auxiliary polynomial reconstructs");
+            assert_eq!(reconstructed_polynomial, expected_polynomial);
+
+            let mut tampered_reconstruction = CommonProofAuxiliaryColumnReconstructionCursor::new(
+                &variant,
+                &context,
+                &challenges,
+                &catalog,
+                column_ordinal,
+            )
+            .expect("the tampered reconstruction initializes");
+            while let Some(input_column_ordinal) =
+                tampered_reconstruction.next_input_column_ordinal()
+            {
+                tampered_reconstruction
+                    .accept_input_column(
+                        input_column_ordinal,
+                        compact_auxiliary_source_polynomial(input_column_ordinal),
+                    )
+                    .expect("the tampered reconstruction dependency is accepted");
+            }
+            let CommonProofSourcePolynomial::Base(mut tampered_private_mask_tail) =
+                extract_auxiliary_private_mask_tail(&variant, column_ordinal, &expected_polynomial)
+                    .expect("the tampered private mask tail is extracted")
+            else {
+                panic!("the compact auxiliary tail must use the base field");
+            };
+            tampered_private_mask_tail[0] =
+                tampered_private_mask_tail[0].add(ProofBaseFieldElement::ONE);
+            assert_ne!(
+                tampered_reconstruction
+                    .finish(tampered_private_mask_tail)
+                    .expect("the structurally valid tampered tail reconstructs"),
+                expected_polynomial,
+                "changing private mask material must change the committed polynomial",
+            );
+            reconstructed_column_count += 1;
+            continue;
+        }
+        assert!(
+            synthesis
+                .advance_ready_task()
+                .expect("the next compact synthesis task advances"),
+            "a nonterminal synthesis cursor must have an input, output, or ready task",
+        );
+    }
+
+    assert_eq!(reconstructed_column_count, 14);
+}

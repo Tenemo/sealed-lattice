@@ -46,7 +46,7 @@ fn registry_test_verification_binding() -> CommonProofVerificationBinding {
 }
 
 #[test]
-fn aggregate_registry_capacity_counts_every_entry_family_and_retries_after_release() {
+fn aggregate_registry_capacity_counts_live_entries_and_retries_after_release() {
     assert_eq!(
         require_common_proof_registry_entry_capacity(&[32, 32]),
         Err(CommonProofRuntimeError::AllocationLimitExceeded),
@@ -60,15 +60,14 @@ fn aggregate_registry_capacity_counts_every_entry_family_and_retries_after_relea
 
     let mut registry = CommonProofRuntimeRegistry::default();
     let verification_binding = registry_test_verification_binding();
-    for identifier in 1..=32 {
+    for identifier in 1..=64 {
         registry.insert_test_verification_operation(identifier, verification_binding, limits());
-        registry.insert_test_authenticated_ledger_transition(identifier);
     }
     assert_eq!(
         registry.require_entry_capacity(),
         Err(CommonProofRuntimeError::AllocationLimitExceeded),
     );
-    registry.remove_test_authenticated_ledger_transition(32);
+    registry.remove_test_verification_operation(64);
     registry
         .require_entry_capacity()
         .expect("the runtime registry retries after one entry family releases a slot");
@@ -78,8 +77,13 @@ fn aggregate_registry_capacity_counts_every_entry_family_and_retries_after_relea
 fn worker_process_refuses_the_sixty_fifth_mixed_registry_admission() {
     let mut runtime_registry = CommonProofRuntimeRegistry::default();
     let mut upstream_registry = CommonProofUpstreamInputRegistry::default();
+    let verification_binding = registry_test_verification_binding();
     for identifier in 1..=21 {
-        runtime_registry.insert_test_authenticated_ledger_transition(identifier);
+        runtime_registry.insert_test_verification_operation(
+            identifier,
+            verification_binding,
+            limits(),
+        );
         upstream_registry.insert_test_refusing_verified_column_evaluator(identifier);
     }
     let runtime_entry_count = runtime_registry

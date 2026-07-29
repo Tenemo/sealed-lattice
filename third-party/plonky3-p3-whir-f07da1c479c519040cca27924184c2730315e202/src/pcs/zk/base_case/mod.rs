@@ -1,5 +1,9 @@
 //! HVZK base case (Construction 7.2 of eprint 2026/391).
 //!
+//! Local modification: the prover accepts caller-owned one-time material and
+//! can pause after transcript-bound source positions are sampled. See
+//! `../../../../UPSTREAM.md`.
+//!
 //! Last step of the hiding pipeline.
 //! All folding is done, so the secrets are now small vectors.
 //! One linear claim about them remains to prove, without revealing them.
@@ -73,7 +77,9 @@ mod verifier;
 
 pub use config::{BaseCaseZkConfig, MaskGroupWitness, MaskProverData};
 pub use error::BaseCaseZkError;
-pub use prover::BaseCaseZkProver;
+pub use prover::{
+    BaseCaseFreshMaskGroup, BaseCaseFreshMaterial, BaseCaseZkProver, PreparedBaseCaseZkProof,
+};
 pub use verifier::BaseCaseZkVerifier;
 
 #[cfg(test)]

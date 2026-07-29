@@ -151,6 +151,7 @@ pub(super) enum RowCodeWhirQuotientMaterializationAction {
 enum OutstandingQuotientMaterializationAction {
     TransformColumn(CommonProofQuotientConstraintTransformKey),
     ReadEvaluationRange(CommonProofQuotientEvaluationReadRequest),
+    CompleteConstraintStorageStep,
     PersistQuotientComponent(u32),
 }
 
@@ -207,6 +208,11 @@ impl RowCodeWhirQuotientMaterialization {
     where
         Coins: CommonProofPrivateCoinSource,
     {
+        if self.outstanding_action
+            == Some(OutstandingQuotientMaterializationAction::CompleteConstraintStorageStep)
+        {
+            return Ok(RowCodeWhirQuotientMaterializationAction::ConstraintCompleted);
+        }
         if self.outstanding_action.is_some() || self.completion_emitted {
             return Err(CommonProofPrivateCoinError::Prover(
                 CommonProofProverError::InvalidInput,
@@ -288,6 +294,8 @@ impl RowCodeWhirQuotientMaterialization {
                         .map_err(CommonProofPrivateCoinError::Prover)?,
                     );
                 }
+                self.outstanding_action =
+                    Some(OutstandingQuotientMaterializationAction::CompleteConstraintStorageStep);
                 return Ok(RowCodeWhirQuotientMaterializationAction::ConstraintCompleted);
             }
         }
@@ -349,6 +357,18 @@ impl RowCodeWhirQuotientMaterialization {
             .next_component_ordinal
             .checked_add(1)
             .ok_or(CommonProofProverError::CountOverflow)?;
+        self.outstanding_action = None;
+        Ok(())
+    }
+
+    pub(super) fn acknowledge_completed_constraint_storage_step(
+        &mut self,
+    ) -> Result<(), CommonProofProverError> {
+        if self.outstanding_action
+            != Some(OutstandingQuotientMaterializationAction::CompleteConstraintStorageStep)
+        {
+            return Err(CommonProofProverError::InvalidQuotient);
+        }
         self.outstanding_action = None;
         Ok(())
     }
@@ -640,13 +660,53 @@ mod tests {
         let variant = relation_plan
             .select_variant(None, None)
             .expect("the public aggregate relation has one variant");
-        let evaluation_domain = ProofEvaluationDomain::new(128, 7)
+        let evaluation_domain = ProofEvaluationDomain::new(64, 7)
             .expect("the compact quotient evaluation domain is valid");
-        let source_polynomials = (0..variant.ordered_columns().len())
-            .map(|_| {
-                CommonProofSourcePolynomial::from_base_coefficients(vec![
-                    ProofBaseFieldElement::ONE,
-                ])
+        let trace_domain = ProofEvaluationDomain::new_subgroup(
+            usize::try_from(variant.trace_domain_size())
+                .expect("the compact trace-domain size fits usize"),
+        )
+        .expect("the compact trace subgroup is valid");
+        let source_polynomials = variant
+            .ordered_columns()
+            .iter()
+            .enumerate()
+            .map(|(column_index, column)| {
+                let column_ordinal =
+                    u32::try_from(column_index).expect("the compact column ordinal fits u32");
+                let tree_index = variant
+                    .ordered_trees()
+                    .iter()
+                    .position(|tree| tree.ordered_column_ordinals().contains(&column_ordinal))
+                    .expect("every compact public column belongs to one tree");
+                let modulus = relation_context
+                    .resolved_modulus(
+                        column
+                            .canonical_residue_modulus()
+                            .expect("every compact public column has a residue modulus"),
+                    )
+                    .expect("the compact residue modulus is resolved");
+                let wrapped_share_value = match tree_index {
+                    0 => modulus.div_ceil(2),
+                    1 => modulus / 2,
+                    2 | 3 => 0,
+                    _ => panic!("the compact aggregate must contain exactly four roots"),
+                };
+                let evaluations = (0..trace_domain.size())
+                    .map(|position| {
+                        ProofBaseFieldElement::from_canonical(if position.is_multiple_of(2) {
+                            wrapped_share_value
+                        } else {
+                            0
+                        })
+                        .expect("the compact aggregate value is canonical")
+                    })
+                    .collect::<Vec<_>>();
+                CommonProofSourcePolynomial::from_base_coefficients(
+                    trace_domain
+                        .interpolate_base_polynomial(&evaluations)
+                        .expect("the valid compact aggregate trace interpolates"),
+                )
             })
             .collect::<Vec<_>>();
         let application_challenges = Vec::new();
@@ -662,6 +722,48 @@ mod tests {
                 )
             })
             .collect::<Vec<_>>();
+        assert!(matches!(
+            RowCodeWhirQuotientMaterialization::new(
+                variant,
+                &relation_context,
+                ProofEvaluationDomain::new(32, 7)
+                    .expect("the undersized hostile domain is structurally valid"),
+                BTreeMap::new(),
+                application_challenges.clone(),
+                composition_challenges.clone(),
+                8,
+            ),
+            Err(CommonProofProverError::InvalidQuotient)
+        ));
+        assert!(matches!(
+            RowCodeWhirQuotientMaterialization::new(
+                variant,
+                &relation_context,
+                ProofEvaluationDomain::new(64, 9)
+                    .expect("the wrong-coset hostile domain is structurally valid"),
+                BTreeMap::new(),
+                application_challenges.clone(),
+                composition_challenges.clone(),
+                8,
+            ),
+            Err(CommonProofProverError::InvalidQuotient)
+        ));
+        let mut wrong_generator_context = relation_context.clone();
+        wrong_generator_context.evaluation_domain_generator = wrong_generator_context
+            .evaluation_domain_generator
+            .wrapping_add(1);
+        assert!(matches!(
+            RowCodeWhirQuotientMaterialization::new(
+                variant,
+                &wrong_generator_context,
+                evaluation_domain,
+                BTreeMap::new(),
+                application_challenges.clone(),
+                composition_challenges.clone(),
+                8,
+            ),
+            Err(CommonProofProverError::InvalidQuotient)
+        ));
         let expected_quotient = construct_composed_quotient_polynomial(
             variant,
             &relation_context,
@@ -671,6 +773,17 @@ mod tests {
             &composition_challenges,
         )
         .expect("the full quotient oracle accepts the checked relation");
+        let relation_domain_quotient = construct_composed_quotient_polynomial(
+            variant,
+            &relation_context,
+            ProofEvaluationDomain::new(128, 7)
+                .expect("the complete relation evaluation domain is valid"),
+            &source_polynomials,
+            &application_challenges,
+            &composition_challenges,
+        )
+        .expect("the relation-domain quotient oracle accepts the checked relation");
+        assert_eq!(expected_quotient, relation_domain_quotient);
         assert!(
             expected_quotient
                 .iter()
@@ -698,6 +811,24 @@ mod tests {
         .expect("the checked quotient cursor initializes");
         let mut coins = DeterministicZeroCoinSource;
         let mut next_external_object_ordinal = 0_u32;
+        let transformed_column_evaluations = source_polynomials
+            .iter()
+            .map(|polynomial| match polynomial {
+                CommonProofSourcePolynomial::Base(coefficients) => evaluation_domain
+                    .evaluate_base_polynomial(coefficients)
+                    .map(|evaluations| {
+                        evaluations
+                            .into_iter()
+                            .map(ProofChallengeExtensionElement::from_base)
+                            .collect::<Vec<_>>()
+                    }),
+                CommonProofSourcePolynomial::Extension(coefficients) => {
+                    evaluation_domain.evaluate_extension_polynomial(coefficients)
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .expect("the compact relation columns evaluate on the quotient domain");
+        let mut transformed_evaluations_by_object = BTreeMap::new();
         let mut actual_components = Vec::new();
         let mut transform_request_count = 0_usize;
         let mut evaluation_read_count = 0_usize;
@@ -743,6 +874,20 @@ mod tests {
                         evaluation_domain.size(),
                     )
                     .expect("the compact transformed vector is valid");
+                    assert!(
+                        transformed_evaluations_by_object
+                            .insert(
+                                vector.object(),
+                                transformed_column_evaluations
+                                    .get(
+                                        usize::try_from(transform_key.column_ordinal())
+                                            .expect("the compact column ordinal fits usize"),
+                                    )
+                                    .expect("the requested compact column exists")
+                                    .clone(),
+                            )
+                            .is_none()
+                    );
                     next_external_object_ordinal = next_external_object_ordinal
                         .checked_add(1)
                         .expect("the compact object ordinal remains bounded");
@@ -760,14 +905,40 @@ mod tests {
                     materialization
                         .supply_evaluation_values(
                             read_request,
-                            Zeroizing::new(vec![ProofChallengeExtensionElement::ONE]),
+                            Zeroizing::new(
+                                transformed_evaluations_by_object
+                                    .get(&read_request.vector().object())
+                                    .expect("the requested compact transform exists")
+                                    [read_request.element_offset()
+                                        ..read_request.element_offset()
+                                            + read_request.element_count()]
+                                    .to_vec(),
+                            ),
                         )
-                        .expect("one base-field evaluation fits the one-element read request");
+                        .expect("the exact transformed evaluation range is accepted");
                 }
                 RowCodeWhirQuotientMaterializationAction::Progressed => {
                     progress_count += 1;
                 }
                 RowCodeWhirQuotientMaterializationAction::ConstraintCompleted => {
+                    assert!(matches!(
+                        materialization
+                            .next_action(
+                                variant,
+                                &relation_context,
+                                &mut coins,
+                                relation_context.maximum_fiat_shamir_candidate_draws_per_output,
+                            )
+                            .expect("an unacknowledged constraint storage step is replayable"),
+                        RowCodeWhirQuotientMaterializationAction::ConstraintCompleted
+                    ));
+                    materialization
+                        .acknowledge_completed_constraint_storage_step()
+                        .expect("the completed constraint storage step is acknowledged");
+                    assert_eq!(
+                        materialization.acknowledge_completed_constraint_storage_step(),
+                        Err(CommonProofProverError::InvalidQuotient),
+                    );
                     progress_count += 1;
                 }
                 RowCodeWhirQuotientMaterializationAction::PersistQuotientComponent {

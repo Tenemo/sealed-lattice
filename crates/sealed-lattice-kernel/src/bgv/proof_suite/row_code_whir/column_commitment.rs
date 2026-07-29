@@ -212,6 +212,7 @@ pub(super) struct StripedColumnCommitmentBuilder {
 }
 
 impl StripedColumnCommitmentBuilder {
+    #[cfg(test)]
     pub(super) fn new(
         expected_row_count: usize,
         encoded_column_count: usize,
@@ -313,6 +314,7 @@ impl StripedColumnCommitmentBuilder {
         Ok(false)
     }
 
+    #[cfg(test)]
     pub(super) fn finish(self) -> Result<ColumnDigest, String> {
         self.finish_commitment().map(|commitment| commitment.root)
     }

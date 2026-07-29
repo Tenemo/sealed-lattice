@@ -83,7 +83,10 @@ pub use opening::{
     ProverMultiClaim, ProverVirtualClaim, VerifierMultiClaim, VerifierOpening,
     VerifierVirtualClaim,
 };
-pub use prover::{Layout, PrefixInitialSumcheckProver, PrefixProver, StackedClaims, SuffixProver};
+pub use prover::{
+    Layout, PrefixInitialSumcheckProver, PrefixOpeningBatchBuilder, PrefixProver, StackedClaims,
+    SuffixProver,
+};
 pub use verifier::Verifier;
 pub use witness::{InterleavedWitnessError, Selector, Table, TablePlacement, Witness};
 

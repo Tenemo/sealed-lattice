@@ -23,7 +23,10 @@ pub use pcs::verifier::errors::VerifierError;
 pub use pcs::verifier::{WhirVerificationState, WhirVerifier};
 #[cfg(feature = "zk")]
 pub use pcs::zk::{
-    BaseCaseZkError, BaseCaseZkProof, BlindedMask, CodeSwitchError, HidingWhirPcs,
-    HidingWhirProverData, MaskCodeShape, MaskGroupShape, MaskOpeningPair, ZkConfigError,
-    ZkParameters, ZkRoundProof, ZkVerifierError, ZkWhirConfig, ZkWhirProof,
+    BaseCaseFreshMaskGroup, BaseCaseFreshMaterial, BaseCaseZkConfig, BaseCaseZkError,
+    BaseCaseZkProof, BaseCaseZkProver, BaseCaseZkVerifier, BlindedMask, CodeSwitchError,
+    FoldedRsCode, HidingWhirPcs, HidingWhirProverData, MaskCodeShape, MaskGroupShape,
+    MaskGroupWitness, MaskOpeningPair, MaskProverData, PreparedBaseCaseZkProof, ZkConfigError,
+    ZkParameters,
+    ZkRoundProof, ZkVerifierError, ZkWhirConfig, ZkWhirProof, switch_mask_covector,
 };

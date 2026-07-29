@@ -24,7 +24,7 @@ use crate::{
         ProofApplicationSlot, ProofApplicationSlotCeilings, RefusalReason,
         STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, StreamDescriptor,
         VerifiedStateReservationRuntimeBinding, resolve_prepared_public_only_proof_attempt_source,
-        verified_state_reservation_binding,
+        retain_action_private_randomness_for_exact_family, verified_state_reservation_binding,
     },
 };
 
@@ -34,9 +34,10 @@ use super::runtime_ffi::{
 };
 use super::{
     CommonProofGenerationAuthorization, CommonProofGenerationPreparationError,
-    CommonProofGenerationSources, CommonProofRelationPlanCapability,
-    CommonProofRelationPlanCapabilityError, CommonProofRuntimeError, CommonProofRuntimeLimits,
-    PreparedCommonProofGeneration, ProofProfileError, RelationPlanError,
+    CommonProofGenerationSources, CommonProofPrivateCoinCoordinateCapacity,
+    CommonProofRelationPlanCapability, CommonProofRelationPlanCapabilityError,
+    CommonProofRuntimeError, CommonProofRuntimeLimits, PreparedCommonProofGeneration,
+    PrivateRandomnessCommonProofCoinSource, ProofProfileError, RelationPlanError,
     SelectedProofAccountingError, selected_proof_runtime_limits,
     selected_relation_plan_check_context, selected_relation_plans,
     verified_application_statement_hash,
@@ -507,6 +508,7 @@ fn resolve_relinearization_aggregate_attempt(
 
 fn prepare_common_generation(
     session_handle: u32,
+    action_randomness_handle: u32,
     prepared_attempt: PreparedPublicOnlyProofAttemptSource,
     runtime_plan: AggregateProofRuntimePlan,
 ) -> Result<PreparedCommonProofGeneration, AggregateRuntimeError> {
@@ -542,14 +544,24 @@ fn prepare_common_generation(
         protocol_version,
         &canonical_statement,
     )?;
-    let sources = CommonProofGenerationSources::public_only(
+    let relation_variant = runtime_plan.compiled_relation_plan.select_variant(
+        prepared_attempt.application_slot().schedule_position(),
+        None,
+    )?;
+    let coordinate_capacity =
+        CommonProofPrivateCoinCoordinateCapacity::from_relation_plan_variant(relation_variant)
+            .map_err(|_| AggregateRuntimeError::InvalidInput)?;
+    let private_coins = PrivateRandomnessCommonProofCoinSource::new(
+        retain_action_private_randomness_for_exact_family(action_randomness_handle)
+            .map_err(AggregateRuntimeError::ActionRandomnessRuntime)?,
         prepared_attempt.application_statement_schema_identifier(),
         Hash512::from_bytes(authorization.binding_hash()),
-        prepared_attempt.attempt_lineage_identifier(),
-        source_provider,
+        prepared_attempt.private_randomness_attempt_identifier(),
+        coordinate_capacity,
     )
     .map_err(|_| AggregateRuntimeError::InvalidInput)?;
-    PreparedCommonProofGeneration::from_exact_family_sources(
+    let sources = CommonProofGenerationSources::new(private_coins, source_provider);
+    PreparedCommonProofGeneration::from_row_code_whir_sources(
         authorization,
         runtime_plan.relation_plan,
         canonical_statement,
@@ -622,12 +634,21 @@ fn prepare_generation(
         fresh_continuation,
     )?;
     let adapter = match generation_mode {
-        GenerationMode::Fresh => CommonProofGenerationFamilyAdapter::fresh(
-            prepare_common_generation(session_handle, fresh_attempt, runtime_plan)?,
-        ),
+        GenerationMode::Fresh => {
+            CommonProofGenerationFamilyAdapter::fresh(prepare_common_generation(
+                session_handle,
+                action_randomness_handle,
+                fresh_attempt,
+                runtime_plan,
+            )?)
+        }
         GenerationMode::Resume => {
-            let fresh_preparation =
-                prepare_common_generation(session_handle, fresh_attempt, runtime_plan)?;
+            let fresh_preparation = prepare_common_generation(
+                session_handle,
+                action_randomness_handle,
+                fresh_attempt,
+                runtime_plan,
+            )?;
             let description = CommonProofGenerationFamilyAdapterDescription::new(
                 fresh_preparation.application_statement_schema_identifier(),
                 fresh_preparation.runtime_binding_hash(),
@@ -660,8 +681,13 @@ fn prepare_generation(
                         continuation,
                     )
                     .map_err(resumed_generation_error)?;
-                    prepare_common_generation(session_handle, attempt, runtime_plan)
-                        .map_err(resumed_generation_error)
+                    prepare_common_generation(
+                        session_handle,
+                        action_randomness_handle,
+                        attempt,
+                        runtime_plan,
+                    )
+                    .map_err(resumed_generation_error)
                 }),
             )
         }

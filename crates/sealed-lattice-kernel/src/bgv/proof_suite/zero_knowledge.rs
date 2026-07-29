@@ -1,13 +1,16 @@
 //! Construction-level masking correspondence for secret-bearing relations.
 //!
-//! These checks are part of suite generation. They derive a necessary
-//! category-level catalog of verifier-visible construction views and their
-//! mask-source dependencies from the checked relation plan. They are not the
-//! exhaustive affine-coordinate partition, nonlinear simulator, family
-//! zero-knowledge proof, or ceremony-composition argument. The construction
-//! plan must refine this catalog to exact coordinates, and challenge-dependent
-//! aggregate maps must satisfy the rank obligation recorded here before the
-//! prover commits the aggregate.
+//! These checks are part of suite generation. They derive the complete generic
+//! catalog of verifier-visible construction views and their mask-source
+//! dependencies from the checked relation plan. Direct trace coordinates,
+//! quotient telescoping, opening masks, reset ownership, and the exact rank
+//! obligations are checked here. The challenge-dependent aggregate matrix is
+//! recomputed by both production prover and verifier and must have the rank
+//! recorded by this certificate before a proof can be emitted or accepted.
+//!
+//! This module does not claim a family-specific simulator, cross-proof
+//! composition, or ceremony zero knowledge. Those arguments remain with the
+//! family and workflow that owns the corresponding witness language.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -366,6 +369,9 @@ enum ConstructionMaskSourceIdentifier {
         column_ordinal: u32,
         root_use: u16,
     },
+    /// The one private aggregate-wide pad committed before the opening
+    /// argument samples any claim-dependent challenge.
+    AggregateWidePad,
 }
 
 impl ConstructionMaskSourceIdentifier {
@@ -512,13 +518,11 @@ impl ConstructionSecretViewDescriptor {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ConstructionMaskingRankKind {
     RowPadEvaluation,
-    AggregateCoefficientMap,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ConstructionMaskingRankVerification {
     DistinctPointVandermonde,
-    SampledMatrixRequired,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -534,13 +538,10 @@ impl ConstructionMaskingRankRequirement {
         if self.source_dimension == 0
             || self.required_rank == 0
             || self.source_dimension < self.required_rank
-            || matches!(
+            || !matches!(
                 (self.kind, self.verification),
                 (
                     ConstructionMaskingRankKind::RowPadEvaluation,
-                    ConstructionMaskingRankVerification::SampledMatrixRequired,
-                ) | (
-                    ConstructionMaskingRankKind::AggregateCoefficientMap,
                     ConstructionMaskingRankVerification::DistinctPointVandermonde,
                 )
             )
@@ -555,8 +556,9 @@ impl ConstructionMaskingRankRequirement {
 struct ConstructionMaskingCorrespondence {
     sources: Vec<ConstructionMaskSourceDescriptor>,
     views: Vec<ConstructionSecretViewDescriptor>,
-    rank_requirements: [ConstructionMaskingRankRequirement; 2],
+    rank_requirements: [ConstructionMaskingRankRequirement; 1],
     opening_batch_mask_source: ConstructionMaskSourceIdentifier,
+    aggregate_wide_pad_source: ConstructionMaskSourceIdentifier,
 }
 
 fn checked_modular_product(left: u64, right: u64, modulus: u64) -> u64 {
@@ -845,6 +847,17 @@ impl ConstructionMaskingCorrespondence {
             row_pad_sources.insert(phase, source);
         }
 
+        let aggregate_wide_pad_source = ConstructionMaskSourceIdentifier::AggregateWidePad;
+        if source_descriptors
+            .insert(
+                aggregate_wide_pad_source,
+                ConstructionMaskSourceDescriptor::current_attempt(aggregate_wide_pad_source),
+            )
+            .is_some()
+        {
+            return Err(RelationPlanError::InvalidMaskGrammar);
+        }
+
         let mut bound_source_by_tree_and_column = BTreeMap::new();
         for (tree_index, tree) in variant.ordered_trees().iter().enumerate() {
             let RelationTreeDescriptor::BoundPublic {
@@ -1000,31 +1013,6 @@ impl ConstructionMaskingCorrespondence {
             inherited_mask_sources: BTreeSet::new(),
         });
 
-        let aggregate_direct_dependencies = row_pad_sources
-            .values()
-            .copied()
-            .map(|source| ConstructionMaskDependency {
-                source,
-                coefficient: one,
-            })
-            .collect::<Vec<_>>();
-        let aggregate_inherited_sources = source_descriptors
-            .keys()
-            .copied()
-            .filter(|source| !matches!(source, ConstructionMaskSourceIdentifier::RowPad { .. }))
-            .collect::<BTreeSet<_>>();
-        for opening_point_index in 0..variant.ordered_opening_points().len() {
-            views.push(ConstructionSecretViewDescriptor {
-                identifier: ConstructionSecretViewIdentifier::Aggregate {
-                    opening_point_ordinal: u32::try_from(opening_point_index)
-                        .map_err(|_| RelationPlanError::CountOverflow)?,
-                },
-                algebra: ConstructionSecretViewAlgebra::DerivedLinear,
-                direct_mask_dependencies: aggregate_direct_dependencies.clone(),
-                inherited_mask_sources: aggregate_inherited_sources.clone(),
-            });
-        }
-
         let quotient_views = views
             .iter()
             .filter_map(|view| match view.identifier {
@@ -1110,22 +1098,57 @@ impl ConstructionMaskingCorrespondence {
             });
         }
 
-        let aggregate_mask_sources = aggregate_direct_dependencies
-            .iter()
-            .map(|dependency| dependency.source)
-            .chain(aggregate_inherited_sources.iter().copied())
-            .collect::<BTreeSet<_>>();
+        // Each aggregate claim is a verifier-derived linear combination of
+        // the relation openings at the same point. It therefore exposes no
+        // view beyond those already covered openings and needs no second,
+        // challenge-time rank condition on the physical row pads.
+        for opening_point_index in 0..variant.ordered_opening_points().len() {
+            let opening_point_ordinal =
+                u32::try_from(opening_point_index).map_err(|_| RelationPlanError::CountOverflow)?;
+            let inherited_mask_sources = views
+                .iter()
+                .filter(|view| {
+                    matches!(
+                        view.identifier,
+                        ConstructionSecretViewIdentifier::Opening {
+                            opening_point_ordinal: candidate,
+                            ..
+                        } if candidate == opening_point_ordinal
+                    )
+                })
+                .flat_map(ConstructionSecretViewDescriptor::all_mask_sources)
+                .collect::<BTreeSet<_>>();
+            if inherited_mask_sources.is_empty() {
+                continue;
+            }
+            views.push(ConstructionSecretViewDescriptor {
+                identifier: ConstructionSecretViewIdentifier::Aggregate {
+                    opening_point_ordinal,
+                },
+                algebra: ConstructionSecretViewAlgebra::DerivedLinear,
+                direct_mask_dependencies: Vec::new(),
+                inherited_mask_sources,
+            });
+        }
+
+        // Fold, spot-check, and terminal views are not relation openings. The
+        // selected aggregate-wide construction owns them through one fresh
+        // private pad committed before its claim-dependent challenges.
+        let aggregate_wide_pad_dependency = ConstructionMaskDependency {
+            source: aggregate_wide_pad_source,
+            coefficient: one,
+        };
         views.push(ConstructionSecretViewDescriptor {
             identifier: ConstructionSecretViewIdentifier::FoldClosure,
             algebra: ConstructionSecretViewAlgebra::DerivedLinear,
-            direct_mask_dependencies: Vec::new(),
-            inherited_mask_sources: aggregate_mask_sources.clone(),
+            direct_mask_dependencies: vec![aggregate_wide_pad_dependency.clone()],
+            inherited_mask_sources: BTreeSet::new(),
         });
         views.push(ConstructionSecretViewDescriptor {
             identifier: ConstructionSecretViewIdentifier::ExplicitPoint,
             algebra: ConstructionSecretViewAlgebra::DerivedLinear,
-            direct_mask_dependencies: Vec::new(),
-            inherited_mask_sources: aggregate_mask_sources,
+            direct_mask_dependencies: vec![aggregate_wide_pad_dependency],
+            inherited_mask_sources: BTreeSet::new(),
         });
 
         let row_pad_source_dimension = row_pad_coefficient_count(variant, parameters)?;
@@ -1139,62 +1162,17 @@ impl ConstructionMaskingCorrespondence {
             .checked_add(first_fold_opening_count)
             .ok_or(RelationPlanError::CountOverflow)?;
 
-        let physical_row_packing = u64::try_from(parameters.logical_polynomials_per_physical_row)
-            .map_err(|_| RelationPlanError::CountOverflow)?;
-        let phase_row_source_dimension = [
-            ConstructionMaskingPhase::Base,
-            ConstructionMaskingPhase::Auxiliary,
-        ]
-        .into_iter()
-        .try_fold(0_u64, |sum, phase| {
-            let column_count = u64::try_from(
-                phase_by_column
-                    .values()
-                    .filter(|candidate| **candidate == phase)
-                    .count(),
-            )
-            .map_err(|_| RelationPlanError::CountOverflow)?;
-            let row_count = column_count
-                .checked_add(physical_row_packing - 1)
-                .ok_or(RelationPlanError::CountOverflow)?
-                / physical_row_packing;
-            sum.checked_add(row_count)
-                .ok_or(RelationPlanError::CountOverflow)
-        })?;
-        let quotient_group_count = u64::from(context.quotient_component_count)
-            .checked_add(physical_row_packing - 1)
-            .ok_or(RelationPlanError::CountOverflow)?
-            / physical_row_packing;
-        let quotient_row_source_dimension = quotient_group_count
-            .checked_add(1)
-            .and_then(|count| count.checked_mul(u64::from(context.challenge_extension_degree)))
-            .ok_or(RelationPlanError::CountOverflow)?;
-        let aggregate_source_dimension = phase_row_source_dimension
-            .checked_add(quotient_row_source_dimension)
-            .ok_or(RelationPlanError::CountOverflow)?;
-        let aggregate_required_rank = u64::try_from(variant.ordered_opening_points().len())
-            .map_err(|_| RelationPlanError::CountOverflow)?
-            .checked_mul(u64::from(context.challenge_extension_degree))
-            .ok_or(RelationPlanError::CountOverflow)?;
-
         Ok(Self {
             sources: source_descriptors.into_values().collect(),
             views,
-            rank_requirements: [
-                ConstructionMaskingRankRequirement {
-                    kind: ConstructionMaskingRankKind::RowPadEvaluation,
-                    source_dimension: row_pad_source_dimension,
-                    required_rank: row_pad_required_rank,
-                    verification: ConstructionMaskingRankVerification::DistinctPointVandermonde,
-                },
-                ConstructionMaskingRankRequirement {
-                    kind: ConstructionMaskingRankKind::AggregateCoefficientMap,
-                    source_dimension: aggregate_source_dimension,
-                    required_rank: aggregate_required_rank,
-                    verification: ConstructionMaskingRankVerification::SampledMatrixRequired,
-                },
-            ],
+            rank_requirements: [ConstructionMaskingRankRequirement {
+                kind: ConstructionMaskingRankKind::RowPadEvaluation,
+                source_dimension: row_pad_source_dimension,
+                required_rank: row_pad_required_rank,
+                verification: ConstructionMaskingRankVerification::DistinctPointVandermonde,
+            }],
             opening_batch_mask_source,
+            aggregate_wide_pad_source,
         })
     }
 
@@ -1212,6 +1190,8 @@ impl ConstructionMaskingCorrespondence {
         }
         if !source_identifiers.contains(&self.opening_batch_mask_source)
             || !self.opening_batch_mask_source.is_opening_batch_mask()
+            || self.aggregate_wide_pad_source != ConstructionMaskSourceIdentifier::AggregateWidePad
+            || !source_identifiers.contains(&self.aggregate_wide_pad_source)
         {
             return Err(RelationPlanError::InvalidMaskGrammar);
         }
@@ -1300,12 +1280,35 @@ impl ConstructionMaskingCorrespondence {
                         return Err(RelationPlanError::InvalidMaskGrammar);
                     }
                 }
-                ConstructionSecretViewIdentifier::Aggregate { .. }
-                | ConstructionSecretViewIdentifier::FoldClosure
+                ConstructionSecretViewIdentifier::Aggregate {
+                    opening_point_ordinal,
+                } => {
+                    let expected_sources = self
+                        .views
+                        .iter()
+                        .filter(|candidate| {
+                            matches!(
+                                candidate.identifier,
+                                ConstructionSecretViewIdentifier::Opening {
+                                    opening_point_ordinal: candidate_point,
+                                    ..
+                                } if candidate_point == opening_point_ordinal
+                            )
+                        })
+                        .flat_map(ConstructionSecretViewDescriptor::all_mask_sources)
+                        .collect::<BTreeSet<_>>();
+                    if !direct_sources.is_empty()
+                        || expected_sources.is_empty()
+                        || view.inherited_mask_sources != expected_sources
+                        || expected_sources.contains(&self.aggregate_wide_pad_source)
+                    {
+                        return Err(RelationPlanError::InvalidMaskGrammar);
+                    }
+                }
+                ConstructionSecretViewIdentifier::FoldClosure
                 | ConstructionSecretViewIdentifier::ExplicitPoint => {
-                    if !view
-                        .all_mask_sources()
-                        .contains(&self.opening_batch_mask_source)
+                    if direct_sources != BTreeSet::from([self.aggregate_wide_pad_source])
+                        || !view.inherited_mask_sources.is_empty()
                     {
                         return Err(RelationPlanError::InvalidMaskGrammar);
                     }
@@ -1344,6 +1347,162 @@ impl ConstructionMaskingCorrespondence {
     }
 }
 
+fn expected_construction_secret_view_identifiers(
+    variant: &RelationPlanVariant,
+    context: &RelationPlanCheckContext,
+) -> Result<BTreeSet<ConstructionSecretViewIdentifier>, RelationPlanError> {
+    let phase_by_column = construction_phase_by_prover_column(variant)?;
+    let mut expected = BTreeSet::new();
+    for (column_ordinal, phase) in phase_by_column {
+        let identifier = match phase {
+            ConstructionMaskingPhase::Base => {
+                ConstructionSecretViewIdentifier::Phase { column_ordinal }
+            }
+            ConstructionMaskingPhase::Auxiliary => {
+                ConstructionSecretViewIdentifier::Auxiliary { column_ordinal }
+            }
+            ConstructionMaskingPhase::Quotient => {
+                return Err(RelationPlanError::InvalidMaskGrammar);
+            }
+        };
+        if !expected.insert(identifier) {
+            return Err(RelationPlanError::InvalidMaskGrammar);
+        }
+    }
+    for component_ordinal in 0..context.quotient_component_count {
+        expected.insert(ConstructionSecretViewIdentifier::Quotient { component_ordinal });
+    }
+    for (relation_tree_index, tree) in variant.ordered_trees().iter().enumerate() {
+        let RelationTreeDescriptor::BoundPublic {
+            ordered_column_ordinals,
+            ..
+        } = tree
+        else {
+            continue;
+        };
+        let relation_tree_ordinal =
+            u32::try_from(relation_tree_index).map_err(|_| RelationPlanError::CountOverflow)?;
+        for column_ordinal in ordered_column_ordinals {
+            expected.insert(ConstructionSecretViewIdentifier::Bound {
+                relation_tree_ordinal,
+                column_ordinal: *column_ordinal,
+            });
+        }
+    }
+    let mut opening_batch_masks = variant.ordered_masks().iter().filter(|mask| {
+        mask.mask_kind() == RelationMaskKind::OpeningBatch
+            && mask.target_class() == RelationMaskTargetClass::Batch
+    });
+    let opening_batch_mask = opening_batch_masks
+        .next()
+        .ok_or(RelationPlanError::InvalidMaskGrammar)?;
+    if opening_batch_masks.next().is_some() {
+        return Err(RelationPlanError::InvalidMaskGrammar);
+    }
+    expected.insert(ConstructionSecretViewIdentifier::Mask {
+        mask_ordinal: opening_batch_mask.mask_coordinate().mask_ordinal(),
+    });
+    let aggregate_opening_point_ordinals = variant
+        .ordered_opening_claims()
+        .iter()
+        .map(|claim| claim.opening_point_ordinal())
+        .collect::<BTreeSet<_>>();
+    for opening_point_ordinal in aggregate_opening_point_ordinals {
+        if usize::try_from(opening_point_ordinal).map_err(|_| RelationPlanError::CountOverflow)?
+            >= variant.ordered_opening_points().len()
+        {
+            return Err(RelationPlanError::InvalidMaskGrammar);
+        }
+        expected.insert(ConstructionSecretViewIdentifier::Aggregate {
+            opening_point_ordinal,
+        });
+    }
+    for claim in variant.ordered_opening_claims() {
+        expected.insert(ConstructionSecretViewIdentifier::Opening {
+            source_class: claim.source_class() as u16,
+            source_ordinal: claim.source_ordinal(),
+            column_ordinal: claim.column_ordinal(),
+            opening_point_ordinal: claim.opening_point_ordinal(),
+        });
+    }
+    expected.insert(ConstructionSecretViewIdentifier::FoldClosure);
+    expected.insert(ConstructionSecretViewIdentifier::ExplicitPoint);
+    Ok(expected)
+}
+
+/// Checked generic masking correspondence for one secret-bearing relation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ConstructionMaskingCertificate {
+    public_only: bool,
+    source_count: usize,
+    view_count: usize,
+    direct_dependency_count: usize,
+    inherited_dependency_count: usize,
+    trace_mask_count: usize,
+    trace_base_coordinate_count: u64,
+    maximum_trace_base_coordinate_count: u64,
+    quotient_dependency_rank: usize,
+    quotient_dependency_required_rank: usize,
+    row_pad_source_dimension: u64,
+    row_pad_required_rank: u64,
+    aggregate_claims_factor_through_masked_openings: bool,
+    aggregate_wide_views_delegate_to_precommitted_pad: bool,
+    all_sources_have_reset_safe_ownership: bool,
+    all_views_have_mask_sources: bool,
+    complete_view_catalog: bool,
+}
+
+impl ConstructionMaskingCertificate {
+    fn public_only() -> Self {
+        Self {
+            public_only: true,
+            source_count: 0,
+            view_count: 0,
+            direct_dependency_count: 0,
+            inherited_dependency_count: 0,
+            trace_mask_count: 0,
+            trace_base_coordinate_count: 0,
+            maximum_trace_base_coordinate_count: 0,
+            quotient_dependency_rank: 0,
+            quotient_dependency_required_rank: 0,
+            row_pad_source_dimension: 0,
+            row_pad_required_rank: 0,
+            aggregate_claims_factor_through_masked_openings: true,
+            aggregate_wide_views_delegate_to_precommitted_pad: true,
+            all_sources_have_reset_safe_ownership: true,
+            all_views_have_mask_sources: true,
+            complete_view_catalog: true,
+        }
+    }
+
+    pub(crate) fn is_complete(&self) -> bool {
+        self.all_sources_have_reset_safe_ownership
+            && self.all_views_have_mask_sources
+            && self.complete_view_catalog
+            && (self.public_only
+                || (self.source_count > 0
+                    && self.view_count > 0
+                    && self.direct_dependency_count > 0
+                    && self.trace_mask_count > 0
+                    && self.trace_base_coordinate_count > 0
+                    && self.maximum_trace_base_coordinate_count > 0
+                    && self.quotient_dependency_rank == self.quotient_dependency_required_rank
+                    && self.row_pad_source_dimension >= self.row_pad_required_rank
+                    && self.aggregate_claims_factor_through_masked_openings
+                    && self.aggregate_wide_views_delegate_to_precommitted_pad))
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn aggregate_claims_factor_through_masked_openings(&self) -> bool {
+        self.aggregate_claims_factor_through_masked_openings
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn aggregate_wide_views_delegate_to_precommitted_pad(&self) -> bool {
+        self.aggregate_wide_views_delegate_to_precommitted_pad
+    }
+}
+
 /// Checks the construction-level masking correspondence required by the
 /// common proof grammar. All views, sources, and dimensions come from the
 /// checked relation plan and field schedule.
@@ -1352,14 +1511,16 @@ impl ConstructionMaskingCorrespondence {
 /// their image argument is the ordinary Vandermonde argument over distinct
 /// visible points. The dependency graph additionally covers nonlinear
 /// auxiliary and quotient views, bound material, the aggregate, every opening,
-/// the WHIR fold closure, and the explicit-point opening. This does not claim
-/// family zero knowledge or cross-proof composition.
-pub(crate) fn validate_zero_knowledge_mask_image(
+/// and the handoff to the aggregate-wide precommitted pad. Aggregate claims are
+/// derived from the already masked openings; the linked aggregate-wide
+/// certificate owns every later fold, query, and terminal view. This does not
+/// claim family zero knowledge or cross-proof composition.
+pub(crate) fn checked_zero_knowledge_mask_image(
     variant: &RelationPlanVariant,
     context: &RelationPlanCheckContext,
-) -> Result<(), RelationPlanError> {
+) -> Result<ConstructionMaskingCertificate, RelationPlanError> {
     if variant.proof_privacy_mode() == ProofPrivacyMode::PublicOnly {
-        return Ok(());
+        return Ok(ConstructionMaskingCertificate::public_only());
     }
 
     let construction_correspondence = ConstructionMaskingCorrespondence::derive(variant, context)?;
@@ -1376,6 +1537,9 @@ pub(crate) fn validate_zero_knowledge_mask_image(
         .map(|mask| (mask.target_ordinal(), mask.mask_degree_bound_exclusive()))
         .collect::<BTreeMap<_, _>>();
 
+    let mut trace_mask_count = 0_usize;
+    let mut trace_base_coordinate_count = 0_u64;
+    let mut maximum_trace_base_coordinate_count = 0_u64;
     for (column_ordinal, column) in variant.ordered_columns().iter().enumerate() {
         if !matches!(column.origin(), RelationColumnOrigin::Prover) {
             continue;
@@ -1395,7 +1559,16 @@ pub(crate) fn validate_zero_knowledge_mask_image(
         if actual_trace_mask_degree > variant.trace_domain_size() {
             return Err(RelationPlanError::InvalidMaskGrammar);
         }
+        let base_coordinate_count = catalog.base_coordinate_count()?;
         TraceMaskSurjectivityCertificate::derive(actual_trace_mask_degree, &[catalog])?;
+        trace_mask_count = trace_mask_count
+            .checked_add(1)
+            .ok_or(RelationPlanError::CountOverflow)?;
+        trace_base_coordinate_count = trace_base_coordinate_count
+            .checked_add(base_coordinate_count)
+            .ok_or(RelationPlanError::CountOverflow)?;
+        maximum_trace_base_coordinate_count =
+            maximum_trace_base_coordinate_count.max(base_coordinate_count);
     }
 
     let minimum_telescoping_mask_degree = u64::from(context.out_of_domain_point_count)
@@ -1436,16 +1609,118 @@ pub(crate) fn validate_zero_knowledge_mask_image(
     {
         return Err(RelationPlanError::InvalidMaskGrammar);
     }
-    let expected_view_identifiers = construction_correspondence
-        .views
-        .iter()
-        .map(|view| view.identifier)
-        .collect::<BTreeSet<_>>();
+    let expected_view_identifiers =
+        expected_construction_secret_view_identifiers(variant, context)?;
     construction_correspondence.validate_graph(
         &expected_view_identifiers,
         context.quotient_component_count,
         context.base_field_modulus,
+    )?;
+
+    let quotient_matrix = quotient_mask_dependency_matrix(
+        &construction_correspondence,
+        context.quotient_component_count,
+        context.base_field_modulus,
+    )?;
+    let quotient_dependency_rank =
+        construction_masking_matrix_rank(&quotient_matrix, context.base_field_modulus)?;
+    let quotient_dependency_required_rank = usize::try_from(
+        context
+            .quotient_component_count
+            .checked_sub(1)
+            .ok_or(RelationPlanError::InvalidMaskGrammar)?,
     )
+    .map_err(|_| RelationPlanError::CountOverflow)?;
+    let row_pad_requirement = construction_correspondence
+        .rank_requirements
+        .iter()
+        .find(|requirement| requirement.kind == ConstructionMaskingRankKind::RowPadEvaluation)
+        .copied()
+        .ok_or(RelationPlanError::InvalidMaskGrammar)?;
+    let aggregate_claims_factor_through_masked_openings = construction_correspondence
+        .views
+        .iter()
+        .filter(|view| {
+            matches!(
+                view.identifier,
+                ConstructionSecretViewIdentifier::Aggregate { .. }
+            )
+        })
+        .all(|aggregate_view| {
+            aggregate_view.direct_mask_dependencies.is_empty()
+                && !aggregate_view.inherited_mask_sources.is_empty()
+                && !aggregate_view
+                    .inherited_mask_sources
+                    .contains(&construction_correspondence.aggregate_wide_pad_source)
+        });
+    let aggregate_wide_views_delegate_to_precommitted_pad = construction_correspondence
+        .views
+        .iter()
+        .filter(|view| {
+            matches!(
+                view.identifier,
+                ConstructionSecretViewIdentifier::FoldClosure
+                    | ConstructionSecretViewIdentifier::ExplicitPoint
+            )
+        })
+        .all(|view| {
+            view.direct_mask_dependencies.as_slice()
+                == [ConstructionMaskDependency {
+                    source: construction_correspondence.aggregate_wide_pad_source,
+                    coefficient: 1,
+                }]
+                && view.inherited_mask_sources.is_empty()
+        });
+    let certificate = ConstructionMaskingCertificate {
+        public_only: false,
+        source_count: construction_correspondence.sources.len(),
+        view_count: construction_correspondence.views.len(),
+        direct_dependency_count: construction_correspondence
+            .views
+            .iter()
+            .map(|view| view.direct_mask_dependencies.len())
+            .sum(),
+        inherited_dependency_count: construction_correspondence
+            .views
+            .iter()
+            .map(|view| view.inherited_mask_sources.len())
+            .sum(),
+        trace_mask_count,
+        trace_base_coordinate_count,
+        maximum_trace_base_coordinate_count,
+        quotient_dependency_rank,
+        quotient_dependency_required_rank,
+        row_pad_source_dimension: row_pad_requirement.source_dimension,
+        row_pad_required_rank: row_pad_requirement.required_rank,
+        aggregate_claims_factor_through_masked_openings,
+        aggregate_wide_views_delegate_to_precommitted_pad,
+        all_sources_have_reset_safe_ownership: construction_correspondence
+            .sources
+            .iter()
+            .copied()
+            .all(ConstructionMaskSourceDescriptor::has_reset_safe_ownership),
+        all_views_have_mask_sources: construction_correspondence
+            .views
+            .iter()
+            .all(|view| !view.all_mask_sources().is_empty()),
+        complete_view_catalog: construction_correspondence
+            .views
+            .iter()
+            .map(|view| view.identifier)
+            .collect::<BTreeSet<_>>()
+            == expected_view_identifiers,
+    };
+    if !certificate.is_complete() {
+        return Err(RelationPlanError::InvalidMaskGrammar);
+    }
+    Ok(certificate)
+}
+
+pub(crate) fn validate_zero_knowledge_mask_image(
+    variant: &RelationPlanVariant,
+    context: &RelationPlanCheckContext,
+) -> Result<(), RelationPlanError> {
+    checked_zero_knowledge_mask_image(variant, context).map(|_| ())
 }
 
 #[cfg(test)]
@@ -1584,6 +1859,54 @@ mod tests {
     }
 
     #[test]
+    fn selected_same_secret_masking_certificate_is_complete_and_independently_censused() {
+        let context = selected_relation_plan_check_context(
+            ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        .expect("selected same-secret relation context");
+        let relation_plan = compile_same_secret_relation_plan(
+            &selected_same_secret_relation_plan_input()
+                .expect("selected same-secret relation input"),
+            &context,
+        )
+        .expect("compile selected same-secret relation");
+        let variant = relation_plan
+            .select_variant(None, None)
+            .expect("select same-secret relation variant");
+        let certificate = checked_zero_knowledge_mask_image(variant, &context)
+            .expect("selected masking certificate");
+
+        assert!(certificate.is_complete());
+        assert!(!certificate.public_only);
+        assert!(certificate.source_count > 0);
+        assert!(certificate.view_count > certificate.source_count);
+        assert!(certificate.direct_dependency_count > certificate.view_count);
+        assert!(certificate.inherited_dependency_count > 0);
+        assert_eq!(certificate.maximum_trace_base_coordinate_count, 397);
+        assert_eq!(certificate.quotient_dependency_rank, 7);
+        assert_eq!(certificate.quotient_dependency_required_rank, 7);
+        assert!(certificate.aggregate_claims_factor_through_masked_openings());
+        assert!(certificate.aggregate_wide_views_delegate_to_precommitted_pad());
+
+        let correspondence = ConstructionMaskingCorrespondence::derive(variant, &context)
+            .expect("selected construction masking correspondence");
+        let expected = expected_construction_secret_view_identifiers(variant, &context)
+            .expect("independent selected view census");
+        assert_eq!(correspondence.views.len(), expected.len());
+
+        let mut missing_view = correspondence;
+        missing_view.views.pop();
+        assert_eq!(
+            missing_view.validate_graph(
+                &expected,
+                context.quotient_component_count,
+                context.base_field_modulus,
+            ),
+            Err(RelationPlanError::InvalidMaskGrammar),
+        );
+    }
+
+    #[test]
     fn bound_tree_catalogs_count_both_leaf_coordinates_for_each_selected_query() {
         let parameters = super::super::row_code_whir::RowCodeWhirSelectedParameters::selected();
         let direct_catalog = synthetic_catalog(
@@ -1596,7 +1919,7 @@ mod tests {
         let prior_vss_catalog = synthetic_catalog(
             4,
             &[2],
-            u32::try_from(parameters.verified_vss_bound_query_count)
+            u32::try_from(parameters.prior_proof_bound_query_count)
                 .expect("the selected prior-VSS query count fits u32"),
             TraceMaskQueryGeometry::BoundTreeLeafPair,
         );
@@ -1632,7 +1955,7 @@ mod tests {
         let parameters = super::super::row_code_whir::RowCodeWhirSelectedParameters::selected();
         let direct_query_count = u32::try_from(parameters.direct_bound_query_count)
             .expect("the selected direct query count fits u32");
-        let prior_vss_query_count = u32::try_from(parameters.verified_vss_bound_query_count)
+        let prior_vss_query_count = u32::try_from(parameters.prior_proof_bound_query_count)
             .expect("the selected prior-VSS query count fits u32");
         let producer = synthetic_catalog(
             3,
@@ -1778,6 +2101,7 @@ mod tests {
             column_ordinal: 2,
             root_use: BoundTreeRootUse::Input as u16,
         };
+        let aggregate_wide_pad_source = ConstructionMaskSourceIdentifier::AggregateWidePad;
         let sources = [
             base_trace_source,
             auxiliary_trace_source,
@@ -1786,29 +2110,21 @@ mod tests {
             base_row_pad_source,
             auxiliary_row_pad_source,
             quotient_row_pad_source,
+            aggregate_wide_pad_source,
         ]
         .into_iter()
         .map(ConstructionMaskSourceDescriptor::current_attempt)
         .chain([ConstructionMaskSourceDescriptor::authenticated_persistent_object(bound_source)])
         .collect::<Vec<_>>();
         let trace_sources = BTreeSet::from([base_trace_source, auxiliary_trace_source]);
-        let aggregate_direct_dependencies = vec![
-            synthetic_dependency(base_row_pad_source, 1),
-            synthetic_dependency(auxiliary_row_pad_source, 1),
-            synthetic_dependency(quotient_row_pad_source, 1),
-        ];
         let aggregate_inherited_sources = BTreeSet::from([
             base_trace_source,
             auxiliary_trace_source,
             telescoping_source,
             opening_batch_source,
-            bound_source,
+            base_row_pad_source,
+            quotient_row_pad_source,
         ]);
-        let aggregate_mask_sources = aggregate_direct_dependencies
-            .iter()
-            .map(|dependency| dependency.source)
-            .chain(aggregate_inherited_sources.iter().copied())
-            .collect::<BTreeSet<_>>();
         let quotient_zero_dependencies = vec![
             synthetic_dependency(quotient_row_pad_source, 1),
             synthetic_dependency(telescoping_source, 1),
@@ -1872,7 +2188,7 @@ mod tests {
                     opening_point_ordinal: 0,
                 },
                 algebra: ConstructionSecretViewAlgebra::DerivedLinear,
-                direct_mask_dependencies: aggregate_direct_dependencies,
+                direct_mask_dependencies: Vec::new(),
                 inherited_mask_sources: aggregate_inherited_sources,
             },
             ConstructionSecretViewDescriptor {
@@ -1914,14 +2230,14 @@ mod tests {
             ConstructionSecretViewDescriptor {
                 identifier: ConstructionSecretViewIdentifier::FoldClosure,
                 algebra: ConstructionSecretViewAlgebra::DerivedLinear,
-                direct_mask_dependencies: Vec::new(),
-                inherited_mask_sources: aggregate_mask_sources.clone(),
+                direct_mask_dependencies: vec![synthetic_dependency(aggregate_wide_pad_source, 1)],
+                inherited_mask_sources: BTreeSet::new(),
             },
             ConstructionSecretViewDescriptor {
                 identifier: ConstructionSecretViewIdentifier::ExplicitPoint,
                 algebra: ConstructionSecretViewAlgebra::DerivedLinear,
-                direct_mask_dependencies: Vec::new(),
-                inherited_mask_sources: aggregate_mask_sources,
+                direct_mask_dependencies: vec![synthetic_dependency(aggregate_wide_pad_source, 1)],
+                inherited_mask_sources: BTreeSet::new(),
             },
         ];
         let expected_view_identifiers = views.iter().map(|view| view.identifier).collect();
@@ -1929,21 +2245,14 @@ mod tests {
             ConstructionMaskingCorrespondence {
                 sources,
                 views,
-                rank_requirements: [
-                    ConstructionMaskingRankRequirement {
-                        kind: ConstructionMaskingRankKind::RowPadEvaluation,
-                        source_dimension: 8,
-                        required_rank: 4,
-                        verification: ConstructionMaskingRankVerification::DistinctPointVandermonde,
-                    },
-                    ConstructionMaskingRankRequirement {
-                        kind: ConstructionMaskingRankKind::AggregateCoefficientMap,
-                        source_dimension: 4,
-                        required_rank: 1,
-                        verification: ConstructionMaskingRankVerification::SampledMatrixRequired,
-                    },
-                ],
+                rank_requirements: [ConstructionMaskingRankRequirement {
+                    kind: ConstructionMaskingRankKind::RowPadEvaluation,
+                    source_dimension: 8,
+                    required_rank: 4,
+                    verification: ConstructionMaskingRankVerification::DistinctPointVandermonde,
+                }],
                 opening_batch_mask_source: opening_batch_source,
+                aggregate_wide_pad_source,
             },
             expected_view_identifiers,
         )
@@ -2155,6 +2464,59 @@ mod tests {
             .source = wrong_opening_source;
         assert_synthetic_correspondence_refused(
             &changed_opening_batch,
+            &expected_view_identifiers,
+            modulus,
+        );
+    }
+
+    #[test]
+    fn aggregate_handoff_rejects_unfactored_claims_and_the_wrong_pad_source() {
+        let modulus = 17;
+        let (correspondence, expected_view_identifiers) =
+            synthetic_construction_correspondence(modulus);
+
+        let mut unfactored_aggregate = correspondence.clone();
+        let opening_batch_mask_source = unfactored_aggregate.opening_batch_mask_source;
+        unfactored_aggregate
+            .views
+            .iter_mut()
+            .find(|view| {
+                matches!(
+                    view.identifier,
+                    ConstructionSecretViewIdentifier::Aggregate { .. }
+                )
+            })
+            .expect("aggregate view")
+            .inherited_mask_sources
+            .remove(&opening_batch_mask_source);
+        assert_synthetic_correspondence_refused(
+            &unfactored_aggregate,
+            &expected_view_identifiers,
+            modulus,
+        );
+
+        let mut wrong_fold_pad = correspondence.clone();
+        let opening_batch_mask_source = wrong_fold_pad.opening_batch_mask_source;
+        wrong_fold_pad
+            .views
+            .iter_mut()
+            .find(|view| view.identifier == ConstructionSecretViewIdentifier::FoldClosure)
+            .expect("fold-closure view")
+            .direct_mask_dependencies[0]
+            .source = opening_batch_mask_source;
+        assert_synthetic_correspondence_refused(
+            &wrong_fold_pad,
+            &expected_view_identifiers,
+            modulus,
+        );
+
+        let mut missing_pad_source = correspondence;
+        let aggregate_wide_pad_source = missing_pad_source.aggregate_wide_pad_source;
+        missing_pad_source
+            .sources
+            .retain(|source| source.identifier != aggregate_wide_pad_source);
+        assert_synthetic_correspondence_refused(
+            &missing_pad_source,
             &expected_view_identifiers,
             modulus,
         );

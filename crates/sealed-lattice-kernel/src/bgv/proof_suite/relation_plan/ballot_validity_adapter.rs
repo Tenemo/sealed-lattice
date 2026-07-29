@@ -1342,7 +1342,7 @@ impl BallotValidityPreparedProofAttempt {
         let relation_trees = proof_created_relation_tree_inputs_from_checked_variant(variant)?;
         let private_coins = self.private_coin_source(compilation, authorization.binding_hash())?;
         let source_polynomials = self.source_polynomial_provider(compilation)?;
-        PreparedCommonProofGeneration::from_exact_family_sources(
+        PreparedCommonProofGeneration::from_row_code_whir_sources(
             authorization,
             relation_plan,
             self.canonical_application_statement_bytes.clone(),

@@ -68,8 +68,12 @@ where
 
         // Fold the stacked polynomial low-to-high.
         // The combining challenge is baked into the compression scale.
-        let compressed = tracing::info_span!("compress_prefix_to_packed")
-            .in_scope(|| self.poly.compress_prefix_to_packed(rs, eps));
+        let compressed = tracing::info_span!("compress_prefix_to_packed").in_scope(|| {
+            self.poly
+                .as_ref()
+                .expect("the generic ZK prefix path requires a resident stacked polynomial")
+                .compress_prefix_to_packed(rs, eps)
+        });
         // Build the equality weights in packed form, fused scatter or pack as cheaper.
         let weights = self.residual_weights_packed(rs, alpha);
         ProductPolynomial::new_packed(VariableOrder::Prefix, compressed, weights)

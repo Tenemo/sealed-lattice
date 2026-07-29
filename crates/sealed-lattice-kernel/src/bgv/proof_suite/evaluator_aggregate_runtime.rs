@@ -23,7 +23,7 @@ use crate::{
         PreparedPublicOnlyProofAttemptSource, ProofApplicationSlot, ProofApplicationSlotCeilings,
         RefusalReason, STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, StreamDescriptor,
         VerifiedStateReservationRuntimeBinding, resolve_prepared_public_only_proof_attempt_source,
-        verified_state_reservation_binding,
+        retain_action_private_randomness_for_exact_family, verified_state_reservation_binding,
     },
 };
 
@@ -38,21 +38,21 @@ use super::runtime_ffi::{
 };
 use super::{
     CommonProofGenerationAuthorization, CommonProofGenerationPreparationError,
-    CommonProofGenerationSources, CommonProofProverError, CommonProofRelationPlanCapability,
-    CommonProofRelationPlanCapabilityError, CommonProofRuntimeError, CommonProofRuntimeLimits,
-    CommonProofSelectedSuiteCapabilityHandle, ComponentMaterialOwnershipBinding,
-    ComponentPublicPolynomialRuntimeError,
+    CommonProofGenerationSources, CommonProofPrivateCoinCoordinateCapacity, CommonProofProverError,
+    CommonProofRelationPlanCapability, CommonProofRelationPlanCapabilityError,
+    CommonProofRuntimeError, CommonProofRuntimeLimits, CommonProofSelectedSuiteCapabilityHandle,
+    ComponentMaterialOwnershipBinding, ComponentPublicPolynomialRuntimeError,
     DescriptorAuthenticatedKeySwitchComponentPublicPolynomialStream, EvaluatorKeyStorePhysicalRole,
-    PreparedCommonProofGeneration, ProofProfileError, RelationPlanError,
-    SelectedEvaluatorAggregatePlanError, SelectedEvaluatorAggregateSourcePolynomialProvider,
-    SelectedEvaluatorEntryKind, SelectedEvaluatorStoreConstruction,
-    SelectedEvaluatorStoreConstructionOutput, SelectedEvaluatorStoreOutputChunk,
-    SelectedEvaluatorStoreSourceReadRequest, SelectedProofAccountingError,
-    SetupPublicPolynomialContext, SetupPublicPolynomialRootRole, SetupPublicPolynomialTree,
-    VerifiedCommonProofCapabilityHandle, VerifiedCommonProofStatementSource,
-    VerifiedEvaluatorAuxiliaryRoot, VerifiedEvaluatorKeyStore, VerifiedEvaluatorKeyStoreMaterial,
-    VerifiedEvaluatorKeyStoreMaterialStream, VerifiedEvaluatorKeyStorePreflight,
-    VerifiedEvaluatorRuntimeRoot, VerifiedStatementOwnedTree,
+    PreparedCommonProofGeneration, PrivateRandomnessCommonProofCoinSource, ProofProfileError,
+    RelationPlanError, SelectedEvaluatorAggregatePlanError,
+    SelectedEvaluatorAggregateSourcePolynomialProvider, SelectedEvaluatorEntryKind,
+    SelectedEvaluatorStoreConstruction, SelectedEvaluatorStoreConstructionOutput,
+    SelectedEvaluatorStoreOutputChunk, SelectedEvaluatorStoreSourceReadRequest,
+    SelectedProofAccountingError, SetupPublicPolynomialContext, SetupPublicPolynomialRootRole,
+    SetupPublicPolynomialTree, VerifiedCommonProofCapabilityHandle,
+    VerifiedCommonProofStatementSource, VerifiedEvaluatorAuxiliaryRoot, VerifiedEvaluatorKeyStore,
+    VerifiedEvaluatorKeyStoreMaterial, VerifiedEvaluatorKeyStoreMaterialStream,
+    VerifiedEvaluatorKeyStorePreflight, VerifiedEvaluatorRuntimeRoot, VerifiedStatementOwnedTree,
     selected_evaluator_aggregate_relation_plan, selected_evaluator_entry_positions,
     selected_proof_runtime_limits, selected_relation_plan_check_context,
     verified_application_statement_hash,
@@ -729,6 +729,7 @@ fn resolve_evaluator_prepared_attempt(
 
 fn prepare_evaluator_common_generation(
     session_handle: u32,
+    action_randomness_handle: u32,
     prepared_attempt: PreparedPublicOnlyProofAttemptSource,
     runtime_plan: SelectedEvaluatorProofRuntimePlan,
 ) -> Result<PreparedCommonProofGeneration, EvaluatorAggregateRuntimeError> {
@@ -759,14 +760,23 @@ fn prepare_evaluator_common_generation(
         FOUNDATION_PROFILE.protocol_version,
         &canonical_statement,
     )?;
-    let sources = CommonProofGenerationSources::public_only(
+    let relation_variant = runtime_plan
+        .compiled_relation_plan
+        .select_variant(None, Some(FOUNDATION_PROFILE.option_count))?;
+    let coordinate_capacity =
+        CommonProofPrivateCoinCoordinateCapacity::from_relation_plan_variant(relation_variant)
+            .map_err(|_| EvaluatorAggregateRuntimeError::InvalidInput)?;
+    let private_coins = PrivateRandomnessCommonProofCoinSource::new(
+        retain_action_private_randomness_for_exact_family(action_randomness_handle)
+            .map_err(EvaluatorAggregateRuntimeError::ActionRandomnessRuntime)?,
         prepared_attempt.application_statement_schema_identifier(),
         Hash512::from_bytes(authorization.binding_hash()),
-        prepared_attempt.attempt_lineage_identifier(),
-        source_provider,
+        prepared_attempt.private_randomness_attempt_identifier(),
+        coordinate_capacity,
     )
     .map_err(|_| EvaluatorAggregateRuntimeError::InvalidInput)?;
-    PreparedCommonProofGeneration::from_exact_family_sources(
+    let sources = CommonProofGenerationSources::new(private_coins, source_provider);
+    PreparedCommonProofGeneration::from_row_code_whir_sources(
         authorization,
         runtime_plan.relation_plan,
         canonical_statement,
@@ -852,6 +862,7 @@ fn prepare_evaluator_generation(
         EvaluatorGenerationMode::Fresh => {
             CommonProofGenerationFamilyAdapter::fresh(prepare_evaluator_common_generation(
                 session_handle,
+                action_randomness_handle,
                 fresh_prepared_attempt,
                 runtime_plan,
             )?)
@@ -859,6 +870,7 @@ fn prepare_evaluator_generation(
         EvaluatorGenerationMode::Resume => {
             let fresh_preparation = prepare_evaluator_common_generation(
                 session_handle,
+                action_randomness_handle,
                 fresh_prepared_attempt,
                 runtime_plan,
             )?;
@@ -890,8 +902,13 @@ fn prepare_evaluator_generation(
                         continuation,
                     )
                     .map_err(resumed_generation_error)?;
-                    prepare_evaluator_common_generation(session_handle, attempt, runtime_plan)
-                        .map_err(resumed_generation_error)
+                    prepare_evaluator_common_generation(
+                        session_handle,
+                        action_randomness_handle,
+                        attempt,
+                        runtime_plan,
+                    )
+                    .map_err(resumed_generation_error)
                 }),
             )
         }

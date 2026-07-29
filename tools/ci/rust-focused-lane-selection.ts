@@ -14,12 +14,6 @@ export const fullProfileEvidenceRustTests = [
 
 export const measurementRustTests = [
     'bgv::proof_suite::resource_accounting_evidence::tests::selected_candidate_static_resource_accounting_emits_run_attachment',
-    'bgv::proof_suite::selected_accounting::selected_ballot_resource_cap_tests::selected_ballot_cap_neutral_external_memory_requirement_reports_raw_geometry',
-    'bgv::proof_suite::selected_accounting::resource_accounting::tests::selected_candidate_external_memory_diagnostic_reports_every_variant',
-    'bgv::proof_suite::selected_accounting::resource_accounting::tests::runtime_limits_match_resource_ceilings_for_every_selected_variant',
-    'bgv::proof_suite::selected_accounting::resource_accounting::tests::exact_variant_rows_reconcile_transport_frontiers_memory_and_copies',
-    'bgv::proof_suite::selected_accounting::resource_accounting::tests::complete_action_accounting_derives_all_physical_proof_slots',
-    'bgv::proof_suite::selected_accounting::resource_accounting::tests::report_one_mixed_galois_batch_against_two_level_shards',
 ] as const;
 
 export const phaseLivenessEvidenceRustTests = [

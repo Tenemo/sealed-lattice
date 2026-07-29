@@ -91,7 +91,7 @@ pub(crate) fn compile_public_key_share_relation_with_source_layout(
         .copied()
         .map(SuiteModulusReference::data)
         .collect::<Vec<_>>();
-    let public_key_share_limbs = builder.add_setup_polynomial_limb_root(
+    let public_key_share_limbs = builder.add_verified_canonical_setup_polynomial_limb_root(
         &KeyVerifierSourceKey::StatementRoot {
             field_ordinal: PUBLIC_KEY_SHARE_ROOT_FIELD_ORDINAL,
             list_ordinal: None,
@@ -137,7 +137,7 @@ pub(crate) fn compile_public_key_share_relation_with_source_layout(
         // the bounded semantic secret proved by the cross-limb relation.
         let opening = builder.add_anchor_opening_witness()?;
         let modulus_reference = SuiteModulusReference::data(data_modulus_index);
-        let commitments = builder.add_setup_polynomial_root(
+        let commitments = builder.add_verified_canonical_setup_polynomial_root(
             &KeyVerifierSourceKey::StatementRoot {
                 field_ordinal: ANCHOR_COMMITMENT_ROOTS_FIELD_ORDINAL,
                 list_ordinal: Some(
@@ -207,7 +207,7 @@ pub(crate) fn compile_public_key_share_relation_with_source_layout(
 mod tests {
     use super::super::same_secret_anchor::tests::{
         TEST_EVALUATION_DOMAIN_SIZE, TEST_OPENING_DEGREE_BOUND_EXCLUSIVE, TEST_RING_DEGREE,
-        application_challenges, check_context, production_context, proof_tree_width,
+        application_challenges, check_context, production_context,
     };
     use super::*;
     use crate::bgv::proof_suite::field::{ProofBaseFieldElement, ProofChallengeExtensionElement};
@@ -252,14 +252,6 @@ mod tests {
                 |_, _, _| Ok(ProofChallengeExtensionElement::ZERO),
             ),
             Err(RelationPlanError::InvalidChallengeCatalog)
-        );
-        eprintln!(
-            "public-key-share columns={} constraints={} trees={} base_width={} auxiliary_width={}",
-            variant.ordered_columns.len(),
-            variant.ordered_constraints.len(),
-            variant.ordered_trees.len(),
-            proof_tree_width(variant, 1),
-            proof_tree_width(variant, 2),
         );
     }
 

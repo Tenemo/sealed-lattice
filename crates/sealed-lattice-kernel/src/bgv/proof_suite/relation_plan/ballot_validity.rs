@@ -3101,13 +3101,13 @@ mod tests {
                 })
         );
         let derive_assignments = || {
-            let mut transcript = CommonProofTranscript::new(
+            let mut transcript = CommonProofTranscript::new_relation_prefix(
                 1,
                 [0x31; 64],
+                [0x47; 64],
                 BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
                 b"exact-ballot-theta-vector",
-                crate::bgv::proof_suite::packed_fri_transcript_schedule(variant, &context)
-                    .expect("the transitional engine schedule derives"),
+                relation_prefix_schedule.clone(),
             )
             .expect("the exact ballot transcript initializes");
             for tree_ordinal in relation_prefix_schedule.ordered_base_tree_ordinals() {
@@ -3183,14 +3183,21 @@ mod tests {
             * u64::try_from(maximum_translated_opening_count).expect("the opening count fits u64")
             + u64::from(context.phase_column_query_coordinate_count);
         assert!(expected_trace_mask_degree > 0 && expected_trace_mask_degree <= TEST_RING_DEGREE);
+        let construction_trace_mask_degree = variant
+            .ordered_masks
+            .iter()
+            .find(|mask| mask.mask_kind == RelationMaskKind::Trace)
+            .expect("the secret-bearing plan has trace masks")
+            .mask_degree_bound_exclusive;
+        assert!(construction_trace_mask_degree >= expected_trace_mask_degree);
         assert!(variant.ordered_masks.iter().all(|mask| {
             mask.mask_kind != RelationMaskKind::Trace
-                || mask.mask_degree_bound_exclusive == expected_trace_mask_degree
+                || mask.mask_degree_bound_exclusive == construction_trace_mask_degree
         }));
         assert!(variant.ordered_columns.iter().all(|column| {
             !matches!(column.origin, RelationColumnOrigin::Prover)
                 || column.source_degree_bound_exclusive
-                    == TEST_RING_DEGREE + expected_trace_mask_degree
+                    == TEST_RING_DEGREE + construction_trace_mask_degree
         }));
 
         let tuple = compiled

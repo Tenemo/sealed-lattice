@@ -11,7 +11,8 @@
 //! bind is a derived quantity rather than a chosen one. It does not yet replace
 //! the operative opening argument.
 
-mod static_accounting;
+#[cfg(test)]
+pub(super) mod static_accounting;
 
 use p3_whir::{FoldingFactor, ProtocolParameters, ZkParameters, ZkWhirConfig};
 
@@ -24,7 +25,7 @@ use super::{ChallengeField, ExtensionFieldChallenger};
 /// construction uses the minimum, because the sumcheck mask only has to hide the
 /// per-round sumcheck wires and every additional coefficient is proof bytes that
 /// no view consumes.
-const SELECTED_HIDING_SUMCHECK_MASK_MESSAGE_LENGTH: usize = 3;
+pub(super) const SELECTED_HIDING_SUMCHECK_MASK_MESSAGE_LENGTH: usize = 3;
 
 /// Log inverse rate of the mask codewords.
 ///
@@ -32,7 +33,7 @@ const SELECTED_HIDING_SUMCHECK_MASK_MESSAGE_LENGTH: usize = 3;
 /// the vendored configuration refuses it. The selected construction reuses the
 /// row code's inverse rate so the mask codewords carry the same relative
 /// distance as everything else the verifier spot-checks.
-const SELECTED_HIDING_MASK_LOG_INVERSE_RATE: usize = 2;
+pub(super) const SELECTED_HIDING_MASK_LOG_INVERSE_RATE: usize = 2;
 
 pub(super) type SelectedHidingWhirConfig =
     ZkWhirConfig<ChallengeField, ChallengeField, ExtensionFieldChallenger>;
@@ -113,6 +114,7 @@ pub(super) fn hiding_whir_config_with_mask_parameters(
 /// Ownership is chronological: a group is committed by the move named here, and
 /// every challenge drawn after that move is bound to its root.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg(test)]
 pub(super) enum HidingMaskGroupOwner {
     /// The masked sumcheck batch that folds committed oracle `oracle_ordinal`.
     ///
@@ -128,6 +130,7 @@ pub(super) enum HidingMaskGroupOwner {
 
 /// One instantiated carried mask group.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg(test)]
 pub(super) struct HidingMaskGroupCensusEntry {
     /// Position of this group in the pipeline's chronological commit order.
     pub(super) commit_ordinal: usize,
@@ -143,6 +146,7 @@ pub(super) struct HidingMaskGroupCensusEntry {
     pub(super) codeword_domain_size: usize,
 }
 
+#[cfg(test)]
 impl HidingMaskGroupCensusEntry {
     /// Codeword coordinates the whole group instantiates.
     pub(super) const fn codeword_coordinate_count(&self) -> usize {
@@ -160,6 +164,7 @@ impl HidingMaskGroupCensusEntry {
 
 /// The folded source code the base case checks, shared by the fresh main mask.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg(test)]
 pub(super) struct HidingSourceCodeCensus {
     /// Message coefficients of the terminal folded word.
     pub(super) message_length: usize,
@@ -169,6 +174,7 @@ pub(super) struct HidingSourceCodeCensus {
     pub(super) codeword_domain_size: usize,
 }
 
+#[cfg(test)]
 impl HidingSourceCodeCensus {
     pub(super) const fn merkle_path_node_count(&self) -> usize {
         self.codeword_domain_size.trailing_zeros() as usize
@@ -184,6 +190,7 @@ impl HidingSourceCodeCensus {
 /// understates the inventory, so every derived total here multiplies by group
 /// width and by the carried/fresh mirror.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg(test)]
 pub(super) struct SelectedHidingMaskCensus {
     /// Carried groups in chronological commit order.
     pub(super) carried_groups: Vec<HidingMaskGroupCensusEntry>,
@@ -195,6 +202,7 @@ pub(super) struct SelectedHidingMaskCensus {
     pub(super) mask_spot_check_count: usize,
 }
 
+#[cfg(test)]
 impl SelectedHidingMaskCensus {
     /// Derives the census from an instantiated configuration.
     pub(super) fn derive(configuration: &SelectedHidingWhirConfig) -> Self {
@@ -337,7 +345,7 @@ mod tests {
             .expect("the selected parameters admit a hiding configuration");
 
         // The hiding pipeline keeps the plain round structure.
-        assert_eq!(configuration.inner.n_rounds(), 4);
+        assert_eq!(configuration.inner.n_rounds(), 5);
         assert_eq!(
             configuration.inner.starting_log_inv_rate,
             parameters.starting_log_inverse_rate
@@ -353,7 +361,7 @@ mod tests {
             .chain(core::iter::once(configuration.inner.final_queries))
             .collect::<Vec<_>>();
         assert_eq!(configuration.oracle_randomness, consuming_query_counts);
-        assert_eq!(configuration.oracle_randomness.len(), 5);
+        assert_eq!(configuration.oracle_randomness.len(), 6);
 
         // Randomness must fit strictly inside each oracle's rate slack, which is
         // load-bearing for zero knowledge rather than a layout convenience. The
@@ -367,7 +375,7 @@ mod tests {
         );
 
         // One sumcheck mask plus one code-switch mask per round.
-        assert_eq!(configuration.switch_masks.len(), 4);
+        assert_eq!(configuration.switch_masks.len(), 5);
         assert_eq!(
             configuration.sumcheck_mask.message_len,
             SELECTED_HIDING_SUMCHECK_MASK_MESSAGE_LENGTH
@@ -398,7 +406,7 @@ mod tests {
 
         // Mask spot checks carry no proof-of-work relief, so they target the
         // full security level plus the union over every mask oracle. For the
-        // selected geometry that union is over ten mask oracles, four bits.
+        // selected geometry that union is over twelve mask oracles, four bits.
         assert_eq!(configuration.mask_queries, 393);
 
         // The complete derived geometry, pinned so the construction plan binds
@@ -406,7 +414,7 @@ mod tests {
         // corroborates the response census behind the transcript ceiling.
         assert_eq!(
             configuration.oracle_randomness,
-            vec![387, 288, 268, 264, 263]
+            vec![387, 288, 268, 264, 263, 263]
         );
         assert_eq!(configuration.sumcheck_mask.domain_size, 2_048);
         assert_eq!(
@@ -415,7 +423,13 @@ mod tests {
                 .iter()
                 .map(|mask| (mask.message_len, mask.domain_size))
                 .collect::<Vec<_>>(),
-            vec![(387, 4_096), (288, 4_096), (268, 4_096), (264, 4_096)],
+            vec![
+                (387, 4_096),
+                (288, 4_096),
+                (268, 4_096),
+                (264, 4_096),
+                (263, 4_096),
+            ],
         );
         assert!(
             configuration
@@ -428,17 +442,17 @@ mod tests {
 
     /// Derives every instantiated mask group, not just the distinct code shapes.
     ///
-    /// The distinct shapes are one sumcheck code and four switch codes. The
+    /// The distinct shapes are one sumcheck code and five switch codes. The
     /// instantiated schedule stacks the sumcheck code once per folded variable
     /// and repeats it after every code switch, so counting shapes understates
-    /// the inventory by the sumcheck width and by four repetitions.
+    /// the inventory by the sumcheck width and by five repetitions.
     #[test]
     fn selected_hiding_census_derives_every_instantiated_carried_group() {
         let census = selected_census();
 
-        // Nine groups: one sumcheck batch per committed oracle, one code switch
+        // Eleven groups: one sumcheck batch per committed oracle, one code switch
         // per round, interleaved in commit order.
-        assert_eq!(census.carried_group_count(), 9);
+        assert_eq!(census.carried_group_count(), 11);
         assert_eq!(
             census
                 .carried_groups
@@ -475,12 +489,18 @@ mod tests {
                     HidingMaskGroupOwner::SumcheckBatch { oracle_ordinal: 4 },
                     3
                 ),
+                (9, HidingMaskGroupOwner::CodeSwitch { round_ordinal: 4 }, 1),
+                (
+                    10,
+                    HidingMaskGroupOwner::SumcheckBatch { oracle_ordinal: 5 },
+                    3
+                ),
             ],
         );
 
-        // Nineteen carried codewords: fifteen sumcheck masks over the 2,048
-        // coordinate mask domain and four switch masks over 4,096 coordinates.
-        assert_eq!(census.carried_codeword_count(), 19);
+        // Twenty-three carried codewords: eighteen sumcheck masks over the 2,048
+        // coordinate mask domain and five switch masks over 4,096 coordinates.
+        assert_eq!(census.carried_codeword_count(), 23);
         assert_eq!(
             census
                 .carried_groups
@@ -488,7 +508,7 @@ mod tests {
                 .filter(|group| matches!(group.owner, HidingMaskGroupOwner::SumcheckBatch { .. }))
                 .map(|group| group.codeword_coordinate_count())
                 .sum::<usize>(),
-            30_720
+            36_864
         );
         assert_eq!(
             census
@@ -497,32 +517,32 @@ mod tests {
                 .filter(|group| matches!(group.owner, HidingMaskGroupOwner::CodeSwitch { .. }))
                 .map(|group| group.codeword_coordinate_count())
                 .sum::<usize>(),
-            16_384
+            20_480
         );
-        assert_eq!(census.carried_codeword_coordinate_count(), 47_104);
+        assert_eq!(census.carried_codeword_coordinate_count(), 57_344);
 
         // The base case mirrors every carried group with one fresh blind of the
         // same shape, so the fresh inventory is a second copy of the carried one.
-        assert_eq!(census.fresh_mirror_group_count(), 9);
-        assert_eq!(census.fresh_mirror_codeword_count(), 19);
-        assert_eq!(census.fresh_mirror_codeword_coordinate_count(), 47_104);
+        assert_eq!(census.fresh_mirror_group_count(), 11);
+        assert_eq!(census.fresh_mirror_codeword_count(), 23);
+        assert_eq!(census.fresh_mirror_codeword_coordinate_count(), 57_344);
 
         // The fresh main mask lives in the folded source code, whose terminal
-        // word has dimension 64 over a 65,536 coordinate domain.
+        // word has dimension 64 over a 262,144 coordinate domain.
         assert_eq!(
             census.source_code,
             HidingSourceCodeCensus {
                 message_length: 64,
                 randomness_length: 263,
-                codeword_domain_size: 65_536,
+                codeword_domain_size: 262_144,
             }
         );
-        assert_eq!(census.source_code.merkle_path_node_count(), 16);
+        assert_eq!(census.source_code.merkle_path_node_count(), 18);
         assert_eq!(census.source_spot_check_count, 263);
         assert_eq!(census.mask_spot_check_count, 393);
 
-        // Nineteen committed roots: nine carried, nine mirrors, one fresh main.
-        assert_eq!(census.committed_root_count(), 19);
+        // Twenty-three committed roots: eleven carried, eleven mirrors, one fresh main.
+        assert_eq!(census.committed_root_count(), 23);
     }
 
     /// Reproduces the direct-port refusal from the derived census.
@@ -553,17 +573,17 @@ mod tests {
 
         assert_eq!(
             sumcheck_group_nodes * PRODUCTION_MERKLE_NODE_BYTE_LENGTH,
-            2_766_720
+            3_320_064
         );
         assert_eq!(
             switch_group_nodes * PRODUCTION_MERKLE_NODE_BYTE_LENGTH,
-            2_414_592
+            3_018_240
         );
-        assert_eq!(source_nodes * PRODUCTION_MERKLE_NODE_BYTE_LENGTH, 538_624);
+        assert_eq!(source_nodes * PRODUCTION_MERKLE_NODE_BYTE_LENGTH, 605_952);
 
         let literal_authentication_bytes =
             census.literal_authentication_node_count() * PRODUCTION_MERKLE_NODE_BYTE_LENGTH;
-        assert_eq!(literal_authentication_bytes, 5_719_936);
+        assert_eq!(literal_authentication_bytes, 6_944_256);
         assert!(literal_authentication_bytes > MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH);
     }
 

@@ -3901,7 +3901,7 @@ impl SetupGenerationKeyRelationSource<'_, '_> {
             &relation_plan_variant,
             witness_bound_attempt,
         )?;
-        PreparedCommonProofGeneration::from_exact_family_sources(
+        PreparedCommonProofGeneration::from_row_code_whir_sources(
             authorization,
             relation_plan,
             self.canonical_application_statement_bytes().to_vec(),
@@ -4240,7 +4240,7 @@ impl SetupGenerationVssSource<'_, '_> {
         let relation_trees = source_polynomials.relation_tree_inputs()?;
         let private_coins =
             self.private_coin_source(authorization.binding_hash(), variant, witness_bound_attempt)?;
-        PreparedCommonProofGeneration::from_exact_family_sources(
+        PreparedCommonProofGeneration::from_row_code_whir_sources(
             authorization,
             relation_plan,
             self.canonical_application_statement_bytes().to_vec(),
@@ -4524,7 +4524,7 @@ impl SetupGenerationRelinearizationRoundOneSource<'_, '_> {
             &relation_plan_variant,
             witness_bound_attempt,
         )?;
-        PreparedCommonProofGeneration::from_exact_family_sources(
+        PreparedCommonProofGeneration::from_row_code_whir_sources(
             authorization,
             relation_plan,
             self.canonical_application_statement_bytes().to_vec(),
@@ -4944,7 +4944,7 @@ impl SetupGenerationRelinearizationRoundTwoSource<'_, '_> {
             &relation_plan_variant,
             witness_bound_attempt,
         )?;
-        PreparedCommonProofGeneration::from_exact_family_sources(
+        PreparedCommonProofGeneration::from_row_code_whir_sources(
             authorization,
             relation_plan,
             self.canonical_application_statement_bytes().to_vec(),
@@ -5559,7 +5559,7 @@ impl SetupGenerationGaloisBatchSource<'_, '_> {
             &relation_plan_variant,
             witness_bound_attempt,
         )?;
-        PreparedCommonProofGeneration::from_exact_family_sources(
+        PreparedCommonProofGeneration::from_row_code_whir_sources(
             authorization,
             relation_plan,
             self.canonical_application_statement_bytes().to_vec(),

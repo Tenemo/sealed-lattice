@@ -17,11 +17,11 @@ use crate::bgv::proof_suite::row_code_whir::literal_bcs_merkle::{
 };
 use crate::hashing::hash_framed_parts_512;
 
-const LINEAR_BCS_TRANSCRIPT_PLAN_ENCODING_VERSION: u16 = 3;
+const LINEAR_BCS_TRANSCRIPT_PLAN_ENCODING_VERSION: u16 = 4;
 const LINEAR_BCS_ORACLE_VALUE_BYTE_LENGTH: usize = 64;
 const LINEAR_BCS_PROOF_STRING_SYMBOL_BYTE_LENGTH: usize = 64;
 const LINEAR_BCS_TRANSCRIPT_PLAN_HASH_DOMAIN: &str =
-    "sealed-lattice/proof/row-code-whir/linear-bcs-transcript-plan/v3";
+    "sealed-lattice/proof/row-code-whir/linear-bcs-transcript-plan/v4";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::bgv::proof_suite) enum LinearBcsChallengeSelectionRule {
@@ -32,7 +32,10 @@ pub(in crate::bgv::proof_suite) enum LinearBcsChallengeSelectionRule {
 pub(in crate::bgv::proof_suite) enum LinearBcsCommittedOracleRole {
     RelationPhase { phase: RowCodeWhirPhase },
     Aggregate,
+    AggregateWidePad,
     WhirRound { round_ordinal: u32 },
+    BaseFreshSource,
+    BaseFreshPad,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -457,7 +460,7 @@ impl LinearBcsTranscriptPlan {
             match opening.owner {
                 LinearBcsSuppliedCommitmentOpeningOwner::OuterQueryVector => encoder.push_u16(1),
                 LinearBcsSuppliedCommitmentOpeningOwner::WhirEpoch { epoch_ordinal } => {
-                    encoder.push_u16(2);
+                    encoder.push_u16(3);
                     encoder.push_u32(epoch_ordinal);
                 }
             }
@@ -730,16 +733,7 @@ fn common_round_root(
                 .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?,
         )
         .map(Some),
-        // The row-code quotient phase already carries the opening-batch mask
-        // polynomial. Its evaluations are a complete canonical prover message;
-        // there is no independent mask commitment or opening owner.
-        CommonProofRound::OpeningBatchMaskRoot => Ok(None),
-        CommonProofRound::BaseRoot { .. }
-        | CommonProofRound::AuxiliaryRoot { .. }
-        | CommonProofRound::QuotientRoot { .. }
-        | CommonProofRound::FriLayerRoot { .. }
-        | CommonProofRound::FriTerminal
-        | CommonProofRound::QueryOpenings => {
+        CommonProofRound::BaseRoot { .. } | CommonProofRound::AuxiliaryRoot { .. } => {
             Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry)
         }
     }
@@ -751,12 +745,27 @@ fn row_code_whir_commitment_root(
 ) -> Result<LinearBcsProverOracleRoot, RowCodeWhirConstructionPlanError> {
     let committed_role = match role {
         RowCodeWhirCommitmentRole::Aggregate => LinearBcsCommittedOracleRole::Aggregate,
+        RowCodeWhirCommitmentRole::AggregateWidePad => {
+            LinearBcsCommittedOracleRole::AggregateWidePad
+        }
         RowCodeWhirCommitmentRole::WhirRound { round_ordinal } => {
             LinearBcsCommittedOracleRole::WhirRound { round_ordinal }
         }
+        RowCodeWhirCommitmentRole::BaseFreshSource => LinearBcsCommittedOracleRole::BaseFreshSource,
+        RowCodeWhirCommitmentRole::BaseFreshPad => LinearBcsCommittedOracleRole::BaseFreshPad,
     };
-    let (opened_oracle, _) = whir_commitment_opening_geometry(plan, role)?;
-    checked_supplied_commitment_root(committed_role, opened_oracle.leaf_count)
+    let payload_leaf_count = match role {
+        RowCodeWhirCommitmentRole::Aggregate | RowCodeWhirCommitmentRole::WhirRound { .. } => {
+            whir_commitment_opening_geometry(plan, role)?.0.leaf_count
+        }
+        RowCodeWhirCommitmentRole::AggregateWidePad | RowCodeWhirCommitmentRole::BaseFreshPad => {
+            aggregate_wide_pad_domain_size(plan)?
+        }
+        RowCodeWhirCommitmentRole::BaseFreshSource => {
+            plan.whir.final_round.encoded_oracle.leaf_count
+        }
+    };
+    checked_supplied_commitment_root(committed_role, payload_leaf_count)
 }
 
 fn whir_commitment_opening_geometry(
@@ -767,6 +776,11 @@ fn whir_commitment_opening_geometry(
     RowCodeWhirConstructionPlanError,
 > {
     match role {
+        RowCodeWhirCommitmentRole::AggregateWidePad
+        | RowCodeWhirCommitmentRole::BaseFreshSource
+        | RowCodeWhirCommitmentRole::BaseFreshPad => {
+            Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry)
+        }
         RowCodeWhirCommitmentRole::Aggregate => plan
             .whir
             .rounds
@@ -846,6 +860,21 @@ fn derive_supplied_commitment_opening_plans(
         aggregate_opening_epoch,
     )?;
 
+    let pad_query_epoch_ordinal = plan
+        .whir
+        .final_round
+        .query_epoch
+        .epoch_ordinal
+        .checked_add(1)
+        .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?;
+    push_epoch_owned_opening(
+        plan,
+        &mut openings,
+        LinearBcsCommittedOracleRole::AggregateWidePad,
+        aggregate_wide_pad_domain_size(plan)?,
+        pad_query_epoch_ordinal,
+    )?;
+
     for (round_index, round) in plan.whir.rounds.iter().enumerate() {
         if usize::try_from(round.round_ordinal)
             .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?
@@ -869,8 +898,62 @@ fn derive_supplied_commitment_opening_plans(
         )?;
     }
 
+    push_epoch_owned_opening(
+        plan,
+        &mut openings,
+        LinearBcsCommittedOracleRole::BaseFreshSource,
+        plan.whir.final_round.encoded_oracle.leaf_count,
+        plan.whir.final_round.query_epoch.epoch_ordinal,
+    )?;
+    push_epoch_owned_opening(
+        plan,
+        &mut openings,
+        LinearBcsCommittedOracleRole::BaseFreshPad,
+        aggregate_wide_pad_domain_size(plan)?,
+        pad_query_epoch_ordinal,
+    )?;
+
     validate_supplied_commitment_root_owner_bijection(round_ranges, &openings)?;
     Ok(openings)
+}
+
+fn push_epoch_owned_opening(
+    plan: &RowCodeWhirConstructionPlan,
+    openings: &mut Vec<LinearBcsSuppliedCommitmentOpeningPlan>,
+    commitment_role: LinearBcsCommittedOracleRole,
+    payload_leaf_count: usize,
+    epoch_ordinal: u32,
+) -> Result<(), RowCodeWhirConstructionPlanError> {
+    let (domain_size, query_count) =
+        unique_query_geometry(plan, RowCodeWhirQueryRole::WhirEpoch { epoch_ordinal })?;
+    if payload_leaf_count == 0 || payload_leaf_count != domain_size {
+        return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
+    }
+    openings.push(LinearBcsSuppliedCommitmentOpeningPlan {
+        commitment_role,
+        owner: LinearBcsSuppliedCommitmentOpeningOwner::WhirEpoch { epoch_ordinal },
+        payload_leaf_count,
+        query_count,
+        query_order: LinearBcsOpeningQueryOrder::AcceptedTranscriptOrder,
+        merkle_traversal_order: LinearBcsMerkleTraversalOrder::SortedCoordinates,
+    });
+    Ok(())
+}
+
+fn aggregate_wide_pad_domain_size(
+    plan: &RowCodeWhirConstructionPlan,
+) -> Result<usize, RowCodeWhirConstructionPlanError> {
+    let configuration = super::super::hiding_whir::selected_hiding_whir_config(plan.parameters)
+        .map_err(|_| RowCodeWhirConstructionPlanError::InvalidVariantGeometry)?;
+    let pad_layout =
+        super::super::aggregate_wide_hiding::AggregateWidePadLayout::derive(&configuration)
+            .map_err(|_| RowCodeWhirConstructionPlanError::InvalidVariantGeometry)?;
+    Ok(p3_whir::MaskCodeShape::new(
+        pad_layout.message_length(),
+        configuration.sumcheck_mask.randomness_len,
+        super::super::aggregate_wide_hiding::FIXED_SUBSPACE_PAD_LOG_INVERSE_RATE,
+    )
+    .domain_size)
 }
 
 fn push_whir_owned_opening(
@@ -979,6 +1062,15 @@ fn validate_supplied_commitment_root_owner_bijection(
                 LinearBcsCommittedOracleRole::WhirRound { round_ordinal },
                 LinearBcsSuppliedCommitmentOpeningOwner::WhirEpoch { epoch_ordinal },
             ) => round_ordinal.checked_add(1) == Some(epoch_ordinal),
+            (
+                LinearBcsCommittedOracleRole::AggregateWidePad
+                | LinearBcsCommittedOracleRole::BaseFreshPad,
+                LinearBcsSuppliedCommitmentOpeningOwner::WhirEpoch { .. },
+            ) => true,
+            (
+                LinearBcsCommittedOracleRole::BaseFreshSource,
+                LinearBcsSuppliedCommitmentOpeningOwner::WhirEpoch { .. },
+            ) => true,
             _ => false,
         };
         if *round_count != 1
@@ -1235,10 +1327,13 @@ fn encode_committed_oracle_role(
             encoder.push_u16(row_code_whir_phase_tag(phase));
         }
         LinearBcsCommittedOracleRole::Aggregate => encoder.push_u16(2),
+        LinearBcsCommittedOracleRole::AggregateWidePad => encoder.push_u16(3),
         LinearBcsCommittedOracleRole::WhirRound { round_ordinal } => {
-            encoder.push_u16(3);
+            encoder.push_u16(4);
             encoder.push_u32(round_ordinal);
         }
+        LinearBcsCommittedOracleRole::BaseFreshSource => encoder.push_u16(5),
+        LinearBcsCommittedOracleRole::BaseFreshPad => encoder.push_u16(6),
     }
 }
 

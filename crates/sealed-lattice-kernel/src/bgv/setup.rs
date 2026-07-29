@@ -103,8 +103,9 @@ pub(crate) use accepted_setup::{
 };
 pub(in crate::bgv) use accepted_setup::{
     VerifiedAggregateThresholdShareTerminal, VerifiedPublicRandomness,
-    VerifiedVssQualificationTerminals, VerifiedVssShareLinkageTerminal,
-    derive_recipient_input_root, verify_public_randomness_board_sources,
+    VerifiedSetupPolynomialLowDegreePrerequisite, VerifiedVssQualificationTerminals,
+    VerifiedVssShareLinkageTerminal, derive_recipient_input_root,
+    verify_public_randomness_board_sources,
 };
 #[cfg(test)]
 pub(crate) use commitment::LatticeAnchorCommitment;

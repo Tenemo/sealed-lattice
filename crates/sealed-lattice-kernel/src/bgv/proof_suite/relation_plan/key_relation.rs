@@ -747,6 +747,16 @@ pub(in crate::bgv::proof_suite::relation_plan) struct PendingFullRingNegacyclicP
     multiplier: ReversibleShiftedSmallVector,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct FullRingProductAccumulatorDependency {
+    negative: bool,
+    selected_half: super::integer_lift::RelationIntegerLiftFullRingHalf,
+    multiplicand_columns: [u32; 2],
+    multiplier_columns: [u32; 2],
+    reversed_multiplier_columns: [u32; 2],
+    multiplier_offsets: [u64; 2],
+}
+
 pub(super) struct KeyRelationPlanBuilder<'context> {
     application_statement_schema_identifier: u16,
     geometry: &'context KeyRelationGeometry,
@@ -765,6 +775,30 @@ pub(super) struct KeyRelationPlanBuilder<'context> {
             Vec<PendingFullRingNegacyclicProduct>,
         ),
         Vec<u32>,
+    >,
+    full_ring_suffix_columns_by_dependency:
+        BTreeMap<((SuiteModulusReference, u16), SplitIntegerVector), [u32; 2]>,
+    full_ring_transpose_columns_by_dependency: BTreeMap<
+        (
+            (SuiteModulusReference, u16),
+            super::integer_lift::RelationIntegerLiftFullRingHalf,
+            SplitIntegerVector,
+        ),
+        [u32; 2],
+    >,
+    linear_evaluation_columns_by_dependency: BTreeMap<
+        (
+            (SuiteModulusReference, u16),
+            Vec<RelationIntegerLiftLinearTermDescriptor>,
+        ),
+        u32,
+    >,
+    product_accumulator_columns_by_dependency: BTreeMap<
+        (
+            (SuiteModulusReference, u16),
+            Vec<FullRingProductAccumulatorDependency>,
+        ),
+        u32,
     >,
     reversed_columns_by_source_halves: BTreeMap<[u32; 2], SplitIntegerVector>,
     bound_trees: Vec<RelationTreeDescriptor>,

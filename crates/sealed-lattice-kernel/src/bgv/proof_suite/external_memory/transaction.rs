@@ -48,16 +48,6 @@ impl ProofExternalMemoryTransactionRequest {
     }
 
     #[cfg(test)]
-    pub(crate) const fn maximum_payload_byte_length(&self) -> u64 {
-        self.maximum_payload_byte_length
-    }
-
-    #[cfg(test)]
-    pub(crate) const fn maximum_operation_count(&self) -> u32 {
-        self.maximum_operation_count
-    }
-
-    #[cfg(test)]
     pub(crate) fn operations(&self) -> &[ProofExternalMemoryTransactionOperation] {
         &self.operations
     }

@@ -32,11 +32,6 @@ pub(crate) use executor::{
     VerifiedEvaluatorAggregateContext, VerifiedEvaluatorAggregateExecutionAuthority,
     VerifiedEvaluatorAggregationAuthority,
 };
-#[cfg(test)]
-pub(crate) use executor::{
-    SelectedEvaluatorExecutionResourceTotals, selected_evaluator_execution_resource_ledger,
-    selected_evaluator_initial_ciphertext_coefficient_byte_count,
-};
 pub(crate) const EVALUATOR_PROGRAM_SET_SCHEMA_IDENTIFIER: u16 = 0x1500;
 pub(crate) const EVALUATOR_INSTRUCTION_SCHEMA_IDENTIFIER: u16 = 0x1501;
 pub(crate) const EVALUATOR_CONSTANT_SCHEMA_IDENTIFIER: u16 = 0x1503;

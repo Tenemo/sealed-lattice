@@ -6,13 +6,15 @@ use std::collections::BTreeMap;
 #[cfg(test)]
 use num_bigint::BigUint;
 
+#[cfg(test)]
+use crate::foundation::ProofApplicationSlotCeilings;
+
 use crate::{
     foundation::{
         ActionPrivateRandomness, FoundationSchemaError, Hash512, PRIVATE_PROOF_SALT_PURPOSE,
         PrivateRandomCursor, PrivateRandomnessAttemptIdentifier, PrivateRandomnessDomain,
-        ProofApplicationSlotCeilings,
     },
-    hashing::hash_framed_parts_512,
+    hashing::{StreamingHash512, hash_framed_parts_512},
 };
 
 use super::super::relation_plan::{
@@ -60,6 +62,13 @@ impl CommonProofPrivateCoinCoordinate {
         }
     }
 
+    pub(crate) const fn hiding_argument() -> Self {
+        Self {
+            purpose_class: 4,
+            ordinal: 0,
+        }
+    }
+
     pub(crate) const fn purpose_class(self) -> u16 {
         self.purpose_class
     }
@@ -75,6 +84,7 @@ pub(crate) struct CommonProofPrivateCoinCoordinateCapacity {
     telescoping_mask_count: u32,
     opening_mask_count: u32,
     includes_proof_salt: bool,
+    includes_hiding_argument: bool,
 }
 
 impl CommonProofPrivateCoinCoordinateCapacity {
@@ -93,11 +103,17 @@ impl CommonProofPrivateCoinCoordinateCapacity {
                 .ok_or(CommonProofCheckpointCursorManifestError::CountOverflow)?;
         }
         let includes_proof_salt = variant.proof_privacy_mode() == ProofPrivacyMode::SecretBearing;
+        // Aggregate-wide WHIR uses an independently keyed private pad for
+        // every family. Public-only describes the relation witness, not the
+        // construction-level hiding stream; deriving that pad from public
+        // transcript data would make the mask publicly recomputable.
+        let includes_hiding_argument = true;
         Ok(Self {
             trace_mask_count: counts[RelationMaskKind::Trace as usize - 1],
             telescoping_mask_count: counts[RelationMaskKind::Telescoping as usize - 1],
             opening_mask_count: counts[RelationMaskKind::OpeningBatch as usize - 1],
             includes_proof_salt,
+            includes_hiding_argument,
         })
     }
 
@@ -107,12 +123,14 @@ impl CommonProofPrivateCoinCoordinateCapacity {
         telescoping_mask_count: u32,
         opening_mask_count: u32,
         includes_proof_salt: bool,
+        includes_hiding_argument: bool,
     ) -> Self {
         Self {
             trace_mask_count,
             telescoping_mask_count,
             opening_mask_count,
             includes_proof_salt,
+            includes_hiding_argument,
         }
     }
 
@@ -122,14 +140,7 @@ impl CommonProofPrivateCoinCoordinateCapacity {
             .checked_add(self.telescoping_mask_count)
             .and_then(|count| count.checked_add(self.opening_mask_count))
             .and_then(|count| count.checked_add(self.includes_proof_salt as u32))
-    }
-
-    #[cfg(test)]
-    pub(crate) const fn consecutive_coordinate_run_count(self) -> u32 {
-        (self.trace_mask_count != 0) as u32
-            + (self.telescoping_mask_count != 0) as u32
-            + (self.opening_mask_count != 0) as u32
-            + self.includes_proof_salt as u32
+            .and_then(|count| count.checked_add(self.includes_hiding_argument as u32))
     }
 }
 
@@ -328,19 +339,34 @@ impl CommonProofPrivateCoinSamplingCatalog {
         modulus: u64,
         maximum_candidate_draws_per_output: u32,
     ) -> Result<(), CommonProofPrivateCoinSamplingCatalogError> {
+        self.record_modulo_samples(coordinate, modulus, maximum_candidate_draws_per_output, 1)
+    }
+
+    pub(crate) fn record_modulo_samples(
+        &mut self,
+        coordinate: CommonProofPrivateCoinCoordinate,
+        modulus: u64,
+        maximum_candidate_draws_per_output: u32,
+        output_count: usize,
+    ) -> Result<(), CommonProofPrivateCoinSamplingCatalogError> {
+        let output_count = u64::try_from(output_count)
+            .map_err(|_| CommonProofPrivateCoinSamplingCatalogError::CountOverflow)?;
+        if output_count == 0 {
+            return Ok(());
+        }
         match self.entries.entry(coordinate) {
             std::collections::btree_map::Entry::Vacant(entry) => {
                 entry.insert(CommonProofPrivateCoinSamplingOperation::ModuloSamples {
                     modulus,
                     maximum_candidate_draws_per_output,
-                    output_count: 1,
+                    output_count,
                 });
             }
             std::collections::btree_map::Entry::Occupied(mut entry) => {
                 let CommonProofPrivateCoinSamplingOperation::ModuloSamples {
                     modulus: recorded_modulus,
                     maximum_candidate_draws_per_output: recorded_maximum_candidate_draws,
-                    output_count,
+                    output_count: recorded_output_count,
                 } = entry.get_mut()
                 else {
                     return Err(CommonProofPrivateCoinSamplingCatalogError::ConflictingOperation);
@@ -350,8 +376,8 @@ impl CommonProofPrivateCoinSamplingCatalog {
                 {
                     return Err(CommonProofPrivateCoinSamplingCatalogError::ConflictingOperation);
                 }
-                *output_count = output_count
-                    .checked_add(1)
+                *recorded_output_count = recorded_output_count
+                    .checked_add(output_count)
                     .ok_or(CommonProofPrivateCoinSamplingCatalogError::CountOverflow)?;
             }
         }
@@ -539,21 +565,20 @@ pub(crate) trait CheckpointableCommonProofPrivateCoinSource:
     ) -> Result<Vec<u8>, CommonProofCheckpointCursorManifestError>;
 }
 
-const COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_MAGIC: [u8; 8] = *b"SLCPCM03";
-const COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_VERSION: u16 = 3;
-const COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_PREFIX_BYTE_LENGTH: usize = 19;
+pub(crate) const COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_MAGIC: [u8; 8] = *b"SLCPCM05";
+const COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_VERSION: u16 = 5;
+const COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_PREFIX_BYTE_LENGTH: usize = 15;
 const COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_IDENTITY_BYTE_LENGTH: usize = 98;
-const COMMON_PROOF_CHECKPOINT_CURSOR_RUN_BYTE_LENGTH: usize = 24;
-const COMMON_PROOF_CHECKPOINT_CURSOR_OVERRIDE_BYTE_LENGTH: usize = 14;
-pub(crate) const MAXIMUM_COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_RUN_COUNT: u32 = 4_096;
+const COMMON_PROOF_CHECKPOINT_CURSOR_STATE_DIGEST_BYTE_LENGTH: usize = 64;
+const COMMON_PROOF_CHECKPOINT_CURSOR_STATE_RECORD_BYTE_LENGTH: u64 = 16;
+const COMMON_PROOF_CHECKPOINT_CURSOR_STATE_HASH_DOMAIN: &str =
+    "sealed-lattice/common-proof/checkpoint-private-cursor-state/v1";
 pub(crate) const MAXIMUM_COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_BYTE_LENGTH: u32 = 1_048_576;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg(test)]
 pub(crate) struct CommonProofCheckpointCursorManifestRequirement {
     logical_cursor_count: u32,
-    consecutive_coordinate_run_count: u32,
-    maximum_override_count: u32,
     canonical_manifest_byte_ceiling: u32,
     retained_cursor_state_byte_ceiling: u64,
     encoding_workspace_byte_ceiling: u32,
@@ -569,32 +594,12 @@ impl CommonProofCheckpointCursorManifestRequirement {
         self.logical_cursor_count
     }
 
-    pub(crate) const fn consecutive_coordinate_run_count(self) -> u32 {
-        self.consecutive_coordinate_run_count
-    }
-
-    pub(crate) const fn maximum_override_count(self) -> u32 {
-        self.maximum_override_count
-    }
-
     pub(crate) const fn canonical_manifest_byte_ceiling(self) -> u32 {
         self.canonical_manifest_byte_ceiling
     }
 
-    pub(crate) const fn retained_cursor_state_byte_ceiling(self) -> u64 {
-        self.retained_cursor_state_byte_ceiling
-    }
-
     pub(crate) const fn pending_manifest_resident_byte_ceiling(self) -> u32 {
         self.pending_manifest_resident_byte_ceiling
-    }
-
-    pub(crate) const fn restore_workspace_byte_ceiling(self) -> u64 {
-        self.restore_workspace_byte_ceiling
-    }
-
-    pub(crate) const fn peak_additional_resident_byte_ceiling(self) -> u64 {
-        self.peak_additional_resident_byte_ceiling
     }
 
     pub(crate) const fn peak_copied_buffer_byte_length(self) -> u32 {
@@ -602,10 +607,8 @@ impl CommonProofCheckpointCursorManifestRequirement {
     }
 
     pub(crate) const fn fits_absolute_bounds(self) -> bool {
-        self.consecutive_coordinate_run_count
-            <= MAXIMUM_COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_RUN_COUNT
-            && self.canonical_manifest_byte_ceiling
-                <= MAXIMUM_COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_BYTE_LENGTH
+        self.canonical_manifest_byte_ceiling
+            <= MAXIMUM_COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_BYTE_LENGTH
             && self.pending_manifest_resident_byte_ceiling()
                 <= MAXIMUM_COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_BYTE_LENGTH
             && self.peak_copied_buffer_byte_length()
@@ -623,21 +626,13 @@ pub(crate) enum CommonProofCheckpointCursorManifestError {
     CoordinateOrder,
 }
 
-#[derive(Clone, Copy)]
-struct CommonProofCheckpointCursorRunSummary {
-    first_coordinate: CommonProofPrivateCoinCoordinate,
-    coordinate_count: u32,
-    common_cursor: PrivateRandomCursor,
-    override_count: u32,
-}
-
-/// Exact compact checkpoint representation for one common-proof coin source.
-/// The source-wide family, derivation binding and attempt identifier occur
-/// once, including before the first cursor is consumed. Every maximal
-/// consecutive ordinal interval inside one purpose class forms one run. A
-/// two-pass encoder counts exact state overrides before it writes directly
-/// into the sole output allocation; it never constructs an expanded cursor
-/// list or a nested run graph.
+/// Exact compact checkpoint commitment for one common-proof coin source. The
+/// source-wide family, derivation binding and attempt identifier occur once,
+/// including before the first cursor is consumed. A two-pass encoder validates
+/// canonical order and streams every coordinate and exact cursor position into
+/// one domain-separated digest. Checkpoint resume deterministically replays the
+/// live private-coin source and recomputes this commitment; it does not rebuild
+/// private streams from producer-supplied cursor bytes.
 pub(crate) fn encode_common_proof_checkpoint_cursor_manifest<OrderedCursors>(
     family_schema_identifier: u16,
     derivation_binding_hash: Hash512,
@@ -648,10 +643,7 @@ where
     OrderedCursors:
         Clone + IntoIterator<Item = (CommonProofPrivateCoinCoordinate, PrivateRandomCursor)>,
 {
-    let mut run_summaries = [None::<CommonProofCheckpointCursorRunSummary>; 4];
-    let mut run_count = 0_usize;
     let mut logical_cursor_count = 0_u32;
-    let mut override_count = 0_u32;
     let mut previous_coordinate = None;
     for (coordinate, cursor) in ordered_cursors.clone() {
         validate_manifest_cursor_identity(
@@ -667,71 +659,20 @@ where
         if previous_coordinate.is_some_and(|previous| coordinate <= previous) {
             return Err(CommonProofCheckpointCursorManifestError::CoordinateOrder);
         }
-        match run_count
-            .checked_sub(1)
-            .and_then(|index| run_summaries[index])
-        {
-            Some(mut run) if coordinate.purpose_class() == run.first_coordinate.purpose_class() => {
-                let expected_ordinal = run
-                    .first_coordinate
-                    .ordinal()
-                    .checked_add(run.coordinate_count)
-                    .ok_or(CommonProofCheckpointCursorManifestError::CountOverflow)?;
-                if coordinate.ordinal() != expected_ordinal {
-                    return Err(CommonProofCheckpointCursorManifestError::CoordinateOrder);
-                }
-                run.coordinate_count = run
-                    .coordinate_count
-                    .checked_add(1)
-                    .ok_or(CommonProofCheckpointCursorManifestError::CountOverflow)?;
-                if !cursor_state_matches(run.common_cursor, cursor) {
-                    run.override_count = run
-                        .override_count
-                        .checked_add(1)
-                        .ok_or(CommonProofCheckpointCursorManifestError::CountOverflow)?;
-                    override_count = override_count
-                        .checked_add(1)
-                        .ok_or(CommonProofCheckpointCursorManifestError::CountOverflow)?;
-                }
-                run_summaries[run_count - 1] = Some(run);
-            }
-            _ => {
-                if coordinate.ordinal() != 0 || run_count == run_summaries.len() {
-                    return Err(CommonProofCheckpointCursorManifestError::CoordinateOrder);
-                }
-                run_summaries[run_count] = Some(CommonProofCheckpointCursorRunSummary {
-                    first_coordinate: coordinate,
-                    coordinate_count: 1,
-                    common_cursor: cursor,
-                    override_count: 0,
-                });
-                run_count += 1;
-            }
-        }
         previous_coordinate = Some(coordinate);
-    }
-    let run_count = u32::try_from(run_count)
-        .map_err(|_| CommonProofCheckpointCursorManifestError::CountOverflow)?;
-    if run_count > MAXIMUM_COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_RUN_COUNT {
-        return Err(CommonProofCheckpointCursorManifestError::OutsideSupportedProfile);
     }
     let byte_length = COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_PREFIX_BYTE_LENGTH
         .checked_add(COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_IDENTITY_BYTE_LENGTH)
         .and_then(|length| {
-            length.checked_add(
-                usize::try_from(run_count)
-                    .ok()?
-                    .checked_mul(COMMON_PROOF_CHECKPOINT_CURSOR_RUN_BYTE_LENGTH)?,
-            )
-        })
-        .and_then(|length| {
-            length.checked_add(
-                usize::try_from(override_count)
-                    .ok()?
-                    .checked_mul(COMMON_PROOF_CHECKPOINT_CURSOR_OVERRIDE_BYTE_LENGTH)?,
-            )
+            length.checked_add(COMMON_PROOF_CHECKPOINT_CURSOR_STATE_DIGEST_BYTE_LENGTH)
         })
         .ok_or(CommonProofCheckpointCursorManifestError::CountOverflow)?;
+    if byte_length
+        > usize::try_from(MAXIMUM_COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_BYTE_LENGTH)
+            .map_err(|_| CommonProofCheckpointCursorManifestError::CountOverflow)?
+    {
+        return Err(CommonProofCheckpointCursorManifestError::OutsideSupportedProfile);
+    }
     let mut output = Vec::new();
     output
         .try_reserve_exact(byte_length)
@@ -739,63 +680,44 @@ where
     output.extend_from_slice(&COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_MAGIC);
     output.extend_from_slice(&COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_VERSION.to_le_bytes());
     output.push(1);
-    output.extend_from_slice(&run_count.to_le_bytes());
     output.extend_from_slice(&logical_cursor_count.to_le_bytes());
     output.extend_from_slice(&family_schema_identifier.to_le_bytes());
     output.extend_from_slice(&derivation_binding_hash.into_bytes());
     output.extend_from_slice(&stream_attempt_identifier);
 
-    let mut cursor_iterator = ordered_cursors.into_iter();
-    for run in run_summaries.into_iter().flatten() {
-        let (first_coordinate, first_cursor) = cursor_iterator
-            .next()
-            .ok_or(CommonProofCheckpointCursorManifestError::NonCanonicalEncoding)?;
-        if first_coordinate != run.first_coordinate || first_cursor != run.common_cursor {
-            return Err(CommonProofCheckpointCursorManifestError::NonCanonicalEncoding);
+    let cursor_state_byte_length = u64::from(logical_cursor_count)
+        .checked_mul(COMMON_PROOF_CHECKPOINT_CURSOR_STATE_RECORD_BYTE_LENGTH)
+        .ok_or(CommonProofCheckpointCursorManifestError::CountOverflow)?;
+    let mut cursor_state_hasher =
+        StreamingHash512::new(COMMON_PROOF_CHECKPOINT_CURSOR_STATE_HASH_DOMAIN, 1);
+    cursor_state_hasher.begin_part(cursor_state_byte_length);
+    let mut encoded_logical_cursor_count = 0_u32;
+    let mut previous_encoded_coordinate = None;
+    for (coordinate, cursor) in ordered_cursors {
+        validate_manifest_cursor_identity(
+            family_schema_identifier,
+            derivation_binding_hash,
+            stream_attempt_identifier,
+            coordinate,
+            cursor,
+        )?;
+        if previous_encoded_coordinate.is_some_and(|previous| coordinate <= previous) {
+            return Err(CommonProofCheckpointCursorManifestError::CoordinateOrder);
         }
-        output.extend_from_slice(&first_coordinate.purpose_class().to_le_bytes());
-        output.extend_from_slice(&first_coordinate.ordinal().to_le_bytes());
-        output.extend_from_slice(&(run.coordinate_count - 1).to_le_bytes());
-        output.extend_from_slice(&first_cursor.next_counter().to_le_bytes());
-        output.extend_from_slice(
-            &encode_cursor_offset(first_cursor.next_unread_bit_offset_in_buffered_block())?
-                .to_le_bytes(),
+        encoded_logical_cursor_count = encoded_logical_cursor_count
+            .checked_add(1)
+            .ok_or(CommonProofCheckpointCursorManifestError::CountOverflow)?;
+        cursor_state_hasher.absorb_raw(&coordinate.purpose_class().to_le_bytes());
+        cursor_state_hasher.absorb_raw(&coordinate.ordinal().to_le_bytes());
+        cursor_state_hasher.absorb_raw(&cursor.next_counter().to_le_bytes());
+        cursor_state_hasher.absorb_raw(
+            &encode_cursor_offset(cursor.next_unread_bit_offset_in_buffered_block())?.to_le_bytes(),
         );
-        output.extend_from_slice(&run.override_count.to_le_bytes());
-        for coordinate_offset in 1..run.coordinate_count {
-            let (coordinate, cursor) = cursor_iterator
-                .next()
-                .ok_or(CommonProofCheckpointCursorManifestError::NonCanonicalEncoding)?;
-            if coordinate.purpose_class() != first_coordinate.purpose_class()
-                || coordinate.ordinal()
-                    != first_coordinate
-                        .ordinal()
-                        .checked_add(coordinate_offset)
-                        .ok_or(CommonProofCheckpointCursorManifestError::CountOverflow)?
-            {
-                return Err(CommonProofCheckpointCursorManifestError::CoordinateOrder);
-            }
-            if !cursor_state_matches(first_cursor, cursor) {
-                output.extend_from_slice(&coordinate_offset.to_le_bytes());
-                output.extend_from_slice(&cursor.next_counter().to_le_bytes());
-                output.extend_from_slice(
-                    &encode_cursor_offset(cursor.next_unread_bit_offset_in_buffered_block())?
-                        .to_le_bytes(),
-                );
-            }
-        }
+        previous_encoded_coordinate = Some(coordinate);
     }
-    if cursor_iterator.next().is_some() {
+    output.extend_from_slice(&cursor_state_hasher.finalize());
+    if encoded_logical_cursor_count != logical_cursor_count || output.len() != byte_length {
         return Err(CommonProofCheckpointCursorManifestError::NonCanonicalEncoding);
-    }
-    if output.len() != byte_length {
-        return Err(CommonProofCheckpointCursorManifestError::NonCanonicalEncoding);
-    }
-    if output.len()
-        > usize::try_from(MAXIMUM_COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_BYTE_LENGTH)
-            .map_err(|_| CommonProofCheckpointCursorManifestError::CountOverflow)?
-    {
-        return Err(CommonProofCheckpointCursorManifestError::OutsideSupportedProfile);
     }
     Ok(output)
 }
@@ -808,35 +730,19 @@ pub(crate) fn common_proof_checkpoint_cursor_manifest_requirement(
     let maximum_logical_cursor_count = capacity
         .logical_cursor_count()
         .ok_or(CommonProofCheckpointCursorManifestError::CountOverflow)?;
-    let maximum_consecutive_coordinate_run_count = capacity.consecutive_coordinate_run_count();
-    if (maximum_logical_cursor_count == 0) != (maximum_consecutive_coordinate_run_count == 0)
-        || maximum_consecutive_coordinate_run_count > maximum_logical_cursor_count
-    {
-        return Err(CommonProofCheckpointCursorManifestError::CoordinateOrder);
-    }
-    let maximum_override_count = maximum_logical_cursor_count
-        .checked_sub(maximum_consecutive_coordinate_run_count)
-        .ok_or(CommonProofCheckpointCursorManifestError::CountOverflow)?;
-    let maximum_canonical_byte_length = u32::try_from(
-        COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_PREFIX_BYTE_LENGTH
-            .checked_add(COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_IDENTITY_BYTE_LENGTH)
-            .and_then(|length| {
-                length.checked_add(
-                    usize::try_from(maximum_consecutive_coordinate_run_count)
-                        .ok()?
-                        .checked_mul(COMMON_PROOF_CHECKPOINT_CURSOR_RUN_BYTE_LENGTH)?,
-                )
-            })
-            .and_then(|length| {
-                length.checked_add(
-                    usize::try_from(maximum_override_count)
-                        .ok()?
-                        .checked_mul(COMMON_PROOF_CHECKPOINT_CURSOR_OVERRIDE_BYTE_LENGTH)?,
-                )
-            })
-            .ok_or(CommonProofCheckpointCursorManifestError::CountOverflow)?,
+    common_proof_checkpoint_cursor_manifest_requirement_from_capacity(
+        capacity,
+        maximum_logical_cursor_count,
     )
-    .map_err(|_| CommonProofCheckpointCursorManifestError::CountOverflow)?;
+}
+
+#[cfg(test)]
+fn common_proof_checkpoint_cursor_manifest_requirement_from_capacity(
+    capacity: CommonProofPrivateCoinCoordinateCapacity,
+    maximum_logical_cursor_count: u32,
+) -> Result<CommonProofCheckpointCursorManifestRequirement, CommonProofCheckpointCursorManifestError>
+{
+    let maximum_canonical_byte_length = common_proof_checkpoint_cursor_manifest_byte_length()?;
     let allocated_mask_cursor_count = capacity
         .trace_mask_count
         .checked_add(capacity.telescoping_mask_count)
@@ -854,9 +760,11 @@ pub(crate) fn common_proof_checkpoint_cursor_manifest_requirement(
                     .ok_or(CommonProofCheckpointCursorManifestError::CountOverflow)?,
             )
             .ok_or(CommonProofCheckpointCursorManifestError::CountOverflow)?;
-    let encoding_workspace_byte_ceiling = u32::try_from(core::mem::size_of::<
-        [Option<CommonProofCheckpointCursorRunSummary>; 4],
-    >())
+    let encoding_workspace_byte_ceiling = u32::try_from(
+        core::mem::size_of::<StreamingHash512>()
+            .checked_add(core::mem::size_of::<Option<CommonProofPrivateCoinCoordinate>>())
+            .ok_or(CommonProofCheckpointCursorManifestError::CountOverflow)?,
+    )
     .map_err(|_| CommonProofCheckpointCursorManifestError::CountOverflow)?;
     let peak_additional_resident_byte_ceiling = retained_cursor_state_byte_ceiling
         .checked_add(u64::from(maximum_canonical_byte_length))
@@ -864,8 +772,6 @@ pub(crate) fn common_proof_checkpoint_cursor_manifest_requirement(
         .ok_or(CommonProofCheckpointCursorManifestError::CountOverflow)?;
     Ok(CommonProofCheckpointCursorManifestRequirement {
         logical_cursor_count: maximum_logical_cursor_count,
-        consecutive_coordinate_run_count: maximum_consecutive_coordinate_run_count,
-        maximum_override_count,
         canonical_manifest_byte_ceiling: maximum_canonical_byte_length,
         retained_cursor_state_byte_ceiling,
         encoding_workspace_byte_ceiling,
@@ -877,18 +783,32 @@ pub(crate) fn common_proof_checkpoint_cursor_manifest_requirement(
 }
 
 #[cfg(test)]
+fn common_proof_checkpoint_cursor_manifest_byte_length()
+-> Result<u32, CommonProofCheckpointCursorManifestError> {
+    u32::try_from(
+        COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_PREFIX_BYTE_LENGTH
+            .checked_add(COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_IDENTITY_BYTE_LENGTH)
+            .and_then(|length| {
+                length.checked_add(COMMON_PROOF_CHECKPOINT_CURSOR_STATE_DIGEST_BYTE_LENGTH)
+            })
+            .ok_or(CommonProofCheckpointCursorManifestError::CountOverflow)?,
+    )
+    .map_err(|_| CommonProofCheckpointCursorManifestError::CountOverflow)
+}
+
+#[cfg(test)]
 pub(crate) fn common_proof_checkpoint_cursor_manifest_requirement_for_variant(
     variant: &RelationPlanVariant,
 ) -> Result<CommonProofCheckpointCursorManifestRequirement, CommonProofCheckpointCursorManifestError>
 {
     let capacity = CommonProofPrivateCoinCoordinateCapacity::from_relation_plan_variant(variant)?;
-    common_proof_checkpoint_cursor_manifest_requirement(capacity)
-}
-
-fn cursor_state_matches(left: PrivateRandomCursor, right: PrivateRandomCursor) -> bool {
-    left.next_counter() == right.next_counter()
-        && left.next_unread_bit_offset_in_buffered_block()
-            == right.next_unread_bit_offset_in_buffered_block()
+    let maximum_logical_cursor_count = capacity
+        .logical_cursor_count()
+        .ok_or(CommonProofCheckpointCursorManifestError::CountOverflow)?;
+    common_proof_checkpoint_cursor_manifest_requirement_from_capacity(
+        capacity,
+        maximum_logical_cursor_count,
+    )
 }
 
 fn encode_cursor_offset(
@@ -956,6 +876,7 @@ struct RetainedCommonProofPrivateCoinCursors {
     telescoping_masks: Box<[Option<PrivateRandomCursor>]>,
     opening_masks: Box<[Option<PrivateRandomCursor>]>,
     proof_salt: Option<Option<PrivateRandomCursor>>,
+    hiding_argument: Option<Option<PrivateRandomCursor>>,
 }
 
 impl RetainedCommonProofPrivateCoinCursors {
@@ -981,6 +902,7 @@ impl RetainedCommonProofPrivateCoinCursors {
             telescoping_masks: allocate_slots(capacity.telescoping_mask_count)?,
             opening_masks: allocate_slots(capacity.opening_mask_count)?,
             proof_salt: capacity.includes_proof_salt.then_some(None),
+            hiding_argument: capacity.includes_hiding_argument.then_some(None),
         })
     }
 
@@ -994,6 +916,7 @@ impl RetainedCommonProofPrivateCoinCursors {
             2 => self.telescoping_masks.get(ordinal),
             3 => self.opening_masks.get(ordinal),
             PRIVATE_PROOF_SALT_PURPOSE if ordinal == 0 => self.proof_salt.as_ref(),
+            4 if ordinal == 0 => self.hiding_argument.as_ref(),
             _ => None,
         }
     }
@@ -1008,6 +931,7 @@ impl RetainedCommonProofPrivateCoinCursors {
             2 => self.telescoping_masks.get_mut(ordinal),
             3 => self.opening_masks.get_mut(ordinal),
             PRIVATE_PROOF_SALT_PURPOSE if ordinal == 0 => self.proof_salt.as_mut(),
+            4 if ordinal == 0 => self.hiding_argument.as_mut(),
             _ => None,
         }
     }
@@ -1045,79 +969,12 @@ impl RetainedCommonProofPrivateCoinCursors {
                     .enumerate()
                     .filter_map(|entry| coordinate_cursor(3, entry)),
             )
+            .chain(self.hiding_argument.iter().filter_map(|cursor| {
+                cursor.map(|cursor| (CommonProofPrivateCoinCoordinate::hiding_argument(), cursor))
+            }))
             .chain(self.proof_salt.iter().filter_map(|cursor| {
                 cursor.map(|cursor| (CommonProofPrivateCoinCoordinate::proof_salt(), cursor))
             }))
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum PublicOnlyCommonProofCoinError {
-    InvalidIdentity,
-    PrivateCoordinateUnavailable,
-}
-
-/// Explicit zero-private-coordinate authority for public-only proof families.
-/// It binds checkpoint state to one local authenticated attempt, but cannot
-/// sample masks or proof salts and never creates a private domain.
-pub(crate) struct PublicOnlyCommonProofCoinSource {
-    family_schema_identifier: u16,
-    derivation_binding_hash: Hash512,
-    attempt_lineage: [u8; 32],
-}
-
-impl PublicOnlyCommonProofCoinSource {
-    pub(crate) fn new(
-        family_schema_identifier: u16,
-        derivation_binding_hash: Hash512,
-        attempt_lineage: [u8; 32],
-    ) -> Result<Self, PublicOnlyCommonProofCoinError> {
-        if !ProofApplicationSlotCeilings::PUBLIC_ONLY_FAMILY_SCHEMA_IDENTIFIERS
-            .contains(&family_schema_identifier)
-            || derivation_binding_hash == Hash512::from_bytes([0_u8; Hash512::BYTE_LENGTH])
-            || attempt_lineage == [0_u8; 32]
-        {
-            return Err(PublicOnlyCommonProofCoinError::InvalidIdentity);
-        }
-        Ok(Self {
-            family_schema_identifier,
-            derivation_binding_hash,
-            attempt_lineage,
-        })
-    }
-}
-
-impl CommonProofPrivateCoinSource for PublicOnlyCommonProofCoinSource {
-    type Error = PublicOnlyCommonProofCoinError;
-
-    fn sample_modulo(
-        &mut self,
-        _coordinate: CommonProofPrivateCoinCoordinate,
-        _modulus: u64,
-        _maximum_candidate_draws_per_output: u32,
-    ) -> Result<u64, Self::Error> {
-        Err(PublicOnlyCommonProofCoinError::PrivateCoordinateUnavailable)
-    }
-
-    fn fill_raw_bytes(
-        &mut self,
-        _coordinate: CommonProofPrivateCoinCoordinate,
-        _destination: &mut [u8],
-    ) -> Result<(), Self::Error> {
-        Err(PublicOnlyCommonProofCoinError::PrivateCoordinateUnavailable)
-    }
-}
-
-impl CheckpointableCommonProofPrivateCoinSource for PublicOnlyCommonProofCoinSource {
-    fn checkpoint_cursor_manifest(
-        &self,
-    ) -> Result<Vec<u8>, CommonProofCheckpointCursorManifestError> {
-        encode_common_proof_checkpoint_cursor_manifest(
-            self.family_schema_identifier,
-            self.derivation_binding_hash,
-            self.attempt_lineage,
-            core::iter::empty::<(CommonProofPrivateCoinCoordinate, PrivateRandomCursor)>(),
-        )
     }
 }
 
@@ -1397,6 +1254,7 @@ mod tests {
             encoded.len(),
             COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_PREFIX_BYTE_LENGTH
                 + COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_IDENTITY_BYTE_LENGTH
+                + COMMON_PROOF_CHECKPOINT_CURSOR_STATE_DIGEST_BYTE_LENGTH
         );
         assert_eq!(
             &encoded[..COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_MAGIC.len()],
@@ -1408,115 +1266,148 @@ mod tests {
         );
         assert_eq!(encoded[10], 1);
         assert_eq!(
-            u32::from_le_bytes(encoded[11..15].try_into().expect("run-count bytes")),
-            0
-        );
-        assert_eq!(
             u32::from_le_bytes(
-                encoded[15..19]
+                encoded[11..15]
                     .try_into()
                     .expect("logical-cursor-count bytes")
             ),
             0
         );
         assert_eq!(
-            u16::from_le_bytes(encoded[19..21].try_into().expect("family bytes")),
+            u16::from_le_bytes(encoded[15..17].try_into().expect("family bytes")),
             family_schema_identifier
         );
-        assert_eq!(&encoded[21..85], &derivation_binding_hash);
-        assert_eq!(&encoded[85..117], &stream_attempt_identifier);
+        assert_eq!(&encoded[17..81], &derivation_binding_hash);
+        assert_eq!(&encoded[81..113], &stream_attempt_identifier);
+    }
+
+    #[test]
+    fn checkpoint_cursor_manifest_commits_all_five_private_coin_purposes() {
+        let family_schema_identifier =
+            ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER;
+        let derivation_binding_hash = Hash512::from_bytes([0x6d_u8; Hash512::BYTE_LENGTH]);
+        let stream_attempt_identifier = [0x37_u8; 32];
+        let ordered_coordinates = [
+            CommonProofPrivateCoinCoordinate::mask(1, 0).expect("trace-mask coordinate"),
+            CommonProofPrivateCoinCoordinate::mask(1, 1).expect("trace-mask coordinate"),
+            CommonProofPrivateCoinCoordinate::mask(2, 0).expect("telescoping-mask coordinate"),
+            CommonProofPrivateCoinCoordinate::mask(3, 0).expect("opening-mask coordinate"),
+            CommonProofPrivateCoinCoordinate::hiding_argument(),
+            CommonProofPrivateCoinCoordinate::proof_salt(),
+        ];
+        let ordered_cursors = ordered_coordinates
+            .into_iter()
+            .enumerate()
+            .map(|(coordinate_ordinal, coordinate)| {
+                let next_counter = if coordinate_ordinal == 1 { 11 } else { 7 };
+                let buffered_offset = (coordinate_ordinal == 1).then_some(19);
+                let cursor = PrivateRandomCursor::new(
+                    family_schema_identifier,
+                    coordinate.purpose_class(),
+                    common_proof_private_coin_coordinate_derivation_context_hash(
+                        derivation_binding_hash,
+                        coordinate,
+                    ),
+                    stream_attempt_identifier,
+                    next_counter,
+                    buffered_offset,
+                )
+                .expect("test cursor identity and state are valid");
+                (coordinate, cursor)
+            })
+            .collect::<Vec<_>>();
+
+        let encoded = encode_common_proof_checkpoint_cursor_manifest(
+            family_schema_identifier,
+            derivation_binding_hash,
+            stream_attempt_identifier,
+            ordered_cursors.clone(),
+        )
+        .expect("all five supported purpose runs have a canonical manifest");
+
+        assert_eq!(
+            u32::from_le_bytes(
+                encoded[11..15]
+                    .try_into()
+                    .expect("logical-cursor-count bytes")
+            ),
+            6
+        );
+        assert_eq!(
+            encoded.len(),
+            COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_PREFIX_BYTE_LENGTH
+                + COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_IDENTITY_BYTE_LENGTH
+                + COMMON_PROOF_CHECKPOINT_CURSOR_STATE_DIGEST_BYTE_LENGTH
+        );
+
+        let requirement = common_proof_checkpoint_cursor_manifest_requirement(
+            CommonProofPrivateCoinCoordinateCapacity::for_test(2, 1, 1, true, true),
+        )
+        .expect("all five private-coin purpose runs fit the bounded workspace");
+        assert_eq!(requirement.logical_cursor_count(), 6);
+        assert_eq!(
+            usize::try_from(requirement.canonical_manifest_byte_ceiling())
+                .expect("manifest ceiling fits usize"),
+            encoded.len()
+        );
+        assert!(requirement.fits_absolute_bounds());
+
+        let mut changed_cursor_state = ordered_cursors.clone();
+        let changed_coordinate = changed_cursor_state[1].0;
+        changed_cursor_state[1].1 = PrivateRandomCursor::new(
+            family_schema_identifier,
+            changed_coordinate.purpose_class(),
+            common_proof_private_coin_coordinate_derivation_context_hash(
+                derivation_binding_hash,
+                changed_coordinate,
+            ),
+            stream_attempt_identifier,
+            12,
+            Some(19),
+        )
+        .expect("changed test cursor identity and state are valid");
+        let changed_state_manifest = encode_common_proof_checkpoint_cursor_manifest(
+            family_schema_identifier,
+            derivation_binding_hash,
+            stream_attempt_identifier,
+            changed_cursor_state,
+        )
+        .expect("a changed exact cursor state remains canonical");
+        assert_ne!(
+            encoded, changed_state_manifest,
+            "the manifest commitment must bind every exact cursor position"
+        );
+
+        let mut noncanonical_order = ordered_cursors;
+        noncanonical_order.swap(4, 5);
+        assert_eq!(
+            encode_common_proof_checkpoint_cursor_manifest(
+                family_schema_identifier,
+                derivation_binding_hash,
+                stream_attempt_identifier,
+                noncanonical_order,
+            ),
+            Err(CommonProofCheckpointCursorManifestError::CoordinateOrder)
+        );
     }
 
     #[test]
     fn zero_cursor_capacity_accounts_for_the_unconditional_identity() {
         let requirement = common_proof_checkpoint_cursor_manifest_requirement(
-            CommonProofPrivateCoinCoordinateCapacity::for_test(0, 0, 0, false),
+            CommonProofPrivateCoinCoordinateCapacity::for_test(0, 0, 0, false, false),
         )
         .expect("zero cursor capacity remains representable");
 
         assert_eq!(requirement.logical_cursor_count(), 0);
-        assert_eq!(requirement.consecutive_coordinate_run_count(), 0);
-        assert_eq!(requirement.maximum_override_count(), 0);
         assert_eq!(
             requirement.canonical_manifest_byte_ceiling(),
             u32::try_from(
                 COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_PREFIX_BYTE_LENGTH
                     + COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_IDENTITY_BYTE_LENGTH
+                    + COMMON_PROOF_CHECKPOINT_CURSOR_STATE_DIGEST_BYTE_LENGTH
             )
             .expect("manifest constants fit u32")
         );
         assert!(requirement.fits_absolute_bounds());
-    }
-
-    #[test]
-    fn public_only_coin_source_has_no_private_domain_and_has_an_empty_checkpoint_manifest() {
-        for family_schema_identifier in
-            ProofApplicationSlotCeilings::PUBLIC_ONLY_FAMILY_SCHEMA_IDENTIFIERS
-        {
-            assert!(
-                PublicOnlyCommonProofCoinSource::new(
-                    family_schema_identifier,
-                    Hash512::from_bytes([0x35_u8; Hash512::BYTE_LENGTH]),
-                    [0x74_u8; 32],
-                )
-                .is_ok()
-            );
-        }
-        for rejected_family in [
-            ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
-            ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
-            0xffff,
-        ] {
-            assert!(matches!(
-                PublicOnlyCommonProofCoinSource::new(
-                    rejected_family,
-                    Hash512::from_bytes([0x35_u8; Hash512::BYTE_LENGTH]),
-                    [0x74_u8; 32],
-                ),
-                Err(PublicOnlyCommonProofCoinError::InvalidIdentity)
-            ));
-        }
-
-        let family_schema_identifier =
-            ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER;
-        let derivation_binding_hash = Hash512::from_bytes([0x35_u8; Hash512::BYTE_LENGTH]);
-        let attempt_lineage = [0x74_u8; 32];
-        let mut source = PublicOnlyCommonProofCoinSource::new(
-            family_schema_identifier,
-            derivation_binding_hash,
-            attempt_lineage,
-        )
-        .expect("the public-only source identity is complete");
-
-        let expected_manifest = encode_common_proof_checkpoint_cursor_manifest(
-            family_schema_identifier,
-            derivation_binding_hash,
-            attempt_lineage,
-            core::iter::empty::<(CommonProofPrivateCoinCoordinate, PrivateRandomCursor)>(),
-        )
-        .expect("the empty cursor catalog is canonical");
-        assert_eq!(
-            source
-                .checkpoint_cursor_manifest()
-                .expect("the public-only checkpoint is representable"),
-            expected_manifest
-        );
-
-        assert!(matches!(
-            source.sample_modulo(
-                CommonProofPrivateCoinCoordinate::mask(1, 0)
-                    .expect("trace-mask coordinates use purpose class one"),
-                17,
-                8
-            ),
-            Err(PublicOnlyCommonProofCoinError::PrivateCoordinateUnavailable)
-        ));
-        assert!(matches!(
-            source.fill_raw_bytes(
-                CommonProofPrivateCoinCoordinate::proof_salt(),
-                &mut [0_u8; 32]
-            ),
-            Err(PublicOnlyCommonProofCoinError::PrivateCoordinateUnavailable)
-        ));
     }
 }

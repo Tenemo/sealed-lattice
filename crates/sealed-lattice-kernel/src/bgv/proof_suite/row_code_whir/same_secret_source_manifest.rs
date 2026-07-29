@@ -7,7 +7,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::{foundation::ProofApplicationSlotCeilings, hashing::StreamingHash512};
+use crate::hashing::StreamingHash512;
 
 use super::super::{
     COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH,
@@ -33,7 +33,6 @@ const SAME_SECRET_AUTHENTICATED_SOURCE_MANIFEST_VERSION: u16 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::bgv::proof_suite) enum SameSecretAuthenticatedSourceManifestError {
-    WrongProofFamily,
     WrongSelectedContext,
     ConstructionPlanMismatch,
     RelationVariantMismatch,
@@ -453,10 +452,7 @@ fn validate_selected_owners(
     relation_variant: &RelationPlanVariant,
     relation_context: &RelationPlanCheckContext,
 ) -> Result<(), SameSecretAuthenticatedSourceManifestError> {
-    let schema_identifier = ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER;
-    if construction_plan.application_statement_schema_identifier() != schema_identifier {
-        return Err(SameSecretAuthenticatedSourceManifestError::WrongProofFamily);
-    }
+    let schema_identifier = construction_plan.application_statement_schema_identifier();
     let selected_context = selected_relation_plan_check_context(schema_identifier)
         .ok_or(SameSecretAuthenticatedSourceManifestError::WrongSelectedContext)?;
     if relation_context != &selected_context {
@@ -610,7 +606,7 @@ fn derive_bound_material_salt_catalog(
             continue;
         }
         if tree.low_degree_mode != RowCodeWhirBoundLowDegreeMode::PriorVssProofRequired
-            || tree.query_count != construction_plan.parameters.verified_vss_bound_query_count
+            || tree.query_count != construction_plan.parameters.prior_proof_bound_query_count
             || tree.query_count == 0
             || tree.leaf_count == 0
             || !tree.leaf_count.is_power_of_two()

@@ -22,8 +22,6 @@ use crate::{
     transcript_core::encode_hex,
 };
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
-use super::super::AuthenticatedCompactCommittedMaterialSource;
 use super::super::prover::requested_pre_challenge_source_column_ordinals;
 use super::super::{
     CommonProofBoundTreeLeafSaltRequest, CommonProofProverError, CommonProofRelationPlanCapability,
@@ -804,40 +802,6 @@ impl SetupKeyRelationSourcePolynomialAdapter {
             return Err(CommonProofProverError::InvalidColumn);
         }
         self.derive_source_polynomial(column_ordinal)
-    }
-
-    /// Returns the authority-owned compact source for one bound committed
-    /// material tree so canonical leaf salts can be reconstructed without
-    /// accepting salts or commitment material from the caller.
-    #[cfg(all(test, not(target_arch = "wasm32")))]
-    pub(crate) fn exact_same_secret_evidence_bound_material_source(
-        &self,
-        tree_catalog_index: u16,
-        expected_root: [u8; 64],
-    ) -> Result<AuthenticatedCompactCommittedMaterialSource, CommonProofProverError> {
-        let bound_source = self
-            .bound_material_tree_sources
-            .iter()
-            .find(|source| source.tree_catalog_index == tree_catalog_index)
-            .copied()
-            .ok_or(CommonProofProverError::InvalidTree)?;
-        let authority_handle =
-            SetupGenerationAuthorityHandle::from_identifier(self.authority_identifier);
-        let application = self.application();
-        with_setup_generation_key_relation::<_, RefusalReason>(
-            &authority_handle,
-            &application,
-            |source| {
-                let authenticated_source = source
-                    .degree_zero_material(bound_source.material_ordinal)?
-                    .owned_authenticated_source();
-                if authenticated_source.compact_source().root() != expected_root {
-                    return Err(RefusalReason::WrongHashOrRoot);
-                }
-                Ok(authenticated_source)
-            },
-        )
-        .map_err(|_| CommonProofProverError::InvalidTree)
     }
 
     #[allow(clippy::too_many_arguments)]

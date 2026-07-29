@@ -42,9 +42,6 @@ use super::{
 
 const NO_SECOND_POLL_VALUE: u32 = u32::MAX;
 const VERIFICATION_POLL_NEEDS_READBACK: u32 = 1;
-const VERIFICATION_POLL_PREFIX_ACCEPTED: u32 = 2;
-const VERIFICATION_POLL_QUERY_HEADER_ACCEPTED: u32 = 3;
-const VERIFICATION_POLL_QUERY_TREE_ACCEPTED: u32 = 4;
 const VERIFICATION_POLL_COMPLETE: u32 = 5;
 const GENERATION_POLL_PROGRESS: u32 = 1;
 const GENERATION_POLL_STORAGE_REQUEST_READY: u32 = 2;
@@ -1422,8 +1419,11 @@ fn generation_worker_error_status(error: CommonProofGenerationWorkerError) -> u3
         CommonProofGenerationWorkerError::AuthenticatedSource => {
             refusal_status(RefusalReason::WrongHashOrRoot)
         }
-        CommonProofGenerationWorkerError::Generation
-        | CommonProofGenerationWorkerError::Cleanup => {
+        CommonProofGenerationWorkerError::Generation(generation_error) => {
+            drop(generation_error);
+            refusal_status(RefusalReason::OutsideSupportedProfile)
+        }
+        CommonProofGenerationWorkerError::Cleanup => {
             refusal_status(RefusalReason::OutsideSupportedProfile)
         }
     }
@@ -2307,19 +2307,6 @@ pub unsafe extern "C" fn sealed_lattice_common_proof_verification_poll(
             VERIFICATION_POLL_NEEDS_READBACK,
             first_chunk_index,
             second_chunk_index.unwrap_or(NO_SECOND_POLL_VALUE),
-        ),
-        Ok(CommonProofVerificationWorkerPoll::PrefixAccepted) => {
-            (VERIFICATION_POLL_PREFIX_ACCEPTED, 0, NO_SECOND_POLL_VALUE)
-        }
-        Ok(CommonProofVerificationWorkerPoll::QueryHeaderAccepted) => (
-            VERIFICATION_POLL_QUERY_HEADER_ACCEPTED,
-            0,
-            NO_SECOND_POLL_VALUE,
-        ),
-        Ok(CommonProofVerificationWorkerPoll::QueryTreeAccepted { catalog_index }) => (
-            VERIFICATION_POLL_QUERY_TREE_ACCEPTED,
-            u32::from(catalog_index),
-            NO_SECOND_POLL_VALUE,
         ),
         Ok(CommonProofVerificationWorkerPoll::Complete) => {
             (VERIFICATION_POLL_COMPLETE, 0, NO_SECOND_POLL_VALUE)

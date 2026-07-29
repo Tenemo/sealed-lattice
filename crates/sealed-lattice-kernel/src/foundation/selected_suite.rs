@@ -1271,31 +1271,9 @@ mod tests {
                 * u64::from(FOUNDATION_PROFILE.participant_count)
                 + accounting.final_evaluator_key_store_resident_byte_length()
         );
-        const CEREMONY_CORPUS_PLANNING_TARGET_BYTE_LENGTH: u64 = 2_147_483_648;
-        let planning_target_overage = accounting
-            .ceremony_setup_wire_byte_length()
-            .saturating_sub(CEREMONY_CORPUS_PLANNING_TARGET_BYTE_LENGTH);
         assert!(
             accounting.ceremony_setup_wire_byte_length()
                 <= crate::foundation::MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH
-        );
-        eprintln!(
-            "selected_evaluator_resources levels={:?} relinearization_positions={} galois_positions={} source_components_per_participant={} source_public_polynomial_context_hashes_per_participant={} source_public_polynomial_context_hash_resident_bytes_per_participant={} final_components={} source_wire_per_participant={} source_resident_per_participant={} final_wire={} final_resident={} ceremony_wire={} ceremony_source_and_final_resident_volume={} corpus_planning_target={} corpus_planning_overage={}",
-            accounting.levels(),
-            accounting.relinearization_position_count(),
-            accounting.galois_position_count(),
-            accounting.source_component_count_per_participant(),
-            accounting.source_public_polynomial_context_hash_count_per_participant(),
-            accounting.source_public_polynomial_context_hash_resident_byte_length_per_participant(),
-            accounting.final_component_count(),
-            accounting.source_wire_byte_length_per_participant(),
-            accounting.source_resident_byte_length_per_participant(),
-            accounting.final_evaluator_key_store_wire_byte_length(),
-            accounting.final_evaluator_key_store_resident_byte_length(),
-            accounting.ceremony_setup_wire_byte_length(),
-            accounting.ceremony_source_and_final_resident_volume_byte_length(),
-            CEREMONY_CORPUS_PLANNING_TARGET_BYTE_LENGTH,
-            planning_target_overage,
         );
     }
 
@@ -1412,6 +1390,16 @@ mod tests {
     fn candidate_suite_gate_derives_one_complete_canonical_record() {
         let candidate = derive_selected_suite_candidate_record()
             .expect("the candidate must satisfy every static selection gate");
+        let canonical_bytes = candidate
+            .encode()
+            .expect("the complete candidate record encodes canonically");
+        eprintln!(
+            "selected suite candidate canonical bytes: {}",
+            canonical_bytes
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        );
         assert_eq!(
             candidate.artifacts(),
             derive_selected_artifact_references()

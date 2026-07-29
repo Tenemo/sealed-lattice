@@ -354,6 +354,33 @@ impl<F: Field> Witness<F> {
         folding: usize,
         poly: Poly<F>,
     ) -> Result<Self, InterleavedWitnessError> {
+        let (num_variables, placements) =
+            Self::plan_interleaved_layout(&table_shapes, folding)?;
+        if poly.num_variables() != num_variables {
+            return Err(InterleavedWitnessError::PolynomialVariableCountMismatch {
+                expected: num_variables,
+                actual: poly.num_variables(),
+            });
+        }
+        Ok(Self {
+            tables: Vec::new(),
+            table_shapes,
+            placements,
+            num_variables,
+            folding,
+            poly,
+        })
+    }
+
+    /// Validates and plans an interleaved layout without allocating its
+    /// stacked polynomial.
+    ///
+    /// Detached prefix provers use this metadata-only path while source
+    /// columns remain in bounded external storage.
+    pub(crate) fn plan_interleaved_layout(
+        table_shapes: &[TableShape],
+        folding: usize,
+    ) -> Result<(usize, Vec<TablePlacement>), InterleavedWitnessError> {
         if table_shapes.is_empty() {
             return Err(InterleavedWitnessError::EmptyTableShapes);
         }
@@ -364,7 +391,7 @@ impl<F: Field> Witness<F> {
             return Err(InterleavedWitnessError::TableBelowFoldingDepth);
         }
         let mut total_cell_count = 0_usize;
-        for shape in &table_shapes {
+        for shape in table_shapes {
             let row_count = 1_usize
                 .checked_shl(shape.num_variables() as u32)
                 .ok_or(InterleavedWitnessError::LayoutSizeOverflow)?;
@@ -393,23 +420,10 @@ impl<F: Field> Witness<F> {
         // addition has succeeded above, so those operations are safe here.
         let (num_variables, mut placements) = plan_layout(&shapes);
         debug_assert_eq!(num_variables, checked_num_variables);
-        if poly.num_variables() != num_variables {
-            return Err(InterleavedWitnessError::PolynomialVariableCountMismatch {
-                expected: num_variables,
-                actual: poly.num_variables(),
-            });
-        }
         placements
             .iter_mut()
             .for_each(TablePlacement::reverse_selectors);
-        Ok(Self {
-            tables: Vec::new(),
-            table_shapes,
-            placements,
-            num_variables,
-            folding,
-            poly,
-        })
+        Ok((num_variables, placements))
     }
 
     /// Returns the number of variables of the stacked polynomial.

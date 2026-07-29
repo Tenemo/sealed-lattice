@@ -385,14 +385,6 @@ pub(super) mod tests {
             ),
             Err(RelationPlanError::InvalidChallengeCatalog)
         );
-        eprintln!(
-            "same-secret columns={} constraints={} trees={} base_width={} auxiliary_width={}",
-            variant.ordered_columns.len(),
-            variant.ordered_constraints.len(),
-            variant.ordered_trees.len(),
-            proof_tree_width(variant, 1),
-            proof_tree_width(variant, 2),
-        );
     }
 
     #[test]
@@ -416,20 +408,6 @@ pub(super) mod tests {
             compile_same_secret_relation_plan(&unsupported_commitment_rank, &context),
             Err(RelationPlanError::InvalidDomain)
         );
-    }
-
-    pub(in super::super) fn proof_tree_width(variant: &RelationPlanVariant, role: u16) -> usize {
-        variant
-            .ordered_trees
-            .iter()
-            .find_map(|tree| match tree {
-                RelationTreeDescriptor::ProofCreated {
-                    proof_tree_role,
-                    ordered_column_ordinals,
-                } if *proof_tree_role == role => Some(ordered_column_ordinals.len()),
-                _ => None,
-            })
-            .expect("proof-created tree role")
     }
 
     pub(in super::super) fn assert_integer_lift_phase_ownership(variant: &RelationPlanVariant) {

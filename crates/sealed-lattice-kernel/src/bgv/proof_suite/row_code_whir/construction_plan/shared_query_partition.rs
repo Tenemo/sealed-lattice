@@ -88,10 +88,13 @@ impl SharedQueryPartitionRow {
 
 /// The exact partition for the selected same-secret construction.
 ///
-/// The outer words are the only class that collapses. The relation phases, the
-/// bound trees, and the statement roots each draw their own vector, so they are
-/// partitioned separately and pay their own multiplicity, which is exactly the
-/// asymmetry the borrowed prior-certificate design relies on.
+/// Every row is one independently bounded event class, and the words inside a
+/// row share that class's vector. The outer opening words and relation-phase
+/// columns reuse the outer vector. The bound-tree checks reuse the first forty
+/// coordinates of the direct-bound vector, while the three statement roots use
+/// all 266 coordinates of that same vector. The different agreement geometries
+/// remain separate terms, and each row earns one deterministic selected-word
+/// charge within its own geometry.
 pub(in crate::bgv::proof_suite) fn selected_shared_query_partition() -> [SharedQueryPartitionRow; 4]
 {
     [
@@ -116,7 +119,7 @@ pub(in crate::bgv::proof_suite) fn selected_shared_query_partition() -> [SharedQ
         SharedQueryPartitionRow {
             class: SharedQueryEventClass::BoundTreeWords,
             word_count: 8,
-            sampled_coordinate_count: 266,
+            sampled_coordinate_count: 40,
             words_fixed_before_sampling: true,
             shares_one_query_vector: true,
             charge_reason: SharedQueryChargeReason::DeterministicBadWordSelection,
@@ -127,9 +130,9 @@ pub(in crate::bgv::proof_suite) fn selected_shared_query_partition() -> [SharedQ
             word_count: 3,
             sampled_coordinate_count: 266,
             words_fixed_before_sampling: true,
-            shares_one_query_vector: false,
-            charge_reason: SharedQueryChargeReason::SeparateQueryVectors,
-            charged_term_count: 3,
+            shares_one_query_vector: true,
+            charge_reason: SharedQueryChargeReason::DeterministicBadWordSelection,
+            charged_term_count: 1,
         },
     ]
 }
@@ -161,13 +164,16 @@ mod tests {
             );
         }
 
-        // The outer words are the class that collapses to one term, and the
-        // separate statement-root reduction is the class that does not. That
-        // asymmetry is load bearing, so assert it directly.
+        // Every word within a class shares its vector and therefore collapses
+        // to one selected-word term. Two pairs of classes intentionally reuse
+        // a vector but retain distinct agreement geometries.
         let partition = selected_shared_query_partition();
-        assert_eq!(partition[0].charged_term_count, 1);
-        assert_eq!(partition[0].word_count, 3);
-        assert_eq!(partition[3].charged_term_count, partition[3].word_count);
+        for row in partition {
+            assert_eq!(row.charged_term_count, 1);
+            assert!(row.word_count > row.charged_term_count);
+        }
+        assert_eq!(partition[2].sampled_coordinate_count, 40);
+        assert_eq!(partition[3].sampled_coordinate_count, 266);
 
         // Every class is distinct, so no event is counted twice or omitted.
         let mut classes = partition.map(|row| row.class);

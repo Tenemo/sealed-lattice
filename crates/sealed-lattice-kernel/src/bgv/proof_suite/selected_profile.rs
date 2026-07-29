@@ -39,8 +39,11 @@ use super::{
     PROOF_NON_NATIVE_THETA_REPETITION_COUNT, PROOF_OUT_OF_DOMAIN_POINT_COUNT,
     RelationPlanCheckContext, ResolvedSuiteModulus, SuiteModulusReference,
     row_code_whir::{
+        ROW_CODE_WHIR_BALLOT_OPENING_DEGREE_BOUND_EXCLUSIVE,
+        ROW_CODE_WHIR_COMMITTED_MATERIAL_OPENING_DEGREE_BOUND_EXCLUSIVE,
         ROW_CODE_WHIR_EVALUATION_DOMAIN_SIZE, ROW_CODE_WHIR_OPENING_DEGREE_BOUND_EXCLUSIVE,
         ROW_CODE_WHIR_PHASE_COLUMN_QUERY_COORDINATE_COUNT,
+        ROW_CODE_WHIR_TARGET_RELEASE_OPENING_DEGREE_BOUND_EXCLUSIVE,
     },
 };
 
@@ -575,7 +578,7 @@ pub(crate) fn selected_ballot_validity_relation_compilation()
         &BallotValidityRelationPlanInput {
             ring_degree: selected_ring_degree(),
             evaluation_domain_size: SELECTED_EVALUATION_DOMAIN_SIZE,
-            opening_degree_bound_exclusive: SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE,
+            opening_degree_bound_exclusive: ROW_CODE_WHIR_BALLOT_OPENING_DEGREE_BOUND_EXCLUSIVE,
             active_data_modulus_indices: selected_data_modulus_indices(),
             plaintext_modulus: PLAINTEXT_MODULUS,
             reserved_slot_rule: RESERVED_BALLOT_SLOT_RULE,
@@ -667,7 +670,8 @@ pub(crate) fn selected_target_release_relation()
         &TargetReleaseRelationPlanInput {
             ring_degree: selected_ring_degree(),
             evaluation_domain_size: SELECTED_EVALUATION_DOMAIN_SIZE,
-            opening_degree_bound_exclusive: SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE,
+            opening_degree_bound_exclusive:
+                ROW_CODE_WHIR_TARGET_RELEASE_OPENING_DEGREE_BOUND_EXCLUSIVE,
             material_column_degree_bound_exclusive,
             public_polynomial_column_degree_bound_exclusive: selected_ring_degree(),
             target_modulus_indices: (0..=CANONICAL_TARGET_CIPHERTEXT_LEVEL)
@@ -688,7 +692,8 @@ pub(crate) fn selected_committed_material_relation_plan_input()
     Ok(CommittedMaterialRelationPlanInput {
         ring_degree: selected_ring_degree(),
         evaluation_domain_size: SELECTED_EVALUATION_DOMAIN_SIZE,
-        opening_degree_bound_exclusive: SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE,
+        opening_degree_bound_exclusive:
+            ROW_CODE_WHIR_COMMITTED_MATERIAL_OPENING_DEGREE_BOUND_EXCLUSIVE,
         material_column_degree_bound_exclusive: u64::try_from(
             committed_material_profile.material_column_degree_bound_exclusive(),
         )
@@ -870,7 +875,7 @@ pub(crate) fn selected_relation_plans()
         &BallotValidityRelationPlanInput {
             ring_degree: selected_ring_degree(),
             evaluation_domain_size: SELECTED_EVALUATION_DOMAIN_SIZE,
-            opening_degree_bound_exclusive: SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE,
+            opening_degree_bound_exclusive: ROW_CODE_WHIR_BALLOT_OPENING_DEGREE_BOUND_EXCLUSIVE,
             active_data_modulus_indices: active_data_modulus_indices.clone(),
             plaintext_modulus: PLAINTEXT_MODULUS,
             reserved_slot_rule: RESERVED_BALLOT_SLOT_RULE,
@@ -1669,7 +1674,10 @@ mod tests {
                             .trace_mask_degree_bound_exclusive
                 }
                 RelationMaskKind::Telescoping => mask.mask_degree_bound_exclusive() == 16_898,
-                RelationMaskKind::OpeningBatch => mask.mask_degree_bound_exclusive() == 262_143,
+                RelationMaskKind::OpeningBatch => {
+                    mask.mask_degree_bound_exclusive()
+                        == SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE - 1
+                }
             }
         }));
 
@@ -1695,7 +1703,10 @@ mod tests {
                             .trace_mask_degree_bound_exclusive
                 }
                 RelationMaskKind::Telescoping => mask.mask_degree_bound_exclusive() == 514,
-                RelationMaskKind::OpeningBatch => mask.mask_degree_bound_exclusive() == 262_143,
+                RelationMaskKind::OpeningBatch => {
+                    mask.mask_degree_bound_exclusive()
+                        == ROW_CODE_WHIR_BALLOT_OPENING_DEGREE_BOUND_EXCLUSIVE - 1
+                }
             }
         }));
     }

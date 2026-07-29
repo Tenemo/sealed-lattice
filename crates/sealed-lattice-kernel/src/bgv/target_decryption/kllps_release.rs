@@ -861,7 +861,7 @@ impl KllpsTargetReleaseWitnessSource {
             coordinate_capacity,
         )?;
         let relation_trees = source_polynomials.relation_tree_inputs()?;
-        let common_generation = PreparedCommonProofGeneration::from_exact_family_sources(
+        let common_generation = PreparedCommonProofGeneration::from_row_code_whir_sources(
             authorization,
             relation_plan,
             canonical_application_statement_bytes,

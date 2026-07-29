@@ -1,19 +1,22 @@
 use super::{
     BTreeMap, CanonicalStreamReadbackVerifier, CanonicalStreamVerifier,
     CommonProofRequiredByteRange, CommonProofRuntimeError, CommonProofRuntimeLimits,
-    CommonProofVerificationBinding, CommonProofVerificationPoll,
-    CommonProofVerificationStateMachine, CommonProofVerificationStatementSource, HASH_BYTE_LENGTH,
+    CommonProofVerificationBinding, CommonProofVerificationStatementSource, HASH_BYTE_LENGTH,
     MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH, MAXIMUM_RESIDENT_COMMON_PROOF_INPUT_CHUNKS,
-    PollableCommonProofVerificationInput, RefusalReason, ResidentCommonProofByteSource,
-    ResidentCommonProofInputChunk, VerifiedCanonicalStreamSummary, VerifiedCommonProof,
-    VerifiedEvaluatorAuxiliaryRoot, VerifiedRelationColumnEvaluator, VerifiedStatementOwnedTree,
-    required_chunk_indices,
+    RefusalReason, ResidentCommonProofByteSource, ResidentCommonProofInputChunk,
+    VerifiedCanonicalStreamSummary, VerifiedCommonProof, VerifiedEvaluatorAuxiliaryRoot,
+    VerifiedRelationColumnEvaluator, VerifiedStatementOwnedTree, required_chunk_indices,
 };
-use crate::bgv::proof_suite::VerifiedRowCodeWhirProofFacts;
 use crate::bgv::proof_suite::row_code_whir::{
     ExactSameSecretFinalProofVerification, ExactSameSecretIncrementalVerification,
-    PreparedExactSameSecretVerification, VerifiedSameSecretLowDegreePrerequisite,
-    exact_same_secret_verification_runtime_limits, prepare_exact_same_secret_verification,
+    PreparedExactSameSecretVerification, PreparedRowCodeWhirVerification,
+    RowCodeWhirFinalProofVerification, RowCodeWhirIncrementalVerification,
+    VerifiedSameSecretLowDegreePrerequisite, exact_same_secret_verification_runtime_limits,
+    prepare_exact_same_secret_verification, prepare_row_code_whir_verification,
+    prepare_setup_polynomial_bound_row_code_whir_verification,
+};
+use crate::bgv::{
+    proof_suite::VerifiedRowCodeWhirProofFacts, setup::VerifiedSetupPolynomialLowDegreePrerequisite,
 };
 
 /// One consumed set of positively verified inputs. This value is process local
@@ -28,68 +31,83 @@ pub(crate) struct ConsumedCommonProofVerificationInputs {
 }
 
 impl ConsumedCommonProofVerificationInputs {
-    #[cfg(test)]
-    pub(crate) fn verification_binding(&self) -> CommonProofVerificationBinding {
-        self.statement_source.verification_binding()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn relation_plan(&self) -> &super::CommonProofRelationPlanCapability {
-        self.statement_source.relation_plan()
-    }
-
-    pub(crate) fn pollable_verification_input(&self) -> PollableCommonProofVerificationInput<'_> {
-        let relation_plan = self.statement_source.relation_plan();
-        let declared_proof_byte_length = usize::try_from(
-            self.statement_source
-                .proof_stream_descriptor()
-                .total_byte_length,
-        )
-        .expect("the verified proof stream length fits the local address space");
-        PollableCommonProofVerificationInput {
-            protocol_version: self.statement_source.protocol_version(),
-            suite_identifier: self
-                .statement_source
-                .verification_binding()
-                .suite_identifier,
-            canonical_application_statement_bytes: self
-                .statement_source
-                .canonical_application_statement_bytes(),
-            relation_plan: relation_plan.compiled_plan(),
-            relation_context: &relation_plan.relation_context,
-            schedule_position: relation_plan.schedule_position,
-            top_count: relation_plan.top_count,
-            row_code_whir_construction_plan_identity_hash: relation_plan
-                .row_code_whir_construction_plan_identity_hash(),
-            statement_owned_trees: &self.statement_owned_trees,
-            evaluator_auxiliary_roots: &self.evaluator_auxiliary_roots,
-            declared_proof_byte_length,
-            proof_byte_ceiling: self.statement_source.limits().maximum_proof_byte_length(),
-            maximum_resident_window_byte_length: MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH
-                .checked_mul(MAXIMUM_RESIDENT_COMMON_PROOF_INPUT_CHUNKS)
-                .unwrap_or(MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH),
-        }
-    }
-
     pub(crate) fn prepare(self) -> PreparedCommonProofVerification {
-        let verifier = self
-            .statement_source
-            .new_verification_state_machine(self.pollable_verification_input())
-            .expect("consumed common-proof verifier inputs passed complete validation");
-        let verification_binding = self.statement_source.verification_binding();
+        self.prepare_row_code_whir(None)
+            .expect("consumed row-code WHIR inputs passed complete validation")
+    }
+
+    pub(in crate::bgv) fn prepare_with_setup_polynomial_prerequisite(
+        self,
+        prerequisite: VerifiedSetupPolynomialLowDegreePrerequisite,
+    ) -> Result<PreparedCommonProofVerification, CommonProofRuntimeError> {
+        self.prepare_row_code_whir(Some(prerequisite))
+    }
+
+    fn prepare_row_code_whir(
+        self,
+        setup_polynomial_prerequisite: Option<VerifiedSetupPolynomialLowDegreePrerequisite>,
+    ) -> Result<PreparedCommonProofVerification, CommonProofRuntimeError> {
+        let Self {
+            statement_source,
+            statement_owned_trees,
+            evaluator_auxiliary_roots,
+            verified_column_evaluator,
+        } = self;
+        let verification_binding = statement_source.verification_binding();
         let canonical_stream_verifier = CanonicalStreamVerifier::new(
             verification_binding.proof_application.proof_stream_domain,
-            self.statement_source.proof_stream_descriptor().clone(),
+            statement_source.proof_stream_descriptor().clone(),
         )
         .expect("the verified statement source retains one canonical proof descriptor");
-        PreparedCommonProofVerification {
-            statement_source: self.statement_source,
-            canonical_stream_verifier: Box::new(canonical_stream_verifier),
-            verifier: PreparedCommonProofVerifier::Current {
-                verifier: Box::new(verifier),
-                verified_column_evaluator: self.verified_column_evaluator,
-            },
+        let exact_source = statement_source
+            .exact_source()
+            .expect("the verifier owns an exact family-minted statement source");
+        let relation_plan = statement_source.relation_plan();
+        if relation_plan
+            .row_code_whir_construction_plan()
+            .requires_verified_vss_bound_prerequisite()
+        {
+            return Err(CommonProofRuntimeError::WrongVerificationBinding);
         }
+        let proof_application_binding = exact_source.proof_application_binding();
+        let row_code_whir_verifier = match setup_polynomial_prerequisite {
+            Some(prerequisite) => prepare_setup_polynomial_bound_row_code_whir_verification(
+                &prerequisite,
+                statement_source.protocol_version(),
+                proof_application_binding.application_slot(),
+                exact_source.canonical_application_statement_bytes(),
+                proof_application_binding.proof_header_hash(),
+                statement_source.proof_stream_descriptor().total_byte_length,
+                relation_plan,
+                statement_owned_trees,
+                evaluator_auxiliary_roots,
+                verified_column_evaluator,
+            ),
+            None => prepare_row_code_whir_verification(
+                statement_source.protocol_version(),
+                proof_application_binding.application_slot(),
+                exact_source.canonical_application_statement_bytes(),
+                proof_application_binding.proof_header_hash(),
+                statement_source.proof_stream_descriptor().total_byte_length,
+                relation_plan,
+                statement_owned_trees,
+                evaluator_auxiliary_roots,
+                verified_column_evaluator,
+            ),
+        }
+        .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+        let verifier = PreparedCommonProofVerifier::RowCodeWhir {
+            verifier: Box::new(row_code_whir_verifier),
+            verified_proof_metadata: Box::new(row_code_whir_verified_proof_metadata(
+                &statement_source,
+                exact_source,
+            )),
+        };
+        Ok(PreparedCommonProofVerification {
+            statement_source,
+            canonical_stream_verifier: Box::new(canonical_stream_verifier),
+            verifier,
+        })
     }
 
     pub(in crate::bgv) fn prepare_exact_same_secret(
@@ -163,13 +181,38 @@ struct RowCodeWhirVerifiedProofMetadata {
     top_count: Option<u16>,
 }
 
+fn row_code_whir_verified_proof_metadata(
+    statement_source: &CommonProofVerificationStatementSource,
+    exact_source: &super::VerifiedCommonProofStatementSource,
+) -> RowCodeWhirVerifiedProofMetadata {
+    let verification_binding = statement_source.verification_binding();
+    let relation_plan = statement_source.relation_plan();
+    RowCodeWhirVerifiedProofMetadata {
+        protocol_version: statement_source.protocol_version(),
+        suite_identifier: verification_binding.suite_identifier,
+        application_statement_schema_identifier: verification_binding
+            .proof_application
+            .application_statement_schema_identifier,
+        application_statement_hash: exact_source.application_statement_hash().into_bytes(),
+        proof_header_hash: verification_binding.proof_application.proof_header_hash,
+        row_code_whir_construction_plan_identity_hash: relation_plan
+            .row_code_whir_construction_plan_identity_hash(),
+        expected_verified_query_count: relation_plan
+            .proof_query_count()
+            .expect("the checked query count fits u32"),
+        relation_plan_variant_hash: relation_plan.relation_plan_variant_hash(),
+        schedule_position: relation_plan.schedule_position(),
+        top_count: relation_plan.top_count(),
+    }
+}
+
 enum PreparedCommonProofVerifier {
-    Current {
-        verifier: Box<CommonProofVerificationStateMachine>,
-        verified_column_evaluator: Box<dyn VerifiedRelationColumnEvaluator>,
-    },
     ExactSameSecret {
         verifier: Box<PreparedExactSameSecretVerification>,
+        verified_proof_metadata: Box<RowCodeWhirVerifiedProofMetadata>,
+    },
+    RowCodeWhir {
+        verifier: Box<PreparedRowCodeWhirVerification>,
         verified_proof_metadata: Box<RowCodeWhirVerifiedProofMetadata>,
     },
 }
@@ -208,11 +251,6 @@ pub(crate) enum CommonProofVerificationWorkerPoll {
     NeedsReadback {
         first_chunk_index: u32,
         second_chunk_index: Option<u32>,
-    },
-    PrefixAccepted,
-    QueryHeaderAccepted,
-    QueryTreeAccepted {
-        catalog_index: u16,
     },
     Complete,
 }
@@ -294,12 +332,12 @@ impl From<CommonProofRuntimeError> for CommonProofVerificationWorkerError {
 }
 
 enum ActiveCommonProofVerifier {
-    Current {
-        verifier: Box<CommonProofVerificationStateMachine>,
-        verified_column_evaluator: Box<dyn VerifiedRelationColumnEvaluator>,
-    },
     ExactSameSecret {
         phase: ExactSameSecretActiveVerificationPhase,
+        verified_proof_metadata: Box<RowCodeWhirVerifiedProofMetadata>,
+    },
+    RowCodeWhir {
+        phase: RowCodeWhirActiveVerificationPhase,
         verified_proof_metadata: Box<RowCodeWhirVerifiedProofMetadata>,
     },
 }
@@ -311,13 +349,19 @@ enum ExactSameSecretActiveVerificationPhase {
     Transitioning,
 }
 
+enum RowCodeWhirActiveVerificationPhase {
+    Decoding(Box<RowCodeWhirIncrementalVerification>),
+    AbsorbingFinalProof(Box<RowCodeWhirFinalProofVerification>),
+    Verified(Box<VerifiedCommonProof>),
+    Transitioning,
+}
+
 impl ActiveCommonProofVerifier {
     fn required_byte_range(
         &self,
         declared_proof_byte_length: usize,
     ) -> Result<Option<CommonProofRequiredByteRange>, CommonProofRuntimeError> {
         match self {
-            Self::Current { verifier, .. } => Ok(verifier.required_byte_range()),
             Self::ExactSameSecret { phase, .. } => {
                 let consumed_byte_length = match phase {
                     ExactSameSecretActiveVerificationPhase::Decoding(verifier) => {
@@ -345,15 +389,37 @@ impl ActiveCommonProofVerifier {
                     .ok_or(CommonProofRuntimeError::InvalidLimits)
                     .map(Some)
             }
+            Self::RowCodeWhir { phase, .. } => {
+                let consumed_byte_length = match phase {
+                    RowCodeWhirActiveVerificationPhase::Decoding(verifier) => {
+                        if verifier.is_decoding_complete() {
+                            return Ok(None);
+                        }
+                        verifier.decoded_byte_length()
+                    }
+                    RowCodeWhirActiveVerificationPhase::AbsorbingFinalProof(verifier) => {
+                        verifier.absorbed_byte_length()
+                    }
+                    RowCodeWhirActiveVerificationPhase::Verified(_) => return Ok(None),
+                    RowCodeWhirActiveVerificationPhase::Transitioning => {
+                        return Err(CommonProofRuntimeError::WrongOperationPhase);
+                    }
+                };
+                let remaining_byte_length = declared_proof_byte_length
+                    .checked_sub(consumed_byte_length)
+                    .ok_or(CommonProofRuntimeError::WrongOperationPhase)?;
+                if remaining_byte_length == 0 {
+                    return Ok(None);
+                }
+                let byte_length = remaining_byte_length.min(MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH);
+                CommonProofRequiredByteRange::new(consumed_byte_length, byte_length)
+                    .ok_or(CommonProofRuntimeError::InvalidLimits)
+                    .map(Some)
+            }
         }
     }
 
-    fn cancel(&mut self) {
-        match self {
-            Self::Current { verifier, .. } => verifier.cancel(),
-            Self::ExactSameSecret { .. } => {}
-        }
-    }
+    fn cancel(&mut self) {}
 }
 
 enum CommonProofVerificationWorkerPhase {
@@ -472,13 +538,6 @@ impl CommonProofVerificationWorker {
         )
         .map_err(CommonProofVerificationWorkerError::Stream)?;
         let verifier = match verifier {
-            PreparedCommonProofVerifier::Current {
-                verifier,
-                verified_column_evaluator,
-            } => ActiveCommonProofVerifier::Current {
-                verifier,
-                verified_column_evaluator,
-            },
             PreparedCommonProofVerifier::ExactSameSecret {
                 verifier,
                 verified_proof_metadata,
@@ -488,6 +547,18 @@ impl CommonProofVerificationWorker {
                     .map_err(|_| CommonProofVerificationWorkerError::Verifier)?;
                 ActiveCommonProofVerifier::ExactSameSecret {
                     phase: ExactSameSecretActiveVerificationPhase::Decoding(Box::new(verifier)),
+                    verified_proof_metadata,
+                }
+            }
+            PreparedCommonProofVerifier::RowCodeWhir {
+                verifier,
+                verified_proof_metadata,
+            } => {
+                let verifier = (*verifier)
+                    .into_incremental()
+                    .map_err(|_| CommonProofVerificationWorkerError::Verifier)?;
+                ActiveCommonProofVerifier::RowCodeWhir {
+                    phase: RowCodeWhirActiveVerificationPhase::Decoding(Box::new(verifier)),
                     verified_proof_metadata,
                 }
             }
@@ -659,6 +730,90 @@ impl CommonProofVerificationWorker {
                         }
                     }
                 }
+                if let ActiveCommonProofVerifier::RowCodeWhir {
+                    phase,
+                    verified_proof_metadata,
+                } = verifier
+                {
+                    match phase {
+                        RowCodeWhirActiveVerificationPhase::Decoding(decoder)
+                            if decoder.is_decoding_complete() =>
+                        {
+                            let owned_phase = core::mem::replace(
+                                phase,
+                                RowCodeWhirActiveVerificationPhase::Transitioning,
+                            );
+                            let RowCodeWhirActiveVerificationPhase::Decoding(decoder) = owned_phase
+                            else {
+                                return Err(CommonProofRuntimeError::WrongOperationPhase.into());
+                            };
+                            let final_proof_verification = decoder
+                                .finish_decoding()
+                                .map_err(|_| CommonProofVerificationWorkerError::Verifier)?;
+                            *phase = RowCodeWhirActiveVerificationPhase::AbsorbingFinalProof(
+                                Box::new(final_proof_verification),
+                            );
+                            continue;
+                        }
+                        RowCodeWhirActiveVerificationPhase::AbsorbingFinalProof(
+                            final_proof_verification,
+                        ) if final_proof_verification.absorbed_byte_length()
+                            == self.proof_byte_length =>
+                        {
+                            let owned_phase = core::mem::replace(
+                                phase,
+                                RowCodeWhirActiveVerificationPhase::Transitioning,
+                            );
+                            let RowCodeWhirActiveVerificationPhase::AbsorbingFinalProof(
+                                final_proof_verification,
+                            ) = owned_phase
+                            else {
+                                return Err(CommonProofRuntimeError::WrongOperationPhase.into());
+                            };
+                            let metrics = final_proof_verification
+                                .finish()
+                                .map_err(|_| CommonProofVerificationWorkerError::Verifier)?;
+                            let verified_query_count = u32::try_from(metrics.query_count)
+                                .map_err(|_| CommonProofRuntimeError::InvalidLimits)?;
+                            if metrics.proof_byte_length != self.proof_byte_length
+                                || verified_query_count
+                                    != verified_proof_metadata.expected_verified_query_count
+                            {
+                                return Err(
+                                    CommonProofRuntimeError::WrongVerificationBinding.into()
+                                );
+                            }
+                            *phase = RowCodeWhirActiveVerificationPhase::Verified(Box::new(
+                                VerifiedCommonProof::from_verified_row_code_whir(
+                                    VerifiedRowCodeWhirProofFacts {
+                                        protocol_version: verified_proof_metadata.protocol_version,
+                                        suite_identifier: verified_proof_metadata.suite_identifier,
+                                        application_statement_schema_identifier:
+                                            verified_proof_metadata
+                                                .application_statement_schema_identifier,
+                                        application_statement_hash: verified_proof_metadata
+                                            .application_statement_hash,
+                                        proof_header_hash: verified_proof_metadata
+                                            .proof_header_hash,
+                                        proof_byte_length: u64::try_from(metrics.proof_byte_length)
+                                            .map_err(|_| CommonProofRuntimeError::InvalidLimits)?,
+                                        verified_query_count,
+                                        row_code_whir_construction_plan_identity_hash:
+                                            verified_proof_metadata
+                                                .row_code_whir_construction_plan_identity_hash,
+                                        relation_plan_variant_hash: verified_proof_metadata
+                                            .relation_plan_variant_hash,
+                                        schedule_position: verified_proof_metadata
+                                            .schedule_position,
+                                        top_count: verified_proof_metadata.top_count,
+                                    },
+                                ),
+                            ));
+                        }
+                        RowCodeWhirActiveVerificationPhase::Verified(_) => {}
+                        _ => return Err(CommonProofRuntimeError::WrongOperationPhase.into()),
+                    }
+                }
                 return Ok(CommonProofVerificationWorkerPoll::Complete);
             };
             self.account_required_range(required_range)?;
@@ -685,45 +840,6 @@ impl CommonProofVerificationWorker {
                 });
             }
             match verifier {
-                ActiveCommonProofVerifier::Current {
-                    verifier,
-                    verified_column_evaluator,
-                } => {
-                    let resident_input_chunks = resident_chunks
-                        .iter()
-                        .map(|(chunk_index, bytes)| {
-                            chunk_index
-                                .checked_mul(MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH)
-                                .map(|offset| ResidentCommonProofInputChunk::new(offset, bytes))
-                                .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
-                    let source = ResidentCommonProofByteSource::new(
-                        self.proof_byte_length,
-                        resident_input_chunks,
-                    )?;
-                    let result = verifier
-                        .poll(&source, verified_column_evaluator.as_mut())
-                        .map_err(|_| CommonProofVerificationWorkerError::Verifier)?;
-                    resident_chunks.clear();
-                    self.last_accounted_required_range = None;
-                    return match result {
-                        CommonProofVerificationPoll::PrefixAccepted => {
-                            Ok(CommonProofVerificationWorkerPoll::PrefixAccepted)
-                        }
-                        CommonProofVerificationPoll::QueryHeaderAccepted => {
-                            Ok(CommonProofVerificationWorkerPoll::QueryHeaderAccepted)
-                        }
-                        CommonProofVerificationPoll::QueryTreeAccepted { catalog_index } => {
-                            Ok(CommonProofVerificationWorkerPoll::QueryTreeAccepted {
-                                catalog_index,
-                            })
-                        }
-                        CommonProofVerificationPoll::Complete => {
-                            Ok(CommonProofVerificationWorkerPoll::Complete)
-                        }
-                    };
-                }
                 ActiveCommonProofVerifier::ExactSameSecret { phase, .. } => {
                     match phase {
                         ExactSameSecretActiveVerificationPhase::Decoding(decoder) => {
@@ -807,6 +923,89 @@ impl CommonProofVerificationWorker {
                     resident_chunks.clear();
                     self.last_accounted_required_range = None;
                 }
+                ActiveCommonProofVerifier::RowCodeWhir { phase, .. } => {
+                    match phase {
+                        RowCodeWhirActiveVerificationPhase::Decoding(decoder) => {
+                            if required_range.offset() != decoder.decoded_byte_length() {
+                                return Err(CommonProofRuntimeError::WrongOperationPhase.into());
+                            }
+                            let resident_input_chunks = resident_chunks
+                                .iter()
+                                .map(|(chunk_index, bytes)| {
+                                    chunk_index
+                                        .checked_mul(MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH)
+                                        .map(|offset| {
+                                            ResidentCommonProofInputChunk::new(offset, bytes)
+                                        })
+                                        .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)
+                                })
+                                .collect::<Result<Vec<_>, _>>()?;
+                            let source = ResidentCommonProofByteSource::new(
+                                self.proof_byte_length,
+                                resident_input_chunks,
+                            )?;
+                            let available_end_offset = required_range
+                                .offset()
+                                .checked_add(required_range.byte_length())
+                                .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
+                            decoder
+                                .consume_available(&source, available_end_offset)
+                                .map_err(|_| CommonProofVerificationWorkerError::Verifier)?;
+                        }
+                        RowCodeWhirActiveVerificationPhase::AbsorbingFinalProof(
+                            final_proof_verification,
+                        ) => {
+                            if required_range.offset()
+                                != final_proof_verification.absorbed_byte_length()
+                            {
+                                return Err(CommonProofRuntimeError::WrongOperationPhase.into());
+                            }
+                            let required_end_offset = required_range
+                                .offset()
+                                .checked_add(required_range.byte_length())
+                                .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
+                            for chunk_index in [Some(first_chunk_index), second_chunk_index]
+                                .into_iter()
+                                .flatten()
+                            {
+                                let chunk = resident_chunks
+                                    .get(&chunk_index)
+                                    .ok_or(CommonProofRuntimeError::WrongOperationPhase)?;
+                                let chunk_offset = chunk_index
+                                    .checked_mul(MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH)
+                                    .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
+                                let chunk_end_offset = chunk_offset
+                                    .checked_add(chunk.len())
+                                    .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
+                                let intersection_start = required_range.offset().max(chunk_offset);
+                                let intersection_end = required_end_offset.min(chunk_end_offset);
+                                if intersection_start >= intersection_end {
+                                    return Err(
+                                        CommonProofRuntimeError::WrongVerificationBinding.into()
+                                    );
+                                }
+                                let local_start = intersection_start - chunk_offset;
+                                let local_end = intersection_end - chunk_offset;
+                                final_proof_verification
+                                    .absorb(&chunk[local_start..local_end])
+                                    .map_err(|_| CommonProofVerificationWorkerError::Verifier)?;
+                            }
+                            if final_proof_verification.absorbed_byte_length()
+                                != required_end_offset
+                            {
+                                return Err(
+                                    CommonProofRuntimeError::WrongVerificationBinding.into()
+                                );
+                            }
+                        }
+                        RowCodeWhirActiveVerificationPhase::Verified(_)
+                        | RowCodeWhirActiveVerificationPhase::Transitioning => {
+                            return Err(CommonProofRuntimeError::WrongOperationPhase.into());
+                        }
+                    }
+                    resident_chunks.clear();
+                    self.last_accounted_required_range = None;
+                }
             }
         }
     }
@@ -834,14 +1033,18 @@ impl CommonProofVerificationWorker {
             return Err(CommonProofRuntimeError::WrongOperationPhase.into());
         }
         let proof = match verifier {
-            ActiveCommonProofVerifier::Current { mut verifier, .. } => verifier
-                .take_verified_common_proof()
-                .ok_or(CommonProofRuntimeError::WrongOperationPhase)?,
             ActiveCommonProofVerifier::ExactSameSecret {
                 phase: ExactSameSecretActiveVerificationPhase::Verified(proof),
                 ..
             } => *proof,
             ActiveCommonProofVerifier::ExactSameSecret { .. } => {
+                return Err(CommonProofRuntimeError::WrongOperationPhase.into());
+            }
+            ActiveCommonProofVerifier::RowCodeWhir {
+                phase: RowCodeWhirActiveVerificationPhase::Verified(proof),
+                ..
+            } => *proof,
+            ActiveCommonProofVerifier::RowCodeWhir { .. } => {
                 return Err(CommonProofRuntimeError::WrongOperationPhase.into());
             }
         };
@@ -854,11 +1057,7 @@ impl CommonProofVerificationWorker {
 
     pub(super) fn cancel(&mut self) {
         match &mut self.phase {
-            CommonProofVerificationWorkerPhase::Ingesting { verifier, .. } => {
-                if let PreparedCommonProofVerifier::Current { verifier, .. } = verifier {
-                    verifier.cancel();
-                }
-            }
+            CommonProofVerificationWorkerPhase::Ingesting { .. } => {}
             CommonProofVerificationWorkerPhase::Verifying { verifier, .. } => verifier.cancel(),
             CommonProofVerificationWorkerPhase::Cancelled => {}
         }

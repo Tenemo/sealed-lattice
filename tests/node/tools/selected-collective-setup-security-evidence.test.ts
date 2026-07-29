@@ -65,9 +65,6 @@ describe('Selected collective-setup security evidence', () => {
             physicalProofApplicationCount: 73,
             readyForClosure: false,
             unresolvedNonAssumptionLeaves: [
-                'commonConstructionKnowledgeSoundness',
-                'commonConstructionQromTransform',
-                'commonConstructionMaskingCorrespondence',
                 'setupFamilySimulationComposition',
                 'collectiveSetupHybridComposition',
             ],
@@ -118,7 +115,7 @@ describe('Selected collective-setup security evidence', () => {
                 expectedEvidence,
             ),
         ).toThrow(
-            'Collective-setup security closure is blocked by: commonConstructionKnowledgeSoundness',
+            'Collective-setup security closure is blocked by: setupFamilySimulationComposition',
         );
         const closure = requireRecord(requireRecord(checkedEvidence).closure);
         expect(closure).toMatchObject({
@@ -193,17 +190,16 @@ describe('Selected collective-setup security evidence', () => {
 
         const overstatedReduction = hostileRecord(checkedEvidence, (record) => {
             const nodes = requireArray(record.reductionDag);
-            const commonProofNode = nodes
+            const setupFamilyNode = nodes
                 .map((value) => requireRecord(value))
                 .find(
                     (node) =>
-                        node.identifier ===
-                        'commonConstructionKnowledgeSoundness',
+                        node.identifier === 'setupFamilySimulationComposition',
                 );
-            if (commonProofNode === undefined) {
-                throw new Error('Expected common-proof obligation.');
+            if (setupFamilyNode === undefined) {
+                throw new Error('Expected setup-family obligation.');
             }
-            commonProofNode.status = 'resolved';
+            setupFamilyNode.status = 'resolved';
         });
         expect(() =>
             validateSelectedCollectiveSetupSecurityEvidence(
@@ -218,7 +214,7 @@ describe('Selected collective-setup security evidence', () => {
                 const imports = requireArray(
                     record.constructionEvidenceImports,
                 );
-                requireRecord(imports[0]).observedStatus = 'resolved';
+                requireRecord(imports[0]).observedStatus = 'unresolved';
                 requireRecord(imports[0]).checkedArtifactDigest = '00'.repeat(
                     64,
                 );

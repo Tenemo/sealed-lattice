@@ -304,7 +304,7 @@ impl<F: Field, EF: ExtensionField<F>> Constraint<F, EF> {
     /// `0..m`, so the carried claim occupies the only remaining degree-`m`
     /// coefficient. Empty batches return one and leave the claim unchanged.
     #[must_use]
-    pub(crate) fn carried_claim_multiplier(&self) -> EF {
+    pub fn carried_claim_multiplier(&self) -> EF {
         let fresh_constraint_count = self.statements.iter().map(Statements::len).sum::<usize>();
         self.challenge.exp_u64(fresh_constraint_count as u64)
     }

@@ -67,7 +67,8 @@ const ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_SCHEMA_IDENTIFIER: u16 = 0x2255;
 const ROW_CODE_WHIR_HASH_PROFILE_SCHEMA_IDENTIFIER: u16 = 0x2256;
 const SCHEMA_VERSION: u16 = 1;
 const PROOF_FAMILY_PROFILE_SCHEMA_VERSION: u16 = 2;
-const PROOF_PROFILE_SET_VERSION: u16 = 4;
+const ROW_CODE_WHIR_CONSTRUCTION_PROFILE_SCHEMA_VERSION: u16 = 2;
+const PROOF_PROFILE_SET_VERSION: u16 = 5;
 const SELECTED_ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_COUNT: usize = 31;
 const ROW_CODE_WHIR_HASH_ALGORITHM_IDENTIFIER: &str = "SHAKE256";
 const ROW_CODE_WHIR_DIGEST_BYTE_LENGTH: u16 = 64;
@@ -813,8 +814,8 @@ fn verify_row_code_whir_construction_profile(
     require_profile_tuple(
         tuple,
         ROW_CODE_WHIR_CONSTRUCTION_PROFILE_SCHEMA_IDENTIFIER,
-        SCHEMA_VERSION,
-        19,
+        ROW_CODE_WHIR_CONSTRUCTION_PROFILE_SCHEMA_VERSION,
+        18,
     )?;
     let selected = RowCodeWhirSelectedParameters::selected();
     let expected_parameters = [
@@ -850,22 +851,21 @@ fn verify_row_code_whir_construction_profile(
         || profile_u64(&tuple.items[11])?
             != u64::try_from(selected.outer_query_count)
                 .map_err(|_| ProofProfileError::CountOverflow)?
-        || profile_u64(&tuple.items[12])? != selected.trace_mask_degree_bound_exclusive
-        || profile_u64(&tuple.items[13])?
+        || profile_u64(&tuple.items[12])?
             != u64::try_from(selected.direct_bound_query_count)
                 .map_err(|_| ProofProfileError::CountOverflow)?
-        || profile_u64(&tuple.items[14])?
-            != u64::try_from(selected.verified_vss_bound_query_count)
+        || profile_u64(&tuple.items[13])?
+            != u64::try_from(selected.prior_proof_bound_query_count)
                 .map_err(|_| ProofProfileError::CountOverflow)?
-        || profile_u32(&tuple.items[15])? != selected.maximum_fiat_shamir_candidate_draws_per_output
-        || profile_u64(&tuple.items[16])? != PROOF_EVALUATION_COSET_OFFSET
+        || profile_u32(&tuple.items[14])? != selected.maximum_fiat_shamir_candidate_draws_per_output
+        || profile_u64(&tuple.items[15])? != PROOF_EVALUATION_COSET_OFFSET
     {
         return Err(ProofProfileError::InvalidSchedule);
     }
 
-    verify_row_code_whir_hash_profile(&profile_nested_tuple(&tuple.items[17], limits)?)?;
+    verify_row_code_whir_hash_profile(&profile_nested_tuple(&tuple.items[16], limits)?)?;
     verify_row_code_whir_construction_references(&profile_nested_tuples(
-        &tuple.items[18],
+        &tuple.items[17],
         limits,
         SELECTED_ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_COUNT,
     )?)
@@ -1345,9 +1345,8 @@ mod canonical_profile_artifact {
         security_level: u64,
         proof_of_work_bits: u64,
         outer_query_count: u64,
-        trace_mask_degree_bound_exclusive: u64,
         direct_bound_query_count: u64,
-        verified_vss_bound_query_count: u64,
+        prior_proof_bound_query_count: u64,
         maximum_fiat_shamir_candidate_draws_per_output: u32,
         evaluation_coset_offset: u64,
     }
@@ -1385,10 +1384,9 @@ mod canonical_profile_artifact {
                 security_level: convert_count(parameters.security_level)?,
                 proof_of_work_bits: convert_count(parameters.proof_of_work_bits)?,
                 outer_query_count: convert_count(parameters.outer_query_count)?,
-                trace_mask_degree_bound_exclusive: parameters.trace_mask_degree_bound_exclusive,
                 direct_bound_query_count: convert_count(parameters.direct_bound_query_count)?,
-                verified_vss_bound_query_count: convert_count(
-                    parameters.verified_vss_bound_query_count,
+                prior_proof_bound_query_count: convert_count(
+                    parameters.prior_proof_bound_query_count,
                 )?,
                 maximum_fiat_shamir_candidate_draws_per_output: parameters
                     .maximum_fiat_shamir_candidate_draws_per_output,
@@ -1417,9 +1415,8 @@ mod canonical_profile_artifact {
                 CanonicalItem::unsigned64(self.security_level),
                 CanonicalItem::unsigned64(self.proof_of_work_bits),
                 CanonicalItem::unsigned64(self.outer_query_count),
-                CanonicalItem::unsigned64(self.trace_mask_degree_bound_exclusive),
                 CanonicalItem::unsigned64(self.direct_bound_query_count),
-                CanonicalItem::unsigned64(self.verified_vss_bound_query_count),
+                CanonicalItem::unsigned64(self.prior_proof_bound_query_count),
                 CanonicalItem::unsigned32(self.maximum_fiat_shamir_candidate_draws_per_output),
                 CanonicalItem::unsigned64(self.evaluation_coset_offset),
             ]
@@ -1678,7 +1675,7 @@ mod canonical_profile_artifact {
             )?);
             Ok(CanonicalTuple::new(
                 ROW_CODE_WHIR_CONSTRUCTION_PROFILE_SCHEMA_IDENTIFIER,
-                SCHEMA_VERSION,
+                ROW_CODE_WHIR_CONSTRUCTION_PROFILE_SCHEMA_VERSION,
                 items,
             ))
         }
@@ -1700,7 +1697,9 @@ mod canonical_profile_artifact {
             for variant in artifact.compiled_plan().variants() {
                 let (reference, parameters) =
                     RowCodeWhirConstructionReference::for_selected_variant(artifact, variant)?;
-                if parameters != selected_parameters {
+                if RowCodeWhirParameterProfile::from_selected(parameters)?
+                    != RowCodeWhirParameterProfile::from_selected(selected_parameters)?
+                {
                     return Err(ProofProfileError::InvalidConstructionProfile);
                 }
                 ordered_references.push(reference);
@@ -1950,17 +1949,6 @@ mod canonical_profile_artifact {
             self.row_code_whir_construction_profile
                 .parameters
                 .folding_factor -= 1;
-
-            self.row_code_whir_construction_profile
-                .parameters
-                .trace_mask_degree_bound_exclusive += 1;
-            assert_eq!(
-                self.canonical_bytes(),
-                Err(ProofProfileError::InvalidConstructionProfile)
-            );
-            self.row_code_whir_construction_profile
-                .parameters
-                .trace_mask_degree_bound_exclusive -= 1;
 
             self.row_code_whir_construction_profile
                 .hash_profile

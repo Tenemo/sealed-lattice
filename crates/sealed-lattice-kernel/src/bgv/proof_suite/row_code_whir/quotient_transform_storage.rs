@@ -1,28 +1,105 @@
-//! Bounded external transform planning for quotient materialization.
+//! Bounded transform planning for quotient materialization.
 //!
 //! Relation coefficients remain in the caller-owned replay objects. Each
-//! column is transformed exactly once, at its first consuming constraint, and
-//! its persistent evaluation object remains live through the last consuming
-//! constraint. Two scratch identities are reused by every sequential
-//! Stockham transform. Persistent identities are reused only across disjoint
-//! lifecycles.
+//! constraint transforms its required columns into constraint-local external
+//! vectors and releases them as soon as that constraint is accumulated. The
+//! transform itself runs in place in one domain-sized WASM buffer, then
+//! streams its result into external memory. Recomputing a column used by a
+//! later constraint keeps peak browser scratch bounded independently of the
+//! relation-wide live-column interval graph. Persistent identities are reused
+//! only across disjoint lifecycles.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use crate::bgv::proof_suite::{
-    CommonProofProverError, ProofEvaluationDomain, RelationPlanVariant,
+    CommonProofProverError, ProofEvaluationDomain, RelationPlanCheckContext, RelationPlanVariant,
     external_memory::{
         ProofExternalMemoryObject, ProofExternalMemoryObjectPlan, ProofExternalMemoryProtection,
     },
-    external_polynomial::{
-        ExternalPolynomialError, ExternalPolynomialVector, ExternalStockhamTransformDirection,
-        ExternalStockhamTransformPlan,
-    },
+    external_polynomial::{ExternalPolynomialError, ExternalPolynomialVector},
     prover::{
         CommonProofQuotientConstraintTransformKey, CommonProofReplayPolynomialPlan,
         common_proof_quotient_constraint_catalog,
     },
+    relation_plan::RelationColumnValueType,
 };
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::bgv::proof_suite) enum RowCodeWhirQuotientColumnSourcePlan {
+    Stored(CommonProofReplayPolynomialPlan),
+    Recomputed {
+        value_type: RelationColumnValueType,
+        coefficient_count: usize,
+    },
+}
+
+impl RowCodeWhirQuotientColumnSourcePlan {
+    pub(super) const fn value_type(self) -> RelationColumnValueType {
+        match self {
+            Self::Stored(plan) => plan.value_type(),
+            Self::Recomputed { value_type, .. } => value_type,
+        }
+    }
+
+    pub(super) const fn coefficient_count(self) -> usize {
+        match self {
+            Self::Stored(plan) => plan.coefficient_count(),
+            Self::Recomputed {
+                coefficient_count, ..
+            } => coefficient_count,
+        }
+    }
+
+    pub(super) const fn stored_plan(self) -> Option<CommonProofReplayPolynomialPlan> {
+        match self {
+            Self::Stored(plan) => Some(plan),
+            Self::Recomputed { .. } => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::bgv::proof_suite) struct RowCodeWhirQuotientColumnTransformPlan {
+    evaluation_domain: ProofEvaluationDomain,
+    source: RowCodeWhirQuotientColumnSourcePlan,
+    output: CommonProofReplayPolynomialPlan,
+    output_vector: ExternalPolynomialVector,
+    object_plans: [ProofExternalMemoryObjectPlan; 1],
+    next_executor_step: u32,
+    total_written_byte_length: u64,
+    total_read_byte_length: u64,
+    transaction_count_excluding_deletions: u64,
+}
+
+impl RowCodeWhirQuotientColumnTransformPlan {
+    pub(super) const fn evaluation_domain(self) -> ProofEvaluationDomain {
+        self.evaluation_domain
+    }
+
+    pub(super) const fn source(self) -> RowCodeWhirQuotientColumnSourcePlan {
+        self.source
+    }
+
+    pub(super) const fn output(self) -> CommonProofReplayPolynomialPlan {
+        self.output
+    }
+
+    pub(super) const fn final_output(self) -> ExternalPolynomialVector {
+        self.output_vector
+    }
+
+    pub(super) const fn total_written_byte_length(self) -> u64 {
+        self.total_written_byte_length
+    }
+
+    pub(super) const fn total_read_byte_length(self) -> u64 {
+        self.total_read_byte_length
+    }
+
+    pub(super) const fn transaction_count_excluding_deletions(self) -> u64 {
+        self.transaction_count_excluding_deletions
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct PersistentOutputIdentity {
@@ -38,10 +115,10 @@ struct PersistentOutputLifecycle {
 
 pub(in crate::bgv::proof_suite) struct RowCodeWhirQuotientTransformStoragePlan {
     pub(super) transform_plans:
-        BTreeMap<CommonProofQuotientConstraintTransformKey, ExternalStockhamTransformPlan>,
+        BTreeMap<CommonProofQuotientConstraintTransformKey, RowCodeWhirQuotientColumnTransformPlan>,
     pub(super) constraint_evaluation_steps: Vec<u32>,
-    /// The step at which each replayed coefficient vector is read by its
-    /// first transform pass. The combined planner may extend the replay
+    /// The final step at which each replayed coefficient vector is read by a
+    /// constraint-local transform. The combined planner may extend the replay
     /// object's last use for later proof phases.
     pub(super) source_last_use_steps: BTreeMap<u32, u32>,
     pub(super) next_executor_step: u32,
@@ -57,23 +134,18 @@ pub(in crate::bgv::proof_suite) struct RowCodeWhirQuotientTransformStoragePlan {
 
 pub(in crate::bgv::proof_suite) fn plan_row_code_whir_quotient_transform_storage(
     variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
     evaluation_domain: ProofEvaluationDomain,
-    relation_replay_polynomial_plans: &BTreeMap<u32, CommonProofReplayPolynomialPlan>,
+    relation_replay_polynomial_plans: &BTreeMap<u32, RowCodeWhirQuotientColumnSourcePlan>,
     first_free_object_ordinal: u32,
     first_executor_step: u32,
     maximum_chunk_byte_length: u32,
     protection: ProofExternalMemoryProtection,
 ) -> Result<RowCodeWhirQuotientTransformStoragePlan, CommonProofProverError> {
-    if maximum_chunk_byte_length == 0
-        || u64::try_from(evaluation_domain.size())
-            .map_err(|_| CommonProofProverError::CountOverflow)?
-            != variant.evaluation_domain_size()
-        || evaluation_domain.size() < 2
-        || !evaluation_domain.size().is_power_of_two()
-    {
+    if maximum_chunk_byte_length == 0 {
         return Err(CommonProofProverError::InvalidInput);
     }
-
+    validate_quotient_transform_domain(variant, relation_context, evaluation_domain)?;
     validate_relation_replay_polynomial_plans(
         variant,
         evaluation_domain.size(),
@@ -81,36 +153,20 @@ pub(in crate::bgv::proof_suite) fn plan_row_code_whir_quotient_transform_storage
         first_free_object_ordinal,
     )?;
     let constraint_catalog = common_proof_quotient_constraint_catalog(variant)?;
-    for column_ordinal in constraint_catalog.column_intervals().keys() {
+    for column_ordinal in constraint_catalog.column_usages().keys() {
         if !relation_replay_polynomial_plans.contains_key(column_ordinal) {
             return Err(CommonProofProverError::InvalidColumn);
         }
     }
 
-    let transform_pass_count = evaluation_domain.size().trailing_zeros();
     let mut constraint_evaluation_steps = Vec::new();
     constraint_evaluation_steps
         .try_reserve_exact(variant.constraint_count())
         .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
     let mut next_executor_step = first_executor_step;
-    for (constraint_index, columns) in constraint_catalog.constraint_columns().iter().enumerate() {
-        let constraint_ordinal =
-            u32::try_from(constraint_index).map_err(|_| CommonProofProverError::CountOverflow)?;
-        let first_use_column_count = columns
-            .iter()
-            .filter(|column_ordinal| {
-                constraint_catalog
-                    .column_intervals()
-                    .get(*column_ordinal)
-                    .is_some_and(|interval| {
-                        interval.first_constraint_ordinal() == constraint_ordinal
-                    })
-            })
-            .count();
-        let transform_step_count = u32::try_from(first_use_column_count)
-            .map_err(|_| CommonProofProverError::CountOverflow)?
-            .checked_mul(transform_pass_count)
-            .ok_or(CommonProofProverError::CountOverflow)?;
+    for columns in constraint_catalog.constraint_columns() {
+        let transform_step_count =
+            u32::try_from(columns.len()).map_err(|_| CommonProofProverError::CountOverflow)?;
         let evaluation_step = next_executor_step
             .checked_add(transform_step_count)
             .ok_or(CommonProofProverError::CountOverflow)?;
@@ -130,14 +186,16 @@ pub(in crate::bgv::proof_suite) fn plan_row_code_whir_quotient_transform_storage
     }
 
     let mut next_free_object_ordinal = first_free_object_ordinal;
-    let scratch_objects = [
-        allocate_object(&mut next_free_object_ordinal)?,
-        allocate_object(&mut next_free_object_ordinal)?,
-    ];
     let mut persistent_output_identities = Vec::<PersistentOutputIdentity>::new();
     let mut output_lifecycles = Vec::<PersistentOutputLifecycle>::new();
     output_lifecycles
-        .try_reserve_exact(constraint_catalog.column_intervals().len())
+        .try_reserve_exact(
+            constraint_catalog
+                .constraint_columns()
+                .iter()
+                .map(Vec::len)
+                .sum(),
+        )
         .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
     let mut transform_plans = BTreeMap::new();
     let mut source_last_use_steps = BTreeMap::new();
@@ -151,18 +209,8 @@ pub(in crate::bgv::proof_suite) fn plan_row_code_whir_quotient_transform_storage
         let constraint_ordinal =
             u32::try_from(constraint_index).map_err(|_| CommonProofProverError::CountOverflow)?;
         for column_ordinal in columns {
-            let interval = constraint_catalog
-                .column_intervals()
-                .get(column_ordinal)
-                .copied()
-                .ok_or(CommonProofProverError::InvalidColumn)?;
-            if interval.first_constraint_ordinal() != constraint_ordinal {
-                continue;
-            }
-            let last_constraint_index = usize::try_from(interval.last_constraint_ordinal())
-                .map_err(|_| CommonProofProverError::CountOverflow)?;
             let final_output_last_use_step = constraint_evaluation_steps
-                .get(last_constraint_index)
+                .get(constraint_index)
                 .copied()
                 .ok_or(CommonProofProverError::InvalidQuotient)?;
             let persistent_final_output_object = persistent_output_object(
@@ -175,35 +223,55 @@ pub(in crate::bgv::proof_suite) fn plan_row_code_whir_quotient_transform_storage
                 .get(column_ordinal)
                 .copied()
                 .ok_or(CommonProofProverError::InvalidColumn)?;
-            let source = ExternalPolynomialVector::new(
-                source_plan.object(),
+            let output_plan = CommonProofReplayPolynomialPlan::new(
+                persistent_final_output_object,
                 source_plan.value_type(),
-                source_plan.coefficient_count(),
+                evaluation_domain.size(),
+            )?;
+            let output_vector = ExternalPolynomialVector::new(
+                output_plan.object(),
+                output_plan.value_type(),
+                output_plan.coefficient_count(),
             )
             .map_err(map_external_polynomial_error)?;
-            let transform_plan =
-                ExternalStockhamTransformPlan::new_with_fixed_scratch_and_persistent_final_output(
-                    evaluation_domain,
-                    ExternalStockhamTransformDirection::Forward,
-                    source,
-                    scratch_objects,
-                    persistent_final_output_object,
-                    next_transform_step,
-                    final_output_last_use_step,
-                    maximum_chunk_byte_length,
-                    protection,
-                )
-                .map_err(map_external_polynomial_error)?;
             let expected_next_transform_step = next_transform_step
-                .checked_add(transform_pass_count)
+                .checked_add(1)
                 .ok_or(CommonProofProverError::CountOverflow)?;
-            if transform_plan.next_executor_step() != expected_next_transform_step {
-                return Err(CommonProofProverError::InvalidQuotient);
-            }
+            let object_plan = ProofExternalMemoryObjectPlan::new(
+                output_plan.object(),
+                protection,
+                output_plan.exact_byte_length(),
+                next_transform_step,
+                next_transform_step,
+                final_output_last_use_step,
+            );
+            let maximum_chunk_byte_length = u64::from(maximum_chunk_byte_length);
+            let source_read_byte_length = source_plan
+                .stored_plan()
+                .map_or(0, CommonProofReplayPolynomialPlan::exact_byte_length);
+            let source_read_transaction_count =
+                source_read_byte_length.div_ceil(maximum_chunk_byte_length);
+            let output_append_transaction_count = output_plan
+                .exact_byte_length()
+                .div_ceil(maximum_chunk_byte_length);
+            let transform_plan = RowCodeWhirQuotientColumnTransformPlan {
+                evaluation_domain,
+                source: source_plan,
+                output: output_plan,
+                output_vector,
+                object_plans: [object_plan],
+                next_executor_step: expected_next_transform_step,
+                total_written_byte_length: output_plan.exact_byte_length(),
+                total_read_byte_length: source_read_byte_length,
+                transaction_count_excluding_deletions: source_read_transaction_count
+                    .checked_add(output_append_transaction_count)
+                    .and_then(|count| count.checked_add(2))
+                    .ok_or(CommonProofProverError::CountOverflow)?,
+            };
             object_plans
-                .try_reserve_exact(transform_plan.object_plans().len())
+                .try_reserve_exact(1)
                 .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
-            object_plans.extend_from_slice(transform_plan.object_plans());
+            object_plans.push(object_plan);
             total_written_byte_length = total_written_byte_length
                 .checked_add(transform_plan.total_written_byte_length())
                 .ok_or(CommonProofProverError::CountOverflow)?;
@@ -215,16 +283,16 @@ pub(in crate::bgv::proof_suite) fn plan_row_code_whir_quotient_transform_storage
                 .ok_or(CommonProofProverError::CountOverflow)?;
             let transform_key =
                 CommonProofQuotientConstraintTransformKey::new(constraint_ordinal, *column_ordinal);
-            if transform_key.constraint_ordinal() != interval.first_constraint_ordinal()
-                || transform_plans
-                    .insert(transform_key, transform_plan)
-                    .is_some()
-                || source_last_use_steps
-                    .insert(*column_ordinal, next_transform_step)
-                    .is_some()
+            if transform_plans
+                .insert(transform_key, transform_plan)
+                .is_some()
             {
                 return Err(CommonProofProverError::InvalidColumn);
             }
+            source_last_use_steps
+                .entry(*column_ordinal)
+                .and_modify(|last_use_step| *last_use_step = next_transform_step)
+                .or_insert(next_transform_step);
             output_lifecycles.push(PersistentOutputLifecycle {
                 issued_step: next_transform_step,
                 last_use_step: final_output_last_use_step,
@@ -239,8 +307,13 @@ pub(in crate::bgv::proof_suite) fn plan_row_code_whir_quotient_transform_storage
             .ok_or(CommonProofProverError::CountOverflow)?;
     }
     if next_transform_step != next_executor_step
-        || transform_plans.len() != constraint_catalog.column_intervals().len()
-        || source_last_use_steps.len() != constraint_catalog.column_intervals().len()
+        || transform_plans.len()
+            != constraint_catalog
+                .constraint_columns()
+                .iter()
+                .map(Vec::len)
+                .sum::<usize>()
+        || source_last_use_steps.len() != constraint_catalog.column_usages().len()
     {
         return Err(CommonProofProverError::InvalidQuotient);
     }
@@ -267,14 +340,52 @@ pub(in crate::bgv::proof_suite) fn plan_row_code_whir_quotient_transform_storage
     })
 }
 
+fn validate_quotient_transform_domain(
+    variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
+    evaluation_domain: ProofEvaluationDomain,
+) -> Result<(), CommonProofProverError> {
+    let trace_domain_size = usize::try_from(variant.trace_domain_size())
+        .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let relation_evaluation_domain_size = usize::try_from(variant.evaluation_domain_size())
+        .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let quotient_component_degree_bound_exclusive =
+        usize::try_from(relation_context.quotient_component_degree_bound_exclusive)
+            .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let expected_quotient_domain_size = trace_domain_size
+        .max(quotient_component_degree_bound_exclusive)
+        .checked_next_power_of_two()
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    let relation_evaluation_domain = ProofEvaluationDomain::new(
+        relation_evaluation_domain_size,
+        relation_context.evaluation_coset_offset,
+    )
+    .map_err(|_| CommonProofProverError::InvalidQuotient)?;
+
+    if trace_domain_size == 0
+        || !trace_domain_size.is_power_of_two()
+        || evaluation_domain.size() != expected_quotient_domain_size
+        || evaluation_domain.size() < trace_domain_size
+        || evaluation_domain.size() > relation_evaluation_domain_size
+        || !evaluation_domain.size().is_multiple_of(trace_domain_size)
+        || evaluation_domain.coset_offset().canonical() != relation_context.evaluation_coset_offset
+        || relation_evaluation_domain.generator().canonical()
+            != relation_context.evaluation_domain_generator
+    {
+        return Err(CommonProofProverError::InvalidQuotient);
+    }
+    Ok(())
+}
+
 fn validate_relation_replay_polynomial_plans(
     variant: &RelationPlanVariant,
     evaluation_domain_size: usize,
-    relation_replay_polynomial_plans: &BTreeMap<u32, CommonProofReplayPolynomialPlan>,
+    relation_replay_polynomial_plans: &BTreeMap<u32, RowCodeWhirQuotientColumnSourcePlan>,
     first_free_object_ordinal: u32,
 ) -> Result<(), CommonProofProverError> {
-    let mut source_objects = BTreeSet::new();
-    for (column_ordinal, plan) in relation_replay_polynomial_plans {
+    let mut source_object_segments =
+        BTreeMap::<ProofExternalMemoryObject, Vec<(u64, u64, bool)>>::new();
+    for (column_ordinal, source_plan) in relation_replay_polynomial_plans {
         let descriptor = variant
             .ordered_columns()
             .get(
@@ -285,13 +396,43 @@ fn validate_relation_replay_polynomial_plans(
         let expected_coefficient_count =
             usize::try_from(descriptor.source_degree_bound_exclusive())
                 .map_err(|_| CommonProofProverError::CountOverflow)?;
-        if plan.value_type() != descriptor.value_type()
-            || plan.coefficient_count() != expected_coefficient_count
-            || plan.coefficient_count() > evaluation_domain_size
-            || plan.object().ordinal() >= first_free_object_ordinal
-            || !source_objects.insert(plan.object())
+        if source_plan.value_type() != descriptor.value_type()
+            || source_plan.coefficient_count() == 0
+            || source_plan.coefficient_count() > expected_coefficient_count
+            || source_plan.coefficient_count() > evaluation_domain_size
         {
             return Err(CommonProofProverError::InvalidColumn);
+        }
+        let Some(plan) = source_plan.stored_plan() else {
+            continue;
+        };
+        if plan.object().ordinal() >= first_free_object_ordinal {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        let segment_end = plan
+            .object_byte_offset()
+            .checked_add(plan.exact_byte_length())
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        source_object_segments
+            .entry(plan.object())
+            .or_default()
+            .push((plan.object_byte_offset(), segment_end, plan.seals_object()));
+    }
+    for segments in source_object_segments.values_mut() {
+        segments.sort_unstable_by_key(|(start, _, _)| *start);
+        let mut expected_start = 0_u64;
+        let last_index = segments
+            .len()
+            .checked_sub(1)
+            .ok_or(CommonProofProverError::InvalidColumn)?;
+        for (segment_index, (start, end, seals_object)) in segments.iter().copied().enumerate() {
+            if start != expected_start
+                || end <= start
+                || seals_object != (segment_index == last_index)
+            {
+                return Err(CommonProofProverError::InvalidColumn);
+            }
+            expected_start = end;
         }
     }
     Ok(())
@@ -374,11 +515,7 @@ fn exact_peak_active_output_count(
 
 fn map_external_polynomial_error(error: ExternalPolynomialError) -> CommonProofProverError {
     match error {
-        ExternalPolynomialError::InvalidDomain | ExternalPolynomialError::InvalidPlan => {
-            CommonProofProverError::InvalidQuotient
-        }
         ExternalPolynomialError::InvalidVector => CommonProofProverError::InvalidColumn,
-        ExternalPolynomialError::WrongTransformStep => CommonProofProverError::InvalidInput,
         ExternalPolynomialError::CountOverflow => CommonProofProverError::CountOverflow,
         ExternalPolynomialError::AllocationLimitExceeded => {
             CommonProofProverError::AllocationLimitExceeded
@@ -389,6 +526,8 @@ fn map_external_polynomial_error(error: ExternalPolynomialError) -> CommonProofP
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::*;
     use crate::bgv::proof_suite::{
         CollectivePublicKeyAggregatePlanInput, PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
@@ -499,6 +638,65 @@ mod tests {
     }
 
     #[test]
+    fn quotient_transform_accepts_exact_replay_lengths_below_descriptor_ceilings() {
+        let relation_context = compact_public_aggregate_context();
+        let compiled_plan = compile_collective_public_key_aggregate_relation_plan(
+            &compact_public_aggregate_input(),
+            &relation_context,
+        )
+        .expect("the compact aggregate relation compiles");
+        let variant = compiled_plan
+            .select_variant(None, None)
+            .expect("the compact aggregate relation has one variant");
+        let evaluation_domain =
+            ProofEvaluationDomain::new(64, 7).expect("the compact quotient domain is valid");
+        let replay_plans = variant
+            .ordered_columns()
+            .iter()
+            .enumerate()
+            .map(|(column_index, descriptor)| {
+                let column_ordinal =
+                    u32::try_from(column_index).expect("the compact column ordinal fits u32");
+                let descriptor_ceiling =
+                    usize::try_from(descriptor.source_degree_bound_exclusive())
+                        .expect("the compact descriptor ceiling fits usize");
+                let exact_coefficient_count = (descriptor_ceiling / 2).max(1);
+                let replay_plan = CommonProofReplayPolynomialPlan::new(
+                    ProofExternalMemoryObject::new(column_ordinal),
+                    descriptor.value_type(),
+                    exact_coefficient_count,
+                )
+                .expect("the exact replay plan is valid");
+                (
+                    column_ordinal,
+                    RowCodeWhirQuotientColumnSourcePlan::Stored(replay_plan),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let first_free_object_ordinal =
+            u32::try_from(replay_plans.len()).expect("the compact object count fits u32");
+
+        validate_relation_replay_polynomial_plans(
+            variant,
+            evaluation_domain.size(),
+            &replay_plans,
+            first_free_object_ordinal,
+        )
+        .expect("exact replay lengths below descriptor ceilings remain valid");
+        plan_row_code_whir_quotient_transform_storage(
+            variant,
+            &relation_context,
+            evaluation_domain,
+            &replay_plans,
+            first_free_object_ordinal,
+            11,
+            1_024,
+            ProofExternalMemoryProtection::PublicIntegrity,
+        )
+        .expect("the quotient planner zero-pads exact replay vectors in its transform buffer");
+    }
+
+    #[test]
     fn checked_relation_plan_drives_transform_keys_lifetimes_and_accounting() {
         let relation_context = compact_public_aggregate_context();
         let compiled_plan = compile_collective_public_key_aggregate_relation_plan(
@@ -510,7 +708,7 @@ mod tests {
             .select_variant(None, None)
             .expect("the compact aggregate relation has one variant");
         let evaluation_domain =
-            ProofEvaluationDomain::new(128, 7).expect("the compact evaluation domain is valid");
+            ProofEvaluationDomain::new(64, 7).expect("the compact quotient domain is valid");
         let relation_replay_polynomial_plans = variant
             .ordered_columns()
             .iter()
@@ -526,7 +724,10 @@ mod tests {
                     coefficient_count,
                 )
                 .expect("the compact replay polynomial plan is valid");
-                (column_ordinal, plan)
+                (
+                    column_ordinal,
+                    RowCodeWhirQuotientColumnSourcePlan::Stored(plan),
+                )
             })
             .collect::<BTreeMap<_, _>>();
         let first_free_object_ordinal = u32::try_from(relation_replay_polynomial_plans.len())
@@ -534,6 +735,7 @@ mod tests {
         let first_executor_step = 11;
         let plan = plan_row_code_whir_quotient_transform_storage(
             variant,
+            &relation_context,
             evaluation_domain,
             &relation_replay_polynomial_plans,
             first_free_object_ordinal,
@@ -547,7 +749,11 @@ mod tests {
 
         assert_eq!(
             plan.transform_plans.len(),
-            constraint_catalog.column_intervals().len()
+            constraint_catalog
+                .constraint_columns()
+                .iter()
+                .map(Vec::len)
+                .sum::<usize>()
         );
         assert_eq!(
             plan.constraint_evaluation_steps.len(),
@@ -568,25 +774,20 @@ mod tests {
         );
 
         for (transform_key, transform_plan) in &plan.transform_plans {
-            let interval = constraint_catalog
-                .column_intervals()
-                .get(&transform_key.column_ordinal())
-                .expect("each transformed column has one interval");
-            assert_eq!(
-                transform_key.constraint_ordinal(),
-                interval.first_constraint_ordinal()
-            );
-            assert_eq!(
+            assert!(
                 plan.source_last_use_steps
                     .get(&transform_key.column_ordinal())
-                    .copied(),
-                transform_plan
-                    .object_plans()
-                    .first()
-                    .map(|object_plan| object_plan.issued_step())
+                    .is_some_and(|last_use_step| {
+                        *last_use_step
+                            >= transform_plan
+                                .object_plans
+                                .first()
+                                .expect("each transform has one output lifecycle")
+                                .issued_step()
+                    })
             );
             assert!(
-                transform_plan.next_executor_step()
+                transform_plan.next_executor_step
                     <= plan.constraint_evaluation_steps[usize::try_from(
                         transform_key.constraint_ordinal()
                     )
@@ -606,7 +807,17 @@ mod tests {
         );
         assert_eq!(
             plan.next_free_object_ordinal,
-            first_free_object_ordinal + 2 + plan.peak_active_output_count
+            first_free_object_ordinal + plan.peak_active_output_count
+        );
+        assert_eq!(
+            usize::try_from(plan.peak_active_output_count)
+                .expect("the active output count fits usize"),
+            constraint_catalog
+                .constraint_columns()
+                .iter()
+                .map(Vec::len)
+                .max()
+                .expect("the checked relation has constraints"),
         );
 
         let mut lifecycles_by_object =

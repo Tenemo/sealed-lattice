@@ -776,70 +776,6 @@ fn setup_public_polynomial_leaf_canonical_prefix(
     Ok(canonical_bytes)
 }
 
-/// Incremental canonical bytes for one queried setup-polynomial leaf. The
-/// deployed v3 encoding interleaves the first and opposite evaluation for
-/// each column, so replay can append one exact pair as each column arrives.
-pub(crate) struct SetupPublicPolynomialLeafByteBuilder {
-    canonical_bytes: Vec<u8>,
-    canonical_leaf_byte_length: usize,
-    expected_column_count: usize,
-    absorbed_column_count: usize,
-}
-
-impl SetupPublicPolynomialLeafByteBuilder {
-    pub(crate) fn new(
-        public_polynomial_context_hash: [u8; 64],
-        leaf_index: u64,
-        row_width: u32,
-    ) -> Result<Self, SetupPublicPolynomialError> {
-        let canonical_leaf_byte_length = setup_public_polynomial_leaf_byte_length(row_width)?;
-        let canonical_bytes = setup_public_polynomial_leaf_canonical_prefix(
-            public_polynomial_context_hash,
-            leaf_index,
-            row_width,
-        )?;
-        Ok(Self {
-            canonical_bytes,
-            canonical_leaf_byte_length,
-            expected_column_count: usize::try_from(row_width)
-                .map_err(|_| SetupPublicPolynomialError::CountOverflow)?,
-            absorbed_column_count: 0,
-        })
-    }
-
-    pub(crate) fn absorb_column_pair(
-        &mut self,
-        first_point_value: ProofBaseFieldElement,
-        opposite_point_value: ProofBaseFieldElement,
-    ) -> Result<(), SetupPublicPolynomialError> {
-        if self.absorbed_column_count >= self.expected_column_count {
-            return Err(SetupPublicPolynomialError::InvalidInput);
-        }
-        self.canonical_bytes
-            .extend_from_slice(&first_point_value.canonical().to_le_bytes());
-        self.canonical_bytes
-            .extend_from_slice(&opposite_point_value.canonical().to_le_bytes());
-        self.absorbed_column_count += 1;
-        Ok(())
-    }
-
-    pub(crate) fn finish(self) -> Result<Vec<u8>, SetupPublicPolynomialError> {
-        if self.absorbed_column_count != self.expected_column_count
-            || self.canonical_bytes.len() != self.canonical_leaf_byte_length
-        {
-            return Err(SetupPublicPolynomialError::InvalidInput);
-        }
-        Ok(self.canonical_bytes)
-    }
-
-    pub(crate) fn resident_owned_payload_byte_length(
-        &self,
-    ) -> Result<u64, SetupPublicPolynomialError> {
-        u64::try_from(self.canonical_bytes.capacity())
-            .map_err(|_| SetupPublicPolynomialError::CountOverflow)
-    }
-}
-
 pub(super) fn setup_public_polynomial_leaf_digest(
     canonical_bytes: &[u8],
 ) -> Result<[u8; 64], SetupPublicPolynomialError> {
@@ -1004,32 +940,6 @@ impl SetupPublicPolynomialLeafHashArena {
         )
     }
 
-    pub(crate) fn native_resident_owned_payload_byte_length(
-        &self,
-    ) -> Result<u64, SetupPublicPolynomialError> {
-        u64::try_from(self.leaf_hash_states.capacity())
-            .ok()
-            .and_then(|capacity| {
-                u64::try_from(core::mem::size_of::<Shake>())
-                    .ok()
-                    .and_then(|state_byte_length| capacity.checked_mul(state_byte_length))
-            })
-            .ok_or(SetupPublicPolynomialError::CountOverflow)
-    }
-
-    pub(crate) fn wasm_resident_owned_payload_byte_length(
-        &self,
-    ) -> Result<u64, SetupPublicPolynomialError> {
-        u64::try_from(self.leaf_hash_states.capacity())
-            .ok()
-            .and_then(|capacity| {
-                u64::try_from(WASM_SETUP_PUBLIC_POLYNOMIAL_LEAF_HASH_STATE_BYTE_LENGTH)
-                    .ok()
-                    .and_then(|state_byte_length| capacity.checked_mul(state_byte_length))
-            })
-            .ok_or(SetupPublicPolynomialError::CountOverflow)
-    }
-
     /// Absorbs one bounded range from the next canonical column. Both slices
     /// name the same leaf indexes in the first and opposite domain halves.
     /// Completing the final range advances exactly one column; a changed
@@ -1093,17 +1003,6 @@ impl SetupPublicPolynomialLeafHashArena {
         root_accumulator.finish()
     }
 
-    pub(crate) fn finish_leaf_digests(
-        self,
-    ) -> Result<SetupPublicPolynomialLeafDigestIterator, SetupPublicPolynomialError> {
-        if self.absorbed_column_count != self.expected_column_count || self.next_leaf_index != 0 {
-            return Err(SetupPublicPolynomialError::InvalidInput);
-        }
-        Ok(SetupPublicPolynomialLeafDigestIterator {
-            states: self.leaf_hash_states.into_iter(),
-        })
-    }
-
     #[cfg(test)]
     fn finish_leaf_digests_for_test(
         self,
@@ -1123,28 +1022,6 @@ impl SetupPublicPolynomialLeafHashArena {
         Ok(leaf_digests)
     }
 }
-
-pub(crate) struct SetupPublicPolynomialLeafDigestIterator {
-    states: std::vec::IntoIter<Shake>,
-}
-
-impl Iterator for SetupPublicPolynomialLeafDigestIterator {
-    type Item = [u8; AUTHENTICATION_DIGEST_BYTE_LENGTH];
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.states.next().map(|state| {
-            let mut digest = [0_u8; AUTHENTICATION_DIGEST_BYTE_LENGTH];
-            state.finalize(&mut digest);
-            digest
-        })
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.states.size_hint()
-    }
-}
-
-impl ExactSizeIterator for SetupPublicPolynomialLeafDigestIterator {}
 
 fn setup_public_polynomial_common_leaf_hash_state(
     public_polynomial_context_hash: [u8; 64],

@@ -1,16 +1,13 @@
-use super::super::prover::{CommonProofExternalMemoryRequirement, PublicOnlyCommonProofCoinSource};
+use super::super::prover::{
+    COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_MAGIC, CommonProofExternalMemoryRequirement,
+};
 use super::super::row_code_whir::{
     ExactSameSecretAuthenticatedTranscriptPrefixRequest, ExactSameSecretFiatShamirBinding,
     ExactSameSecretTranscriptPrefixAuthorityBinding, PreparedExactSameSecretTranscriptPrefix,
-    RowCodeWhirGenerationStateMachine,
+    RowCodeWhirGenerationStateMachine, RowCodeWhirTranscriptPrefixAuthority,
 };
 use super::super::{
     CommonProofAuthenticatedSourceReadRequest, CommonProofProverError, ProofExternalMemoryUsage,
-};
-#[cfg(test)]
-use super::super::{
-    CommonProofCheckpointCursorManifestError, CommonProofCheckpointCursorManifestRequirement,
-    RelationPlanVariant, common_proof_checkpoint_cursor_manifest_requirement_for_variant,
 };
 #[cfg(test)]
 use super::ProofExternalMemoryTransactionRequest;
@@ -23,8 +20,7 @@ use super::{
     CanonicalDecodeLimits, CheckpointableCommonProofPrivateCoinSource, CommonProofByteSink,
     CommonProofGenerationCheckpointBoundary, CommonProofGenerationError,
     CommonProofGenerationInitializationError, CommonProofGenerationPoll,
-    CommonProofGenerationStage, CommonProofGenerationStateMachine,
-    CommonProofPrivateCoinCoordinate, CommonProofPrivateCoinSource,
+    CommonProofGenerationStage, CommonProofPrivateCoinCoordinate, CommonProofPrivateCoinSource,
     CommonProofRelationPlanCapability, CommonProofRequiredByteRange, CommonProofRuntimeError,
     CommonProofRuntimeLimits, CommonProofSourcePolynomialProvider,
     CommonProofStorageTransactionRuntime, CommonProofVerificationBinding,
@@ -46,7 +42,6 @@ pub(crate) enum CommonProofGenerationSourceError {
 }
 
 const COMMON_PROOF_GENERATION_CURSOR_MANIFEST_MAGIC: [u8; 8] = *b"SLCGCM01";
-const COMMON_PROOF_PRIVATE_COIN_CURSOR_MANIFEST_MAGIC: [u8; 8] = *b"SLCPCM03";
 const COMMON_PROOF_GENERATION_CURSOR_MANIFEST_VERSION: u16 = 1;
 const COMMON_PROOF_GENERATION_CURSOR_MANIFEST_TRANSCRIPT_PRESENT_FLAG: u16 = 1;
 const COMMON_PROOF_GENERATION_CURSOR_MANIFEST_PREFIX_BYTE_LENGTH: usize =
@@ -183,10 +178,10 @@ fn decode_common_proof_generation_cursor_manifest(
         transcript_cursor_digest: transcript_is_present.then_some(transcript_cursor_digest),
     };
     if decoded.private_coin_cursor_manifest_bytes.len()
-        < COMMON_PROOF_PRIVATE_COIN_CURSOR_MANIFEST_MAGIC.len()
+        < COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_MAGIC.len()
         || decoded.private_coin_cursor_manifest_bytes
-            [..COMMON_PROOF_PRIVATE_COIN_CURSOR_MANIFEST_MAGIC.len()]
-            != COMMON_PROOF_PRIVATE_COIN_CURSOR_MANIFEST_MAGIC
+            [..COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_MAGIC.len()]
+            != COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_MAGIC
     {
         return Err(CommonProofRuntimeError::WrongVerificationBinding);
     }
@@ -298,29 +293,6 @@ impl CommonProofGenerationSources {
             )),
             source_polynomial_provider: Some(Box::new(source_polynomial_provider)),
         }
-    }
-
-    pub(crate) fn public_only<SourcePolynomials>(
-        family_schema_identifier: u16,
-        derivation_binding_hash: Hash512,
-        attempt_lineage: [u8; 32],
-        source_polynomial_provider: SourcePolynomials,
-    ) -> Result<Self, CommonProofGenerationSourceError>
-    where
-        SourcePolynomials: CommonProofSourcePolynomialProvider + 'static,
-    {
-        if !ProofApplicationSlotCeilings::PUBLIC_ONLY_FAMILY_SCHEMA_IDENTIFIERS
-            .contains(&family_schema_identifier)
-        {
-            return Err(CommonProofGenerationSourceError::PrivateCoinSource);
-        }
-        let public_only_coins = PublicOnlyCommonProofCoinSource::new(
-            family_schema_identifier,
-            derivation_binding_hash,
-            attempt_lineage,
-        )
-        .map_err(|_| CommonProofGenerationSourceError::PrivateCoinSource)?;
-        Ok(Self::new(public_only_coins, source_polynomial_provider))
     }
 
     fn take_source_polynomial_provider(
@@ -822,26 +794,17 @@ pub(crate) struct PreparedCommonProofGeneration {
     limits: CommonProofRuntimeLimits,
 }
 
-enum CommonProofGenerationExecutionState {
-    RowCodeWhir(RowCodeWhirGenerationStateMachine),
-    RemainingFamilies(CommonProofGenerationStateMachine),
-}
+struct CommonProofGenerationExecutionState(RowCodeWhirGenerationStateMachine);
 
 impl CommonProofGenerationExecutionState {
     fn stage(&self) -> CommonProofGenerationStage {
-        match self {
-            Self::RowCodeWhir(state) => state.stage(),
-            Self::RemainingFamilies(state) => state.stage(),
-        }
+        self.0.stage()
     }
 
     const fn pending_authenticated_source_read(
         &self,
     ) -> Option<CommonProofAuthenticatedSourceReadRequest> {
-        match self {
-            Self::RowCodeWhir(state) => state.pending_authenticated_source_read(),
-            Self::RemainingFamilies(state) => state.pending_authenticated_source_read(),
-        }
+        self.0.pending_authenticated_source_read()
     }
 
     fn supply_authenticated_source_range(
@@ -849,72 +812,45 @@ impl CommonProofGenerationExecutionState {
         request: CommonProofAuthenticatedSourceReadRequest,
         authenticated_bytes: Zeroizing<Box<[u8]>>,
     ) -> Result<(), CommonProofProverError> {
-        match self {
-            Self::RowCodeWhir(state) => {
-                state.supply_authenticated_source_range(request, authenticated_bytes)
-            }
-            Self::RemainingFamilies(state) => {
-                state.supply_authenticated_source_range(request, authenticated_bytes)
-            }
-        }
+        self.0
+            .supply_authenticated_source_range(request, authenticated_bytes)
     }
 
     fn authenticated_transcript_prefix_request(
         &self,
     ) -> Result<ExactSameSecretAuthenticatedTranscriptPrefixRequest, CommonProofRuntimeError> {
-        match self {
-            Self::RowCodeWhir(state) => state
-                .authenticated_transcript_prefix_request()
-                .map_err(|_| CommonProofRuntimeError::WrongOperationPhase),
-            Self::RemainingFamilies(_) => Err(CommonProofRuntimeError::WrongOperationPhase),
-        }
+        self.0
+            .authenticated_transcript_prefix_request()
+            .map_err(|_| CommonProofRuntimeError::WrongOperationPhase)
     }
 
     fn supply_authenticated_transcript_prefix(
         &mut self,
         prepared: PreparedExactSameSecretTranscriptPrefix,
     ) -> Result<(), CommonProofRuntimeError> {
-        match self {
-            Self::RowCodeWhir(state) => state
-                .supply_authenticated_transcript_prefix(prepared)
-                .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding),
-            Self::RemainingFamilies(_) => Err(CommonProofRuntimeError::WrongOperationPhase),
-        }
+        self.0
+            .supply_authenticated_transcript_prefix(prepared)
+            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)
     }
 
     fn external_memory_usage(&self) -> Option<ProofExternalMemoryUsage> {
-        match self {
-            Self::RowCodeWhir(state) => state.external_memory_usage(),
-            Self::RemainingFamilies(state) => state.external_memory_usage(),
-        }
+        self.0.external_memory_usage()
     }
 
     fn terminal_external_memory_usage(&self) -> Option<ProofExternalMemoryUsage> {
-        match self {
-            Self::RowCodeWhir(state) => state.terminal_external_memory_usage(),
-            Self::RemainingFamilies(state) => state.terminal_external_memory_usage(),
-        }
+        self.0.terminal_external_memory_usage()
     }
 
     fn external_memory_requirement(&self) -> Option<CommonProofExternalMemoryRequirement> {
-        match self {
-            Self::RowCodeWhir(state) => Some(state.external_memory_requirement()),
-            Self::RemainingFamilies(state) => Some(state.external_memory_requirement()),
-        }
+        Some(self.0.external_memory_requirement())
     }
 
     const fn canonical_output_byte_length(&self) -> Option<usize> {
-        match self {
-            Self::RowCodeWhir(state) => state.canonical_output_byte_length(),
-            Self::RemainingFamilies(state) => state.canonical_output_byte_length(),
-        }
+        self.0.canonical_output_byte_length()
     }
 
     fn checkpoint_boundary(&self) -> Option<CommonProofGenerationCheckpointBoundary> {
-        match self {
-            Self::RowCodeWhir(state) => state.checkpoint_boundary(),
-            Self::RemainingFamilies(state) => state.checkpoint_boundary(),
-        }
+        self.0.checkpoint_boundary()
     }
 
     fn restore_authenticated_checkpoint_transcript_cursor(
@@ -922,21 +858,12 @@ impl CommonProofGenerationExecutionState {
         canonical_cursor_bytes: &[u8],
         expected_cursor_digest: Option<[u8; HASH_BYTE_LENGTH]>,
     ) -> Result<(), CommonProofRuntimeError> {
-        match self {
-            Self::RowCodeWhir(state) => state
-                .restore_authenticated_checkpoint_transcript_cursor(
-                    canonical_cursor_bytes,
-                    expected_cursor_digest,
-                )
-                .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding),
-            Self::RemainingFamilies(_) => {
-                if canonical_cursor_bytes.is_empty() && expected_cursor_digest.is_none() {
-                    Ok(())
-                } else {
-                    Err(CommonProofRuntimeError::WrongVerificationBinding)
-                }
-            }
-        }
+        self.0
+            .restore_authenticated_checkpoint_transcript_cursor(
+                canonical_cursor_bytes,
+                expected_cursor_digest,
+            )
+            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)
     }
 
     fn poll(
@@ -945,10 +872,7 @@ impl CommonProofGenerationExecutionState {
         coins: &mut CommonProofWorkerPrivateCoinSource,
         sink: &mut RuntimeCommonProofByteSink,
     ) -> Result<CommonProofGenerationPoll, OwnedCommonProofGenerationError> {
-        match self {
-            Self::RowCodeWhir(state) => state.poll(storage, coins, sink),
-            Self::RemainingFamilies(state) => state.poll(storage, coins, sink),
-        }
+        self.0.poll(storage, coins, sink)
     }
 
     fn cancel(
@@ -956,10 +880,7 @@ impl CommonProofGenerationExecutionState {
         storage: &mut CommonProofStorageTransactionRuntime,
     ) -> Result<(), ProofExternalMemoryExecutorError<ProofExternalMemoryTransactionAdapterError>>
     {
-        match self {
-            Self::RowCodeWhir(state) => state.cancel(storage),
-            Self::RemainingFamilies(state) => state.cancel(storage),
-        }
+        self.0.cancel(storage)
     }
 }
 
@@ -1099,56 +1020,11 @@ impl PreparedCommonProofGeneration {
         self.binding.authorization.checkpoint_lineage_identifier
     }
 
-    #[cfg(test)]
-    pub(crate) const fn checkpoint_schedule_digest(&self) -> Hash512 {
-        self.binding.authorization.checkpoint_schedule_digest
-    }
-
     pub(crate) fn matches_authenticated_checkpoint(
         &self,
         checkpoint: &AuthenticatedCommonProofGenerationCheckpoint,
     ) -> bool {
         checkpoint.state.matches_binding(self.binding)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn from_exact_family_sources(
-        authorization: CommonProofGenerationAuthorization,
-        relation_plan: CommonProofRelationPlanCapability,
-        canonical_application_statement_bytes: Vec<u8>,
-        relation_trees: Vec<RelationProofTreeInput>,
-        limits: CommonProofRuntimeLimits,
-        mut sources: CommonProofGenerationSources,
-    ) -> Result<Self, CommonProofGenerationPreparationError> {
-        let binding = CommonProofGenerationBinding::from_authorization(authorization);
-        if relation_plan.relation_plan_hash() != authorization.relation_plan_hash
-            || relation_plan.row_code_whir_construction_plan_identity_hash()
-                != authorization.row_code_whir_construction_plan_identity_hash
-            || verified_application_statement_hash(
-                authorization.protocol_version,
-                authorization.suite_identifier,
-                authorization.application_statement_schema_identifier,
-                &canonical_application_statement_bytes,
-            ) != authorization.application_statement_hash
-        {
-            return Err(CommonProofRuntimeError::WrongVerificationBinding.into());
-        }
-        let state = CommonProofGenerationStateMachine::new(relation_plan.generation_input(
-            authorization.protocol_version,
-            authorization.suite_identifier,
-            &canonical_application_statement_bytes,
-            relation_trees,
-            sources.take_source_polynomial_provider()?,
-            limits,
-        ))
-        .map_err(CommonProofGenerationPreparationError::Generation)?;
-        Ok(Self {
-            binding,
-            relation_plan,
-            state: CommonProofGenerationExecutionState::RemainingFamilies(state),
-            sources,
-            limits,
-        })
     }
 
     pub(crate) fn from_row_code_whir_sources(
@@ -1172,11 +1048,19 @@ impl PreparedCommonProofGeneration {
         {
             return Err(CommonProofRuntimeError::WrongVerificationBinding.into());
         }
-        let transcript_prefix_authority_binding = authorization
-            .exact_same_secret_transcript_prefix_authority_binding(
-                &canonical_application_statement_bytes,
-                &relation_plan,
-            )?;
+        let transcript_prefix_authority = if relation_plan
+            .row_code_whir_construction_plan()
+            .requires_verified_vss_bound_prerequisite()
+        {
+            RowCodeWhirTranscriptPrefixAuthority::VerifiedVss(
+                authorization.exact_same_secret_transcript_prefix_authority_binding(
+                    &canonical_application_statement_bytes,
+                    &relation_plan,
+                )?,
+            )
+        } else {
+            RowCodeWhirTranscriptPrefixAuthority::Direct
+        };
         let source_polynomial_provider = sources.take_source_polynomial_provider()?;
         let state = RowCodeWhirGenerationStateMachine::new(
             relation_plan.generation_input(
@@ -1188,65 +1072,13 @@ impl PreparedCommonProofGeneration {
                 limits,
             ),
             relation_plan.row_code_whir_construction_plan(),
-            transcript_prefix_authority_binding,
+            transcript_prefix_authority,
         )
         .map_err(CommonProofGenerationPreparationError::Generation)?;
         Ok(Self {
             binding,
             relation_plan,
-            state: CommonProofGenerationExecutionState::RowCodeWhir(state),
-            sources,
-            limits,
-        })
-    }
-
-    #[cfg(test)]
-    pub(crate) fn from_genuine_test_sources(
-        authorization: CommonProofGenerationAuthorization,
-        relation_plan: CommonProofRelationPlanCapability,
-        state: CommonProofGenerationStateMachine,
-        sources: CommonProofGenerationSources,
-        limits: CommonProofRuntimeLimits,
-    ) -> Self {
-        Self {
-            binding: CommonProofGenerationBinding::from_authorization(authorization),
-            relation_plan,
-            state: CommonProofGenerationExecutionState::RemainingFamilies(state),
-            sources,
-            limits,
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn from_genuine_test_sources_for_authenticated_checkpoint(
-        authorization: CommonProofGenerationAuthorization,
-        relation_plan: CommonProofRelationPlanCapability,
-        state: CommonProofGenerationStateMachine,
-        sources: CommonProofGenerationSources,
-        limits: CommonProofRuntimeLimits,
-        authenticated_checkpoint_state: &[u8],
-    ) -> Result<Self, CommonProofRuntimeError> {
-        let checkpoint =
-            CommonProofGenerationCheckpointState::decode(authenticated_checkpoint_state)?;
-        let mut binding = CommonProofGenerationBinding::from_authorization(authorization);
-        if checkpoint.stable_attempt_binding_hash != binding.binding_hash()
-            || checkpoint.checkpoint_lineage_identifier
-                != binding.authorization.checkpoint_lineage_identifier
-            || checkpoint.checkpoint_schedule_digest
-                != binding
-                    .authorization
-                    .checkpoint_schedule_digest
-                    .into_bytes()
-        {
-            return Err(CommonProofRuntimeError::WrongVerificationBinding);
-        }
-        binding.checkpoint_next_event_index = checkpoint.next_event_index;
-        binding.checkpoint_cumulative_event_digest =
-            Hash512::from_bytes(checkpoint.cumulative_event_digest);
-        Ok(Self {
-            binding,
-            relation_plan,
-            state: CommonProofGenerationExecutionState::RemainingFamilies(state),
+            state: CommonProofGenerationExecutionState(state),
             sources,
             limits,
         })
@@ -1263,7 +1095,7 @@ type OwnedCommonProofGenerationError = CommonProofGenerationError<
 pub(crate) enum CommonProofGenerationWorkerError {
     Runtime(CommonProofRuntimeError),
     AuthenticatedSource,
-    Generation,
+    Generation(OwnedCommonProofGenerationError),
     Cleanup,
 }
 
@@ -1530,128 +1362,6 @@ impl PendingCommonProofGenerationCheckpoint {
     pub(super) fn cursor_manifest_bytes(&self) -> &[u8] {
         &self.cursor_manifest_bytes
     }
-}
-
-/// Exact checkpoint custody live set layered on the plan-derived private-coin
-/// manifest requirement. It keeps the fixed encoded state, decoded state
-/// owner, and `Vec` owner in the runtime module that actually owns them, so
-/// selected accounting cannot silently omit or duplicate these bytes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg(test)]
-pub(crate) struct CommonProofGenerationCheckpointCustodyRequirement {
-    cursor_manifest_requirement: CommonProofCheckpointCursorManifestRequirement,
-    encoded_state_byte_length: u32,
-    decoded_state_owner_byte_length: u32,
-    pending_checkpoint_fixed_owner_byte_length: u32,
-    transient_construction_resident_byte_ceiling: u64,
-    pending_checkpoint_resident_byte_ceiling: u64,
-    boundary_peak_additional_resident_byte_ceiling: u64,
-    restore_workspace_byte_ceiling: u64,
-    peak_copied_buffer_byte_length: u32,
-}
-
-#[cfg(test)]
-impl CommonProofGenerationCheckpointCustodyRequirement {
-    pub(crate) const fn cursor_manifest_requirement(
-        self,
-    ) -> CommonProofCheckpointCursorManifestRequirement {
-        self.cursor_manifest_requirement
-    }
-
-    pub(crate) const fn boundary_peak_additional_resident_byte_ceiling(self) -> u64 {
-        self.boundary_peak_additional_resident_byte_ceiling
-    }
-
-    pub(crate) const fn restore_workspace_byte_ceiling(self) -> u64 {
-        self.restore_workspace_byte_ceiling
-    }
-
-    pub(crate) const fn peak_copied_buffer_byte_length(self) -> u32 {
-        self.peak_copied_buffer_byte_length
-    }
-
-    pub(crate) const fn fits_absolute_bounds(self) -> bool {
-        self.cursor_manifest_requirement.fits_absolute_bounds()
-            && self.boundary_peak_additional_resident_byte_ceiling
-                <= super::super::MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
-            && self.peak_copied_buffer_byte_length
-                <= super::MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH as u32
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn common_proof_generation_checkpoint_custody_requirement_for_variant(
-    variant: &RelationPlanVariant,
-) -> Result<
-    CommonProofGenerationCheckpointCustodyRequirement,
-    CommonProofCheckpointCursorManifestError,
-> {
-    let cursor_manifest_requirement =
-        common_proof_checkpoint_cursor_manifest_requirement_for_variant(variant)?;
-    let generation_cursor_manifest_byte_ceiling =
-        usize::try_from(cursor_manifest_requirement.canonical_manifest_byte_ceiling())
-            .map_err(|_| CommonProofCheckpointCursorManifestError::CountOverflow)?
-            .checked_add(COMMON_PROOF_GENERATION_CURSOR_MANIFEST_PREFIX_BYTE_LENGTH)
-            .and_then(|byte_length| {
-                byte_length
-                    .checked_add(MAXIMUM_ROW_CODE_WHIR_TRANSCRIPT_CHECKPOINT_CURSOR_BYTE_LENGTH)
-            })
-            .filter(|byte_length| {
-                *byte_length <= MAXIMUM_COMMON_PROOF_GENERATION_CURSOR_MANIFEST_BYTE_LENGTH
-            })
-            .ok_or(CommonProofCheckpointCursorManifestError::OutsideSupportedProfile)?;
-    let generation_cursor_manifest_byte_ceiling =
-        u32::try_from(generation_cursor_manifest_byte_ceiling)
-            .map_err(|_| CommonProofCheckpointCursorManifestError::CountOverflow)?;
-    let encoded_state_byte_length = u32::try_from(COMMON_PROOF_CHECKPOINT_STATE_BYTE_LENGTH)
-        .map_err(|_| CommonProofCheckpointCursorManifestError::CountOverflow)?;
-    let decoded_state_owner_byte_length =
-        u32::try_from(core::mem::size_of::<CommonProofGenerationCheckpointState>())
-            .map_err(|_| CommonProofCheckpointCursorManifestError::CountOverflow)?;
-    let pending_checkpoint_fixed_owner_byte_length =
-        u32::try_from(core::mem::size_of::<PendingCommonProofGenerationCheckpoint>())
-            .map_err(|_| CommonProofCheckpointCursorManifestError::CountOverflow)?;
-    let manifest_vector_owner_byte_length = u64::try_from(core::mem::size_of::<Vec<u8>>())
-        .map_err(|_| CommonProofCheckpointCursorManifestError::CountOverflow)?;
-    let transient_construction_resident_byte_ceiling = cursor_manifest_requirement
-        .peak_additional_resident_byte_ceiling()
-        .checked_add(u64::from(generation_cursor_manifest_byte_ceiling))
-        .and_then(|bytes| {
-            bytes.checked_add(
-                u64::try_from(MAXIMUM_ROW_CODE_WHIR_TRANSCRIPT_CHECKPOINT_CURSOR_BYTE_LENGTH)
-                    .ok()?,
-            )
-        })
-        .and_then(|bytes| bytes.checked_add(u64::from(decoded_state_owner_byte_length)))
-        .and_then(|bytes| bytes.checked_add(u64::from(encoded_state_byte_length)))
-        .and_then(|bytes| bytes.checked_add(manifest_vector_owner_byte_length))
-        .ok_or(CommonProofCheckpointCursorManifestError::CountOverflow)?;
-    let pending_checkpoint_resident_byte_ceiling = cursor_manifest_requirement
-        .retained_cursor_state_byte_ceiling()
-        .checked_add(u64::from(generation_cursor_manifest_byte_ceiling))
-        .and_then(|bytes| bytes.checked_add(u64::from(pending_checkpoint_fixed_owner_byte_length)))
-        .ok_or(CommonProofCheckpointCursorManifestError::CountOverflow)?;
-    let boundary_peak_additional_resident_byte_ceiling =
-        transient_construction_resident_byte_ceiling.max(pending_checkpoint_resident_byte_ceiling);
-    let restore_workspace_byte_ceiling = cursor_manifest_requirement
-        .restore_workspace_byte_ceiling()
-        .checked_add(u64::from(generation_cursor_manifest_byte_ceiling))
-        .and_then(|bytes| bytes.checked_add(u64::from(decoded_state_owner_byte_length)))
-        .and_then(|bytes| bytes.checked_add(manifest_vector_owner_byte_length))
-        .ok_or(CommonProofCheckpointCursorManifestError::CountOverflow)?;
-    let peak_copied_buffer_byte_length =
-        generation_cursor_manifest_byte_ceiling.max(encoded_state_byte_length);
-    Ok(CommonProofGenerationCheckpointCustodyRequirement {
-        cursor_manifest_requirement,
-        encoded_state_byte_length,
-        decoded_state_owner_byte_length,
-        pending_checkpoint_fixed_owner_byte_length,
-        transient_construction_resident_byte_ceiling,
-        pending_checkpoint_resident_byte_ceiling,
-        boundary_peak_additional_resident_byte_ceiling,
-        restore_workspace_byte_ceiling,
-        peak_copied_buffer_byte_length,
-    })
 }
 
 fn build_generation_checkpoint(
@@ -1943,90 +1653,6 @@ impl GeneratedCommonProof {
 /// private coin cursors, bound-tree source, external-memory replay, and output
 /// digest all stay in this worker. Host input can only satisfy the exact
 /// pending storage request or acknowledge and reread the exact staged chunk.
-#[cfg(test)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum CommonProofGenerationAttemptStart {
-    CheckpointGenesis,
-    CheckpointGenesisWithAuthenticatedResumeTarget,
-}
-
-#[cfg(test)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum CommonProofGenerationResumePrefixExecution {
-    DeterministicReplayFromGenesisThroughAuthenticatedTarget,
-}
-
-#[cfg(test)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum CommonProofGenerationResumeStateRestoration {
-    CheckpointTargetComparisonAndAuthenticatedTranscriptCursorRestoration,
-}
-
-#[cfg(test)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum CommonProofGenerationCumulativeWorkRule {
-    PriorPrefixPlusReplayedPrefixPlusRemainingSuffix,
-}
-
-/// Production resume topology used by static accounting. A checkpoint binds
-/// the target state and cursors. Resume executes a new worker from genesis
-/// through the authenticated target, compares the complete reconstructed
-/// checkpoint, restores the exact transcript cursor, and then continues. The
-/// replayed prefix remains additional work beside the prefix completed by the
-/// prior attempt.
-#[cfg(test)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct CommonProofGenerationAttemptTopology {
-    fresh_start: CommonProofGenerationAttemptStart,
-    resumed_start: CommonProofGenerationAttemptStart,
-    resumed_prefix_execution: CommonProofGenerationResumePrefixExecution,
-    resumed_state_restoration: CommonProofGenerationResumeStateRestoration,
-    cumulative_work_rule: CommonProofGenerationCumulativeWorkRule,
-}
-
-#[cfg(test)]
-impl CommonProofGenerationAttemptTopology {
-    pub(crate) const fn fresh_start(self) -> CommonProofGenerationAttemptStart {
-        self.fresh_start
-    }
-
-    pub(crate) const fn resumed_start(self) -> CommonProofGenerationAttemptStart {
-        self.resumed_start
-    }
-
-    pub(crate) const fn resumed_prefix_execution(
-        self,
-    ) -> CommonProofGenerationResumePrefixExecution {
-        self.resumed_prefix_execution
-    }
-
-    pub(crate) const fn resumed_state_restoration(
-        self,
-    ) -> CommonProofGenerationResumeStateRestoration {
-        self.resumed_state_restoration
-    }
-
-    pub(crate) const fn cumulative_work_rule(self) -> CommonProofGenerationCumulativeWorkRule {
-        self.cumulative_work_rule
-    }
-}
-
-#[cfg(test)]
-pub(crate) const fn common_proof_generation_attempt_topology()
--> CommonProofGenerationAttemptTopology {
-    CommonProofGenerationAttemptTopology {
-        fresh_start: CommonProofGenerationAttemptStart::CheckpointGenesis,
-        resumed_start:
-            CommonProofGenerationAttemptStart::CheckpointGenesisWithAuthenticatedResumeTarget,
-        resumed_prefix_execution:
-            CommonProofGenerationResumePrefixExecution::DeterministicReplayFromGenesisThroughAuthenticatedTarget,
-        resumed_state_restoration:
-            CommonProofGenerationResumeStateRestoration::CheckpointTargetComparisonAndAuthenticatedTranscriptCursorRestoration,
-        cumulative_work_rule:
-            CommonProofGenerationCumulativeWorkRule::PriorPrefixPlusReplayedPrefixPlusRemainingSuffix,
-    }
-}
-
 pub(super) struct CommonProofGenerationWorker {
     binding: CommonProofGenerationBinding,
     relation_plan: CommonProofRelationPlanCapability,
@@ -2281,7 +1907,7 @@ impl CommonProofGenerationWorker {
                 | PollableCommonProofByteSinkError::ChunkAwaitingCommit
                 | PollableCommonProofByteSinkError::ChunkAwaitingReadback,
             )) => self.poll(),
-            Err(_) => Err(CommonProofGenerationWorkerError::Generation),
+            Err(error) => Err(CommonProofGenerationWorkerError::Generation(error)),
             Ok(CommonProofGenerationPoll::StorageTransactionCompleted) => self.progress_poll(),
             Ok(CommonProofGenerationPoll::AuthenticatedTranscriptPrefixRequired) => {
                 Ok(CommonProofGenerationWorkerPoll::AuthenticatedTranscriptPrefixRequired)
@@ -2303,13 +1929,7 @@ impl CommonProofGenerationWorker {
         let stage = self.state.stage();
         let Some(boundary) = self.state.checkpoint_boundary() else {
             if self.resume_target.is_some()
-                && matches!(
-                    stage,
-                    CommonProofGenerationStage::EmittingPrefix
-                        | CommonProofGenerationStage::EmittingQueries
-                        | CommonProofGenerationStage::Finalizing
-                        | CommonProofGenerationStage::Complete
-                )
+                && matches!(stage, CommonProofGenerationStage::Finalizing)
             {
                 return Err(CommonProofRuntimeError::WrongVerificationBinding.into());
             }
@@ -2415,7 +2035,9 @@ impl CommonProofGenerationWorker {
                     .poll(&mut self.storage, &mut self.private_coins, &mut self.output);
             match result {
                 Ok(_) => self.storage.transaction_completed()?,
-                Err(_) => return Err(CommonProofGenerationWorkerError::Generation),
+                Err(error) => {
+                    return Err(CommonProofGenerationWorkerError::Generation(error));
+                }
             }
             self.generation_transaction_must_replay_before_cancellation = false;
         }
@@ -2526,8 +2148,8 @@ mod generation_cursor_manifest_tests {
     use super::*;
 
     fn private_coin_cursor_manifest() -> Vec<u8> {
-        let mut manifest = COMMON_PROOF_PRIVATE_COIN_CURSOR_MANIFEST_MAGIC.to_vec();
-        manifest.extend_from_slice(&[3, 0, 1, 0, 0, 0, 0]);
+        let mut manifest = COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_MAGIC.to_vec();
+        manifest.extend_from_slice(&[5, 0, 1, 0, 0, 0, 0]);
         manifest
     }
 

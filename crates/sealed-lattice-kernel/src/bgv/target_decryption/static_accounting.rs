@@ -59,35 +59,6 @@ pub(crate) enum SelectedTargetReleaseStaticAccountingError {
     CountOverflow,
 }
 
-impl SelectedTargetReleaseStaticAccountingError {
-    pub(crate) const fn reason_code(self) -> &'static str {
-        match self {
-            Self::EmptyProof => "target-release-static-accounting-empty-proof",
-            Self::ProofOutsideSupportedProfile => {
-                "target-release-static-accounting-proof-outside-supported-profile"
-            }
-            Self::InvalidSelectedProfile => {
-                "target-release-static-accounting-invalid-selected-profile"
-            }
-            Self::CanonicalEncoding => "target-release-static-accounting-canonical-encoding",
-            Self::SourceProviderMemory => "target-release-static-accounting-source-provider-memory",
-            Self::InvalidReconstructionInput => {
-                "target-release-static-accounting-invalid-reconstruction-input"
-            }
-            Self::MissingProductionCarrier => {
-                "target-release-static-accounting-missing-production-carrier"
-            }
-            Self::DuplicateProductionCarrier => {
-                "target-release-static-accounting-duplicate-production-carrier"
-            }
-            Self::InvalidProductionCarrierLifetime => {
-                "target-release-static-accounting-invalid-production-carrier-lifetime"
-            }
-            Self::CountOverflow => "target-release-static-accounting-count-overflow",
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SelectedTargetReleaseCanonicalMaterialAccounting {

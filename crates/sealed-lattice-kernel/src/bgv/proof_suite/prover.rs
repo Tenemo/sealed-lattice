@@ -1,39 +1,20 @@
-//! Production prover primitives for the suite-bound common transparent proof.
-//!
-//! This module contains no native-only path.  Large oracle, Merkle, quotient,
-//! and FRI material can be persisted through `external_memory`; proof bytes are
-//! emitted to a bounded sink and never need to exist as one allocation.
+//! Browser-compatible prover primitives for construction-driven row-code proofs.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroizing;
 
-use crate::foundation::{CanonicalDecodeLimits, CanonicalItemType, ProofObjectHeader};
 use crate::hashing::StreamingHash512;
 
-use super::body::{
-    PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER, PROOF_AUTHENTICATION_FRONTIER_SCHEMA_VERSION,
-    PROOF_QUERY_OPENING_RECORD_SCHEMA_IDENTIFIER, canonical_leaf_byte_length, entry_leaf_count,
-    maximum_minimal_frontier_node_count,
-};
-use super::external_memory;
-use super::external_memory::{
-    ProofExternalMemory, ProofExternalMemoryError, ProofExternalMemoryExecutor,
-    ProofExternalMemoryExecutorError, ProofExternalMemoryObject, ProofExternalMemoryObjectPlan,
-    ProofExternalMemoryPlan, ProofExternalMemoryProtection, ProofExternalMemoryUsage,
-};
-use super::external_polynomial::{
-    ExternalPolynomialError, ExternalPolynomialValue, ExternalPolynomialVector,
-    ExternalStockhamTransform, ExternalStockhamTransformDirection, ExternalStockhamTransformError,
-    ExternalStockhamTransformPlan, ExternalStockhamTransformProgress,
-    external_polynomial_extension_read_resident_memory_requirement,
-    external_stockham_resident_memory_requirement, external_value_byte_length,
-    map_external_polynomial_plan_error, read_external_polynomial_base_values,
-    read_external_polynomial_extension_values, read_external_polynomial_value,
-};
-use super::merkle::minimal_frontier_coordinates;
+use super::COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH;
+#[cfg(test)]
+use super::external_memory::ProofExternalMemoryObject;
+use super::external_polynomial::{ExternalPolynomialVector, external_value_byte_length};
+use super::field::{ProofBaseFieldElement, ProofChallengeExtensionElement, ProofFieldError};
+use super::merkle::{ProofMerkleError, ProofTreeRole};
+use super::polynomial::{ProofEvaluationDomain, ProofPolynomialError, evaluate_extension_at};
 use super::relation_plan::{
-    BoundTreeConstructionKind, CheckedRelationApplicationChallenges, ProofPrivacyMode,
+    CheckedRelationApplicationChallenges, ProofPrivacyMode, RelationApplicationChallengeAssignment,
     RelationColumnDescriptor, RelationColumnOrigin, RelationColumnValueType,
     RelationConstraintColumnQuery, RelationIntegerLiftCoefficient,
     RelationIntegerLiftComponentDescriptor, RelationIntegerLiftConvolutionKind,
@@ -41,31 +22,12 @@ use super::relation_plan::{
     RelationIntegerLiftFullRingNegacyclicProductDescriptor,
     RelationIntegerLiftLinearTermDescriptor,
     RelationIntegerLiftNegacyclicAutomorphismPermutationDescriptor, RelationMaskDescriptor,
-    RelationMaskKind, RelationMaskTargetClass, RelationOpeningClaimDescriptor,
-    RelationOpeningSourceClass, RelationTreeDescriptor,
+    RelationMaskKind, RelationMaskTargetClass, RelationPlanCheckContext, RelationPlanError,
+    RelationPlanVariant, RelationTreeDescriptor, SuiteModulusReference,
 };
-use super::{
-    COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, CommonProofChallenge, CommonProofPrivacyMode,
-    CommonProofQueryOpeningAbsorber, CommonProofTranscript, CommonProofTranscriptSchedule,
-    CompiledRelationPlan, CompleteProofTreeCatalog, MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
-    MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH, PROOF_CHALLENGE_EXTENSION_DEGREE,
-    ProofBaseFieldElement, ProofBodyError, ProofChallengeExtensionElement, ProofEvaluationDomain,
-    ProofFieldError, ProofLeafVisibility, ProofMerkleError, ProofMerkleTreeContext,
-    ProofOraclePhasePairLeaf, ProofPolynomialError, ProofProfileError, ProofTreeCatalogEntry,
-    ProofTreeCatalogInput, ProofTreeCatalogSource, ProofTreeRole, ProofTreeValue,
-    RelationApplicationChallengeAssignment, RelationPlanCheckContext, RelationPlanError,
-    RelationPlanVariant, RelationProofTreeInput, StatementOwnedProofTreeInput,
-    SuiteModulusReference, TranscriptError, ValidatedRelationPlanArtifact,
-    build_complete_proof_tree_catalog, divide_extension_polynomial_by_linear_in_place,
-    evaluate_extension_at, extension_polynomial_degree, fold_extension_evaluations_in_place,
-    sample_relation_application_challenges,
-};
+use super::transcript::CommonProofChallenge;
 
-const SCHEMA_VERSION: u16 = 1;
 const HASH_BYTE_LENGTH: usize = 64;
-const AUTHENTICATION_DIGEST_BYTE_LENGTH: usize = 64;
-const CHECKPOINT_COMMITTED_STATE_HASH_DOMAIN: &str =
-    "sealed-lattice/common-proof/checkpoint-committed-state/v1";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CommonProofProverError {
@@ -75,7 +37,6 @@ pub(crate) enum CommonProofProverError {
     InvalidMask,
     InvalidQuotient,
     InvalidOpening,
-    InvalidFriLayer,
     InvalidTree,
     CountOverflow,
     AllocationLimitExceeded,
@@ -110,128 +71,186 @@ impl From<RelationPlanError> for CommonProofProverError {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub(crate) enum CommonProofGenerationStage {
+    PreparingInputs = 1,
+    MaterializingBaseTrees = 2,
+    DerivingApplicationColumns = 3,
+    MaterializingAuxiliaryTrees = 4,
+    ConstructingQuotient = 5,
+    MaterializingQuotientTrees = 6,
+    DerivingOutOfDomainOpenings = 7,
+    MaterializingOpeningMask = 8,
+    ReducingCommittedOracles = 9,
+    Finalizing = 12,
+    Cancelled = 14,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CommonProofGenerationPoll {
+    ArithmeticStepCompleted,
+    StorageTransactionCompleted,
+    AuthenticatedTranscriptPrefixRequired,
+    OutputFragmentAccepted,
+    Complete,
+}
+
+/// One replayable commitment-round boundary.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CommonProofGenerationCheckpointBoundary {
+    safe_boundary_ordinal: u32,
+    position: [u8; 16],
+    committed_state_digest: [u8; HASH_BYTE_LENGTH],
+    canonical_transcript_cursor_bytes: Vec<u8>,
+    canonical_transcript_cursor_digest: Option<[u8; HASH_BYTE_LENGTH]>,
+}
+
+impl CommonProofGenerationCheckpointBoundary {
+    pub(crate) const fn new(
+        safe_boundary_ordinal: u32,
+        position: [u8; 16],
+        committed_state_digest: [u8; HASH_BYTE_LENGTH],
+    ) -> Self {
+        Self {
+            safe_boundary_ordinal,
+            position,
+            committed_state_digest,
+            canonical_transcript_cursor_bytes: Vec::new(),
+            canonical_transcript_cursor_digest: None,
+        }
+    }
+
+    pub(crate) fn with_canonical_transcript_cursor(
+        mut self,
+        canonical_transcript_cursor_bytes: Vec<u8>,
+        canonical_transcript_cursor_digest: [u8; HASH_BYTE_LENGTH],
+    ) -> Self {
+        self.canonical_transcript_cursor_bytes = canonical_transcript_cursor_bytes;
+        self.canonical_transcript_cursor_digest = Some(canonical_transcript_cursor_digest);
+        self
+    }
+
+    pub(crate) const fn safe_boundary_ordinal(&self) -> u32 {
+        self.safe_boundary_ordinal
+    }
+
+    pub(crate) const fn position(&self) -> [u8; 16] {
+        self.position
+    }
+
+    pub(crate) const fn committed_state_digest(&self) -> [u8; HASH_BYTE_LENGTH] {
+        self.committed_state_digest
+    }
+
+    pub(crate) fn canonical_transcript_cursor_bytes(&self) -> &[u8] {
+        &self.canonical_transcript_cursor_bytes
+    }
+
+    pub(crate) const fn canonical_transcript_cursor_digest(
+        &self,
+    ) -> Option<[u8; HASH_BYTE_LENGTH]> {
+        self.canonical_transcript_cursor_digest
+    }
+}
+
 mod encoding;
-mod fri;
-mod generation_state;
 mod generation_storage;
-mod merkle_storage;
 mod private_coins;
 mod quotient;
 mod relation_columns;
 
-pub(crate) use encoding::{
-    BoundedCommonProofByteSink, BoundedCommonProofByteSinkError, CommonProofByteSink,
-    CommonProofEncodingError, CommonProofOpeningGeometry,
-    canonical_common_proof_query_section_header, canonical_proof_object_header_bytes,
-    common_proof_query_section_byte_length, encode_common_proof_query_tree_fragment,
-    write_common_proof_prefix,
-};
-#[cfg(test)]
-pub(crate) use generation_state::common_proof_source_provider_is_live_during_phase;
-#[cfg(test)]
-pub(crate) use generation_state::generate_checked_fixture_common_proof;
-pub(crate) use generation_state::{
-    CommonProofGenerationCheckpointBoundary, CommonProofGenerationPoll, CommonProofGenerationStage,
-    CommonProofGenerationStateMachine,
-};
+pub(crate) use encoding::{CommonProofByteSink, canonical_proof_object_header_bytes};
 pub(crate) use generation_storage::{
     CommonProofExternalMemoryRequirement, CommonProofGenerationError,
     CommonProofGenerationInitializationError, CommonProofGenerationInput,
-    CommonProofResidentMemoryConfiguration, CommonProofResidentMemoryPhase,
-    CommonProofResidentMemoryPlan, GeneratedCommonProofStoragePlanError,
-    MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, common_proof_resident_memory_plan,
+    CommonProofReplayPolynomialEncoding, CommonProofReplayPolynomialPlan,
+    CommonProofReplayPolynomialRangeDestination, CommonProofReplayPolynomialRangeReader,
+    CommonProofReplayPolynomialReader, CommonProofReplayPolynomialRef,
+    CommonProofReplayPolynomialWriter, MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
     validate_generation_relation_trees,
 };
-#[cfg(test)]
-pub(crate) use generation_storage::{
-    common_proof_cap_neutral_resource_requirement, common_proof_external_memory_requirement,
-    common_proof_resident_memory_requirement,
-};
-pub(crate) use merkle_storage::{
-    CommonProofMerkleMaterializer, CommonProofMerkleMaterializerProgress,
-    CommonProofMerkleStoragePlan, CommonProofOpeningPrefetchProgress, CommonProofOpeningPrefetcher,
-    CommonProofTreeStorageError, PrefetchedCommonProofOpeningArtifact,
-    SetupPolynomialColumnMajorMerkleReplay, SetupPolynomialColumnMajorMerkleReplayMode,
-    SetupPolynomialColumnMajorMerkleRootPass, StatementOwnedMerkleReplay,
-    StatementOwnedMerkleReplayMode, StoredCommonProofMerkleTree,
-    common_proof_merkle_materialization_resident_memory_requirement,
-    common_proof_merkle_storage_plan,
-    setup_polynomial_column_major_merkle_replay_wasm_memory_bound,
-};
 pub(crate) use private_coins::{
-    CheckpointableCommonProofPrivateCoinSource, CommonProofPrivateCoinCoordinate,
-    CommonProofPrivateCoinCoordinateCapacity, CommonProofPrivateCoinSource,
-    PrivateRandomnessCommonProofCoinError, PrivateRandomnessCommonProofCoinSource,
-    PublicOnlyCommonProofCoinSource,
+    COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_MAGIC, CheckpointableCommonProofPrivateCoinSource,
+    CommonProofPrivateCoinCoordinate, CommonProofPrivateCoinCoordinateCapacity,
+    CommonProofPrivateCoinSource, PrivateRandomnessCommonProofCoinError,
+    PrivateRandomnessCommonProofCoinSource,
 };
 #[cfg(test)]
 pub(crate) use private_coins::{
-    CommonProofCheckpointCursorManifestError, CommonProofCheckpointCursorManifestRequirement,
     CommonProofPrivateCoinSamplingCatalog, CommonProofPrivateCoinSamplingOperation,
     RecordingCommonProofPrivateCoinSource,
     common_proof_checkpoint_cursor_manifest_requirement_for_variant,
     common_proof_private_coin_coordinate_derivation_context_hash,
     encode_common_proof_checkpoint_cursor_manifest,
 };
-pub(crate) use quotient::CommonProofQuotientComponentCursor;
-#[cfg(test)]
 pub(crate) use quotient::{
-    construct_composed_quotient_polynomial,
-    construct_constraint_stream_composed_quotient_polynomial, decompose_composed_quotient,
+    CommonProofConstraintStreamQuotientBuilder, CommonProofQuotientComponentCursor,
+    CommonProofQuotientConstraintTransformKey, CommonProofQuotientEvaluationProgress,
+    CommonProofQuotientEvaluationReadRequest, common_proof_quotient_constraint_catalog,
 };
 #[cfg(test)]
-pub(crate) use relation_columns::ResidentCommonProofSourcePolynomialProvider;
+pub(crate) use quotient::{construct_composed_quotient_polynomial, decompose_composed_quotient};
 #[cfg(test)]
 pub(crate) use relation_columns::construct_pre_challenge_relation_columns;
 pub(crate) use relation_columns::{
-    CommonProofAuthenticatedSourceReadRequest, CommonProofAuxiliaryColumnSynthesisCursor,
+    CommonProofAuthenticatedSourceReadRequest, CommonProofAuxiliaryColumnReconstructionCatalog,
+    CommonProofAuxiliaryColumnReconstructionCursor, CommonProofAuxiliaryColumnSynthesisCursor,
     CommonProofBoundTreeLeafSaltRequest, CommonProofPreChallengeSourceCursor,
     CommonProofPreChallengeSourcePoll, CommonProofPrivateCoinError, CommonProofSourcePolynomial,
     CommonProofSourcePolynomialProvider, CommonProofSourcePolynomialProviderPoll,
     CommonProofSourcePolynomialReplayIdentity, CommonProofSourcePolynomialRequest,
     CommonProofSourcePolynomialRequestContext, CommonProofSourceProviderMemoryAccounting,
     ProvidedCommonProofSourcePolynomial, apply_trace_mask,
-    authenticated_pre_challenge_source_coefficient_position_counts, construct_opening_batch_mask,
-    construct_reversed_relation_column, maximum_auxiliary_synthesis_trace_vector_count,
-    persisted_pre_challenge_column_coefficient_position_counts, proof_created_tree_roles_by_column,
+    authenticated_pre_challenge_source_coefficient_position_counts,
+    auxiliary_private_mask_tail_coefficient_count, construct_opening_batch_mask,
+    construct_reversed_relation_column, extract_auxiliary_private_mask_tail,
+    ordered_integer_lift_auxiliary_column_ordinals,
+    persisted_pre_challenge_column_coefficient_position_counts,
     relation_column_replay_requirements, relation_reversed_column_bindings,
     requested_pre_challenge_source_column_ordinals, sample_private_extension_polynomial,
 };
 
-pub(in crate::bgv::proof_suite) use encoding::opened_leaf_indexes;
-use fri::{
-    add_replay_polynomial_to_initial_fri, add_shifted_extension_polynomial,
-    evaluate_replay_polynomial_opening, replay_polynomial_key_for_claim,
-    subtract_extension_polynomial, trim_base_polynomial, trim_extension_polynomial,
-};
-#[cfg(test)]
-use generation_storage::CompletedCommonProofGenerationResult;
-#[cfg(test)]
-use generation_storage::common_tree_materialization_write_transaction_count;
-use generation_storage::{
-    CommonProofGenerationPollResult, CommonProofReplayPolynomialKey,
-    generated_common_proof_storage_plan, insert_materialized_tree,
-    map_private_coin_generation_error, statement_owned_tree_root, unique_catalog_entry,
-};
-pub(crate) use generation_storage::{
-    CommonProofReplayPolynomialPlan, CommonProofReplayPolynomialRangeDestination,
-    CommonProofReplayPolynomialRangeReader, CommonProofReplayPolynomialReader,
-    CommonProofReplayPolynomialRef, CommonProofReplayPolynomialWriter,
-};
-use merkle_storage::{canonical_common_proof_leaf_byte_length, common_proof_tree_value_type};
-use quotient::{
-    COMMON_PROOF_RELATION_EVALUATION_BLOCK_LENGTH, rotated_relation_evaluation_position,
-};
-pub(crate) use quotient::{
-    CommonProofConstraintStreamQuotientBuilder, CommonProofQuotientConstraintTransformKey,
-    CommonProofQuotientEvaluationProgress, CommonProofQuotientEvaluationReadRequest,
-    common_proof_quotient_constraint_catalog,
-};
-#[cfg(test)]
-use relation_columns::{
-    convolution_transpose_rows, full_ring_transpose_rows, prefix_evaluation_rows,
-    product_accumulator_rows, suffix_evaluation_rows,
-};
+fn add_shifted_extension_polynomial(
+    target: &mut Vec<ProofChallengeExtensionElement>,
+    addend: &[ProofChallengeExtensionElement],
+    shift: usize,
+) -> Result<(), CommonProofProverError> {
+    let required = shift
+        .checked_add(addend.len())
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    if target.len() < required {
+        target.resize(required, ProofChallengeExtensionElement::ZERO);
+    }
+    for (ordinal, coefficient) in addend.iter().copied().enumerate() {
+        target[shift + ordinal] = target[shift + ordinal].add(coefficient);
+    }
+    Ok(())
+}
 
-#[cfg(test)]
-mod tests;
+fn subtract_extension_polynomial(
+    target: &mut Vec<ProofChallengeExtensionElement>,
+    subtrahend: &[ProofChallengeExtensionElement],
+) -> Result<(), CommonProofProverError> {
+    if target.len() < subtrahend.len() {
+        target.resize(subtrahend.len(), ProofChallengeExtensionElement::ZERO);
+    }
+    for (destination, coefficient) in target.iter_mut().zip(subtrahend) {
+        *destination = destination.subtract(*coefficient);
+    }
+    Ok(())
+}
+
+fn trim_base_polynomial(coefficients: &mut Vec<ProofBaseFieldElement>) {
+    while coefficients.len() > 1 && coefficients.last() == Some(&ProofBaseFieldElement::ZERO) {
+        coefficients.pop();
+    }
+}
+
+fn trim_extension_polynomial(coefficients: &mut Vec<ProofChallengeExtensionElement>) {
+    while coefficients.len() > 1
+        && coefficients.last() == Some(&ProofChallengeExtensionElement::ZERO)
+    {
+        coefficients.pop();
+    }
+}

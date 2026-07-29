@@ -8,6 +8,7 @@ use p3_field::{ExtensionField, Field, HornerIter};
 use p3_multilinear_util::point::Point;
 
 use super::data::{ZkSumcheckData, ZkVerifierHandoff};
+use crate::constraints::Constraint;
 use crate::error::SumcheckError;
 use crate::layout::{LayoutStrategy, Verifier};
 use crate::strategy::VariableOrder;
@@ -120,19 +121,16 @@ where
         Ok(())
     }
 
-    fn replay_claim_unchecked<M, Ch>(
+    fn replay_precommitted_claim_unchecked<Ch>(
         zk_data: &ZkSumcheckData<F, EF>,
-        mask_commitment: &M::Commitment,
         folding_factor: usize,
         pow_bits: usize,
         claimed_sum: EF,
         challenger: &mut Ch,
     ) -> Result<ZkVerifierHandoff<EF>, SumcheckError>
     where
-        M: Mmcs<EF>,
-        Ch: FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<M::Commitment>,
+        Ch: FieldChallenger<F> + GrindingChallenger<Witness = F>,
     {
-        challenger.observe(mask_commitment.clone());
         challenger.observe_algebra_element(zk_data.mu_tilde);
         let eps: EF = challenger.sample_algebra_element();
 
@@ -182,6 +180,26 @@ where
     {
         // Delegate; the HVZK overlay carries no extra state at claim time.
         self.inner.add_claim(table_idx, batch, evals, challenger)
+    }
+
+    /// Records one opening claim at an explicit point already derived by an
+    /// enclosing reduction.
+    ///
+    /// The point and evaluations are absorbed by the inner layout verifier in
+    /// the same order as the matching explicit-point prover operation.
+    pub fn add_claim_at_point<Ch>(
+        &mut self,
+        table_idx: usize,
+        batch: &OpeningRequest,
+        evals: &OpeningEvals<EF>,
+        point: Point<EF>,
+        challenger: &mut Ch,
+    ) -> Result<(), SumcheckError>
+    where
+        Ch: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+    {
+        self.inner
+            .add_claim_at_point(table_idx, batch, evals, point, challenger)
     }
 
     /// Records a virtual evaluation claim on the inner verifier.
@@ -259,14 +277,77 @@ where
         let mu = self.inner.sum(alpha);
 
         // Phase 3: absorb the mask commitment and mu_tilde, sample eps, and walk the round chain.
-        Self::replay_claim_unchecked::<M, _>(
+        challenger.observe(mask_commitment.clone());
+        Self::replay_precommitted_claim_unchecked(
             zk_data,
-            mask_commitment,
             folding_factor,
             pow_bits,
             mu,
             challenger,
         )
+    }
+
+    /// Replays the layout-driven HVZK sumcheck against a mask commitment that
+    /// the caller already bound to the transcript.
+    ///
+    /// This is the aggregate-wide counterpart of [`Self::into_sumcheck`]. The
+    /// caller must observe the shared commitment before any claim-dependent
+    /// challenge. This method samples `alpha`, derives the batched claim, and
+    /// starts directly at `mu_tilde` without observing another commitment.
+    #[allow(clippy::too_many_arguments)]
+    pub fn into_precommitted_sumcheck<Ch>(
+        self,
+        zk_data: &ZkSumcheckData<F, EF>,
+        ell_zk: usize,
+        folding_factor: usize,
+        pow_bits: usize,
+        challenger: &mut Ch,
+    ) -> Result<ZkVerifierHandoff<EF>, SumcheckError>
+    where
+        Ch: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+    {
+        Self::validate_shape(zk_data, ell_zk, folding_factor, pow_bits)?;
+        let alpha: EF = challenger.sample_algebra_element();
+        let mu = self.inner.sum(alpha);
+        Self::replay_precommitted_claim_unchecked(
+            zk_data,
+            folding_factor,
+            pow_bits,
+            mu,
+            challenger,
+        )
+    }
+
+    /// Replays a layout-driven precommitted sumcheck and returns the symbolic
+    /// alpha-batched source constraint used to derive its scalar claim.
+    ///
+    /// Returning both outputs from one operation is important: sampling alpha
+    /// twice would change the transcript, while reconstructing the constraint
+    /// outside the layout verifier would duplicate its selector semantics.
+    #[allow(clippy::too_many_arguments)]
+    pub fn into_precommitted_sumcheck_with_constraint<Ch>(
+        self,
+        zk_data: &ZkSumcheckData<F, EF>,
+        ell_zk: usize,
+        folding_factor: usize,
+        pow_bits: usize,
+        challenger: &mut Ch,
+    ) -> Result<(ZkVerifierHandoff<EF>, Constraint<F, EF>), SumcheckError>
+    where
+        Ch: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+    {
+        Self::validate_shape(zk_data, ell_zk, folding_factor, pow_bits)?;
+        let alpha: EF = challenger.sample_algebra_element();
+        let constraint = self.inner.constraint(alpha);
+        let mu = self.inner.sum(alpha);
+        let handoff = Self::replay_precommitted_claim_unchecked(
+            zk_data,
+            folding_factor,
+            pow_bits,
+            mu,
+            challenger,
+        )?;
+        Ok((handoff, constraint))
     }
 
     /// Replays an HVZK sumcheck transcript for an already-batched scalar claim.
@@ -293,9 +374,38 @@ where
     {
         Self::validate_shape(zk_data, ell_zk, folding_factor, pow_bits)?;
         challenger.observe_algebra_element(claimed_sum);
-        Self::replay_claim_unchecked::<M, _>(
+        challenger.observe(mask_commitment.clone());
+        Self::replay_precommitted_claim_unchecked(
             zk_data,
-            mask_commitment,
+            folding_factor,
+            pow_bits,
+            claimed_sum,
+            challenger,
+        )
+    }
+
+    /// Replays a residual HVZK claim against a mask commitment that the caller
+    /// already bound to the transcript.
+    ///
+    /// The scalar claim remains transcript-bound here. Only the repeated mask
+    /// commitment observation is omitted, allowing one aggregate-wide mask
+    /// commitment to serve multiple disjoint logical mask slices.
+    #[allow(clippy::too_many_arguments)]
+    pub fn verify_precommitted_claim<Ch>(
+        zk_data: &ZkSumcheckData<F, EF>,
+        ell_zk: usize,
+        folding_factor: usize,
+        pow_bits: usize,
+        claimed_sum: EF,
+        challenger: &mut Ch,
+    ) -> Result<ZkVerifierHandoff<EF>, SumcheckError>
+    where
+        Ch: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+    {
+        Self::validate_shape(zk_data, ell_zk, folding_factor, pow_bits)?;
+        challenger.observe_algebra_element(claimed_sum);
+        Self::replay_precommitted_claim_unchecked(
+            zk_data,
             folding_factor,
             pow_bits,
             claimed_sum,

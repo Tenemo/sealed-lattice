@@ -1675,7 +1675,7 @@ fn prepare_aggregate_common_generation(
             coordinate_capacity,
         )
         .map_err(|_| AggregateThresholdShareRuntimeError::Refusal(RefusalReason::WrongContext))?;
-        PreparedCommonProofGeneration::from_exact_family_sources(
+        PreparedCommonProofGeneration::from_row_code_whir_sources(
             authorization,
             relation_plan,
             generation_material

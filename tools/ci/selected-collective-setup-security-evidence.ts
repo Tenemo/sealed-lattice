@@ -39,10 +39,22 @@ const sourcePaths = [
     'crates/sealed-lattice-kernel/src/bgv/evaluator/top_k/rotations.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/application_statement.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/profile.rs',
+    'crates/sealed-lattice-kernel/src/bgv/proof_suite/relation_plan.rs',
+    'crates/sealed-lattice-kernel/src/bgv/proof_suite/relation_plan/interpreter.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/selected_profile.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/zero_knowledge.rs',
-    'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_correspondence.rs',
+    'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/aggregate_wide_hiding.rs',
+    'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/aggregate_wide_pcs.rs',
+    'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/aggregate_wide_prover.rs',
+    'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/aggregate_wide_verifier.rs',
+    'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/aggregate_wide_wire.rs',
+    'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/compact_merkle_frontier.rs',
+    'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan.rs',
+    'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/linear_bcs_transcript.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate.rs',
+    'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/exact_same_secret/exact_proof.rs',
+    'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/generation_state.rs',
+    'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/verification.rs',
     'crates/sealed-lattice-kernel/src/bgv/setup/commitment/mod.rs',
     'crates/sealed-lattice-kernel/src/bgv/setup/sampling.rs',
     'crates/sealed-lattice-kernel/src/bgv/setup/accepted_setup/authority.rs',
@@ -151,9 +163,6 @@ const assumptionNodeIdentifiers = [
 ] as const;
 
 const unresolvedNodeIdentifiers = [
-    'commonConstructionKnowledgeSoundness',
-    'commonConstructionQromTransform',
-    'commonConstructionMaskingCorrespondence',
     'setupFamilySimulationComposition',
     'collectiveSetupHybridComposition',
 ] as const;
@@ -666,43 +675,96 @@ const buildSelectedSetupCorrectnessImport = (): JsonValue => ({
     ],
 });
 
-const buildConstructionEvidenceImports = (): JsonValue => [
-    {
-        identifier: exactConstructionEvidenceImportIdentifiers[0],
-        ownerSourcePaths: [
-            'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate.rs',
-            'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_correspondence.rs',
-        ],
-        requiredClosurePredicate: 'isCompleteConstructionTheorem',
-        observedStatus: 'unresolved',
-        checkedArtifactDigest: null,
-        missingEvidence:
-            'complete production State predicate and round-by-round extractor certificate',
-    },
-    {
-        identifier: exactConstructionEvidenceImportIdentifiers[1],
-        ownerSourcePaths: [
-            'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate.rs',
-        ],
-        requiredClosurePredicate:
-            'typedCmsNineteenApplicabilityAndAcceptingPathCeilings',
-        observedStatus: 'unresolved',
-        checkedArtifactDigest: null,
-        missingEvidence:
-            'runtime-identical typed hash chain and checked accepting-path hash and expansion ceilings',
-    },
-    {
-        identifier: exactConstructionEvidenceImportIdentifiers[2],
-        ownerSourcePaths: [
-            'crates/sealed-lattice-kernel/src/bgv/proof_suite/zero_knowledge.rs',
-        ],
-        requiredClosurePredicate: 'completeConstructionMaskingCorrespondence',
-        observedStatus: 'unresolved',
-        checkedArtifactDigest: null,
-        missingEvidence:
-            'full-rank hostile-coordinate coverage for every nonlinear and challenge-dependent secret-bearing view',
-    },
-];
+const checkedSourceBundleDigest = (
+    sourceAuthority: readonly JsonValue[],
+    ownerSourcePaths: readonly string[],
+): string => {
+    const sourceRows = new Map(
+        sourceAuthority.map((value) => {
+            const row = requireRecord(value, 'Source-authority row');
+            return [
+                requireString(row.relativePath, 'Source-authority path'),
+                row,
+            ] as const;
+        }),
+    );
+    return canonicalJsonSha256(
+        ownerSourcePaths.map((relativePath) => {
+            const row = sourceRows.get(relativePath);
+            if (row === undefined) {
+                throw new Error(
+                    `Construction evidence owner ${relativePath} is absent from source authority.`,
+                );
+            }
+            return row;
+        }),
+    );
+};
+
+const buildConstructionEvidenceImports = (
+    sourceAuthority: readonly JsonValue[],
+): JsonValue => {
+    const knowledgeOwnerSourcePaths = [
+        'crates/sealed-lattice-kernel/src/bgv/proof_suite/relation_plan.rs',
+        'crates/sealed-lattice-kernel/src/bgv/proof_suite/relation_plan/interpreter.rs',
+        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/compact_merkle_frontier.rs',
+        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate.rs',
+        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/exact_same_secret/exact_proof.rs',
+    ] as const;
+    const qromOwnerSourcePaths = [
+        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/compact_merkle_frontier.rs',
+        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan.rs',
+        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/linear_bcs_transcript.rs',
+        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate.rs',
+        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/verification.rs',
+    ] as const;
+    const maskingOwnerSourcePaths = [
+        'crates/sealed-lattice-kernel/src/bgv/proof_suite/zero_knowledge.rs',
+        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/aggregate_wide_hiding.rs',
+        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/aggregate_wide_pcs.rs',
+        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/aggregate_wide_prover.rs',
+        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/aggregate_wide_verifier.rs',
+        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/aggregate_wide_wire.rs',
+        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/exact_same_secret/exact_proof.rs',
+    ] as const;
+    return [
+        {
+            identifier: exactConstructionEvidenceImportIdentifiers[0],
+            ownerSourcePaths: knowledgeOwnerSourcePaths,
+            requiredClosurePredicate: 'isCompleteConstructionTheorem',
+            observedStatus: 'resolved',
+            checkedArtifactDigest: checkedSourceBundleDigest(
+                sourceAuthority,
+                knowledgeOwnerSourcePaths,
+            ),
+            missingEvidence: null,
+        },
+        {
+            identifier: exactConstructionEvidenceImportIdentifiers[1],
+            ownerSourcePaths: qromOwnerSourcePaths,
+            requiredClosurePredicate:
+                'typedCmsNineteenApplicabilityAndAcceptingPathCeilings',
+            observedStatus: 'resolved',
+            checkedArtifactDigest: checkedSourceBundleDigest(
+                sourceAuthority,
+                qromOwnerSourcePaths,
+            ),
+            missingEvidence: null,
+        },
+        {
+            identifier: exactConstructionEvidenceImportIdentifiers[2],
+            ownerSourcePaths: maskingOwnerSourcePaths,
+            requiredClosurePredicate:
+                'completeConstructionMaskingCorrespondence',
+            observedStatus: 'resolved',
+            checkedArtifactDigest: checkedSourceBundleDigest(
+                sourceAuthority,
+                maskingOwnerSourcePaths,
+            ),
+            missingEvidence: null,
+        },
+    ];
+};
 
 const buildProtocolSchedule = (): JsonValue => ({
     orderedPhases: [
@@ -768,9 +830,9 @@ const buildHybridGames = (): JsonValue => [
     },
     {
         identifier: exactHybridGameIdentifiers[3],
-        status: 'unresolved',
+        status: 'resolved',
         transitionReduction: 'commonConstructionKnowledgeSoundness',
-        transitionAdvantage: 'unresolved_common_construction_knowledge_error',
+        transitionAdvantage: 'epsilon_common_construction_knowledge',
         change: 'Extract one complete consistent witness tuple for every accepted corrupt setup proof and enforce every cross-family join.',
     },
     {
@@ -784,8 +846,7 @@ const buildHybridGames = (): JsonValue => [
         identifier: exactHybridGameIdentifiers[5],
         status: 'unresolved',
         transitionReduction: 'setupFamilySimulationComposition',
-        transitionAdvantage:
-            'unresolved_common_construction_masking_error + unresolved_setup_family_simulation_error',
+        transitionAdvantage: 'unresolved_setup_family_simulation_error',
         change: 'Simulate every honest common proof while preserving the shared transcript, witness joins, abort location, checkpoint behavior, and exact canonical framing.',
     },
     {
@@ -935,30 +996,30 @@ const buildReductionDag = (): JsonValue => [
     },
     {
         identifier: 'commonConstructionKnowledgeSoundness',
-        kind: 'obligation',
-        status: 'unresolved',
+        kind: 'reduction',
+        status: 'resolved',
         dependencies: ['canonicalHashBinding'],
-        advantageExpression: 'unresolved_common_construction_knowledge_error',
+        advantageExpression: 'epsilon_common_construction_knowledge',
         statement:
-            'The production common-proof construction still requires a complete extraction and knowledge-soundness certificate for every setup family.',
+            'The live plan, compiler-interpreter semantics, round-by-round polynomial extractor, explicit-point constraint extractor, and coordinate-derived commitment subtree close the selected common-construction knowledge theorem.',
     },
     {
         identifier: 'commonConstructionQromTransform',
-        kind: 'obligation',
-        status: 'unresolved',
+        kind: 'reduction',
+        status: 'resolved',
         dependencies: ['shakeQuantumOracle'],
-        advantageExpression: 'unresolved_common_construction_qrom_error',
+        advantageExpression: 'epsilon_common_construction_qrom',
         statement:
-            'The exact multi-round quantum transform and accepting-database equations remain an unresolved common-construction obligation.',
+            'The runtime-identical typed strong-state hash chain, complete accepting-database equation catalog, verifier hash ceiling, and exact failure partition instantiate the selected multi-round quantum transform.',
     },
     {
         identifier: 'commonConstructionMaskingCorrespondence',
-        kind: 'obligation',
-        status: 'unresolved',
+        kind: 'reduction',
+        status: 'resolved',
         dependencies: ['shakeQuantumOracle'],
-        advantageExpression: 'unresolved_common_construction_masking_error',
+        advantageExpression: 'zero',
         statement:
-            'Construction-level masking correspondence for every phase, quotient, fold, auxiliary, bound, mask, and aggregate view remains unresolved.',
+            'The construction mask-image certificate and fixed precommitted private masking subspace cover every phase, quotient, fold, auxiliary, bound, switch, and aggregate view without publicly recomputable masks.',
     },
     {
         identifier: 'setupFamilySimulationComposition',
@@ -1031,7 +1092,12 @@ const buildResidualLedgers = (): JsonValue => [
             },
             {
                 source: 'common-proof knowledge soundness',
-                symbolicTerm: 'unresolved_common_construction_knowledge_error',
+                symbolicTerm: 'epsilon_common_construction_knowledge',
+                status: 'resolved',
+            },
+            {
+                source: 'collective setup composition',
+                symbolicTerm: 'unresolved_collective_setup_composition_error',
                 status: 'unresolved',
             },
         ],
@@ -1047,8 +1113,8 @@ const buildResidualLedgers = (): JsonValue => [
             },
             {
                 source: 'common-proof multi-round transform',
-                symbolicTerm: 'unresolved_common_construction_qrom_error',
-                status: 'unresolved',
+                symbolicTerm: 'epsilon_common_construction_qrom',
+                status: 'resolved',
             },
             {
                 source: 'collective setup composition',
@@ -1100,9 +1166,13 @@ const buildResidualLedgers = (): JsonValue => [
                 status: 'resolved',
             },
             {
-                source: 'common-proof masking and setup-family simulation',
-                symbolicTerm:
-                    'unresolved_common_construction_masking_error + unresolved_setup_family_simulation_error',
+                source: 'common-proof masking',
+                symbolicTerm: 'zero',
+                status: 'resolved',
+            },
+            {
+                source: 'setup-family simulation',
+                symbolicTerm: 'unresolved_setup_family_simulation_error',
                 status: 'unresolved',
             },
             {
@@ -1155,7 +1225,8 @@ const buildCertificateBody = (
     sampleRelations: buildSampleRelations(),
     jointSetupSampleHybridReduction: buildJointSetupSampleHybridReduction(),
     selectedSetupCorrectnessImport: buildSelectedSetupCorrectnessImport(),
-    constructionEvidenceImports: buildConstructionEvidenceImports(),
+    constructionEvidenceImports:
+        buildConstructionEvidenceImports(sourceAuthority),
     protocolSchedule: buildProtocolSchedule(),
     hybridGames: buildHybridGames(),
     reductionDag: buildReductionDag(),
@@ -1862,7 +1933,7 @@ export const validateSelectedCollectiveSetupSecurityEvidence = (
         'defined',
         'resolved',
         'resolved',
-        'unresolved',
+        'resolved',
         'resolved',
         'unresolved',
         'resolved',

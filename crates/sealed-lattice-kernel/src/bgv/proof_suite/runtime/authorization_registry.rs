@@ -199,19 +199,6 @@ impl PendingCommonProofAuthorizationHandle {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct CommonProofAuthenticatedLedgerHeadCapabilityHandle(u32);
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct CommonProofAuthenticatedLedgerTransitionCapabilityHandle(u32);
-
-impl CommonProofAuthenticatedLedgerTransitionCapabilityHandle {
-    #[cfg(test)]
-    pub(crate) const fn get(&self) -> u32 {
-        self.0
-    }
-}
-
 struct CommonProofOperationEntry {
     binding: CommonProofVerificationBinding,
     limits: CommonProofRuntimeLimits,
@@ -445,37 +432,12 @@ impl ConsumedVerifiedCommonProofCapability {
         self.entry.proof.application_statement_hash()
     }
 
-    #[cfg(test)]
-    pub(crate) const fn proof_header_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
-        self.entry.proof.proof_header_hash()
-    }
-
     pub(crate) const fn proof_stream_domain(&self) -> CanonicalStreamDomain {
         self.entry.verified_stream.stream_domain()
     }
 
     pub(crate) const fn proof_stream_descriptor(&self) -> &StreamDescriptor {
         self.entry.verified_stream.stream_descriptor()
-    }
-
-    #[cfg(test)]
-    pub(crate) const fn proof_stream_full_object_digest(&self) -> [u8; HASH_BYTE_LENGTH] {
-        self.entry.verified_stream.full_object_digest().into_bytes()
-    }
-
-    #[cfg(test)]
-    pub(crate) const fn proof_byte_length(&self) -> u64 {
-        self.entry.proof.proof_byte_length()
-    }
-
-    #[cfg(test)]
-    pub(crate) const fn verified_query_count(&self) -> u32 {
-        self.entry.proof.verified_query_count()
-    }
-
-    #[cfg(test)]
-    pub(crate) const fn relation_plan_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
-        self.entry.binding.relation_plan_hash
     }
 
     pub(crate) const fn relation_plan_variant_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
@@ -514,16 +476,6 @@ impl CommonProofAuthenticatedLedgerHead {
     }
 }
 
-struct CommonProofAuthenticatedLedgerHeadCapabilityEntry {
-    terminal_capability_handle: u32,
-    #[cfg(test)]
-    authenticated_head: CommonProofAuthenticatedLedgerHead,
-}
-
-struct CommonProofAuthenticatedLedgerTransitionCapabilityEntry {
-    pending_authorization_handle: u32,
-}
-
 struct PendingCommonProofAuthorizationEntry {
     predecessor_authenticated_storage_head: CommonProofAuthenticatedLedgerHead,
     durable_authorization_frame_digest: [u8; HASH_BYTE_LENGTH],
@@ -540,13 +492,7 @@ struct PendingCommonProofAuthorizationEntry {
 pub(crate) struct PreparedCommonProofAuthorization {
     pending_handle: PendingCommonProofAuthorizationHandle,
     durable_authorization_frame: Box<[u8; DURABLE_AUTHORIZATION_FRAME_BYTE_LENGTH]>,
-    #[cfg(test)]
-    durable_authorization_frame_digest: [u8; HASH_BYTE_LENGTH],
     proof_application_slot_hash: [u8; HASH_BYTE_LENGTH],
-    #[cfg(test)]
-    application_statement_schema_identifier: u16,
-    #[cfg(test)]
-    proof_byte_length: u64,
 }
 
 impl PreparedCommonProofAuthorization {
@@ -558,23 +504,8 @@ impl PreparedCommonProofAuthorization {
         self.durable_authorization_frame.as_slice()
     }
 
-    #[cfg(test)]
-    pub(crate) const fn durable_authorization_frame_digest(&self) -> [u8; HASH_BYTE_LENGTH] {
-        self.durable_authorization_frame_digest
-    }
-
     pub(crate) const fn proof_application_slot_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
         self.proof_application_slot_hash
-    }
-
-    #[cfg(test)]
-    pub(crate) const fn application_statement_schema_identifier(&self) -> u16 {
-        self.application_statement_schema_identifier
-    }
-
-    #[cfg(test)]
-    pub(crate) const fn proof_byte_length(&self) -> u64 {
-        self.proof_byte_length
     }
 }
 
@@ -586,10 +517,6 @@ pub(crate) struct CommonProofRuntimeRegistry {
     next_generation_operation_handle: u32,
     next_verified_capability_handle: u32,
     next_generated_capability_handle: u32,
-    #[cfg(test)]
-    next_authenticated_ledger_head_handle: u32,
-    #[cfg(test)]
-    next_authenticated_ledger_transition_handle: u32,
     next_pending_authorization_handle: u32,
     operations: BTreeMap<CommonProofVerificationOperationHandle, CommonProofOperationEntry>,
     generation_operations:
@@ -598,14 +525,6 @@ pub(crate) struct CommonProofRuntimeRegistry {
         BTreeMap<VerifiedCommonProofCapabilityHandle, VerifiedCommonProofCapabilityEntry>,
     generated_capabilities:
         BTreeMap<GeneratedCommonProofCapabilityHandle, GeneratedCommonProofCapabilityEntry>,
-    authenticated_ledger_heads: BTreeMap<
-        CommonProofAuthenticatedLedgerHeadCapabilityHandle,
-        CommonProofAuthenticatedLedgerHeadCapabilityEntry,
-    >,
-    authenticated_ledger_transitions: BTreeMap<
-        CommonProofAuthenticatedLedgerTransitionCapabilityHandle,
-        CommonProofAuthenticatedLedgerTransitionCapabilityEntry,
-    >,
     pending_authorizations:
         BTreeMap<PendingCommonProofAuthorizationHandle, PendingCommonProofAuthorizationEntry>,
 }
@@ -617,17 +536,11 @@ impl Default for CommonProofRuntimeRegistry {
             next_generation_operation_handle: 1,
             next_verified_capability_handle: 1,
             next_generated_capability_handle: 1,
-            #[cfg(test)]
-            next_authenticated_ledger_head_handle: 1,
-            #[cfg(test)]
-            next_authenticated_ledger_transition_handle: 1,
             next_pending_authorization_handle: 1,
             operations: BTreeMap::new(),
             generation_operations: BTreeMap::new(),
             verified_capabilities: BTreeMap::new(),
             generated_capabilities: BTreeMap::new(),
-            authenticated_ledger_heads: BTreeMap::new(),
-            authenticated_ledger_transitions: BTreeMap::new(),
             pending_authorizations: BTreeMap::new(),
         }
     }
@@ -640,8 +553,6 @@ impl CommonProofRuntimeRegistry {
             self.generation_operations.len(),
             self.verified_capabilities.len(),
             self.generated_capabilities.len(),
-            self.authenticated_ledger_heads.len(),
-            self.authenticated_ledger_transitions.len(),
             self.pending_authorizations.len(),
         ])
     }
@@ -659,8 +570,6 @@ impl CommonProofRuntimeRegistry {
             self.generation_operations.len(),
             self.verified_capabilities.len(),
             self.generated_capabilities.len(),
-            self.authenticated_ledger_heads.len(),
-            self.authenticated_ledger_transitions.len(),
             self.pending_authorizations.len(),
         ])
     }
@@ -685,20 +594,11 @@ impl CommonProofRuntimeRegistry {
     }
 
     #[cfg(test)]
-    pub(super) fn insert_test_authenticated_ledger_transition(&mut self, identifier: u32) {
-        self.authenticated_ledger_transitions.insert(
-            CommonProofAuthenticatedLedgerTransitionCapabilityHandle(identifier),
-            CommonProofAuthenticatedLedgerTransitionCapabilityEntry {
-                pending_authorization_handle: identifier,
-            },
-        );
-    }
-
-    #[cfg(test)]
-    pub(super) fn remove_test_authenticated_ledger_transition(&mut self, identifier: u32) {
-        self.authenticated_ledger_transitions.remove(
-            &CommonProofAuthenticatedLedgerTransitionCapabilityHandle(identifier),
-        );
+    pub(super) fn remove_test_verification_operation(&mut self, identifier: u32) {
+        self.operations
+            .remove(&CommonProofVerificationOperationHandle::from_identifier(
+                identifier,
+            ));
     }
 
     #[cfg(test)]
@@ -728,22 +628,6 @@ impl CommonProofRuntimeRegistry {
         self.generation_operations
             .insert(handle, CommonProofGenerationOperationEntry { worker });
         Ok(handle)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn resume_owned_generation(
-        &mut self,
-        prepared: PreparedCommonProofGeneration,
-        authenticated_checkpoint_state: &[u8],
-        authenticated_generation_cursor_manifest: &[u8],
-    ) -> Result<CommonProofGenerationOperationHandle, CommonProofGenerationWorkerError> {
-        let handle = self.preissue_generation_operation_handle()?;
-        self.resume_owned_generation_with_handle(
-            prepared,
-            authenticated_checkpoint_state,
-            authenticated_generation_cursor_manifest,
-            handle,
-        )
     }
 
     pub(crate) fn resume_owned_generation_with_handle(
@@ -1248,15 +1132,6 @@ impl CommonProofRuntimeRegistry {
         Ok(())
     }
 
-    #[cfg(test)]
-    pub(crate) fn begin_owned_verification(
-        &mut self,
-        prepared: PreparedCommonProofVerification,
-    ) -> Result<CommonProofVerificationOperationHandle, CommonProofVerificationWorkerError> {
-        let handle = self.preissue_verification_operation_handle()?;
-        self.begin_owned_verification_with_handle(prepared, handle)
-    }
-
     pub(crate) fn preissue_verification_operation_handle(
         &mut self,
     ) -> Result<CommonProofVerificationOperationHandle, CommonProofRuntimeError> {
@@ -1280,38 +1155,6 @@ impl CommonProofRuntimeRegistry {
                 statement_source: Some(statement_source),
                 cancellation_requested: false,
                 worker: Some(worker),
-            },
-        );
-        Ok(handle)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn begin_verification(
-        &mut self,
-        binding: CommonProofVerificationBinding,
-        relation_plan: &CommonProofRelationPlanCapability,
-        limits: CommonProofRuntimeLimits,
-    ) -> Result<CommonProofVerificationOperationHandle, CommonProofRuntimeError> {
-        if binding.relation_plan_hash != relation_plan.relation_plan_hash()
-            || binding
-                .proof_application
-                .row_code_whir_construction_plan_identity_hash
-                != relation_plan.row_code_whir_construction_plan_identity_hash()
-        {
-            return Err(CommonProofRuntimeError::WrongVerificationBinding);
-        }
-        self.require_entry_capacity()?;
-        let handle = CommonProofVerificationOperationHandle(take_nonrepeating_handle(
-            &mut self.next_operation_handle,
-        )?);
-        self.operations.insert(
-            handle,
-            CommonProofOperationEntry {
-                binding,
-                limits,
-                statement_source: None,
-                cancellation_requested: false,
-                worker: None,
             },
         );
         Ok(handle)
@@ -1454,22 +1297,6 @@ impl CommonProofRuntimeRegistry {
         .map_err(CommonProofVerificationWorkerError::Runtime)
     }
 
-    #[cfg(test)]
-    pub(crate) fn request_cancellation(
-        &mut self,
-        handle: CommonProofVerificationOperationHandle,
-    ) -> Result<(), CommonProofRuntimeError> {
-        let operation = self
-            .operations
-            .get_mut(&handle)
-            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
-        operation.cancellation_requested = true;
-        if let Some(worker) = operation.worker.as_mut() {
-            worker.cancel();
-        }
-        Ok(())
-    }
-
     pub(crate) fn cancel_operation(
         &mut self,
         handle: CommonProofVerificationOperationHandle,
@@ -1531,31 +1358,6 @@ impl CommonProofRuntimeRegistry {
             .take()
             .ok_or(CommonProofRuntimeError::WrongOperationPhase)?
             .into_exact_source()
-    }
-
-    /// Converts the verifier's terminal, non-constructible token into a
-    /// process-local capability. Decoded bytes, hashes, and caller-supplied
-    /// verdicts cannot enter this registry.
-    #[cfg(test)]
-    pub(crate) fn register_verified_proof(
-        &mut self,
-        handle: CommonProofVerificationOperationHandle,
-        relation_plan: &CommonProofRelationPlanCapability,
-        proof: VerifiedCommonProof,
-        verified_stream: VerifiedCanonicalStreamSummary,
-    ) -> Result<VerifiedCommonProofCapabilityHandle, CommonProofRuntimeError> {
-        let capability_identifier = take_replacement_handle_before_consuming_source(
-            &self.operations,
-            &handle,
-            &mut self.next_verified_capability_handle,
-        )?;
-        self.register_verified_proof_with_identifier(
-            handle,
-            CommonProofRelationPlanTerminalBinding::try_from_relation_plan(relation_plan)?,
-            proof,
-            verified_stream,
-            capability_identifier,
-        )
     }
 
     fn register_verified_proof_with_identifier(
@@ -1638,8 +1440,6 @@ impl CommonProofRuntimeRegistry {
             .verified_capabilities
             .remove(handle)
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
-        self.authenticated_ledger_heads
-            .retain(|_, head| head.terminal_capability_handle != handle.0);
         Ok(ConsumedVerifiedCommonProofCapability { entry })
     }
 
@@ -1652,45 +1452,6 @@ impl CommonProofRuntimeRegistry {
             .get(handle)
             .map(|entry| inspect(BorrowedVerifiedCommonProofCapability { entry }))
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
-    }
-
-    /// Retains one authenticated browser-worker ledger head for the exact
-    /// terminal verifier capability. The participant identity remains the
-    /// local browser identity; it is deliberately not compared with the proof
-    /// producer's identity.
-    #[cfg(test)]
-    pub(crate) fn retain_authenticated_ledger_head(
-        &mut self,
-        terminal_capability_handle: &VerifiedCommonProofCapabilityHandle,
-        source: &BrowserWorkerAuthenticatedStorageHeadSource,
-    ) -> Result<CommonProofAuthenticatedLedgerHeadCapabilityHandle, CommonProofRuntimeError> {
-        let verified_capability = self
-            .verified_capabilities
-            .get(terminal_capability_handle)
-            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
-        let authenticated_head =
-            CommonProofAuthenticatedLedgerHead::from_browser_worker_source(source);
-        if !authenticated_head_matches_binding(authenticated_head, verified_capability.binding)
-            || self
-                .authenticated_ledger_heads
-                .values()
-                .any(|entry| entry.terminal_capability_handle == terminal_capability_handle.0)
-        {
-            return Err(CommonProofRuntimeError::AuthenticatedStorageHeadMismatch);
-        }
-        self.require_entry_capacity()?;
-        let handle = CommonProofAuthenticatedLedgerHeadCapabilityHandle(take_nonrepeating_handle(
-            &mut self.next_authenticated_ledger_head_handle,
-        )?);
-        self.authenticated_ledger_heads.insert(
-            CommonProofAuthenticatedLedgerHeadCapabilityHandle(handle.0),
-            CommonProofAuthenticatedLedgerHeadCapabilityEntry {
-                terminal_capability_handle: terminal_capability_handle.0,
-                #[cfg(test)]
-                authenticated_head,
-            },
-        );
-        Ok(handle)
     }
 
     /// Joins a browser-worker authenticated head and prepares one durable
@@ -1710,11 +1471,7 @@ impl CommonProofRuntimeRegistry {
         if !authenticated_head_matches_binding(
             predecessor_authenticated_storage_head,
             verified_capability.binding,
-        ) || self
-            .authenticated_ledger_heads
-            .values()
-            .any(|entry| entry.terminal_capability_handle == terminal_capability_handle.0)
-        {
+        ) {
             return Err(CommonProofRuntimeError::AuthenticatedStorageHeadMismatch);
         }
         let pending_identifier =
@@ -1726,44 +1483,6 @@ impl CommonProofRuntimeRegistry {
         Ok(self.retain_pending_authorization(
             pending_identifier,
             VerifiedCommonProofCapabilityHandle(terminal_capability_handle.0),
-            entry,
-            predecessor_authenticated_storage_head,
-        ))
-    }
-
-    /// Moves one terminal verifier capability and its authenticated predecessor
-    /// head into a retained pending state. The returned frame contains only
-    /// verifier-derived facts and is never decoded as proof authority.
-    #[cfg(test)]
-    pub(crate) fn prepare_verified_proof_application(
-        &mut self,
-        handle: &VerifiedCommonProofCapabilityHandle,
-        predecessor_head_handle: &CommonProofAuthenticatedLedgerHeadCapabilityHandle,
-    ) -> Result<PreparedCommonProofAuthorization, CommonProofRuntimeError> {
-        let predecessor_head = self
-            .authenticated_ledger_heads
-            .get(predecessor_head_handle)
-            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
-        if predecessor_head.terminal_capability_handle != handle.0
-            || !self.verified_capabilities.contains_key(handle)
-        {
-            return Err(CommonProofRuntimeError::AuthenticatedStorageHeadMismatch);
-        }
-        let pending_identifier =
-            take_nonrepeating_handle(&mut self.next_pending_authorization_handle)?;
-        let original_capability_handle = VerifiedCommonProofCapabilityHandle(handle.0);
-        let entry = self
-            .verified_capabilities
-            .remove(handle)
-            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
-        let predecessor_authenticated_storage_head = self
-            .authenticated_ledger_heads
-            .remove(predecessor_head_handle)
-            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
-            .authenticated_head;
-        Ok(self.retain_pending_authorization(
-            pending_identifier,
-            original_capability_handle,
             entry,
             predecessor_authenticated_storage_head,
         ))
@@ -1782,18 +1501,10 @@ impl CommonProofRuntimeRegistry {
         let prepared = PreparedCommonProofAuthorization {
             pending_handle: PendingCommonProofAuthorizationHandle(pending_identifier),
             durable_authorization_frame,
-            #[cfg(test)]
-            durable_authorization_frame_digest,
             proof_application_slot_hash: entry
                 .binding
                 .proof_application
                 .proof_application_slot_hash,
-            #[cfg(test)]
-            application_statement_schema_identifier: entry
-                .proof
-                .application_statement_schema_identifier(),
-            #[cfg(test)]
-            proof_byte_length: entry.proof.proof_byte_length(),
         };
         self.pending_authorizations.insert(
             PendingCommonProofAuthorizationHandle(pending_identifier),
@@ -1805,43 +1516,6 @@ impl CommonProofRuntimeRegistry {
             },
         );
         prepared
-    }
-
-    /// Mints one exact transition capability from a freshly authenticated
-    /// browser-worker head. A mismatch leaves the pending proof authority live.
-    #[cfg(test)]
-    pub(crate) fn retain_authenticated_ledger_transition(
-        &mut self,
-        pending_handle: &PendingCommonProofAuthorizationHandle,
-        source: &BrowserWorkerAuthenticatedStorageTransitionSource,
-    ) -> Result<CommonProofAuthenticatedLedgerTransitionCapabilityHandle, CommonProofRuntimeError>
-    {
-        let pending = self
-            .pending_authorizations
-            .get(pending_handle)
-            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
-        if !authenticated_transition_source_is_valid(
-            pending.predecessor_authenticated_storage_head,
-            pending.durable_authorization_frame_digest,
-            source,
-        ) || self
-            .authenticated_ledger_transitions
-            .values()
-            .any(|entry| entry.pending_authorization_handle == pending_handle.0)
-        {
-            return Err(CommonProofRuntimeError::AuthenticatedStorageHeadMismatch);
-        }
-        self.require_entry_capacity()?;
-        let handle = CommonProofAuthenticatedLedgerTransitionCapabilityHandle(
-            take_nonrepeating_handle(&mut self.next_authenticated_ledger_transition_handle)?,
-        );
-        self.authenticated_ledger_transitions.insert(
-            CommonProofAuthenticatedLedgerTransitionCapabilityHandle(handle.0),
-            CommonProofAuthenticatedLedgerTransitionCapabilityEntry {
-                pending_authorization_handle: pending_handle.0,
-            },
-        );
-        Ok(handle)
     }
 
     /// Joins a browser-worker authenticated transition and confirms one
@@ -1860,37 +1534,9 @@ impl CommonProofRuntimeRegistry {
             pending.predecessor_authenticated_storage_head,
             pending.durable_authorization_frame_digest,
             source,
-        ) || self
-            .authenticated_ledger_transitions
-            .values()
-            .any(|entry| entry.pending_authorization_handle == pending_handle.0)
-        {
+        ) {
             return Err(CommonProofRuntimeError::AuthenticatedStorageHeadMismatch);
         }
-        self.pending_authorizations.remove(pending_handle);
-        Ok(())
-    }
-
-    /// Consumes retained proof authority only after an exact transition
-    /// capability was minted from the browser-owned authenticated store.
-    #[cfg(test)]
-    pub(crate) fn confirm_verified_proof_application(
-        &mut self,
-        pending_handle: &PendingCommonProofAuthorizationHandle,
-        transition_handle: &CommonProofAuthenticatedLedgerTransitionCapabilityHandle,
-    ) -> Result<(), CommonProofRuntimeError> {
-        self.pending_authorizations
-            .get(pending_handle)
-            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
-        let transition = self
-            .authenticated_ledger_transitions
-            .get(transition_handle)
-            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
-        if transition.pending_authorization_handle != pending_handle.0 {
-            return Err(CommonProofRuntimeError::AuthenticatedStorageHeadMismatch);
-        }
-        self.authenticated_ledger_transitions
-            .remove(transition_handle);
         self.pending_authorizations.remove(pending_handle);
         Ok(())
     }
@@ -1916,8 +1562,6 @@ impl CommonProofRuntimeRegistry {
             .pending_authorizations
             .remove(pending_handle)
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
-        self.authenticated_ledger_transitions
-            .retain(|_, transition| transition.pending_authorization_handle != pending_handle.0);
         let restored_identifier = pending.original_capability_handle.0;
         self.verified_capabilities.insert(
             pending.original_capability_handle,

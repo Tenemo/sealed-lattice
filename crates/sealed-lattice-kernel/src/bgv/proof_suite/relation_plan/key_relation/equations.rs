@@ -175,6 +175,39 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         logical_row_count: usize,
         root_use: BoundPolynomialRootUse,
     ) -> Result<Vec<SplitIntegerVector>, RelationPlanError> {
+        self.add_setup_polynomial_root_with_canonicality(
+            source_key,
+            modulus_reference,
+            logical_row_count,
+            root_use,
+            true,
+        )
+    }
+
+    pub(in crate::bgv::proof_suite::relation_plan) fn add_verified_canonical_setup_polynomial_root(
+        &mut self,
+        source_key: &KeyVerifierSourceKey,
+        modulus_reference: SuiteModulusReference,
+        logical_row_count: usize,
+        root_use: BoundPolynomialRootUse,
+    ) -> Result<Vec<SplitIntegerVector>, RelationPlanError> {
+        self.add_setup_polynomial_root_with_canonicality(
+            source_key,
+            modulus_reference,
+            logical_row_count,
+            root_use,
+            false,
+        )
+    }
+
+    fn add_setup_polynomial_root_with_canonicality(
+        &mut self,
+        source_key: &KeyVerifierSourceKey,
+        modulus_reference: SuiteModulusReference,
+        logical_row_count: usize,
+        root_use: BoundPolynomialRootUse,
+        prove_canonicality_in_relation: bool,
+    ) -> Result<Vec<SplitIntegerVector>, RelationPlanError> {
         if logical_row_count == 0 {
             return Err(RelationPlanError::InvalidRoot);
         }
@@ -205,8 +238,10 @@ impl<'context> KeyRelationPlanBuilder<'context> {
                 None,
             )?;
             let halves = [low, high];
-            for half in halves {
-                self.register_exact_radix_decomposition(half, modulus_reference, None)?;
+            if prove_canonicality_in_relation {
+                for half in halves {
+                    self.register_exact_radix_decomposition(half, modulus_reference, None)?;
+                }
             }
             tree_columns.extend(halves);
             rows.push(SplitIntegerVector { halves });
@@ -223,7 +258,7 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         Ok(rows)
     }
 
-    pub(in crate::bgv::proof_suite::relation_plan) fn add_setup_polynomial_limb_root(
+    pub(in crate::bgv::proof_suite::relation_plan) fn add_verified_canonical_setup_polynomial_limb_root(
         &mut self,
         source_key: &KeyVerifierSourceKey,
         ordered_modulus_references: &[SuiteModulusReference],
@@ -247,6 +282,7 @@ impl<'context> KeyRelationPlanBuilder<'context> {
                 source_ordinal,
                 *modulus_reference,
                 &mut tree_columns,
+                false,
             )?;
             limbs.push(vector);
         }
@@ -285,6 +321,7 @@ impl<'context> KeyRelationPlanBuilder<'context> {
                 source_ordinal,
                 *modulus_reference,
                 &mut tree_columns,
+                true,
             )?;
             rows.push(vector);
         }
@@ -305,6 +342,7 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         source_ordinal: u32,
         modulus_reference: SuiteModulusReference,
         tree_columns: &mut Vec<u32>,
+        prove_canonicality_in_relation: bool,
     ) -> Result<SplitIntegerVector, RelationPlanError> {
         let mut halves = [0_u32; 2];
         for half in &mut halves {
@@ -317,7 +355,9 @@ impl<'context> KeyRelationPlanBuilder<'context> {
                 Some(modulus_reference),
                 None,
             )?;
-            self.register_exact_radix_decomposition(*half, modulus_reference, None)?;
+            if prove_canonicality_in_relation {
+                self.register_exact_radix_decomposition(*half, modulus_reference, None)?;
+            }
         }
         tree_columns.extend(halves);
         Ok(SplitIntegerVector { halves })

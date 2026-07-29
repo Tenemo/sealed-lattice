@@ -62,6 +62,10 @@ impl<'context> KeyRelationPlanBuilder<'context> {
             semantic_cells_by_column: BTreeMap::new(),
             exact_radix_digits_by_column: BTreeMap::new(),
             exact_carry_columns_by_component: BTreeMap::new(),
+            full_ring_suffix_columns_by_dependency: BTreeMap::new(),
+            full_ring_transpose_columns_by_dependency: BTreeMap::new(),
+            linear_evaluation_columns_by_dependency: BTreeMap::new(),
+            product_accumulator_columns_by_dependency: BTreeMap::new(),
             reversed_columns_by_source_halves: BTreeMap::new(),
             bound_trees: Vec::new(),
             base_tree_columns: Vec::new(),
@@ -556,32 +560,15 @@ impl KeyRelationPlanBuilder<'_> {
     pub(in crate::bgv::proof_suite::relation_plan) fn finish(
         mut self,
     ) -> Result<CompiledRelationPlan, RelationPlanError> {
-        #[cfg(test)]
-        let phase_started = std::time::Instant::now();
         self.finalize_integer_lift_batches()?;
-        #[cfg(test)]
-        eprintln!(
-            "key relation finalize integer lifts: {:?}; columns={} constraints={} batches={}",
-            phase_started.elapsed(),
-            self.ordered_columns.len(),
-            self.ordered_constraints.len(),
-            self.ordered_integer_lift_batches.len()
-        );
         if self.base_tree_columns.is_empty()
             || self.auxiliary_tree_columns.is_empty()
             || self.ordered_integer_lift_batches.is_empty()
         {
             return Err(RelationPlanError::InvalidRoot);
         }
-        #[cfg(test)]
-        let phase_started = std::time::Instant::now();
         let required_rotations_by_column =
             required_column_rotations(&self.ordered_constraints, &[])?;
-        #[cfg(test)]
-        eprintln!(
-            "key relation required rotations: {:?}",
-            phase_started.elapsed()
-        );
         if required_rotations_by_column.len() != self.ordered_columns.len() {
             return Err(RelationPlanError::InvalidOpening);
         }
@@ -663,8 +650,6 @@ impl KeyRelationPlanBuilder<'_> {
                 ))
             })
             .collect::<Result<BTreeMap<_, _>, RelationPlanError>>()?;
-        #[cfg(test)]
-        let phase_started = std::time::Instant::now();
         let mut ordered_opening_claims = Vec::new();
         for (tree_ordinal, tree) in ordered_trees.iter().enumerate() {
             for column_ordinal in tree.ordered_column_ordinals() {
@@ -732,12 +717,6 @@ impl KeyRelationPlanBuilder<'_> {
                 .checked_sub(1)
                 .ok_or(RelationPlanError::DegreeBoundExceeded)?,
         });
-        #[cfg(test)]
-        eprintln!(
-            "key relation opening claims: {:?}; claims={}",
-            phase_started.elapsed(),
-            ordered_opening_claims.len()
-        );
 
         let mut next_trace_mask_ordinal = 0_u32;
         let mut ordered_masks = Vec::new();
@@ -829,11 +808,7 @@ impl KeyRelationPlanBuilder<'_> {
                 }],
             },
         };
-        #[cfg(test)]
-        let phase_started = std::time::Instant::now();
         compiled.check(self.context)?;
-        #[cfg(test)]
-        eprintln!("key relation compiled check: {:?}", phase_started.elapsed());
         Ok(compiled)
     }
 }

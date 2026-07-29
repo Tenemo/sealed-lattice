@@ -56,6 +56,20 @@ pub(in crate::bgv) struct VerifiedSameSecretTerminal {
     proof_stream_descriptor: StreamDescriptor,
 }
 
+/// Process-local authority for reusing the low-degree result of one accepted
+/// same-secret proof at the exact three setup-polynomial roots it certified.
+/// There is no decoder, clone implementation, or raw-root constructor.
+pub(in crate::bgv) struct VerifiedSetupPolynomialLowDegreePrerequisite {
+    protocol_version: u16,
+    suite_identifier: [u8; Hash512::BYTE_LENGTH],
+    ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
+    action_context_hash: [u8; Hash512::BYTE_LENGTH],
+    setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
+    participant_identity: [u8; Hash512::BYTE_LENGTH],
+    roster_position: u16,
+    anchor_commitment_roots: [[u8; Hash512::BYTE_LENGTH]; 3],
+}
+
 pub(in crate::bgv) struct VerifiedSameSecretTerminalPreflight {
     terminal: VerifiedSameSecretTerminal,
 }
@@ -201,6 +215,79 @@ impl VerifiedSameSecretTerminal {
 
     pub(super) const fn proof_stream_descriptor(&self) -> &StreamDescriptor {
         &self.proof_stream_descriptor
+    }
+
+    pub(super) const fn setup_polynomial_low_degree_prerequisite(
+        &self,
+    ) -> VerifiedSetupPolynomialLowDegreePrerequisite {
+        VerifiedSetupPolynomialLowDegreePrerequisite {
+            protocol_version: self.protocol_version,
+            suite_identifier: self.suite_identifier,
+            ceremony_context_hash: self.ceremony_context_hash,
+            action_context_hash: self.action_context_hash,
+            setup_proof_context_hash: self.setup_proof_context_hash,
+            participant_identity: self.participant_identity,
+            roster_position: self.roster_position,
+            anchor_commitment_roots: self.anchor_commitment_roots,
+        }
+    }
+}
+
+impl VerifiedSetupPolynomialLowDegreePrerequisite {
+    #[cfg(test)]
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::bgv) const fn for_test(
+        protocol_version: u16,
+        suite_identifier: [u8; Hash512::BYTE_LENGTH],
+        ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
+        action_context_hash: [u8; Hash512::BYTE_LENGTH],
+        setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
+        participant_identity: [u8; Hash512::BYTE_LENGTH],
+        roster_position: u16,
+        anchor_commitment_roots: [[u8; Hash512::BYTE_LENGTH]; 3],
+    ) -> Self {
+        Self {
+            protocol_version,
+            suite_identifier,
+            ceremony_context_hash,
+            action_context_hash,
+            setup_proof_context_hash,
+            participant_identity,
+            roster_position,
+            anchor_commitment_roots,
+        }
+    }
+
+    pub(in crate::bgv) const fn protocol_version(&self) -> u16 {
+        self.protocol_version
+    }
+
+    pub(in crate::bgv) const fn suite_identifier(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.suite_identifier
+    }
+
+    pub(in crate::bgv) const fn ceremony_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.ceremony_context_hash
+    }
+
+    pub(in crate::bgv) const fn action_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.action_context_hash
+    }
+
+    pub(in crate::bgv) const fn setup_proof_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.setup_proof_context_hash
+    }
+
+    pub(in crate::bgv) const fn participant_identity(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.participant_identity
+    }
+
+    pub(in crate::bgv) const fn roster_position(&self) -> u16 {
+        self.roster_position
+    }
+
+    pub(in crate::bgv) const fn anchor_commitment_roots(&self) -> [[u8; Hash512::BYTE_LENGTH]; 3] {
+        self.anchor_commitment_roots
     }
 }
 

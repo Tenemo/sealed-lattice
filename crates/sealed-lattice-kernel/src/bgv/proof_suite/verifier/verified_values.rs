@@ -19,23 +19,23 @@ use super::super::{
     },
     selected_committed_material_relation_plan_input, selected_evaluator_aggregate_relation_plan,
 };
-use super::{
-    CanonicalItemType, CommonProofVerifierError, FOUNDATION_PROFILE, ProofApplicationSlotCeilings,
-    SelectedApplicationStatementContext, SelectedEvaluatorEntryKind,
+use super::super::{
+    CommonProofVerifierError, SelectedApplicationStatementContext, SelectedEvaluatorEntryKind,
     SelectedEvaluatorEntryPosition, SetupPublicPolynomialRootRole, SetupPublicPolynomialTree,
     StatementOwnedProofTreeInput, SuiteModulusReference,
     selected_evaluator_aggregate_entry_roots_in_order, selected_evaluator_entry_positions,
-    verified_application_statement_hash,
 };
-#[cfg(test)]
-use super::{CommittedMaterialTree, RelationProofTreeInput};
+use super::verified_application_statement_hash;
 use crate::bgv::evaluator::candidate_evidence::EvaluatorCandidateInput;
 use crate::bgv::proof_suite::application_statement::decode_selected_relinearization_round_two_statement;
 use crate::bgv::setup::{
     SETUP_COMMITMENT_MODULUS_LIMB_INDICES, VerifiedAcceptedSetupEvaluatorSourceCatalog,
     VerifiedAcceptedSetupParticipantTargetReleaseLease, VerifiedPublicRandomness,
 };
-use crate::foundation::{CanonicalStreamDomain, StreamDescriptor, VerifiedCanonicalStreamSummary};
+use crate::foundation::{
+    CanonicalItemType, CanonicalStreamDomain, FOUNDATION_PROFILE, ProofApplicationSlotCeilings,
+    StreamDescriptor, VerifiedCanonicalStreamSummary,
+};
 #[cfg(test)]
 use crate::foundation::{derive_canonical_stream_descriptor, selected_suite_capability_for_tests};
 
@@ -118,23 +118,8 @@ impl VerifiedCommonProof {
         self.verified_query_count
     }
 
-    #[cfg(test)]
-    pub(crate) const fn with_test_verified_query_count(mut self, query_count: u32) -> Self {
-        self.verified_query_count = query_count;
-        self
-    }
-
     pub(crate) const fn row_code_whir_construction_plan_identity_hash(&self) -> [u8; 64] {
         self.row_code_whir_construction_plan_identity_hash
-    }
-
-    #[cfg(test)]
-    pub(crate) const fn with_test_row_code_whir_construction_plan_identity_hash(
-        mut self,
-        identity_hash: [u8; 64],
-    ) -> Self {
-        self.row_code_whir_construction_plan_identity_hash = identity_hash;
-        self
     }
 
     pub(crate) const fn relation_plan_variant_hash(&self) -> [u8; 64] {
@@ -185,80 +170,18 @@ impl VerifiedStatementOwnedTree {
     }
 
     #[cfg(test)]
-    pub(crate) const fn statement_owned_tree_input(&self) -> &StatementOwnedProofTreeInput {
-        &self.tree
-    }
-
-    /// Reconstructs the verifier-owned coordinates for a tree that already
-    /// came from the authenticated generation relation. This is test-only so
-    /// persisted proof evidence can exercise the production typed verifier
-    /// context without retaining a second public-input wire format.
-    #[cfg(test)]
-    pub(crate) fn from_authenticated_generation_relation_tree(
-        variant: &RelationPlanVariant,
-        ordered_tree_ordinal: usize,
-        relation_tree: &RelationProofTreeInput,
-    ) -> Result<Option<Self>, CommonProofVerifierError> {
-        let descriptor = variant
-            .ordered_trees()
-            .get(ordered_tree_ordinal)
-            .ok_or(CommonProofVerifierError::InvalidBoundTree)?;
-        match (descriptor, relation_tree) {
-            (
-                RelationTreeDescriptor::ProofCreated {
-                    proof_tree_role,
-                    ordered_column_ordinals,
-                },
-                RelationProofTreeInput::ProofCreated {
-                    tree_role,
-                    row_width,
-                    ..
-                },
-            ) if *proof_tree_role == *tree_role as u16
-                && usize::try_from(*row_width).ok() == Some(ordered_column_ordinals.len()) =>
-            {
-                Ok(None)
-            }
-            (
-                RelationTreeDescriptor::BoundPublic {
-                    expected_root_source_ordinal,
-                    ordered_column_ordinals,
-                    ..
-                },
-                RelationProofTreeInput::BoundPublic(tree),
-            ) => {
-                let ordered_canonical_residue_moduli = ordered_column_ordinals
-                    .iter()
-                    .map(|column_ordinal| {
-                        variant
-                            .ordered_columns()
-                            .get(*column_ordinal as usize)
-                            .map(|column| column.canonical_residue_modulus())
-                            .ok_or(CommonProofVerifierError::InvalidBoundTree)
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(Some(Self {
-                    ordered_tree_ordinal: u32::try_from(ordered_tree_ordinal)
-                        .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?,
-                    expected_root_source_ordinal: *expected_root_source_ordinal,
-                    tree: tree.clone(),
-                    ordered_canonical_residue_moduli,
-                }))
-            }
-            _ => Err(CommonProofVerifierError::InvalidBoundTree),
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn with_relation_coordinates(
-        &self,
+    pub(crate) fn from_test_relation_input(
         ordered_tree_ordinal: u32,
         expected_root_source_ordinal: u32,
+        tree: StatementOwnedProofTreeInput,
+        ordered_canonical_residue_moduli: Vec<Option<SuiteModulusReference>>,
     ) -> Self {
-        let mut rebound = self.clone();
-        rebound.ordered_tree_ordinal = ordered_tree_ordinal;
-        rebound.expected_root_source_ordinal = expected_root_source_ordinal;
-        rebound
+        Self {
+            ordered_tree_ordinal,
+            expected_root_source_ordinal,
+            tree,
+            ordered_canonical_residue_moduli,
+        }
     }
 
     pub(crate) const fn expected_root(&self) -> [u8; 64] {
@@ -282,34 +205,6 @@ impl VerifiedStatementOwnedTree {
             } => *rebound_root = expected_root,
         }
         rebound
-    }
-
-    #[cfg(test)]
-    pub(crate) fn with_test_statement_owned_tree_input(
-        &self,
-        tree: StatementOwnedProofTreeInput,
-    ) -> Self {
-        let mut rebound = self.clone();
-        rebound.tree = tree;
-        rebound
-    }
-
-    #[cfg(test)]
-    pub(crate) fn from_committed_material_tree(
-        ordered_tree_ordinal: u32,
-        expected_root_source_ordinal: u32,
-        tree: &CommittedMaterialTree,
-        ordered_canonical_residue_moduli: Vec<Option<SuiteModulusReference>>,
-    ) -> Self {
-        Self {
-            ordered_tree_ordinal,
-            expected_root_source_ordinal,
-            tree: StatementOwnedProofTreeInput::CommittedMaterial {
-                material_context_hash: tree.material_context_hash(),
-                expected_root: tree.root(),
-            },
-            ordered_canonical_residue_moduli,
-        }
     }
 
     /// Constructs the verifier-owned tree input only from canonical source
@@ -2120,94 +2015,6 @@ impl VerifiedEvaluatorAuxiliaryRoot {
         })
     }
 
-    #[cfg(test)]
-    pub(crate) fn from_verified_relinearization_round_one_aggregate(
-        verified_proof: &VerifiedCommonProof,
-        canonical_application_statement_bytes: &[u8],
-    ) -> Result<Self, CommonProofVerifierError> {
-        let schedule_position = verified_proof
-            .schedule_position
-            .filter(|_| {
-                verified_proof.application_statement_schema_identifier
-                    == ProofApplicationSlotCeilings::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
-                    && verified_proof.top_count.is_none()
-                    && verified_proof.binds_application_statement(
-                        canonical_application_statement_bytes,
-                    )
-            })
-            .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
-        let statement = decode_selected_application_statement(
-            canonical_application_statement_bytes,
-            ProofApplicationSlotCeilings::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
-            SelectedApplicationStatementContext::new(
-                verified_proof.protocol_version,
-                verified_proof.suite_identifier,
-                Some(schedule_position),
-                None,
-            ),
-        )
-        .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
-        let auxiliary_component_root = statement
-            .items
-            .get(4)
-            .filter(|item| {
-                item.item_type() == CanonicalItemType::Hash512 && item.canonical_bytes().len() == 64
-            })
-            .and_then(|item| item.canonical_bytes().try_into().ok())
-            .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
-        let position = selected_evaluator_entry_positions(FOUNDATION_PROFILE.option_count)
-            .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?
-            .into_iter()
-            .find(|position| {
-                position.schedule_position() == schedule_position
-                    && matches!(
-                        position.key_kind(),
-                        SelectedEvaluatorEntryKind::Relinearization { .. }
-                    )
-            })
-            .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
-        Ok(Self {
-            position,
-            auxiliary_component_root,
-            source_material_root: None,
-            source_stream_descriptor: None,
-        })
-    }
-
-    /// Mints the Galois A linkage only from a verifier-recomputed role-11
-    /// public-polynomial tree at the exact selected catalog coordinate.
-    #[cfg(test)]
-    pub(crate) fn from_galois_common_public_polynomial_tree(
-        schedule_position: u32,
-        galois_element: usize,
-        catalog_level: usize,
-        tree: &SetupPublicPolynomialTree,
-    ) -> Result<Self, CommonProofVerifierError> {
-        let position = selected_evaluator_entry_positions(FOUNDATION_PROFILE.option_count)
-            .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?
-            .into_iter()
-            .find(|position| {
-                position.schedule_position() == schedule_position
-                    && position.key_kind()
-                        == SelectedEvaluatorEntryKind::Galois {
-                            galois_element,
-                            catalog_level,
-                        }
-            })
-            .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
-        if tree.root_role() != SetupPublicPolynomialRootRole::GaloisCommon
-            || tree.schedule_position() != Some(schedule_position)
-        {
-            return Err(CommonProofVerifierError::InvalidApplicationStatement);
-        }
-        Ok(Self {
-            position,
-            auxiliary_component_root: tree.root(),
-            source_material_root: None,
-            source_stream_descriptor: None,
-        })
-    }
-
     /// Mints the same Galois A linkage from the setup-domain incremental root
     /// builder. Both the context hash and root are outputs of that builder;
     /// callers cannot replace the role or schedule with detached metadata.
@@ -2819,33 +2626,6 @@ impl VerifiedEvaluatorKeyStore {
         Ok(store)
     }
 
-    #[cfg(test)]
-    pub(crate) fn from_verified_common_proof(
-        verified_proof: &VerifiedCommonProof,
-        canonical_application_statement_bytes: &[u8],
-        verified_evaluator_key_store_stream: &VerifiedCanonicalStreamSummary,
-        ordered_verified_runtime_roots: &[VerifiedEvaluatorRuntimeRoot],
-    ) -> Result<Self, CommonProofVerifierError> {
-        Self::from_verified_common_proof_inner(
-            VerifiedEvaluatorKeyStoreProofInputs {
-                verified_proof,
-                canonical_application_statement_bytes,
-            },
-            VerifiedEvaluatorKeyStoreMaterialInputs {
-                verified_evaluator_key_store_stream,
-                ordered_verified_runtime_roots,
-                store_material: None,
-            },
-            VerifiedEvaluatorKeyStoreBindings {
-                ceremony_context_hash: [0_u8; 64],
-                action_context_hash: [0_u8; 64],
-                manifest_hash: [0_u8; 64],
-                roster_hash: [0_u8; 64],
-                proof_stream_descriptor: None,
-            },
-        )
-    }
-
     fn from_verified_common_proof_inner(
         proof_inputs: VerifiedEvaluatorKeyStoreProofInputs<'_>,
         material_inputs: VerifiedEvaluatorKeyStoreMaterialInputs<'_>,
@@ -2988,16 +2768,6 @@ impl VerifiedEvaluatorKeyStore {
 
     pub(crate) const fn top_count(&self) -> u16 {
         self.top_count
-    }
-
-    #[cfg(test)]
-    pub(crate) const fn evaluator_key_store_digest(&self) -> [u8; 64] {
-        self.evaluator_key_store_digest
-    }
-
-    #[cfg(test)]
-    pub(crate) fn ordered_runtime_roots(&self) -> &[VerifiedEvaluatorRuntimeRoot] {
-        &self.ordered_runtime_roots
     }
 
     pub(crate) const fn verified_evaluator_key_store_stream(

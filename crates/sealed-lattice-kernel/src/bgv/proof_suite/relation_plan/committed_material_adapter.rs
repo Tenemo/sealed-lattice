@@ -25,11 +25,6 @@ use super::{
     derive_aggregate_threshold_share_trace_witness_provider,
     derive_vss_share_linkage_trace_witness_provider,
 };
-#[cfg(test)]
-use super::{
-    aggregate_threshold_share_trace_witness_structure_memory_accounting,
-    vss_share_linkage_trace_witness_structure_memory_accounting,
-};
 
 const VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER: u16 =
     crate::foundation::ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER;
@@ -578,42 +573,6 @@ fn committed_material_source_provider_memory_accounting(
     )
 }
 
-#[cfg(test)]
-pub(crate) fn aggregate_threshold_share_source_provider_memory_accounting(
-    input: &CommittedMaterialRelationPlanInput,
-    context: &RelationPlanCheckContext,
-    compiled_relation_plan: &CompiledRelationPlan,
-) -> Result<CommittedMaterialSourceProviderMemoryAccounting, CommonProofProverError> {
-    let trace_witness_structure =
-        aggregate_threshold_share_trace_witness_structure_memory_accounting(input, context)
-            .map_err(CommonProofProverError::Relation)?;
-    committed_material_source_provider_memory_accounting(
-        SelectedCommittedMaterialRelationKind::AggregateThresholdShare,
-        input,
-        context,
-        compiled_relation_plan,
-        trace_witness_structure,
-    )
-}
-
-#[cfg(test)]
-pub(crate) fn vss_share_linkage_source_provider_memory_accounting(
-    input: &CommittedMaterialRelationPlanInput,
-    context: &RelationPlanCheckContext,
-    compiled_relation_plan: &CompiledRelationPlan,
-) -> Result<CommittedMaterialSourceProviderMemoryAccounting, CommonProofProverError> {
-    let trace_witness_structure =
-        vss_share_linkage_trace_witness_structure_memory_accounting(input, context)
-            .map_err(CommonProofProverError::Relation)?;
-    committed_material_source_provider_memory_accounting(
-        SelectedCommittedMaterialRelationKind::VssShareLinkage,
-        input,
-        context,
-        compiled_relation_plan,
-        trace_witness_structure,
-    )
-}
-
 /// One-column-at-a-time source adapter for selected committed-material relations.
 ///
 /// Canonical coefficients and compact root authorities are owner-held `Arc`s.
@@ -643,23 +602,6 @@ pub(crate) struct CommittedMaterialSourcePolynomialAdapter {
 }
 
 impl CommittedMaterialSourcePolynomialAdapter {
-    #[cfg(test)]
-    pub(crate) fn representative_aggregate_projection_digit_and_quotient_column_ordinals(
-        &self,
-    ) -> Result<[u32; 3], CommonProofProverError> {
-        if !matches!(
-            self.relation_kind,
-            SelectedCommittedMaterialRelationKind::AggregateThresholdShare
-        ) {
-            return Err(CommonProofProverError::InvalidColumn);
-        }
-        self.trace_witness
-            .as_ref()
-            .ok_or(CommonProofProverError::InvalidColumn)?
-            .representative_aggregate_projection_digit_and_quotient_column_ordinals()
-            .map_err(CommonProofProverError::Relation)
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_vss_share_linkage(
         input: CommittedMaterialRelationPlanInput,
@@ -1221,21 +1163,6 @@ impl CommonProofSourcePolynomialProvider for CommittedMaterialSourcePolynomialAd
             && self.next_leaf_salt_index == 0
         {
             self.leaf_salts_finished = true;
-            Ok(())
-        } else {
-            Err(CommonProofProverError::InvalidTree)
-        }
-    }
-
-    fn rewind_bound_tree_leaf_salts(&mut self) -> Result<(), CommonProofProverError> {
-        if self.source_polynomials_finished
-            && self.leaf_salts_finished
-            && self.next_leaf_salt_source_ordinal == self.bound_sources_by_catalog_index.len()
-            && self.next_leaf_salt_index == 0
-        {
-            self.next_leaf_salt_source_ordinal = 0;
-            self.next_leaf_salt_index = 0;
-            self.leaf_salts_finished = false;
             Ok(())
         } else {
             Err(CommonProofProverError::InvalidTree)

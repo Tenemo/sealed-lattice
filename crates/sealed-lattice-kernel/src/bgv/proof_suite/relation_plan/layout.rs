@@ -1,13 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use num_traits::ToPrimitive;
+
 use crate::foundation::{CanonicalItem, CanonicalItemType, CanonicalTuple};
 
 use super::super::transcript::{
     CommonProofApplicationChallengeGroup, CommonProofChallenge, CommonProofPrivacyMode,
     CommonProofRelationPrefixSchedule,
 };
-#[cfg(test)]
-use super::bounds::RelationBoundCertificate;
+use super::model::RelationColumnOrigin;
 use super::{
     bounds::{RelationConstraintDescriptor, SemanticCellDescriptor},
     compiled_plan::RelationPlanCheckContext,
@@ -32,6 +33,40 @@ use super::{
         RELATION_PLAN_VARIANT_SCHEMA_IDENTIFIER, SCHEMA_VERSION,
     },
 };
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct RelationCompactTraceEncoding {
+    minimum: i128,
+    maximum: i128,
+    encoded_value_byte_length: u8,
+}
+
+impl RelationCompactTraceEncoding {
+    #[cfg(test)]
+    pub(crate) const fn new_for_test(
+        minimum: i128,
+        maximum: i128,
+        encoded_value_byte_length: u8,
+    ) -> Self {
+        Self {
+            minimum,
+            maximum,
+            encoded_value_byte_length,
+        }
+    }
+
+    pub(crate) const fn minimum(self) -> i128 {
+        self.minimum
+    }
+
+    pub(crate) const fn maximum(self) -> i128 {
+        self.maximum
+    }
+
+    pub(crate) const fn encoded_value_byte_length(self) -> u8 {
+        self.encoded_value_byte_length
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct RelationOpeningPointDescriptor {
@@ -345,6 +380,95 @@ impl RelationPlanVariant {
         &self.ordered_columns
     }
 
+    /// Returns the smallest byte-aligned encoding of one checked trace value
+    /// when the relation proves that value lies in an injective integer
+    /// interval. Polynomial coefficients are deliberately not covered by this
+    /// bound; callers must preserve the complete masked coefficient tail when
+    /// using trace values as a replay representation.
+    pub(crate) fn compact_trace_encoding(
+        &self,
+        column_ordinal: u32,
+        context: &RelationPlanCheckContext,
+    ) -> Result<Option<RelationCompactTraceEncoding>, RelationPlanError> {
+        let descriptor = self
+            .ordered_columns
+            .get(usize::try_from(column_ordinal).map_err(|_| RelationPlanError::CountOverflow)?)
+            .ok_or(RelationPlanError::InvalidColumn)?;
+        let mut matching_semantic_cells = self
+            .ordered_semantic_cells
+            .iter()
+            .filter(|cell| cell.column_ordinal == column_ordinal);
+        let semantic_interval = matching_semantic_cells
+            .next()
+            .map(|cell| &cell.claimed_interval);
+        if matching_semantic_cells.next().is_some() {
+            return Err(RelationPlanError::InvalidSemanticCell);
+        }
+
+        let interval = if let Some(interval) = semantic_interval {
+            Some((
+                interval
+                    .minimum
+                    .to_i128()
+                    .ok_or(RelationPlanError::IntegerBoundOverflow)?,
+                interval
+                    .maximum
+                    .to_i128()
+                    .ok_or(RelationPlanError::IntegerBoundOverflow)?,
+            ))
+        } else if let RelationColumnOrigin::VerifierSequence {
+            verifier_source_ordinal,
+            ..
+        } = descriptor.origin()
+        {
+            match self.verifier_source(*verifier_source_ordinal) {
+                Some(RelationVerifierSource::RadixDecomposition { radix, .. }) if *radix >= 2 => {
+                    Some((0, i128::from(*radix - 1)))
+                }
+                Some(_) => None,
+                None => return Err(RelationPlanError::InvalidSource),
+            }
+        } else if let Some(modulus_reference) = descriptor.canonical_residue_modulus() {
+            Some((
+                0,
+                i128::from(
+                    context
+                        .resolved_modulus(modulus_reference)?
+                        .checked_sub(1)
+                        .ok_or(RelationPlanError::InvalidModulus)?,
+                ),
+            ))
+        } else {
+            None
+        };
+        let Some((minimum, maximum)) = interval else {
+            return Ok(None);
+        };
+        let base_field_modulus = i128::from(context.base_field_modulus);
+        if minimum > maximum || minimum <= -base_field_modulus || maximum >= base_field_modulus {
+            return Err(RelationPlanError::NoWrapBoundViolated);
+        }
+        let inclusive_range_maximum = u128::try_from(maximum - minimum)
+            .map_err(|_| RelationPlanError::IntegerBoundOverflow)?;
+        if inclusive_range_maximum >= context.base_field_modulus.into() {
+            return Err(RelationPlanError::NoWrapBoundViolated);
+        }
+        let significant_bit_count = u128::BITS - inclusive_range_maximum.leading_zeros();
+        let encoded_value_byte_length = u8::try_from(significant_bit_count.div_ceil(8).max(1))
+            .map_err(|_| RelationPlanError::IntegerBoundOverflow)?;
+        if encoded_value_byte_length
+            >= u8::try_from(core::mem::size_of::<u64>())
+                .map_err(|_| RelationPlanError::CountOverflow)?
+        {
+            return Ok(None);
+        }
+        Ok(Some(RelationCompactTraceEncoding {
+            minimum,
+            maximum,
+            encoded_value_byte_length,
+        }))
+    }
+
     pub(crate) fn verifier_source(&self, ordinal: u32) -> Option<&RelationVerifierSource> {
         self.ordered_verifier_sources.get(ordinal as usize)
     }
@@ -378,40 +502,6 @@ impl RelationPlanVariant {
 
     pub(crate) fn ordered_masks(&self) -> &[RelationMaskDescriptor] {
         &self.ordered_masks
-    }
-
-    #[cfg(test)]
-    pub(crate) fn radix_digit_and_carry_column_counts(&self) -> (usize, usize) {
-        let mut digit_columns = BTreeSet::new();
-        let mut carry_columns = BTreeSet::new();
-        for semantic_cell in &self.ordered_semantic_cells {
-            match &semantic_cell.bound_certificate {
-                RelationBoundCertificate::UnsignedRadixRecomposition {
-                    ordered_digit_column_ordinals,
-                    ..
-                }
-                | RelationBoundCertificate::ShiftedRadixRecomposition {
-                    ordered_digit_column_ordinals,
-                    ..
-                } => {
-                    digit_columns.extend(ordered_digit_column_ordinals.iter().copied());
-                }
-                RelationBoundCertificate::CanonicalModulusRecomposition {
-                    ordered_digit_column_ordinals,
-                    ordered_difference_digit_column_ordinals,
-                    ordered_borrow_column_ordinals,
-                    ..
-                } => {
-                    digit_columns.extend(ordered_digit_column_ordinals.iter().copied());
-                    digit_columns.extend(ordered_difference_digit_column_ordinals.iter().copied());
-                    carry_columns.extend(ordered_borrow_column_ordinals.iter().copied());
-                }
-                RelationBoundCertificate::Trinary { .. }
-                | RelationBoundCertificate::Binary { .. }
-                | RelationBoundCertificate::FiniteIntegerSet { .. } => {}
-            }
-        }
-        (digit_columns.len(), carry_columns.len())
     }
 
     pub(super) fn canonical_tuple(&self) -> Result<CanonicalTuple, RelationPlanError> {

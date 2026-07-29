@@ -1,7 +1,8 @@
 use super::super::RelationTreeDescriptor;
 use super::super::row_code_whir::{
     VerifiedSameSecretLowDegreePrerequisite,
-    exact_same_secret_verification_resident_memory_accounting,
+    exact_same_secret_verification_resident_memory_accounting, prepare_row_code_whir_verification,
+    prepare_setup_polynomial_bound_row_code_whir_verification,
 };
 use super::{
     BTreeMap, BTreeSet, CommonProofApplicationInputCapabilityHandle,
@@ -9,23 +10,17 @@ use super::{
     CommonProofEvaluatorAuxiliaryRootEntry, CommonProofPreverificationApplicationSourceEntry,
     CommonProofPreverificationApplicationSourceHandle, CommonProofRuntimeError,
     CommonProofSelectedSuiteCapabilityHandle, CommonProofSelectedSuiteEntry,
-    CommonProofVerificationResidentMemoryAccounting, CommonProofVerificationStateMachine,
     CommonProofVerificationStatementSource, CommonProofVerifiedColumnEvaluatorCapabilityHandle,
     CommonProofVerifiedColumnEvaluatorEntry, ConsumedCommonProofVerificationInputs,
     FOUNDATION_PROFILE, MAXIMUM_COMMON_PROOF_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
     MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, MAXIMUM_RESIDENT_COMMON_PROOF_INPUT_CHUNKS,
-    PollableCommonProofVerificationInput, RefusingVerifiedColumnEvaluator, RelationColumnOrigin,
-    SelectedSuiteCapability, VerifiedCommonProofStatementSource, VerifiedEvaluatorAuxiliaryRoot,
+    RefusingVerifiedColumnEvaluator, RelationColumnOrigin, SelectedSuiteCapability,
+    VerifiedCommonProofStatementSource, VerifiedEvaluatorAuxiliaryRoot,
     VerifiedRelationColumnEvaluator, VerifiedStatementOwnedTree, common_proof_registry_entry_count,
     require_common_proof_registry_entry_capacity, take_nonrepeating_handle,
     verified_application_statement_hash,
 };
-#[cfg(test)]
-use super::{
-    CommonProofRelationPlanCapability, CommonProofRuntimeLimits, CommonProofVerificationBinding,
-    StreamDescriptor,
-};
-
+use crate::bgv::setup::VerifiedSetupPolynomialLowDegreePrerequisite;
 fn checked_verification_operation_memory_add(
     left: u64,
     right: u64,
@@ -43,15 +38,54 @@ fn checked_verification_operation_memory_multiply(
 }
 
 fn common_proof_verification_operation_resident_byte_length(
-    verifier_accounting: CommonProofVerificationResidentMemoryAccounting,
+    verifier_resident_byte_length: u64,
     evaluator_accounting: super::VerifiedRelationColumnEvaluatorMemoryAccounting,
     proof_chunk_count: usize,
 ) -> Result<u64, CommonProofRuntimeError> {
     common_proof_verification_operation_resident_byte_length_for_verifier(
-        verifier_accounting.maximum_resident_byte_length(),
+        verifier_resident_byte_length,
         evaluator_accounting,
         proof_chunk_count,
     )
+}
+
+fn prepare_row_code_whir_validation(
+    statement_source: &VerifiedCommonProofStatementSource,
+    statement_trees: &[VerifiedStatementOwnedTree],
+    auxiliary_roots: &[VerifiedEvaluatorAuxiliaryRoot],
+    setup_polynomial_prerequisite: Option<&VerifiedSetupPolynomialLowDegreePrerequisite>,
+) -> Result<super::super::row_code_whir::PreparedRowCodeWhirVerification, CommonProofRuntimeError> {
+    let proof_application_binding = statement_source.proof_application_binding();
+    match setup_polynomial_prerequisite {
+        Some(prerequisite) => prepare_setup_polynomial_bound_row_code_whir_verification(
+            prerequisite,
+            statement_source.protocol_version,
+            proof_application_binding.application_slot(),
+            statement_source.canonical_application_statement_bytes(),
+            proof_application_binding.proof_header_hash(),
+            proof_application_binding
+                .proof_stream_descriptor()
+                .total_byte_length,
+            &statement_source.relation_plan,
+            statement_trees.to_vec(),
+            auxiliary_roots.to_vec(),
+            Box::new(RefusingVerifiedColumnEvaluator),
+        ),
+        None => prepare_row_code_whir_verification(
+            statement_source.protocol_version,
+            proof_application_binding.application_slot(),
+            statement_source.canonical_application_statement_bytes(),
+            proof_application_binding.proof_header_hash(),
+            proof_application_binding
+                .proof_stream_descriptor()
+                .total_byte_length,
+            &statement_source.relation_plan,
+            statement_trees.to_vec(),
+            auxiliary_roots.to_vec(),
+            Box::new(RefusingVerifiedColumnEvaluator),
+        ),
+    }
+    .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)
 }
 
 fn common_proof_verification_operation_resident_byte_length_for_verifier(
@@ -578,9 +612,6 @@ impl CommonProofUpstreamInputRegistry {
         }) {
             return Err(CommonProofRuntimeError::WrongVerificationBinding);
         }
-        let maximum_resident_window_byte_length = MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH
-            .checked_mul(MAXIMUM_RESIDENT_COMMON_PROOF_INPUT_CHUNKS)
-            .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
         let declared_proof_byte_length = usize::try_from(
             statement_source
                 .proof_application_binding()
@@ -591,28 +622,14 @@ impl CommonProofUpstreamInputRegistry {
         if declared_proof_byte_length > statement_source.limits.maximum_proof_byte_length() {
             return Err(CommonProofRuntimeError::WrongVerificationBinding);
         }
-        let validation_state =
-            CommonProofVerificationStateMachine::new(PollableCommonProofVerificationInput {
-                protocol_version: statement_source.protocol_version,
-                suite_identifier: statement_source.verification_binding.suite_identifier,
-                canonical_application_statement_bytes: statement_source
-                    .canonical_application_statement_bytes(),
-                relation_plan: statement_source.relation_plan.compiled_plan(),
-                relation_context: &statement_source.relation_plan.relation_context,
-                schedule_position: statement_source.relation_plan.schedule_position,
-                top_count: statement_source.relation_plan.top_count,
-                row_code_whir_construction_plan_identity_hash: statement_source
-                    .relation_plan
-                    .row_code_whir_construction_plan_identity_hash(),
-                statement_owned_trees: statement_trees,
-                evaluator_auxiliary_roots: auxiliary_roots,
-                declared_proof_byte_length,
-                proof_byte_ceiling: statement_source.limits.maximum_proof_byte_length(),
-                maximum_resident_window_byte_length,
-            })
-            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
-        let verifier_memory_accounting = validation_state
-            .resident_memory_accounting()
+        let validation = prepare_row_code_whir_validation(
+            statement_source,
+            statement_trees,
+            auxiliary_roots,
+            None,
+        )?;
+        let verifier_resident_byte_length = validation
+            .maximum_resident_byte_length()
             .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?;
         let evaluator_memory_accounting = RefusingVerifiedColumnEvaluator
             .memory_accounting()
@@ -624,14 +641,14 @@ impl CommonProofUpstreamInputRegistry {
             .len();
         let verification_operation_resident_byte_length =
             common_proof_verification_operation_resident_byte_length(
-                verifier_memory_accounting,
+                verifier_resident_byte_length,
                 evaluator_memory_accounting,
                 proof_chunk_count,
             )?;
         require_common_proof_verification_operation_resident_bound(
             verification_operation_resident_byte_length,
         )?;
-        drop(validation_state);
+        drop(validation);
         Ok(())
     }
 
@@ -701,6 +718,54 @@ impl CommonProofUpstreamInputRegistry {
         };
         match self.consume_verification_inputs(&application_handle, &[], Some(&evaluator_handle)) {
             Ok(inputs) => Ok(inputs.prepare()),
+            Err(error) => {
+                self.cancel_application(&application_handle)?;
+                Err(error)
+            }
+        }
+    }
+
+    pub(in crate::bgv) fn prepare_setup_polynomial_bound_row_code_whir_verification(
+        &mut self,
+        suite_handle: &CommonProofSelectedSuiteCapabilityHandle,
+        statement_source: VerifiedCommonProofStatementSource,
+        statement_trees: Vec<VerifiedStatementOwnedTree>,
+        verified_column_evaluator: Box<dyn VerifiedRelationColumnEvaluator>,
+        prerequisite: VerifiedSetupPolynomialLowDegreePrerequisite,
+    ) -> Result<super::PreparedCommonProofVerification, CommonProofRuntimeError> {
+        let preverification_handle =
+            self.install_preverification_application_source(suite_handle, statement_source)?;
+        let application_handle = match self
+            .promote_preverification_application_source(suite_handle, &preverification_handle)
+        {
+            Ok(handle) => handle,
+            Err(error) => {
+                self.release_preverification_application_source(&preverification_handle)?;
+                return Err(error);
+            }
+        };
+        if let Err(error) =
+            self.attach_statement_owned_tree_batch(&application_handle, statement_trees)
+        {
+            self.cancel_application(&application_handle)?;
+            return Err(error);
+        }
+        let evaluator_handle = match self
+            .mint_verified_column_evaluator(&application_handle, verified_column_evaluator)
+        {
+            Ok(handle) => handle,
+            Err(error) => {
+                self.cancel_application(&application_handle)?;
+                return Err(error);
+            }
+        };
+        match self.consume_verification_inputs_with_setup_polynomial_prerequisite(
+            &application_handle,
+            &[],
+            Some(&evaluator_handle),
+            &prerequisite,
+        ) {
+            Ok(inputs) => inputs.prepare_with_setup_polynomial_prerequisite(prerequisite),
             Err(error) => {
                 self.cancel_application(&application_handle)?;
                 Err(error)
@@ -839,6 +904,40 @@ impl CommonProofUpstreamInputRegistry {
             &CommonProofVerifiedColumnEvaluatorCapabilityHandle,
         >,
     ) -> Result<ConsumedCommonProofVerificationInputs, CommonProofRuntimeError> {
+        self.consume_verification_inputs_with_optional_setup_polynomial_prerequisite(
+            application_handle,
+            evaluator_root_handles,
+            verified_column_evaluator_handle,
+            None,
+        )
+    }
+
+    fn consume_verification_inputs_with_setup_polynomial_prerequisite(
+        &mut self,
+        application_handle: &CommonProofApplicationInputCapabilityHandle,
+        evaluator_root_handles: &[&CommonProofEvaluatorAuxiliaryRootCapabilityHandle],
+        verified_column_evaluator_handle: Option<
+            &CommonProofVerifiedColumnEvaluatorCapabilityHandle,
+        >,
+        prerequisite: &VerifiedSetupPolynomialLowDegreePrerequisite,
+    ) -> Result<ConsumedCommonProofVerificationInputs, CommonProofRuntimeError> {
+        self.consume_verification_inputs_with_optional_setup_polynomial_prerequisite(
+            application_handle,
+            evaluator_root_handles,
+            verified_column_evaluator_handle,
+            Some(prerequisite),
+        )
+    }
+
+    fn consume_verification_inputs_with_optional_setup_polynomial_prerequisite(
+        &mut self,
+        application_handle: &CommonProofApplicationInputCapabilityHandle,
+        evaluator_root_handles: &[&CommonProofEvaluatorAuxiliaryRootCapabilityHandle],
+        verified_column_evaluator_handle: Option<
+            &CommonProofVerifiedColumnEvaluatorCapabilityHandle,
+        >,
+        setup_polynomial_prerequisite: Option<&VerifiedSetupPolynomialLowDegreePrerequisite>,
+    ) -> Result<ConsumedCommonProofVerificationInputs, CommonProofRuntimeError> {
         let application = self
             .applications
             .get(&application_handle.0)
@@ -894,8 +993,6 @@ impl CommonProofUpstreamInputRegistry {
                     .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let relation_plan = application.statement_source.relation_plan();
-        let verification_binding = application.statement_source.verification_binding();
         let declared_proof_byte_length = usize::try_from(
             application
                 .statement_source
@@ -911,35 +1008,14 @@ impl CommonProofUpstreamInputRegistry {
         {
             return Err(CommonProofRuntimeError::WrongVerificationBinding);
         }
-        let verification_input = PollableCommonProofVerificationInput {
-            protocol_version: application.statement_source.protocol_version(),
-            suite_identifier: verification_binding.suite_identifier,
-            canonical_application_statement_bytes: application
-                .statement_source
-                .canonical_application_statement_bytes(),
-            relation_plan: relation_plan.compiled_plan(),
-            relation_context: &relation_plan.relation_context,
-            schedule_position: relation_plan.schedule_position,
-            top_count: relation_plan.top_count,
-            row_code_whir_construction_plan_identity_hash: relation_plan
-                .row_code_whir_construction_plan_identity_hash(),
+        let validation = prepare_row_code_whir_validation(
+            application.statement_source.exact_source()?,
             statement_owned_trees,
-            evaluator_auxiliary_roots: &evaluator_auxiliary_roots,
-            declared_proof_byte_length,
-            proof_byte_ceiling: application
-                .statement_source
-                .limits()
-                .maximum_proof_byte_length(),
-            maximum_resident_window_byte_length: MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH
-                .checked_mul(MAXIMUM_RESIDENT_COMMON_PROOF_INPUT_CHUNKS)
-                .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?,
-        };
-        let validation_state = application
-            .statement_source
-            .new_verification_state_machine(verification_input)
-            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
-        let verifier_memory_accounting = validation_state
-            .resident_memory_accounting()
+            &evaluator_auxiliary_roots,
+            setup_polynomial_prerequisite,
+        )?;
+        let verifier_resident_byte_length = validation
+            .maximum_resident_byte_length()
             .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?;
         let evaluator_memory_accounting = match verified_column_evaluator_handle {
             Some(handle) => self
@@ -960,12 +1036,12 @@ impl CommonProofUpstreamInputRegistry {
             .len();
         require_common_proof_verification_operation_resident_bound(
             common_proof_verification_operation_resident_byte_length(
-                verifier_memory_accounting,
+                verifier_resident_byte_length,
                 evaluator_memory_accounting,
                 proof_chunk_count,
             )?,
         )?;
-        drop(validation_state);
+        drop(validation);
 
         for handle in evaluator_root_handles {
             self.evaluator_roots
@@ -1007,55 +1083,6 @@ impl CommonProofUpstreamInputRegistry {
         } else {
             Err(CommonProofRuntimeError::UnknownOrStaleHandle)
         }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn install_test_application_fixture(
-        &mut self,
-        verification_binding: CommonProofVerificationBinding,
-        relation_plan: CommonProofRelationPlanCapability,
-        protocol_version: u16,
-        canonical_application_statement_bytes: &[u8],
-        proof_stream_descriptor: StreamDescriptor,
-        limits: CommonProofRuntimeLimits,
-    ) -> Result<CommonProofApplicationInputCapabilityHandle, CommonProofRuntimeError> {
-        if verification_binding.relation_plan_hash != relation_plan.relation_plan_hash()
-            || verification_binding
-                .proof_application
-                .row_code_whir_construction_plan_identity_hash
-                != relation_plan.row_code_whir_construction_plan_identity_hash()
-            || canonical_application_statement_bytes.is_empty()
-            || proof_stream_descriptor.total_byte_length
-                != verification_binding.proof_application.proof_byte_length
-            || proof_stream_descriptor.full_object_digest.into_bytes()
-                != verification_binding
-                    .proof_application
-                    .proof_stream_full_object_digest
-        {
-            return Err(CommonProofRuntimeError::WrongVerificationBinding);
-        }
-        self.require_entry_capacity()?;
-        let mut statement_bytes = Vec::new();
-        statement_bytes
-            .try_reserve_exact(canonical_application_statement_bytes.len())
-            .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?;
-        statement_bytes.extend_from_slice(canonical_application_statement_bytes);
-        let handle = take_nonrepeating_handle(&mut self.next_application_handle)?;
-        self.applications.insert(
-            handle,
-            CommonProofApplicationInputEntry {
-                statement_source: CommonProofVerificationStatementSource::from_test_fixture(
-                    verification_binding,
-                    relation_plan,
-                    protocol_version,
-                    statement_bytes,
-                    proof_stream_descriptor,
-                    limits,
-                ),
-                statement_owned_tree_batch: None,
-            },
-        );
-        Ok(CommonProofApplicationInputCapabilityHandle(handle))
     }
 }
 

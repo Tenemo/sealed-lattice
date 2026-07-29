@@ -690,7 +690,6 @@ mod tests {
                     error.refusal_reason,
                     RefusalReason::UnsupportedVersionOrSuite
                 );
-                eprintln!("selected target profile unavailable: {error:?}");
             }
         }
     }

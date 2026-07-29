@@ -6,8 +6,6 @@ use fips203::{
 };
 use zeroize::Zeroizing;
 
-use crate::hashing::hash_framed_parts_512;
-
 use super::board_ingestion_runtime::VerifiedBoardApplicationSource;
 use super::local_storage_runtime::{
     LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH, open_action_randomness_root,
@@ -53,9 +51,6 @@ const HANDLE_BYTE_LENGTH: usize = 4;
 const HASH_BYTE_LENGTH: usize = 64;
 const ATTEMPT_IDENTIFIER_BYTE_LENGTH: usize = 32;
 const MAXIMUM_ACTIVE_SESSION_COUNT: usize = 256;
-const PUBLIC_ONLY_PROOF_ATTEMPT_LINEAGE_DOMAIN: &str =
-    "sealed-lattice/proof/public-only/local-attempt-lineage/v1";
-
 pub(crate) const ACTION_RANDOMNESS_RUNTIME_RESOURCE_LIMIT: u32 = 0x0001_0000;
 pub(crate) const ACTION_RANDOMNESS_RUNTIME_STALE_HANDLE: u32 = 0x0001_0001;
 
@@ -223,13 +218,16 @@ pub(crate) struct WitnessBoundPreparedActionProofAttemptSource {
     attempt_identifier: PrivateRandomnessAttemptIdentifier,
 }
 
-/// Opaque local generation authority for one exact public-only proof. It is
-/// bound to the browser-owned action key, setup reservation, application slot,
-/// canonical statement, selected proof limits, and checkpoint continuation,
-/// but it does not authorize or derive any private proof-coin coordinate.
+/// Opaque local generation authority for one proof whose relation witness is
+/// public. It is bound to the browser-owned action key, setup reservation,
+/// application slot, canonical statement, selected proof limits, and
+/// checkpoint continuation. Its private-randomness attempt identifier
+/// authorizes only construction-level hiding coins; it does not create a
+/// private relation witness or a relation-mask domain.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct PreparedPublicOnlyProofAttemptSource {
     attempt_lineage_identifier: [u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
+    private_randomness_attempt_identifier: PrivateRandomnessAttemptIdentifier,
     application_slot: ProofApplicationSlot,
     application_slot_hash: Hash512,
     application_statement_schema_identifier: u16,
@@ -240,6 +238,12 @@ pub(crate) struct PreparedPublicOnlyProofAttemptSource {
 impl PreparedPublicOnlyProofAttemptSource {
     pub(crate) const fn attempt_lineage_identifier(&self) -> [u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH] {
         self.attempt_lineage_identifier
+    }
+
+    pub(crate) const fn private_randomness_attempt_identifier(
+        &self,
+    ) -> PrivateRandomnessAttemptIdentifier {
+        self.private_randomness_attempt_identifier
     }
 
     pub(crate) const fn application_slot(&self) -> ProofApplicationSlot {
@@ -375,11 +379,11 @@ pub(crate) fn resolve_prepared_action_proof_attempt_source(
     })
 }
 
-/// Resolves one locally owned public-only setup proof attempt. The exact
-/// family slot and canonical statement are joined to the participant's live
-/// setup reservation solely to authorize generation and checkpoint custody.
-/// No private proof-coin input, witness binding, mask, or salt domain exists
-/// for this path.
+/// Resolves one locally owned setup proof attempt whose relation witness is
+/// public. The exact family slot and canonical statement are joined to the
+/// participant's live setup reservation to authorize generation, checkpoint
+/// custody, and an independent private construction-hiding stream. No private
+/// relation witness, relation mask, or leaf-salt domain exists for this path.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve_prepared_public_only_proof_attempt_source(
     action_randomness_handle: u32,
@@ -414,21 +418,17 @@ pub(crate) fn resolve_prepared_public_only_proof_attempt_source(
         )?;
 
         let application_slot_hash = application_slot.hash().map_err(schema_status)?;
-        let lineage_digest = hash_framed_parts_512(
-            PUBLIC_ONLY_PROOF_ATTEMPT_LINEAGE_DOMAIN,
-            &[
-                randomness.setup_attempt_identifier().as_bytes(),
-                verified_reservation_binding.authorization_hash.as_bytes(),
-                application_slot_hash.as_bytes(),
-                application_statement_hash.as_bytes(),
-            ],
-        );
-        let mut attempt_lineage_identifier = [0_u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH];
-        attempt_lineage_identifier
-            .copy_from_slice(&lineage_digest[..ATTEMPT_IDENTIFIER_BYTE_LENGTH]);
+        let proof_coin_input =
+            PersistentProofCoinInput::new(application_slot, application_statement_hash)
+                .map_err(schema_status)?;
+        let private_randomness_attempt_identifier = randomness
+            .persistent_proof_preparation_identifier(&proof_coin_input)
+            .map_err(schema_status)?;
+        let attempt_lineage_identifier = *private_randomness_attempt_identifier.as_bytes();
 
         Ok(PreparedPublicOnlyProofAttemptSource {
             attempt_lineage_identifier,
+            private_randomness_attempt_identifier,
             application_slot,
             application_slot_hash,
             application_statement_schema_identifier: statement_schema_identifier,

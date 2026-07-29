@@ -47,21 +47,24 @@ Works today:
   state witnessing have focused desktop-browser coverage.
 - Ballot encryption, aggregation, encrypted evaluation, and target release have
   focused component tests.
+- All production proof-family preparation sites now use the streaming row-code
+  and explicit-point WHIR construction. The old operative FRI body has been
+  removed, and the successor has production-owned masked proof assembly,
+  incremental canonical verification, bounded-storage primitives, and focused
+  development tests.
 
 Not yet:
 
-- The operative FRI proof path is not feasible at the target width. Its
-  streaming-interleaved row-code replacement and explicit-point WHIR verifier
-  have focused development evidence and conditional exact arithmetic, but
-  production browser proving, exact transcript-to-theorem correspondence,
-  complete construction-level masking evidence, all-family cutover, suite
-  freeze, and fresh release evidence remain unfinished.
-- The replacement's aggregate opening still has no selected masking
-  subconstruction. Static accounting refuses the hiding candidate that commits
-  and spot-checks one mask oracle per fold batch and per code switch, because
-  its canonical opening exceeds the internal proof-size gate at every admissible
-  mask parameter. Published development proofs therefore remain non-hiding and
-  must be assumed to leak beyond their public statements.
+- The successor is not cryptographically complete. Its current 64-way
+  same-secret geometry does not match the pinned theorem certificate, and its
+  current aggregate-wide pad uses a code rate whose exact agreement bound is
+  too weak. The safer rate-one-quarter masking repair, exact
+  transcript-to-theorem correspondence, and construction-level leakage proof
+  remain unfinished.
+- No full-width exact proof has completed on the current implementation, and no
+  release WebAssembly proof has been generated and freshly verified across the
+  desktop browsers. Recent guarded native attempts ended before proof emission,
+  so their observed memory is diagnostic rather than completion evidence.
 - No exact `n = 10` suite is frozen, no complete accepted vote runs end to end,
   and ballot, evaluator, and target-release operations are not public APIs.
 - No physical-phone profile is qualified. Desktop-browser, Node.js, native, and

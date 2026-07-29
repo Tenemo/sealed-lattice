@@ -1,5 +1,6 @@
 {
     "privateProofSaltPurpose": 65534,
+    "hidingArgumentPurpose": 4,
     "maskPurposeClasses": {
         "trace": 1,
         "telescoping": 2,

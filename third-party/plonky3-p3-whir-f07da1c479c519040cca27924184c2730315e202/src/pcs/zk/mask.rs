@@ -1,11 +1,15 @@
 //! Mask-code geometry for the HVZK-WHIR pipeline.
 //!
+//! Local modification: callers can encode explicit protocol-owned message and
+//! randomness material. See `../../../UPSTREAM.md`.
+//!
 //! Code shapes and committed mask groups, shared by the configuration, the
 //! verifier replay, and the base case.
 
 use p3_dft::Radix2Dit;
 use p3_field::TwoAdicField;
-use p3_zk_codes::ReedSolomonZkEncoding;
+use p3_matrix::dense::RowMajorMatrix;
+use p3_zk_codes::{ReedSolomonZkEncoding, ZkEncodingWithRandomness};
 use rand::distr::{Distribution, StandardUniform};
 
 /// Shape of one small mask code: a Reed-Solomon ZK encoding over `EF`.
@@ -46,6 +50,21 @@ impl MaskCodeShape {
             self.domain_size,
             Radix2Dit::default(),
         )
+    }
+
+    /// Encodes explicit caller-owned material in this mask code.
+    #[must_use]
+    pub fn encode_with_randomness<EF>(
+        &self,
+        message: &[EF],
+        randomness: &[EF],
+    ) -> RowMajorMatrix<EF>
+    where
+        EF: TwoAdicField,
+        StandardUniform: Distribution<EF>,
+    {
+        self.encoding::<EF>()
+            .encode_with_randomness(message, randomness)
     }
 }
 

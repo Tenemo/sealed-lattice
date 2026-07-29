@@ -81,23 +81,6 @@ pub(crate) struct BrowserWorkerAuthenticatedStorageHeadSource {
 }
 
 impl BrowserWorkerAuthenticatedStorageHeadSource {
-    #[cfg(test)]
-    pub(crate) const fn from_test_fixture(
-        local_storage_binding: LocalStorageBinding,
-        storage_root_commitment: Hash512,
-        namespace_sequence: u64,
-        authenticated_head_digest: Hash512,
-        storage_instance_identity: Hash512,
-    ) -> Self {
-        Self {
-            local_storage_binding,
-            storage_root_commitment,
-            namespace_sequence,
-            authenticated_head_digest,
-            storage_instance_identity,
-        }
-    }
-
     pub(crate) const fn local_storage_binding(&self) -> LocalStorageBinding {
         self.local_storage_binding
     }
@@ -165,30 +148,6 @@ impl BrowserWorkerAuthenticatedStorageTransitionSource {
 
     pub(crate) const fn authenticated_record_digest(&self) -> Hash512 {
         self.authenticated_record_digest
-    }
-
-    #[cfg(test)]
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) const fn from_test_fixture(
-        local_storage_binding: LocalStorageBinding,
-        storage_root_commitment: Hash512,
-        predecessor_namespace_sequence: u64,
-        predecessor_authenticated_head_digest: Hash512,
-        successor_namespace_sequence: u64,
-        successor_authenticated_head_digest: Hash512,
-        storage_instance_identity: Hash512,
-        authenticated_record_digest: Hash512,
-    ) -> Self {
-        Self {
-            local_storage_binding,
-            storage_root_commitment,
-            predecessor_namespace_sequence,
-            predecessor_authenticated_head_digest,
-            successor_namespace_sequence,
-            successor_authenticated_head_digest,
-            storage_instance_identity,
-            authenticated_record_digest,
-        }
     }
 }
 

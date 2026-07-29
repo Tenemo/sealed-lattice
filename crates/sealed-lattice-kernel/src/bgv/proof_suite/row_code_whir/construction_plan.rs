@@ -40,14 +40,38 @@ mod linear_bcs_transcript;
 mod shared_query_partition;
 
 pub(super) const ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT: usize = 32_768;
-pub(super) const ROW_CODE_WHIR_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW: usize = 8;
-pub(super) const ROW_CODE_WHIR_PHYSICAL_ROW_WITNESS_VARIABLE_COUNT: usize = 18;
+/// Maximum number of logical polynomials carried by one physical row.
+///
+/// The exact same-secret construction uses all 64 lanes. Other proof families
+/// may select a narrower power-of-two row when their larger opening-point
+/// catalog needs more prefix-selector variables inside the same commitment
+/// domain.
+pub(super) const ROW_CODE_WHIR_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW: usize = 64;
+pub(super) const ROW_CODE_WHIR_BALLOT_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW: usize = 8;
+pub(super) const ROW_CODE_WHIR_COMMITTED_MATERIAL_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW: usize = 8;
+pub(super) const ROW_CODE_WHIR_TARGET_RELEASE_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW: usize = 8;
 pub(super) const ROW_CODE_WHIR_LOG_INVERSE_RATE: usize = 2;
-pub(super) const ROW_CODE_WHIR_TABLE_VARIABLE_COUNT: usize = 19;
-pub(super) const ROW_CODE_WHIR_POLYNOMIAL_COMMITMENT_VARIABLE_COUNT: usize = 21;
+pub(super) const ROW_CODE_WHIR_PHYSICAL_ROW_WITNESS_VARIABLE_COUNT: usize =
+    ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT.ilog2() as usize
+        + ROW_CODE_WHIR_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW.ilog2() as usize;
+pub(super) const ROW_CODE_WHIR_TABLE_VARIABLE_COUNT: usize =
+    ROW_CODE_WHIR_PHYSICAL_ROW_WITNESS_VARIABLE_COUNT + 1;
+pub(super) const ROW_CODE_WHIR_POLYNOMIAL_COMMITMENT_VARIABLE_COUNT: usize =
+    ROW_CODE_WHIR_TABLE_VARIABLE_COUNT + ROW_CODE_WHIR_LOG_INVERSE_RATE;
 pub(in crate::bgv::proof_suite) const ROW_CODE_WHIR_OPENING_DEGREE_BOUND_EXCLUSIVE: u64 =
     (ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT
         * ROW_CODE_WHIR_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW) as u64;
+pub(in crate::bgv::proof_suite) const ROW_CODE_WHIR_BALLOT_OPENING_DEGREE_BOUND_EXCLUSIVE: u64 =
+    (ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT
+        * ROW_CODE_WHIR_BALLOT_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW) as u64;
+pub(in crate::bgv::proof_suite) const ROW_CODE_WHIR_COMMITTED_MATERIAL_OPENING_DEGREE_BOUND_EXCLUSIVE:
+    u64 = (ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT
+    * ROW_CODE_WHIR_COMMITTED_MATERIAL_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW)
+    as u64;
+pub(in crate::bgv::proof_suite) const ROW_CODE_WHIR_TARGET_RELEASE_OPENING_DEGREE_BOUND_EXCLUSIVE:
+    u64 = (ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT
+    * ROW_CODE_WHIR_TARGET_RELEASE_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW)
+    as u64;
 pub(in crate::bgv::proof_suite) const ROW_CODE_WHIR_EVALUATION_DOMAIN_SIZE: u64 =
     1_u64 << ROW_CODE_WHIR_POLYNOMIAL_COMMITMENT_VARIABLE_COUNT;
 pub(in crate::bgv::proof_suite) const ROW_CODE_WHIR_PHASE_COLUMN_QUERY_COORDINATE_COUNT: u32 = 387;
@@ -55,12 +79,12 @@ pub(in crate::bgv::proof_suite) const ROW_CODE_WHIR_TRACE_MASK_DEGREE_BOUND_EXCL
 pub(super) const ROW_CODE_WHIR_OUTER_QUERY_COUNT: usize =
     ROW_CODE_WHIR_PHASE_COLUMN_QUERY_COORDINATE_COUNT as usize;
 pub(super) const ROW_CODE_WHIR_DIRECT_BOUND_QUERY_COUNT: usize = 266;
-pub(super) const ROW_CODE_WHIR_VERIFIED_VSS_BOUND_QUERY_COUNT: usize = 40;
+pub(super) const ROW_CODE_WHIR_PRIOR_PROOF_BOUND_QUERY_COUNT: usize = 40;
 
 const ROW_CODE_WHIR_FOLDING_FACTOR: usize = 3;
 const ROW_CODE_WHIR_SECURITY_LEVEL: usize = 262;
 const ROW_CODE_WHIR_PROOF_OF_WORK_BITS: usize = 0;
-const ROW_CODE_WHIR_CONSTRUCTION_PLAN_IDENTITY_ENCODING_VERSION: u16 = 6;
+const ROW_CODE_WHIR_CONSTRUCTION_PLAN_IDENTITY_ENCODING_VERSION: u16 = 8;
 const ROW_CODE_WHIR_CONSTRUCTION_PLAN_IDENTITY_HASH_DOMAIN: &str =
     "sealed-lattice/proof/row-code-whir/construction-plan/v1";
 const ROW_CODE_WHIR_ORACLE_EQUATION_CATALOG_ENCODING_VERSION: u16 = 2;
@@ -167,7 +191,7 @@ pub(in crate::bgv::proof_suite) struct RowCodeWhirSelectedParameters {
     pub(in crate::bgv::proof_suite) outer_query_count: usize,
     pub(in crate::bgv::proof_suite) trace_mask_degree_bound_exclusive: u64,
     pub(in crate::bgv::proof_suite) direct_bound_query_count: usize,
-    pub(in crate::bgv::proof_suite) verified_vss_bound_query_count: usize,
+    pub(in crate::bgv::proof_suite) prior_proof_bound_query_count: usize,
     pub(in crate::bgv::proof_suite) maximum_fiat_shamir_candidate_draws_per_output: u32,
 }
 
@@ -191,31 +215,76 @@ impl RowCodeWhirSelectedParameters {
             outer_query_count: ROW_CODE_WHIR_OUTER_QUERY_COUNT,
             trace_mask_degree_bound_exclusive: ROW_CODE_WHIR_TRACE_MASK_DEGREE_BOUND_EXCLUSIVE,
             direct_bound_query_count: ROW_CODE_WHIR_DIRECT_BOUND_QUERY_COUNT,
-            verified_vss_bound_query_count: ROW_CODE_WHIR_VERIFIED_VSS_BOUND_QUERY_COUNT,
+            prior_proof_bound_query_count: ROW_CODE_WHIR_PRIOR_PROOF_BOUND_QUERY_COUNT,
             maximum_fiat_shamir_candidate_draws_per_output:
                 PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
         }
     }
 
-    /// Replaces the pinned same-secret mask capacity with the capacity this
-    /// variant's own relation declares. Every other selected parameter stays
-    /// fixed, so the resulting identity still binds one construction-owned
-    /// parameter set per family.
-    fn with_variant_trace_mask_degree_bound(
-        self,
+    fn for_selected_variant_geometry(
         variant: &RelationPlanVariant,
     ) -> Result<Self, RowCodeWhirConstructionPlanError> {
-        if variant.proof_privacy_mode() == ProofPrivacyMode::PublicOnly {
-            // A public-only variant declares no trace mask, so there is no
-            // relation-owned capacity to bind and nothing that could contradict
-            // the pinned value. Keeping it leaves those families' construction
-            // identity determined by their real geometry rather than by a
-            // placeholder capacity.
-            return Ok(self);
-        }
+        let logical_polynomial_coefficient_count =
+            ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT;
+        let logical_polynomials_per_physical_row =
+            usize::try_from(variant.opening_degree_bound_exclusive())
+                .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?
+                .checked_div(logical_polynomial_coefficient_count)
+                .filter(|width| {
+                    *width > 0
+                        && width.is_power_of_two()
+                        && *width <= ROW_CODE_WHIR_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW
+                        && logical_polynomial_coefficient_count
+                            .checked_mul(*width)
+                            .is_some_and(|capacity| {
+                                u64::try_from(capacity).ok()
+                                    == Some(variant.opening_degree_bound_exclusive())
+                            })
+                })
+                .ok_or(RowCodeWhirConstructionPlanError::InvalidVariantGeometry)?;
+        let witness_value_count = logical_polynomial_coefficient_count
+            .checked_mul(logical_polynomials_per_physical_row)
+            .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?;
+        let physical_row_witness_variable_count = usize::try_from(witness_value_count.ilog2())
+            .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?;
+        let table_variable_count = physical_row_witness_variable_count
+            .checked_add(1)
+            .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?;
+        let polynomial_commitment_variable_count =
+            usize::try_from(variant.evaluation_domain_size().ilog2())
+                .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?;
+        let row_code_log_inverse_rate = polynomial_commitment_variable_count
+            .checked_sub(table_variable_count)
+            .filter(|rate| *rate >= ROW_CODE_WHIR_LOG_INVERSE_RATE)
+            .ok_or(RowCodeWhirConstructionPlanError::InvalidVariantGeometry)?;
+        let trace_mask_degree_bound_exclusive =
+            if variant.proof_privacy_mode() == ProofPrivacyMode::PublicOnly {
+                ROW_CODE_WHIR_TRACE_MASK_DEGREE_BOUND_EXCLUSIVE
+            } else {
+                variant_trace_mask_degree_bound(variant)?
+            };
+        // The row-code rate embeds this candidate's table in the fixed
+        // commitment domain. The aggregate PCS then codes that complete
+        // domain at its independently selected rate; reusing the embedding
+        // rate here would add the redundancy twice.
         Ok(Self {
-            trace_mask_degree_bound_exclusive: variant_trace_mask_degree_bound(variant)?,
-            ..self
+            logical_polynomial_coefficient_count,
+            logical_polynomials_per_physical_row,
+            physical_row_witness_variable_count,
+            row_code_log_inverse_rate,
+            table_variable_count,
+            polynomial_commitment_variable_count,
+            starting_log_inverse_rate: ROW_CODE_WHIR_LOG_INVERSE_RATE,
+            folding_factor: ROW_CODE_WHIR_FOLDING_FACTOR,
+            soundness_assumption: RowCodeWhirSoundnessAssumption::UniqueDecoding,
+            security_level: ROW_CODE_WHIR_SECURITY_LEVEL,
+            proof_of_work_bits: ROW_CODE_WHIR_PROOF_OF_WORK_BITS,
+            outer_query_count: ROW_CODE_WHIR_OUTER_QUERY_COUNT,
+            trace_mask_degree_bound_exclusive,
+            direct_bound_query_count: ROW_CODE_WHIR_DIRECT_BOUND_QUERY_COUNT,
+            prior_proof_bound_query_count: ROW_CODE_WHIR_PRIOR_PROOF_BOUND_QUERY_COUNT,
+            maximum_fiat_shamir_candidate_draws_per_output:
+                PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
         })
     }
 
@@ -240,7 +309,8 @@ impl RowCodeWhirSelectedParameters {
     ) -> Result<Self, RowCodeWhirConstructionPlanError> {
         let evaluation_domain_size = usize::try_from(evaluation_domain_size)
             .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?;
-        let row_encoding_expansion_factor = ROW_CODE_WHIR_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW
+        const FIXTURE_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW: usize = 8;
+        let row_encoding_expansion_factor = FIXTURE_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW
             .checked_mul(2)
             .and_then(|factor| factor.checked_shl(ROW_CODE_WHIR_LOG_INVERSE_RATE as u32))
             .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?;
@@ -255,7 +325,7 @@ impl RowCodeWhirSelectedParameters {
             })
             .ok_or(RowCodeWhirConstructionPlanError::InvalidVariantGeometry)?;
         let witness_values_per_row = logical_polynomial_coefficient_count
-            .checked_mul(ROW_CODE_WHIR_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW)
+            .checked_mul(FIXTURE_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW)
             .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?;
         let padded_coefficient_count = witness_values_per_row
             .checked_mul(2)
@@ -271,12 +341,11 @@ impl RowCodeWhirSelectedParameters {
             .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?;
         let direct_bound_query_count =
             outer_query_count.min(ROW_CODE_WHIR_DIRECT_BOUND_QUERY_COUNT);
-        let verified_vss_bound_query_count =
-            direct_bound_query_count.min(ROW_CODE_WHIR_VERIFIED_VSS_BOUND_QUERY_COUNT);
+        let prior_proof_bound_query_count =
+            direct_bound_query_count.min(ROW_CODE_WHIR_PRIOR_PROOF_BOUND_QUERY_COUNT);
         Ok(Self {
             logical_polynomial_coefficient_count,
-            logical_polynomials_per_physical_row:
-                ROW_CODE_WHIR_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW,
+            logical_polynomials_per_physical_row: FIXTURE_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW,
             physical_row_witness_variable_count,
             row_code_log_inverse_rate: ROW_CODE_WHIR_LOG_INVERSE_RATE,
             table_variable_count,
@@ -289,11 +358,26 @@ impl RowCodeWhirSelectedParameters {
             outer_query_count,
             trace_mask_degree_bound_exclusive,
             direct_bound_query_count,
-            verified_vss_bound_query_count,
+            prior_proof_bound_query_count,
             maximum_fiat_shamir_candidate_draws_per_output:
                 PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
         })
     }
+}
+
+fn aggregate_table_width_from_parameters(
+    parameters: RowCodeWhirSelectedParameters,
+) -> Result<usize, RowCodeWhirConstructionPlanError> {
+    parameters
+        .polynomial_commitment_variable_count
+        .checked_sub(parameters.table_variable_count)
+        .and_then(|selector_variable_count| {
+            u32::try_from(selector_variable_count)
+                .ok()
+                .and_then(|shift| 1_usize.checked_shl(shift))
+        })
+        .filter(|width| *width > 0)
+        .ok_or(RowCodeWhirConstructionPlanError::InvalidVariantGeometry)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -355,13 +439,20 @@ pub(super) enum RowCodeWhirBoundLowDegreeMode {
     /// Static construction requirement. The verifier must still resolve the
     /// opaque positively verified VSS capability before using this query class.
     PriorVssProofRequired,
+    /// The same setup-polynomial root was already accepted as an output of an
+    /// earlier proof in this ceremony. The later proof still authenticates its
+    /// claimed opening, but reuses the positive low-degree result bound to that
+    /// exact root and statement coordinate.
+    PriorSetupPolynomialProofRequired,
     Direct,
 }
 
 impl RowCodeWhirBoundLowDegreeMode {
     const fn query_count(self, parameters: RowCodeWhirSelectedParameters) -> usize {
         match self {
-            Self::PriorVssProofRequired => parameters.verified_vss_bound_query_count,
+            Self::PriorVssProofRequired | Self::PriorSetupPolynomialProofRequired => {
+                parameters.prior_proof_bound_query_count
+            }
             Self::Direct => parameters.direct_bound_query_count,
         }
     }
@@ -474,7 +565,10 @@ pub(in crate::bgv::proof_suite) struct RowCodeWhirOpeningBatchPlan {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::bgv::proof_suite) enum RowCodeWhirCommitmentRole {
     Aggregate,
+    AggregateWidePad,
     WhirRound { round_ordinal: u32 },
+    BaseFreshSource,
+    BaseFreshPad,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -487,16 +581,13 @@ pub(in crate::bgv::proof_suite) enum RowCodeWhirQueryRole {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::bgv::proof_suite) enum RowCodeWhirExtensionRole {
     Direct(RowCodeWhirChallenge),
-    InitialOutOfDomainPoint {
-        sample_ordinal: u32,
-    },
     OpeningBatching,
-    InitialSumcheck {
-        round_ordinal: u32,
+    MaskedSumcheckEpsilon {
+        batch_ordinal: u32,
     },
-    RoundOutOfDomainPoint {
+    MaskedSumcheckRound {
+        batch_ordinal: u32,
         round_ordinal: u32,
-        sample_ordinal: u32,
     },
     RoundCheckpoint {
         round_ordinal: u32,
@@ -504,41 +595,35 @@ pub(in crate::bgv::proof_suite) enum RowCodeWhirExtensionRole {
     RoundCombination {
         round_ordinal: u32,
     },
-    RoundSumcheck {
-        round_ordinal: u32,
-        sumcheck_round_ordinal: u32,
-    },
-    FinalSumcheck {
-        round_ordinal: u32,
-    },
+    BaseCaseBlinding,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::bgv::proof_suite) enum RowCodeWhirObservationRole {
-    InitialOutOfDomainAnswer {
-        sample_ordinal: u32,
-    },
     OpeningPoint {
         batch_ordinal: u32,
     },
     OpeningEvaluations {
         batch_ordinal: u32,
     },
-    InitialSumcheckPolynomial {
+    MaskedSumcheckClaim {
+        batch_ordinal: u32,
+    },
+    MaskedSumcheckMaskClaim {
+        batch_ordinal: u32,
+    },
+    MaskedSumcheckPolynomial {
+        batch_ordinal: u32,
         round_ordinal: u32,
     },
-    RoundSumcheckPolynomial {
-        round_ordinal: u32,
-        sumcheck_round_ordinal: u32,
-    },
-    RoundOutOfDomainAnswer {
-        round_ordinal: u32,
-        sample_ordinal: u32,
-    },
-    FinalPolynomial,
-    FinalSumcheckPolynomial {
+    SwitchMaskOffset {
         round_ordinal: u32,
     },
+    BaseMaskedClaim,
+    BaseBlindedSourceMessage,
+    BaseBlindedSourceRandomness,
+    BaseBlindedPadMessage,
+    BaseBlindedPadRandomness,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -696,9 +781,10 @@ pub(in crate::bgv::proof_suite) enum RowCodeWhirProofSectionRole {
     OutOfDomainEvaluations,
     OpeningBatchMaskEvaluations,
     AggregateCommitment,
+    AggregateWidePadCommitment,
     PhaseOpenings { phase: RowCodeWhirPhase },
     BoundTreeOpenings { bound_tree_ordinal: u32 },
-    PlainWhir,
+    AggregateWideOpening,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -713,7 +799,7 @@ pub(in crate::bgv::proof_suite) enum RowCodeWhirCheckpointBoundary {
     SourcesAndConstruction,
     PhaseCommitment { phase: RowCodeWhirPhase },
     RelationEvaluationsAndMask,
-    AggregateCommitmentAndQueries,
+    AggregateCommitmentsAndQueries,
     WhirRound { round_ordinal: u32 },
     CompletedProofStream,
 }
@@ -724,6 +810,22 @@ pub(in crate::bgv::proof_suite) struct RowCodeWhirCheckpointPlan {
     pub(in crate::bgv::proof_suite) boundary: RowCodeWhirCheckpointBoundary,
     pub(in crate::bgv::proof_suite) next_transcript_operation_ordinal: u32,
     pub(in crate::bgv::proof_suite) next_proof_section_ordinal: u32,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::bgv::proof_suite) enum RowCodeWhirOpeningFrontierRole {
+    Phase { phase: RowCodeWhirPhase },
+    BoundTree { bound_tree_ordinal: u32 },
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::bgv::proof_suite) struct RowCodeWhirOpeningFrontierGeometry {
+    pub(in crate::bgv::proof_suite) role: RowCodeWhirOpeningFrontierRole,
+    pub(in crate::bgv::proof_suite) leaf_count: usize,
+    pub(in crate::bgv::proof_suite) query_count: usize,
+    pub(in crate::bgv::proof_suite) opened_value_byte_length: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -772,8 +874,7 @@ impl RowCodeWhirConstructionPlan {
         let variant = artifact
             .compiled_plan()
             .select_variant(schedule_position, top_count)?;
-        let parameters = RowCodeWhirSelectedParameters::selected()
-            .with_variant_trace_mask_degree_bound(variant)?;
+        let parameters = RowCodeWhirSelectedParameters::for_selected_variant_geometry(variant)?;
         Self::for_context_variant(
             artifact,
             &context,
@@ -828,10 +929,7 @@ impl RowCodeWhirConstructionPlan {
         if variant.schedule_position() != schedule_position || variant.top_count() != top_count {
             return Err(RowCodeWhirConstructionPlanError::InvalidSelectedProfile);
         }
-        let relation_prefix_schedule = variant
-            .common_proof_relation_prefix_schedule(context)?
-            .into_row_code_whir_successor()
-            .map_err(|_| RowCodeWhirConstructionPlanError::InvalidVariantGeometry)?;
+        let relation_prefix_schedule = variant.common_proof_relation_prefix_schedule(context)?;
 
         validate_domain_geometry(variant, context, parameters)?;
         let tree_column_opening_patterns = tree_column_opening_patterns(variant)?;
@@ -873,6 +971,11 @@ impl RowCodeWhirConstructionPlan {
         if !bound_reduction_blocks.is_empty() {
             aggregate_column_roles.push(RowCodeWhirAggregateColumnRole::BoundReduction);
         }
+        if aggregate_column_roles.is_empty()
+            || aggregate_column_roles.len() > aggregate_table_width_from_parameters(parameters)?
+        {
+            return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
+        }
 
         let mut phase_order = Vec::with_capacity(3);
         if base_phase.is_some() {
@@ -884,7 +987,7 @@ impl RowCodeWhirConstructionPlan {
         phase_order.push(RowCodeWhirPhase::Quotient);
         let bound_opening_column_ordinals = bound_opening_column_ordinals(variant)?;
         let (whir, protocol_schedule) =
-            super::plain_whir::derive_plain_aggregate_whir_plan(parameters)
+            super::aggregate_wide_pcs::derive_aggregate_wide_whir_plan(parameters)
                 .map_err(|_| RowCodeWhirConstructionPlanError::InvalidVariantGeometry)?;
         let opening_batches =
             opening_batch_plans(&aggregate_column_roles, &bound_reduction_blocks, parameters)?;
@@ -907,7 +1010,9 @@ impl RowCodeWhirConstructionPlan {
             &phase_order,
             variant.ordered_opening_claims().len(),
             &bound_trees,
+            &bound_reduction_blocks,
             variant.proof_privacy_mode(),
+            &quotient_phase,
             parameters,
         )?;
         let checkpoints =
@@ -1159,6 +1264,58 @@ impl RowCodeWhirConstructionPlan {
         self.parameters.outer_query_count
     }
 
+    pub(in crate::bgv::proof_suite) fn phase_row_count(
+        &self,
+        phase: RowCodeWhirPhase,
+    ) -> Option<usize> {
+        match phase {
+            RowCodeWhirPhase::Base => self.base_phase.as_ref().map(|plan| plan.rows.len()),
+            RowCodeWhirPhase::Auxiliary => {
+                self.auxiliary_phase.as_ref().map(|plan| plan.rows.len())
+            }
+            RowCodeWhirPhase::Quotient => Some(self.quotient_phase.rows.len()),
+        }
+    }
+
+    pub(in crate::bgv::proof_suite) fn phase_encoded_column_count(
+        &self,
+        phase: RowCodeWhirPhase,
+    ) -> Option<usize> {
+        match phase {
+            RowCodeWhirPhase::Base => self
+                .base_phase
+                .as_ref()
+                .map(|plan| plan.geometry.encoded_column_count),
+            RowCodeWhirPhase::Auxiliary => self
+                .auxiliary_phase
+                .as_ref()
+                .map(|plan| plan.geometry.encoded_column_count),
+            RowCodeWhirPhase::Quotient => Some(self.quotient_phase.geometry.encoded_column_count),
+        }
+    }
+
+    /// Whether this construction borrows a positively verified VSS
+    /// low-degree result instead of proving every bound tree directly.
+    ///
+    /// The authenticated transcript-prefix handoff is required exactly for
+    /// this construction property. Other proof families build their prefix
+    /// directly from the canonical proof header and checked construction plan.
+    pub(in crate::bgv::proof_suite) fn requires_verified_vss_bound_prerequisite(&self) -> bool {
+        self.bound_trees.iter().any(|tree| {
+            tree.low_degree_mode == RowCodeWhirBoundLowDegreeMode::PriorVssProofRequired
+        })
+    }
+
+    /// Whether this construction reuses an earlier positive low-degree result
+    /// for exact setup-polynomial input roots.
+    pub(in crate::bgv::proof_suite) fn requires_verified_setup_polynomial_bound_prerequisite(
+        &self,
+    ) -> bool {
+        self.bound_trees.iter().any(|tree| {
+            tree.low_degree_mode == RowCodeWhirBoundLowDegreeMode::PriorSetupPolynomialProofRequired
+        })
+    }
+
     /// Rechecks and binds the exact eight direct VSS certificates borrowed by
     /// the selected same-secret relation. This digest is deliberately narrower
     /// than the complete construction identity: it records the certificate
@@ -1298,8 +1455,16 @@ impl RowCodeWhirConstructionPlan {
         &self.whir
     }
 
-    pub(in crate::bgv::proof_suite) const fn aggregate_table_width(&self) -> usize {
+    pub(in crate::bgv::proof_suite) const fn aggregate_logical_column_count(&self) -> usize {
         self.aggregate_column_roles.len()
+    }
+
+    /// Physical interleaved table width consumed by the selected PCS. Logical
+    /// aggregate roles occupy the leading columns and every remaining column
+    /// is canonically zero. Accounting must use this width, not the number of
+    /// candidate-specific logical roles.
+    pub(in crate::bgv::proof_suite) fn aggregate_table_width(&self) -> usize {
+        aggregate_table_width_from_parameters(self.parameters).unwrap_or(0)
     }
 
     pub(in crate::bgv::proof_suite) fn opening_batches(&self) -> &[RowCodeWhirOpeningBatchPlan] {
@@ -1312,12 +1477,74 @@ impl RowCodeWhirConstructionPlan {
         &self.transcript_operations
     }
 
+    pub(in crate::bgv::proof_suite) fn opening_batch_mask_chunk_evaluation_count(
+        &self,
+    ) -> Result<usize, RowCodeWhirConstructionPlanError> {
+        opening_batch_mask_chunk_evaluation_count(self.proof_privacy_mode, &self.quotient_phase)
+    }
+
     pub(in crate::bgv::proof_suite) fn proof_sections(&self) -> &[RowCodeWhirProofSectionPlan] {
         &self.proof_sections
     }
 
     pub(in crate::bgv::proof_suite) fn checkpoints(&self) -> &[RowCodeWhirCheckpointPlan] {
         &self.checkpoints
+    }
+
+    #[cfg(test)]
+    pub(in crate::bgv::proof_suite) fn opening_frontier_geometries(
+        &self,
+    ) -> Result<Vec<RowCodeWhirOpeningFrontierGeometry>, RowCodeWhirConstructionPlanError> {
+        let mut geometries = Vec::new();
+        geometries
+            .try_reserve_exact(self.phase_order.len() + self.bound_trees.len())
+            .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?;
+        for phase in &self.phase_order {
+            let row_count = self
+                .phase_row_count(*phase)
+                .ok_or(RowCodeWhirConstructionPlanError::InvalidVariantGeometry)?;
+            let leaf_count = self
+                .phase_encoded_column_count(*phase)
+                .ok_or(RowCodeWhirConstructionPlanError::InvalidVariantGeometry)?;
+            let opened_value_byte_length = self
+                .outer_query_count()
+                .checked_mul(row_count)
+                .and_then(|count| count.checked_mul(core::mem::size_of::<u64>()))
+                .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?;
+            geometries.push(RowCodeWhirOpeningFrontierGeometry {
+                role: RowCodeWhirOpeningFrontierRole::Phase { phase: *phase },
+                leaf_count,
+                query_count: self.outer_query_count(),
+                opened_value_byte_length,
+            });
+        }
+        for tree in &self.bound_trees {
+            let salt_byte_length = match tree.construction_kind {
+                BoundTreeConstructionKind::CommittedMaterial => {
+                    crate::bgv::proof_suite::COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH
+                }
+                BoundTreeConstructionKind::SetupPolynomial => 0,
+            };
+            let opened_leaf_byte_length = tree
+                .ordered_columns
+                .len()
+                .checked_mul(2)
+                .and_then(|count| count.checked_mul(core::mem::size_of::<u64>()))
+                .and_then(|length| length.checked_add(salt_byte_length))
+                .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?;
+            geometries.push(RowCodeWhirOpeningFrontierGeometry {
+                role: RowCodeWhirOpeningFrontierRole::BoundTree {
+                    bound_tree_ordinal: tree.bound_tree_ordinal,
+                },
+                leaf_count: tree.leaf_count,
+                query_count: tree.query_count,
+                opened_value_byte_length: tree
+                    .query_count
+                    .checked_mul(opened_leaf_byte_length)
+                    .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?,
+            });
+        }
+        Ok(geometries)
     }
 
     pub(in crate::bgv::proof_suite) fn canonical_identity_hash(
@@ -1516,7 +1743,10 @@ fn transcript_operation_catalog(
     let mut builder = RowCodeWhirTranscriptCatalogBuilder::default();
     if proof_privacy_mode == ProofPrivacyMode::SecretBearing {
         builder.push(RowCodeWhirTranscriptOperation::ObserveMaskEvaluations {
-            value_count: parameters.logical_polynomials_per_physical_row,
+            value_count: opening_batch_mask_chunk_evaluation_count(
+                proof_privacy_mode,
+                quotient_phase,
+            )?,
         });
     }
     builder.push(RowCodeWhirTranscriptOperation::ObserveProtocolSchedule {
@@ -1528,25 +1758,41 @@ fn transcript_operation_catalog(
         auxiliary_phase,
         quotient_phase,
         aggregate_column_roles,
+        parameters,
     )?;
     append_bound_opening_weight_transcript_operations(&mut builder, bound_opening_column_ordinals);
     builder.push(RowCodeWhirTranscriptOperation::ObserveCommitment {
         role: RowCodeWhirCommitmentRole::Aggregate,
     });
+    builder.push(RowCodeWhirTranscriptOperation::ObserveCommitment {
+        role: RowCodeWhirCommitmentRole::AggregateWidePad,
+    });
+    append_bound_degree_transcript_operations(&mut builder, bound_reduction_blocks, parameters)?;
     builder.push(RowCodeWhirTranscriptOperation::SampleDistinctIndices {
         role: RowCodeWhirQueryRole::Outer,
         upper_bound: quotient_phase.geometry.encoded_column_count,
         output_count: parameters.outer_query_count,
     });
-    append_bound_query_and_degree_transcript_operations(
+    append_bound_query_transcript_operation(&mut builder, bound_trees, bound_reduction_blocks)?;
+    let hiding_configuration = super::hiding_whir::selected_hiding_whir_config(parameters)
+        .map_err(|_| RowCodeWhirConstructionPlanError::InvalidVariantGeometry)?;
+    let pad_layout =
+        super::aggregate_wide_hiding::AggregateWidePadLayout::derive(&hiding_configuration)
+            .map_err(|_| RowCodeWhirConstructionPlanError::InvalidVariantGeometry)?;
+    append_aggregate_wide_initial_transcript_operations(
         &mut builder,
-        bound_trees,
-        bound_reduction_blocks,
+        opening_batches,
+        whir,
+        &hiding_configuration,
         parameters,
     )?;
-    append_initial_whir_transcript_operations(&mut builder, opening_batches, whir, parameters)?;
-    append_whir_round_transcript_operations(&mut builder, whir)?;
-    append_final_whir_transcript_operations(&mut builder, whir)?;
+    append_aggregate_wide_round_transcript_operations(&mut builder, whir, &hiding_configuration)?;
+    append_aggregate_wide_base_transcript_operations(
+        &mut builder,
+        whir,
+        &hiding_configuration,
+        pad_layout.message_length(),
+    )?;
     builder.push(RowCodeWhirTranscriptOperation::FinishProofStream);
     Ok(builder.operations)
 }
@@ -1941,9 +2187,6 @@ fn oracle_equation_catalog_for_plan(
             maximum_candidate_draws,
         )?;
     }
-    if relation_schedule.quotient_commitment_root_count() != 1 {
-        return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
-    }
     let quotient_round = CommonProofRound::RowCodeWhirQuotientPhaseRoot;
     builder.push_response(
         RowCodeWhirOracleEquationOperationKind::CommonRound(quotient_round),
@@ -1964,15 +2207,6 @@ fn oracle_equation_catalog_for_plan(
         out_of_domain_round.tag(application_schema_identifier),
         true,
     )?;
-    if relation_schedule.requires_separate_opening_batch_mask_root() {
-        let mask_round = CommonProofRound::OpeningBatchMaskRoot;
-        builder.push_response(
-            RowCodeWhirOracleEquationOperationKind::CommonRound(mask_round),
-            mask_round.tag(application_schema_identifier),
-            false,
-        )?;
-    }
-
     for (operation_index, operation) in plan.transcript_operations.iter().enumerate() {
         let transcript_operation_ordinal = u32::try_from(operation_index)
             .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?;
@@ -2037,8 +2271,17 @@ fn row_code_whir_operation_oracle_tag(
             role: RowCodeWhirCommitmentRole::Aggregate,
         } => Ok("row-code-whir/aggregate-commitment".to_owned()),
         RowCodeWhirTranscriptOperation::ObserveCommitment {
+            role: RowCodeWhirCommitmentRole::AggregateWidePad,
+        } => Ok("row-code-whir/aggregate-wide-pad-commitment".to_owned()),
+        RowCodeWhirTranscriptOperation::ObserveCommitment {
             role: RowCodeWhirCommitmentRole::WhirRound { round_ordinal },
         } => Ok(format!("row-code-whir/whir-commitment/{round_ordinal:08x}")),
+        RowCodeWhirTranscriptOperation::ObserveCommitment {
+            role: RowCodeWhirCommitmentRole::BaseFreshSource,
+        } => Ok("row-code-whir/base-fresh-source-commitment".to_owned()),
+        RowCodeWhirTranscriptOperation::ObserveCommitment {
+            role: RowCodeWhirCommitmentRole::BaseFreshPad,
+        } => Ok("row-code-whir/base-fresh-pad-commitment".to_owned()),
         RowCodeWhirTranscriptOperation::SampleDistinctIndices {
             role,
             upper_bound,
@@ -2230,10 +2473,7 @@ fn common_round_response_root_is_recomputed(round: CommonProofRound) -> bool {
         round,
         CommonProofRound::BaseRoot { .. }
             | CommonProofRound::AuxiliaryRoot { .. }
-            | CommonProofRound::QuotientRoot { .. }
             | CommonProofRound::RowCodeWhirQuotientPhaseRoot
-            | CommonProofRound::OpeningBatchMaskRoot
-            | CommonProofRound::FriLayerRoot { .. }
     )
 }
 
@@ -2420,15 +2660,24 @@ fn append_opening_point_transcript_operations(
     auxiliary_phase: Option<&RowCodeWhirTracePhasePlan>,
     quotient_phase: &RowCodeWhirQuotientPhasePlan,
     aggregate_column_roles: &[RowCodeWhirAggregateColumnRole],
+    parameters: RowCodeWhirSelectedParameters,
 ) -> Result<(), RowCodeWhirConstructionPlanError> {
     let opening_point_count = aggregate_column_roles
         .iter()
         .filter(|role| matches!(role, RowCodeWhirAggregateColumnRole::OpeningPoint { .. }))
         .count();
+    if !parameters
+        .logical_polynomials_per_physical_row
+        .is_power_of_two()
+    {
+        return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
+    }
+    let selector_count = usize::try_from(parameters.logical_polynomials_per_physical_row.ilog2())
+        .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?;
     for opening_point_index in 0..opening_point_count {
         let opening_point_ordinal = u16::try_from(opening_point_index)
             .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?;
-        for selector_index in 0..opening_point_count {
+        for selector_index in 0..selector_count {
             builder.push(RowCodeWhirTranscriptOperation::SampleExtension {
                 role: RowCodeWhirExtensionRole::Direct(RowCodeWhirChallenge::PointSelectorWeight {
                     opening_point_ordinal,
@@ -2460,18 +2709,19 @@ fn append_trace_group_weight_operations(
         (RowCodeWhirTracePhase::Auxiliary, auxiliary_phase),
     ] {
         if let Some(phase_plan) = phase_plan {
-            for (column_group_index, row) in phase_plan.rows.iter().enumerate() {
+            let mut sampled_column_groups = BTreeSet::new();
+            for row in &phase_plan.rows {
                 if row
                     .opening_point_ordinals
                     .contains(&u32::from(opening_point_ordinal))
+                    && sampled_column_groups.insert(row.column_group_ordinal)
                 {
                     builder.push(RowCodeWhirTranscriptOperation::SampleExtension {
                         role: RowCodeWhirExtensionRole::Direct(
                             RowCodeWhirChallenge::TraceColumnGroupWeight {
                                 opening_point_ordinal,
                                 phase,
-                                column_group_ordinal: u32::try_from(column_group_index)
-                                    .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?,
+                                column_group_ordinal: row.column_group_ordinal,
                             },
                         ),
                         whir_challenge_ordinal: None,
@@ -2532,11 +2782,10 @@ fn append_bound_opening_weight_transcript_operations(
     }
 }
 
-fn append_bound_query_and_degree_transcript_operations(
+fn append_bound_query_transcript_operation(
     builder: &mut RowCodeWhirTranscriptCatalogBuilder,
     bound_trees: &[RowCodeWhirBoundTreePlan],
     bound_reduction_blocks: &[RowCodeWhirBoundReductionBlockPlan],
-    parameters: RowCodeWhirSelectedParameters,
 ) -> Result<(), RowCodeWhirConstructionPlanError> {
     if !bound_reduction_blocks.is_empty() {
         let bound_leaf_count = bound_trees
@@ -2559,53 +2808,56 @@ fn append_bound_query_and_degree_transcript_operations(
             upper_bound: bound_leaf_count,
             output_count: bound_query_count,
         });
-        for (block_index, block) in bound_reduction_blocks.iter().enumerate() {
-            for (suffix_index, suffix_prefix) in block.degree_suffix_prefixes.iter().enumerate() {
-                let fixed_coordinate_count = block
-                    .selector_prefix
-                    .len()
-                    .checked_add(suffix_prefix.len())
-                    .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?;
-                if fixed_coordinate_count > parameters.table_variable_count {
-                    return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
-                }
-                for coordinate_index in fixed_coordinate_count..parameters.table_variable_count {
-                    builder.push(RowCodeWhirTranscriptOperation::SampleExtension {
-                        role: RowCodeWhirExtensionRole::Direct(
-                            RowCodeWhirChallenge::BoundDegreeCoordinate {
-                                block_ordinal: u16::try_from(block_index)
-                                    .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?,
-                                degree_test_ordinal: u16::try_from(suffix_index + 1)
-                                    .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?,
-                                coordinate_ordinal: u16::try_from(coordinate_index)
-                                    .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?,
-                            },
-                        ),
-                        whir_challenge_ordinal: None,
-                    });
-                }
+    }
+    Ok(())
+}
+
+fn append_bound_degree_transcript_operations(
+    builder: &mut RowCodeWhirTranscriptCatalogBuilder,
+    bound_reduction_blocks: &[RowCodeWhirBoundReductionBlockPlan],
+    parameters: RowCodeWhirSelectedParameters,
+) -> Result<(), RowCodeWhirConstructionPlanError> {
+    for (block_index, block) in bound_reduction_blocks.iter().enumerate() {
+        for (suffix_index, suffix_prefix) in block.degree_suffix_prefixes.iter().enumerate() {
+            let fixed_coordinate_count = block
+                .selector_prefix
+                .len()
+                .checked_add(suffix_prefix.len())
+                .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?;
+            if fixed_coordinate_count > parameters.table_variable_count {
+                return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
+            }
+            for coordinate_index in fixed_coordinate_count..parameters.table_variable_count {
+                builder.push(RowCodeWhirTranscriptOperation::SampleExtension {
+                    role: RowCodeWhirExtensionRole::Direct(
+                        RowCodeWhirChallenge::BoundDegreeCoordinate {
+                            block_ordinal: u16::try_from(block_index)
+                                .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?,
+                            degree_test_ordinal: u16::try_from(suffix_index + 1)
+                                .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?,
+                            coordinate_ordinal: u16::try_from(coordinate_index)
+                                .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?,
+                        },
+                    ),
+                    whir_challenge_ordinal: None,
+                });
             }
         }
     }
     Ok(())
 }
 
-fn append_initial_whir_transcript_operations(
+fn append_aggregate_wide_initial_transcript_operations(
     builder: &mut RowCodeWhirTranscriptCatalogBuilder,
     opening_batches: &[RowCodeWhirOpeningBatchPlan],
     whir: &RowCodeWhirWhirPlan,
+    hiding_configuration: &super::hiding_whir::SelectedHidingWhirConfig,
     parameters: RowCodeWhirSelectedParameters,
 ) -> Result<(), RowCodeWhirConstructionPlanError> {
-    for sample_index in 0..whir.initial_out_of_domain_sample_count {
-        let sample_ordinal = u32::try_from(sample_index)
-            .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?;
-        builder.push_whir_extension(RowCodeWhirExtensionRole::InitialOutOfDomainPoint {
-            sample_ordinal,
-        })?;
-        builder.push_observation(
-            RowCodeWhirObservationRole::InitialOutOfDomainAnswer { sample_ordinal },
-            1,
-        )?;
+    if whir.initial_out_of_domain_sample_count != 0
+        || hiding_configuration.commitment_ood_samples != 0
+    {
+        return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
     }
     for batch in opening_batches {
         builder.push_observation(
@@ -2622,42 +2874,70 @@ fn append_initial_whir_transcript_operations(
         )?;
     }
     builder.push_whir_extension(RowCodeWhirExtensionRole::OpeningBatching)?;
-    for round_index in 0..whir.initial_sumcheck_round_count {
+    append_masked_sumcheck_transcript_operations(
+        builder,
+        0,
+        hiding_configuration.round_folding_factor(0),
+        false,
+    )
+}
+
+fn append_masked_sumcheck_transcript_operations(
+    builder: &mut RowCodeWhirTranscriptCatalogBuilder,
+    batch_ordinal: usize,
+    folding_factor: usize,
+    observe_scalar_claim: bool,
+) -> Result<(), RowCodeWhirConstructionPlanError> {
+    let batch_ordinal = u32::try_from(batch_ordinal)
+        .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?;
+    if observe_scalar_claim {
+        builder.push_observation(
+            RowCodeWhirObservationRole::MaskedSumcheckClaim { batch_ordinal },
+            1,
+        )?;
+    }
+    builder.push_observation(
+        RowCodeWhirObservationRole::MaskedSumcheckMaskClaim { batch_ordinal },
+        1,
+    )?;
+    builder
+        .push_whir_extension(RowCodeWhirExtensionRole::MaskedSumcheckEpsilon { batch_ordinal })?;
+    for round_index in 0..folding_factor {
         let round_ordinal = u32::try_from(round_index)
             .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?;
         builder.push_observation(
-            RowCodeWhirObservationRole::InitialSumcheckPolynomial { round_ordinal },
+            RowCodeWhirObservationRole::MaskedSumcheckPolynomial {
+                batch_ordinal,
+                round_ordinal,
+            },
             2,
         )?;
-        builder.push_whir_extension(RowCodeWhirExtensionRole::InitialSumcheck { round_ordinal })?;
+        builder.push_whir_extension(RowCodeWhirExtensionRole::MaskedSumcheckRound {
+            batch_ordinal,
+            round_ordinal,
+        })?;
     }
     Ok(())
 }
 
-fn append_whir_round_transcript_operations(
+fn append_aggregate_wide_round_transcript_operations(
     builder: &mut RowCodeWhirTranscriptCatalogBuilder,
     whir: &RowCodeWhirWhirPlan,
+    hiding_configuration: &super::hiding_whir::SelectedHidingWhirConfig,
 ) -> Result<(), RowCodeWhirConstructionPlanError> {
-    for round in &whir.rounds {
+    if whir.rounds.len() != hiding_configuration.n_rounds() {
+        return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
+    }
+    for (round_index, round) in whir.rounds.iter().enumerate() {
         builder.push(RowCodeWhirTranscriptOperation::ObserveCommitment {
             role: RowCodeWhirCommitmentRole::WhirRound {
                 round_ordinal: round.round_ordinal,
             },
         });
-        for sample_index in 0..round.out_of_domain_sample_count {
-            let sample_ordinal = u32::try_from(sample_index)
-                .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?;
-            builder.push_whir_extension(RowCodeWhirExtensionRole::RoundOutOfDomainPoint {
-                round_ordinal: round.round_ordinal,
-                sample_ordinal,
-            })?;
-            builder.push_observation(
-                RowCodeWhirObservationRole::RoundOutOfDomainAnswer {
-                    round_ordinal: round.round_ordinal,
-                    sample_ordinal,
-                },
-                1,
-            )?;
+        if round.out_of_domain_sample_count != 0
+            || hiding_configuration.round_parameters[round_index].ood_samples != 0
+        {
+            return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
         }
         builder.push_whir_extension(RowCodeWhirExtensionRole::RoundCheckpoint {
             round_ordinal: round.round_ordinal,
@@ -2672,32 +2952,51 @@ fn append_whir_round_transcript_operations(
         builder.push_whir_extension(RowCodeWhirExtensionRole::RoundCombination {
             round_ordinal: round.round_ordinal,
         })?;
-        for sumcheck_round_index in 0..round.following_sumcheck_round_count {
-            let sumcheck_round_ordinal = u32::try_from(sumcheck_round_index)
-                .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?;
-            builder.push_observation(
-                RowCodeWhirObservationRole::RoundSumcheckPolynomial {
-                    round_ordinal: round.round_ordinal,
-                    sumcheck_round_ordinal,
-                },
-                2,
-            )?;
-            builder.push_whir_extension(RowCodeWhirExtensionRole::RoundSumcheck {
+        builder.push_observation(
+            RowCodeWhirObservationRole::SwitchMaskOffset {
                 round_ordinal: round.round_ordinal,
-                sumcheck_round_ordinal,
-            })?;
-        }
+            },
+            1,
+        )?;
+        append_masked_sumcheck_transcript_operations(
+            builder,
+            round_index + 1,
+            hiding_configuration.round_folding_factor(round_index + 1),
+            true,
+        )?;
     }
     Ok(())
 }
 
-fn append_final_whir_transcript_operations(
+fn append_aggregate_wide_base_transcript_operations(
     builder: &mut RowCodeWhirTranscriptCatalogBuilder,
     whir: &RowCodeWhirWhirPlan,
+    hiding_configuration: &super::hiding_whir::SelectedHidingWhirConfig,
+    pad_message_length: usize,
 ) -> Result<(), RowCodeWhirConstructionPlanError> {
+    builder.push(RowCodeWhirTranscriptOperation::ObserveCommitment {
+        role: RowCodeWhirCommitmentRole::BaseFreshSource,
+    });
+    builder.push(RowCodeWhirTranscriptOperation::ObserveCommitment {
+        role: RowCodeWhirCommitmentRole::BaseFreshPad,
+    });
+    builder.push_observation(RowCodeWhirObservationRole::BaseMaskedClaim, 1)?;
+    builder.push_whir_extension(RowCodeWhirExtensionRole::BaseCaseBlinding)?;
     builder.push_observation(
-        RowCodeWhirObservationRole::FinalPolynomial,
+        RowCodeWhirObservationRole::BaseBlindedSourceMessage,
         whir.final_round.revealed_coefficient_count,
+    )?;
+    builder.push_observation(
+        RowCodeWhirObservationRole::BaseBlindedSourceRandomness,
+        hiding_configuration.oracle_randomness[hiding_configuration.n_rounds()],
+    )?;
+    builder.push_observation(
+        RowCodeWhirObservationRole::BaseBlindedPadMessage,
+        pad_message_length,
+    )?;
+    builder.push_observation(
+        RowCodeWhirObservationRole::BaseBlindedPadRandomness,
+        hiding_configuration.sumcheck_mask.randomness_len,
     )?;
     builder.push(RowCodeWhirTranscriptOperation::SampleDistinctIndices {
         role: RowCodeWhirQueryRole::WhirEpoch {
@@ -2706,15 +3005,23 @@ fn append_final_whir_transcript_operations(
         upper_bound: whir.final_round.query_epoch.domain_size,
         output_count: whir.final_round.query_epoch.query_count,
     });
-    for round_index in 0..whir.final_round.sumcheck_round_count {
-        let round_ordinal = u32::try_from(round_index)
-            .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?;
-        builder.push_observation(
-            RowCodeWhirObservationRole::FinalSumcheckPolynomial { round_ordinal },
-            2,
-        )?;
-        builder.push_whir_extension(RowCodeWhirExtensionRole::FinalSumcheck { round_ordinal })?;
-    }
+    let pad_shape = p3_whir::MaskCodeShape::new(
+        pad_message_length,
+        hiding_configuration.sumcheck_mask.randomness_len,
+        super::aggregate_wide_hiding::FIXED_SUBSPACE_PAD_LOG_INVERSE_RATE,
+    );
+    builder.push(RowCodeWhirTranscriptOperation::SampleDistinctIndices {
+        role: RowCodeWhirQueryRole::WhirEpoch {
+            epoch_ordinal: whir
+                .final_round
+                .query_epoch
+                .epoch_ordinal
+                .checked_add(1)
+                .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?,
+        },
+        upper_bound: pad_shape.domain_size,
+        output_count: hiding_configuration.mask_queries,
+    });
     Ok(())
 }
 
@@ -2722,7 +3029,9 @@ fn proof_section_plans(
     phase_order: &[RowCodeWhirPhase],
     out_of_domain_evaluation_count: usize,
     bound_trees: &[RowCodeWhirBoundTreePlan],
+    _bound_reduction_blocks: &[RowCodeWhirBoundReductionBlockPlan],
     proof_privacy_mode: ProofPrivacyMode,
+    quotient_phase: &RowCodeWhirQuotientPhasePlan,
     parameters: RowCodeWhirSelectedParameters,
 ) -> Result<Vec<RowCodeWhirProofSectionPlan>, RowCodeWhirConstructionPlanError> {
     let mut sections = Vec::new();
@@ -2750,10 +3059,11 @@ fn proof_section_plans(
     if proof_privacy_mode == ProofPrivacyMode::SecretBearing {
         push_section(
             RowCodeWhirProofSectionRole::OpeningBatchMaskEvaluations,
-            parameters.logical_polynomials_per_physical_row,
+            opening_batch_mask_chunk_evaluation_count(proof_privacy_mode, quotient_phase)?,
         )?;
     }
     push_section(RowCodeWhirProofSectionRole::AggregateCommitment, 1)?;
+    push_section(RowCodeWhirProofSectionRole::AggregateWidePadCommitment, 1)?;
     for phase in phase_order {
         push_section(
             RowCodeWhirProofSectionRole::PhaseOpenings { phase: *phase },
@@ -2768,7 +3078,7 @@ fn proof_section_plans(
             tree.query_count,
         )?;
     }
-    push_section(RowCodeWhirProofSectionRole::PlainWhir, 1)?;
+    push_section(RowCodeWhirProofSectionRole::AggregateWideOpening, 1)?;
     Ok(sections)
 }
 
@@ -2776,6 +3086,7 @@ fn operation_belongs_to_whir_round(
     operation: &RowCodeWhirTranscriptOperation,
     round_ordinal: u32,
 ) -> bool {
+    let following_batch_ordinal = round_ordinal.checked_add(1);
     match operation {
         RowCodeWhirTranscriptOperation::ObserveCommitment {
             role:
@@ -2785,34 +3096,34 @@ fn operation_belongs_to_whir_round(
         }
         | RowCodeWhirTranscriptOperation::SampleExtension {
             role:
-                RowCodeWhirExtensionRole::RoundOutOfDomainPoint {
-                    round_ordinal: observed,
-                    ..
-                }
-                | RowCodeWhirExtensionRole::RoundCheckpoint {
+                RowCodeWhirExtensionRole::RoundCheckpoint {
                     round_ordinal: observed,
                 }
                 | RowCodeWhirExtensionRole::RoundCombination {
                     round_ordinal: observed,
-                }
-                | RowCodeWhirExtensionRole::RoundSumcheck {
-                    round_ordinal: observed,
-                    ..
                 },
             ..
         }
         | RowCodeWhirTranscriptOperation::ObserveExtensionValues {
             role:
-                RowCodeWhirObservationRole::RoundOutOfDomainAnswer {
+                RowCodeWhirObservationRole::SwitchMaskOffset {
                     round_ordinal: observed,
-                    ..
-                }
-                | RowCodeWhirObservationRole::RoundSumcheckPolynomial {
-                    round_ordinal: observed,
-                    ..
                 },
             ..
         } => *observed == round_ordinal,
+        RowCodeWhirTranscriptOperation::SampleExtension {
+            role:
+                RowCodeWhirExtensionRole::MaskedSumcheckEpsilon { batch_ordinal }
+                | RowCodeWhirExtensionRole::MaskedSumcheckRound { batch_ordinal, .. },
+            ..
+        }
+        | RowCodeWhirTranscriptOperation::ObserveExtensionValues {
+            role:
+                RowCodeWhirObservationRole::MaskedSumcheckClaim { batch_ordinal }
+                | RowCodeWhirObservationRole::MaskedSumcheckMaskClaim { batch_ordinal }
+                | RowCodeWhirObservationRole::MaskedSumcheckPolynomial { batch_ordinal, .. },
+            ..
+        } => Some(*batch_ordinal) == following_batch_ordinal,
         _ => false,
     }
 }
@@ -2879,7 +3190,7 @@ fn checkpoint_plans(
         aggregate_commitment_section_index,
     )?;
     push_checkpoint(
-        RowCodeWhirCheckpointBoundary::AggregateCommitmentAndQueries,
+        RowCodeWhirCheckpointBoundary::AggregateCommitmentsAndQueries,
         direct_tail_end,
         proof_sections.len().saturating_sub(1),
     )?;
@@ -3087,19 +3398,8 @@ fn encode_common_proof_round(
             encoder.push_u16(2);
             encoder.push_u16(tree_ordinal);
         }
-        CommonProofRound::QuotientRoot { component_ordinal } => {
-            encoder.push_u16(3);
-            encoder.push_u16(component_ordinal);
-        }
         CommonProofRound::RowCodeWhirQuotientPhaseRoot => encoder.push_u16(4),
         CommonProofRound::OutOfDomainEvaluations => encoder.push_u16(5),
-        CommonProofRound::OpeningBatchMaskRoot => encoder.push_u16(6),
-        CommonProofRound::FriLayerRoot { fold_ordinal } => {
-            encoder.push_u16(7);
-            encoder.push_u16(fold_ordinal);
-        }
-        CommonProofRound::FriTerminal => encoder.push_u16(8),
-        CommonProofRound::QueryOpenings => encoder.push_u16(9),
     }
 }
 
@@ -3124,15 +3424,6 @@ fn encode_common_proof_challenge(
             encoder.push_u16(4);
             encoder.push_u16(point_ordinal);
         }
-        CommonProofChallenge::OpeningBatch { claim_ordinal } => {
-            encoder.push_u16(5);
-            encoder.push_u32(claim_ordinal);
-        }
-        CommonProofChallenge::FriFold { fold_ordinal } => {
-            encoder.push_u16(6);
-            encoder.push_u16(fold_ordinal);
-        }
-        CommonProofChallenge::QueryVector => encoder.push_u16(7),
     }
 }
 
@@ -3290,6 +3581,7 @@ fn encode_bound_low_degree_mode(
     encoder.push_u16(match mode {
         RowCodeWhirBoundLowDegreeMode::PriorVssProofRequired => 1,
         RowCodeWhirBoundLowDegreeMode::Direct => 2,
+        RowCodeWhirBoundLowDegreeMode::PriorSetupPolynomialProofRequired => 3,
     });
 }
 
@@ -3432,43 +3724,28 @@ fn encode_extension_role(
             encoder.push_u16(1);
             encode_direct_challenge(encoder, challenge);
         }
-        RowCodeWhirExtensionRole::InitialOutOfDomainPoint { sample_ordinal } => {
-            encoder.push_u16(2);
-            encoder.push_u32(sample_ordinal);
+        RowCodeWhirExtensionRole::OpeningBatching => encoder.push_u16(2),
+        RowCodeWhirExtensionRole::MaskedSumcheckEpsilon { batch_ordinal } => {
+            encoder.push_u16(3);
+            encoder.push_u32(batch_ordinal);
         }
-        RowCodeWhirExtensionRole::OpeningBatching => encoder.push_u16(3),
-        RowCodeWhirExtensionRole::InitialSumcheck { round_ordinal } => {
-            encoder.push_u16(4);
-            encoder.push_u32(round_ordinal);
-        }
-        RowCodeWhirExtensionRole::RoundOutOfDomainPoint {
+        RowCodeWhirExtensionRole::MaskedSumcheckRound {
+            batch_ordinal,
             round_ordinal,
-            sample_ordinal,
         } => {
-            encoder.push_u16(5);
+            encoder.push_u16(4);
+            encoder.push_u32(batch_ordinal);
             encoder.push_u32(round_ordinal);
-            encoder.push_u32(sample_ordinal);
         }
         RowCodeWhirExtensionRole::RoundCheckpoint { round_ordinal } => {
-            encoder.push_u16(6);
+            encoder.push_u16(5);
             encoder.push_u32(round_ordinal);
         }
         RowCodeWhirExtensionRole::RoundCombination { round_ordinal } => {
-            encoder.push_u16(7);
+            encoder.push_u16(6);
             encoder.push_u32(round_ordinal);
         }
-        RowCodeWhirExtensionRole::RoundSumcheck {
-            round_ordinal,
-            sumcheck_round_ordinal,
-        } => {
-            encoder.push_u16(8);
-            encoder.push_u32(round_ordinal);
-            encoder.push_u32(sumcheck_round_ordinal);
-        }
-        RowCodeWhirExtensionRole::FinalSumcheck { round_ordinal } => {
-            encoder.push_u16(9);
-            encoder.push_u32(round_ordinal);
-        }
+        RowCodeWhirExtensionRole::BaseCaseBlinding => encoder.push_u16(7),
     }
 }
 
@@ -3477,43 +3754,39 @@ fn encode_observation_role(
     role: RowCodeWhirObservationRole,
 ) {
     match role {
-        RowCodeWhirObservationRole::InitialOutOfDomainAnswer { sample_ordinal } => {
-            encoder.push_u16(1);
-            encoder.push_u32(sample_ordinal);
-        }
         RowCodeWhirObservationRole::OpeningPoint { batch_ordinal } => {
-            encoder.push_u16(2);
+            encoder.push_u16(1);
             encoder.push_u32(batch_ordinal);
         }
         RowCodeWhirObservationRole::OpeningEvaluations { batch_ordinal } => {
+            encoder.push_u16(2);
+            encoder.push_u32(batch_ordinal);
+        }
+        RowCodeWhirObservationRole::MaskedSumcheckClaim { batch_ordinal } => {
             encoder.push_u16(3);
             encoder.push_u32(batch_ordinal);
         }
-        RowCodeWhirObservationRole::InitialSumcheckPolynomial { round_ordinal } => {
+        RowCodeWhirObservationRole::MaskedSumcheckMaskClaim { batch_ordinal } => {
             encoder.push_u16(4);
-            encoder.push_u32(round_ordinal);
+            encoder.push_u32(batch_ordinal);
         }
-        RowCodeWhirObservationRole::RoundSumcheckPolynomial {
+        RowCodeWhirObservationRole::MaskedSumcheckPolynomial {
+            batch_ordinal,
             round_ordinal,
-            sumcheck_round_ordinal,
         } => {
             encoder.push_u16(5);
+            encoder.push_u32(batch_ordinal);
             encoder.push_u32(round_ordinal);
-            encoder.push_u32(sumcheck_round_ordinal);
         }
-        RowCodeWhirObservationRole::RoundOutOfDomainAnswer {
-            round_ordinal,
-            sample_ordinal,
-        } => {
+        RowCodeWhirObservationRole::SwitchMaskOffset { round_ordinal } => {
             encoder.push_u16(6);
             encoder.push_u32(round_ordinal);
-            encoder.push_u32(sample_ordinal);
         }
-        RowCodeWhirObservationRole::FinalPolynomial => encoder.push_u16(7),
-        RowCodeWhirObservationRole::FinalSumcheckPolynomial { round_ordinal } => {
-            encoder.push_u16(8);
-            encoder.push_u32(round_ordinal);
-        }
+        RowCodeWhirObservationRole::BaseMaskedClaim => encoder.push_u16(7),
+        RowCodeWhirObservationRole::BaseBlindedSourceMessage => encoder.push_u16(8),
+        RowCodeWhirObservationRole::BaseBlindedSourceRandomness => encoder.push_u16(9),
+        RowCodeWhirObservationRole::BaseBlindedPadMessage => encoder.push_u16(10),
+        RowCodeWhirObservationRole::BaseBlindedPadRandomness => encoder.push_u16(11),
     }
 }
 
@@ -3547,10 +3820,13 @@ fn encode_transcript_operation(
             encoder.push_u16(4);
             match role {
                 RowCodeWhirCommitmentRole::Aggregate => encoder.push_u16(1),
+                RowCodeWhirCommitmentRole::AggregateWidePad => encoder.push_u16(2),
                 RowCodeWhirCommitmentRole::WhirRound { round_ordinal } => {
-                    encoder.push_u16(2);
+                    encoder.push_u16(3);
                     encoder.push_u32(*round_ordinal);
                 }
+                RowCodeWhirCommitmentRole::BaseFreshSource => encoder.push_u16(4),
+                RowCodeWhirCommitmentRole::BaseFreshPad => encoder.push_u16(5),
             }
         }
         RowCodeWhirTranscriptOperation::SampleDistinctIndices {
@@ -3598,15 +3874,16 @@ fn encode_proof_section(
         RowCodeWhirProofSectionRole::OutOfDomainEvaluations => encoder.push_u16(2),
         RowCodeWhirProofSectionRole::OpeningBatchMaskEvaluations => encoder.push_u16(3),
         RowCodeWhirProofSectionRole::AggregateCommitment => encoder.push_u16(4),
+        RowCodeWhirProofSectionRole::AggregateWidePadCommitment => encoder.push_u16(5),
         RowCodeWhirProofSectionRole::PhaseOpenings { phase } => {
-            encoder.push_u16(5);
+            encoder.push_u16(6);
             encoder.push_u16(row_code_whir_phase_tag(phase));
         }
         RowCodeWhirProofSectionRole::BoundTreeOpenings { bound_tree_ordinal } => {
-            encoder.push_u16(6);
+            encoder.push_u16(7);
             encoder.push_u32(bound_tree_ordinal);
         }
-        RowCodeWhirProofSectionRole::PlainWhir => encoder.push_u16(7),
+        RowCodeWhirProofSectionRole::AggregateWideOpening => encoder.push_u16(8),
     }
     encoder.push_usize(section.item_count)
 }
@@ -3623,7 +3900,7 @@ fn encode_checkpoint(
             encoder.push_u16(row_code_whir_phase_tag(phase));
         }
         RowCodeWhirCheckpointBoundary::RelationEvaluationsAndMask => encoder.push_u16(3),
-        RowCodeWhirCheckpointBoundary::AggregateCommitmentAndQueries => encoder.push_u16(4),
+        RowCodeWhirCheckpointBoundary::AggregateCommitmentsAndQueries => encoder.push_u16(4),
         RowCodeWhirCheckpointBoundary::WhirRound { round_ordinal } => {
             encoder.push_u16(5);
             encoder.push_u32(round_ordinal);
@@ -3655,7 +3932,7 @@ fn encode_selected_parameters(
     encoder.push_usize(parameters.outer_query_count)?;
     encoder.push_u64(parameters.trace_mask_degree_bound_exclusive);
     encoder.push_usize(parameters.direct_bound_query_count)?;
-    encoder.push_usize(parameters.verified_vss_bound_query_count)?;
+    encoder.push_usize(parameters.prior_proof_bound_query_count)?;
     encoder.push_u32(parameters.maximum_fiat_shamir_candidate_draws_per_output);
     Ok(())
 }
@@ -3729,8 +4006,21 @@ fn validate_domain_geometry_values(
     let expected_direct_bound_query_count = parameters
         .outer_query_count
         .min(ROW_CODE_WHIR_DIRECT_BOUND_QUERY_COUNT);
-    let expected_verified_vss_bound_query_count =
-        expected_direct_bound_query_count.min(ROW_CODE_WHIR_VERIFIED_VSS_BOUND_QUERY_COUNT);
+    let expected_prior_proof_bound_query_count =
+        expected_direct_bound_query_count.min(ROW_CODE_WHIR_PRIOR_PROOF_BOUND_QUERY_COUNT);
+    let expected_physical_row_witness_variable_count = parameters
+        .logical_polynomial_coefficient_count
+        .checked_mul(parameters.logical_polynomials_per_physical_row)
+        .filter(|value_count| value_count.is_power_of_two())
+        .and_then(|value_count| usize::try_from(value_count.ilog2()).ok());
+    let expected_table_variable_count = expected_physical_row_witness_variable_count
+        .and_then(|variable_count| variable_count.checked_add(1));
+    let expected_row_code_log_inverse_rate =
+        expected_table_variable_count.and_then(|table_variable_count| {
+            parameters
+                .polynomial_commitment_variable_count
+                .checked_sub(table_variable_count)
+        });
     let maximum_distinct_leaf_query_count = evaluation_domain_size
         .checked_div(2)
         .ok_or(RowCodeWhirConstructionPlanError::InvalidVariantGeometry)?;
@@ -3745,8 +4035,15 @@ fn validate_domain_geometry_values(
         || !parameters
             .logical_polynomial_coefficient_count
             .is_power_of_two()
+        || parameters.logical_polynomials_per_physical_row == 0
+        || !parameters
+            .logical_polynomials_per_physical_row
+            .is_power_of_two()
         || parameters.logical_polynomials_per_physical_row
-            != ROW_CODE_WHIR_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW
+            > ROW_CODE_WHIR_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW
+        || expected_physical_row_witness_variable_count
+            != Some(parameters.physical_row_witness_variable_count)
+        || expected_table_variable_count != Some(parameters.table_variable_count)
         || opening_degree_bound_exclusive == 0
         || opening_degree_bound_exclusive > logical_row_capacity_u64
         || opening_degree_bound_exclusive <= preceding_logical_row_capacity_u64
@@ -3759,11 +4056,12 @@ fn validate_domain_geometry_values(
         || parameters.outer_query_count == 0
         || parameters.outer_query_count > maximum_distinct_leaf_query_count
         || parameters.direct_bound_query_count != expected_direct_bound_query_count
-        || parameters.verified_vss_bound_query_count != expected_verified_vss_bound_query_count
+        || parameters.prior_proof_bound_query_count != expected_prior_proof_bound_query_count
         || parameters.direct_bound_query_count > maximum_distinct_leaf_query_count
-        || parameters.verified_vss_bound_query_count > parameters.direct_bound_query_count
-        || parameters.row_code_log_inverse_rate != ROW_CODE_WHIR_LOG_INVERSE_RATE
-        || parameters.starting_log_inverse_rate != parameters.row_code_log_inverse_rate
+        || parameters.prior_proof_bound_query_count > parameters.direct_bound_query_count
+        || expected_row_code_log_inverse_rate != Some(parameters.row_code_log_inverse_rate)
+        || parameters.row_code_log_inverse_rate < ROW_CODE_WHIR_LOG_INVERSE_RATE
+        || parameters.starting_log_inverse_rate != ROW_CODE_WHIR_LOG_INVERSE_RATE
         || parameters.folding_factor != ROW_CODE_WHIR_FOLDING_FACTOR
         || parameters.soundness_assumption != RowCodeWhirSoundnessAssumption::UniqueDecoding
         || parameters.security_level != ROW_CODE_WHIR_SECURITY_LEVEL
@@ -4038,6 +4336,23 @@ fn coefficient_chunk_count(
     usize::try_from(count).map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)
 }
 
+fn opening_batch_mask_chunk_evaluation_count(
+    proof_privacy_mode: ProofPrivacyMode,
+    quotient_phase: &RowCodeWhirQuotientPhasePlan,
+) -> Result<usize, RowCodeWhirConstructionPlanError> {
+    match (
+        proof_privacy_mode,
+        quotient_phase.opening_batch_mask_degree_bound_exclusive,
+    ) {
+        (ProofPrivacyMode::PublicOnly, None) => Ok(0),
+        (ProofPrivacyMode::SecretBearing, Some(degree_bound_exclusive)) => coefficient_chunk_count(
+            degree_bound_exclusive,
+            ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT,
+        ),
+        _ => Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry),
+    }
+}
+
 fn trace_phase_plan(
     variant: &RelationPlanVariant,
     patterns: &BTreeMap<u32, RelationTreeColumnOpeningPattern>,
@@ -4074,8 +4389,7 @@ fn trace_phase_plan(
     for ((opening_point_ordinals, coefficient_chunk_count), column_ordinals) in
         columns_by_opening_pattern_and_chunk_count
     {
-        for column_group in
-            column_ordinals.chunks(ROW_CODE_WHIR_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW)
+        for column_group in column_ordinals.chunks(parameters.logical_polynomials_per_physical_row)
         {
             let column_group_ordinal = next_column_group_ordinal;
             next_column_group_ordinal = next_column_group_ordinal
@@ -4175,7 +4489,7 @@ fn quotient_phase_plan(
     let mut next_quotient_component_group_ordinal = 0_u32;
     for (opening_point_ordinals, component_ordinals) in &components_by_opening_pattern {
         let component_groups = component_ordinals
-            .chunks(ROW_CODE_WHIR_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW)
+            .chunks(parameters.logical_polynomials_per_physical_row)
             .collect::<Vec<_>>();
         for chunk_index in 0..quotient_chunk_count {
             let coefficient_chunk_ordinal = u32::try_from(chunk_index)
@@ -4253,13 +4567,12 @@ fn quotient_phase_plan(
             let mask_ordinal = mask.mask_coordinate().mask_ordinal();
             let opening_point_ordinals = batch_mask_opening_points.into_iter().collect::<Vec<_>>();
             for chunk_group_start in
-                (0..mask_chunk_count).step_by(ROW_CODE_WHIR_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW)
+                (0..mask_chunk_count).step_by(parameters.logical_polynomials_per_physical_row)
             {
                 for extension_coordinate_ordinal in 0..context.challenge_extension_degree {
                     let mut row_chunks = [None; ROW_CODE_WHIR_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW];
-                    let chunk_group_end = mask_chunk_count.min(
-                        chunk_group_start + ROW_CODE_WHIR_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW,
-                    );
+                    let chunk_group_end = mask_chunk_count
+                        .min(chunk_group_start + parameters.logical_polynomials_per_physical_row);
                     for (row_position, chunk_index) in
                         (chunk_group_start..chunk_group_end).enumerate()
                     {
@@ -4397,6 +4710,12 @@ fn selected_bound_low_degree_mode(
         && root_use == BoundTreeRootUse::Input
     {
         RowCodeWhirBoundLowDegreeMode::PriorVssProofRequired
+    } else if application_statement_schema_identifier
+        == ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+        && construction_kind == BoundTreeConstructionKind::SetupPolynomial
+        && root_use == BoundTreeRootUse::Input
+    {
+        RowCodeWhirBoundLowDegreeMode::PriorSetupPolynomialProofRequired
     } else {
         RowCodeWhirBoundLowDegreeMode::Direct
     }
@@ -4593,7 +4912,13 @@ pub(in crate::bgv::proof_suite) mod theorem_certificate;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bgv::proof_suite::selected_profile::selected_relation_plans;
+    use crate::bgv::proof_suite::{
+        ValidatedRelationPlanArtifact, compile_aggregate_threshold_share_relation_plan,
+        compile_same_secret_relation_plan, compile_vss_share_linkage_relation_plan,
+        selected_ballot_validity_relation_compilation,
+        selected_profile::{selected_relation_plans, selected_target_release_relation},
+        selected_same_secret_relation_plan_input,
+    };
 
     #[test]
     fn trace_mask_degree_lookup_requires_the_exact_selected_context_and_trace_geometry() {
@@ -4689,7 +5014,7 @@ mod tests {
         assert_eq!(parameters.outer_query_count, 16);
         assert_eq!(parameters.trace_mask_degree_bound_exclusive, 26);
         assert_eq!(parameters.direct_bound_query_count, 16);
-        assert_eq!(parameters.verified_vss_bound_query_count, 16);
+        assert_eq!(parameters.prior_proof_bound_query_count, 16);
         assert_eq!(
             validate_domain_geometry_values(256, 4_096, 258, &checked_context, parameters),
             Ok(()),
@@ -4754,6 +5079,67 @@ mod tests {
     }
 
     #[test]
+    fn candidate_specific_row_widths_cover_extended_opening_catalogs() {
+        let ballot_compilation = selected_ballot_validity_relation_compilation()
+            .expect("the selected ballot relation compiles");
+        let target_release_compilation = selected_target_release_relation()
+            .expect("the selected target-release relation compiles");
+        let committed_material_input = selected_committed_material_relation_plan_input()
+            .expect("the selected committed-material relation input derives");
+        let committed_material_context = selected_relation_plan_check_context(
+            ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        .expect("the selected committed-material relation context derives");
+        let vss_share_linkage = compile_vss_share_linkage_relation_plan(
+            &committed_material_input,
+            &committed_material_context,
+        )
+        .expect("the selected VSS share-linkage relation compiles");
+        let aggregate_threshold_share = compile_aggregate_threshold_share_relation_plan(
+            &committed_material_input,
+            &committed_material_context,
+        )
+        .expect("the selected aggregate-threshold-share relation compiles");
+        for (compiled_plan, expected_opening_bound) in [
+            (
+                ballot_compilation.relation_plan().clone(),
+                ROW_CODE_WHIR_BALLOT_OPENING_DEGREE_BOUND_EXCLUSIVE,
+            ),
+            (
+                target_release_compilation.relation_plan().clone(),
+                ROW_CODE_WHIR_TARGET_RELEASE_OPENING_DEGREE_BOUND_EXCLUSIVE,
+            ),
+            (
+                vss_share_linkage,
+                ROW_CODE_WHIR_COMMITTED_MATERIAL_OPENING_DEGREE_BOUND_EXCLUSIVE,
+            ),
+            (
+                aggregate_threshold_share,
+                ROW_CODE_WHIR_COMMITTED_MATERIAL_OPENING_DEGREE_BOUND_EXCLUSIVE,
+            ),
+        ] {
+            let schema_identifier = compiled_plan.application_statement_schema_identifier();
+            let context = selected_relation_plan_check_context(schema_identifier)
+                .expect("the selected family has a relation context");
+            let artifact =
+                ValidatedRelationPlanArtifact::from_owned_compiled_plan(compiled_plan, &context)
+                    .expect("the selected family relation validates");
+            let plan = RowCodeWhirConstructionPlan::for_selected_variant(&artifact, None, None)
+                .expect("the candidate-specific row construction derives");
+            assert_eq!(plan.opening_degree_bound_exclusive, expected_opening_bound);
+            assert_eq!(
+                plan.parameters.logical_polynomials_per_physical_row,
+                ROW_CODE_WHIR_COMMITTED_MATERIAL_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW,
+            );
+            assert_eq!(plan.parameters.row_code_log_inverse_rate, 5);
+            assert_eq!(plan.parameters.starting_log_inverse_rate, 2);
+            assert_eq!(plan.aggregate_table_width(), 32);
+            assert!(!plan.aggregate_column_roles.is_empty());
+            assert!(plan.aggregate_column_roles.len() <= plan.aggregate_table_width());
+        }
+    }
+
+    #[test]
     fn checked_fixture_bound_geometry_uses_the_compiler_packing_factor() {
         assert_eq!(
             checked_fixture_bound_root_source_trace_domain_size(
@@ -4790,7 +5176,7 @@ mod tests {
     ) -> usize {
         match application_statement_schema_identifier {
             ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER => 2_018,
-            ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER => 4_528,
+            ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER => 3_302,
             ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => 506,
             ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER => 61_140,
             ProofApplicationSlotCeilings::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => 9_152,
@@ -4827,10 +5213,46 @@ mod tests {
         match application_statement_schema_identifier {
             ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
             | ProofApplicationSlotCeilings::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
-            | ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => 10,
+            | ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => 5,
             ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
             | ProofApplicationSlotCeilings::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER => 20,
             _ => 15,
+        }
+    }
+
+    fn expected_opening_degree_bound_exclusive(
+        application_statement_schema_identifier: u16,
+    ) -> u64 {
+        match application_statement_schema_identifier {
+            ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER => {
+                ROW_CODE_WHIR_BALLOT_OPENING_DEGREE_BOUND_EXCLUSIVE
+            }
+            ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+            | ProofApplicationSlotCeilings::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER => {
+                ROW_CODE_WHIR_COMMITTED_MATERIAL_OPENING_DEGREE_BOUND_EXCLUSIVE
+            }
+            ProofApplicationSlotCeilings::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER => {
+                ROW_CODE_WHIR_TARGET_RELEASE_OPENING_DEGREE_BOUND_EXCLUSIVE
+            }
+            _ => ROW_CODE_WHIR_OPENING_DEGREE_BOUND_EXCLUSIVE,
+        }
+    }
+
+    fn expected_logical_polynomials_per_physical_row(
+        application_statement_schema_identifier: u16,
+    ) -> usize {
+        match application_statement_schema_identifier {
+            ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER => {
+                ROW_CODE_WHIR_BALLOT_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW
+            }
+            ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+            | ProofApplicationSlotCeilings::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER => {
+                ROW_CODE_WHIR_COMMITTED_MATERIAL_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW
+            }
+            ProofApplicationSlotCeilings::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER => {
+                ROW_CODE_WHIR_TARGET_RELEASE_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW
+            }
+            _ => ROW_CODE_WHIR_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW,
         }
     }
 
@@ -5155,7 +5577,10 @@ mod tests {
             plan.quotient_phase.geometry.row_count,
             plan.quotient_phase.rows.len(),
         );
-        assert_eq!(plan.quotient_phase.geometry.encoded_column_count, 1 << 21);
+        assert_eq!(
+            plan.quotient_phase.geometry.encoded_column_count,
+            usize::try_from(plan.evaluation_domain_size).expect("selected domain fits usize"),
+        );
     }
 
     fn assert_plan_identity_mutation_changes(
@@ -5792,7 +6217,7 @@ mod tests {
             plan,
             expected_identity,
             "verified-VSS bound query count",
-            |mutated| mutated.parameters.verified_vss_bound_query_count += 1,
+            |mutated| mutated.parameters.prior_proof_bound_query_count += 1,
         );
         // The derived oracle-equation catalog is part of the identity, and it
         // refuses a draw ceiling that disagrees with the relation schedule and
@@ -5899,8 +6324,31 @@ mod tests {
                 assert_eq!(plan.schedule_position, variant.schedule_position());
                 assert_eq!(plan.top_count, variant.top_count());
                 assert_eq!(plan.trace_domain_size, variant.trace_domain_size());
-                assert_eq!(plan.evaluation_domain_size, 1 << 21);
-                assert_eq!(plan.opening_degree_bound_exclusive, 1 << 18);
+                assert_eq!(plan.evaluation_domain_size, 1 << 24);
+                assert_eq!(
+                    plan.opening_degree_bound_exclusive,
+                    expected_opening_degree_bound_exclusive(schema_identifier),
+                );
+                assert_eq!(
+                    plan.parameters.logical_polynomials_per_physical_row,
+                    expected_logical_polynomials_per_physical_row(schema_identifier),
+                );
+                let expected_log_inverse_rate = if matches!(
+                    schema_identifier,
+                    ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER
+                        | ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+                        | ProofApplicationSlotCeilings::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+                        | ProofApplicationSlotCeilings::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER
+                ) {
+                    5
+                } else {
+                    2
+                };
+                assert_eq!(
+                    plan.parameters.row_code_log_inverse_rate,
+                    expected_log_inverse_rate,
+                );
+                assert_eq!(plan.aggregate_table_width(), 1 << expected_log_inverse_rate,);
                 assert_eq!(plan.proof_privacy_mode, variant.proof_privacy_mode());
                 assert!(
                     plan.requested_source_column_ordinals
@@ -6088,8 +6536,8 @@ mod tests {
             .auxiliary_phase
             .as_ref()
             .expect("same-secret auxiliary phase");
-        assert_eq!(base_phase.rows.len(), 247);
-        assert_eq!(auxiliary_phase.rows.len(), 136);
+        assert_eq!(base_phase.rows.len(), 32);
+        assert_eq!(auxiliary_phase.rows.len(), 17);
         assert_eq!(plan.quotient_phase.rows.len(), 15);
         for (phase, tree_role) in [
             (base_phase, ProofTreeRole::BaseOracle),
@@ -6130,8 +6578,10 @@ mod tests {
                 let expected_sources: [Option<RowCodeWhirOpenedPolynomialSource>;
                     ROW_CODE_WHIR_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW] =
                     core::array::from_fn(|component_ordinal| {
-                        Some(RowCodeWhirOpenedPolynomialSource::QuotientComponent {
-                            component_ordinal: u32::try_from(component_ordinal).unwrap(),
+                        (component_ordinal < 8).then(|| {
+                            RowCodeWhirOpenedPolynomialSource::QuotientComponent {
+                                component_ordinal: u32::try_from(component_ordinal).unwrap(),
+                            }
                         })
                     });
                 assert_eq!(
@@ -6227,7 +6677,7 @@ mod tests {
         assert!(plan.bound_trees[..8].iter().all(|tree| {
             tree.ordered_columns.len() == 4
                 && tree.source_trace_domain_size == 16_384
-                && tree.leaf_count == 1 << 20
+                && tree.leaf_count == 1 << 23
                 && tree.ordered_columns.iter().all(|column| {
                     column.source_degree_bound_exclusive == 18_432
                         && column.opening_point_ordinals.len() == 1
@@ -6236,7 +6686,7 @@ mod tests {
         assert!(plan.bound_trees[8..].iter().all(|tree| {
             tree.ordered_columns.len() == 4
                 && tree.source_trace_domain_size == 16_384
-                && tree.leaf_count == 1 << 20
+                && tree.leaf_count == 1 << 23
                 && tree.ordered_columns.iter().all(|column| {
                     column.source_degree_bound_exclusive == 16_384
                         && column.opening_point_ordinals.len() == 1
@@ -6266,11 +6716,11 @@ mod tests {
         assert_eq!(direct_output_block.degree_test_count(), 2);
         assert_eq!(
             plan.bound_reduction_blocks[0].selector_prefix,
-            vec![0, 0, 0, 0],
+            vec![0, 0, 0, 0, 0, 0, 0],
         );
         assert_eq!(
             plan.bound_reduction_blocks[1].selector_prefix,
-            vec![0, 0, 0, 1],
+            vec![0, 0, 0, 0, 0, 0, 1],
         );
         assert_eq!(
             plan.bound_reduction_blocks
@@ -6279,11 +6729,11 @@ mod tests {
                 .sum::<usize>(),
             6,
         );
-        assert_eq!(plan.parameters.table_variable_count, 19);
-        assert_eq!(plan.parameters.polynomial_commitment_variable_count, 21);
+        assert_eq!(plan.parameters.table_variable_count, 22);
+        assert_eq!(plan.parameters.polynomial_commitment_variable_count, 24);
         assert_eq!(plan.parameters.logical_polynomial_coefficient_count, 32_768);
-        assert_eq!(plan.parameters.logical_polynomials_per_physical_row, 8);
-        assert_eq!(plan.parameters.physical_row_witness_variable_count, 18);
+        assert_eq!(plan.parameters.logical_polynomials_per_physical_row, 64);
+        assert_eq!(plan.parameters.physical_row_witness_variable_count, 21);
         assert_eq!(plan.parameters.row_code_log_inverse_rate, 2);
         assert_eq!(plan.parameters.starting_log_inverse_rate, 2);
         assert_eq!(plan.parameters.folding_factor, 3);
@@ -6305,7 +6755,7 @@ mod tests {
         );
         assert_eq!(plan.bound_opening_column_ordinals.len(), 44);
         assert_eq!(plan.opening_batches.len(), 1_008);
-        assert_eq!(plan.whir.rounds.len(), 4);
+        assert_eq!(plan.whir.rounds.len(), 5);
         assert_eq!(
             plan.whir
                 .rounds
@@ -6316,9 +6766,16 @@ mod tests {
                     plan.whir.final_round.query_epoch.query_count,
                 )))
                 .collect::<Vec<_>>(),
-            vec![(20, 387), (19, 288), (18, 268), (17, 264), (16, 263)],
+            vec![
+                (23, 387),
+                (22, 288),
+                (21, 268),
+                (20, 264),
+                (19, 263),
+                (18, 263),
+            ],
         );
-        assert_eq!(plan.transcript_operations.len(), 2_712);
+        assert_eq!(plan.transcript_operations.len(), 2_293);
         assert_eq!(
             plan.transcript_operations
                 .iter()
@@ -6328,7 +6785,7 @@ mod tests {
                     } => Some(canonical_values.len()),
                     _ => None,
                 }),
-            Some(97),
+            Some(111),
         );
         assert_eq!(
             plan.transcript_operations
@@ -6341,7 +6798,7 @@ mod tests {
                     }
                 ))
                 .count(),
-            629,
+            181,
         );
         assert_eq!(
             plan.transcript_operations
@@ -6354,7 +6811,7 @@ mod tests {
                     }
                 ))
                 .count(),
-            30,
+            36,
         );
         assert_eq!(
             plan.transcript_operations
@@ -6364,7 +6821,7 @@ mod tests {
                     RowCodeWhirTranscriptOperation::ObserveCommitment { .. }
                 ))
                 .count(),
-            5,
+            9,
         );
         assert_eq!(
             plan.transcript_operations
@@ -6374,10 +6831,10 @@ mod tests {
                     RowCodeWhirTranscriptOperation::SampleDistinctIndices { .. }
                 ))
                 .count(),
-            7,
+            9,
         );
-        assert_eq!(plan.proof_sections.len(), 21);
-        assert_eq!(plan.checkpoints.len(), 11);
+        assert_eq!(plan.proof_sections.len(), 22);
+        assert_eq!(plan.checkpoints.len(), 12);
         assert_eq!(
             plan.proof_sections[..3]
                 .iter()
@@ -6407,7 +6864,12 @@ mod tests {
             &plan.phase_order,
             out_of_domain_evaluation_count,
             &plan.bound_trees,
+            &plan.bound_reduction_blocks,
             ProofPrivacyMode::PublicOnly,
+            &RowCodeWhirQuotientPhasePlan {
+                opening_batch_mask_degree_bound_exclusive: None,
+                ..plan.quotient_phase.clone()
+            },
             plan.parameters,
         )
         .expect("the public-only proof layout is canonical");
@@ -6440,7 +6902,6 @@ mod tests {
             relation_prefix_schedule.maximum_candidate_draws_per_output(),
             relation_prefix_schedule.privacy_mode(),
         )
-        .and_then(CommonProofRelationPrefixSchedule::into_row_code_whir_successor)
         .expect("the mutated relation-prefix schedule remains structurally valid");
         let mut relation_rescheduled_plan = plan.clone();
         relation_rescheduled_plan.relation_prefix_schedule = mutated_relation_prefix_schedule;
@@ -6471,21 +6932,26 @@ mod tests {
     }
 
     fn selected_same_secret_construction_plan() -> RowCodeWhirConstructionPlan {
-        let artifacts = selected_relation_plans().expect("selected relation plans derive");
-        let artifact = artifacts
-            .iter()
-            .find(|artifact| {
-                artifact.application_statement_schema_identifier()
-                    == ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER
-            })
-            .expect("the selected same-secret relation plan exists");
+        let schema_identifier =
+            ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER;
+        let context = selected_relation_plan_check_context(schema_identifier)
+            .expect("the selected same-secret relation context exists");
+        let compiled_plan = compile_same_secret_relation_plan(
+            &selected_same_secret_relation_plan_input()
+                .expect("the selected same-secret relation input derives"),
+            &context,
+        )
+        .expect("the selected same-secret relation compiles");
+        let artifact =
+            ValidatedRelationPlanArtifact::from_owned_compiled_plan(compiled_plan, &context)
+                .expect("the selected same-secret relation validates");
         let variant = artifact
             .compiled_plan()
             .variants()
             .first()
             .expect("the selected same-secret relation plan has one variant");
         RowCodeWhirConstructionPlan::for_selected_variant(
-            artifact,
+            &artifact,
             variant.schedule_position(),
             variant.top_count(),
         )
@@ -6507,7 +6973,7 @@ mod tests {
             quotient_domain.coset_offset().canonical(),
             context.evaluation_coset_offset
         );
-        assert_eq!(plan.evaluation_domain_size, 2_097_152);
+        assert_eq!(plan.evaluation_domain_size, 16_777_216);
 
         type ContextMutation = (&'static str, fn(&mut RelationPlanCheckContext));
         let context_mutations: &[ContextMutation] = &[
@@ -6780,17 +7246,17 @@ mod tests {
         let selected_catalog_hash = plan
             .linear_bcs_transcript_plan_hash()
             .expect("the selected literal BCS catalog hash derives");
-        assert_eq!(round_count, 683_840);
+        assert_eq!(round_count, 690_142);
         assert_ne!(selected_catalog_hash, [0_u8; 64]);
         assert_eq!(selected_accounting.round_count, round_count);
         assert_eq!(
             selected_accounting.maximum_single_opening_hash_query_count,
             64
         );
-        assert_eq!(selected_accounting.supplied_commitment_opening_count, 2_631);
+        assert_eq!(selected_accounting.supplied_commitment_opening_count, 3_680);
         assert_eq!(
             selected_accounting.supplied_commitment_independent_opening_hash_query_count_ceiling,
-            155_970,
+            200_297,
         );
         let opening_query_order =
             linear_bcs_transcript::LinearBcsOpeningQueryOrder::AcceptedTranscriptOrder;
@@ -6841,6 +7307,18 @@ mod tests {
                         },
                     payload_leaf_count: 1_048_576,
                     query_count: 387,
+                    query_order: opening_query_order,
+                    merkle_traversal_order,
+                },
+                linear_bcs_transcript::LinearBcsSuppliedCommitmentOpeningPlan {
+                    commitment_role:
+                        linear_bcs_transcript::LinearBcsCommittedOracleRole::AggregateWidePad,
+                    owner:
+                        linear_bcs_transcript::LinearBcsSuppliedCommitmentOpeningOwner::WhirEpoch {
+                            epoch_ordinal: 5,
+                        },
+                    payload_leaf_count: 8_192,
+                    query_count: 393,
                     query_order: opening_query_order,
                     merkle_traversal_order,
                 },
@@ -6897,6 +7375,30 @@ mod tests {
                         },
                     payload_leaf_count: 65_536,
                     query_count: 263,
+                    query_order: opening_query_order,
+                    merkle_traversal_order,
+                },
+                linear_bcs_transcript::LinearBcsSuppliedCommitmentOpeningPlan {
+                    commitment_role:
+                        linear_bcs_transcript::LinearBcsCommittedOracleRole::BaseFreshSource,
+                    owner:
+                        linear_bcs_transcript::LinearBcsSuppliedCommitmentOpeningOwner::WhirEpoch {
+                            epoch_ordinal: 4,
+                        },
+                    payload_leaf_count: 65_536,
+                    query_count: 263,
+                    query_order: opening_query_order,
+                    merkle_traversal_order,
+                },
+                linear_bcs_transcript::LinearBcsSuppliedCommitmentOpeningPlan {
+                    commitment_role:
+                        linear_bcs_transcript::LinearBcsCommittedOracleRole::BaseFreshPad,
+                    owner:
+                        linear_bcs_transcript::LinearBcsSuppliedCommitmentOpeningOwner::WhirEpoch {
+                            epoch_ordinal: 5,
+                        },
+                    payload_leaf_count: 8_192,
+                    query_count: 393,
                     query_order: opening_query_order,
                     merkle_traversal_order,
                 },
@@ -6983,6 +7485,18 @@ mod tests {
                 )
             })
             .expect("the outer query operation exists");
+        let aggregate_wide_pad_commitment_operation_ordinal = plan
+            .transcript_operations
+            .iter()
+            .position(|operation| {
+                matches!(
+                    operation,
+                    RowCodeWhirTranscriptOperation::ObserveCommitment {
+                        role: RowCodeWhirCommitmentRole::AggregateWidePad,
+                    }
+                )
+            })
+            .expect("the aggregate-wide pad commitment operation exists");
         let bound_query_operation_ordinal = plan
             .transcript_operations
             .iter()
@@ -6997,7 +7511,7 @@ mod tests {
             })
             .expect("the bound query operation exists");
         assert_eq!(
-            outer_query_operation_ordinal,
+            aggregate_wide_pad_commitment_operation_ordinal,
             aggregate_commitment_operation_ordinal + 1,
         );
         assert_eq!(
@@ -7066,7 +7580,10 @@ mod tests {
         assert!(
             bound_degree_operation_ordinals
                 .iter()
-                .all(|operation_ordinal| *operation_ordinal > bound_query_operation_ordinal),
+                .all(|operation_ordinal| {
+                    *operation_ordinal > aggregate_wide_pad_commitment_operation_ordinal
+                        && *operation_ordinal < outer_query_operation_ordinal
+                }),
         );
 
         let canonical_bytes = catalog
