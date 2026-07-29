@@ -1801,9 +1801,17 @@ export const validateSelectedCollectiveSetupSecurityEvidence = (
     if (recordedDigest !== canonicalJsonSha256(body)) {
         throw new Error('The collective-setup evidence digest does not match.');
     }
+    const sourceAuthority = requireArray(
+        record.sourceAuthority,
+        'Collective-setup source authority',
+    );
+    const expectedSourceAuthority = requireArray(
+        expectedRecord.sourceAuthority,
+        'Expected collective-setup source authority',
+    );
     if (
-        canonicalJsonText(record.sourceAuthority ?? null) !==
-        canonicalJsonText(expectedRecord.sourceAuthority ?? null)
+        canonicalJsonText(sourceAuthority) !==
+        canonicalJsonText(expectedSourceAuthority)
     ) {
         throw new Error('The collective-setup source authority is stale.');
     }
@@ -1899,7 +1907,9 @@ export const validateSelectedCollectiveSetupSecurityEvidence = (
     );
     if (
         canonicalJsonText(constructionEvidenceImports) !==
-        canonicalJsonText(buildConstructionEvidenceImports())
+        canonicalJsonText(
+            buildConstructionEvidenceImports(expectedSourceAuthority),
+        )
     ) {
         throw new Error(
             'A common-construction evidence import is stale or overstated.',

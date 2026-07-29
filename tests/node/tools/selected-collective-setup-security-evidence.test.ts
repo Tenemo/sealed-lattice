@@ -5,6 +5,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import {
     buildSelectedCollectiveSetupSecurityEvidence,
     canonicalJsonSha256,
+    canonicalJsonText,
     parseJsonValue,
     requireSelectedCollectiveSetupSecurityClosure,
     selectedCollectiveSetupSecurityEvidencePath,
@@ -108,6 +109,143 @@ describe('Selected collective-setup security evidence', () => {
         );
     });
 
+    it('round-trips the exact source authority into every construction evidence import', () => {
+        const checkedRecord = requireRecord(checkedEvidence);
+        const expectedRecord = requireRecord(expectedEvidence);
+        const sourceAuthority = requireArray(checkedRecord.sourceAuthority);
+        const expectedSourceAuthority = requireArray(
+            expectedRecord.sourceAuthority,
+        );
+        expect(canonicalJsonText(sourceAuthority as JsonValue)).toBe(
+            canonicalJsonText(expectedSourceAuthority as JsonValue),
+        );
+
+        const sourceRowsByPath = new Map(
+            sourceAuthority.map((sourceValue) => {
+                const source = requireRecord(sourceValue);
+                if (typeof source.relativePath !== 'string') {
+                    throw new Error('Expected a source-authority path.');
+                }
+                return [source.relativePath, source] as const;
+            }),
+        );
+        const constructionEvidenceImports = requireArray(
+            checkedRecord.constructionEvidenceImports,
+        );
+        for (const importValue of constructionEvidenceImports) {
+            const constructionEvidenceImport = requireRecord(importValue);
+            const ownerSourceRows = requireArray(
+                constructionEvidenceImport.ownerSourcePaths,
+            ).map((ownerSourcePathValue) => {
+                if (typeof ownerSourcePathValue !== 'string') {
+                    throw new Error('Expected a construction owner path.');
+                }
+                const sourceRow = sourceRowsByPath.get(ownerSourcePathValue);
+                if (sourceRow === undefined) {
+                    throw new Error(
+                        `Missing source-authority row for ${ownerSourcePathValue}.`,
+                    );
+                }
+                return sourceRow;
+            });
+            expect(constructionEvidenceImport.checkedArtifactDigest).toBe(
+                canonicalJsonSha256(ownerSourceRows as JsonValue),
+            );
+        }
+        expect(() =>
+            validateSelectedCollectiveSetupSecurityEvidence(
+                checkedEvidence,
+                expectedEvidence,
+            ),
+        ).not.toThrow();
+    });
+
+    it('refuses a wrong source authority', () => {
+        const wrongSourceAuthority = hostileRecord(
+            checkedEvidence,
+            (record) => {
+                const sourceAuthority = requireArray(record.sourceAuthority);
+                requireRecord(sourceAuthority[0]).sha256 = '00'.repeat(32);
+            },
+        );
+        expect(() =>
+            validateSelectedCollectiveSetupSecurityEvidence(
+                wrongSourceAuthority,
+                expectedEvidence,
+            ),
+        ).toThrow('The collective-setup source authority is stale.');
+    });
+
+    it('refuses every stale construction evidence import', () => {
+        const constructionEvidenceImportCount = requireArray(
+            requireRecord(checkedEvidence).constructionEvidenceImports,
+        ).length;
+        for (
+            let importOrdinal = 0;
+            importOrdinal < constructionEvidenceImportCount;
+            importOrdinal += 1
+        ) {
+            const staleImport = hostileRecord(checkedEvidence, (record) => {
+                const imports = requireArray(
+                    record.constructionEvidenceImports,
+                );
+                requireRecord(imports[importOrdinal]).checkedArtifactDigest =
+                    '00'.repeat(32);
+            });
+            expect(() =>
+                validateSelectedCollectiveSetupSecurityEvidence(
+                    staleImport,
+                    expectedEvidence,
+                ),
+            ).toThrow(
+                'A common-construction evidence import is stale or overstated.',
+            );
+        }
+    });
+
+    it('canonically binds every imported construction artifact', () => {
+        const constructionEvidenceImports = requireArray(
+            requireRecord(checkedEvidence).constructionEvidenceImports,
+        );
+        for (const [
+            importOrdinal,
+            importValue,
+        ] of constructionEvidenceImports.entries()) {
+            const ownerSourcePaths = requireArray(
+                requireRecord(importValue).ownerSourcePaths,
+            );
+            for (const [
+                ownerOrdinal,
+                ownerSourcePath,
+            ] of ownerSourcePaths.entries()) {
+                if (typeof ownerSourcePath !== 'string') {
+                    throw new Error('Expected a construction owner path.');
+                }
+                const alteredArtifact = hostileRecord(
+                    checkedEvidence,
+                    (record) => {
+                        const imports = requireArray(
+                            record.constructionEvidenceImports,
+                        );
+                        const owners = requireArray(
+                            requireRecord(imports[importOrdinal])
+                                .ownerSourcePaths,
+                        );
+                        owners[ownerOrdinal] = `${ownerSourcePath}.stale`;
+                    },
+                );
+                expect(() =>
+                    validateSelectedCollectiveSetupSecurityEvidence(
+                        alteredArtifact,
+                        expectedEvidence,
+                    ),
+                ).toThrow(
+                    'A common-construction evidence import is stale or overstated.',
+                );
+            }
+        }
+    });
+
     it('keeps the security review fail-closed without minting protocol authority', () => {
         expect(() =>
             requireSelectedCollectiveSetupSecurityClosure(
@@ -126,18 +264,7 @@ describe('Selected collective-setup security evidence', () => {
         expect(JSON.stringify(checkedEvidence)).not.toContain('VerifiedSetup');
     });
 
-    it('refuses stale source and production relation-plan hashes', () => {
-        const staleSource = hostileRecord(checkedEvidence, (record) => {
-            const sourceAuthority = requireArray(record.sourceAuthority);
-            requireRecord(sourceAuthority[0]).sha256 = '00'.repeat(32);
-        });
-        expect(() =>
-            validateSelectedCollectiveSetupSecurityEvidence(
-                staleSource,
-                expectedEvidence,
-            ),
-        ).toThrow('The collective-setup source authority is stale.');
-
+    it('refuses stale production relation-plan hashes', () => {
         const wrongPlanHash = hostileRecord(checkedEvidence, (record) => {
             const authority = requireRecord(record.productionAuthority);
             const bindings = requireArray(authority.relationPlanBindings);
@@ -207,25 +334,6 @@ describe('Selected collective-setup security evidence', () => {
                 expectedEvidence,
             ),
         ).toThrow('unresolved non-assumption reduction catalog');
-
-        const overstatedConstructionImport = hostileRecord(
-            checkedEvidence,
-            (record) => {
-                const imports = requireArray(
-                    record.constructionEvidenceImports,
-                );
-                requireRecord(imports[0]).observedStatus = 'unresolved';
-                requireRecord(imports[0]).checkedArtifactDigest = '00'.repeat(
-                    64,
-                );
-            },
-        );
-        expect(() =>
-            validateSelectedCollectiveSetupSecurityEvidence(
-                overstatedConstructionImport,
-                expectedEvidence,
-            ),
-        ).toThrow('common-construction evidence import is stale or overstated');
     });
 
     it('refuses numeric estimator costs disguised as reduction advantages', () => {
