@@ -108,9 +108,10 @@ impl SetupGenerationAuthorityHandle {
 }
 
 /// Nonserialized live-set accounting for the mutually exclusive setup
-/// authority lifetimes. Shared VSS sources are split from their wrappers so a
-/// prepared proof adapter can borrow the same Arc allocations without making
-/// a second resident-memory owner.
+/// authority lifetimes. The post-release phase retains shared VSS sources and
+/// the exact same-secret witness. Source payloads are split from their
+/// wrappers so a prepared proof adapter can borrow the same allocations
+/// without making a second resident-memory owner.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct SetupGenerationRetainedMemoryAccounting {
     all_family_payload_byte_length: u64,
@@ -995,6 +996,71 @@ struct PinnedProofAttempt {
     application_statement_hash: [u8; Hash512::BYTE_LENGTH],
 }
 
+#[allow(clippy::too_many_arguments)]
+fn pin_setup_generation_key_relation_application(
+    application: &SetupGenerationKeyRelationApplication<'_>,
+    protocol_version: u16,
+    suite_identifier: [u8; Hash512::BYTE_LENGTH],
+    ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
+    action_context_hash: [u8; Hash512::BYTE_LENGTH],
+    roster_hash: [u8; Hash512::BYTE_LENGTH],
+    setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
+    participant_identity: [u8; Hash512::BYTE_LENGTH],
+    roster_position: u16,
+    canonical_application_statement_bytes: &[u8],
+    pinned_attempt: &mut Option<PinnedProofAttempt>,
+) -> Result<(), RefusalReason> {
+    let application_slot = application.prepared_attempt.application_slot();
+    let statement_schema_identifier = application.family.statement_schema_identifier();
+    if application.canonical_application_statement_bytes != canonical_application_statement_bytes
+        || application.setup_proof_context_hash != setup_proof_context_hash
+        || application.roster_hash != roster_hash
+        || application.participant_identity != participant_identity
+        || application.roster_position != roster_position
+        || application_slot.suite_identifier().into_bytes() != suite_identifier
+        || application_slot.ceremony_context_hash().into_bytes() != ceremony_context_hash
+        || application_slot.action_context_hash().into_bytes() != action_context_hash
+        || application_slot.application_statement_schema_identifier() != statement_schema_identifier
+        || application_slot.roster_position() != Some(roster_position)
+        || application_slot.schedule_position().is_some()
+        || application_slot.producer_sequence().is_some()
+        || application
+            .prepared_attempt
+            .application_statement_hash()
+            .into_bytes()
+            != verified_application_statement_hash(
+                protocol_version,
+                suite_identifier,
+                statement_schema_identifier,
+                canonical_application_statement_bytes,
+            )
+    {
+        return Err(RefusalReason::WrongContext);
+    }
+    let pinned = PinnedProofAttempt {
+        attempt_identifier: application.prepared_attempt.attempt_identifier(),
+        application_slot_hash: application
+            .prepared_attempt
+            .application_slot_hash()
+            .into_bytes(),
+        application_statement_hash: application
+            .prepared_attempt
+            .application_statement_hash()
+            .into_bytes(),
+    };
+    if let Some(existing) = pinned_attempt {
+        if existing.attempt_identifier != pinned.attempt_identifier
+            || existing.application_slot_hash != pinned.application_slot_hash
+            || existing.application_statement_hash != pinned.application_statement_hash
+        {
+            return Err(RefusalReason::ConsumedState);
+        }
+    } else {
+        *pinned_attempt = Some(pinned);
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct SetupGenerationVssPublicRecordBinding {
     ordered_recipient_envelope_hashes: Box<[Hash512]>,
@@ -1253,6 +1319,8 @@ fn add_relinearization_aggregate_binding_allocations(
 
 fn setup_generation_vss_post_release_memory_accounting(
     ordered_roster: &[[u8; Hash512::BYTE_LENGTH]],
+    anchor_openings: &[SetupGenerationAnchorOpening],
+    common_secret_coefficients: &Zeroizing<Vec<i8>>,
     ordered_coefficient_materials: &[SetupGeneratedCommittedMaterial],
     ordered_recipient_share_materials: &[SetupGeneratedCommittedMaterial],
     pinned_vss_public_record_binding: Option<&SetupGenerationVssPublicRecordBinding>,
@@ -1261,6 +1329,10 @@ fn setup_generation_vss_post_release_memory_accounting(
         ordered_coefficient_materials
             .iter()
             .chain(ordered_recipient_share_materials),
+    )?;
+    let same_secret_accounting = setup_generation_same_secret_retained_allocation_accounting(
+        anchor_openings,
+        common_secret_coefficients,
     )?;
     let mut binding_wrapper_and_catalog_byte_length = 0_u64;
     if let Some(binding) = pinned_vss_public_record_binding {
@@ -1282,14 +1354,70 @@ fn setup_generation_vss_post_release_memory_accounting(
             .checked_add(ordered_recipient_share_materials.len())
             .ok_or(RefusalReason::OutsideSupportedProfile)?,
         source_accounting,
+        same_secret_accounting,
         binding_wrapper_and_catalog_byte_length,
     )
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct SetupGenerationSameSecretRetainedAllocationAccounting {
+    coefficient_and_canonical_payload_byte_length: u64,
+    allocation_wrapper_byte_length: u64,
+}
+
+fn setup_generation_same_secret_retained_allocation_accounting(
+    anchor_openings: &[SetupGenerationAnchorOpening],
+    common_secret_coefficients: &Zeroizing<Vec<i8>>,
+) -> Result<SetupGenerationSameSecretRetainedAllocationAccounting, RefusalReason> {
+    let mut accounting = SetupGenerationSameSecretRetainedAllocationAccounting::default();
+    let mut add_payload = |byte_length: usize| {
+        accounting.coefficient_and_canonical_payload_byte_length = accounting
+            .coefficient_and_canonical_payload_byte_length
+            .checked_add(
+                u64::try_from(byte_length).map_err(|_| RefusalReason::OutsideSupportedProfile)?,
+            )
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        Ok::<_, RefusalReason>(())
+    };
+    add_payload(common_secret_coefficients.capacity())?;
+    for anchor in anchor_openings {
+        add_payload(anchor.canonical_commitment_bytes.len())?;
+        for polynomial in anchor
+            .hiding_secret_polynomials
+            .iter()
+            .chain(anchor.hiding_error_polynomials.iter())
+        {
+            add_payload(polynomial.capacity())?;
+        }
+    }
+
+    let anchor_catalog_byte_length = anchor_openings
+        .len()
+        .checked_mul(size_of::<SetupGenerationAnchorOpening>())
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    let polynomial_wrapper_count = anchor_openings.iter().try_fold(0_usize, |count, anchor| {
+        count
+            .checked_add(anchor.hiding_secret_polynomials.len())
+            .and_then(|count| count.checked_add(anchor.hiding_error_polynomials.len()))
+            .ok_or(RefusalReason::OutsideSupportedProfile)
+    })?;
+    let polynomial_wrapper_byte_length = polynomial_wrapper_count
+        .checked_mul(size_of::<Zeroizing<Vec<i8>>>())
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    accounting.allocation_wrapper_byte_length = u64::try_from(
+        anchor_catalog_byte_length
+            .checked_add(polynomial_wrapper_byte_length)
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+    )
+    .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+    Ok(accounting)
 }
 
 fn setup_generation_vss_post_release_memory_accounting_from_dimensions(
     roster_count: usize,
     material_count: usize,
     source_accounting: SetupGenerationVssSourceAllocationAccounting,
+    same_secret_accounting: SetupGenerationSameSecretRetainedAllocationAccounting,
     binding_wrapper_and_catalog_byte_length: u64,
 ) -> Result<(u64, u64, u64), RefusalReason> {
     let mut wrapper_and_catalog_byte_length =
@@ -1315,14 +1443,20 @@ fn setup_generation_vss_post_release_memory_accounting_from_dimensions(
     }
     wrapper_and_catalog_byte_length = wrapper_and_catalog_byte_length
         .checked_add(source_accounting.allocation_wrapper_byte_length)
+        .and_then(|length| {
+            length.checked_add(same_secret_accounting.allocation_wrapper_byte_length)
+        })
         .and_then(|length| length.checked_add(binding_wrapper_and_catalog_byte_length))
         .ok_or(RefusalReason::OutsideSupportedProfile)?;
-    let post_release_payload_byte_length = source_accounting
+    let retained_source_and_same_secret_payload_byte_length = source_accounting
         .shared_source_byte_length
+        .checked_add(same_secret_accounting.coefficient_and_canonical_payload_byte_length)
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    let post_release_payload_byte_length = retained_source_and_same_secret_payload_byte_length
         .checked_add(wrapper_and_catalog_byte_length)
         .ok_or(RefusalReason::OutsideSupportedProfile)?;
     Ok((
-        source_accounting.shared_source_byte_length,
+        retained_source_and_same_secret_payload_byte_length,
         wrapper_and_catalog_byte_length,
         post_release_payload_byte_length,
     ))
@@ -1340,9 +1474,79 @@ impl SetupGenerationVssProofAuthority {
     fn retained_memory_accounting(&self) -> Result<(u64, u64, u64), RefusalReason> {
         setup_generation_vss_post_release_memory_accounting(
             &self.ordered_roster,
+            &self.anchor_openings,
+            &self.common_secret_coefficients,
             self.ordered_coefficient_materials(),
             self.ordered_recipient_share_materials(),
             self.pinned_vss_public_record_binding.as_ref(),
+        )
+    }
+
+    fn degree_zero_material_count(&self) -> Result<usize, RefusalReason> {
+        selected_degree_zero_material_count()
+    }
+
+    fn degree_zero_material(
+        &self,
+        degree_zero_material_ordinal: usize,
+    ) -> Result<&SetupGeneratedCommittedMaterial, RefusalReason> {
+        selected_degree_zero_material(
+            self.ordered_coefficient_materials(),
+            degree_zero_material_ordinal,
+        )
+    }
+
+    fn canonical_same_secret_statement(&self) -> Result<Vec<u8>, RefusalReason> {
+        canonical_selected_same_secret_generation_statement(
+            self.setup_proof_context_hash,
+            self.participant_identity,
+            self.roster_position,
+            self.ordered_coefficient_materials(),
+            &self.anchor_commitment_roots,
+        )
+    }
+
+    fn same_secret_preparation_source(
+        &self,
+    ) -> Result<SetupGenerationKeyRelationPreparationSource, RefusalReason> {
+        Ok(SetupGenerationKeyRelationPreparationSource {
+            family: SetupKeyRelationProofFamily::SameSecret,
+            protocol_version: self.protocol_version,
+            suite_identifier: self.suite_identifier,
+            manifest_hash: self.manifest_hash,
+            ceremony_context_hash: self.ceremony_context_hash,
+            action_context_hash: self.action_context_hash,
+            roster_hash: self.roster_hash,
+            setup_proof_context_hash: self.setup_proof_context_hash,
+            source_setup_intent_object_hash: self.source_setup_intent_object_hash,
+            participant_identity: self.participant_identity,
+            roster_position: self.roster_position,
+            action_randomness_authorization_hash: self.action_randomness_authorization_hash,
+            public_setup_seed: self.public_setup_seed,
+            canonical_application_statement_bytes: self.canonical_same_secret_statement()?,
+        })
+    }
+
+    fn pin_same_secret_application(
+        &mut self,
+        application: &SetupGenerationKeyRelationApplication<'_>,
+    ) -> Result<(), RefusalReason> {
+        if application.family != SetupKeyRelationProofFamily::SameSecret {
+            return Err(RefusalReason::WrongContext);
+        }
+        let canonical_application_statement_bytes = self.canonical_same_secret_statement()?;
+        pin_setup_generation_key_relation_application(
+            application,
+            self.protocol_version,
+            self.suite_identifier,
+            self.ceremony_context_hash,
+            self.action_context_hash,
+            self.roster_hash,
+            self.setup_proof_context_hash,
+            self.participant_identity,
+            self.roster_position,
+            &canonical_application_statement_bytes,
+            &mut self.pinned_same_secret_proof_attempt,
         )
     }
 
@@ -1753,9 +1957,9 @@ struct SetupGenerationAuthority {
 }
 
 /// Checkpoint-stable final setup proof authority. Entering this phase moves
-/// only the VSS committed sources and their transcript bindings out of the
-/// all-family setup authority; every superseded setup, RKG and Galois witness
-/// allocation is dropped before common-proof preparation begins.
+/// the VSS committed sources, exact same-secret witness, and their transcript
+/// bindings out of the all-family setup authority. Public-key-share, RKG, and
+/// Galois witness allocations are dropped before common-proof preparation.
 struct SetupGenerationVssProofAuthority {
     protocol_version: u16,
     suite_identifier: [u8; Hash512::BYTE_LENGTH],
@@ -1772,10 +1976,59 @@ struct SetupGenerationVssProofAuthority {
     action_randomness_authorization_hash: [u8; Hash512::BYTE_LENGTH],
     action_private_randomness: Rc<ActionPrivateRandomness>,
     public_setup_seed: [u8; Hash512::BYTE_LENGTH],
+    anchor_commitment_roots: [[u8; Hash512::BYTE_LENGTH]; 3],
+    anchor_openings: Box<[SetupGenerationAnchorOpening]>,
+    common_secret_coefficients: Zeroizing<Vec<i8>>,
     ordered_coefficient_materials: Box<[SetupGeneratedCommittedMaterial]>,
     ordered_recipient_share_materials: Box<[SetupGeneratedCommittedMaterial]>,
     pinned_vss_proof_attempt: Option<PinnedProofAttempt>,
     pinned_vss_public_record_binding: Option<SetupGenerationVssPublicRecordBinding>,
+    pinned_same_secret_proof_attempt: Option<PinnedProofAttempt>,
+}
+
+fn selected_degree_zero_material_count() -> Result<usize, RefusalReason> {
+    selected_committed_material_relation_plan_input()
+        .map(|input| input.sharing_data_modulus_indices.len())
+        .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)
+}
+
+fn selected_degree_zero_material(
+    ordered_coefficient_materials: &[SetupGeneratedCommittedMaterial],
+    degree_zero_material_ordinal: usize,
+) -> Result<&SetupGeneratedCommittedMaterial, RefusalReason> {
+    if degree_zero_material_ordinal >= selected_degree_zero_material_count()? {
+        return Err(RefusalReason::WrongTypeOrLength);
+    }
+    let reconstruction_threshold = usize::from(FOUNDATION_PROFILE.reconstruction_threshold);
+    let material_ordinal = degree_zero_material_ordinal
+        .checked_mul(reconstruction_threshold)
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    ordered_coefficient_materials
+        .get(material_ordinal)
+        .ok_or(RefusalReason::WrongTypeOrLength)
+}
+
+fn canonical_selected_same_secret_generation_statement(
+    setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
+    participant_identity: [u8; Hash512::BYTE_LENGTH],
+    roster_position: u16,
+    ordered_coefficient_materials: &[SetupGeneratedCommittedMaterial],
+    anchor_commitment_roots: &[[u8; Hash512::BYTE_LENGTH]; 3],
+) -> Result<Vec<u8>, RefusalReason> {
+    let ordered_degree_zero_commitment_roots = (0..selected_degree_zero_material_count()?)
+        .map(|material_ordinal| {
+            selected_degree_zero_material(ordered_coefficient_materials, material_ordinal)
+                .map(|material| material.compact_source().root())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    canonical_selected_same_secret_statement(
+        setup_proof_context_hash,
+        participant_identity,
+        roster_position,
+        &ordered_degree_zero_commitment_roots,
+        anchor_commitment_roots,
+    )
+    .map_err(|_| RefusalReason::OutsideSupportedProfile)
 }
 
 impl SetupGenerationAuthority {
@@ -2051,26 +2304,17 @@ impl SetupGenerationAuthority {
     }
 
     fn degree_zero_material_count(&self) -> Result<usize, RefusalReason> {
-        selected_committed_material_relation_plan_input()
-            .map(|input| input.sharing_data_modulus_indices.len())
-            .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)
+        selected_degree_zero_material_count()
     }
 
     fn degree_zero_material(
         &self,
         degree_zero_material_ordinal: usize,
     ) -> Result<&SetupGeneratedCommittedMaterial, RefusalReason> {
-        if degree_zero_material_ordinal >= self.degree_zero_material_count()? {
-            return Err(RefusalReason::WrongTypeOrLength);
-        }
-        let reconstruction_threshold = usize::from(FOUNDATION_PROFILE.reconstruction_threshold);
-        let material_ordinal = degree_zero_material_ordinal
-            .checked_mul(reconstruction_threshold)
-            .ok_or(RefusalReason::OutsideSupportedProfile)?;
-        self.vss_material
-            .ordered_coefficient_materials()
-            .get(material_ordinal)
-            .ok_or(RefusalReason::WrongTypeOrLength)
+        selected_degree_zero_material(
+            self.vss_material.ordered_coefficient_materials(),
+            degree_zero_material_ordinal,
+        )
     }
 
     fn canonical_key_relation_statement(
@@ -2079,21 +2323,13 @@ impl SetupGenerationAuthority {
     ) -> Result<Vec<u8>, RefusalReason> {
         match family {
             SetupKeyRelationProofFamily::SameSecret => {
-                let ordered_degree_zero_commitment_roots = (0..self
-                    .degree_zero_material_count()?)
-                    .map(|material_ordinal| {
-                        self.degree_zero_material(material_ordinal)
-                            .map(|material| material.compact_source().root())
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                canonical_selected_same_secret_statement(
+                canonical_selected_same_secret_generation_statement(
                     self.setup_proof_context_hash,
                     self.participant_identity,
                     self.roster_position,
-                    &ordered_degree_zero_commitment_roots,
+                    self.vss_material.ordered_coefficient_materials(),
                     &self.anchor_commitment_roots,
                 )
-                .map_err(|_| RefusalReason::OutsideSupportedProfile)
             }
             SetupKeyRelationProofFamily::PublicKeyShare => {
                 canonical_selected_public_key_share_statement(
@@ -2485,65 +2721,27 @@ impl SetupGenerationAuthority {
         &mut self,
         application: &SetupGenerationKeyRelationApplication<'_>,
     ) -> Result<(), RefusalReason> {
-        let application_slot = application.prepared_attempt.application_slot();
-        let statement_schema_identifier = application.family.statement_schema_identifier();
         let canonical_application_statement_bytes =
             self.canonical_key_relation_statement(application.family)?;
-        if application.canonical_application_statement_bytes
-            != canonical_application_statement_bytes
-            || application.setup_proof_context_hash != self.setup_proof_context_hash
-            || application.roster_hash != self.roster_hash
-            || application.participant_identity != self.participant_identity
-            || application.roster_position != self.roster_position
-            || application_slot.suite_identifier().into_bytes() != self.suite_identifier
-            || application_slot.ceremony_context_hash().into_bytes() != self.ceremony_context_hash
-            || application_slot.action_context_hash().into_bytes() != self.action_context_hash
-            || application_slot.application_statement_schema_identifier()
-                != statement_schema_identifier
-            || application_slot.roster_position() != Some(self.roster_position)
-            || application_slot.schedule_position().is_some()
-            || application_slot.producer_sequence().is_some()
-            || application
-                .prepared_attempt
-                .application_statement_hash()
-                .into_bytes()
-                != verified_application_statement_hash(
-                    self.protocol_version,
-                    self.suite_identifier,
-                    statement_schema_identifier,
-                    &canonical_application_statement_bytes,
-                )
-        {
-            return Err(RefusalReason::WrongContext);
-        }
-        let pinned = PinnedProofAttempt {
-            attempt_identifier: application.prepared_attempt.attempt_identifier(),
-            application_slot_hash: application
-                .prepared_attempt
-                .application_slot_hash()
-                .into_bytes(),
-            application_statement_hash: application
-                .prepared_attempt
-                .application_statement_hash()
-                .into_bytes(),
-        };
         let pinned_attempt = match application.family {
             SetupKeyRelationProofFamily::SameSecret => &mut self.pinned_same_secret_proof_attempt,
             SetupKeyRelationProofFamily::PublicKeyShare => {
                 &mut self.pinned_public_key_share_proof_attempt
             }
         };
-        if let Some(existing) = pinned_attempt {
-            if existing.attempt_identifier != pinned.attempt_identifier
-                || existing.application_slot_hash != pinned.application_slot_hash
-                || existing.application_statement_hash != pinned.application_statement_hash
-            {
-                return Err(RefusalReason::ConsumedState);
-            }
-        } else {
-            *pinned_attempt = Some(pinned);
-        }
-        Ok(())
+        pin_setup_generation_key_relation_application(
+            application,
+            self.protocol_version,
+            self.suite_identifier,
+            self.ceremony_context_hash,
+            self.action_context_hash,
+            self.roster_hash,
+            self.setup_proof_context_hash,
+            self.participant_identity,
+            self.roster_position,
+            &canonical_application_statement_bytes,
+            pinned_attempt,
+        )
     }
 
     fn pin_relinearization_round_one_application(
@@ -3074,9 +3272,13 @@ impl SetupGenerationAuthority {
             action_randomness_authorization_hash,
             action_private_randomness,
             public_setup_seed,
+            anchor_commitment_roots,
+            anchor_openings,
+            common_secret_coefficients,
             vss_material,
             pinned_vss_proof_attempt,
             pinned_vss_public_record_binding,
+            pinned_same_secret_proof_attempt,
             ..
         } = self;
         let (ordered_coefficient_materials, ordered_recipient_share_materials) =
@@ -3097,10 +3299,14 @@ impl SetupGenerationAuthority {
             action_randomness_authorization_hash,
             action_private_randomness,
             public_setup_seed,
+            anchor_commitment_roots,
+            anchor_openings,
+            common_secret_coefficients,
             ordered_coefficient_materials,
             ordered_recipient_share_materials,
             pinned_vss_proof_attempt,
             pinned_vss_public_record_binding,
+            pinned_same_secret_proof_attempt,
         }
     }
 }
@@ -3432,9 +3638,125 @@ impl<'statement> SetupGenerationKeyRelationApplication<'statement> {
 
 /// Borrowed, non-serializable source for the selected same-secret and public-
 /// key-share provers. Secret reads remain inside the authority callback.
+#[derive(Clone, Copy)]
+enum SetupGenerationKeyRelationRetainedAuthority<'authority> {
+    AllFamilies(&'authority SetupGenerationAuthority),
+    VssProof(&'authority SetupGenerationVssProofAuthority),
+}
+
+macro_rules! setup_generation_key_relation_authority_copy_field {
+    ($method:ident, $field:ident, $field_type:ty) => {
+        fn $method(self) -> $field_type {
+            match self {
+                Self::AllFamilies(authority) => authority.$field,
+                Self::VssProof(authority) => authority.$field,
+            }
+        }
+    };
+}
+
+impl<'authority> SetupGenerationKeyRelationRetainedAuthority<'authority> {
+    setup_generation_key_relation_authority_copy_field!(protocol_version, protocol_version, u16);
+    setup_generation_key_relation_authority_copy_field!(
+        suite_identifier,
+        suite_identifier,
+        [u8; Hash512::BYTE_LENGTH]
+    );
+    setup_generation_key_relation_authority_copy_field!(
+        roster_hash,
+        roster_hash,
+        [u8; Hash512::BYTE_LENGTH]
+    );
+    setup_generation_key_relation_authority_copy_field!(
+        action_context_hash,
+        action_context_hash,
+        [u8; Hash512::BYTE_LENGTH]
+    );
+    setup_generation_key_relation_authority_copy_field!(
+        setup_proof_context_hash,
+        setup_proof_context_hash,
+        [u8; Hash512::BYTE_LENGTH]
+    );
+    setup_generation_key_relation_authority_copy_field!(
+        source_setup_intent_object_hash,
+        source_setup_intent_object_hash,
+        [u8; Hash512::BYTE_LENGTH]
+    );
+    setup_generation_key_relation_authority_copy_field!(
+        participant_identity,
+        participant_identity,
+        [u8; Hash512::BYTE_LENGTH]
+    );
+    setup_generation_key_relation_authority_copy_field!(roster_position, roster_position, u16);
+    setup_generation_key_relation_authority_copy_field!(
+        setup_attempt_identifier,
+        setup_attempt_identifier,
+        [u8; 32]
+    );
+    setup_generation_key_relation_authority_copy_field!(
+        action_randomness_authorization_hash,
+        action_randomness_authorization_hash,
+        [u8; Hash512::BYTE_LENGTH]
+    );
+    setup_generation_key_relation_authority_copy_field!(
+        public_setup_seed,
+        public_setup_seed,
+        [u8; Hash512::BYTE_LENGTH]
+    );
+
+    fn common_secret_coefficients(self) -> &'authority [i8] {
+        match self {
+            Self::AllFamilies(authority) => authority.common_secret_coefficients.as_slice(),
+            Self::VssProof(authority) => authority.common_secret_coefficients.as_slice(),
+        }
+    }
+
+    fn anchor_openings(self) -> &'authority [SetupGenerationAnchorOpening] {
+        match self {
+            Self::AllFamilies(authority) => &authority.anchor_openings,
+            Self::VssProof(authority) => &authority.anchor_openings,
+        }
+    }
+
+    fn public_key_share(self) -> Result<&'authority SetupGeneratedPublicKeyShare, RefusalReason> {
+        match self {
+            Self::AllFamilies(authority) => Ok(&authority.public_key_share),
+            Self::VssProof(_) => Err(RefusalReason::MissingPrerequisite),
+        }
+    }
+
+    fn degree_zero_material(
+        self,
+        degree_zero_material_ordinal: usize,
+    ) -> Result<&'authority SetupGeneratedCommittedMaterial, RefusalReason> {
+        match self {
+            Self::AllFamilies(authority) => {
+                authority.degree_zero_material(degree_zero_material_ordinal)
+            }
+            Self::VssProof(authority) => {
+                authority.degree_zero_material(degree_zero_material_ordinal)
+            }
+        }
+    }
+
+    fn degree_zero_material_count(self) -> Result<usize, RefusalReason> {
+        match self {
+            Self::AllFamilies(authority) => authority.degree_zero_material_count(),
+            Self::VssProof(authority) => authority.degree_zero_material_count(),
+        }
+    }
+
+    fn action_private_randomness(self) -> &'authority Rc<ActionPrivateRandomness> {
+        match self {
+            Self::AllFamilies(authority) => &authority.action_private_randomness,
+            Self::VssProof(authority) => &authority.action_private_randomness,
+        }
+    }
+}
+
 pub(crate) struct SetupGenerationKeyRelationSource<'authority, 'statement> {
     authority_identifier: u32,
-    authority: &'authority SetupGenerationAuthority,
+    authority: SetupGenerationKeyRelationRetainedAuthority<'authority>,
     application: &'authority SetupGenerationKeyRelationApplication<'statement>,
 }
 
@@ -3461,64 +3783,64 @@ impl SetupGenerationKeyRelationSource<'_, '_> {
         self.application.family
     }
 
-    pub(crate) const fn protocol_version(&self) -> u16 {
-        self.authority.protocol_version
+    pub(crate) fn protocol_version(&self) -> u16 {
+        self.authority.protocol_version()
     }
 
-    pub(crate) const fn suite_identifier(&self) -> [u8; Hash512::BYTE_LENGTH] {
-        self.authority.suite_identifier
+    pub(crate) fn suite_identifier(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.suite_identifier()
     }
 
-    pub(crate) const fn roster_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
-        self.authority.roster_hash
+    pub(crate) fn roster_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.roster_hash()
     }
 
-    pub(crate) const fn action_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
-        self.authority.action_context_hash
+    pub(crate) fn action_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.action_context_hash()
     }
 
-    pub(crate) const fn setup_proof_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
-        self.authority.setup_proof_context_hash
+    pub(crate) fn setup_proof_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.setup_proof_context_hash()
     }
 
-    pub(crate) const fn source_setup_intent_object_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
-        self.authority.source_setup_intent_object_hash
+    pub(crate) fn source_setup_intent_object_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.source_setup_intent_object_hash()
     }
 
-    pub(crate) const fn participant_identity(&self) -> [u8; Hash512::BYTE_LENGTH] {
-        self.authority.participant_identity
+    pub(crate) fn participant_identity(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.participant_identity()
     }
 
-    pub(crate) const fn roster_position(&self) -> u16 {
-        self.authority.roster_position
+    pub(crate) fn roster_position(&self) -> u16 {
+        self.authority.roster_position()
     }
 
-    pub(crate) const fn setup_attempt_identifier(&self) -> [u8; 32] {
-        self.authority.setup_attempt_identifier
+    pub(crate) fn setup_attempt_identifier(&self) -> [u8; 32] {
+        self.authority.setup_attempt_identifier()
     }
 
-    pub(crate) const fn action_randomness_authorization_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
-        self.authority.action_randomness_authorization_hash
+    pub(crate) fn action_randomness_authorization_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.action_randomness_authorization_hash()
     }
 
-    pub(crate) const fn public_setup_seed(&self) -> [u8; Hash512::BYTE_LENGTH] {
-        self.authority.public_setup_seed
+    pub(crate) fn public_setup_seed(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.public_setup_seed()
     }
 
     pub(crate) fn common_secret_coefficients(&self) -> &[i8] {
-        self.authority.common_secret_coefficients.as_slice()
+        self.authority.common_secret_coefficients()
     }
 
     pub(crate) fn ring_degree(&self) -> usize {
-        self.authority.common_secret_coefficients.len()
+        self.common_secret_coefficients().len()
     }
 
     pub(crate) fn anchor_openings(&self) -> &[SetupGenerationAnchorOpening] {
-        &self.authority.anchor_openings
+        self.authority.anchor_openings()
     }
 
-    pub(crate) const fn public_key_share(&self) -> &SetupGeneratedPublicKeyShare {
-        &self.authority.public_key_share
+    pub(crate) fn public_key_share(&self) -> Result<&SetupGeneratedPublicKeyShare, RefusalReason> {
+        self.authority.public_key_share()
     }
 
     pub(crate) fn degree_zero_material(
@@ -3527,6 +3849,14 @@ impl SetupGenerationKeyRelationSource<'_, '_> {
     ) -> Result<&SetupGeneratedCommittedMaterial, RefusalReason> {
         self.authority
             .degree_zero_material(degree_zero_material_ordinal)
+    }
+
+    fn degree_zero_material_count(&self) -> Result<usize, RefusalReason> {
+        self.authority.degree_zero_material_count()
+    }
+
+    fn action_private_randomness(&self) -> &Rc<ActionPrivateRandomness> {
+        self.authority.action_private_randomness()
     }
 
     pub(crate) const fn prepared_attempt(&self) -> &PreparedActionProofAttemptSource {
@@ -3623,8 +3953,7 @@ impl SetupGenerationKeyRelationSource<'_, '_> {
         )
         .map_err(|error| error.refusal_reason)?;
         let mut binding = self
-            .authority
-            .action_private_randomness
+            .action_private_randomness()
             .begin_persistent_proof_witness_coin_binding(&persistent_proof_coin_input)
             .map_err(|error| error.refusal_reason)?;
         let witness_domain = match self.family() {
@@ -3644,7 +3973,7 @@ impl SetupGenerationKeyRelationSource<'_, '_> {
         self.absorb_anchor_opening_witness(&mut binding)?;
         match self.family() {
             SetupKeyRelationProofFamily::SameSecret => {
-                let material_count = self.authority.degree_zero_material_count()?;
+                let material_count = self.degree_zero_material_count()?;
                 binding
                     .absorb_canonical_bytes(
                         &u64::try_from(material_count)
@@ -3683,7 +4012,7 @@ impl SetupGenerationKeyRelationSource<'_, '_> {
                 }
             }
             SetupKeyRelationProofFamily::PublicKeyShare => {
-                let public_key_share = self.public_key_share();
+                let public_key_share = self.public_key_share()?;
                 binding
                     .absorb_canonical_bytes(&public_key_share.public_polynomial_context_hash())
                     .map_err(|error| error.refusal_reason)?;
@@ -3750,7 +4079,7 @@ impl SetupGenerationKeyRelationSource<'_, '_> {
             )
             .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
         PrivateRandomnessCommonProofCoinSource::new(
-            Rc::clone(&self.authority.action_private_randomness),
+            Rc::clone(self.action_private_randomness()),
             self.family().statement_schema_identifier(),
             Hash512::from_bytes(pre_output_generation_binding_hash),
             witness_bound_attempt.private_randomness_attempt_identifier(),
@@ -5845,6 +6174,8 @@ pub(crate) fn setup_generation_retained_memory_accounting(
                 let (_, _, post_release_payload_byte_length) =
                     setup_generation_vss_post_release_memory_accounting(
                         &authority.ordered_roster,
+                        &authority.anchor_openings,
+                        &authority.common_secret_coefficients,
                         authority.vss_material.ordered_coefficient_materials(),
                         authority.vss_material.ordered_recipient_share_materials(),
                         authority.pinned_vss_public_record_binding.as_ref(),
@@ -5888,14 +6219,30 @@ pub(crate) fn resolve_setup_generation_key_relation_preparation_source(
     handle: &SetupGenerationAuthorityHandle,
     family: SetupKeyRelationProofFamily,
 ) -> Result<SetupGenerationKeyRelationPreparationSource, RefusalReason> {
-    SETUP_GENERATION_AUTHORITY_REGISTRY.with(|registry| {
+    let all_family_source = SETUP_GENERATION_AUTHORITY_REGISTRY.with(|registry| {
+        let registry = registry
+            .try_borrow()
+            .map_err(|_| RefusalReason::ConsumedState)?;
+        registry
+            .authorities
+            .get(&handle.0)
+            .map(|authority| authority.key_relation_preparation_source(family))
+            .transpose()
+    })?;
+    if let Some(source) = all_family_source {
+        return Ok(source);
+    }
+    if family != SetupKeyRelationProofFamily::SameSecret {
+        return Err(RefusalReason::ConsumedState);
+    }
+    SETUP_GENERATION_VSS_PROOF_AUTHORITY_REGISTRY.with(|registry| {
         registry
             .try_borrow()
             .map_err(|_| RefusalReason::ConsumedState)?
             .authorities
             .get(&handle.0)
             .ok_or(RefusalReason::ConsumedState)?
-            .key_relation_preparation_source(family)
+            .same_secret_preparation_source()
     })
 }
 
@@ -5907,7 +6254,36 @@ pub(crate) fn with_setup_generation_key_relation<Value, Error>(
 where
     Error: From<RefusalReason>,
 {
-    SETUP_GENERATION_AUTHORITY_REGISTRY.with(|registry| {
+    let all_family_authority_is_retained =
+        SETUP_GENERATION_AUTHORITY_REGISTRY.with(|registry| {
+            registry
+                .try_borrow()
+                .map(|registry| registry.authorities.contains_key(&handle.0))
+                .map_err(|_| Error::from(RefusalReason::ConsumedState))
+        })?;
+    if all_family_authority_is_retained {
+        return SETUP_GENERATION_AUTHORITY_REGISTRY.with(|registry| {
+            let mut registry = registry
+                .try_borrow_mut()
+                .map_err(|_| Error::from(RefusalReason::ConsumedState))?;
+            let authority = registry
+                .authorities
+                .get_mut(&handle.0)
+                .ok_or_else(|| Error::from(RefusalReason::ConsumedState))?;
+            authority
+                .pin_key_relation_application(application)
+                .map_err(Error::from)?;
+            operation(SetupGenerationKeyRelationSource {
+                authority_identifier: handle.0,
+                authority: SetupGenerationKeyRelationRetainedAuthority::AllFamilies(authority),
+                application,
+            })
+        });
+    }
+    if application.family != SetupKeyRelationProofFamily::SameSecret {
+        return Err(Error::from(RefusalReason::ConsumedState));
+    }
+    SETUP_GENERATION_VSS_PROOF_AUTHORITY_REGISTRY.with(|registry| {
         let mut registry = registry
             .try_borrow_mut()
             .map_err(|_| Error::from(RefusalReason::ConsumedState))?;
@@ -5916,11 +6292,11 @@ where
             .get_mut(&handle.0)
             .ok_or_else(|| Error::from(RefusalReason::ConsumedState))?;
         authority
-            .pin_key_relation_application(application)
+            .pin_same_secret_application(application)
             .map_err(Error::from)?;
         operation(SetupGenerationKeyRelationSource {
             authority_identifier: handle.0,
-            authority,
+            authority: SetupGenerationKeyRelationRetainedAuthority::VssProof(authority),
             application,
         })
     })
@@ -6793,6 +7169,313 @@ mod tests {
 
     fn hash(marker: u8) -> Hash512 {
         Hash512::from_bytes([marker; Hash512::BYTE_LENGTH])
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn fixed_action_randomness(
+        root_marker: u8,
+        suite_identifier: Hash512,
+        ceremony_context_hash: Hash512,
+        action_context_hash: Hash512,
+        participant_identity: ParticipantIdentity,
+    ) -> ActionPrivateRandomness {
+        crate::foundation::ActionRandomnessRoot::from_injected_bytes(Zeroizing::new(
+            [root_marker; crate::foundation::ACTION_RANDOMNESS_ROOT_BYTE_LENGTH],
+        ))
+        .derive(crate::foundation::ActionRandomnessDerivationInput::new(
+            suite_identifier,
+            ceremony_context_hash,
+            action_context_hash,
+            participant_identity,
+        ))
+        .expect("fixed action randomness derives")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn same_secret_test_application<'statement>(
+        action_private_randomness: &ActionPrivateRandomness,
+        canonical_application_statement_bytes: &'statement [u8],
+        setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
+        roster_hash: [u8; Hash512::BYTE_LENGTH],
+        participant_identity: [u8; Hash512::BYTE_LENGTH],
+        roster_position: u16,
+    ) -> SetupGenerationKeyRelationApplication<'statement> {
+        let derivation = action_private_randomness.derivation_input();
+        let statement_schema_identifier =
+            SetupKeyRelationProofFamily::SameSecret.statement_schema_identifier();
+        let application_slot = crate::foundation::ProofApplicationSlot::new(
+            derivation.suite_identifier(),
+            derivation.ceremony_context_hash(),
+            derivation.action_context_hash(),
+            statement_schema_identifier,
+            Some(roster_position),
+            None,
+            None,
+        )
+        .expect("same-secret application slot is valid");
+        let application_statement_hash = Hash512::from_bytes(verified_application_statement_hash(
+            FOUNDATION_PROFILE.protocol_version,
+            derivation.suite_identifier().into_bytes(),
+            statement_schema_identifier,
+            canonical_application_statement_bytes,
+        ));
+        let prepared_attempt = crate::foundation::prepare_exact_same_secret_evidence_attempt(
+            action_private_randomness,
+            application_slot,
+            application_statement_hash,
+        )
+        .expect("same-secret test attempt prepares");
+        SetupGenerationKeyRelationApplication::from_runtime_binding(
+            SetupKeyRelationProofFamily::SameSecret,
+            prepared_attempt,
+            canonical_application_statement_bytes,
+            setup_proof_context_hash,
+            roster_hash,
+            participant_identity,
+            roster_position,
+        )
+    }
+
+    fn retained_anchor_opening_for_accounting(
+        canonical_commitment_byte_length: usize,
+        secret_polynomial_lengths: &[usize],
+        error_polynomial_lengths: &[usize],
+    ) -> SetupGenerationAnchorOpening {
+        SetupGenerationAnchorOpening {
+            commitment_data_prime_index: 0,
+            canonical_commitment_bytes: vec![0_u8; canonical_commitment_byte_length]
+                .into_boxed_slice(),
+            public_polynomial_context_hash: [0_u8; Hash512::BYTE_LENGTH],
+            root: [0_u8; Hash512::BYTE_LENGTH],
+            source_polynomial_degree_bound_exclusive: 1,
+            hiding_secret_polynomials: secret_polynomial_lengths
+                .iter()
+                .map(|length| Zeroizing::new(vec![0_i8; *length]))
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+            hiding_error_polynomials: error_polynomial_lengths
+                .iter()
+                .map(|length| Zeroizing::new(vec![0_i8; *length]))
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        }
+    }
+
+    #[test]
+    fn post_release_accounting_includes_every_retained_same_secret_allocation() {
+        let anchor_openings = [
+            retained_anchor_opening_for_accounting(17, &[3, 5], &[7]),
+            retained_anchor_opening_for_accounting(19, &[11], &[13, 17]),
+        ];
+        let common_secret_coefficients = Zeroizing::new(vec![0_i8; 23]);
+        let accounting = setup_generation_same_secret_retained_allocation_accounting(
+            &anchor_openings,
+            &common_secret_coefficients,
+        )
+        .unwrap();
+        let expected_payload_byte_length = common_secret_coefficients.capacity()
+            + anchor_openings
+                .iter()
+                .map(|anchor| {
+                    anchor.canonical_commitment_bytes.len()
+                        + anchor
+                            .hiding_secret_polynomials
+                            .iter()
+                            .chain(anchor.hiding_error_polynomials.iter())
+                            .map(|polynomial| polynomial.capacity())
+                            .sum::<usize>()
+                })
+                .sum::<usize>();
+        let expected_wrapper_byte_length = anchor_openings
+            .len()
+            .checked_mul(size_of::<SetupGenerationAnchorOpening>())
+            .unwrap()
+            + anchor_openings
+                .iter()
+                .map(|anchor| {
+                    anchor.hiding_secret_polynomials.len() + anchor.hiding_error_polynomials.len()
+                })
+                .sum::<usize>()
+                * size_of::<Zeroizing<Vec<i8>>>();
+        assert_eq!(
+            accounting.coefficient_and_canonical_payload_byte_length,
+            u64::try_from(expected_payload_byte_length).unwrap()
+        );
+        assert_eq!(
+            accounting.allocation_wrapper_byte_length,
+            u64::try_from(expected_wrapper_byte_length).unwrap()
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn key_relation_attempt_pinning_refuses_wrong_and_stale_authority() {
+        let suite_identifier = hash(0x11);
+        let ceremony_context_hash = hash(0x22);
+        let action_context_hash = hash(0x33);
+        let roster_hash = hash(0x44).into_bytes();
+        let setup_proof_context_hash = hash(0x55).into_bytes();
+        let participant_identity = ParticipantIdentity::from_bytes([0x66; Hash512::BYTE_LENGTH]);
+        let roster_position = 2;
+        let canonical_application_statement_bytes = [0x77_u8; 31];
+        let action_private_randomness = fixed_action_randomness(
+            0x88,
+            suite_identifier,
+            ceremony_context_hash,
+            action_context_hash,
+            participant_identity,
+        );
+        let application = same_secret_test_application(
+            &action_private_randomness,
+            &canonical_application_statement_bytes,
+            setup_proof_context_hash,
+            roster_hash,
+            participant_identity.into_bytes(),
+            roster_position,
+        );
+        let mut pinned_attempt = None;
+        let pin = |application: &SetupGenerationKeyRelationApplication<'_>,
+                   pinned_attempt: &mut Option<PinnedProofAttempt>,
+                   expected_roster_hash| {
+            pin_setup_generation_key_relation_application(
+                application,
+                FOUNDATION_PROFILE.protocol_version,
+                suite_identifier.into_bytes(),
+                ceremony_context_hash.into_bytes(),
+                action_context_hash.into_bytes(),
+                expected_roster_hash,
+                setup_proof_context_hash,
+                participant_identity.into_bytes(),
+                roster_position,
+                &canonical_application_statement_bytes,
+                pinned_attempt,
+            )
+        };
+        pin(&application, &mut pinned_attempt, roster_hash).unwrap();
+        pin(&application, &mut pinned_attempt, roster_hash).unwrap();
+        assert_eq!(
+            pin(&application, &mut pinned_attempt, hash(0x99).into_bytes()).unwrap_err(),
+            RefusalReason::WrongContext
+        );
+
+        let stale_action_private_randomness = fixed_action_randomness(
+            0xaa,
+            suite_identifier,
+            ceremony_context_hash,
+            action_context_hash,
+            participant_identity,
+        );
+        let stale_application = same_secret_test_application(
+            &stale_action_private_randomness,
+            &canonical_application_statement_bytes,
+            setup_proof_context_hash,
+            roster_hash,
+            participant_identity.into_bytes(),
+            roster_position,
+        );
+        assert_eq!(
+            pin(&stale_application, &mut pinned_attempt, roster_hash).unwrap_err(),
+            RefusalReason::ConsumedState
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn post_release_same_secret_source_preserves_witness_and_refuses_public_key_use() {
+        let suite_identifier = hash(0x11);
+        let ceremony_context_hash = hash(0x22);
+        let action_context_hash = hash(0x33);
+        let roster_hash = hash(0x44).into_bytes();
+        let setup_proof_context_hash = hash(0x55).into_bytes();
+        let source_setup_intent_object_hash = hash(0x56).into_bytes();
+        let action_randomness_authorization_hash = hash(0x57).into_bytes();
+        let public_setup_seed = hash(0x58).into_bytes();
+        let participant_identity = ParticipantIdentity::from_bytes([0x66; Hash512::BYTE_LENGTH]);
+        let roster_position = 2;
+        let setup_attempt_identifier = [0x59_u8; 32];
+        let canonical_application_statement_bytes = [0x77_u8; 31];
+        let action_private_randomness = Rc::new(fixed_action_randomness(
+            0x88,
+            suite_identifier,
+            ceremony_context_hash,
+            action_context_hash,
+            participant_identity,
+        ));
+        let application = same_secret_test_application(
+            action_private_randomness.as_ref(),
+            &canonical_application_statement_bytes,
+            setup_proof_context_hash,
+            roster_hash,
+            participant_identity.into_bytes(),
+            roster_position,
+        );
+        let anchor_openings =
+            vec![retained_anchor_opening_for_accounting(17, &[3], &[5])].into_boxed_slice();
+        let common_secret_coefficients = Zeroizing::new(vec![-1_i8, 0, 1, 1]);
+        let authority = SetupGenerationVssProofAuthority {
+            protocol_version: FOUNDATION_PROFILE.protocol_version,
+            suite_identifier: suite_identifier.into_bytes(),
+            manifest_hash: hash(0x45).into_bytes(),
+            ceremony_context_hash: ceremony_context_hash.into_bytes(),
+            action_context_hash: action_context_hash.into_bytes(),
+            roster_hash,
+            ordered_roster: vec![participant_identity.into_bytes()].into_boxed_slice(),
+            setup_proof_context_hash,
+            source_setup_intent_object_hash,
+            participant_identity: participant_identity.into_bytes(),
+            roster_position,
+            setup_attempt_identifier,
+            action_randomness_authorization_hash,
+            action_private_randomness,
+            public_setup_seed,
+            anchor_commitment_roots: [[0x5a_u8; Hash512::BYTE_LENGTH]; 3],
+            anchor_openings,
+            common_secret_coefficients,
+            ordered_coefficient_materials: Vec::new().into_boxed_slice(),
+            ordered_recipient_share_materials: Vec::new().into_boxed_slice(),
+            pinned_vss_proof_attempt: None,
+            pinned_vss_public_record_binding: None,
+            pinned_same_secret_proof_attempt: None,
+        };
+        let source = SetupGenerationKeyRelationSource {
+            authority_identifier: 17,
+            authority: SetupGenerationKeyRelationRetainedAuthority::VssProof(&authority),
+            application: &application,
+        };
+
+        assert_eq!(source.authority_identifier(), 17);
+        assert_eq!(
+            source.protocol_version(),
+            FOUNDATION_PROFILE.protocol_version
+        );
+        assert_eq!(source.suite_identifier(), suite_identifier.into_bytes());
+        assert_eq!(source.roster_hash(), roster_hash);
+        assert_eq!(
+            source.action_context_hash(),
+            action_context_hash.into_bytes()
+        );
+        assert_eq!(source.setup_proof_context_hash(), setup_proof_context_hash);
+        assert_eq!(
+            source.source_setup_intent_object_hash(),
+            source_setup_intent_object_hash
+        );
+        assert_eq!(
+            source.participant_identity(),
+            participant_identity.into_bytes()
+        );
+        assert_eq!(source.roster_position(), roster_position);
+        assert_eq!(source.setup_attempt_identifier(), setup_attempt_identifier);
+        assert_eq!(
+            source.action_randomness_authorization_hash(),
+            action_randomness_authorization_hash
+        );
+        assert_eq!(source.public_setup_seed(), public_setup_seed);
+        assert_eq!(source.common_secret_coefficients(), &[-1, 0, 1, 1]);
+        assert_eq!(source.anchor_openings().len(), 1);
+        assert!(matches!(
+            source.public_key_share(),
+            Err(RefusalReason::MissingPrerequisite)
+        ));
     }
 
     fn stream_descriptor(marker: u8) -> StreamDescriptor {

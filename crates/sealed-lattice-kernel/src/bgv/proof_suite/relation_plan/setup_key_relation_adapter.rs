@@ -1024,7 +1024,7 @@ impl SetupKeyRelationSourcePolynomialAdapter {
                         public_key_bound_half(layout, column_ordinal)
                 {
                     let coefficients = source
-                        .public_key_share()
+                        .public_key_share()?
                         .ordered_limb_coefficients()
                         .get(limb_ordinal)
                         .ok_or(RefusalReason::WrongTypeOrLength)?;
@@ -1398,10 +1398,14 @@ pub(crate) fn public_key_share_relation_tree_inputs(
                 StatementOwnedProofTreeInput::SetupPolynomial {
                     public_polynomial_context_hash: source
                         .public_key_share()
+                        .map_err(|_| CommonProofProverError::InvalidTree)?
                         .public_polynomial_context_hash(),
                     row_width: u32::try_from(ordered_column_ordinals.len())
                         .map_err(|_| CommonProofProverError::CountOverflow)?,
-                    expected_root: source.public_key_share().root(),
+                    expected_root: source
+                        .public_key_share()
+                        .map_err(|_| CommonProofProverError::InvalidTree)?
+                        .root(),
                 },
             )));
         }
@@ -2332,7 +2336,9 @@ impl KeyRelationColumnDerivation for PublicKeyShareColumnDerivation<'_, '_, '_, 
             column_ordinal,
         ) {
             return split_i8_polynomial_with_relation_offset(
-                self.source.public_key_share().centered_error_coefficients(),
+                self.source
+                    .public_key_share()?
+                    .centered_error_coefficients(),
                 half_ordinal,
                 self.source_layout.public_key_error.offset,
             )
@@ -2347,7 +2353,7 @@ impl KeyRelationColumnDerivation for PublicKeyShareColumnDerivation<'_, '_, '_, 
         {
             let coefficients = self
                 .source
-                .public_key_share()
+                .public_key_share()?
                 .ordered_limb_coefficients()
                 .get(limb_ordinal)
                 .ok_or(RefusalReason::WrongTypeOrLength)?;
@@ -2427,7 +2433,7 @@ impl PublicKeyShareColumnDerivation<'_, '_, '_, '_> {
             .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
         let public_key_share = self
             .source
-            .public_key_share()
+            .public_key_share()?
             .ordered_limb_coefficients()
             .get(limb_ordinal)
             .ok_or(RefusalReason::WrongTypeOrLength)?;
@@ -2451,7 +2457,10 @@ impl PublicKeyShareColumnDerivation<'_, '_, '_, '_> {
                 .collect::<Vec<_>>(),
             &secret,
         )?;
-        let error = self.source.public_key_share().centered_error_coefficients();
+        let error = self
+            .source
+            .public_key_share()?
+            .centered_error_coefficients();
         exact_modular_quotient(
             public_key_share
                 .iter()
