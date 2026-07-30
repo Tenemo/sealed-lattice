@@ -106,9 +106,12 @@ use crate::bgv::proof_suite::{
     construct_opening_batch_mask, evaluate_extension_at, sample_relation_application_challenges,
     verified_application_statement_hash,
 };
+use crate::foundation::SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT;
 use crate::hashing::{StreamingHash512, hash_framed_parts_512};
 
 const HASH_BYTE_LENGTH: usize = 64;
+const ROW_CODE_WHIR_PRIVATE_SAMPLER_CANDIDATE_DRAW_CEILING: u32 =
+    SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RowCodeWhirGenerationPhase {
@@ -3059,8 +3062,7 @@ impl RowCodeWhirGenerationStateMachine {
                         reversed_column_ordinal,
                         source,
                         coins,
-                        self.relation_context
-                            .maximum_fiat_shamir_candidate_draws_per_output,
+                        ROW_CODE_WHIR_PRIVATE_SAMPLER_CANDIDATE_DRAW_CEILING,
                     )
                     .map_err(map_private_coin_error)?;
                     let _persisted = self
@@ -3454,8 +3456,7 @@ impl RowCodeWhirGenerationStateMachine {
                             ),
                         )?,
                         coins,
-                        self.relation_context
-                            .maximum_fiat_shamir_candidate_draws_per_output,
+                        ROW_CODE_WHIR_PRIVATE_SAMPLER_CANDIDATE_DRAW_CEILING,
                     )
                     .map_err(map_private_coin_error)?;
                 match next_source {
@@ -3765,8 +3766,7 @@ impl RowCodeWhirGenerationStateMachine {
                     .next_action(
                         &self.relation_plan_variant,
                         coins,
-                        self.relation_context
-                            .maximum_fiat_shamir_candidate_draws_per_output,
+                        ROW_CODE_WHIR_PRIVATE_SAMPLER_CANDIDATE_DRAW_CEILING,
                     )
                     .map_err(map_private_coin_error)?;
                 match action {
@@ -3876,8 +3876,7 @@ impl RowCodeWhirGenerationStateMachine {
                         &self.relation_plan_variant,
                         &self.relation_context,
                         coins,
-                        self.relation_context
-                            .maximum_fiat_shamir_candidate_draws_per_output,
+                        ROW_CODE_WHIR_PRIVATE_SAMPLER_CANDIDATE_DRAW_CEILING,
                     )
                     .map_err(map_private_coin_error)?;
                 match action {
@@ -3983,8 +3982,7 @@ impl RowCodeWhirGenerationStateMachine {
                 let opening_batch_mask = construct_opening_batch_mask(
                     &self.relation_plan_variant,
                     coins,
-                    self.relation_context
-                        .maximum_fiat_shamir_candidate_draws_per_output,
+                    ROW_CODE_WHIR_PRIVATE_SAMPLER_CANDIDATE_DRAW_CEILING,
                 )
                 .map_err(map_private_coin_error)?;
                 let expected_degree_bound = self
@@ -4375,10 +4373,7 @@ impl RowCodeWhirGenerationStateMachine {
                     .ok_or(CommonProofGenerationError::Prover(
                         CommonProofProverError::InvalidInput,
                     ))?
-                    .poll(
-                        coins,
-                        crate::foundation::SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
-                    )
+                    .poll(coins, ROW_CODE_WHIR_PRIVATE_SAMPLER_CANDIDATE_DRAW_CEILING)
                     .map_err(map_aggregate_wide_hiding_material_generation_error)?;
                 match poll {
                     AggregateWideHidingMaterialGenerationPoll::ExtensionElementSampled {
@@ -5087,7 +5082,7 @@ impl RowCodeWhirGenerationStateMachine {
                 &self.relation_plan_variant,
                 column_ordinal,
                 coins,
-                crate::foundation::SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+                ROW_CODE_WHIR_PRIVATE_SAMPLER_CANDIDATE_DRAW_CEILING,
             )?;
         if let Ok(source_index) = self
             .construction_plan
@@ -6873,6 +6868,29 @@ mod tests {
             ProofApplicationSlotCeilings,
         },
     };
+
+    #[test]
+    fn generation_private_mask_sampler_ceiling_is_distinct_from_fiat_shamir() {
+        let relation_context = selected_relation_plan_check_context(
+            ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        .expect("the selected same-secret relation context exists");
+
+        assert_eq!(
+            ROW_CODE_WHIR_PRIVATE_SAMPLER_CANDIDATE_DRAW_CEILING,
+            SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+        );
+        assert_eq!(ROW_CODE_WHIR_PRIVATE_SAMPLER_CANDIDATE_DRAW_CEILING, 64);
+        assert_eq!(
+            relation_context.maximum_fiat_shamir_candidate_draws_per_output,
+            128,
+        );
+        assert_ne!(
+            ROW_CODE_WHIR_PRIVATE_SAMPLER_CANDIDATE_DRAW_CEILING,
+            relation_context.maximum_fiat_shamir_candidate_draws_per_output,
+            "private mask streams and public Fiat-Shamir streams have distinct exhaustion ledgers",
+        );
+    }
 
     #[test]
     fn selected_same_secret_storage_plan_distinguishes_lifecycles_from_physical_custody() {
