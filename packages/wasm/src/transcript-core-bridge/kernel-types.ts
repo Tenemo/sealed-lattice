@@ -8,7 +8,7 @@ import type {
     SignedMailboxEnvelope,
     UnsignedMailboxEnvelope,
     VerificationResult,
-} from "@sealed-lattice/types";
+} from '@sealed-lattice/types';
 
 export type {
     MailboxAssociatedData,
@@ -17,17 +17,17 @@ export type {
     SetupMailboxSlot,
     SignedMailboxEnvelope,
     UnsignedMailboxEnvelope,
-} from "@sealed-lattice/types";
+} from '@sealed-lattice/types';
 
 import type {
     BgvCollectiveSetupParametersDescription,
     BgvRnsParametersDescription,
-} from "./kernel-types/bgv.js";
+} from './kernel-types/bgv.js';
 
 export type {
     BgvCollectiveSetupParametersDescription,
     BgvRnsParametersDescription,
-} from "./kernel-types/bgv.js";
+} from './kernel-types/bgv.js';
 
 export type FoundationOptionDefinitionIngress = Readonly<{
     readonly displayLabelUtf8Hex: string;
@@ -221,15 +221,15 @@ export type TranscriptCoreKernelContextOwner = object;
 
 export type PublishedSdkKernel = Pick<
     TranscriptCoreKernel,
-    | "encodeFoundationActionDefinition"
-    | "encodeFoundationBoardPolicy"
-    | "encodeFoundationManifest"
-    | "verifyFoundationActionContext"
-    | "verifyFoundationActionDefinition"
-    | "verifyFoundationBoardPolicy"
-    | "verifyFoundationCeremonyContext"
-    | "verifyFoundationManifest"
-    | "verifyFoundationSuiteRecord"
+    | 'encodeFoundationActionDefinition'
+    | 'encodeFoundationBoardPolicy'
+    | 'encodeFoundationManifest'
+    | 'verifyFoundationActionContext'
+    | 'verifyFoundationActionDefinition'
+    | 'verifyFoundationBoardPolicy'
+    | 'verifyFoundationCeremonyContext'
+    | 'verifyFoundationManifest'
+    | 'verifyFoundationSuiteRecord'
 >;
 
 type KernelMethodInput<MethodName extends keyof TranscriptCoreKernel> =
@@ -238,7 +238,7 @@ type KernelMethodInput<MethodName extends keyof TranscriptCoreKernel> =
         : never;
 
 type KernelWireInput<Input> = Input extends unknown
-    ? Omit<Input, "statementFamily">
+    ? Omit<Input, 'statementFamily'>
     : never;
 
 type KernelCommandFromMethod<
@@ -252,100 +252,100 @@ type KernelCommandFromMethod<
 
 type TranscriptCoreKernelCommand =
     | KernelCommandFromMethod<
-          "DeriveCanonicalObjectHash",
-          "deriveCanonicalObjectHash"
+          'DeriveCanonicalObjectHash',
+          'deriveCanonicalObjectHash'
       >
     | KernelCommandFromMethod<
-          "EncodeFoundationManifest",
-          "encodeFoundationManifest"
+          'EncodeFoundationManifest',
+          'encodeFoundationManifest'
       >
     | KernelCommandFromMethod<
-          "VerifyFoundationManifest",
-          "verifyFoundationManifest"
+          'VerifyFoundationManifest',
+          'verifyFoundationManifest'
       >
     | KernelCommandFromMethod<
-          "EncodeFoundationActionDefinition",
-          "encodeFoundationActionDefinition"
+          'EncodeFoundationActionDefinition',
+          'encodeFoundationActionDefinition'
       >
     | KernelCommandFromMethod<
-          "VerifyFoundationActionDefinition",
-          "verifyFoundationActionDefinition"
+          'VerifyFoundationActionDefinition',
+          'verifyFoundationActionDefinition'
       >
     | KernelCommandFromMethod<
-          "EncodeFoundationBoardPolicy",
-          "encodeFoundationBoardPolicy"
+          'EncodeFoundationBoardPolicy',
+          'encodeFoundationBoardPolicy'
       >
     | KernelCommandFromMethod<
-          "VerifyFoundationBoardPolicy",
-          "verifyFoundationBoardPolicy"
+          'VerifyFoundationBoardPolicy',
+          'verifyFoundationBoardPolicy'
       >
     | KernelCommandFromMethod<
-          "VerifyFoundationSuiteRecord",
-          "verifyFoundationSuiteRecord"
+          'VerifyFoundationSuiteRecord',
+          'verifyFoundationSuiteRecord'
       >
     | KernelCommandFromMethod<
-          "VerifyFoundationCeremonyContext",
-          "verifyFoundationCeremonyContext"
+          'VerifyFoundationCeremonyContext',
+          'verifyFoundationCeremonyContext'
       >
     | KernelCommandFromMethod<
-          "VerifyFoundationActionContext",
-          "verifyFoundationActionContext"
+          'VerifyFoundationActionContext',
+          'verifyFoundationActionContext'
       >
     | Readonly<{
-          readonly command: "EncodeMailboxKeyScheduleInput";
+          readonly command: 'EncodeMailboxKeyScheduleInput';
           readonly kemCiphertextHex: string;
           readonly value: MailboxKeyScheduleInput;
       }>
     | KernelCommandFromMethod<
-          "DecodeMailboxKeyScheduleInput",
-          "decodeMailboxKeyScheduleInput"
+          'DecodeMailboxKeyScheduleInput',
+          'decodeMailboxKeyScheduleInput'
       >
     | Readonly<{
-          readonly command: "EncodeMailboxAssociatedData";
+          readonly command: 'EncodeMailboxAssociatedData';
           readonly value: MailboxAssociatedData;
       }>
     | KernelCommandFromMethod<
-          "DecodeMailboxAssociatedData",
-          "decodeMailboxAssociatedData"
+          'DecodeMailboxAssociatedData',
+          'decodeMailboxAssociatedData'
       >
     | Readonly<{
-          readonly command: "EncodeStreamDescriptor";
+          readonly command: 'EncodeStreamDescriptor';
           readonly value: MailboxCiphertextDescriptor;
       }>
     | KernelCommandFromMethod<
-          "DecodeStreamDescriptor",
-          "decodeStreamDescriptor"
+          'DecodeStreamDescriptor',
+          'decodeStreamDescriptor'
       >
     | Readonly<{
-          readonly command: "DeriveSetupMailboxSlotHash";
+          readonly command: 'DeriveSetupMailboxSlotHash';
           readonly value: SetupMailboxSlot;
       }>
     | Readonly<{
-          readonly command: "EncodePrivateRandomCursor";
+          readonly command: 'EncodePrivateRandomCursor';
           readonly value: PrivateRandomCursor;
       }>
     | KernelCommandFromMethod<
-          "DecodePrivateRandomCursor",
-          "decodePrivateRandomCursor"
+          'DecodePrivateRandomCursor',
+          'decodePrivateRandomCursor'
       >
     | Readonly<{
-          readonly command: "EncodeSignedMailboxEnvelope";
+          readonly command: 'EncodeSignedMailboxEnvelope';
           readonly value: SignedMailboxEnvelope;
       }>
     | KernelCommandFromMethod<
-          "DecodeSignedMailboxEnvelope",
-          "decodeSignedMailboxEnvelope"
+          'DecodeSignedMailboxEnvelope',
+          'decodeSignedMailboxEnvelope'
       >
     | Readonly<{
-          readonly command: "DeriveMailboxEnvelopeHash";
+          readonly command: 'DeriveMailboxEnvelopeHash';
           readonly value: UnsignedMailboxEnvelope;
       }>
     | {
-          readonly command: "DescribeBgvRnsParameters";
+          readonly command: 'DescribeBgvRnsParameters';
       }
     | KernelCommandFromMethod<
-          "DescribeCollectiveBgvSetupParameters",
-          "describeCollectiveBgvSetupParameters"
+          'DescribeCollectiveBgvSetupParameters',
+          'describeCollectiveBgvSetupParameters'
       >;
 
 type RelinearizationPrepareGenerationExport = (
