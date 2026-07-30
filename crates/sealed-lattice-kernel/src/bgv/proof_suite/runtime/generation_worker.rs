@@ -1131,12 +1131,22 @@ type OwnedCommonProofGenerationError = CommonProofGenerationError<
     PollableCommonProofByteSinkError,
 >;
 
-#[derive(Debug)]
 pub(crate) enum CommonProofGenerationWorkerError {
     Runtime(CommonProofRuntimeError),
     AuthenticatedSource,
-    Generation,
+    Generation(OwnedCommonProofGenerationError),
     Cleanup,
+}
+
+impl core::fmt::Debug for CommonProofGenerationWorkerError {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Runtime(error) => formatter.debug_tuple("Runtime").field(error).finish(),
+            Self::AuthenticatedSource => formatter.write_str("AuthenticatedSource"),
+            Self::Generation(error) => formatter.debug_tuple("Generation").field(error).finish(),
+            Self::Cleanup => formatter.write_str("Cleanup"),
+        }
+    }
 }
 
 impl From<CommonProofRuntimeError> for CommonProofGenerationWorkerError {
@@ -1947,7 +1957,7 @@ impl CommonProofGenerationWorker {
                 | PollableCommonProofByteSinkError::ChunkAwaitingCommit
                 | PollableCommonProofByteSinkError::ChunkAwaitingReadback,
             )) => self.poll(),
-            Err(_) => Err(CommonProofGenerationWorkerError::Generation),
+            Err(error) => Err(CommonProofGenerationWorkerError::Generation(error)),
             Ok(CommonProofGenerationPoll::StorageTransactionCompleted) => self.progress_poll(),
             Ok(CommonProofGenerationPoll::AuthenticatedTranscriptPrefixRequired) => {
                 Ok(CommonProofGenerationWorkerPoll::AuthenticatedTranscriptPrefixRequired)
@@ -2075,8 +2085,8 @@ impl CommonProofGenerationWorker {
                     .poll(&mut self.storage, &mut self.private_coins, &mut self.output);
             match result {
                 Ok(_) => self.storage.transaction_completed()?,
-                Err(_) => {
-                    return Err(CommonProofGenerationWorkerError::Generation);
+                Err(error) => {
+                    return Err(CommonProofGenerationWorkerError::Generation(error));
                 }
             }
             self.generation_transaction_must_replay_before_cancellation = false;
@@ -2186,6 +2196,15 @@ pub(super) fn required_chunk_indices(
 #[cfg(test)]
 mod generation_cursor_manifest_tests {
     use super::*;
+
+    #[test]
+    fn generation_worker_error_retains_the_structured_generation_failure() {
+        let error = CommonProofGenerationWorkerError::Generation(
+            CommonProofGenerationError::Prover(CommonProofProverError::InvalidColumn),
+        );
+
+        assert_eq!(format!("{error:?}"), "Generation(Prover(InvalidColumn))");
+    }
 
     fn private_coin_cursor_manifest() -> Vec<u8> {
         let mut manifest = COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_MAGIC.to_vec();

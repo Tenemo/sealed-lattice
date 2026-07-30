@@ -1419,7 +1419,7 @@ fn generation_worker_error_status(error: CommonProofGenerationWorkerError) -> u3
         CommonProofGenerationWorkerError::AuthenticatedSource => {
             refusal_status(RefusalReason::WrongHashOrRoot)
         }
-        CommonProofGenerationWorkerError::Generation => {
+        CommonProofGenerationWorkerError::Generation(_) => {
             refusal_status(RefusalReason::OutsideSupportedProfile)
         }
         CommonProofGenerationWorkerError::Cleanup => {
