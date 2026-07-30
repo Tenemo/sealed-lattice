@@ -191,7 +191,7 @@ pub(super) fn aggregate_wide_challenger_from_transcript(
     let pad_shape = p3_whir::MaskCodeShape::new(
         pad_layout.message_length(),
         hiding_configuration.sumcheck_mask.randomness_len,
-        super::aggregate_wide_hiding::FIXED_SUBSPACE_PAD_LOG_INVERSE_RATE,
+        super::aggregate_wide_hiding::AGGREGATE_WIDE_PAD_LOG_INVERSE_RATE,
     );
     query_schedule.push(super::WhirQueryEpoch {
         bit_length: pad_shape.domain_size.ilog2() as usize,

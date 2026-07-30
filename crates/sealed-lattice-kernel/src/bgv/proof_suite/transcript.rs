@@ -1537,7 +1537,7 @@ impl RowCodeWhirLiveRoleSchedule {
             extension_roles.push(RowCodeWhirExtensionRole::RoundCombination {
                 round_ordinal: round.round_ordinal,
             });
-            observation_roles.push(RowCodeWhirObservationRole::SwitchMaskOffset {
+            observation_roles.push(RowCodeWhirObservationRole::SwitchMaskDelta {
                 round_ordinal: round.round_ordinal,
             });
             let batch_ordinal = u32::try_from(round_index + 1)

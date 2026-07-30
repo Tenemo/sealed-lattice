@@ -24,8 +24,8 @@ use p3_whir::{
 };
 
 use super::aggregate_wide_hiding::{
-    AggregateWidePadClaim, AggregateWidePadLayout, AggregateWideSourceConstraints,
-    FIXED_SUBSPACE_PAD_LOG_INVERSE_RATE,
+    AGGREGATE_WIDE_PAD_LOG_INVERSE_RATE, AggregateWidePadClaim, AggregateWidePadLayout,
+    AggregateWideSourceConstraints,
 };
 use super::aggregate_wide_pcs::{AggregateWideCommitment, AggregateWidePcs};
 use super::aggregate_wide_wire::CompactAggregateWideOpeningProof;
@@ -140,13 +140,22 @@ fn verify_compact_aggregate_wide_proof_after_observed_commitments(
     for round_ordinal in 0..configuration.n_rounds() {
         let round = &proof.rounds[round_ordinal];
         let round_commitment = &round.commitment;
-        let switch_mask_offset = round.switch_mask_offset;
+        let switch_mask_delta = &round.switch_mask_delta;
         let proof_of_work_witness = round.proof_of_work_witness;
         let round_configuration = &configuration.round_parameters[round_ordinal];
         let current_folding = configuration.round_folding_factor(round_ordinal);
         let next_folding = configuration.round_folding_factor(round_ordinal + 1);
 
         challenger.observe(round_commitment.clone());
+        let switch_range = pad_layout.switch_mask_range(round_ordinal)?;
+        if switch_mask_delta.len() != switch_range.len() {
+            return Err(format!(
+                "aggregate-wide round {round_ordinal} has {} switch-mask delta coordinates, expected {}",
+                switch_mask_delta.len(),
+                switch_range.len(),
+            ));
+        }
+        challenger.observe_algebra_slice(switch_mask_delta);
         if round_configuration.pow_bits > 0
             && !challenger.check_witness(round_configuration.pow_bits, proof_of_work_witness)
         {
@@ -218,12 +227,10 @@ fn verify_compact_aggregate_wide_proof_after_observed_commitments(
             &query_points,
             &query_coefficients,
         );
-        let switch_range = pad_layout.switch_mask_range(round_ordinal)?;
-        challenger.observe_algebra_element(switch_mask_offset);
-        pad_claim.record_switch_mask_offset(
+        pad_claim.record_switch_mask_delta(
             switch_range,
             &logical_mask_covector,
-            switch_mask_offset,
+            switch_mask_delta,
         )?;
 
         let next_handoff = ZkVerifier::<ChallengeField, ChallengeField>::verify_precommitted_claim(
@@ -266,7 +273,7 @@ fn verify_compact_aggregate_wide_proof_after_observed_commitments(
     let pad_shape = MaskCodeShape::new(
         pad_layout.message_length(),
         configuration.mask_queries,
-        FIXED_SUBSPACE_PAD_LOG_INVERSE_RATE,
+        AGGREGATE_WIDE_PAD_LOG_INVERSE_RATE,
     );
     let base_configuration = BaseCaseZkConfig {
         code: source_code,
@@ -411,7 +418,7 @@ fn derive_base_query_schedules(
     )?;
     let pad_domain_size = (pad_layout.message_length() + configuration.mask_queries)
         .next_power_of_two()
-        << FIXED_SUBSPACE_PAD_LOG_INVERSE_RATE;
+        << AGGREGATE_WIDE_PAD_LOG_INVERSE_RATE;
     let pad_query_indices = sample_distinct_query_indices(
         pad_domain_size,
         0,

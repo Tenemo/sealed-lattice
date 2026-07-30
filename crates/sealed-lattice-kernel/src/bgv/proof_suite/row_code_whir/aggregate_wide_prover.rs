@@ -30,7 +30,7 @@ use super::aggregate_source_storage::{
 use super::aggregate_wide_hiding::{
     AggregateWideCommittedPad, AggregateWideHidingMaterial, AggregateWideOpeningProof,
     AggregateWidePadClaim, AggregateWidePadLayout, AggregateWideRoundProof,
-    PrecommittedMaskedSumcheck, fold_limb_randomness, switch_mask_offset,
+    PrecommittedMaskedSumcheck, fold_limb_randomness, switch_mask_delta,
 };
 use super::aggregate_wide_pcs::{AggregateLayout, AggregateWideCommitment, AggregateWidePcs};
 use super::hiding_whir::SelectedHidingWhirConfig;
@@ -346,6 +346,7 @@ pub(in crate::bgv::proof_suite::row_code_whir) struct StreamingAggregateWideProo
     current_source_writer: Option<AggregateSourceWriter>,
     current_oracle_pass: Option<RecomputableOraclePass>,
     current_round_commitment: Option<AggregateWideCommitment>,
+    current_switch_mask_delta: Vec<ChallengeField>,
     current_round_proof_of_work_witness: ChallengeField,
     round_query_indices: Vec<usize>,
     pending_openings: Option<RecomputableOracleOutput>,
@@ -669,6 +670,7 @@ impl StreamingAggregateWideProofGeneration {
             current_source_writer: None,
             current_oracle_pass: None,
             current_round_commitment: None,
+            current_switch_mask_delta: Vec::new(),
             current_round_proof_of_work_witness: ChallengeField::ZERO,
             round_query_indices: Vec::new(),
             pending_openings: None,
@@ -877,6 +879,15 @@ impl StreamingAggregateWideProofGeneration {
                             ));
                         }
                         challenger.observe(output.root.clone());
+                        let switch_mask_delta = switch_mask_delta(
+                            &self.pad_layout,
+                            self.current_round_ordinal,
+                            &self.current_folded_oracle_randomness,
+                            self.committed_pad.message(),
+                        )
+                        .map_err(Self::geometry_error)?;
+                        challenger.observe_algebra_slice(&switch_mask_delta);
+                        self.current_switch_mask_delta = switch_mask_delta;
                         self.current_round_commitment = Some(output.root.clone());
                         self.oracle_roots.push(output.root);
                         self.stage = StreamingAggregateWideProofStage::SampleRoundQueries;
@@ -1292,21 +1303,13 @@ impl StreamingAggregateWideProofGeneration {
             &query_points,
             &query_coefficients,
         );
-        let switch_mask_offset = switch_mask_offset(
-            &self.pad_layout,
-            self.current_round_ordinal,
-            &self.current_folded_oracle_randomness,
-            self.committed_pad.message(),
-            &logical_mask_covector,
-        )
-        .map_err(Self::geometry_error)?;
-        challenger.observe_algebra_element(switch_mask_offset);
+        let switch_mask_delta = core::mem::take(&mut self.current_switch_mask_delta);
         let pad_range = self
             .pad_layout
             .switch_mask_range(self.current_round_ordinal)
             .map_err(Self::geometry_error)?;
         self.pad_claim
-            .record_switch_mask_offset(pad_range, &logical_mask_covector, switch_mask_offset)
+            .record_switch_mask_delta(pad_range, &logical_mask_covector, &switch_mask_delta)
             .map_err(Self::geometry_error)?;
         let reconstructed_target = self.sumcheck_prover()?.claimed_sum()
             + self
@@ -1323,7 +1326,7 @@ impl StreamingAggregateWideProofGeneration {
             commitment: self.current_round_commitment.take().ok_or_else(|| {
                 Self::geometry_error("aggregate-wide round commitment is missing")
             })?,
-            switch_mask_offset,
+            switch_mask_delta,
             proof_of_work_witness: self.current_round_proof_of_work_witness,
             queries,
         });
@@ -1481,7 +1484,7 @@ fn aggregate_wide_pad_shape(
     MaskCodeShape::new(
         layout.message_length(),
         config.mask_queries,
-        super::aggregate_wide_hiding::FIXED_SUBSPACE_PAD_LOG_INVERSE_RATE,
+        super::aggregate_wide_hiding::AGGREGATE_WIDE_PAD_LOG_INVERSE_RATE,
     )
 }
 

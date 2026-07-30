@@ -229,7 +229,7 @@ pub(crate) mod resource_accounting {
         merkle::maximum_minimal_frontier_node_count,
         relation_plan::{BoundTreeConstructionKind, RelationColumnOrigin, RelationTreeDescriptor},
         row_code_whir::{
-            MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH,
+            NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH,
             canonical_row_code_whir_aggregate_opening_section_byte_ledger,
             canonical_row_code_whir_family_body_byte_length_ceiling,
             planned_row_code_whir_external_memory_requirement,
@@ -1088,7 +1088,7 @@ pub(crate) mod resource_accounting {
                     .ok_or(SelectedProofAccountingError::CountOverflow)?;
                 if proof_byte_length == 0
                     || proof_byte_length >= SELECTED_PROOF_SIZE_TARGET_BYTE_LENGTH
-                    || proof_byte_length >= MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH
+                    || proof_byte_length >= NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH
                     || proof_byte_length > MAXIMUM_COMMON_PROOF_BYTE_LENGTH
                 {
                     return Err(SelectedProofAccountingError::VariantResourcePlanning {

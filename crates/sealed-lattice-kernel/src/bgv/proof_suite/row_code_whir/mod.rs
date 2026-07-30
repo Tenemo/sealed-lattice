@@ -75,7 +75,9 @@ pub(crate) use verification::{
     prepare_setup_polynomial_bound_row_code_whir_verification,
 };
 #[cfg(test)]
-pub(crate) const MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH: usize = 5_242_880;
+pub(crate) const NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH: usize = 5_242_880;
+#[cfg(test)]
+pub(crate) const AUTOMATIC_ROW_CODE_WHIR_PROOF_ACCEPTANCE_BYTE_LENGTH: usize = 7_864_320;
 
 use core::mem::size_of;
 

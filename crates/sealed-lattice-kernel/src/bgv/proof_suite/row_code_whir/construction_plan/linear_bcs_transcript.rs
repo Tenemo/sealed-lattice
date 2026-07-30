@@ -951,7 +951,7 @@ fn aggregate_wide_pad_domain_size(
     Ok(p3_whir::MaskCodeShape::new(
         pad_layout.message_length(),
         configuration.sumcheck_mask.randomness_len,
-        super::super::aggregate_wide_hiding::FIXED_SUBSPACE_PAD_LOG_INVERSE_RATE,
+        super::super::aggregate_wide_hiding::AGGREGATE_WIDE_PAD_LOG_INVERSE_RATE,
     )
     .domain_size)
 }

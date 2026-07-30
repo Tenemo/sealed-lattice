@@ -66,7 +66,7 @@ use crate::{
 use std::collections::BTreeMap;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
-use super::MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH;
+use super::NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH;
 use super::{column_commitment::ColumnDigest, row_encoding::RowEncodingGeometry};
 use crate::bgv::proof_suite::relation_plan::{RelationOpeningSourceClass, RelationTreeDescriptor};
 
@@ -113,6 +113,8 @@ const PHYSICAL_ROW_WITNESS_VARIABLE_COUNT: usize =
     super::construction_plan::ROW_CODE_WHIR_PHYSICAL_ROW_WITNESS_VARIABLE_COUNT;
 const LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW: usize =
     super::construction_plan::ROW_CODE_WHIR_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW;
+const EXACT_QUOTIENT_COMPONENT_COUNT: usize =
+    super::super::selected_profile::SELECTED_QUOTIENT_COMPONENT_COUNT as usize;
 const EXACT_ROW_CODE_LOG_INVERSE_RATE: usize =
     super::construction_plan::ROW_CODE_WHIR_LOG_INVERSE_RATE;
 const VERIFIED_SAME_SECRET_LOW_DEGREE_PREREQUISITE_DOMAIN: &str =
@@ -2215,9 +2217,9 @@ mod native_checkpoint {
             store: &'source ExactPolynomialStore,
             quotient_component_count: usize,
         ) -> Result<Self, String> {
-            if quotient_component_count != LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW {
+            if quotient_component_count != EXACT_QUOTIENT_COMPONENT_COUNT {
                 return Err(format!(
-                    "quotient component count {quotient_component_count} does not fill the exact eight-block row"
+                    "quotient component count {quotient_component_count} does not match the selected same-secret relation"
                 ));
             }
             Ok(Self {
@@ -2370,7 +2372,7 @@ mod tests {
         let relation_plan =
             selected_relation_plan_capability(SetupKeyRelationProofFamily::SameSecret);
         let canonical_proof_byte_length =
-            u64::try_from(MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH + 1)
+            u64::try_from(NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH + 1)
                 .expect("the selection proof-size target fits u64");
 
         let limits = exact_same_secret_verification_runtime_limits(
@@ -2419,7 +2421,7 @@ mod tests {
     fn exact_verification_sizing_refuses_wrong_construction() {
         let wrong_relation_plan =
             selected_relation_plan_capability(SetupKeyRelationProofFamily::PublicKeyShare);
-        let bounded_proof_byte_length = u64::try_from(MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH - 1)
+        let bounded_proof_byte_length = u64::try_from(NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH - 1)
             .expect("the selected proof-size target fits u64");
 
         assert!(matches!(
@@ -2939,15 +2941,15 @@ mod tests {
             .expect("derive selected aggregate-wide private-material shape");
         let hiding_base_field_sample_count =
             hiding_shape.total_extension_element_count() * PROOF_CHALLENGE_EXTENSION_DEGREE;
-        assert_eq!(hiding_shape.total_extension_element_count(), 18_001);
-        assert_eq!(hiding_base_field_sample_count, 90_005);
+        assert_eq!(hiding_shape.total_extension_element_count(), 18_025);
+        assert_eq!(hiding_base_field_sample_count, 90_125);
         assert_eq!(
             catalog.entry(CommonProofPrivateCoinCoordinate::hiding_argument()),
             Some(CommonProofPrivateCoinSamplingOperation::ModuloSamples {
                 modulus: crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS,
                 maximum_candidate_draws_per_output:
                     SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
-                output_count: 90_005,
+                output_count: 90_125,
             })
         );
         assert_eq!(catalog.entry_count(), variant.ordered_masks().len() + 2);
@@ -3719,7 +3721,7 @@ mod tests {
                 .flat_map(|row| row.column_ordinals)
                 .flatten()
                 .count(),
-            1_080
+            900
         );
         assert!(base_layout.rows.iter().all(|row| {
             !row.opening_point_ordinals.is_empty()
@@ -3842,7 +3844,7 @@ mod tests {
             observed_private_coin_catalog, expected_private_coin_catalog,
             "the exact auxiliary generator must consume its source-derived private-coin catalog exactly"
         );
-        assert_eq!(auxiliary_output_count, 1_080);
+        assert_eq!(auxiliary_output_count, 900);
         assert!(auxiliary_layout.rows.iter().all(|row| {
             row.column_ordinals
                 .iter()

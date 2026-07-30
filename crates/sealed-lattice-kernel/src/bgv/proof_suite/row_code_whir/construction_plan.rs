@@ -616,7 +616,7 @@ pub(in crate::bgv::proof_suite) enum RowCodeWhirObservationRole {
         batch_ordinal: u32,
         round_ordinal: u32,
     },
-    SwitchMaskOffset {
+    SwitchMaskDelta {
         round_ordinal: u32,
     },
     BaseMaskedClaim,
@@ -2939,6 +2939,12 @@ fn append_aggregate_wide_round_transcript_operations(
         {
             return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
         }
+        builder.push_observation(
+            RowCodeWhirObservationRole::SwitchMaskDelta {
+                round_ordinal: round.round_ordinal,
+            },
+            hiding_configuration.switch_masks[round_index].message_len,
+        )?;
         builder.push_whir_extension(RowCodeWhirExtensionRole::RoundCheckpoint {
             round_ordinal: round.round_ordinal,
         })?;
@@ -2952,12 +2958,6 @@ fn append_aggregate_wide_round_transcript_operations(
         builder.push_whir_extension(RowCodeWhirExtensionRole::RoundCombination {
             round_ordinal: round.round_ordinal,
         })?;
-        builder.push_observation(
-            RowCodeWhirObservationRole::SwitchMaskOffset {
-                round_ordinal: round.round_ordinal,
-            },
-            1,
-        )?;
         append_masked_sumcheck_transcript_operations(
             builder,
             round_index + 1,
@@ -3008,7 +3008,7 @@ fn append_aggregate_wide_base_transcript_operations(
     let pad_shape = p3_whir::MaskCodeShape::new(
         pad_message_length,
         hiding_configuration.sumcheck_mask.randomness_len,
-        super::aggregate_wide_hiding::FIXED_SUBSPACE_PAD_LOG_INVERSE_RATE,
+        super::aggregate_wide_hiding::AGGREGATE_WIDE_PAD_LOG_INVERSE_RATE,
     );
     builder.push(RowCodeWhirTranscriptOperation::SampleDistinctIndices {
         role: RowCodeWhirQueryRole::WhirEpoch {
@@ -3106,7 +3106,7 @@ fn operation_belongs_to_whir_round(
         }
         | RowCodeWhirTranscriptOperation::ObserveExtensionValues {
             role:
-                RowCodeWhirObservationRole::SwitchMaskOffset {
+                RowCodeWhirObservationRole::SwitchMaskDelta {
                     round_ordinal: observed,
                 },
             ..
@@ -3778,7 +3778,7 @@ fn encode_observation_role(
             encoder.push_u32(batch_ordinal);
             encoder.push_u32(round_ordinal);
         }
-        RowCodeWhirObservationRole::SwitchMaskOffset { round_ordinal } => {
+        RowCodeWhirObservationRole::SwitchMaskDelta { round_ordinal } => {
             encoder.push_u16(6);
             encoder.push_u32(round_ordinal);
         }
@@ -4916,7 +4916,10 @@ mod tests {
         ValidatedRelationPlanArtifact, compile_aggregate_threshold_share_relation_plan,
         compile_same_secret_relation_plan, compile_vss_share_linkage_relation_plan,
         selected_ballot_validity_relation_compilation,
-        selected_profile::{selected_relation_plans, selected_target_release_relation},
+        selected_profile::{
+            SELECTED_QUOTIENT_COMPONENT_COUNT, selected_relation_plans,
+            selected_target_release_relation,
+        },
         selected_same_secret_relation_plan_input,
     };
 
@@ -6537,7 +6540,7 @@ mod tests {
             .as_ref()
             .expect("same-secret auxiliary phase");
         assert_eq!(base_phase.rows.len(), 32);
-        assert_eq!(auxiliary_phase.rows.len(), 17);
+        assert_eq!(auxiliary_phase.rows.len(), 15);
         assert_eq!(plan.quotient_phase.rows.len(), 15);
         for (phase, tree_role) in [
             (base_phase, ProofTreeRole::BaseOracle),
@@ -6636,7 +6639,7 @@ mod tests {
                 .iter()
                 .flat_map(|row| row.logical_polynomial_chunks.iter().flatten())
                 .count(),
-            1_080,
+            900,
         );
         assert!(
             base_phase
@@ -6733,6 +6736,27 @@ mod tests {
         assert_eq!(plan.parameters.polynomial_commitment_variable_count, 24);
         assert_eq!(plan.parameters.logical_polynomial_coefficient_count, 32_768);
         assert_eq!(plan.parameters.logical_polynomials_per_physical_row, 64);
+        let logical_row_selector_coordinate_count =
+            usize::try_from(plan.parameters.logical_polynomials_per_physical_row.ilog2())
+                .expect("the logical-row selector count fits usize");
+        let prefix_stacking_selector_variable_count =
+            plan.parameters.polynomial_commitment_variable_count
+                - plan.parameters.table_variable_count;
+        let encoded_merkle_leaf_width = 1_usize << plan.parameters.folding_factor;
+        assert_eq!(logical_row_selector_coordinate_count, 6);
+        assert_eq!(prefix_stacking_selector_variable_count, 2);
+        assert_eq!(encoded_merkle_leaf_width, 8);
+        assert_eq!(SELECTED_QUOTIENT_COMPONENT_COUNT, 8);
+        assert_ne!(
+            logical_row_selector_coordinate_count,
+            prefix_stacking_selector_variable_count
+        );
+        let selected_quotient_component_count = usize::try_from(SELECTED_QUOTIENT_COMPONENT_COUNT)
+            .expect("the quotient component count fits usize");
+        assert_ne!(
+            plan.parameters.logical_polynomials_per_physical_row,
+            selected_quotient_component_count,
+        );
         assert_eq!(plan.parameters.physical_row_witness_variable_count, 21);
         assert_eq!(plan.parameters.row_code_log_inverse_rate, 2);
         assert_eq!(plan.parameters.starting_log_inverse_rate, 2);
@@ -6775,7 +6799,7 @@ mod tests {
                 (18, 263),
             ],
         );
-        assert_eq!(plan.transcript_operations.len(), 2_293);
+        assert_eq!(plan.transcript_operations.len(), 2_289);
         assert_eq!(
             plan.transcript_operations
                 .iter()
@@ -6798,7 +6822,7 @@ mod tests {
                     }
                 ))
                 .count(),
-            181,
+            177,
         );
         assert_eq!(
             plan.transcript_operations
@@ -7035,6 +7059,7 @@ mod tests {
                 .maximum_equation_count()
                 .expect("the catalog equation ceiling derives"),
         );
+        assert_eq!(maximum_transcript_hash_query_count, 1_141_598);
         assert_eq!(
             logical_verifier_message_count,
             u64::try_from(
@@ -7048,6 +7073,7 @@ mod tests {
             )
             .expect("the verifier-message count fits u64"),
         );
+        assert_eq!(logical_verifier_message_count, 4_272);
 
         let mut product_expansion_count = 0_usize;
         let mut distinct_expansion_count = 0_usize;

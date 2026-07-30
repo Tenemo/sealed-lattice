@@ -321,7 +321,7 @@ impl SelectedHidingMaskCensus {
 
 #[cfg(test)]
 mod tests {
-    use super::super::MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH;
+    use super::super::NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH;
     use super::*;
 
     /// Digest bytes of one authentication node in the production Merkle tree.
@@ -584,7 +584,7 @@ mod tests {
         let literal_authentication_bytes =
             census.literal_authentication_node_count() * PRODUCTION_MERKLE_NODE_BYTE_LENGTH;
         assert_eq!(literal_authentication_bytes, 6_944_256);
-        assert!(literal_authentication_bytes > MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH);
+        assert!(literal_authentication_bytes > NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH);
     }
 
     #[test]

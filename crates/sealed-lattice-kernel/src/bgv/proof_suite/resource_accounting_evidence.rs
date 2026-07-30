@@ -39,7 +39,7 @@ use super::{
         SelectedCompleteActionPhaseLivenessAccounting,
         derive_selected_complete_action_phase_liveness_accounting,
     },
-    row_code_whir::MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH,
+    row_code_whir::NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH,
     selected_accounting::resource_accounting::{
         SelectedCompleteActionMaterialResourceAccounting,
         derive_selected_complete_action_material_resource_accounting,
@@ -1036,7 +1036,7 @@ mod tests {
         assert_eq!(record.ordered_proof_variants.len(), 31);
         assert!(record.ordered_proof_variants.iter().all(|variant| {
             variant.canonical_proof_byte_length
-                < u64::try_from(MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH)
+                < u64::try_from(NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH)
                     .expect("proof target fits u64")
         }));
         let material = derive_selected_complete_action_material_resource_accounting()

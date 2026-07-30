@@ -40,25 +40,26 @@ const SELECTED_SCALAR_OPENING_COUNT: u64 = 1_782;
 ///
 /// ~~~text
 /// initial header root and absorption      1 +     1 =         2
-/// response roots                       2,744      =     2,744
-/// response bindings                    2,725      =     2,725
-/// response absorptions                 2,760      =     2,760
-/// accepted challenges                  5,077 * 1  =     5,077
-/// challenge handles                    5,077 * 1  =     5,077
-/// extension rejection chains   5,066 * 2 * 127    = 1,286,764
+/// response roots                       2,059      =     2,059
+/// response bindings                    2,034      =     2,034
+/// response absorptions                 2,071      =     2,071
+/// accepted challenges                  4,272 * 1  =     4,272
+/// challenge handles                    4,272 * 1  =     4,272
+/// extension rejection chains   4,260 * 2 * 127    = 1,082,040
 /// product expansions               3 * 128 * 1    =       384
 /// distinct expansions
-///     (2*387 + 288 + 268 + 266 + 264 + 2*263) * 16 =    38,176
-/// total                                             1,343,709
+///     (2*387 + 393 + 288 + 268 + 266 + 264 + 2*263) * 16
+///                                                    =    44,464
+/// total                                             1,141,598
 /// ~~~
 ///
-/// The `5,077` accepted challenges partition as `5,066` extension challenges
-/// plus `8` distinct-index samplers plus `3` product-space samplers, which is
+/// The `4,272` accepted challenges partition as `4,260` extension challenges
+/// plus `9` distinct-index samplers plus `3` product-space samplers, which is
 /// also the logical verifier-message count below. The distinct-sampler row
 /// carries `266` accepted direct-bound draws once; the prior-certificate subset
 /// selects its first `40` in accepted order and therefore draws nothing extra.
-const SELECTED_TRANSCRIPT_HASH_QUERY_COUNT: u64 = 1_343_709;
-const SELECTED_LOGICAL_VERIFIER_MESSAGE_COUNT: u64 = 5_077;
+const SELECTED_TRANSCRIPT_HASH_QUERY_COUNT: u64 = 1_141_598;
+const SELECTED_LOGICAL_VERIFIER_MESSAGE_COUNT: u64 = 4_272;
 const CMS19_ADVERSARIAL_QUERY_EXPONENT: usize = 80;
 const CMS19_ORACLE_OUTPUT_BIT_LENGTH: usize = 512;
 
@@ -567,7 +568,7 @@ impl ExactFailureMagnitudeCertificate {
         self.owner_rows
             .iter()
             .all(|row| row.transition_count == row.expected_transition_count)
-            && self.query_rows.len() == 10
+            && self.query_rows.len() == 11
             && self.theta_rows.len() == 3
             && self.algebraic_rows.len() == 13
             && self.same_secret_family_multiplicity == 10
@@ -958,7 +959,13 @@ fn checked_supplied_commitment_opening_rows(
         .map(|row| row.phase)
         .collect::<Vec<_>>()
         != plan.phase_order
-        || whir_epochs.len() != 5
+        || whir_epochs.len()
+            != plan
+                .whir
+                .rounds
+                .len()
+                .checked_add(1)
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?
         || aggregate_wide_mask_openings.len() != 3
     {
         return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
@@ -1077,6 +1084,7 @@ struct CommitmentSubtreeExtractionRow {
 struct CommitmentSubtreeExtractionCertificate {
     rows: Vec<CommitmentSubtreeExtractionRow>,
     supplied_commitment_root_count: usize,
+    bound_tree_root_count: usize,
     canonical_complete_message_count: u64,
     one_edge_sampler_message_count: u64,
     distinct_protocol_tree_role_count: usize,
@@ -1092,9 +1100,14 @@ struct CommitmentSubtreeExtractionCertificate {
 
 impl CommitmentSubtreeExtractionCertificate {
     fn is_complete(&self) -> bool {
-        self.rows.len() == 22
+        !self.rows.is_empty()
             && self.distinct_protocol_tree_role_count == self.rows.len()
-            && self.supplied_commitment_root_count == 11
+            && self.supplied_commitment_root_count > 0
+            && self.bound_tree_root_count > 0
+            && self
+                .supplied_commitment_root_count
+                .checked_add(self.bound_tree_root_count)
+                == Some(self.rows.len())
             && self.canonical_complete_message_count > 0
             && self.one_edge_sampler_message_count > 0
             && self.rows.iter().all(|row| {
@@ -1398,12 +1411,16 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
     plan: &RowCodeWhirConstructionPlan,
 ) -> Result<RowCodeWhirFailurePartitionCertificate, WhirTheoremCertificateError> {
     let parameters = plan.selected_parameters();
+    let hiding_configuration =
+        super::super::hiding_whir::selected_hiding_whir_config(parameters)
+            .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
     if parameters != RowCodeWhirSelectedParameters::selected()
         || parameters.soundness_assumption != RowCodeWhirSoundnessAssumption::UniqueDecoding
         || parameters.folding_factor != 3
-        || plan.whir.rounds.len() != 4
-        || plan.whir.initial_sumcheck_round_count != parameters.folding_factor
-        || plan.whir.final_round.sumcheck_round_count != 6
+        || plan.whir.rounds.len() != hiding_configuration.n_rounds()
+        || plan.whir.initial_sumcheck_round_count != hiding_configuration.round_folding_factor(0)
+        || plan.whir.final_round.sumcheck_round_count
+            != hiding_configuration.inner.final_sumcheck_rounds
     {
         return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
     }
@@ -1472,9 +1489,6 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
     let construction_masking =
         checked_zero_knowledge_mask_image(relation_variant, &relation_context)
             .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
-    let hiding_configuration =
-        super::super::hiding_whir::selected_hiding_whir_config(parameters)
-            .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
     let aggregate_wide_masking = AggregateWideMaskingCertificate::derive(&hiding_configuration)
         .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
     if !construction_masking.is_complete()
@@ -1494,7 +1508,15 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
         .collect::<Vec<_>>();
     let supplied_commitment_openings = checked_supplied_commitment_opening_rows(plan)?;
     let whir_epoch_openings = &supplied_commitment_openings.whir_epochs;
-    if encoded_oracles.len() != 5 || whir_epoch_openings.len() != 5 {
+    let source_epoch_count = plan
+        .whir
+        .rounds
+        .len()
+        .checked_add(1)
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    if encoded_oracles.len() != source_epoch_count
+        || whir_epoch_openings.len() != source_epoch_count
+    {
         return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
     }
 
@@ -1518,8 +1540,22 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
     if whir_epoch_openings[0].query_count != parameters.outer_query_count {
         return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
     }
-    let mut code_state_rows = Vec::with_capacity(20);
-    let mut interleaved_unique_decoding_rows = Vec::with_capacity(20);
+    let encoded_oracle_leaf_width = 1_usize
+        .checked_shl(
+            u32::try_from(parameters.folding_factor)
+                .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+        )
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let code_state_count = source_epoch_count
+        .checked_mul(
+            parameters
+                .folding_factor
+                .checked_add(1)
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+        )
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let mut code_state_rows = Vec::with_capacity(code_state_count);
+    let mut interleaved_unique_decoding_rows = Vec::with_capacity(code_state_count);
     for epoch_index in 0..encoded_oracles.len() {
         let epoch_ordinal = u32::try_from(epoch_index)
             .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
@@ -1535,7 +1571,7 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
                 whir_epoch_openings[preceding_index].query_count
             });
         if encoded_oracle.evaluation_count != expected_evaluation_count
-            || encoded_oracle.leaf_width != parameters.logical_polynomials_per_physical_row
+            || encoded_oracle.leaf_width != encoded_oracle_leaf_width
             || encoded_oracle
                 .leaf_count
                 .checked_mul(encoded_oracle.leaf_width)
@@ -1607,13 +1643,17 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
             )?;
             interleaved_unique_decoding_rows.push(InterleavedUniqueDecodingRow::derive(
                 code_state,
-                parameters.logical_polynomials_per_physical_row,
+                source_interleaving_width,
             )?);
             code_state_rows.push(code_state);
         }
     }
 
-    let mut fold_rows = Vec::with_capacity(15);
+    let mut fold_rows = Vec::with_capacity(
+        source_epoch_count
+            .checked_mul(parameters.folding_factor)
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+    );
     for epoch_index in 0..encoded_oracles.len() {
         let epoch_ordinal = u32::try_from(epoch_index)
             .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
@@ -1679,15 +1719,17 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
         });
     }
 
+    let final_source_epoch_ordinal = u32::try_from(source_epoch_count - 1)
+        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
     let final_code_state = code_state_rows
         .iter()
         .find(|row| {
-            row.epoch_ordinal == 4
+            row.epoch_ordinal == final_source_epoch_ordinal
                 && usize::try_from(row.fold_ordinal).ok() == Some(parameters.folding_factor)
         })
         .ok_or(WhirTheoremCertificateError::InvalidSelectedGeometry)?;
     let final_query_row = WhirFinalQueryRow {
-        epoch_ordinal: 4,
+        epoch_ordinal: final_source_epoch_ordinal,
         query_count: u64::try_from(
             whir_epoch_openings
                 .last()
@@ -2652,7 +2694,19 @@ fn validate_selected_plan_state_predicate_certificate(
                 && (row.transition != SelectedPlanLifecycleTransition::FreshVerifierAcceptance
                     || !row.requires_fresh_verifier)
         })
-        || code_state_rows.len() != 20
+        || code_state_rows.len()
+            != plan
+                .whir
+                .rounds
+                .len()
+                .checked_add(1)
+                .and_then(|epoch_count| {
+                    plan.parameters
+                        .folding_factor
+                        .checked_add(1)
+                        .and_then(|state_count| epoch_count.checked_mul(state_count))
+                })
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?
     {
         return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
     }
@@ -3013,7 +3067,11 @@ fn derive_commitment_subtree_extraction_certificate(
                 .map(u32::try_from)
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?
-        || whir_epoch_ordinals != [0, 1, 2, 3, 4]
+        || whir_epoch_ordinals
+            != (0..=plan.whir.rounds.len())
+                .map(u32::try_from)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?
         || aggregate_wide_role_count != 3
         || supplied_commitment_root_count.checked_add(plan.bound_trees.len())
             != Some(merkle_rows.len())
@@ -3086,6 +3144,7 @@ fn derive_commitment_subtree_extraction_certificate(
         distinct_protocol_tree_role_count: rows.len(),
         rows,
         supplied_commitment_root_count,
+        bound_tree_root_count: plan.bound_trees.len(),
         canonical_complete_message_count,
         one_edge_sampler_message_count,
         // CMS19 Definition 6.3 rejects collisions before expanding a node.
@@ -3264,7 +3323,18 @@ fn derive_cms19_state_predicate_certificate(
     exact_failure_magnitude: &ExactFailureMagnitudeCertificate,
 ) -> Cms19StatePredicateCertificate {
     let selected_plan_state_is_total = selected_plan_state_predicate.is_total_for_plan(plan);
-    let selected_geometry_is_strict = code_state_rows.len() == 20
+    let expected_code_state_count = plan
+        .whir
+        .rounds
+        .len()
+        .checked_add(1)
+        .and_then(|epoch_count| {
+            plan.parameters
+                .folding_factor
+                .checked_add(1)
+                .and_then(|state_count| epoch_count.checked_mul(state_count))
+        });
+    let selected_geometry_is_strict = expected_code_state_count == Some(code_state_rows.len())
         && code_state_rows.iter().all(|row| {
             row.selected_state_relative_distance
                 .less_than(row.theorem_five_two_strict_distance_ceiling)
@@ -3277,9 +3347,13 @@ fn derive_cms19_state_predicate_certificate(
                 && row.unique_decoding_radius.saturating_mul(2) < row.minimum_distance
                 && row.unique_decoding_list_size_ceiling == 1
         });
-    let interleaved_distance_is_exact = interleaved_unique_decoding_rows.len() == 20
+    let expected_interleaving_lane_count = u32::try_from(plan.parameters.folding_factor)
+        .ok()
+        .and_then(|folding_factor| 1_usize.checked_shl(folding_factor));
+    let interleaved_distance_is_exact = expected_code_state_count
+        == Some(interleaved_unique_decoding_rows.len())
         && interleaved_unique_decoding_rows.iter().all(|row| {
-            row.lane_count == plan.parameters.logical_polynomials_per_physical_row
+            Some(row.lane_count) == expected_interleaving_lane_count
                 && row.constituent_minimum_distance == row.interleaved_minimum_distance
                 && row.selected_state_error_count_ceiling
                     < (row.interleaved_minimum_distance - 1) / 2
@@ -3433,22 +3507,22 @@ fn derive_cms19_arithmetic_certificate(
 const EXACT_FAILURE_OWNER_COUNTS: [(ExactFailureOwnerKind, usize); 19] = [
     (ExactFailureOwnerKind::NonNativeThetaProduct, 3),
     (ExactFailureOwnerKind::NonNativeAlphaProduct, 0),
-    (ExactFailureOwnerKind::RelationComposition, 4_406),
+    (ExactFailureOwnerKind::RelationComposition, 4_046),
     (ExactFailureOwnerKind::OutOfDomainPoint, 1),
-    (ExactFailureOwnerKind::PointSelector, 9),
-    (ExactFailureOwnerKind::TraceColumnGroup, 524),
+    (ExactFailureOwnerKind::PointSelector, 18),
+    (ExactFailureOwnerKind::TraceColumnGroup, 63),
     (ExactFailureOwnerKind::QuotientGroup, 1),
     (ExactFailureOwnerKind::OpeningBatchMask, 1),
     (ExactFailureOwnerKind::BoundOpening, 44),
     (ExactFailureOwnerKind::BoundDegreeCoordinate, 50),
     (ExactFailureOwnerKind::OuterQueryVector, 1),
     (ExactFailureOwnerKind::BoundQueryVector, 1),
-    (ExactFailureOwnerKind::WhirQueryVector, 6),
+    (ExactFailureOwnerKind::WhirQueryVector, 7),
     (ExactFailureOwnerKind::WhirOpeningBatching, 1),
-    (ExactFailureOwnerKind::MaskedSumcheckEpsilon, 5),
-    (ExactFailureOwnerKind::MaskedSumcheckFold, 15),
-    (ExactFailureOwnerKind::RoundCheckpoint, 4),
-    (ExactFailureOwnerKind::RoundCombination, 4),
+    (ExactFailureOwnerKind::MaskedSumcheckEpsilon, 6),
+    (ExactFailureOwnerKind::MaskedSumcheckFold, 18),
+    (ExactFailureOwnerKind::RoundCheckpoint, 5),
+    (ExactFailureOwnerKind::RoundCombination, 5),
     (ExactFailureOwnerKind::BaseCaseBlinding, 1),
 ];
 
@@ -3650,7 +3724,6 @@ fn derive_exact_query_failure_rows(
             .bound_trees
             .iter()
             .any(|tree| tree.leaf_count != bound_population)
-        || bound_population != 1 << 20
     {
         return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
     }
@@ -3683,7 +3756,18 @@ fn derive_exact_query_failure_rows(
             bound_population * 65 / 128,
         ),
     ];
-    let mut rows = Vec::with_capacity(10);
+    let mut rows = Vec::with_capacity(
+        shared_partition
+            .len()
+            .checked_add(
+                plan.whir
+                    .rounds
+                    .len()
+                    .checked_add(2)
+                    .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+            )
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+    );
     for (partition_row, (event, sponsoring_owner, population, agreement_ceiling)) in
         shared_partition.into_iter().zip(shared_geometries)
     {
@@ -3708,7 +3792,13 @@ fn derive_exact_query_failure_rows(
         .filter(|row| row.fold_ordinal == terminal_fold_ordinal)
         .collect::<Vec<_>>();
     source_states.sort_by_key(|row| row.epoch_ordinal);
-    if source_states.len() != 5
+    let expected_source_epoch_count = plan
+        .whir
+        .rounds
+        .len()
+        .checked_add(1)
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    if source_states.len() != expected_source_epoch_count
         || source_states
             .iter()
             .enumerate()
@@ -3727,7 +3817,13 @@ fn derive_exact_query_failure_rows(
                     usize::try_from(code_state.dimension)
                         .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
                 )
-            || interleaving_width != plan.parameters.logical_polynomials_per_physical_row
+            || interleaving_width
+                != 1_usize
+                    .checked_shl(
+                        u32::try_from(plan.parameters.folding_factor)
+                            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+                    )
+                    .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?
         {
             return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
         }
@@ -3768,8 +3864,15 @@ fn derive_exact_query_failure_rows(
             .ok_or(WhirTheoremCertificateError::InvalidSelectedGeometry)?,
         pad_domain_size,
     )?;
-    let pad_code_state =
-        WhirCodeStateRow::derive(5, 0, pad_domain_size, pad_dimension, pad_selected_distance)?;
+    let pad_epoch_ordinal = u32::try_from(expected_source_epoch_count)
+        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let pad_code_state = WhirCodeStateRow::derive(
+        pad_epoch_ordinal,
+        0,
+        pad_domain_size,
+        pad_dimension,
+        pad_selected_distance,
+    )?;
     rows.push(ExactQueryFailureRow::derive(
         ExactQueryFailureEvent::AggregateWidePad,
         ExactFailureOwnerKind::WhirQueryVector,
@@ -3857,10 +3960,12 @@ fn derive_exact_algebraic_failure_rows(
             .checked_add(row.algebraic_numerator)
             .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
     })?;
+    let final_source_epoch_ordinal = u32::try_from(plan.whir.rounds.len())
+        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
     let final_source_domain_size = code_state_rows
         .iter()
         .find(|row| {
-            row.epoch_ordinal == 4
+            row.epoch_ordinal == final_source_epoch_ordinal
                 && usize::try_from(row.fold_ordinal).ok() == Some(plan.parameters.folding_factor)
         })
         .map(|row| row.domain_size)
@@ -4436,13 +4541,13 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
     assert_eq!(
         challenge_kind_counts,
         [
-            3, 0, 4_406, 1, 9, 524, 1, 1, 44, 50, 1, 1, 6, 1, 5, 15, 4, 4, 1
+            3, 0, 4_046, 1, 18, 63, 1, 1, 44, 50, 1, 1, 7, 1, 6, 18, 5, 5, 1
         ],
     );
 
-    assert_eq!(certificate.code_state_rows.len(), 20);
-    assert_eq!(certificate.fold_rows.len(), 15);
-    assert_eq!(certificate.shift_rows.len(), 4);
+    assert_eq!(certificate.code_state_rows.len(), 24);
+    assert_eq!(certificate.fold_rows.len(), 18);
+    assert_eq!(certificate.shift_rows.len(), 5);
     assert_eq!(
         certificate
             .fold_rows
@@ -4453,35 +4558,37 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
                 })
             })
             .collect::<Option<Vec<_>>>(),
-        Some(vec![7_340_041, 3_670_025, 1_835_017, 917_513, 458_761]),
+        Some(vec![
+            58_720_265, 29_360_137, 14_680_073, 7_340_041, 3_670_025, 1_835_017,
+        ]),
     );
-    assert_eq!(certificate.fold_numerator(), Ok(14_221_357));
+    assert_eq!(certificate.fold_numerator(), Ok(115_605_558));
     assert_eq!(
         certificate
             .shift_rows
             .iter()
             .map(|row| row.algebraic_numerator)
             .collect::<Vec<_>>(),
-        [388, 289, 269, 265],
+        [388, 289, 269, 265, 264],
     );
-    assert_eq!(certificate.shift_numerator(), Ok(1_211));
+    assert_eq!(certificate.shift_numerator(), Ok(1_475));
     assert_eq!(certificate.initial_constraint_batch_numerator(), 1_781);
     assert_eq!(certificate.final_sumcheck_numerator(), 0);
-    assert_eq!(certificate.final_query_row.epoch_ordinal, 4);
+    assert_eq!(certificate.final_query_row.epoch_ordinal, 5);
     assert_eq!(certificate.final_query_row.query_count, 263);
     // The terminal source code includes 64 logical coefficients and 263
-    // private encoding coefficients. Its domain is `65,536`, dimension is
-    // therefore `327`, and a false state agrees in at most `32,932`
-    // positions, or `8,233 / 16,384` in lowest terms.
+    // private encoding coefficients. Its domain is `262,144`, dimension is
+    // therefore `327`, and a false state agrees in at most `131,236`
+    // positions, or `32,809 / 65,536` in lowest terms.
     assert_eq!(
         certificate.final_query_row.bad_agreement,
-        ExactFraction::new(8_233, 16_384).expect("the fraction is valid"),
+        ExactFraction::new(32_809, 65_536).expect("the fraction is valid"),
     );
     assert_eq!(certificate.prefix_stacking.source_table_count, 1);
     assert_eq!(certificate.prefix_stacking.committed_polynomial_count, 1);
-    assert_eq!(certificate.prefix_stacking.table_variable_count, 19);
+    assert_eq!(certificate.prefix_stacking.table_variable_count, 22);
     assert_eq!(certificate.prefix_stacking.selector_variable_count, 2);
-    assert_eq!(certificate.prefix_stacking.stacked_variable_count, 21);
+    assert_eq!(certificate.prefix_stacking.stacked_variable_count, 24);
     assert_eq!(certificate.prefix_stacking.table_width, 4);
     assert_eq!(certificate.prefix_stacking.opening_batch_count, 1_008);
     assert_eq!(certificate.prefix_stacking.scalar_opening_count, 1_782);
@@ -4512,7 +4619,7 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
             .iter()
             .map(|row| (row.epoch_ordinal, row.fold_ordinal))
             .collect::<Vec<_>>(),
-        (0_u32..5)
+        (0_u32..6)
             .flat_map(|epoch_ordinal| {
                 (1_u32..=3).map(move |fold_ordinal| (epoch_ordinal, fold_ordinal))
             })
@@ -4534,7 +4641,7 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
             .iter()
             .map(|row| row.round_ordinal)
             .collect::<Vec<_>>(),
-        [0, 1, 2, 3],
+        [0, 1, 2, 3, 4],
     );
     assert_eq!(
         certificate.maximum_transcript_hash_query_count,
@@ -4554,28 +4661,28 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
     };
     assert_eq!(
         transcript_role_equation_count(OracleEquationRole::ResponseRoot),
-        2_744,
+        2_059,
     );
     assert_eq!(
         transcript_role_equation_count(OracleEquationRole::ResponseBinding),
-        2_725,
+        2_034,
     );
     assert_eq!(
         transcript_role_equation_count(OracleEquationRole::ResponseAbsorption),
-        2_760,
+        2_071,
     );
     assert_eq!(
         transcript_role_equation_count(OracleEquationRole::AcceptedChallenge),
-        5_077,
+        4_272,
     );
     assert_eq!(
         transcript_role_equation_count(OracleEquationRole::ChallengeHandle),
-        5_077,
+        4_272,
     );
     let verifier_ledger = &certificate.complete_verifier_oracle_ledger;
-    assert_eq!(verifier_ledger.transcript_equation_count, 1_343_709);
-    assert_eq!(verifier_ledger.transcript_hash_query_count, 1_343_709);
-    assert_eq!(verifier_ledger.merkle_rows.len(), 22);
+    assert_eq!(verifier_ledger.transcript_equation_count, 1_141_598);
+    assert_eq!(verifier_ledger.transcript_hash_query_count, 1_141_598);
+    assert_eq!(verifier_ledger.merkle_rows.len(), 23);
     assert_eq!(
         verifier_ledger.merkle_rows[..3]
             .iter()
@@ -4586,60 +4693,65 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
                 MerkleOracleEquationRole::RelationPhase {
                     phase: RowCodeWhirPhase::Base,
                 },
-                2_097_152,
+                16_777_216,
                 387,
             ),
             (
                 MerkleOracleEquationRole::RelationPhase {
                     phase: RowCodeWhirPhase::Auxiliary,
                 },
-                2_097_152,
+                16_777_216,
                 387,
             ),
             (
                 MerkleOracleEquationRole::RelationPhase {
                     phase: RowCodeWhirPhase::Quotient,
                 },
-                2_097_152,
+                16_777_216,
                 387,
             ),
         ],
     );
     assert_eq!(
-        verifier_ledger.merkle_rows[14..19]
+        verifier_ledger.merkle_rows[14..20]
             .iter()
             .map(|row| (row.role, row.leaf_count, row.query_count))
             .collect::<Vec<_>>(),
         [
             (
                 MerkleOracleEquationRole::WhirEpoch { epoch_ordinal: 0 },
-                1_048_576,
+                8_388_608,
                 387,
             ),
             (
                 MerkleOracleEquationRole::WhirEpoch { epoch_ordinal: 1 },
-                524_288,
+                4_194_304,
                 288,
             ),
             (
                 MerkleOracleEquationRole::WhirEpoch { epoch_ordinal: 2 },
-                262_144,
+                2_097_152,
                 268,
             ),
             (
                 MerkleOracleEquationRole::WhirEpoch { epoch_ordinal: 3 },
-                131_072,
+                1_048_576,
                 264,
             ),
             (
                 MerkleOracleEquationRole::WhirEpoch { epoch_ordinal: 4 },
-                65_536,
+                524_288,
+                263,
+            ),
+            (
+                MerkleOracleEquationRole::WhirEpoch { epoch_ordinal: 5 },
+                262_144,
                 263,
             ),
         ],
     );
     assert_eq!(
-        verifier_ledger.merkle_rows[19..]
+        verifier_ledger.merkle_rows[20..]
             .iter()
             .map(|row| (row.role, row.leaf_count, row.query_count))
             .collect::<Vec<_>>(),
@@ -4657,7 +4769,7 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
                     commitment_role:
                         linear_bcs_transcript::LinearBcsCommittedOracleRole::BaseFreshSource,
                 },
-                65_536,
+                262_144,
                 263,
             ),
             (
@@ -4676,14 +4788,14 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
             .iter()
             .all(|row| row.predecessor_support_ceiling <= 2)
     );
-    assert_eq!(verifier_ledger.merkle_hash_query_count(), Ok(58_133));
+    assert_eq!(verifier_ledger.merkle_hash_query_count(), Ok(73_047));
     assert_eq!(
         verifier_ledger.merkle_rows[..3]
             .iter()
             .try_fold(0_u64, |total, row| {
                 total.checked_add(row.hash_query_count().expect("phase row count"))
             }),
-        Some(16_626),
+        Some(20_109),
     );
     assert_eq!(
         verifier_ledger.merkle_rows[3..14]
@@ -4691,23 +4803,23 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
             .try_fold(0_u64, |total, row| {
                 total.checked_add(row.hash_query_count().expect("bound row count"))
             }),
-        Some(16_413),
+        Some(19_767),
     );
     assert_eq!(
-        verifier_ledger.merkle_rows[14..19]
+        verifier_ledger.merkle_rows[14..20]
             .iter()
             .try_fold(0_u64, |total, row| {
                 total.checked_add(row.hash_query_count().expect("WHIR row count"))
             }),
-        Some(17_527),
+        Some(25_078),
     );
     assert_eq!(
-        verifier_ledger.merkle_rows[19..]
+        verifier_ledger.merkle_rows[20..]
             .iter()
             .try_fold(0_u64, |total, row| {
                 total.checked_add(row.hash_query_count().expect("mask row count"))
             }),
-        Some(7_567),
+        Some(8_093),
     );
     assert_eq!(verifier_ledger.fixed_hash_rows.len(), 5);
     assert_eq!(verifier_ledger.fixed_hash_query_count(), Ok(22));
@@ -4720,21 +4832,21 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
             .all(|row| row.transcript_catalog_equation_overlap_count == 0),
     );
     // Both complete ceilings are the transcript ceiling plus the plan's Merkle
-    // ceiling of `58,133` plus the fixed rows: `1,343,709 + 58,133 + 13 =
-    // 1,401,855` equations and `1,343,709 + 58,133 + 22 = 1,401,864` hash
+    // ceiling of `73,047` plus the fixed rows: `1,141,598 + 73,047 + 13 =
+    // 1,214,658` equations and `1,141,598 + 73,047 + 22 = 1,214,667` hash
     // queries. The Merkle and fixed components are independent of the
     // transcript catalog, and the two totals now differ only by the fixed
     // distinct-equation and hash-query rows because the catalog charges one
     // equation per hash query.
-    assert_eq!(verifier_ledger.complete_equation_count_ceiling, 1_401_855);
-    assert_eq!(verifier_ledger.complete_hash_query_count, 1_401_864);
+    assert_eq!(verifier_ledger.complete_equation_count_ceiling, 1_214_658);
+    assert_eq!(verifier_ledger.complete_hash_query_count, 1_214_667);
     assert!(certificate.commitment_subtree_extraction.is_complete());
-    assert_eq!(certificate.commitment_subtree_extraction.rows.len(), 22);
+    assert_eq!(certificate.commitment_subtree_extraction.rows.len(), 23);
     assert_eq!(
         certificate
             .commitment_subtree_extraction
             .supplied_commitment_root_count,
-        11,
+        12,
     );
     assert!(
         certificate
@@ -4762,7 +4874,7 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
     );
     assert_eq!(
         certificate.cms19_arithmetic.verifier_hash_query_count,
-        1_401_864
+        1_214_667
     );
     assert_eq!(
         certificate
@@ -4891,6 +5003,22 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
     assert!(certificate.cms19_state_predicate.is_complete());
     assert!(certificate.construction_masking.is_complete());
     assert!(certificate.aggregate_wide_masking.is_complete());
+    assert_eq!(
+        certificate
+            .aggregate_wide_masking
+            .joint_affine_view_summary(),
+        (18_025, 18_013, 12),
+    );
+    assert_eq!(
+        certificate.aggregate_wide_masking.nonlinear_view_summary(),
+        (9, 9, 5, 6),
+    );
+    assert_eq!(
+        certificate
+            .aggregate_wide_masking
+            .generator_sample_summary(),
+        (18_025, 90_125, 64, 10),
+    );
     assert!(
         certificate
             .relation_compiler_interpreter_semantics
@@ -4990,23 +5118,23 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
             (
                 ExactQueryFailureEvent::OuterOpeningPointWords,
                 3,
-                2_097_152,
-                1_310_720,
+                16_777_216,
+                10_485_760,
                 387,
                 1,
             ),
             (
                 ExactQueryFailureEvent::RelationPhaseColumns,
                 3,
-                2_097_152,
-                1_310_720,
+                16_777_216,
+                10_485_760,
                 387,
                 1,
             ),
             (
                 ExactQueryFailureEvent::BoundTreeWords,
                 8,
-                1_048_576,
+                8_388_608,
                 9_217,
                 40,
                 1,
@@ -5014,48 +5142,56 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
             (
                 ExactQueryFailureEvent::StatementRootWords,
                 3,
-                1_048_576,
-                532_480,
+                8_388_608,
+                4_259_840,
                 266,
                 1,
             ),
             (
                 ExactQueryFailureEvent::WhirSource { epoch_ordinal: 0 },
                 1,
-                1_048_576,
-                655_554,
+                8_388_608,
+                5_243_074,
                 387,
                 1,
             ),
             (
                 ExactQueryFailureEvent::WhirSource { epoch_ordinal: 1 },
                 1,
-                524_288,
-                278_672,
+                4_194_304,
+                2_228_368,
                 288,
                 1,
             ),
             (
                 ExactQueryFailureEvent::WhirSource { epoch_ordinal: 2 },
                 1,
-                262_144,
-                133_254,
+                2_097_152,
+                1_065_094,
                 268,
                 1,
             ),
             (
                 ExactQueryFailureEvent::WhirSource { epoch_ordinal: 3 },
                 1,
-                131_072,
-                65_924,
+                1_048_576,
+                526_468,
                 264,
                 1,
             ),
             (
                 ExactQueryFailureEvent::WhirSource { epoch_ordinal: 4 },
                 1,
-                65_536,
-                32_932,
+                524_288,
+                262_532,
+                263,
+                1,
+            ),
+            (
+                ExactQueryFailureEvent::WhirSource { epoch_ordinal: 5 },
+                1,
+                262_144,
+                131_236,
                 263,
                 1,
             ),
@@ -5063,7 +5199,7 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
                 ExactQueryFailureEvent::AggregateWidePad,
                 1,
                 8_192,
-                4_919,
+                5_055,
                 393,
                 1,
             ),
@@ -5086,11 +5222,11 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
     let theta_numerator = BigUint::from(3_u8) * single_theta_numerator;
     assert_eq!(
         &complete_algebraic_numerator - &theta_numerator,
-        BigUint::from(26_881_059_u64),
+        BigUint::from(216_542_517_u64),
     );
     assert_eq!(
         complete_algebraic_numerator,
-        BigUint::parse_bytes(b"113302212165600267086787", 10)
+        BigUint::parse_bytes(b"113302212165600456748245", 10)
             .expect("the exact algebraic numerator parses"),
     );
     assert!(

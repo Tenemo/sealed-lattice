@@ -149,6 +149,12 @@ pub(crate) use prepared_signed_carrier::{
     retain_prepared_signed_carrier,
 };
 pub(crate) use private_randomness::PersistentProofWitnessCoinBinding;
+#[cfg(test)]
+pub(crate) use private_randomness::generator_hybrid::{
+    DECLARED_ADVERSARIAL_QUERY_BUDGET, MaskGeneratorHonestAbortEvent,
+    MaskGeneratorHybridAssumption, MaskGeneratorHybridHop, MaskGeneratorHybridLoss,
+    action_root_expansion_summary, deployed_mask_generator_hybrid, quantum_mask_generator_hybrid,
+};
 pub use private_randomness::{
     ACTION_RANDOMNESS_DERIVATION_INPUT_SCHEMA_IDENTIFIER, ACTION_RANDOMNESS_ROOT_BYTE_LENGTH,
     ActionPrivateRandomness, ActionRandomnessDerivationInput, ActionRandomnessRoot,

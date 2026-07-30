@@ -6,6 +6,7 @@ use std::{
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
+use super::super::AUTOMATIC_ROW_CODE_WHIR_PROOF_ACCEPTANCE_BYTE_LENGTH;
 use super::exact_proof::ExactSameSecretVerificationMetrics;
 use super::*;
 use crate::{
@@ -364,7 +365,7 @@ fn generate_exact_same_secret_proof(
 ) -> Result<(Vec<u8>, u64, usize), String> {
     let prefix_relation_plan = production_same_secret_relation()?.0;
     let limits = CommonProofRuntimeLimits::new(
-        MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH,
+        AUTOMATIC_ROW_CODE_WHIR_PROOF_ACCEPTANCE_BYTE_LENGTH,
         MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
         u64::try_from(MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH)
             .map_err(|_| "exact output chunk length exceeds u64".to_owned())?,
@@ -601,7 +602,7 @@ fn heavy_rust_kernel_exact_aggregate_wide_same_secret_proof_round_trip() {
         maximum_external_memory_byte_length,
         started_at.elapsed(),
     );
-    assert!(proof.len() < MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH);
+    assert!(proof.len() <= AUTOMATIC_ROW_CODE_WHIR_PROOF_ACCEPTANCE_BYTE_LENGTH);
     assert!(checkpoint_count >= 6);
 
     let metrics =

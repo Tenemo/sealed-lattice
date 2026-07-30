@@ -65,8 +65,12 @@ const EXACT_ROW_SELECTOR_VARIABLE_COUNT: usize =
 const EXACT_TABLE_VARIABLE_COUNT: usize = PHYSICAL_ROW_WITNESS_VARIABLE_COUNT + 1;
 const EXACT_PCS_VARIABLE_COUNT: usize =
     EXACT_TABLE_VARIABLE_COUNT + EXACT_ROW_CODE_LOG_INVERSE_RATE;
-const EXACT_QUOTIENT_PHASE_ROW_COUNT: usize = 15;
-const EXACT_OPENING_BATCH_MASK_CHUNK_COUNT: usize = 8;
+const EXACT_QUOTIENT_COMPONENT_CHUNK_COUNT: usize = 2;
+const EXACT_OPENING_BATCH_MASK_CHUNK_COUNT: usize = LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW;
+const EXACT_QUOTIENT_COMPONENT_ROW_COUNT: usize =
+    EXACT_QUOTIENT_COMPONENT_CHUNK_COUNT * PROOF_CHALLENGE_EXTENSION_DEGREE;
+const EXACT_QUOTIENT_PHASE_ROW_COUNT: usize =
+    (EXACT_QUOTIENT_COMPONENT_CHUNK_COUNT + 1) * PROOF_CHALLENGE_EXTENSION_DEGREE;
 const EXACT_BOUND_TREE_COUNT: usize = 11;
 const EXACT_INPUT_BOUND_TREE_COUNT: usize = 8;
 const EXACT_OUTPUT_BOUND_TREE_COUNT: usize = 3;
@@ -438,7 +442,7 @@ fn validate_exact_quotient_phase_plan(
     )?;
     if context.challenge_extension_degree != 5
         || context.quotient_component_count
-            != u32::try_from(LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW)
+            != u32::try_from(EXACT_QUOTIENT_COMPONENT_COUNT)
                 .map_err(|_| "exact quotient component count exceeds u32".to_owned())?
         || phase.quotient_component_count != context.quotient_component_count
         || phase.quotient_component_degree_bound_exclusive
@@ -451,7 +455,7 @@ fn validate_exact_quotient_phase_plan(
         return Err("exact construction plan has the wrong quotient geometry".to_owned());
     }
 
-    let quotient_row_count = 2 * usize::from(context.challenge_extension_degree);
+    let quotient_row_count = EXACT_QUOTIENT_COMPONENT_ROW_COUNT;
     for (row_index, row) in phase.rows.iter().enumerate() {
         if row.opening_point_ordinals != [0] {
             return Err("exact construction plan has the wrong quotient opening points".to_owned());
@@ -470,7 +474,14 @@ fn validate_exact_quotient_phase_plan(
             {
                 return Err("exact construction plan has the wrong quotient row".to_owned());
             }
-            for (component_ordinal, chunk) in row.logical_polynomial_chunks.iter().enumerate() {
+            for (row_position, chunk) in row.logical_polynomial_chunks.iter().enumerate() {
+                if row_position >= EXACT_QUOTIENT_COMPONENT_COUNT {
+                    if chunk.is_some() {
+                        return Err("exact quotient row populates a non-component lane".to_owned());
+                    }
+                    continue;
+                }
+                let component_ordinal = row_position;
                 let expected_component_ordinal = u32::try_from(component_ordinal)
                     .map_err(|_| "exact quotient component ordinal exceeds u32".to_owned())?;
                 if !matches!(
@@ -626,7 +637,7 @@ fn validate_exact_bound_construction_plan(
             (0_u32..8).collect::<Vec<_>>(),
             18_432_u64,
             18_431_u64,
-            vec![0, 0, 0, 0],
+            vec![0, 0, 0, 0, 0, 0, 0],
             EXACT_INPUT_BOUND_DEGREE_SUFFIX_PREFIXES
                 .iter()
                 .map(|prefix| prefix.to_vec())
@@ -638,7 +649,7 @@ fn validate_exact_bound_construction_plan(
             (8_u32..11).collect::<Vec<_>>(),
             16_384_u64,
             16_383_u64,
-            vec![0, 0, 0, 1],
+            vec![0, 0, 0, 0, 0, 0, 1],
             EXACT_OUTPUT_BOUND_DEGREE_SUFFIX_PREFIXES
                 .iter()
                 .map(|prefix| prefix.to_vec())
@@ -839,17 +850,22 @@ impl ExactPolynomialProtocolExtractorCertificate {
             && self.persisted_pre_challenge_source_coefficient_position_count == 34_462_440
             && self.deterministic_reversed_column_count == 12
             && self.stored_pre_challenge_column_count == 2_030
-            && self.relation_phase_row_counts == [247, 136, 15]
-            && self.relation_phase_polynomial_counts == [1_968, 1_080, 120]
+            && self.relation_phase_row_counts == [32, 15, 15]
+            && self.relation_phase_polynomial_counts == [1_968, 900, 400]
             && self.quotient_component_chunk_coordinate_count == 80
-            && self.opening_batch_mask_chunk_coordinate_count == 40
+            && self.opening_batch_mask_chunk_coordinate_count == 320
             && self.prior_vss_bound_codeword_count == EXACT_INPUT_BOUND_TREE_COUNT
             && self.direct_bound_codeword_count == EXACT_OUTPUT_BOUND_TREE_COUNT
             && self.bound_polynomial_count == EXACT_BOUND_COLUMN_COUNT
-            && self.whir_epoch_codeword_count == 5
-            && self.whir_fold_transition_count == 15
-            && self.whir_code_state_count == 20
-            && self.whir_epoch_query_counts == [387, 288, 268, 264, 263]
+            && self.whir_epoch_codeword_count == self.whir_epoch_query_counts.len()
+            && self.whir_epoch_codeword_count > 0
+            && self.whir_fold_transition_count == self.whir_epoch_codeword_count * 3
+            && self.whir_code_state_count == self.whir_epoch_codeword_count * 4
+            && self.whir_epoch_query_counts.iter().all(|count| *count > 0)
+            && self
+                .whir_epoch_query_counts
+                .windows(2)
+                .all(|pair| pair[1] <= pair[0])
             && self.opening_batch_count == 1_008
             && self.scalar_opening_count == 1_782
             && self.polynomial_basis_identity_count == 3 * LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT
@@ -913,7 +929,7 @@ impl ExactPointConstraintExtractorCertificate {
             && self.quotient_active_point_count == 1
             && self.proof_created_tree_opening_claim_count > 0
             && self.bound_tree_opening_claim_count == EXACT_BOUND_COLUMN_COUNT
-            && self.quotient_opening_claim_count == LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW
+            && self.quotient_opening_claim_count == EXACT_QUOTIENT_COMPONENT_COUNT
             && self.opening_batch_mask_claim_count == 1
             && self.proof_created_tree_opening_claim_count
                 + self.bound_tree_opening_claim_count
@@ -987,7 +1003,11 @@ fn checked_trace_phase_polynomial_mapping(
     if observed_columns != expected_columns {
         return Err("exact trace phase omits or invents a relation polynomial".to_owned());
     }
-    Ok(observed_columns.len())
+    Ok(phase
+        .rows
+        .iter()
+        .flat_map(|row| row.logical_polynomial_chunks.iter().flatten())
+        .count())
 }
 
 #[cfg(test)]
@@ -1017,18 +1037,29 @@ fn checked_quotient_phase_polynomial_mapping(
             }
         }
     }
-    let expected_quotient_coordinates = (0_u32..8)
+    let expected_quotient_coordinates = (0..EXACT_QUOTIENT_COMPONENT_COUNT)
         .flat_map(|component_ordinal| {
-            (0_u32..2).flat_map(move |chunk_ordinal| {
-                (0_u16..5).map(move |extension_coordinate| {
-                    (component_ordinal, chunk_ordinal, extension_coordinate)
+            (0..EXACT_QUOTIENT_COMPONENT_CHUNK_COUNT).flat_map(move |chunk_ordinal| {
+                (0..PROOF_CHALLENGE_EXTENSION_DEGREE).map(move |extension_coordinate| {
+                    (
+                        u32::try_from(component_ordinal).expect("exact component ordinal fits u32"),
+                        u32::try_from(chunk_ordinal).expect("exact chunk ordinal fits u32"),
+                        u16::try_from(extension_coordinate)
+                            .expect("exact extension coordinate fits u16"),
+                    )
                 })
             })
         })
         .collect::<BTreeSet<_>>();
-    let expected_mask_coordinates = (0_u32..8)
+    let expected_mask_coordinates = (0..EXACT_OPENING_BATCH_MASK_CHUNK_COUNT)
         .flat_map(|chunk_ordinal| {
-            (0_u16..5).map(move |extension_coordinate| (chunk_ordinal, extension_coordinate))
+            (0..PROOF_CHALLENGE_EXTENSION_DEGREE).map(move |extension_coordinate| {
+                (
+                    u32::try_from(chunk_ordinal).expect("exact mask chunk ordinal fits u32"),
+                    u16::try_from(extension_coordinate)
+                        .expect("exact extension coordinate fits u16"),
+                )
+            })
         })
         .collect::<BTreeSet<_>>();
     if quotient_coordinates != expected_quotient_coordinates
@@ -2855,12 +2886,13 @@ pub(super) fn derive_exact_point_row_weights(
                     opening_point_ordinal,
                 },
             )?;
-            for extension_coordinate in 0..5 {
+            for extension_coordinate in 0..PROOF_CHALLENGE_EXTENSION_DEGREE {
                 let basis = challenge_extension_basis(extension_coordinate);
                 quotient[extension_coordinate] = quotient_component_weight * basis;
-                quotient[5 + extension_coordinate] =
+                quotient[PROOF_CHALLENGE_EXTENSION_DEGREE + extension_coordinate] =
                     quotient_component_weight * quotient_chunk_power * basis;
-                quotient[10 + extension_coordinate] = opening_batch_mask_weight * basis;
+                quotient[EXACT_QUOTIENT_COMPONENT_ROW_COUNT + extension_coordinate] =
+                    opening_batch_mask_weight * basis;
             }
         }
         weights.push(ExactPointRowWeights {
@@ -3025,7 +3057,7 @@ fn expected_quotient_phase_out_of_domain_value(
     let quotient_component_weight = row_weights[0];
     for (component_ordinal, selector_weight) in selector_weights
         .iter()
-        .take(EXACT_OPENING_BATCH_MASK_CHUNK_COUNT)
+        .take(EXACT_QUOTIENT_COMPONENT_COUNT)
         .enumerate()
     {
         let source_ordinal = u32::try_from(component_ordinal)
@@ -3041,7 +3073,7 @@ fn expected_quotient_phase_out_of_domain_value(
             .ok_or_else(|| format!("quotient component {source_ordinal} has no opening"))?;
         expected += quotient_component_weight * *selector_weight * challenge_from_production(value);
     }
-    let opening_batch_mask_weight = row_weights[10];
+    let opening_batch_mask_weight = row_weights[EXACT_QUOTIENT_COMPONENT_ROW_COUNT];
     for (chunk_ordinal, chunk_evaluation) in opening_batch_mask_chunk_evaluations.iter().enumerate()
     {
         expected += opening_batch_mask_weight
@@ -4815,7 +4847,7 @@ pub(in crate::bgv::proof_suite) fn canonical_row_code_whir_aggregate_opening_sec
     .map_err(|error| format!("derive selected aggregate-wide configuration: {error:?}"))?;
     let hiding_census = super::super::hiding_whir::SelectedHidingMaskCensus::derive(&configuration);
     Ok(
-        super::super::hiding_whir::static_accounting::fixed_subspace_pad_opening_byte_ledger(
+        super::super::hiding_whir::static_accounting::aggregate_wide_pad_opening_byte_ledger(
             &configuration,
             &hiding_census,
             opening_evaluation_count,

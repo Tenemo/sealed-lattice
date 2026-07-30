@@ -88,7 +88,7 @@ impl CompactAggregateWideQueryBatch {
 
 pub(super) struct CompactAggregateWideRoundProof {
     pub(super) commitment: AggregateWideCommitment,
-    pub(super) switch_mask_offset: ChallengeField,
+    pub(super) switch_mask_delta: Vec<ChallengeField>,
     pub(super) proof_of_work_witness: ChallengeField,
     pub(super) queries: CompactAggregateWideQueryBatch,
 }
@@ -188,7 +188,7 @@ impl CompactAggregateWideOpeningProof {
             .rounds
             .iter()
             .map(|round| {
-                core::mem::size_of_val(&round.switch_mask_offset)
+                round.switch_mask_delta.capacity() * core::mem::size_of::<ChallengeField>()
                     + round.queries.resident_byte_length()
             })
             .sum::<usize>();
@@ -297,8 +297,11 @@ pub(super) fn encode_aggregate_wide_opening(
     for (round_ordinal, round) in proof.rounds.iter().enumerate() {
         let round_configuration = &configuration.round_parameters[round_ordinal];
         writer.write_commitment(&round.commitment)?;
-        pad_layout.switch_mask_range(round_ordinal)?;
-        writer.write_field(round.switch_mask_offset)?;
+        let switch_mask_range = pad_layout.switch_mask_range(round_ordinal)?;
+        if round.switch_mask_delta.len() != switch_mask_range.len() {
+            return Err("aggregate-wide switch-mask delta has the wrong length".to_owned());
+        }
+        writer.write_fields(&round.switch_mask_delta)?;
         encode_optional_witness(
             &mut writer,
             round_configuration.pow_bits,
@@ -386,8 +389,8 @@ pub(super) fn decode_compact_aggregate_wide_opening(
     for round_ordinal in 0..configuration.n_rounds() {
         let round_configuration = &configuration.round_parameters[round_ordinal];
         let commitment = reader.read_commitment()?;
-        pad_layout.switch_mask_range(round_ordinal)?;
-        let switch_mask_offset = reader.read_field()?;
+        let switch_mask_range = pad_layout.switch_mask_range(round_ordinal)?;
+        let switch_mask_delta = reader.read_fields(switch_mask_range.len())?;
         let proof_of_work_witness =
             decode_optional_witness(&mut reader, round_configuration.pow_bits)?;
         let folding_factor = configuration.round_folding_factor(round_ordinal);
@@ -410,7 +413,7 @@ pub(super) fn decode_compact_aggregate_wide_opening(
         )?);
         rounds.push(CompactAggregateWideRoundProof {
             commitment,
-            switch_mask_offset,
+            switch_mask_delta,
             proof_of_work_witness,
             queries,
         });
@@ -776,7 +779,7 @@ fn pad_codeword_domain_size(
     pad_layout: &AggregateWidePadLayout,
 ) -> usize {
     (pad_layout.message_length() + configuration.mask_queries).next_power_of_two()
-        << super::aggregate_wide_hiding::FIXED_SUBSPACE_PAD_LOG_INVERSE_RATE
+        << super::aggregate_wide_hiding::AGGREGATE_WIDE_PAD_LOG_INVERSE_RATE
 }
 
 fn encode_optional_witness(

@@ -62,7 +62,7 @@ const PUBLIC_ONLY_PROOF_FAMILIES: [u16; 3] =
 
 mod domain;
 #[cfg(test)]
-mod generator_hybrid;
+pub(super) mod generator_hybrid;
 mod material;
 mod proof_coins;
 mod stream;
