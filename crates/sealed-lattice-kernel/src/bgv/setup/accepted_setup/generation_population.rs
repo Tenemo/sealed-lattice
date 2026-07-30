@@ -221,6 +221,8 @@ pub(in crate::bgv) fn populate_browser_owned_setup_generation_authority(
         bindings.setup_attempt_identifier,
         ring_degree,
     )?;
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    println!("setup generation phase: construct anchor openings");
     let (anchor_commitment_roots, anchor_openings) = construct_anchor_openings(
         selected_suite,
         &action_private_randomness,
@@ -229,12 +231,16 @@ pub(in crate::bgv) fn populate_browser_owned_setup_generation_authority(
         usize::try_from(relation_input.evaluation_domain_size)
             .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
     )?;
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    println!("setup generation phase: construct VSS material");
     let vss_material = construct_vss_material(
         selected_suite,
         &action_private_randomness,
         &bindings,
         &common_secret_coefficients,
     )?;
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    println!("setup generation phase: construct public-key share");
     let public_key_share = construct_public_key_share(
         selected_suite,
         &action_private_randomness,
@@ -243,6 +249,8 @@ pub(in crate::bgv) fn populate_browser_owned_setup_generation_authority(
         usize::try_from(relation_input.evaluation_domain_size)
             .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
     )?;
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    println!("setup generation phase: construct relinearization material");
     let relinearization_material = construct_relinearization_material(
         selected_suite,
         &action_private_randomness,
@@ -251,6 +259,8 @@ pub(in crate::bgv) fn populate_browser_owned_setup_generation_authority(
         bindings.public_setup_seed,
         &common_secret_coefficients,
     )?;
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    println!("setup generation phase: construct Galois material");
     let ordered_galois_entries = construct_galois_entries(
         selected_suite,
         &action_private_randomness,
@@ -259,6 +269,8 @@ pub(in crate::bgv) fn populate_browser_owned_setup_generation_authority(
     )?;
     let [galois_batch_schedule_position] = selected_galois_key_share_batch_schedule();
 
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    println!("setup generation phase: retain browser-owned authority");
     retain_browser_owned_setup_generation_authority(SetupGenerationAuthorityInput {
         suite_identifier: bindings.suite_identifier,
         manifest_hash: bindings.manifest_hash,

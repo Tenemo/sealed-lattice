@@ -1311,9 +1311,15 @@ fn release_production_same_secret_authority(
 #[cfg(all(test, not(target_arch = "wasm32")))]
 fn production_same_secret_sources() -> Result<ProductionSameSecretEvidenceSources, String> {
     let (relation_plan, _, _) = production_same_secret_relation()?;
+    let authority_population_started_at = std::time::Instant::now();
+    println!("exact same-secret phase: populate browser-owned setup authority");
     let authority =
         populate_exact_same_secret_evidence_authority(EXACT_SAME_SECRET_EVIDENCE_REVISION)
             .map_err(|error| format!("populate production setup authority: {error:?}"))?;
+    println!(
+        "exact same-secret phase complete: browser-owned setup authority ({:?})",
+        authority_population_started_at.elapsed(),
+    );
     let sources = (|| {
         let preparation_source = resolve_setup_generation_key_relation_preparation_source(
             &authority.authority_handle,
@@ -1656,7 +1662,12 @@ mod native_checkpoint {
 
     impl ExactPolynomialStore {
         pub(super) fn open() -> Result<Self, String> {
-            let root = PathBuf::from("temp")
+            let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .and_then(Path::parent)
+                .ok_or_else(|| "resolve exact checkpoint workspace root".to_owned())?;
+            let root = workspace_root
+                .join("temp")
                 .join("test-checkpoints")
                 .join("exact-same-secret-row-code-whir-v1");
             fs::create_dir_all(&root)
@@ -3526,12 +3537,23 @@ mod tests {
             authority_handle,
         } = production_same_secret_sources().expect("production source fixture");
         let store = ExactPolynomialStore::open().expect("open exact polynomial checkpoint");
-        assert_eq!(sources.relation_plan_variant.ordered_columns().len(), 3_110);
-        assert_eq!(sources.relation_plan_variant.constraint_count(), 4_406);
+        assert_eq!(sources.relation_plan_variant.ordered_columns().len(), 2_930);
+        assert_eq!(sources.relation_plan_variant.constraint_count(), 4_046);
         assert_eq!(sources.relation_plan_variant.trace_domain_size(), 16_384);
+        let polynomial_commitment_variable_count = sources
+            .relation_plan
+            .row_code_whir_construction_plan()
+            .selected_parameters()
+            .polynomial_commitment_variable_count;
+        let expected_evaluation_domain_size = 1_u64
+            .checked_shl(
+                u32::try_from(polynomial_commitment_variable_count)
+                    .expect("the PCS variable count fits u32"),
+            )
+            .expect("the PCS evaluation domain size fits u64");
         assert_eq!(
             sources.relation_plan_variant.evaluation_domain_size(),
-            2_097_152
+            expected_evaluation_domain_size
         );
         assert_eq!(sources.relation_trees.len(), 13);
         assert!(!sources.canonical_application_statement_bytes.is_empty());
@@ -3557,6 +3579,7 @@ mod tests {
         let mut maximum_coefficient_count = 0_usize;
         let source_replay_identity_digest;
         let catalog_digest;
+        println!("exact same-secret phase: derive authenticated source polynomials");
         {
             let mut recording_private_coins = RecordingCommonProofPrivateCoinSource::new(
                 &mut sources.private_coins,
@@ -3597,6 +3620,12 @@ mod tests {
                             source_polynomial_digest(column_ordinal, &polynomial)
                                 .expect("hash source polynomial"),
                         );
+                        if polynomial_digests.len().is_multiple_of(128) {
+                            println!(
+                                "exact same-secret source progress: {} polynomials",
+                                polynomial_digests.len(),
+                            );
+                        }
                         store
                             .write(column_ordinal, &polynomial)
                             .expect("checkpoint production source polynomial");

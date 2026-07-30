@@ -2409,8 +2409,8 @@ mod tests {
         let certificate = checked_relation_compiler_interpreter_semantics(variant, &context)
             .expect("the independent semantic oracle matches every emitted program");
         assert!(certificate.is_complete());
-        assert_eq!(certificate.constraint_count(), 4_406);
-        assert_eq!(certificate.compared_program_evaluation_count(), 52_872);
+        assert_eq!(certificate.constraint_count(), 4_046);
+        assert_eq!(certificate.compared_program_evaluation_count(), 48_552);
         assert_eq!(
             checked_relation_compiler_interpreter_semantics_with_fault(
                 variant,

@@ -579,9 +579,9 @@ pub(super) mod tests {
         ),
         (
             SameSecretSemanticCategory::FullRingProductIdentities,
-            720,
-            1_440,
-            1_440,
+            540,
+            1_080,
+            1_080,
         ),
         (
             SameSecretSemanticCategory::ComponentAccumulatorIdentities,
@@ -1119,7 +1119,7 @@ pub(super) mod tests {
         constraint_shape_index: &SameSecretConstraintShapeIndex,
         context: &RelationPlanCheckContext,
         ownership: &mut SameSecretSemanticOwnership,
-    ) {
+    ) -> (usize, usize, usize) {
         use super::super::integer_lift::{
             integer_lift_component_constraint_programs,
             integer_lift_full_ring_product_constraint_programs, integer_lift_point_zeroifier,
@@ -1158,6 +1158,9 @@ pub(super) mod tests {
         )
         .expect("integer-lift except-last zeroifier");
 
+        let mut full_ring_product_count = 0_usize;
+        let mut generated_full_ring_program_count = 0_usize;
+        let mut distinct_full_ring_program_count = 0_usize;
         for batch in variant.ordered_integer_lift_batches() {
             assert!(
                 batch
@@ -1184,22 +1187,38 @@ pub(super) mod tests {
                     ),
                 );
             }
+            let mut distinct_full_ring_program_shapes = BTreeSet::new();
             for component in &batch.ordered_components {
                 assert!(component.ordered_convolution_products.is_empty());
                 for product in &component.ordered_full_ring_negacyclic_products {
-                    claim_integer_lift_constraint_programs(
-                        constraint_shape_index,
-                        ownership,
-                        SameSecretSemanticCategory::FullRingProductIdentities,
-                        integer_lift_full_ring_product_constraint_programs(
-                            product,
-                            &theta_expression,
-                            trace_domain_size,
-                            point_last.clone(),
-                            except_last.clone(),
-                        )
-                        .expect("full-ring product constraint programs"),
-                    );
+                    full_ring_product_count += 1;
+                    let programs = integer_lift_full_ring_product_constraint_programs(
+                        product,
+                        &theta_expression,
+                        trace_domain_size,
+                        point_last.clone(),
+                        except_last.clone(),
+                    )
+                    .expect("full-ring product constraint programs");
+                    generated_full_ring_program_count += programs.len();
+                    for program in programs {
+                        let shape = same_secret_constraint_shape(
+                            &program.numerator_postfix_expression,
+                            &program.zeroifier_postfix_expression,
+                            false,
+                        );
+                        if distinct_full_ring_program_shapes.insert(shape) {
+                            distinct_full_ring_program_count += 1;
+                            claim_matching_constraint(
+                                constraint_shape_index,
+                                ownership,
+                                SameSecretSemanticCategory::FullRingProductIdentities,
+                                &program.numerator_postfix_expression,
+                                &program.zeroifier_postfix_expression,
+                                false,
+                            );
+                        }
+                    }
                 }
                 claim_integer_lift_constraint_programs(
                     constraint_shape_index,
@@ -1218,6 +1237,11 @@ pub(super) mod tests {
                 );
             }
         }
+        (
+            full_ring_product_count,
+            generated_full_ring_program_count,
+            distinct_full_ring_program_count,
+        )
     }
 
     fn claim_same_secret_opening_claims(
@@ -1504,11 +1528,16 @@ pub(super) mod tests {
             &compiled.source_layout,
             &mut ownership,
         );
-        claim_same_secret_integer_lift_constraints(
+        let full_ring_accounting = claim_same_secret_integer_lift_constraints(
             variant,
             &constraint_shape_index,
             &context,
             &mut ownership,
+        );
+        assert_eq!(
+            full_ring_accounting,
+            (180, 1_440, 1_080),
+            "shared full-ring witnesses retain every product while compiling each identical constraint once"
         );
         claim_same_secret_opening_claims(variant, &mut ownership);
 
