@@ -52,15 +52,17 @@ Works today:
   removed, and the successor has production-owned masked proof assembly,
   incremental canonical verification, bounded-storage primitives, and focused
   development tests.
+- The live 64-way same-secret geometry and full-coordinate, inverse-rate-four
+  aggregate-wide mask are bound to the regenerated construction certificate.
+  Production-derived static accounting places the same-secret proof at
+  `5,309,850` bytes. The complete evaluator-key proof is `28,749,492` bytes: it
+  requires engineering review against the nominal target but remains below the
+  absolute proof bound.
 
 Not yet:
 
-- The successor is not cryptographically complete. Its current 64-way
-  same-secret geometry does not match the pinned theorem certificate, and its
-  current aggregate-wide pad uses a code rate whose exact agreement bound is
-  too weak. The safer rate-one-quarter masking repair, exact
-  transcript-to-theorem correspondence, and construction-level leakage proof
-  remain unfinished.
+- The generic construction certificate does not establish family simulation,
+  malicious-verifier zero knowledge, or quantum-random-oracle zero knowledge.
 - No full-width exact proof has completed on the current implementation, and no
   release WebAssembly proof has been generated and freshly verified across the
   desktop browsers. Recent guarded native attempts ended before proof emission,

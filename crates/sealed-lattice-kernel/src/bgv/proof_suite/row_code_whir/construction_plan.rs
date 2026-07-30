@@ -4715,9 +4715,11 @@ fn selected_bound_low_degree_mode(
         && root_use == BoundTreeRootUse::Input
     {
         RowCodeWhirBoundLowDegreeMode::PriorVssProofRequired
-    } else if application_statement_schema_identifier
-        == ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
-        && construction_kind == BoundTreeConstructionKind::SetupPolynomial
+    } else if matches!(
+        application_statement_schema_identifier,
+        ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+            | ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+    ) && construction_kind == BoundTreeConstructionKind::SetupPolynomial
         && root_use == BoundTreeRootUse::Input
     {
         RowCodeWhirBoundLowDegreeMode::PriorSetupPolynomialProofRequired

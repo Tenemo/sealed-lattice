@@ -12,12 +12,21 @@ use crate::bgv::proof_suite::row_code_whir::{
     PreparedExactSameSecretVerification, PreparedRowCodeWhirVerification,
     RowCodeWhirFinalProofVerification, RowCodeWhirIncrementalVerification,
     VerifiedSameSecretLowDegreePrerequisite, exact_same_secret_verification_runtime_limits,
+    prepare_evaluator_source_bound_row_code_whir_verification,
     prepare_exact_same_secret_verification, prepare_row_code_whir_verification,
     prepare_setup_polynomial_bound_row_code_whir_verification,
 };
 use crate::bgv::{
-    proof_suite::VerifiedRowCodeWhirProofFacts, setup::VerifiedSetupPolynomialLowDegreePrerequisite,
+    proof_suite::VerifiedRowCodeWhirProofFacts,
+    setup::{
+        VerifiedEvaluatorSourceLowDegreePrerequisite, VerifiedSetupPolynomialLowDegreePrerequisite,
+    },
 };
+
+enum ConsumedSetupPolynomialBoundPrerequisite {
+    PublicKeyShare(VerifiedSetupPolynomialLowDegreePrerequisite),
+    EvaluatorSources(VerifiedEvaluatorSourceLowDegreePrerequisite),
+}
 
 /// One consumed set of positively verified inputs. This value is process local
 /// and non-serializable. It can construct the persistent verifier, but it has
@@ -40,12 +49,23 @@ impl ConsumedCommonProofVerificationInputs {
         self,
         prerequisite: VerifiedSetupPolynomialLowDegreePrerequisite,
     ) -> Result<PreparedCommonProofVerification, CommonProofRuntimeError> {
-        self.prepare_row_code_whir(Some(prerequisite))
+        self.prepare_row_code_whir(Some(
+            ConsumedSetupPolynomialBoundPrerequisite::PublicKeyShare(prerequisite),
+        ))
+    }
+
+    pub(in crate::bgv) fn prepare_with_evaluator_source_prerequisite(
+        self,
+        prerequisite: VerifiedEvaluatorSourceLowDegreePrerequisite,
+    ) -> Result<PreparedCommonProofVerification, CommonProofRuntimeError> {
+        self.prepare_row_code_whir(Some(
+            ConsumedSetupPolynomialBoundPrerequisite::EvaluatorSources(prerequisite),
+        ))
     }
 
     fn prepare_row_code_whir(
         self,
-        setup_polynomial_prerequisite: Option<VerifiedSetupPolynomialLowDegreePrerequisite>,
+        setup_polynomial_prerequisite: Option<ConsumedSetupPolynomialBoundPrerequisite>,
     ) -> Result<PreparedCommonProofVerification, CommonProofRuntimeError> {
         let Self {
             statement_source,
@@ -71,18 +91,34 @@ impl ConsumedCommonProofVerificationInputs {
         }
         let proof_application_binding = exact_source.proof_application_binding();
         let row_code_whir_verifier = match setup_polynomial_prerequisite {
-            Some(prerequisite) => prepare_setup_polynomial_bound_row_code_whir_verification(
-                &prerequisite,
-                statement_source.protocol_version(),
-                proof_application_binding.application_slot(),
-                exact_source.canonical_application_statement_bytes(),
-                proof_application_binding.proof_header_hash(),
-                statement_source.proof_stream_descriptor().total_byte_length,
-                relation_plan,
-                statement_owned_trees,
-                evaluator_auxiliary_roots,
-                verified_column_evaluator,
-            ),
+            Some(ConsumedSetupPolynomialBoundPrerequisite::PublicKeyShare(prerequisite)) => {
+                prepare_setup_polynomial_bound_row_code_whir_verification(
+                    &prerequisite,
+                    statement_source.protocol_version(),
+                    proof_application_binding.application_slot(),
+                    exact_source.canonical_application_statement_bytes(),
+                    proof_application_binding.proof_header_hash(),
+                    statement_source.proof_stream_descriptor().total_byte_length,
+                    relation_plan,
+                    statement_owned_trees,
+                    evaluator_auxiliary_roots,
+                    verified_column_evaluator,
+                )
+            }
+            Some(ConsumedSetupPolynomialBoundPrerequisite::EvaluatorSources(prerequisite)) => {
+                prepare_evaluator_source_bound_row_code_whir_verification(
+                    &prerequisite,
+                    statement_source.protocol_version(),
+                    proof_application_binding.application_slot(),
+                    exact_source.canonical_application_statement_bytes(),
+                    proof_application_binding.proof_header_hash(),
+                    statement_source.proof_stream_descriptor().total_byte_length,
+                    relation_plan,
+                    statement_owned_trees,
+                    evaluator_auxiliary_roots,
+                    verified_column_evaluator,
+                )
+            }
             None => prepare_row_code_whir_verification(
                 statement_source.protocol_version(),
                 proof_application_binding.application_slot(),

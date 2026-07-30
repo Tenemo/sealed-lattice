@@ -3,7 +3,7 @@ use crate::{
         SelectedEvaluatorEntryPosition, SelectedEvaluatorStoreSource,
         SelectedEvaluatorStoreSourceCatalog, VerifiedGaloisSourceMaterialBatch,
         VerifiedKeySwitchComponentMaterial, VerifiedRelinearizationAggregateMaterial,
-        VerifiedRelinearizationSourceMaterial,
+        VerifiedRelinearizationSourceMaterial, selected_evaluator_entry_positions,
     },
     foundation::{CanonicalStreamReadbackVerifier, FOUNDATION_PROFILE, Hash512, RefusalReason},
 };
@@ -46,6 +46,112 @@ pub(crate) struct VerifiedAcceptedSetupEvaluatorSourceCatalog {
     roster_hash: [u8; Hash512::BYTE_LENGTH],
     setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
     ordered_participants: Box<[VerifiedAcceptedSetupParticipantEvaluatorSource]>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::bgv) struct VerifiedEvaluatorSourceLowDegreeTreeBinding {
+    evaluator_position: SelectedEvaluatorEntryPosition,
+    roster_position: u16,
+    expected_root: [u8; Hash512::BYTE_LENGTH],
+    public_polynomial_context_hash: [u8; Hash512::BYTE_LENGTH],
+}
+
+impl VerifiedEvaluatorSourceLowDegreeTreeBinding {
+    pub(in crate::bgv) const fn evaluator_position(self) -> SelectedEvaluatorEntryPosition {
+        self.evaluator_position
+    }
+
+    pub(in crate::bgv) const fn roster_position(self) -> u16 {
+        self.roster_position
+    }
+
+    pub(in crate::bgv) const fn expected_root(self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.expected_root
+    }
+
+    pub(in crate::bgv) const fn public_polynomial_context_hash(self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.public_polynomial_context_hash
+    }
+}
+
+/// Process-local authority for reusing the low-degree conclusions of the
+/// exact participant relinearization and Galois proofs consumed into one
+/// accepted evaluator source catalog. There is no decoder or constructor from
+/// detached roots.
+pub(in crate::bgv) struct VerifiedEvaluatorSourceLowDegreePrerequisite {
+    protocol_version: u16,
+    suite_identifier: [u8; Hash512::BYTE_LENGTH],
+    ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
+    action_context_hash: [u8; Hash512::BYTE_LENGTH],
+    setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
+    ordered_source_trees: Box<[VerifiedEvaluatorSourceLowDegreeTreeBinding]>,
+}
+
+impl VerifiedEvaluatorSourceLowDegreePrerequisite {
+    #[cfg(test)]
+    pub(in crate::bgv) fn for_test(
+        protocol_version: u16,
+        suite_identifier: [u8; Hash512::BYTE_LENGTH],
+        ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
+        action_context_hash: [u8; Hash512::BYTE_LENGTH],
+        setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
+        ordered_source_trees: Vec<(
+            SelectedEvaluatorEntryPosition,
+            u16,
+            [u8; Hash512::BYTE_LENGTH],
+            [u8; Hash512::BYTE_LENGTH],
+        )>,
+    ) -> Self {
+        Self {
+            protocol_version,
+            suite_identifier,
+            ceremony_context_hash,
+            action_context_hash,
+            setup_proof_context_hash,
+            ordered_source_trees: ordered_source_trees
+                .into_iter()
+                .map(
+                    |(
+                        evaluator_position,
+                        roster_position,
+                        expected_root,
+                        public_polynomial_context_hash,
+                    )| VerifiedEvaluatorSourceLowDegreeTreeBinding {
+                        evaluator_position,
+                        roster_position,
+                        expected_root,
+                        public_polynomial_context_hash,
+                    },
+                )
+                .collect(),
+        }
+    }
+
+    pub(in crate::bgv) const fn protocol_version(&self) -> u16 {
+        self.protocol_version
+    }
+
+    pub(in crate::bgv) const fn suite_identifier(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.suite_identifier
+    }
+
+    pub(in crate::bgv) const fn ceremony_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.ceremony_context_hash
+    }
+
+    pub(in crate::bgv) const fn action_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.action_context_hash
+    }
+
+    pub(in crate::bgv) const fn setup_proof_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.setup_proof_context_hash
+    }
+
+    pub(in crate::bgv) fn ordered_source_trees(
+        &self,
+    ) -> &[VerifiedEvaluatorSourceLowDegreeTreeBinding] {
+        &self.ordered_source_trees
+    }
 }
 
 /// Allocation-complete borrowed validation for one evaluator source catalog.
@@ -204,6 +310,50 @@ impl VerifiedAcceptedSetupEvaluatorSourceCatalog {
 
     pub(crate) const fn setup_proof_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
         self.setup_proof_context_hash
+    }
+
+    pub(in crate::bgv) fn evaluator_source_low_degree_prerequisite(
+        &self,
+    ) -> Result<VerifiedEvaluatorSourceLowDegreePrerequisite, RefusalReason> {
+        let positions = selected_evaluator_entry_positions(FOUNDATION_PROFILE.option_count)
+            .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+        let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
+        let expected_tree_count = positions
+            .len()
+            .checked_mul(participant_count)
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        let mut ordered_source_trees = Vec::new();
+        ordered_source_trees
+            .try_reserve_exact(expected_tree_count)
+            .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+        for evaluator_position in positions {
+            for roster_position in 0..FOUNDATION_PROFILE.participant_count {
+                ordered_source_trees.push(VerifiedEvaluatorSourceLowDegreeTreeBinding {
+                    evaluator_position,
+                    roster_position,
+                    expected_root: self
+                        .component_root(roster_position, evaluator_position)
+                        .ok_or(RefusalReason::MissingPrerequisite)?,
+                    public_polynomial_context_hash: self
+                        .component_public_polynomial_context_hash(
+                            roster_position,
+                            evaluator_position,
+                        )
+                        .ok_or(RefusalReason::MissingPrerequisite)?,
+                });
+            }
+        }
+        if ordered_source_trees.len() != expected_tree_count {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+        Ok(VerifiedEvaluatorSourceLowDegreePrerequisite {
+            protocol_version: self.protocol_version,
+            suite_identifier: self.suite_identifier,
+            ceremony_context_hash: self.ceremony_context_hash,
+            action_context_hash: self.action_context_hash,
+            setup_proof_context_hash: self.setup_proof_context_hash,
+            ordered_source_trees: ordered_source_trees.into_boxed_slice(),
+        })
     }
 
     pub(crate) fn matches_ordered_participant_identities(

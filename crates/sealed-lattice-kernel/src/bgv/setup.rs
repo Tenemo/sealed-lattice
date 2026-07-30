@@ -102,10 +102,10 @@ pub(crate) use accepted_setup::{
     SetupGenerationDealerPublicRecordSource, resolve_setup_generation_dealer_public_record_source,
 };
 pub(in crate::bgv) use accepted_setup::{
-    VerifiedAggregateThresholdShareTerminal, VerifiedPublicRandomness,
-    VerifiedSetupPolynomialLowDegreePrerequisite, VerifiedVssQualificationTerminals,
-    VerifiedVssShareLinkageTerminal, derive_recipient_input_root,
-    verify_public_randomness_board_sources,
+    VerifiedAggregateThresholdShareTerminal, VerifiedEvaluatorSourceLowDegreePrerequisite,
+    VerifiedPublicRandomness, VerifiedSetupPolynomialLowDegreePrerequisite,
+    VerifiedVssQualificationTerminals, VerifiedVssShareLinkageTerminal,
+    derive_recipient_input_root, verify_public_randomness_board_sources,
 };
 #[cfg(test)]
 pub(crate) use commitment::LatticeAnchorCommitment;

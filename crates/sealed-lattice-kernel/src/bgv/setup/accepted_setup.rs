@@ -45,7 +45,9 @@ pub(crate) use self::collective_and_relinearization_verification_population::{
     retain_relinearization_round_one_verification_terminal_source,
     retain_relinearization_round_two_verification_terminal_source,
 };
-pub(in crate::bgv) use self::evaluator_source::VerifiedAcceptedSetupEvaluatorSourceCatalog;
+pub(in crate::bgv) use self::evaluator_source::{
+    VerifiedAcceptedSetupEvaluatorSourceCatalog, VerifiedEvaluatorSourceLowDegreePrerequisite,
+};
 #[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) use self::generation_authority::PreparedExactSameSecretGenerationSources;
 pub(in crate::bgv) use self::generation_authority::{

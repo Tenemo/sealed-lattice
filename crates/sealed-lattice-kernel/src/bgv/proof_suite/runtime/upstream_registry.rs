@@ -1,7 +1,8 @@
 use super::super::RelationTreeDescriptor;
 use super::super::row_code_whir::{
     VerifiedSameSecretLowDegreePrerequisite,
-    exact_same_secret_verification_resident_memory_accounting, prepare_row_code_whir_verification,
+    exact_same_secret_verification_resident_memory_accounting,
+    prepare_evaluator_source_bound_row_code_whir_verification, prepare_row_code_whir_verification,
     prepare_setup_polynomial_bound_row_code_whir_verification,
 };
 use super::{
@@ -20,7 +21,15 @@ use super::{
     require_common_proof_registry_entry_capacity, take_nonrepeating_handle,
     verified_application_statement_hash,
 };
-use crate::bgv::setup::VerifiedSetupPolynomialLowDegreePrerequisite;
+use crate::bgv::setup::{
+    VerifiedEvaluatorSourceLowDegreePrerequisite, VerifiedSetupPolynomialLowDegreePrerequisite,
+};
+
+#[derive(Clone, Copy)]
+enum BorrowedSetupPolynomialBoundPrerequisite<'prerequisite> {
+    PublicKeyShare(&'prerequisite VerifiedSetupPolynomialLowDegreePrerequisite),
+    EvaluatorSources(&'prerequisite VerifiedEvaluatorSourceLowDegreePrerequisite),
+}
 fn checked_verification_operation_memory_add(
     left: u64,
     right: u64,
@@ -53,24 +62,42 @@ fn prepare_row_code_whir_validation(
     statement_source: &VerifiedCommonProofStatementSource,
     statement_trees: &[VerifiedStatementOwnedTree],
     auxiliary_roots: &[VerifiedEvaluatorAuxiliaryRoot],
-    setup_polynomial_prerequisite: Option<&VerifiedSetupPolynomialLowDegreePrerequisite>,
+    setup_polynomial_prerequisite: Option<BorrowedSetupPolynomialBoundPrerequisite<'_>>,
 ) -> Result<super::super::row_code_whir::PreparedRowCodeWhirVerification, CommonProofRuntimeError> {
     let proof_application_binding = statement_source.proof_application_binding();
     match setup_polynomial_prerequisite {
-        Some(prerequisite) => prepare_setup_polynomial_bound_row_code_whir_verification(
-            prerequisite,
-            statement_source.protocol_version,
-            proof_application_binding.application_slot(),
-            statement_source.canonical_application_statement_bytes(),
-            proof_application_binding.proof_header_hash(),
-            proof_application_binding
-                .proof_stream_descriptor()
-                .total_byte_length,
-            &statement_source.relation_plan,
-            statement_trees.to_vec(),
-            auxiliary_roots.to_vec(),
-            Box::new(RefusingVerifiedColumnEvaluator),
-        ),
+        Some(BorrowedSetupPolynomialBoundPrerequisite::PublicKeyShare(prerequisite)) => {
+            prepare_setup_polynomial_bound_row_code_whir_verification(
+                prerequisite,
+                statement_source.protocol_version,
+                proof_application_binding.application_slot(),
+                statement_source.canonical_application_statement_bytes(),
+                proof_application_binding.proof_header_hash(),
+                proof_application_binding
+                    .proof_stream_descriptor()
+                    .total_byte_length,
+                &statement_source.relation_plan,
+                statement_trees.to_vec(),
+                auxiliary_roots.to_vec(),
+                Box::new(RefusingVerifiedColumnEvaluator),
+            )
+        }
+        Some(BorrowedSetupPolynomialBoundPrerequisite::EvaluatorSources(prerequisite)) => {
+            prepare_evaluator_source_bound_row_code_whir_verification(
+                prerequisite,
+                statement_source.protocol_version,
+                proof_application_binding.application_slot(),
+                statement_source.canonical_application_statement_bytes(),
+                proof_application_binding.proof_header_hash(),
+                proof_application_binding
+                    .proof_stream_descriptor()
+                    .total_byte_length,
+                &statement_source.relation_plan,
+                statement_trees.to_vec(),
+                auxiliary_roots.to_vec(),
+                Box::new(RefusingVerifiedColumnEvaluator),
+            )
+        }
         None => prepare_row_code_whir_verification(
             statement_source.protocol_version,
             proof_application_binding.application_slot(),
@@ -595,6 +622,42 @@ impl CommonProofUpstreamInputRegistry {
         statement_trees: &[VerifiedStatementOwnedTree],
         auxiliary_roots: &[VerifiedEvaluatorAuxiliaryRoot],
     ) -> Result<(), CommonProofRuntimeError> {
+        self.preflight_statement_tree_and_auxiliary_root_family_verification_with_prerequisite(
+            suite_handle,
+            statement_source,
+            statement_trees,
+            auxiliary_roots,
+            None,
+        )
+    }
+
+    pub(in crate::bgv) fn preflight_evaluator_source_bound_family_verification_without_evaluator(
+        &self,
+        suite_handle: &CommonProofSelectedSuiteCapabilityHandle,
+        statement_source: &VerifiedCommonProofStatementSource,
+        statement_trees: &[VerifiedStatementOwnedTree],
+        auxiliary_roots: &[VerifiedEvaluatorAuxiliaryRoot],
+        prerequisite: &VerifiedEvaluatorSourceLowDegreePrerequisite,
+    ) -> Result<(), CommonProofRuntimeError> {
+        self.preflight_statement_tree_and_auxiliary_root_family_verification_with_prerequisite(
+            suite_handle,
+            statement_source,
+            statement_trees,
+            auxiliary_roots,
+            Some(BorrowedSetupPolynomialBoundPrerequisite::EvaluatorSources(
+                prerequisite,
+            )),
+        )
+    }
+
+    fn preflight_statement_tree_and_auxiliary_root_family_verification_with_prerequisite(
+        &self,
+        suite_handle: &CommonProofSelectedSuiteCapabilityHandle,
+        statement_source: &VerifiedCommonProofStatementSource,
+        statement_trees: &[VerifiedStatementOwnedTree],
+        auxiliary_roots: &[VerifiedEvaluatorAuxiliaryRoot],
+        setup_polynomial_prerequisite: Option<BorrowedSetupPolynomialBoundPrerequisite<'_>>,
+    ) -> Result<(), CommonProofRuntimeError> {
         self.preflight_statement_source_suite_binding(suite_handle, statement_source)?;
         let selected_variant = statement_source
             .relation_plan
@@ -626,7 +689,7 @@ impl CommonProofUpstreamInputRegistry {
             statement_source,
             statement_trees,
             auxiliary_roots,
-            None,
+            setup_polynomial_prerequisite,
         )?;
         let verifier_resident_byte_length = validation
             .maximum_resident_byte_length()
@@ -677,6 +740,32 @@ impl CommonProofUpstreamInputRegistry {
             verified_column_evaluator: Box::new(RefusingVerifiedColumnEvaluator),
         }
         .prepare()
+    }
+
+    pub(in crate::bgv) fn prepare_preflighted_evaluator_source_bound_family_verification_without_evaluator(
+        &self,
+        suite_handle: &CommonProofSelectedSuiteCapabilityHandle,
+        statement_source: VerifiedCommonProofStatementSource,
+        statement_trees: Vec<VerifiedStatementOwnedTree>,
+        auxiliary_roots: Vec<VerifiedEvaluatorAuxiliaryRoot>,
+        prerequisite: VerifiedEvaluatorSourceLowDegreePrerequisite,
+    ) -> super::PreparedCommonProofVerification {
+        self.preflight_evaluator_source_bound_family_verification_without_evaluator(
+            suite_handle,
+            &statement_source,
+            &statement_trees,
+            &auxiliary_roots,
+            &prerequisite,
+        )
+        .expect("preflighted evaluator-source proof inputs remain valid during commit");
+        ConsumedCommonProofVerificationInputs {
+            statement_source: CommonProofVerificationStatementSource::from_exact(statement_source),
+            statement_owned_trees: statement_trees,
+            evaluator_auxiliary_roots: auxiliary_roots,
+            verified_column_evaluator: Box::new(RefusingVerifiedColumnEvaluator),
+        }
+        .prepare_with_evaluator_source_prerequisite(prerequisite)
+        .expect("preflighted evaluator-source authority remains valid during commit")
     }
 
     /// Atomically prepares an exact-family verifier from verifier-recomputed
@@ -1012,7 +1101,8 @@ impl CommonProofUpstreamInputRegistry {
             application.statement_source.exact_source()?,
             statement_owned_trees,
             &evaluator_auxiliary_roots,
-            setup_polynomial_prerequisite,
+            setup_polynomial_prerequisite
+                .map(BorrowedSetupPolynomialBoundPrerequisite::PublicKeyShare),
         )?;
         let verifier_resident_byte_length = validation
             .maximum_resident_byte_length()

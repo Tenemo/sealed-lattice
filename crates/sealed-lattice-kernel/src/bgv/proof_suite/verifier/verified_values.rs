@@ -191,6 +191,16 @@ impl VerifiedStatementOwnedTree {
         }
     }
 
+    pub(crate) const fn public_polynomial_context_hash(&self) -> Option<[u8; 64]> {
+        match &self.tree {
+            StatementOwnedProofTreeInput::SetupPolynomial {
+                public_polynomial_context_hash,
+                ..
+            } => Some(*public_polynomial_context_hash),
+            StatementOwnedProofTreeInput::CommittedMaterial { .. } => None,
+        }
+    }
+
     #[cfg(test)]
     pub(in crate::bgv) fn with_test_expected_root(&self, expected_root: [u8; 64]) -> Self {
         let mut rebound = self.clone();
@@ -361,8 +371,8 @@ impl VerifiedStatementOwnedTree {
     }
 
     /// Resolves the complete selected `0x1218` statement-tree batch from the
-    /// positive participant-source catalog and the four runtime component
-    /// trees recomputed from the exact evaluator-store bytes. The forty
+    /// positive participant-source catalog and the seven runtime component
+    /// trees recomputed from the exact evaluator-store bytes. The seventy
     /// participant roots and context hashes retain their earlier positive
     /// `0x1216`/`0x1217` authority; no detached root list is accepted here.
     pub(crate) fn from_verified_evaluator_aggregate_statement_sources(

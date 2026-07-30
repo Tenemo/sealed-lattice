@@ -2142,8 +2142,8 @@ pub(crate) mod resource_accounting {
                     None,
                     Some(top_count),
                     u32::from(top_count == FOUNDATION_PROFILE.option_count),
-                    111_358_732,
-                    103_494_412,
+                    28_749_492,
+                    20_885_172,
                 )
             }));
             expected_engineering_review_rows.extend([
@@ -2164,9 +2164,18 @@ pub(crate) mod resource_accounting {
                 active_evaluator_row.complete_action_application_multiplicity(),
                 1
             );
+            assert_eq!(
+                active_evaluator_row.canonical_proof_byte_length(),
+                28_749_492
+            );
             assert!(
-                active_evaluator_row.canonical_proof_byte_length() > nominal_proof_byte_length * 20,
-                "the evaluator proof remains an orders-of-magnitude redesign signal"
+                active_evaluator_row.canonical_proof_byte_length()
+                    > automatic_acceptance_byte_length,
+                "the evaluator proof requires an explicit engineering review"
+            );
+            assert!(
+                active_evaluator_row.canonical_proof_byte_length() < nominal_proof_byte_length * 10,
+                "the evaluator proof must not remain an orders-of-magnitude redesign signal"
             );
             assert!(
                 rows.iter()
@@ -2217,6 +2226,158 @@ pub(crate) mod resource_accounting {
                         <= row.generation_wasm_resident_hard_bound_byte_length()
                 );
             }
+        }
+
+        #[test]
+        fn active_evaluator_proof_accounting_reconciles_every_wire_section() {
+            let relation_plans = selected_relation_plans().expect("selected relation plans derive");
+            let artifact = relation_plans
+                .iter()
+                .find(|artifact| {
+                    artifact.application_statement_schema_identifier()
+                        == ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+                })
+                .expect("the evaluator relation plan exists");
+            let variant = artifact
+                .compiled_plan()
+                .select_variant(None, Some(FOUNDATION_PROFILE.option_count))
+                .expect("the active evaluator variant exists");
+            let construction_plan = RowCodeWhirConstructionPlan::for_selected_variant(
+                artifact,
+                None,
+                Some(FOUNDATION_PROFILE.option_count),
+            )
+            .expect("the active evaluator construction derives");
+            let relation_trees = selected_relation_tree_inputs(variant)
+                .expect("the active evaluator relation trees derive");
+            let bound_tree_entries =
+                build_relation_bound_public_tree_catalog_entries(&relation_trees)
+                    .expect("the active evaluator bound catalog derives");
+            let family_body_byte_length = canonical_row_code_whir_family_body_byte_length_ceiling(
+                &construction_plan,
+                variant,
+                &bound_tree_entries,
+            )
+            .expect("the active evaluator family body is bounded");
+            let construction = construction_accounting(&construction_plan)
+                .expect("the active evaluator construction is accounted");
+            let phase_opening_byte_length = construction
+                .compact_frontiers()
+                .iter()
+                .filter(|frontier| frontier.role_code() == 1)
+                .map(|frontier| frontier.canonical_opening_byte_length())
+                .sum::<u64>();
+            let bound_opening_byte_length = construction
+                .compact_frontiers()
+                .iter()
+                .filter(|frontier| frontier.role_code() == 2)
+                .map(|frontier| frontier.canonical_opening_byte_length())
+                .sum::<u64>();
+            let aggregate_opening_byte_length = construction
+                .aggregate_opening_sections()
+                .iter()
+                .map(|section| section.byte_length())
+                .sum::<u64>();
+            let non_opening_prefix_byte_length = u64::try_from(family_body_byte_length)
+                .expect("the evaluator body length fits u64")
+                .checked_sub(phase_opening_byte_length)
+                .and_then(|length| length.checked_sub(bound_opening_byte_length))
+                .and_then(|length| length.checked_sub(aggregate_opening_byte_length))
+                .expect("the evaluator wire sections fit within the body");
+            let mut bound_tree_width_census = BTreeMap::<usize, usize>::new();
+            for tree in variant.ordered_trees() {
+                if let RelationTreeDescriptor::BoundPublic {
+                    ordered_column_ordinals,
+                    ..
+                } = tree
+                {
+                    *bound_tree_width_census
+                        .entry(ordered_column_ordinals.len())
+                        .or_default() += 1;
+                }
+            }
+            let (verifier_columns, bound_columns, prover_columns) =
+                relation_column_origin_counts(variant)
+                    .expect("the evaluator column census derives");
+            assert_eq!(
+                (verifier_columns, bound_columns, prover_columns),
+                (0, 20_680, 0)
+            );
+            assert_eq!(variant.ordered_constraint_count(), 1_880);
+            assert_eq!(variant.ordered_opening_claims().len(), 20_689);
+            assert_eq!(variant.ordered_trees().len(), 77);
+            assert_eq!(
+                construction
+                    .compact_frontiers()
+                    .iter()
+                    .filter(|frontier| frontier.role_code() == 2 && frontier.query_count() == 40)
+                    .count(),
+                70
+            );
+            assert_eq!(
+                construction
+                    .compact_frontiers()
+                    .iter()
+                    .filter(|frontier| frontier.role_code() == 2 && frontier.query_count() == 266)
+                    .count(),
+                7
+            );
+            assert_eq!(
+                bound_tree_width_census,
+                BTreeMap::from([(180, 33), (308, 33), (416, 11)])
+            );
+            assert_eq!(construction.aggregate_logical_column_count(), 2);
+            assert_eq!(construction.opening_batch_count(), 1_002);
+            assert_eq!(construction.scalar_opening_count(), 1_002);
+            assert_eq!(non_opening_prefix_byte_length, 827_764);
+            assert_eq!(phase_opening_byte_length, 395_004);
+            assert_eq!(bound_opening_byte_length, 24_966_068);
+            assert_eq!(aggregate_opening_byte_length, 2_554_808);
+            assert_eq!(family_body_byte_length, 28_743_644);
+            assert_eq!(
+                non_opening_prefix_byte_length
+                    + phase_opening_byte_length
+                    + bound_opening_byte_length
+                    + aggregate_opening_byte_length,
+                u64::try_from(family_body_byte_length).expect("the evaluator body length fits u64")
+            );
+            let statement_bytes = canonical_selected_application_statement_for_ceiling(
+                ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+                SelectedApplicationStatementContext::new(
+                    FOUNDATION_PROFILE.protocol_version,
+                    [0; Hash512::BYTE_LENGTH],
+                    None,
+                    Some(FOUNDATION_PROFILE.option_count),
+                ),
+            )
+            .expect("the active evaluator statement is canonical");
+            let header_byte_length = ProofObjectHeader::from_canonical_application_statement(
+                statement_bytes,
+                &CanonicalDecodeLimits::default(),
+            )
+            .and_then(|header| header.encode())
+            .expect("the active evaluator header is canonical")
+            .len();
+            assert_eq!(header_byte_length, 5_848);
+            let proof_byte_length = header_byte_length
+                .checked_add(family_body_byte_length)
+                .expect("the active evaluator proof length fits usize");
+            assert_eq!(proof_byte_length, 28_749_492);
+            assert_eq!(
+                proof_byte_length.saturating_sub(NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH),
+                23_506_612
+            );
+            assert_eq!(
+                proof_byte_length
+                    .saturating_sub(AUTOMATIC_ROW_CODE_WHIR_PROOF_ACCEPTANCE_BYTE_LENGTH),
+                20_885_172
+            );
+            assert_eq!(
+                MAXIMUM_COMMON_PROOF_BYTE_LENGTH
+                    .checked_sub(proof_byte_length)
+                    .expect("the active evaluator proof stays within the absolute bound"),
+                239_685_964
+            );
         }
 
         #[test]
@@ -2326,7 +2487,7 @@ pub(crate) mod resource_accounting {
         }
 
         #[test]
-        fn candidate_specific_evaluator_rows_count_only_the_requested_entries() {
+        fn candidate_specific_evaluator_rows_account_for_the_complete_key_catalog() {
             let rows = selected_proof_variant_resource_inventory()
                 .expect("selected row-code WHIR accounting derives")
                 .iter()
@@ -2339,7 +2500,8 @@ pub(crate) mod resource_accounting {
             for (index, row) in rows.iter().enumerate() {
                 let expected_top_count = u16::try_from(index + 1).expect("top count fits u16");
                 assert_eq!(row.top_count(), Some(expected_top_count));
-                assert_eq!(row.logical_entry_count(), u32::from(expected_top_count));
+                assert_eq!(row.logical_entry_count(), 7);
+                assert_eq!(row.canonical_proof_byte_length(), 28_749_492);
                 assert_eq!(
                     row.complete_action_application_multiplicity(),
                     u32::from(expected_top_count == FOUNDATION_PROFILE.option_count),

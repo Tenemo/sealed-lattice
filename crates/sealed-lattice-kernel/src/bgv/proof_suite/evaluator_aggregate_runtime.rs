@@ -1053,6 +1053,9 @@ fn prepare_evaluator_verification_adapter(
                             &session.ordered_runtime_component_trees,
                         )
                         .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+                    let prerequisite = source_catalog
+                        .evaluator_source_low_degree_prerequisite()
+                        .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
                     preflight_reserved_common_proof_verification_family_adapter_from_upstream(
                         adapter_reservation_handle,
                         |upstream_inputs| {
@@ -1061,21 +1064,22 @@ fn prepare_evaluator_verification_adapter(
                                     selected_suite_handle,
                                 );
                             upstream_inputs
-                                .preflight_statement_tree_and_auxiliary_root_family_verification_without_evaluator(
+                                .preflight_evaluator_source_bound_family_verification_without_evaluator(
                                     &selected_suite_handle,
                                     statement_source,
                                     &statement_trees,
                                     &session.ordered_auxiliary_roots,
+                                    &prerequisite,
                                 )
                         },
                     )?;
-                    Ok(statement_trees)
+                    Ok((statement_trees, prerequisite))
                 },
             )
         })
     });
-    let statement_trees = match borrowed_preflight {
-        Ok(statement_trees) => statement_trees,
+    let (statement_trees, prerequisite) = match borrowed_preflight {
+        Ok(preflighted_inputs) => preflighted_inputs,
         Err(error) => {
             cancel_common_proof_verification_family_adapter_reservation(adapter_reservation_handle)
                 .expect("failed evaluator preflight retains its common-proof reservation");
@@ -1104,11 +1108,12 @@ fn prepare_evaluator_verification_adapter(
                         selected_suite_handle,
                     );
                 upstream_inputs
-                    .prepare_preflighted_statement_tree_and_auxiliary_root_family_verification_without_evaluator(
+                    .prepare_preflighted_evaluator_source_bound_family_verification_without_evaluator(
                         &selected_suite_handle,
                         statement_source,
                         adapter_statement_trees,
                         auxiliary_roots,
+                        prerequisite,
                     )
             },
         ),

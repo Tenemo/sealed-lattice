@@ -72,8 +72,8 @@ pub(in crate::bgv::proof_suite) use quotient_transform_storage::{
 pub(crate) use verification::row_code_whir_verification_resident_memory_ceiling;
 pub(crate) use verification::{
     PreparedRowCodeWhirVerification, RowCodeWhirFinalProofVerification,
-    RowCodeWhirIncrementalVerification, prepare_row_code_whir_verification,
-    prepare_setup_polynomial_bound_row_code_whir_verification,
+    RowCodeWhirIncrementalVerification, prepare_evaluator_source_bound_row_code_whir_verification,
+    prepare_row_code_whir_verification, prepare_setup_polynomial_bound_row_code_whir_verification,
 };
 #[cfg(test)]
 pub(crate) const NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH: usize = 5_242_880;

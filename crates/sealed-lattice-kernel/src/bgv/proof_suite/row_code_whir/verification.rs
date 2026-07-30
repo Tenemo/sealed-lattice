@@ -40,18 +40,21 @@ use crate::bgv::proof_suite::{
     RelationPlanVariant, RelationProofTreeInput, SelectedApplicationStatementContext,
     VerifiedEvaluatorAuxiliaryRoot, VerifiedRelationColumnEvaluator, VerifiedStatementOwnedTree,
     build_relation_bound_public_tree_catalog_entries, canonical_proof_object_header_bytes,
-    decode_application_statement, decode_selected_public_key_share_statement,
-    derive_relation_tree_inputs, sample_relation_application_challenges,
-    validate_evaluator_auxiliary_root_linkage,
+    decode_application_statement, decode_selected_application_statement,
+    decode_selected_public_key_share_statement, derive_relation_tree_inputs,
+    sample_relation_application_challenges, selected_evaluator_aggregate_entry_roots_in_order,
+    selected_evaluator_entry_positions, validate_evaluator_auxiliary_root_linkage,
     verify_out_of_domain_composition_with_verified_sequences,
 };
 use crate::bgv::{
     proof_suite::relation_plan::{BoundTreeConstructionKind, BoundTreeRootUse, ProofPrivacyMode},
-    setup::VerifiedSetupPolynomialLowDegreePrerequisite,
+    setup::{
+        VerifiedEvaluatorSourceLowDegreePrerequisite, VerifiedSetupPolynomialLowDegreePrerequisite,
+    },
 };
 use crate::foundation::{
-    CanonicalDecodeLimits, Hash512, ProofApplicationSlot, ProofApplicationSlotCeilings,
-    ProofObjectHeader,
+    CanonicalDecodeLimits, CanonicalItemType, FOUNDATION_PROFILE, Hash512, ProofApplicationSlot,
+    ProofApplicationSlotCeilings, ProofObjectHeader,
 };
 
 const ROW_CODE_WHIR_PROOF_WIRE_MAGIC: &[u8; 8] = b"SLXPRF08";
@@ -76,6 +79,12 @@ pub(crate) struct PreparedRowCodeWhirVerification {
     header_comparator: IncrementalExpectedProofObjectHeaderComparator,
 }
 
+#[derive(Clone, Copy)]
+enum VerifiedSetupPolynomialBoundPrerequisite<'prerequisite> {
+    PublicKeyShare(&'prerequisite VerifiedSetupPolynomialLowDegreePrerequisite),
+    EvaluatorSources(&'prerequisite VerifiedEvaluatorSourceLowDegreePrerequisite),
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn prepare_row_code_whir_verification(
     protocol_version: u16,
@@ -88,7 +97,7 @@ pub(crate) fn prepare_row_code_whir_verification(
     evaluator_auxiliary_roots: Vec<VerifiedEvaluatorAuxiliaryRoot>,
     verified_column_evaluator: Box<dyn VerifiedRelationColumnEvaluator>,
 ) -> Result<PreparedRowCodeWhirVerification, String> {
-    prepare_row_code_whir_verification_with_setup_polynomial_prerequisite(
+    prepare_row_code_whir_verification_with_bound_prerequisite(
         None,
         protocol_version,
         application_slot,
@@ -115,8 +124,10 @@ pub(crate) fn prepare_setup_polynomial_bound_row_code_whir_verification(
     evaluator_auxiliary_roots: Vec<VerifiedEvaluatorAuxiliaryRoot>,
     verified_column_evaluator: Box<dyn VerifiedRelationColumnEvaluator>,
 ) -> Result<PreparedRowCodeWhirVerification, String> {
-    prepare_row_code_whir_verification_with_setup_polynomial_prerequisite(
-        Some(prerequisite),
+    prepare_row_code_whir_verification_with_bound_prerequisite(
+        Some(VerifiedSetupPolynomialBoundPrerequisite::PublicKeyShare(
+            prerequisite,
+        )),
         protocol_version,
         application_slot,
         canonical_application_statement_bytes,
@@ -130,8 +141,37 @@ pub(crate) fn prepare_setup_polynomial_bound_row_code_whir_verification(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn prepare_row_code_whir_verification_with_setup_polynomial_prerequisite(
-    setup_polynomial_prerequisite: Option<&VerifiedSetupPolynomialLowDegreePrerequisite>,
+pub(crate) fn prepare_evaluator_source_bound_row_code_whir_verification(
+    prerequisite: &VerifiedEvaluatorSourceLowDegreePrerequisite,
+    protocol_version: u16,
+    application_slot: ProofApplicationSlot,
+    canonical_application_statement_bytes: &[u8],
+    expected_proof_header_hash: Hash512,
+    expected_canonical_proof_byte_length: u64,
+    relation_plan: &CommonProofRelationPlanCapability,
+    statement_owned_trees: Vec<VerifiedStatementOwnedTree>,
+    evaluator_auxiliary_roots: Vec<VerifiedEvaluatorAuxiliaryRoot>,
+    verified_column_evaluator: Box<dyn VerifiedRelationColumnEvaluator>,
+) -> Result<PreparedRowCodeWhirVerification, String> {
+    prepare_row_code_whir_verification_with_bound_prerequisite(
+        Some(VerifiedSetupPolynomialBoundPrerequisite::EvaluatorSources(
+            prerequisite,
+        )),
+        protocol_version,
+        application_slot,
+        canonical_application_statement_bytes,
+        expected_proof_header_hash,
+        expected_canonical_proof_byte_length,
+        relation_plan,
+        statement_owned_trees,
+        evaluator_auxiliary_roots,
+        verified_column_evaluator,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn prepare_row_code_whir_verification_with_bound_prerequisite(
+    setup_polynomial_prerequisite: Option<VerifiedSetupPolynomialBoundPrerequisite<'_>>,
     protocol_version: u16,
     application_slot: ProofApplicationSlot,
     canonical_application_statement_bytes: &[u8],
@@ -232,7 +272,7 @@ fn prepare_row_code_whir_verification_with_setup_polynomial_prerequisite(
 }
 
 fn validate_optional_setup_polynomial_low_degree_prerequisite(
-    prerequisite: Option<&VerifiedSetupPolynomialLowDegreePrerequisite>,
+    prerequisite: Option<VerifiedSetupPolynomialBoundPrerequisite<'_>>,
     protocol_version: u16,
     application_slot: ProofApplicationSlot,
     canonical_application_statement_bytes: &[u8],
@@ -240,14 +280,26 @@ fn validate_optional_setup_polynomial_low_degree_prerequisite(
     statement_owned_trees: &[VerifiedStatementOwnedTree],
 ) -> Result<(), String> {
     match prerequisite {
-        Some(prerequisite) => validate_setup_polynomial_low_degree_prerequisite(
-            prerequisite,
-            protocol_version,
-            application_slot,
-            canonical_application_statement_bytes,
-            construction_plan,
-            statement_owned_trees,
-        ),
+        Some(VerifiedSetupPolynomialBoundPrerequisite::PublicKeyShare(prerequisite)) => {
+            validate_setup_polynomial_low_degree_prerequisite(
+                prerequisite,
+                protocol_version,
+                application_slot,
+                canonical_application_statement_bytes,
+                construction_plan,
+                statement_owned_trees,
+            )
+        }
+        Some(VerifiedSetupPolynomialBoundPrerequisite::EvaluatorSources(prerequisite)) => {
+            validate_evaluator_source_low_degree_prerequisite(
+                prerequisite,
+                protocol_version,
+                application_slot,
+                canonical_application_statement_bytes,
+                construction_plan,
+                statement_owned_trees,
+            )
+        }
         None if construction_plan.requires_verified_setup_polynomial_bound_prerequisite() => {
             Err("row-code WHIR verification is missing its prior setup-polynomial proof".to_owned())
         }
@@ -339,6 +391,170 @@ fn validate_setup_polynomial_low_degree_prerequisite(
         if statement_tree.expected_root() != *anchor_root {
             return Err(
                 "setup-polynomial prerequisite is bound to a different input root".to_owned(),
+            );
+        }
+    }
+    Ok(())
+}
+
+fn validate_evaluator_source_low_degree_prerequisite(
+    prerequisite: &VerifiedEvaluatorSourceLowDegreePrerequisite,
+    protocol_version: u16,
+    application_slot: ProofApplicationSlot,
+    canonical_application_statement_bytes: &[u8],
+    construction_plan: &RowCodeWhirConstructionPlan,
+    statement_owned_trees: &[VerifiedStatementOwnedTree],
+) -> Result<(), String> {
+    let schema_identifier =
+        ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER;
+    let top_count = construction_plan
+        .top_count
+        .filter(|top_count| (1..=FOUNDATION_PROFILE.option_count).contains(top_count))
+        .ok_or_else(|| {
+            "evaluator-source prerequisite has the wrong candidate topology".to_owned()
+        })?;
+    let statement = decode_selected_application_statement(
+        canonical_application_statement_bytes,
+        schema_identifier,
+        SelectedApplicationStatementContext::new(
+            protocol_version,
+            application_slot.suite_identifier().into_bytes(),
+            None,
+            Some(top_count),
+        ),
+    )
+    .map_err(|_| "decode evaluator-source prerequisite statement".to_owned())?;
+    let statement_setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH] = statement
+        .items
+        .first()
+        .filter(|item| {
+            item.item_type() == CanonicalItemType::Hash512
+                && item.canonical_bytes().len() == Hash512::BYTE_LENGTH
+        })
+        .and_then(|item| item.canonical_bytes().try_into().ok())
+        .ok_or_else(|| "decode evaluator-source setup context".to_owned())?;
+    if protocol_version != prerequisite.protocol_version()
+        || application_slot.application_statement_schema_identifier() != schema_identifier
+        || application_slot.suite_identifier().into_bytes() != prerequisite.suite_identifier()
+        || application_slot.ceremony_context_hash().into_bytes()
+            != prerequisite.ceremony_context_hash()
+        || application_slot.action_context_hash().into_bytes() != prerequisite.action_context_hash()
+        || application_slot.roster_position().is_some()
+        || application_slot.schedule_position().is_some()
+        || application_slot.producer_sequence().is_some()
+        || statement_setup_proof_context_hash != prerequisite.setup_proof_context_hash()
+        || construction_plan.application_statement_schema_identifier != schema_identifier
+        || construction_plan.schedule_position.is_some()
+        || construction_plan.top_count != Some(top_count)
+        || construction_plan.requires_verified_vss_bound_prerequisite()
+        || !construction_plan.requires_verified_setup_polynomial_bound_prerequisite()
+    {
+        return Err("evaluator-source prerequisite has the wrong proof context".to_owned());
+    }
+
+    let positions = selected_evaluator_entry_positions(top_count)
+        .map_err(|_| "derive evaluator-source prerequisite positions".to_owned())?;
+    let ordered_statement_roots =
+        selected_evaluator_aggregate_entry_roots_in_order(&statement, top_count)
+            .map_err(|_| "derive evaluator-source prerequisite roots".to_owned())?;
+    let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
+    let expected_source_tree_count = positions
+        .len()
+        .checked_mul(participant_count)
+        .ok_or_else(|| "evaluator-source prerequisite tree count overflows".to_owned())?;
+    let prior_proof_trees = construction_plan
+        .bound_trees
+        .iter()
+        .filter(|tree| {
+            tree.low_degree_mode == RowCodeWhirBoundLowDegreeMode::PriorSetupPolynomialProofRequired
+        })
+        .collect::<Vec<_>>();
+    let direct_output_trees = construction_plan
+        .bound_trees
+        .iter()
+        .filter(|tree| tree.low_degree_mode == RowCodeWhirBoundLowDegreeMode::Direct)
+        .collect::<Vec<_>>();
+    if positions.is_empty()
+        || ordered_statement_roots.len() != positions.len()
+        || prerequisite.ordered_source_trees().len() != expected_source_tree_count
+        || prior_proof_trees.len() != expected_source_tree_count
+        || direct_output_trees.len() != positions.len()
+        || construction_plan.bound_trees.len()
+            != expected_source_tree_count
+                .checked_add(positions.len())
+                .ok_or_else(|| "evaluator-source bound-tree count overflows".to_owned())?
+        || prior_proof_trees.iter().any(|tree| {
+            tree.construction_kind != BoundTreeConstructionKind::SetupPolynomial
+                || tree.root_use != BoundTreeRootUse::Input
+                || tree.query_count != construction_plan.parameters.prior_proof_bound_query_count
+        })
+        || direct_output_trees.iter().any(|tree| {
+            tree.construction_kind != BoundTreeConstructionKind::SetupPolynomial
+                || tree.root_use != BoundTreeRootUse::Output
+                || tree.query_count != construction_plan.parameters.direct_bound_query_count
+        })
+    {
+        return Err("evaluator-source prerequisite has the wrong construction geometry".to_owned());
+    }
+
+    let expected_sources =
+        ordered_statement_roots
+            .iter()
+            .zip(&positions)
+            .flat_map(|(entry, expected_position)| {
+                entry.source_component_roots().iter().enumerate().map(
+                    move |(roster_position, root)| (*expected_position, roster_position, *root),
+                )
+            });
+    for (
+        ((expected_position, roster_position, statement_root), prerequisite_binding),
+        bound_tree,
+    ) in expected_sources
+        .zip(prerequisite.ordered_source_trees())
+        .zip(prior_proof_trees)
+    {
+        let roster_position = u16::try_from(roster_position)
+            .map_err(|_| "evaluator-source roster position overflows".to_owned())?;
+        let mut matching_statement_trees = statement_owned_trees.iter().filter(|tree| {
+            tree.ordered_tree_ordinal() == bound_tree.relation_tree_ordinal
+                && tree.expected_root_source_ordinal() == bound_tree.expected_root_source_ordinal
+        });
+        let statement_tree = matching_statement_trees.next().ok_or_else(|| {
+            "evaluator-source prerequisite is missing an authenticated input tree".to_owned()
+        })?;
+        if matching_statement_trees.next().is_some()
+            || prerequisite_binding.evaluator_position() != expected_position
+            || prerequisite_binding.roster_position() != roster_position
+            || prerequisite_binding.expected_root() != statement_root
+            || statement_tree.expected_root() != statement_root
+            || statement_tree.public_polynomial_context_hash()
+                != Some(prerequisite_binding.public_polynomial_context_hash())
+        {
+            return Err(
+                "evaluator-source prerequisite is bound to a different input tree".to_owned(),
+            );
+        }
+    }
+
+    for ((entry, expected_position), bound_tree) in ordered_statement_roots
+        .iter()
+        .zip(positions)
+        .zip(direct_output_trees)
+    {
+        let mut matching_statement_trees = statement_owned_trees.iter().filter(|tree| {
+            tree.ordered_tree_ordinal() == bound_tree.relation_tree_ordinal
+                && tree.expected_root_source_ordinal() == bound_tree.expected_root_source_ordinal
+        });
+        let statement_tree = matching_statement_trees.next().ok_or_else(|| {
+            "evaluator-source prerequisite is missing an authenticated output tree".to_owned()
+        })?;
+        if matching_statement_trees.next().is_some()
+            || entry.position() != expected_position
+            || statement_tree.expected_root() != entry.runtime_component_root()
+            || statement_tree.public_polynomial_context_hash().is_none()
+        {
+            return Err(
+                "evaluator-source prerequisite has the wrong aggregate output tree".to_owned(),
             );
         }
     }
@@ -2136,13 +2352,216 @@ fn validate_declared_proof_byte_length(declared_proof_byte_length: usize) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bgv::proof_suite::application_statement::{
+        SelectedEvaluatorAggregateEntryInput, canonical_selected_evaluator_aggregate_statement,
+    };
     use crate::bgv::proof_suite::{
         StatementOwnedProofTreeInput, ValidatedRelationPlanArtifact,
         canonical_selected_public_key_share_statement, compile_public_key_share_relation_plan,
-        selected_public_key_share_relation_plan_input, selected_relation_plan_check_context,
+        selected_evaluator_aggregate_relation_plan, selected_public_key_share_relation_plan_input,
+        selected_relation_plan_check_context,
     };
     use crate::foundation::FOUNDATION_PROFILE;
     use std::sync::OnceLock;
+
+    type EvaluatorSourceTestBinding = (
+        crate::bgv::proof_suite::SelectedEvaluatorEntryPosition,
+        u16,
+        [u8; 64],
+        [u8; 64],
+    );
+
+    struct EvaluatorSourcePrerequisiteFixture {
+        construction_plan: RowCodeWhirConstructionPlan,
+        canonical_statement: Vec<u8>,
+        application_slot: ProofApplicationSlot,
+        statement_trees: Vec<VerifiedStatementOwnedTree>,
+        setup_proof_context_hash: [u8; 64],
+        ordered_source_bindings: Vec<EvaluatorSourceTestBinding>,
+    }
+
+    fn distinct_test_hash(domain: u8, ordinal: usize) -> [u8; 64] {
+        let mut hash = [domain; 64];
+        hash[..8].copy_from_slice(
+            &u64::try_from(ordinal)
+                .expect("the test ordinal fits u64")
+                .to_le_bytes(),
+        );
+        hash
+    }
+
+    fn evaluator_source_prerequisite_fixture() -> &'static EvaluatorSourcePrerequisiteFixture {
+        static FIXTURE: OnceLock<EvaluatorSourcePrerequisiteFixture> = OnceLock::new();
+        FIXTURE.get_or_init(|| {
+            let schema_identifier =
+                ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER;
+            let relation_context = selected_relation_plan_check_context(schema_identifier)
+                .expect("the selected evaluator relation context exists");
+            let compiled_relation_plan = selected_evaluator_aggregate_relation_plan()
+                .expect("the selected evaluator relation compiles");
+            let selected_artifact = ValidatedRelationPlanArtifact::from_owned_compiled_plan(
+                compiled_relation_plan,
+                &relation_context,
+            )
+            .expect("the selected evaluator relation is valid");
+            let construction_plan = RowCodeWhirConstructionPlan::for_selected_variant(
+                &selected_artifact,
+                None,
+                Some(FOUNDATION_PROFILE.option_count),
+            )
+            .expect("the active evaluator construction is valid");
+            let positions = selected_evaluator_entry_positions(FOUNDATION_PROFILE.option_count)
+                .expect("the evaluator positions derive");
+            let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
+            let ordered_source_roots = positions
+                .iter()
+                .enumerate()
+                .map(|(entry_ordinal, _)| {
+                    (0..participant_count)
+                        .map(|roster_position| {
+                            distinct_test_hash(
+                                0x41,
+                                entry_ordinal * participant_count + roster_position,
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>();
+            let ordered_runtime_roots = (0..positions.len())
+                .map(|entry_ordinal| distinct_test_hash(0x51, entry_ordinal))
+                .collect::<Vec<_>>();
+            let ordered_auxiliary_roots = (0..positions.len())
+                .map(|entry_ordinal| distinct_test_hash(0x61, entry_ordinal))
+                .collect::<Vec<_>>();
+            let statement_entries = ordered_source_roots
+                .iter()
+                .zip(&ordered_runtime_roots)
+                .zip(&ordered_auxiliary_roots)
+                .map(|((source_roots, runtime_root), auxiliary_root)| {
+                    SelectedEvaluatorAggregateEntryInput::new(
+                        source_roots,
+                        *runtime_root,
+                        *auxiliary_root,
+                    )
+                })
+                .collect::<Vec<_>>();
+            let setup_proof_context_hash = [0x31; 64];
+            let canonical_statement = canonical_selected_evaluator_aggregate_statement(
+                setup_proof_context_hash,
+                FOUNDATION_PROFILE.option_count,
+                &statement_entries,
+                [0x71; 64],
+            )
+            .expect("the evaluator statement is canonical");
+            let application_slot = ProofApplicationSlot::new(
+                Hash512::from_bytes([0x81; 64]),
+                Hash512::from_bytes([0x82; 64]),
+                Hash512::from_bytes([0x83; 64]),
+                schema_identifier,
+                None,
+                None,
+                None,
+            )
+            .expect("the evaluator application slot is valid");
+            let ordered_source_bindings =
+                positions
+                    .iter()
+                    .copied()
+                    .zip(&ordered_source_roots)
+                    .enumerate()
+                    .flat_map(|(entry_ordinal, (position, source_roots))| {
+                        source_roots.iter().copied().enumerate().map(
+                            move |(roster_position, root)| {
+                                let flat_ordinal = entry_ordinal
+                                    .checked_mul(participant_count)
+                                    .and_then(|offset| offset.checked_add(roster_position))
+                                    .expect("the evaluator test ordinal fits usize");
+                                (
+                                    position,
+                                    u16::try_from(roster_position)
+                                        .expect("the roster position fits u16"),
+                                    root,
+                                    distinct_test_hash(0x91, flat_ordinal),
+                                )
+                            },
+                        )
+                    })
+                    .collect::<Vec<_>>();
+            let flattened_source_roots = ordered_source_roots
+                .iter()
+                .flatten()
+                .copied()
+                .collect::<Vec<_>>();
+            let flattened_source_contexts = ordered_source_bindings
+                .iter()
+                .map(|binding| binding.3)
+                .collect::<Vec<_>>();
+            let mut next_source_tree = 0_usize;
+            let mut next_output_tree = 0_usize;
+            let statement_trees = construction_plan
+                .bound_trees
+                .iter()
+                .map(|tree| {
+                    let (expected_root, public_polynomial_context_hash) = match tree.root_use {
+                        BoundTreeRootUse::Input => {
+                            let tree_input = (
+                                flattened_source_roots[next_source_tree],
+                                flattened_source_contexts[next_source_tree],
+                            );
+                            next_source_tree += 1;
+                            tree_input
+                        }
+                        BoundTreeRootUse::Output => {
+                            let tree_output = (
+                                ordered_runtime_roots[next_output_tree],
+                                distinct_test_hash(0xa1, next_output_tree),
+                            );
+                            next_output_tree += 1;
+                            tree_output
+                        }
+                    };
+                    VerifiedStatementOwnedTree::from_test_relation_input(
+                        tree.relation_tree_ordinal,
+                        tree.expected_root_source_ordinal,
+                        StatementOwnedProofTreeInput::SetupPolynomial {
+                            public_polynomial_context_hash,
+                            row_width: u32::try_from(tree.ordered_columns.len())
+                                .expect("the test row width fits u32"),
+                            expected_root,
+                        },
+                        vec![None; tree.ordered_columns.len()],
+                    )
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(next_source_tree, flattened_source_roots.len());
+            assert_eq!(next_output_tree, ordered_runtime_roots.len());
+            EvaluatorSourcePrerequisiteFixture {
+                construction_plan,
+                canonical_statement,
+                application_slot,
+                statement_trees,
+                setup_proof_context_hash,
+                ordered_source_bindings,
+            }
+        })
+    }
+
+    fn evaluator_fixture_prerequisite(
+        fixture: &EvaluatorSourcePrerequisiteFixture,
+        ordered_source_bindings: Vec<EvaluatorSourceTestBinding>,
+    ) -> VerifiedEvaluatorSourceLowDegreePrerequisite {
+        VerifiedEvaluatorSourceLowDegreePrerequisite::for_test(
+            FOUNDATION_PROFILE.protocol_version,
+            fixture.application_slot.suite_identifier().into_bytes(),
+            fixture
+                .application_slot
+                .ceremony_context_hash()
+                .into_bytes(),
+            fixture.application_slot.action_context_hash().into_bytes(),
+            fixture.setup_proof_context_hash,
+            ordered_source_bindings,
+        )
+    }
 
     struct SetupPolynomialPrerequisiteFixture {
         construction_plan: RowCodeWhirConstructionPlan,
@@ -2255,11 +2674,163 @@ mod tests {
     }
 
     #[test]
+    fn evaluator_source_reuse_requires_the_exact_verified_catalog_authority() {
+        let fixture = evaluator_source_prerequisite_fixture();
+        let prerequisite =
+            evaluator_fixture_prerequisite(fixture, fixture.ordered_source_bindings.clone());
+        validate_optional_setup_polynomial_low_degree_prerequisite(
+            Some(VerifiedSetupPolynomialBoundPrerequisite::EvaluatorSources(
+                &prerequisite,
+            )),
+            FOUNDATION_PROFILE.protocol_version,
+            fixture.application_slot,
+            &fixture.canonical_statement,
+            &fixture.construction_plan,
+            &fixture.statement_trees,
+        )
+        .expect("the exact evaluator-source authority is accepted");
+
+        assert!(
+            validate_optional_setup_polynomial_low_degree_prerequisite(
+                None,
+                FOUNDATION_PROFILE.protocol_version,
+                fixture.application_slot,
+                &fixture.canonical_statement,
+                &fixture.construction_plan,
+                &fixture.statement_trees,
+            )
+            .is_err(),
+            "statement roots alone cannot authorize evaluator source reuse",
+        );
+
+        let public_key_fixture = setup_polynomial_prerequisite_fixture();
+        let public_key_prerequisite = fixture_prerequisite(public_key_fixture);
+        assert!(
+            validate_optional_setup_polynomial_low_degree_prerequisite(
+                Some(VerifiedSetupPolynomialBoundPrerequisite::PublicKeyShare(
+                    &public_key_prerequisite,
+                )),
+                FOUNDATION_PROFILE.protocol_version,
+                fixture.application_slot,
+                &fixture.canonical_statement,
+                &fixture.construction_plan,
+                &fixture.statement_trees,
+            )
+            .is_err(),
+            "a different prior-proof family cannot authorize evaluator source reuse",
+        );
+    }
+
+    #[test]
+    fn evaluator_source_reuse_refuses_stale_reordered_or_incomplete_authority() {
+        let fixture = evaluator_source_prerequisite_fixture();
+        let assert_refused = |bindings: Vec<EvaluatorSourceTestBinding>, message: &str| {
+            let prerequisite = evaluator_fixture_prerequisite(fixture, bindings);
+            assert!(
+                validate_evaluator_source_low_degree_prerequisite(
+                    &prerequisite,
+                    FOUNDATION_PROFILE.protocol_version,
+                    fixture.application_slot,
+                    &fixture.canonical_statement,
+                    &fixture.construction_plan,
+                    &fixture.statement_trees,
+                )
+                .is_err(),
+                "{message}",
+            );
+        };
+
+        let mut wrong_root = fixture.ordered_source_bindings.clone();
+        wrong_root[0].2 = [0xb1; 64];
+        assert_refused(wrong_root, "a changed source root must be refused");
+
+        let mut stale_context = fixture.ordered_source_bindings.clone();
+        stale_context[0].3 = [0xb2; 64];
+        assert_refused(
+            stale_context,
+            "a stale public-polynomial context must be refused",
+        );
+
+        let mut reordered = fixture.ordered_source_bindings.clone();
+        reordered.swap(0, 1);
+        assert_refused(reordered, "reordered source authority must be refused");
+
+        let mut incomplete = fixture.ordered_source_bindings.clone();
+        incomplete.pop();
+        assert_refused(incomplete, "an omitted source coordinate must be refused");
+
+        let prerequisite =
+            evaluator_fixture_prerequisite(fixture, fixture.ordered_source_bindings.clone());
+        let wrong_action_slot = ProofApplicationSlot::new(
+            fixture.application_slot.suite_identifier(),
+            fixture.application_slot.ceremony_context_hash(),
+            Hash512::from_bytes([0xb3; 64]),
+            ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+            None,
+            None,
+            None,
+        )
+        .expect("the hostile evaluator slot is structurally valid");
+        assert!(
+            validate_evaluator_source_low_degree_prerequisite(
+                &prerequisite,
+                FOUNDATION_PROFILE.protocol_version,
+                wrong_action_slot,
+                &fixture.canonical_statement,
+                &fixture.construction_plan,
+                &fixture.statement_trees,
+            )
+            .is_err(),
+            "authority from another action must be refused",
+        );
+
+        let mut wrong_statement_trees = fixture.statement_trees.clone();
+        wrong_statement_trees[0] = wrong_statement_trees[0].with_test_expected_root([0xb4; 64]);
+        assert!(
+            validate_evaluator_source_low_degree_prerequisite(
+                &prerequisite,
+                FOUNDATION_PROFILE.protocol_version,
+                fixture.application_slot,
+                &fixture.canonical_statement,
+                &fixture.construction_plan,
+                &wrong_statement_trees,
+            )
+            .is_err(),
+            "a changed verifier-owned statement tree must be refused",
+        );
+
+        let mut wrong_query_schedule = fixture.construction_plan.clone();
+        let first_reused_tree = wrong_query_schedule
+            .bound_trees
+            .iter_mut()
+            .find(|tree| {
+                tree.low_degree_mode
+                    == RowCodeWhirBoundLowDegreeMode::PriorSetupPolynomialProofRequired
+            })
+            .expect("the evaluator construction has reused source trees");
+        first_reused_tree.query_count += 1;
+        assert!(
+            validate_evaluator_source_low_degree_prerequisite(
+                &prerequisite,
+                FOUNDATION_PROFILE.protocol_version,
+                fixture.application_slot,
+                &fixture.canonical_statement,
+                &wrong_query_schedule,
+                &fixture.statement_trees,
+            )
+            .is_err(),
+            "a changed shared-query schedule must be refused",
+        );
+    }
+
+    #[test]
     fn setup_polynomial_reuse_requires_the_exact_prior_same_secret_capability() {
         let fixture = setup_polynomial_prerequisite_fixture();
         let prerequisite = fixture_prerequisite(fixture);
         validate_optional_setup_polynomial_low_degree_prerequisite(
-            Some(&prerequisite),
+            Some(VerifiedSetupPolynomialBoundPrerequisite::PublicKeyShare(
+                &prerequisite,
+            )),
             FOUNDATION_PROFILE.protocol_version,
             fixture.application_slot,
             &fixture.canonical_statement,
