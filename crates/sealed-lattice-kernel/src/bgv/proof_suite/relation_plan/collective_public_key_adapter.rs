@@ -133,6 +133,7 @@ struct PendingCollectiveSourceColumn {
     source_column: CollectiveSourceColumn,
     coefficients_bytes: Zeroizing<Box<[u8]>>,
     filled_byte_length: usize,
+    advances_initial_position: bool,
 }
 
 struct CachedCollectiveSourceChunk {
@@ -378,7 +379,10 @@ pub(crate) fn collective_public_key_source_provider_memory_accounting(
     ]
     .into_iter()
     .try_fold(0_u64, add)?;
-    let post_source_polynomial_finish_persistent_resident_byte_length = provider_fixed_byte_length;
+    let post_source_polynomial_finish_persistent_resident_byte_length =
+        loading_persistent_resident_byte_length
+            .checked_sub(authenticated_chunk_flag_payload_byte_length)
+            .ok_or(CommonProofProverError::CountOverflow)?;
     let preparation_input_source_byte_length = add(
         input_source_catalog_byte_length,
         input_authenticated_summary_payload_byte_length,
@@ -637,6 +641,76 @@ impl CollectivePublicKeySourcePolynomialProvider {
             .ok_or(CommonProofProverError::InvalidColumn)
     }
 
+    fn replay_column(
+        &self,
+        column_ordinal: u32,
+    ) -> Result<CollectiveSourceColumn, CommonProofProverError> {
+        let ordered_columns = self
+            .ordered_columns
+            .as_ref()
+            .ok_or(CommonProofProverError::InvalidColumn)?;
+        let column_index = ordered_columns
+            .binary_search_by_key(&column_ordinal, |column| column.column_ordinal)
+            .map_err(|_| CommonProofProverError::InvalidColumn)?;
+        ordered_columns
+            .get(column_index)
+            .cloned()
+            .ok_or(CommonProofProverError::InvalidColumn)
+    }
+
+    fn poll_selected_column(
+        &mut self,
+        request: CommonProofSourcePolynomialRequest<'_>,
+        expected: CollectiveSourceColumn,
+        advances_initial_position: bool,
+    ) -> Result<CommonProofSourcePolynomialProviderPoll, CommonProofProverError> {
+        if request.request_context() != self.expected_request_context
+            || request.column_ordinal() != expected.column_ordinal
+            || request.descriptor() != &expected.descriptor
+            || self.pending_column.as_ref().is_some_and(|pending| {
+                pending.source_column.column_ordinal != expected.column_ordinal
+                    || pending.advances_initial_position != advances_initial_position
+            })
+        {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        let source_is_resident = matches!(
+            self.sources
+                .as_ref()
+                .and_then(|sources| sources.get(expected.source_ordinal))
+                .map(|source| &source.material),
+            Some(PreparedCollectiveSourceMaterial::Resident { .. })
+        );
+        if source_is_resident {
+            return self
+                .resident_column(&expected, advances_initial_position)
+                .map(CommonProofSourcePolynomialProviderPoll::Ready);
+        }
+        if self.pending_column.is_none() {
+            self.pending_column = Some(PendingCollectiveSourceColumn {
+                source_column: expected,
+                coefficients_bytes: Zeroizing::new(
+                    vec![0_u8; TRACE_HALF_BYTE_LENGTH].into_boxed_slice(),
+                ),
+                filled_byte_length: 0,
+                advances_initial_position,
+            });
+        }
+        self.absorb_cached_chunk()?;
+        if self
+            .pending_column
+            .as_ref()
+            .is_some_and(|pending| pending.filled_byte_length == TRACE_HALF_BYTE_LENGTH)
+        {
+            return self
+                .finish_pending_column()
+                .map(CommonProofSourcePolynomialProviderPoll::Ready);
+        }
+        self.next_read_request()?;
+        self.cached_chunk = None;
+        Ok(CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired)
+    }
+
     fn next_read_request(
         &self,
     ) -> Result<CommonProofAuthenticatedSourceReadRequest, CommonProofProverError> {
@@ -781,10 +855,12 @@ impl CollectivePublicKeySourcePolynomialProvider {
         ProofEvaluationDomain::new_subgroup(TRACE_HALF_DEGREE)?
             .interpolate_base_polynomial_in_place(&mut trace_values)?;
         let replay_identity = self.replay_identity(&pending.source_column, source)?;
-        self.next_column_position = self
-            .next_column_position
-            .checked_add(1)
-            .ok_or(CommonProofProverError::CountOverflow)?;
+        if pending.advances_initial_position {
+            self.next_column_position = self
+                .next_column_position
+                .checked_add(1)
+                .ok_or(CommonProofProverError::CountOverflow)?;
+        }
         Ok(ProvidedCommonProofSourcePolynomial::new(
             CommonProofSourcePolynomial::from_base_coefficients(trace_values),
             replay_identity,
@@ -794,6 +870,7 @@ impl CollectivePublicKeySourcePolynomialProvider {
     fn resident_column(
         &mut self,
         column: &CollectiveSourceColumn,
+        advances_initial_position: bool,
     ) -> Result<ProvidedCommonProofSourcePolynomial, CommonProofProverError> {
         let source = self
             .sources
@@ -824,10 +901,12 @@ impl CollectivePublicKeySourcePolynomialProvider {
         ProofEvaluationDomain::new_subgroup(TRACE_HALF_DEGREE)?
             .interpolate_base_polynomial_in_place(&mut trace_values)?;
         let replay_identity = self.replay_identity(column, source)?;
-        self.next_column_position = self
-            .next_column_position
-            .checked_add(1)
-            .ok_or(CommonProofProverError::CountOverflow)?;
+        if advances_initial_position {
+            self.next_column_position = self
+                .next_column_position
+                .checked_add(1)
+                .ok_or(CommonProofProverError::CountOverflow)?;
+        }
         Ok(ProvidedCommonProofSourcePolynomial::new(
             CommonProofSourcePolynomial::from_base_coefficients(trace_values),
             replay_identity,
@@ -897,49 +976,18 @@ impl CommonProofSourcePolynomialProvider for CollectivePublicKeySourcePolynomial
             return Err(CommonProofProverError::InvalidColumn);
         }
         let expected = self.expected_column()?;
-        if request.request_context() != self.expected_request_context
-            || request.column_ordinal() != expected.column_ordinal
-            || request.descriptor() != &expected.descriptor
-            || self.pending_column.as_ref().is_some_and(|pending| {
-                pending.source_column.column_ordinal != expected.column_ordinal
-            })
-        {
+        self.poll_selected_column(request, expected, true)
+    }
+
+    fn poll_replayed_source_polynomial(
+        &mut self,
+        request: CommonProofSourcePolynomialRequest<'_>,
+    ) -> Result<CommonProofSourcePolynomialProviderPoll, CommonProofProverError> {
+        if !self.finished {
             return Err(CommonProofProverError::InvalidColumn);
         }
-        let source_is_resident = matches!(
-            self.sources
-                .as_ref()
-                .and_then(|sources| sources.get(expected.source_ordinal))
-                .map(|source| &source.material),
-            Some(PreparedCollectiveSourceMaterial::Resident { .. })
-        );
-        if source_is_resident {
-            return self
-                .resident_column(&expected)
-                .map(CommonProofSourcePolynomialProviderPoll::Ready);
-        }
-        if self.pending_column.is_none() {
-            self.pending_column = Some(PendingCollectiveSourceColumn {
-                source_column: expected,
-                coefficients_bytes: Zeroizing::new(
-                    vec![0_u8; TRACE_HALF_BYTE_LENGTH].into_boxed_slice(),
-                ),
-                filled_byte_length: 0,
-            });
-        }
-        self.absorb_cached_chunk()?;
-        if self
-            .pending_column
-            .as_ref()
-            .is_some_and(|pending| pending.filled_byte_length == TRACE_HALF_BYTE_LENGTH)
-        {
-            return self
-                .finish_pending_column()
-                .map(CommonProofSourcePolynomialProviderPoll::Ready);
-        }
-        self.next_read_request()?;
-        self.cached_chunk = None;
-        Ok(CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired)
+        let expected = self.replay_column(request.column_ordinal())?;
+        self.poll_selected_column(request, expected, false)
     }
 
     fn pending_authenticated_source_read_request(
@@ -1010,20 +1058,20 @@ impl CommonProofSourcePolynomialProvider for CollectivePublicKeySourcePolynomial
         {
             return Err(CommonProofProverError::InvalidColumn);
         }
-        self.ordered_columns = None;
-        let sources = self
-            .sources
-            .take()
-            .ok_or(CommonProofProverError::InvalidColumn)?;
         self.cached_chunk = None;
-        for source in sources {
+        for source in self
+            .sources
+            .as_mut()
+            .ok_or(CommonProofProverError::InvalidColumn)?
+        {
             if let PreparedCollectiveSourceMaterial::Authenticated(authenticated_material) =
-                source.material
+                &mut source.material
             {
                 authenticated_material
                     .readback
+                    .as_mut()
                     .ok_or(CommonProofProverError::InvalidColumn)?
-                    .finish()
+                    .finish_initial_pass()
                     .into_result()
                     .map_err(|_| CommonProofProverError::InvalidColumn)?;
             }

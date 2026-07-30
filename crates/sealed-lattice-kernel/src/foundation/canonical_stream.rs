@@ -205,6 +205,29 @@ impl VerifiedCanonicalStreamSummary {
         &self.stream_descriptor
     }
 
+    fn authenticate_readback_chunk(
+        &self,
+        chunk_index: usize,
+        chunk_bytes: &[u8],
+    ) -> Result<(), RefusalReason> {
+        let expected_digest = self
+            .stream_descriptor
+            .ordered_chunk_digests
+            .get(chunk_index)
+            .ok_or(RefusalReason::WrongTypeOrLength)?;
+        let expected_byte_length = expected_chunk_byte_length(
+            self.total_byte_length(),
+            self.stream_descriptor.ordered_chunk_digests.len(),
+            chunk_index,
+        )?;
+        if chunk_bytes.len() != expected_byte_length
+            || chunk_digest(self.stream_domain, chunk_index, chunk_bytes)? != *expected_digest
+        {
+            return Err(RefusalReason::WrongHashOrRoot);
+        }
+        Ok(())
+    }
+
     pub(crate) const fn total_byte_length(&self) -> u64 {
         self.stream_descriptor.total_byte_length
     }
@@ -478,6 +501,7 @@ pub(crate) struct CanonicalStreamReadbackVerifier {
     verified_summary: VerifiedCanonicalStreamSummary,
     authenticated_chunks: Box<[bool]>,
     authenticated_chunk_count: usize,
+    initial_pass_finished: bool,
     refusal_reason: Option<RefusalReason>,
 }
 
@@ -499,6 +523,7 @@ impl CanonicalStreamReadbackVerifier {
             verified_summary,
             authenticated_chunks: vec![false; chunk_count].into_boxed_slice(),
             authenticated_chunk_count: 0,
+            initial_pass_finished: false,
             refusal_reason: None,
         })
     }
@@ -508,7 +533,6 @@ impl CanonicalStreamReadbackVerifier {
         self.verified_summary.total_byte_length()
     }
 
-    #[cfg(test)]
     pub(crate) fn chunk_count(&self) -> usize {
         self.verified_summary
             .stream_descriptor()
@@ -535,10 +559,31 @@ impl CanonicalStreamReadbackVerifier {
         if let Some(refusal_reason) = self.refusal_reason {
             return VerificationResult::refused(refusal_reason);
         }
-        if self.authenticated_chunk_count != self.authenticated_chunks.len() {
+        if !self.initial_pass_finished
+            && self.authenticated_chunk_count != self.authenticated_chunks.len()
+        {
             return VerificationResult::refused(RefusalReason::WrongTypeOrLength);
         }
         VerificationResult::valid(self.verified_summary)
+    }
+
+    /// Completes the required full authenticated pass while retaining only the
+    /// verified chunk-digest authority. Later random-access reads are checked
+    /// against those bound digests without retaining the source body or the
+    /// initial per-chunk visitation flags.
+    pub(crate) fn finish_initial_pass(&mut self) -> VerificationResult<()> {
+        if let Some(refusal_reason) = self.refusal_reason {
+            return VerificationResult::refused(refusal_reason);
+        }
+        if self.initial_pass_finished
+            || self.authenticated_chunk_count != self.authenticated_chunks.len()
+        {
+            return VerificationResult::refused(RefusalReason::WrongTypeOrLength);
+        }
+        self.authenticated_chunks = Box::new([]);
+        self.authenticated_chunk_count = 0;
+        self.initial_pass_finished = true;
+        VerificationResult::valid(())
     }
 
     fn authenticate_chunk_inner(
@@ -546,24 +591,13 @@ impl CanonicalStreamReadbackVerifier {
         chunk_index: usize,
         chunk_bytes: &[u8],
     ) -> Result<(), RefusalReason> {
-        let expected_digest = self
-            .verified_summary
-            .stream_descriptor()
-            .ordered_chunk_digests
-            .get(chunk_index)
-            .ok_or(RefusalReason::WrongTypeOrLength)?;
-        let expected_byte_length = expected_chunk_byte_length(
-            self.verified_summary.total_byte_length(),
-            self.verified_summary
-                .stream_descriptor()
-                .ordered_chunk_digests
-                .len(),
-            chunk_index,
-        )?;
-        if chunk_bytes.len() != expected_byte_length
-            || chunk_digest(self.stream_domain, chunk_index, chunk_bytes)? != *expected_digest
-        {
+        if self.stream_domain != self.verified_summary.stream_domain() {
             return Err(RefusalReason::WrongHashOrRoot);
+        }
+        self.verified_summary
+            .authenticate_readback_chunk(chunk_index, chunk_bytes)?;
+        if self.initial_pass_finished {
+            return Ok(());
         }
         let authenticated = self
             .authenticated_chunks
@@ -1961,6 +1995,59 @@ mod tests {
             .expect("every descriptor chunk was authenticated");
         assert_eq!(summary.stream_domain(), stream_domain);
         assert_eq!(summary.total_byte_length(), bytes.len() as u64);
+    }
+
+    #[test]
+    fn authenticated_readback_releases_visit_flags_and_reauthenticates_replayed_chunks() {
+        let stream_domain = CanonicalStreamDomain::EvaluatorKeyStore;
+        let bytes = (0..FOUNDATION_PROFILE.stream_chunk_byte_length + 29)
+            .map(|index| (index.wrapping_mul(211) & 0xff) as u8)
+            .collect::<Vec<_>>();
+        let descriptor = descriptor_for(stream_domain, &bytes);
+        let chunks = bytes
+            .chunks(FOUNDATION_PROFILE.stream_chunk_byte_length)
+            .collect::<Vec<_>>();
+        let verified_summary = {
+            let mut verifier = CanonicalStreamVerifier::new(stream_domain, descriptor)
+                .expect("descriptor begins sequential verification");
+            for (chunk_index, chunk) in chunks.iter().copied().enumerate() {
+                assert_eq!(
+                    verifier.absorb_chunk(chunk_index, chunk),
+                    VerificationResult::valid(())
+                );
+            }
+            verifier
+                .finish_with_summary()
+                .into_result()
+                .expect("the sequential stream verifies")
+        };
+        let mut readback = CanonicalStreamReadbackVerifier::new(stream_domain, verified_summary)
+            .expect("verified descriptor begins readback");
+        for (chunk_index, chunk) in chunks.iter().copied().enumerate() {
+            readback
+                .authenticate_chunk(chunk_index, chunk)
+                .expect("the complete initial readback authenticates");
+        }
+        assert_eq!(
+            readback.finish_initial_pass(),
+            VerificationResult::valid(())
+        );
+        assert_eq!(readback.authenticated_chunks.len(), 0);
+        assert_eq!(readback.authenticated_chunk_count, 0);
+        readback
+            .authenticate_chunk(1, chunks[1])
+            .expect("a replayed chunk authenticates from the retained verified digest");
+
+        let mut substituted = chunks[0].to_vec();
+        substituted[9] ^= 1;
+        assert_eq!(
+            readback.authenticate_chunk(0, &substituted),
+            Err(RefusalReason::WrongHashOrRoot)
+        );
+        assert!(matches!(
+            readback.finish().into_result(),
+            Err(RefusalReason::WrongHashOrRoot)
+        ));
     }
 
     #[test]

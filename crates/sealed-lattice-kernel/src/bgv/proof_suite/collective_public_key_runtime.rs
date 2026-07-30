@@ -2408,7 +2408,8 @@ mod tests {
         );
         assert_eq!(
             source_provider.post_source_polynomial_finish_persistent_resident_byte_length(),
-            source_provider.provider_fixed_byte_length(),
+            source_provider.loading_persistent_resident_byte_length()
+                - source_provider.authenticated_chunk_flag_payload_byte_length(),
         );
         assert_eq!(
             source_provider.additional_loading_source_polynomials_transient_byte_length(),

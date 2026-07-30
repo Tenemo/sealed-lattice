@@ -57,7 +57,7 @@ use super::{
 };
 
 const RELINEARIZATION_ROUND_TWO_SOURCE_REPLAY_IDENTITY_DOMAIN: &str =
-    "sealed-lattice/relinearization-round-two/source-replay-identity/v1";
+    "sealed-lattice/relinearization-round-two/source-replay-identity/v2";
 const RELINEARIZATION_ROUND_TWO_SOURCE_CATALOG_BINDING_DOMAIN: &str =
     "sealed-lattice/relinearization-round-two/source-catalog-binding/v1";
 const RELINEARIZATION_ROUND_TWO_SOURCE_DESCRIPTOR_BINDING_DOMAIN: &str =
@@ -180,7 +180,6 @@ pub(crate) struct RelinearizationRoundTwoSourceProviderMemoryAccounting {
     maximum_loaded_aggregate_trace_pair_byte_length: u64,
     maximum_cached_authenticated_chunk_byte_length: u64,
     maximum_pending_catalog_byte_length: u64,
-    maximum_quotient_phase_populated_request_identity_byte_length: u64,
     maximum_recursive_cached_row_payload_byte_length: u64,
     maximum_recursive_cached_row_catalog_byte_length: u64,
     relation_derivation_active_column_flag_byte_length: u64,
@@ -241,11 +240,6 @@ impl RelinearizationRoundTwoSourceProviderMemoryAccounting {
     }
 
     #[cfg(test)]
-    pub(crate) const fn maximum_quotient_phase_populated_request_identity_byte_length(self) -> u64 {
-        self.maximum_quotient_phase_populated_request_identity_byte_length
-    }
-
-    #[cfg(test)]
     pub(crate) const fn maximum_recursive_cached_row_payload_byte_length(self) -> u64 {
         self.maximum_recursive_cached_row_payload_byte_length
     }
@@ -303,7 +297,6 @@ struct RelinearizationRoundTwoSourceProviderMemoryDimensions {
     total_authenticated_source_chunk_count: u64,
     maximum_trace_half_byte_length: u64,
     maximum_trace_pair_byte_length: u64,
-    maximum_trace_pair_chunk_count: u64,
     maximum_recursive_cached_row_count: u64,
     maximum_relation_column_derivation_workspace_byte_length: u64,
     maximum_recursive_cache_and_relation_workspace_byte_length: u64,
@@ -345,7 +338,6 @@ fn finish_relinearization_round_two_source_provider_memory_accounting(
         || dimensions.total_authenticated_source_chunk_count == 0
         || dimensions.maximum_trace_half_byte_length == 0
         || dimensions.maximum_trace_pair_byte_length == 0
-        || dimensions.maximum_trace_pair_chunk_count == 0
         || dimensions.maximum_recursive_cached_row_count == 0
         || dimensions.maximum_relation_column_derivation_workspace_byte_length == 0
         || dimensions.maximum_recursive_cache_and_relation_workspace_byte_length == 0
@@ -357,8 +349,6 @@ fn finish_relinearization_round_two_source_provider_memory_accounting(
         || dimensions.trace_domain_size == 0
         || dimensions.trace_domain_size.checked_mul(2) != Some(dimensions.ring_degree)
         || dimensions.maximum_trace_half_byte_length >= dimensions.maximum_trace_pair_byte_length
-        || dimensions.maximum_trace_pair_chunk_count
-            > dimensions.total_authenticated_source_chunk_count
     {
         return Err(CommonProofProverError::InvalidColumn);
     }
@@ -407,16 +397,10 @@ fn finish_relinearization_round_two_source_provider_memory_accounting(
             u64::try_from(size_of::<Option<LoadedAggregateTraceColumn>>())
                 .map_err(|_| CommonProofProverError::CountOverflow)?,
         )?;
-    let maximum_request_identity_catalog_byte_length = checked_relinearization_provider_multiply(
-        dimensions.total_authenticated_source_chunk_count,
-        u64::try_from(size_of::<[u8; Hash512::BYTE_LENGTH]>())
-            .map_err(|_| CommonProofProverError::CountOverflow)?,
-    )?;
     let maximum_pending_catalog_byte_length = [
         maximum_logical_requirement_catalog_byte_length,
         maximum_active_load_requirement_catalog_byte_length,
         maximum_loaded_trace_column_catalog_byte_length,
-        maximum_request_identity_catalog_byte_length,
     ]
     .into_iter()
     .try_fold(0_u64, checked_relinearization_provider_add)?;
@@ -487,19 +471,6 @@ fn finish_relinearization_round_two_source_provider_memory_accounting(
             .map_err(|_| CommonProofProverError::CountOverflow)?,
         )?;
 
-    // The right aggregate phase retains the authenticated request identities
-    // from the left phase. The two sources have the same topology, so exactly
-    // two pair spans can coexist with the right-side arithmetic.
-    let quotient_phase_populated_request_identity_byte_length =
-        checked_relinearization_provider_multiply(
-            dimensions
-                .maximum_trace_pair_chunk_count
-                .checked_mul(2)
-                .ok_or(CommonProofProverError::CountOverflow)?
-                .min(dimensions.total_authenticated_source_chunk_count),
-            u64::try_from(size_of::<[u8; Hash512::BYTE_LENGTH]>())
-                .map_err(|_| CommonProofProverError::CountOverflow)?,
-        )?;
     let quotient_phase_transient_byte_length = [
         maximum_pending_catalog_byte_length,
         dimensions.maximum_trace_pair_byte_length,
@@ -539,14 +510,15 @@ fn finish_relinearization_round_two_source_provider_memory_accounting(
             .max(relation_column_derivation_transient_byte_length)
             .max(maximum_requirement_discovery_transient_byte_length);
 
-    let post_source_polynomial_finish_persistent_resident_byte_length =
-        checked_relinearization_provider_add(
-            provider_fixed_owner_byte_length,
-            dimensions.retained_catalog_heap_byte_length,
-        )?;
+    let post_source_polynomial_finish_persistent_resident_byte_length = [
+        provider_fixed_owner_byte_length,
+        dimensions.retained_catalog_heap_byte_length,
+        readback_chunk_digest_byte_length,
+    ]
+    .into_iter()
+    .try_fold(0_u64, checked_relinearization_provider_add)?;
     let loading_persistent_resident_byte_length = [
         post_source_polynomial_finish_persistent_resident_byte_length,
-        readback_chunk_digest_byte_length,
         readback_authentication_flag_byte_length,
         cached_quotient_byte_length,
     ]
@@ -563,8 +535,6 @@ fn finish_relinearization_round_two_source_provider_memory_accounting(
         maximum_loaded_aggregate_trace_pair_byte_length: dimensions.maximum_trace_pair_byte_length,
         maximum_cached_authenticated_chunk_byte_length,
         maximum_pending_catalog_byte_length,
-        maximum_quotient_phase_populated_request_identity_byte_length:
-            quotient_phase_populated_request_identity_byte_length,
         maximum_recursive_cached_row_payload_byte_length,
         maximum_recursive_cached_row_catalog_byte_length,
         relation_derivation_active_column_flag_byte_length,
@@ -1075,7 +1045,6 @@ pub(crate) fn relinearization_round_two_source_provider_memory_accounting(
         .map_err(|_| CommonProofProverError::CountOverflow)?;
     let mut maximum_trace_half_byte_length = 0_u64;
     let mut maximum_trace_pair_byte_length = 0_u64;
-    let mut maximum_trace_pair_chunk_count = 0_u64;
     for row_ordinal in 0..trace_column_count / 2 {
         let low_half = aggregate_topology
             .trace_column(
@@ -1103,21 +1072,10 @@ pub(crate) fn relinearization_round_two_source_provider_memory_accounting(
             .byte_length()
             .checked_add(high_half.byte_length())
             .ok_or(CommonProofProverError::CountOverflow)?;
-        let trace_pair_end = high_half
-            .byte_offset()
-            .checked_add(high_half.byte_length())
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        let first_chunk_index = low_half.byte_offset() / stream_chunk_byte_length;
-        let end_chunk_index_exclusive = trace_pair_end.div_ceil(stream_chunk_byte_length);
         maximum_trace_half_byte_length = maximum_trace_half_byte_length
             .max(low_half.byte_length())
             .max(high_half.byte_length());
         maximum_trace_pair_byte_length = maximum_trace_pair_byte_length.max(trace_pair_byte_length);
-        maximum_trace_pair_chunk_count = maximum_trace_pair_chunk_count.max(
-            end_chunk_index_exclusive
-                .checked_sub(first_chunk_index)
-                .ok_or(CommonProofProverError::CountOverflow)?,
-        );
     }
     let component_chunk_count = aggregate_topology
         .expected_byte_length()
@@ -1171,7 +1129,6 @@ pub(crate) fn relinearization_round_two_source_provider_memory_accounting(
             total_authenticated_source_chunk_count,
             maximum_trace_half_byte_length,
             maximum_trace_pair_byte_length,
-            maximum_trace_pair_chunk_count,
             maximum_recursive_cached_row_count,
             maximum_relation_column_derivation_workspace_byte_length:
                 relation_column_derivation_liveness.maximum_workspace_byte_length,
@@ -1321,53 +1278,6 @@ impl ExactLoadedAggregateTraceColumnCatalog {
     }
 }
 
-struct ExactAggregateSourceRequestIdentityCatalog {
-    ordered_request_identities: Box<[[u8; Hash512::BYTE_LENGTH]]>,
-    request_identity_count: usize,
-}
-
-impl ExactAggregateSourceRequestIdentityCatalog {
-    fn new(maximum_request_identity_count: usize) -> Self {
-        Self {
-            ordered_request_identities: vec![
-                [0_u8; Hash512::BYTE_LENGTH];
-                maximum_request_identity_count
-            ]
-            .into_boxed_slice(),
-            request_identity_count: 0,
-        }
-    }
-
-    fn push(
-        &mut self,
-        request_identity: [u8; Hash512::BYTE_LENGTH],
-    ) -> Result<(), CommonProofProverError> {
-        let slot = self
-            .ordered_request_identities
-            .get_mut(self.request_identity_count)
-            .ok_or(CommonProofProverError::InvalidColumn)?;
-        *slot = request_identity;
-        self.request_identity_count = self
-            .request_identity_count
-            .checked_add(1)
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        Ok(())
-    }
-
-    fn as_slice(&self) -> &[[u8; Hash512::BYTE_LENGTH]] {
-        &self.ordered_request_identities[..self.request_identity_count]
-    }
-
-    const fn len(&self) -> usize {
-        self.request_identity_count
-    }
-
-    #[cfg(test)]
-    fn allocated_identity_slot_count(&self) -> usize {
-        self.ordered_request_identities.len()
-    }
-}
-
 struct PendingAggregateTraceColumn {
     requirement: AggregateTraceColumnRequirement,
     trace_column: KeySwitchComponentTraceColumn,
@@ -1395,12 +1305,12 @@ struct OutstandingAggregateSourceRead {
 
 struct PendingRelinearizationRoundTwoColumn {
     column_ordinal: u32,
+    advances_initial_position: bool,
     logical_requirements: Box<[AggregateTraceColumnRequirement]>,
     load_requirements: Box<[AggregateTraceColumnRequirement]>,
     next_load_requirement_index: usize,
     current_trace_column: Option<PendingAggregateTraceColumn>,
     loaded_trace_columns: ExactLoadedAggregateTraceColumnCatalog,
-    ordered_request_identities: ExactAggregateSourceRequestIdentityCatalog,
     quotient_phase: PendingRelinearizationRoundTwoQuotientPhase,
 }
 
@@ -2166,6 +2076,7 @@ impl RelinearizationRoundTwoSourcePolynomialAdapter {
     fn begin_pending_column(
         &self,
         column_ordinal: u32,
+        advances_initial_position: bool,
     ) -> Result<PendingRelinearizationRoundTwoColumn, CommonProofProverError> {
         let trace_column_count = self
             .aggregate_topology
@@ -2225,24 +2136,14 @@ impl RelinearizationRoundTwoSourcePolynomialAdapter {
         if load_requirements.len() > 2 {
             return Err(CommonProofProverError::InvalidColumn);
         }
-        let maximum_request_identity_count =
-            self.aggregate_sources
-                .iter()
-                .try_fold(0_usize, |total, source| {
-                    total
-                        .checked_add(source.authenticated_chunks.len())
-                        .ok_or(CommonProofProverError::CountOverflow)
-                })?;
         Ok(PendingRelinearizationRoundTwoColumn {
             column_ordinal,
+            advances_initial_position,
             logical_requirements,
             load_requirements,
             next_load_requirement_index: 0,
             current_trace_column: None,
             loaded_trace_columns: ExactLoadedAggregateTraceColumnCatalog::new(2),
-            ordered_request_identities: ExactAggregateSourceRequestIdentityCatalog::new(
-                maximum_request_identity_count,
-            ),
             quotient_phase,
         })
     }
@@ -2710,13 +2611,15 @@ impl RelinearizationRoundTwoSourcePolynomialAdapter {
         &self,
         pending: &PendingRelinearizationRoundTwoColumn,
     ) -> Result<CommonProofSourcePolynomialReplayIdentity, CommonProofProverError> {
-        const FIXED_PART_COUNT: u64 = 26;
+        // Bind the two authenticated source objects, their exact topology, and
+        // the complete logical coefficient map. Chunk-read order is only a
+        // bounded host schedule and deliberately cannot change the identity:
+        // each initial and replayed chunk is authenticated independently by
+        // the retained canonical stream digests.
+        const FIXED_PART_COUNT: u64 = 25;
         let part_count = u64::try_from(pending.logical_requirements.len())
             .ok()
             .and_then(|count| count.checked_add(FIXED_PART_COUNT))
-            .and_then(|count| {
-                count.checked_add(u64::try_from(pending.ordered_request_identities.len()).ok()?)
-            })
             .ok_or(CommonProofProverError::CountOverflow)?;
         let mut hasher = StreamingHash512::new(
             RELINEARIZATION_ROUND_TWO_SOURCE_REPLAY_IDENTITY_DOMAIN,
@@ -2753,20 +2656,21 @@ impl RelinearizationRoundTwoSourcePolynomialAdapter {
                 .map_err(|_| CommonProofProverError::CountOverflow)?
                 .to_le_bytes(),
         );
-        hasher.absorb_part(
-            &u64::try_from(pending.ordered_request_identities.len())
-                .map_err(|_| CommonProofProverError::CountOverflow)?
-                .to_le_bytes(),
-        );
         for source in &self.aggregate_sources {
             hasher.absorb_part(&source.descriptor_binding);
             hasher.absorb_part(&source.material_root);
             hasher.absorb_part(&source.stream_digest);
             hasher.absorb_part(&source.stream_total_byte_length.to_le_bytes());
             hasher.absorb_part(
-                &u64::try_from(source.authenticated_chunks.len())
-                    .map_err(|_| CommonProofProverError::CountOverflow)?
-                    .to_le_bytes(),
+                &u64::try_from(
+                    source
+                        .readback
+                        .as_ref()
+                        .ok_or(CommonProofProverError::InvalidColumn)?
+                        .chunk_count(),
+                )
+                .map_err(|_| CommonProofProverError::CountOverflow)?
+                .to_le_bytes(),
             );
         }
         for requirement in pending.logical_requirements.iter().copied() {
@@ -2782,9 +2686,6 @@ impl RelinearizationRoundTwoSourcePolynomialAdapter {
                     .to_le_bytes(),
             );
             hasher.absorb_part(&encoded_requirement);
-        }
-        for request_identity in pending.ordered_request_identities.as_slice() {
-            hasher.absorb_part(request_identity);
         }
         CommonProofSourcePolynomialReplayIdentity::from_authenticated_source(hasher.finalize())
     }
@@ -2868,6 +2769,110 @@ impl RelinearizationRoundTwoSourcePolynomialAdapter {
         .interpolate_base_polynomial_in_place(&mut field_values)?;
         Ok(CommonProofSourcePolynomial::from_protected_base_coefficients(field_values))
     }
+
+    fn poll_selected_source_polynomial(
+        &mut self,
+        request: CommonProofSourcePolynomialRequest<'_>,
+        advances_initial_position: bool,
+    ) -> Result<CommonProofSourcePolynomialProviderPoll, CommonProofProverError> {
+        if request.request_context() != self.request_context
+            || self.relation_plan_variant.ordered_columns().get(
+                usize::try_from(request.column_ordinal())
+                    .map_err(|_| CommonProofProverError::CountOverflow)?,
+            ) != Some(request.descriptor())
+        {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        let column_ordinal = request.column_ordinal();
+        if self.pending_column.is_none() {
+            if self.outstanding_source_read.is_some() {
+                return Err(CommonProofProverError::InvalidColumn);
+            }
+            if !advances_initial_position {
+                self.cached_quotient = None;
+            }
+            self.pending_column =
+                Some(self.begin_pending_column(column_ordinal, advances_initial_position)?);
+        } else if self.pending_column.as_ref().is_none_or(|pending| {
+            pending.column_ordinal != column_ordinal
+                || pending.advances_initial_position != advances_initial_position
+        }) {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        if self.outstanding_source_read.is_some() {
+            return Ok(CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired);
+        }
+
+        loop {
+            self.ensure_current_trace_column()?;
+            self.absorb_cached_source_chunk()?;
+            if self.finish_loaded_trace_column()? {
+                continue;
+            }
+            if self.requirements_are_loaded() {
+                match self.advance_pending_round_two_quotient() {
+                    Ok(true) => continue,
+                    Ok(false) => {}
+                    Err(error) => {
+                        self.pending_column = None;
+                        self.cached_source_chunk = None;
+                        self.cached_quotient = None;
+                        self.source_polynomials_finished = true;
+                        return Err(error);
+                    }
+                }
+                let is_final_initial_source_column = advances_initial_position
+                    && self
+                        .next_source_index
+                        .checked_add(1)
+                        .ok_or(CommonProofProverError::CountOverflow)?
+                        == self.requested_column_ordinals.len();
+                if is_final_initial_source_column
+                    && let Some(outstanding) = self.next_final_coverage_source_read(request)?
+                {
+                    self.cached_source_chunk = None;
+                    self.outstanding_source_read = Some(outstanding);
+                    return Ok(
+                        CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired,
+                    );
+                }
+                let pending = self
+                    .pending_column
+                    .take()
+                    .ok_or(CommonProofProverError::InvalidColumn)?;
+                let replay_identity = self.replay_identity(&pending)?;
+                let derived_polynomial =
+                    self.derive_source_polynomial(column_ordinal, &pending.loaded_trace_columns);
+                if !advances_initial_position {
+                    self.cached_quotient = None;
+                }
+                let polynomial = match derived_polynomial {
+                    Ok(polynomial) => polynomial,
+                    Err(error) => {
+                        self.cached_source_chunk = None;
+                        self.cached_quotient = None;
+                        self.source_polynomials_finished = true;
+                        return Err(error);
+                    }
+                };
+                if advances_initial_position {
+                    self.next_source_index = self
+                        .next_source_index
+                        .checked_add(1)
+                        .ok_or(CommonProofProverError::CountOverflow)?;
+                }
+                return Ok(CommonProofSourcePolynomialProviderPoll::Ready(
+                    ProvidedCommonProofSourcePolynomial::new(polynomial, replay_identity),
+                ));
+            }
+            let outstanding = self.next_trace_source_read(request)?;
+            // The retained chunk has contributed every byte it can to this
+            // trace range. Drop it before the host allocates the next chunk.
+            self.cached_source_chunk = None;
+            self.outstanding_source_read = Some(outstanding);
+            return Ok(CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired);
+        }
+    }
 }
 
 impl CommonProofSourcePolynomialProvider for RelinearizationRoundTwoSourcePolynomialAdapter {
@@ -2900,96 +2905,30 @@ impl CommonProofSourcePolynomialProvider for RelinearizationRoundTwoSourcePolyno
         request: CommonProofSourcePolynomialRequest<'_>,
     ) -> Result<CommonProofSourcePolynomialProviderPoll, CommonProofProverError> {
         if self.source_polynomials_finished
-            || request.request_context() != self.request_context
             || self
                 .requested_column_ordinals
                 .get(self.next_source_index)
                 .copied()
                 != Some(request.column_ordinal())
-            || self.relation_plan_variant.ordered_columns().get(
-                usize::try_from(request.column_ordinal())
-                    .map_err(|_| CommonProofProverError::CountOverflow)?,
-            ) != Some(request.descriptor())
         {
             return Err(CommonProofProverError::InvalidColumn);
         }
-        if self.outstanding_source_read.is_some() {
-            return Ok(CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired);
-        }
-        let column_ordinal = request.column_ordinal();
-        if self.pending_column.is_none() {
-            self.pending_column = Some(self.begin_pending_column(column_ordinal)?);
-        } else if self
-            .pending_column
-            .as_ref()
-            .is_none_or(|pending| pending.column_ordinal != column_ordinal)
-        {
-            return Err(CommonProofProverError::InvalidColumn);
-        }
+        self.poll_selected_source_polynomial(request, true)
+    }
 
-        loop {
-            self.ensure_current_trace_column()?;
-            self.absorb_cached_source_chunk()?;
-            if self.finish_loaded_trace_column()? {
-                continue;
-            }
-            if self.requirements_are_loaded() {
-                match self.advance_pending_round_two_quotient() {
-                    Ok(true) => continue,
-                    Ok(false) => {}
-                    Err(error) => {
-                        self.pending_column = None;
-                        self.cached_source_chunk = None;
-                        self.cached_quotient = None;
-                        self.source_polynomials_finished = true;
-                        return Err(error);
-                    }
-                }
-                let is_final_source_column = self
-                    .next_source_index
-                    .checked_add(1)
-                    .ok_or(CommonProofProverError::CountOverflow)?
-                    == self.requested_column_ordinals.len();
-                if is_final_source_column
-                    && let Some(outstanding) = self.next_final_coverage_source_read(request)?
-                {
-                    self.cached_source_chunk = None;
-                    self.outstanding_source_read = Some(outstanding);
-                    return Ok(
-                        CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired,
-                    );
-                }
-                let pending = self
-                    .pending_column
-                    .take()
-                    .ok_or(CommonProofProverError::InvalidColumn)?;
-                let replay_identity = self.replay_identity(&pending)?;
-                let polynomial = match self
-                    .derive_source_polynomial(column_ordinal, &pending.loaded_trace_columns)
-                {
-                    Ok(polynomial) => polynomial,
-                    Err(error) => {
-                        self.cached_source_chunk = None;
-                        self.cached_quotient = None;
-                        self.source_polynomials_finished = true;
-                        return Err(error);
-                    }
-                };
-                self.next_source_index = self
-                    .next_source_index
-                    .checked_add(1)
-                    .ok_or(CommonProofProverError::CountOverflow)?;
-                return Ok(CommonProofSourcePolynomialProviderPoll::Ready(
-                    ProvidedCommonProofSourcePolynomial::new(polynomial, replay_identity),
-                ));
-            }
-            let outstanding = self.next_trace_source_read(request)?;
-            // The retained chunk has contributed every byte it can to this
-            // trace range. Drop it before the host allocates the next chunk.
-            self.cached_source_chunk = None;
-            self.outstanding_source_read = Some(outstanding);
-            return Ok(CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired);
+    fn poll_replayed_source_polynomial(
+        &mut self,
+        request: CommonProofSourcePolynomialRequest<'_>,
+    ) -> Result<CommonProofSourcePolynomialProviderPoll, CommonProofProverError> {
+        if !self.source_polynomials_finished
+            || self
+                .requested_column_ordinals
+                .binary_search(&request.column_ordinal())
+                .is_err()
+        {
+            return Err(CommonProofProverError::InvalidColumn);
         }
+        self.poll_selected_source_polynomial(request, false)
     }
 
     fn pending_authenticated_source_read_request(
@@ -3009,7 +2948,12 @@ impl CommonProofSourcePolynomialProvider for RelinearizationRoundTwoSourcePolyno
         let Some(outstanding) = self.outstanding_source_read.take() else {
             return Err(CommonProofProverError::InvalidColumn);
         };
-        if self.source_polynomials_finished
+        let advances_initial_position = self
+            .pending_column
+            .as_ref()
+            .map(|pending| pending.advances_initial_position)
+            .ok_or(CommonProofProverError::InvalidColumn)?;
+        if self.source_polynomials_finished == advances_initial_position
             || outstanding.request != request
             || authenticated_bytes.len()
                 != usize::try_from(request.source_byte_length())
@@ -3040,15 +2984,12 @@ impl CommonProofSourcePolynomialProvider for RelinearizationRoundTwoSourcePolyno
             self.source_polynomials_finished = true;
             return Err(CommonProofProverError::InvalidColumn);
         }
-        *source
-            .authenticated_chunks
-            .get_mut(chunk_index)
-            .ok_or(CommonProofProverError::InvalidColumn)? = true;
-        self.pending_column
-            .as_mut()
-            .ok_or(CommonProofProverError::InvalidColumn)?
-            .ordered_request_identities
-            .push(request.request_identity())?;
+        if advances_initial_position {
+            *source
+                .authenticated_chunks
+                .get_mut(chunk_index)
+                .ok_or(CommonProofProverError::InvalidColumn)? = true;
+        }
         match outstanding.purpose {
             AggregateSourceReadPurpose::TraceColumn => {
                 self.cached_source_chunk = Some(CachedAggregateSourceChunk {
@@ -3091,9 +3032,9 @@ impl CommonProofSourcePolynomialProvider for RelinearizationRoundTwoSourcePolyno
         for source in &mut self.aggregate_sources {
             source
                 .readback
-                .take()
+                .as_mut()
                 .ok_or(CommonProofProverError::InvalidColumn)?
-                .finish()
+                .finish_initial_pass()
                 .into_result()
                 .map_err(|_| CommonProofProverError::InvalidColumn)?;
             source.authenticated_chunks = Vec::new().into_boxed_slice();
@@ -3276,7 +3217,6 @@ mod tests {
             total_authenticated_source_chunk_count: 8,
             maximum_trace_half_byte_length: 128,
             maximum_trace_pair_byte_length: 256,
-            maximum_trace_pair_chunk_count: 2,
             maximum_recursive_cached_row_count: 3,
             maximum_relation_column_derivation_workspace_byte_length: 2_048,
             maximum_recursive_cache_and_relation_workspace_byte_length: 2_240,
@@ -3332,30 +3272,17 @@ mod tests {
         let derived_rows = ExactKeyRelationDerivedRowCache::new(11);
         let active_columns = ExactKeyRelationActiveColumnSet::new(11);
         let loaded_columns = ExactLoadedAggregateTraceColumnCatalog::new(2);
-        let mut request_identities = ExactAggregateSourceRequestIdentityCatalog::new(8);
         let radix_digits = [(7_u32, vec![8_u32, 9].into_boxed_slice())]
             .into_iter()
             .collect::<super::super::key_relation::ExactRadixDigitColumnCatalog>();
-        request_identities
-            .push([1_u8; Hash512::BYTE_LENGTH])
-            .expect("first request identity");
-        request_identities
-            .push([2_u8; Hash512::BYTE_LENGTH])
-            .expect("second request identity");
 
         assert_eq!(derived_rows.descriptor_slot_count(), 11);
         assert_eq!(active_columns.flag_count(), 11);
         assert_eq!(loaded_columns.descriptor_slot_count(), 2);
-        assert_eq!(request_identities.allocated_identity_slot_count(), 8);
-        assert_eq!(request_identities.len(), 2);
         assert_eq!(radix_digits.len(), 1);
         assert_eq!(
             radix_digits.values().next().map(Box::as_ref),
             Some([8_u32, 9].as_slice())
-        );
-        assert_eq!(
-            request_identities.as_slice()[1],
-            [2_u8; Hash512::BYTE_LENGTH]
         );
     }
 
@@ -3378,13 +3305,6 @@ mod tests {
             accounting.first_aggregate_product_byte_length(),
             accounting.cached_quotient_byte_length()
         );
-        assert_eq!(
-            accounting.maximum_quotient_phase_populated_request_identity_byte_length(),
-            valid_memory_dimensions().maximum_trace_pair_chunk_count
-                * 2
-                * u64::try_from(size_of::<[u8; Hash512::BYTE_LENGTH]>())
-                    .expect("request identity size")
-        );
         assert!(
             accounting.additional_loading_source_polynomials_transient_byte_length()
                 >= accounting.first_aggregate_product_byte_length()
@@ -3405,11 +3325,11 @@ mod tests {
             accounting.post_source_polynomial_finish_persistent_resident_byte_length(),
             accounting.provider_fixed_owner_byte_length()
                 + accounting.retained_catalog_heap_byte_length()
+                + accounting.readback_chunk_digest_byte_length()
         );
         assert_eq!(
             accounting.loading_persistent_resident_byte_length(),
             accounting.post_source_polynomial_finish_persistent_resident_byte_length()
-                + accounting.readback_chunk_digest_byte_length()
                 + accounting.readback_authentication_flag_byte_length()
                 + accounting.cached_quotient_byte_length()
         );
@@ -3516,7 +3436,6 @@ mod tests {
 
         let mut overflowing_chunk_count = valid_memory_dimensions();
         overflowing_chunk_count.total_authenticated_source_chunk_count = u64::MAX;
-        overflowing_chunk_count.maximum_trace_pair_chunk_count = 1;
         assert!(matches!(
             finish_relinearization_round_two_source_provider_memory_accounting(
                 overflowing_chunk_count

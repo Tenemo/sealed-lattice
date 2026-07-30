@@ -405,15 +405,12 @@ fn ballot_validity_carrier_buffer_accounting(
     ]
     .into_iter()
     .try_fold(0_u64, checked_adapter_add)?;
-    let provider_post_source_finish_persistent_resident_byte_length = [
-        provider_fixed_owner_byte_length,
-        provider_source_plan_catalog_byte_length,
-        provider_ordered_source_column_catalog_byte_length,
-        public_material_catalog_and_arc_header_byte_length,
-        provider_bound_public_residue_byte_length,
-    ]
-    .into_iter()
-    .try_fold(0_u64, checked_adapter_add)?;
+    // Exact same-secret row-code openings replay source polynomials after the
+    // initial pass. Retain the authenticated witness and its precomputed
+    // transforms until `finish_source_replay`; the phase-local value cache is
+    // still released at each boundary.
+    let provider_post_source_finish_persistent_resident_byte_length =
+        provider_loading_persistent_resident_byte_length;
     let provider_additional_loading_transient_byte_length = provider_value_cache_byte_length.max(
         provider_value_cache_byte_length
             .checked_add(provider_transient_scratch_byte_length)
@@ -2779,13 +2776,47 @@ impl CommonProofSourcePolynomialProvider for BallotValiditySourcePolynomialAdapt
     }
 
     fn finish(&mut self) -> Result<(), CommonProofProverError> {
-        let result = if self.next_source_column_position == self.ordered_source_columns.len() {
-            Ok(())
-        } else {
-            Err(CommonProofProverError::InvalidColumn)
-        };
+        if self.next_source_column_position != self.ordered_source_columns.len() {
+            self.release_secret_material();
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        self.cached_value_source = None;
+        Ok(())
+    }
+
+    fn poll_replayed_source_polynomial(
+        &mut self,
+        request: CommonProofSourcePolynomialRequest<'_>,
+    ) -> Result<CommonProofSourcePolynomialProviderPoll, CommonProofProverError> {
+        if self.next_source_column_position != self.ordered_source_columns.len() {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        let result = self
+            .ordered_source_columns
+            .binary_search_by_key(&request.column_ordinal(), |(column_ordinal, _)| {
+                *column_ordinal
+            })
+            .map_err(|_| CommonProofProverError::InvalidColumn)
+            .and_then(|source_position| {
+                self.cached_value_source = None;
+                let result =
+                    self.provide_source_polynomial_at_position(request, source_position, false);
+                self.cached_value_source = None;
+                result
+            });
+        if result.is_err() {
+            self.release_secret_material();
+        }
+        result.map(CommonProofSourcePolynomialProviderPoll::Ready)
+    }
+
+    fn finish_source_replay(&mut self) -> Result<(), CommonProofProverError> {
+        if self.next_source_column_position != self.ordered_source_columns.len() {
+            self.release_secret_material();
+            return Err(CommonProofProverError::InvalidColumn);
+        }
         self.release_secret_material();
-        result
+        Ok(())
     }
 }
 
@@ -2794,14 +2825,23 @@ impl BallotValiditySourcePolynomialAdapter {
         &mut self,
         request: CommonProofSourcePolynomialRequest<'_>,
     ) -> Result<ProvidedCommonProofSourcePolynomial, CommonProofProverError> {
+        self.provide_source_polynomial_at_position(request, self.next_source_column_position, true)
+    }
+
+    fn provide_source_polynomial_at_position(
+        &mut self,
+        request: CommonProofSourcePolynomialRequest<'_>,
+        source_position: usize,
+        advances_initial_position: bool,
+    ) -> Result<ProvidedCommonProofSourcePolynomial, CommonProofProverError> {
         let expected_column_ordinal = self
             .ordered_source_columns
-            .get(self.next_source_column_position)
+            .get(source_position)
             .map(|(column_ordinal, _)| *column_ordinal)
             .ok_or(CommonProofProverError::InvalidColumn)?;
         let expected_descriptor = self
             .ordered_source_columns
-            .get(self.next_source_column_position)
+            .get(source_position)
             .map(|(_, descriptor)| descriptor)
             .ok_or(CommonProofProverError::InvalidColumn)?;
         if request.protocol_version() != self.protocol_version
@@ -2825,7 +2865,12 @@ impl BallotValiditySourcePolynomialAdapter {
         let polynomial = self
             .derive_source_polynomial(expected_column_ordinal)
             .map_err(|_| CommonProofProverError::InvalidColumn)?;
-        self.next_source_column_position += 1;
+        if advances_initial_position {
+            self.next_source_column_position = self
+                .next_source_column_position
+                .checked_add(1)
+                .ok_or(CommonProofProverError::CountOverflow)?;
+        }
         Ok(ProvidedCommonProofSourcePolynomial::new(
             polynomial,
             replay_identity,
@@ -4664,7 +4709,7 @@ mod tests {
     }
 
     #[test]
-    fn provider_releases_secret_material_after_successful_source_construction() {
+    fn provider_replays_authenticated_sources_before_releasing_secret_material() {
         let compilation = compilation();
         let witness = witness(&compilation);
         let material = public_material(&compilation, &witness);
@@ -4703,6 +4748,21 @@ mod tests {
         )
         .expect("all pre-challenge source columns construct");
         assert_ne!(constructed.source_replay_identity_digest(), [0_u8; 64]);
+        assert!(!provider.secret_material_is_released());
+        let (replayed_column_ordinal, replayed_descriptor) = provider
+            .ordered_source_columns
+            .first()
+            .cloned()
+            .expect("ballot relation has a source column");
+        assert!(matches!(
+            provider.poll_replayed_source_polynomial(
+                request_context.request(replayed_column_ordinal, &replayed_descriptor)
+            ),
+            Ok(CommonProofSourcePolynomialProviderPoll::Ready(_))
+        ));
+        provider
+            .finish_source_replay()
+            .expect("source replay finishes");
         assert!(provider.secret_material_is_released());
         assert_eq!(remaining_owner.secret_owner_count(), 1);
     }

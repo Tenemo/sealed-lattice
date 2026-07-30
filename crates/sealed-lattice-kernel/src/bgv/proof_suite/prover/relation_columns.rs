@@ -291,6 +291,7 @@ impl CommonProofAuthenticatedSourceReadRequest {
         })
     }
 
+    #[cfg(test)]
     pub(crate) const fn request_identity(self) -> [u8; 64] {
         self.request_identity
     }
@@ -498,10 +499,8 @@ pub(crate) trait CommonProofSourcePolynomialProvider {
     /// not sample proof coins or accept caller-supplied polynomial material.
     fn poll_replayed_source_polynomial(
         &mut self,
-        _request: CommonProofSourcePolynomialRequest<'_>,
-    ) -> Result<CommonProofSourcePolynomialProviderPoll, CommonProofProverError> {
-        Err(CommonProofProverError::InvalidColumn)
-    }
+        request: CommonProofSourcePolynomialRequest<'_>,
+    ) -> Result<CommonProofSourcePolynomialProviderPoll, CommonProofProverError>;
 
     /// Returns the exact request represented by the most recent
     /// `AuthenticatedSourceReadRequired` poll. Keeping the request in provider

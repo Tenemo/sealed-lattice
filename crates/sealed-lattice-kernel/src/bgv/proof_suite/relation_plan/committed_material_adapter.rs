@@ -311,12 +311,12 @@ impl CommittedMaterialSourceProviderMemoryAccounting {
             .and_then(|total| total.checked_add(recipe_catalog_byte_length))
             .and_then(|total| total.checked_add(nested_recipe_catalog_byte_length))
             .ok_or(CommonProofProverError::CountOverflow)?;
+        // Exact same-secret openings replay both committed and prover-created
+        // source columns. The checked witness catalogs therefore remain live
+        // until `finish_source_replay`; relation-tree inputs are already
+        // accounted as preparation-only transient storage.
         let post_source_polynomial_finish_persistent_resident_byte_length =
-            adapter_fixed_byte_length
-                .checked_add(authenticated_coefficient_byte_length)
-                .and_then(|total| total.checked_add(compact_source_byte_length))
-                .and_then(|total| total.checked_add(adapter_source_wrapper_catalog_byte_length))
-                .ok_or(CommonProofProverError::CountOverflow)?;
+            loading_persistent_resident_byte_length;
         let restart_reference_catalog_byte_length = logical_root_count
             .checked_add(4)
             .and_then(|count| count.checked_mul(framed_part_reference_byte_length))
@@ -985,6 +985,56 @@ impl CommittedMaterialSourcePolynomialAdapter {
         ))
     }
 
+    fn materialize_source_polynomial(
+        &mut self,
+        column_ordinal: u32,
+        descriptor: &RelationColumnDescriptor,
+    ) -> Result<(CommonProofSourcePolynomial, Option<[u8; 64]>), CommonProofProverError> {
+        match descriptor.origin() {
+            RelationColumnOrigin::BoundTree { .. } => {
+                let source = self
+                    .bound_material_by_column
+                    .as_deref()
+                    .ok_or(CommonProofProverError::InvalidColumn)?
+                    .get(
+                        usize::try_from(column_ordinal)
+                            .map_err(|_| CommonProofProverError::CountOverflow)?,
+                    )
+                    .and_then(Option::as_ref)
+                    .ok_or(CommonProofProverError::InvalidColumn)?;
+                let authenticated_source = self
+                    .bound_sources_by_catalog_index
+                    .get(source.logical_root_ordinal)
+                    .map(|(_, authenticated_source)| authenticated_source)
+                    .ok_or(CommonProofProverError::InvalidColumn)?;
+                let polynomial = authenticated_source
+                    .regenerate_masked_coefficients(source.physical_column_ordinal)
+                    .map_err(|_| CommonProofProverError::InvalidColumn)?;
+                Ok((
+                    CommonProofSourcePolynomial::from_protected_base_coefficients(polynomial),
+                    Some(authenticated_source.compact_source().root()),
+                ))
+            }
+            RelationColumnOrigin::Prover => {
+                let mut rows = self
+                    .trace_witness
+                    .as_ref()
+                    .ok_or(CommonProofProverError::InvalidColumn)?
+                    .column_trace_field_values(column_ordinal)
+                    .map_err(|_| CommonProofProverError::InvalidColumn)?;
+                self.trace_domain
+                    .interpolate_base_polynomial_in_place(&mut rows)?;
+                Ok((
+                    CommonProofSourcePolynomial::from_base_coefficients(rows),
+                    None,
+                ))
+            }
+            RelationColumnOrigin::VerifierSequence { .. } => {
+                Err(CommonProofProverError::InvalidColumn)
+            }
+        }
+    }
+
     const fn expected_request_context(&self) -> CommonProofSourcePolynomialRequestContext {
         CommonProofSourcePolynomialRequestContext::new(
             self.protocol_version,
@@ -1046,49 +1096,9 @@ impl CommonProofSourcePolynomialProvider for CommittedMaterialSourcePolynomialAd
         {
             return Err(CommonProofProverError::InvalidColumn);
         }
-        let (polynomial, root) = match expected_descriptor.origin() {
-            RelationColumnOrigin::BoundTree { .. } => {
-                let source = self
-                    .bound_material_by_column
-                    .as_deref()
-                    .ok_or(CommonProofProverError::InvalidColumn)?
-                    .get(
-                        usize::try_from(expected_column_ordinal)
-                            .map_err(|_| CommonProofProverError::CountOverflow)?,
-                    )
-                    .and_then(Option::as_ref)
-                    .ok_or(CommonProofProverError::InvalidColumn)?;
-                let authenticated_source = self
-                    .bound_sources_by_catalog_index
-                    .get(source.logical_root_ordinal)
-                    .map(|(_, authenticated_source)| authenticated_source)
-                    .ok_or(CommonProofProverError::InvalidColumn)?;
-                let polynomial = authenticated_source
-                    .regenerate_masked_coefficients(source.physical_column_ordinal)
-                    .map_err(|_| CommonProofProverError::InvalidColumn)?;
-                (
-                    CommonProofSourcePolynomial::from_protected_base_coefficients(polynomial),
-                    Some(authenticated_source.compact_source().root()),
-                )
-            }
-            RelationColumnOrigin::Prover => {
-                let mut rows = self
-                    .trace_witness
-                    .as_ref()
-                    .ok_or(CommonProofProverError::InvalidColumn)?
-                    .column_trace_field_values(expected_column_ordinal)
-                    .map_err(|_| CommonProofProverError::InvalidColumn)?;
-                self.trace_domain
-                    .interpolate_base_polynomial_in_place(&mut rows)?;
-                (
-                    CommonProofSourcePolynomial::from_base_coefficients(rows),
-                    None,
-                )
-            }
-            RelationColumnOrigin::VerifierSequence { .. } => {
-                return Err(CommonProofProverError::InvalidColumn);
-            }
-        };
+        let expected_descriptor = expected_descriptor.clone();
+        let (polynomial, root) =
+            self.materialize_source_polynomial(expected_column_ordinal, &expected_descriptor)?;
         let replay_identity = CommonProofSourcePolynomialReplayIdentity::from_authenticated_source(
             self.replay_identity(expected_column_ordinal, root)?,
         )?;
@@ -1108,13 +1118,38 @@ impl CommonProofSourcePolynomialProvider for CommittedMaterialSourcePolynomialAd
             && self.relation_tree_inputs.is_none()
         {
             self.source_polynomials_finished = true;
-            self.ordered_columns = None;
-            self.trace_witness = None;
-            self.bound_material_by_column = None;
             Ok(())
         } else {
             Err(CommonProofProverError::InvalidColumn)
         }
+    }
+
+    fn poll_replayed_source_polynomial(
+        &mut self,
+        request: CommonProofSourcePolynomialRequest<'_>,
+    ) -> Result<CommonProofSourcePolynomialProviderPoll, CommonProofProverError> {
+        if !self.source_polynomials_finished
+            || request.request_context() != self.expected_request_context()
+        {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        let column_index = usize::try_from(request.column_ordinal())
+            .map_err(|_| CommonProofProverError::CountOverflow)?;
+        let descriptor = self
+            .ordered_columns
+            .as_deref()
+            .and_then(|columns| columns.get(column_index))
+            .filter(|descriptor| *descriptor == request.descriptor())
+            .cloned()
+            .ok_or(CommonProofProverError::InvalidColumn)?;
+        let (polynomial, root) =
+            self.materialize_source_polynomial(request.column_ordinal(), &descriptor)?;
+        let replay_identity = CommonProofSourcePolynomialReplayIdentity::from_authenticated_source(
+            self.replay_identity(request.column_ordinal(), root)?,
+        )?;
+        Ok(CommonProofSourcePolynomialProviderPoll::Ready(
+            ProvidedCommonProofSourcePolynomial::new(polynomial, replay_identity),
+        ))
     }
 
     fn provide_bound_tree_leaf_salt(
@@ -1167,6 +1202,16 @@ impl CommonProofSourcePolynomialProvider for CommittedMaterialSourcePolynomialAd
         } else {
             Err(CommonProofProverError::InvalidTree)
         }
+    }
+
+    fn finish_source_replay(&mut self) -> Result<(), CommonProofProverError> {
+        if !self.source_polynomials_finished {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        self.ordered_columns = None;
+        self.trace_witness = None;
+        self.bound_material_by_column = None;
+        Ok(())
     }
 }
 
@@ -1302,10 +1347,7 @@ mod tests {
         );
         assert_eq!(
             accounting.post_source_polynomial_finish_persistent_resident_byte_length(),
-            accounting.adapter_fixed_byte_length()
-                + accounting.authenticated_coefficient_byte_length()
-                + accounting.compact_source_byte_length()
-                + accounting.adapter_source_wrapper_catalog_byte_length()
+            accounting.loading_persistent_resident_byte_length()
         );
         assert_eq!(
             accounting.preparation_transient_byte_length(),

@@ -174,12 +174,12 @@ fn finish_evaluator_source_provider_memory_accounting(
         authenticated_source_catalog_byte_length,
         ordered_source_column_catalog_byte_length,
         topology_catalog_byte_length,
+        readback_chunk_digest_byte_length,
     ]
     .into_iter()
     .try_fold(0_u64, checked_provider_add)?;
     let loading_persistent_resident_byte_length = [
         post_source_polynomial_finish_persistent_resident_byte_length,
-        readback_chunk_digest_byte_length,
         readback_authentication_flag_byte_length,
     ]
     .into_iter()
@@ -284,6 +284,7 @@ struct PendingEvaluatorAggregateSourceColumn {
     source_column: EvaluatorAggregateSourceColumn,
     coefficients_bytes: Zeroizing<Box<[u8]>>,
     filled_byte_length: usize,
+    advances_initial_position: bool,
 }
 
 struct CachedEvaluatorAggregateSourceChunk {
@@ -744,6 +745,60 @@ impl SelectedEvaluatorAggregateSourcePolynomialProvider {
             .ok_or(CommonProofProverError::InvalidColumn)
     }
 
+    fn replay_source_column(
+        &self,
+        column_ordinal: u32,
+    ) -> Result<EvaluatorAggregateSourceColumn, CommonProofProverError> {
+        let column_index = self
+            .ordered_source_columns
+            .binary_search_by_key(&column_ordinal, |column| column.column_ordinal)
+            .map_err(|_| CommonProofProverError::InvalidColumn)?;
+        self.ordered_source_columns
+            .get(column_index)
+            .cloned()
+            .ok_or(CommonProofProverError::InvalidColumn)
+    }
+
+    fn poll_selected_source_column(
+        &mut self,
+        request: CommonProofSourcePolynomialRequest<'_>,
+        expected: EvaluatorAggregateSourceColumn,
+        advances_initial_position: bool,
+    ) -> Result<CommonProofSourcePolynomialProviderPoll, CommonProofProverError> {
+        if request.request_context() != self.expected_request_context
+            || request.column_ordinal() != expected.column_ordinal
+            || request.descriptor() != &expected.descriptor
+            || self.pending_column.as_ref().is_some_and(|pending| {
+                pending.source_column.column_ordinal != expected.column_ordinal
+                    || pending.advances_initial_position != advances_initial_position
+            })
+        {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        if self.pending_column.is_none() {
+            let capacity = usize::try_from(expected.trace_column.byte_length())
+                .map_err(|_| CommonProofProverError::CountOverflow)?;
+            self.pending_column = Some(PendingEvaluatorAggregateSourceColumn {
+                source_column: expected,
+                coefficients_bytes: Zeroizing::new(vec![0_u8; capacity].into_boxed_slice()),
+                filled_byte_length: 0,
+                advances_initial_position,
+            });
+        }
+        self.absorb_cached_chunk()?;
+        if self.pending_column_is_complete() {
+            return self
+                .finish_pending_column()
+                .map(CommonProofSourcePolynomialProviderPoll::Ready);
+        }
+        self.next_read_request()?;
+        // The retained chunk has already contributed every byte it can to the
+        // pending column. Release it before the caller allocates the next
+        // authenticated chunk so two full source chunks never overlap here.
+        self.cached_chunk = None;
+        Ok(CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired)
+    }
+
     fn next_read_request(
         &self,
     ) -> Result<CommonProofAuthenticatedSourceReadRequest, CommonProofProverError> {
@@ -907,10 +962,12 @@ impl SelectedEvaluatorAggregateSourcePolynomialProvider {
                 ],
             ),
         )?;
-        self.next_source_column_position = self
-            .next_source_column_position
-            .checked_add(1)
-            .ok_or(CommonProofProverError::CountOverflow)?;
+        if pending.advances_initial_position {
+            self.next_source_column_position = self
+                .next_source_column_position
+                .checked_add(1)
+                .ok_or(CommonProofProverError::CountOverflow)?;
+        }
         Ok(ProvidedCommonProofSourcePolynomial::new(
             CommonProofSourcePolynomial::from_base_coefficients(coefficients),
             replay_identity,
@@ -942,36 +999,18 @@ impl CommonProofSourcePolynomialProvider for SelectedEvaluatorAggregateSourcePol
             return Err(CommonProofProverError::InvalidColumn);
         }
         let expected = self.expected_source_column()?;
-        if request.request_context() != self.expected_request_context
-            || request.column_ordinal() != expected.column_ordinal
-            || request.descriptor() != &expected.descriptor
-            || self.pending_column.as_ref().is_some_and(|pending| {
-                pending.source_column.column_ordinal != expected.column_ordinal
-            })
-        {
+        self.poll_selected_source_column(request, expected, true)
+    }
+
+    fn poll_replayed_source_polynomial(
+        &mut self,
+        request: CommonProofSourcePolynomialRequest<'_>,
+    ) -> Result<CommonProofSourcePolynomialProviderPoll, CommonProofProverError> {
+        if !self.finished {
             return Err(CommonProofProverError::InvalidColumn);
         }
-        if self.pending_column.is_none() {
-            let capacity = usize::try_from(expected.trace_column.byte_length())
-                .map_err(|_| CommonProofProverError::CountOverflow)?;
-            self.pending_column = Some(PendingEvaluatorAggregateSourceColumn {
-                source_column: expected,
-                coefficients_bytes: Zeroizing::new(vec![0_u8; capacity].into_boxed_slice()),
-                filled_byte_length: 0,
-            });
-        }
-        self.absorb_cached_chunk()?;
-        if self.pending_column_is_complete() {
-            return self
-                .finish_pending_column()
-                .map(CommonProofSourcePolynomialProviderPoll::Ready);
-        }
-        self.next_read_request()?;
-        // The retained chunk has already contributed every byte it can to the
-        // pending column. Release it before the caller allocates the next
-        // authenticated chunk so two full source chunks never overlap here.
-        self.cached_chunk = None;
-        Ok(CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired)
+        let expected = self.replay_source_column(request.column_ordinal())?;
+        self.poll_selected_source_column(request, expected, false)
     }
 
     fn pending_authenticated_source_read_request(
@@ -1033,9 +1072,9 @@ impl CommonProofSourcePolynomialProvider for SelectedEvaluatorAggregateSourcePol
         for source in &mut self.ordered_sources {
             source
                 .readback
-                .take()
+                .as_mut()
                 .ok_or(CommonProofProverError::InvalidColumn)?
-                .finish()
+                .finish_initial_pass()
                 .into_result()
                 .map_err(|_| CommonProofProverError::InvalidColumn)?;
         }
@@ -1270,6 +1309,19 @@ mod tests {
         ))
     }
 
+    fn poll_replayed_first_column(
+        provider: &mut SelectedEvaluatorAggregateSourcePolynomialProvider,
+        request_variant: &super::super::RelationPlanVariant,
+    ) -> Result<CommonProofSourcePolynomialProviderPoll, CommonProofProverError> {
+        let column_ordinal = provider.ordered_source_columns[0].column_ordinal;
+        let request_context = provider.expected_request_context;
+        provider.poll_replayed_source_polynomial(request_context.request(
+            column_ordinal,
+            &request_variant.ordered_columns()
+                [usize::try_from(column_ordinal).expect("column ordinal")],
+        ))
+    }
+
     #[test]
     fn provider_memory_accounting_covers_exact_owned_catalogs_and_loading_buffers() {
         let (provider, _, _) = test_provider();
@@ -1277,7 +1329,6 @@ mod tests {
         assert_eq!(
             accounting.loading_persistent_resident_byte_length(),
             accounting.post_source_polynomial_finish_persistent_resident_byte_length()
-                + accounting.readback_chunk_digest_byte_length()
                 + accounting.readback_authentication_flag_byte_length()
         );
         assert_eq!(
@@ -1286,6 +1337,7 @@ mod tests {
                 + accounting.authenticated_source_catalog_byte_length()
                 + accounting.ordered_source_column_catalog_byte_length()
                 + accounting.topology_catalog_byte_length()
+                + accounting.readback_chunk_digest_byte_length()
         );
         assert_eq!(
             accounting.additional_loading_source_polynomials_transient_byte_length(),
@@ -1445,6 +1497,64 @@ mod tests {
             ),
             Err(CommonProofProverError::InvalidColumn)
         );
+    }
+
+    #[test]
+    fn finished_provider_replays_the_same_authenticated_column_and_identity() {
+        let (mut provider, request_variant, bytes) = test_provider();
+        assert!(matches!(
+            poll_first_column(&mut provider, &request_variant),
+            Ok(CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired)
+        ));
+        let initial_request = provider
+            .pending_authenticated_source_read_request()
+            .expect("initial request derives")
+            .expect("initial request is pending");
+        provider
+            .supply_authenticated_source_range(
+                initial_request,
+                Zeroizing::new(bytes.clone().into_boxed_slice()),
+            )
+            .expect("initial authenticated source range");
+        let initial = match poll_first_column(&mut provider, &request_variant)
+            .expect("initial column completes")
+        {
+            CommonProofSourcePolynomialProviderPoll::Ready(provided) => provided,
+            CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired => {
+                panic!("the complete initial column requested another range")
+            }
+        };
+        provider.finish().expect("the initial source pass finishes");
+        assert!(matches!(
+            poll_first_column(&mut provider, &request_variant),
+            Err(CommonProofProverError::InvalidColumn)
+        ));
+
+        assert!(matches!(
+            poll_replayed_first_column(&mut provider, &request_variant),
+            Ok(CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired)
+        ));
+        let replay_request = provider
+            .pending_authenticated_source_read_request()
+            .expect("replay request derives")
+            .expect("replay request is pending");
+        assert_eq!(replay_request, initial_request);
+        provider
+            .supply_authenticated_source_range(
+                replay_request,
+                Zeroizing::new(bytes.into_boxed_slice()),
+            )
+            .expect("replayed source range authenticates independently");
+        let replayed = match poll_replayed_first_column(&mut provider, &request_variant)
+            .expect("replayed column completes")
+        {
+            CommonProofSourcePolynomialProviderPoll::Ready(provided) => provided,
+            CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired => {
+                panic!("the complete replayed column requested another range")
+            }
+        };
+        assert_eq!(initial.into_parts(), replayed.into_parts());
+        assert_eq!(provider.next_source_column_position, 1);
     }
 
     #[test]

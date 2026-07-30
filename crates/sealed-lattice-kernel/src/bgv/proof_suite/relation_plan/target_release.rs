@@ -1851,7 +1851,10 @@ fn target_release_source_provider_memory_accounting_from_dimensions(
     )?;
     Ok(CommonProofSourceProviderMemoryAccounting::new(
         loading_persistent_resident_byte_length,
-        fixed_and_catalog_byte_length,
+        // Replay can reconstruct any source column and may rebuild the full
+        // steady role envelope after the initial pass. Charge that live set
+        // throughout exact same-secret opening generation.
+        loading_persistent_resident_byte_length,
         additional_loading_transient_byte_length,
         maximum_returned_source_polynomial_byte_length,
     ))
@@ -1965,6 +1968,57 @@ where
         ))
     }
 
+    fn poll_replayed_source_polynomial(
+        &mut self,
+        request: CommonProofSourcePolynomialRequest<'_>,
+    ) -> Result<CommonProofSourcePolynomialProviderPoll, CommonProofProverError> {
+        if !self.source_polynomials_finished
+            || request.request_context() != self.expected_request_context()
+        {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        let source_position = self
+            .ordered_source_column_ordinals
+            .binary_search(&request.column_ordinal())
+            .map_err(|_| CommonProofProverError::InvalidColumn)?;
+        if self
+            .compilation
+            .relation_plan()
+            .select_variant(None, None)
+            .map_err(|_| CommonProofProverError::InvalidColumn)?
+            .ordered_columns()
+            .get(
+                usize::try_from(request.column_ordinal())
+                    .map_err(|_| CommonProofProverError::CountOverflow)?,
+            )
+            != Some(request.descriptor())
+        {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        let block = self
+            .ordered_source_blocks
+            .get(source_position)
+            .copied()
+            .ok_or(CommonProofProverError::InvalidColumn)?;
+        self.cached_role_key = None;
+        self.cached_role_layers = None;
+        self.cached_exact_carry_column_ordinal = None;
+        self.cached_exact_carry_rows = None;
+        let materialized = self.materialize_requested_column(block, request.column_ordinal());
+        self.cached_role_key = None;
+        self.cached_role_layers = None;
+        self.cached_exact_carry_column_ordinal = None;
+        self.cached_exact_carry_rows = None;
+        let polynomial = materialized.map_err(|_| CommonProofProverError::InvalidColumn)?;
+        let replay_identity = CommonProofSourcePolynomialReplayIdentity::from_authenticated_source(
+            self.source_polynomial_replay_identity(request.column_ordinal())
+                .map_err(|_| CommonProofProverError::InvalidColumn)?,
+        )?;
+        Ok(CommonProofSourcePolynomialProviderPoll::Ready(
+            ProvidedCommonProofSourcePolynomial::new(polynomial, replay_identity),
+        ))
+    }
+
     fn finish(&mut self) -> Result<(), CommonProofProverError> {
         if self.source_polynomials_finished
             || self.next_source_column_position != self.ordered_source_column_ordinals.len()
@@ -2045,6 +2099,18 @@ where
         } else {
             Err(CommonProofProverError::InvalidTree)
         }
+    }
+
+    fn finish_source_replay(&mut self) -> Result<(), CommonProofProverError> {
+        if !self.source_polynomials_finished
+            || self.cached_role_key.is_some()
+            || self.cached_role_layers.is_some()
+            || self.cached_exact_carry_column_ordinal.is_some()
+            || self.cached_exact_carry_rows.is_some()
+        {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        Ok(())
     }
 }
 
@@ -5484,8 +5550,8 @@ mod tests {
                         provider_accounting
                             .post_source_polynomial_finish_persistent_resident_byte_length(),
                     ),
-                Some(17_302_440),
-                "one role-specific steady envelope is retained during loading",
+                Some(0),
+                "source replay can rebuild one role-specific steady envelope",
             );
             assert_eq!(
                 provider_accounting.additional_loading_transient_byte_length(),
