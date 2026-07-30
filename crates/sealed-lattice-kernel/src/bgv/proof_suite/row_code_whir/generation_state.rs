@@ -5740,15 +5740,23 @@ impl RowCodeWhirGenerationStateMachine {
         .ok_or(CommonProofProverError::InvalidColumn)?;
         let expected_witness_value_count = ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT
             .checked_mul(
-                phase
-                    .rows
-                    .first()
-                    .map_or(0, |row| row.logical_polynomial_chunks.len()),
+                self.construction_plan
+                    .parameters
+                    .logical_polynomials_per_physical_row,
             )
             .ok_or(CommonProofProverError::CountOverflow)?;
+        let logical_polynomials_per_physical_row = self
+            .construction_plan
+            .parameters
+            .logical_polynomials_per_physical_row;
         if phase.rows.len() != phase.geometry.row_count
             || expected_witness_value_count != phase.geometry.witness_values_per_row
             || phase.geometry.encoded_column_count == 0
+            || phase.rows.iter().any(|row| {
+                row.logical_polynomial_chunks
+                    .get(logical_polynomials_per_physical_row..)
+                    .is_none_or(|padding| padding.iter().any(Option::is_some))
+            })
         {
             return Err(CommonProofProverError::InvalidColumn);
         }
@@ -5964,7 +5972,12 @@ impl RowCodeWhirGenerationStateMachine {
             .rows
             .get(self.next_phase_row_index)
             .ok_or(CommonProofProverError::InvalidColumn)?;
-        if self.next_phase_logical_chunk_index < row.logical_polynomial_chunks.len() {
+        if self.next_phase_logical_chunk_index
+            < self
+                .construction_plan
+                .parameters
+                .logical_polynomials_per_physical_row
+        {
             let logical_block_index = self.next_phase_logical_chunk_index;
             let Some(chunk) = row.logical_polynomial_chunks[logical_block_index] else {
                 self.next_phase_logical_chunk_index = self
@@ -6071,15 +6084,23 @@ impl RowCodeWhirGenerationStateMachine {
         let phase = &self.construction_plan.quotient_phase;
         let expected_witness_value_count = ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT
             .checked_mul(
-                phase
-                    .rows
-                    .first()
-                    .map_or(0, |row| row.logical_polynomial_chunks.len()),
+                self.construction_plan
+                    .parameters
+                    .logical_polynomials_per_physical_row,
             )
             .ok_or(CommonProofProverError::CountOverflow)?;
+        let logical_polynomials_per_physical_row = self
+            .construction_plan
+            .parameters
+            .logical_polynomials_per_physical_row;
         if phase.rows.len() != phase.geometry.row_count
             || expected_witness_value_count != phase.geometry.witness_values_per_row
             || phase.geometry.encoded_column_count == 0
+            || phase.rows.iter().any(|row| {
+                row.logical_polynomial_chunks
+                    .get(logical_polynomials_per_physical_row..)
+                    .is_none_or(|padding| padding.iter().any(Option::is_some))
+            })
         {
             return Err(CommonProofProverError::InvalidColumn);
         }
@@ -6259,7 +6280,12 @@ impl RowCodeWhirGenerationStateMachine {
             .rows
             .get(self.next_phase_row_index)
             .ok_or(CommonProofProverError::InvalidColumn)?;
-        if self.next_phase_logical_chunk_index < row.logical_polynomial_chunks.len() {
+        if self.next_phase_logical_chunk_index
+            < self
+                .construction_plan
+                .parameters
+                .logical_polynomials_per_physical_row
+        {
             let logical_block_index = self.next_phase_logical_chunk_index;
             let Some(chunk) = row.logical_polynomial_chunks[logical_block_index] else {
                 self.next_phase_logical_chunk_index = self
@@ -6870,7 +6896,7 @@ mod tests {
     };
 
     #[test]
-    fn selected_vss_generation_manifest_accepts_direct_output_material() {
+    fn selected_vss_generation_manifest_and_compact_row_geometry_are_compatible() {
         let schema_identifier =
             ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER;
         let relation_context = selected_relation_plan_check_context(schema_identifier)
@@ -6908,6 +6934,38 @@ mod tests {
         .expect("generation accepts the candidate-specific VSS source manifest");
 
         assert_eq!(manifest.bound_material_tree_count(), Ok(112));
+        let base_phase = construction_plan
+            .base_phase
+            .as_ref()
+            .expect("the selected VSS construction has a base phase");
+        let quotient_phase = &construction_plan.quotient_phase;
+        let selected_row_width = construction_plan
+            .parameters
+            .logical_polynomials_per_physical_row;
+        let expected_witness_value_count =
+            ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT * selected_row_width;
+
+        assert_eq!(selected_row_width, 8);
+        assert_eq!(base_phase.rows.len(), base_phase.geometry.row_count);
+        assert_eq!(quotient_phase.rows.len(), quotient_phase.geometry.row_count);
+        assert_eq!(
+            expected_witness_value_count,
+            base_phase.geometry.witness_values_per_row
+        );
+        assert_eq!(
+            expected_witness_value_count,
+            quotient_phase.geometry.witness_values_per_row
+        );
+        assert!(base_phase.rows.iter().all(|row| {
+            row.logical_polynomial_chunks[selected_row_width..]
+                .iter()
+                .all(Option::is_none)
+        }));
+        assert!(quotient_phase.rows.iter().all(|row| {
+            row.logical_polynomial_chunks[selected_row_width..]
+                .iter()
+                .all(Option::is_none)
+        }));
     }
 
     #[test]
