@@ -17,15 +17,16 @@ use crate::{
         proof_suite::{
             CommonProofGenerationSources, CommonProofGenerationWorkerPoll,
             CommonProofRuntimeLimits, CommonProofRuntimeRegistry,
+            CommonProofVerificationWorkerPoll, ConsumedVerifiedCommonProofCapability,
             MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
             MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH, ProofExternalMemoryObject,
             ProofExternalMemoryProtection, ProofExternalMemoryTransactionOperation,
             ProofExternalMemoryTransactionRequest, RelationProofTreeInput, RelationTreeDescriptor,
-            VerifiedStatementOwnedTree,
+            VerifiedCommonProofStatementSource, VerifiedStatementOwnedTree,
         },
-        setup::SetupKeyRelationProofFamily,
+        setup::{SetupKeyRelationProofFamily, VerifiedPublicRandomness},
     },
-    foundation::{Hash512, ProofApplicationSlot},
+    foundation::{Hash512, ProofApplicationSlot, StreamDescriptor},
 };
 
 #[derive(Debug)]
@@ -44,42 +45,28 @@ struct FileBackedExternalMemory {
     maximum_declared_byte_length: u64,
 }
 
-#[derive(Clone)]
 struct ExactVerificationPrerequisiteFactory {
-    protocol_version: u16,
-    suite_identifier: [u8; Hash512::BYTE_LENGTH],
-    ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
-    action_context_hash: [u8; Hash512::BYTE_LENGTH],
-    public_setup_seed: [u8; Hash512::BYTE_LENGTH],
-    canonical_application_statement_bytes: Vec<u8>,
+    verified_public_randomness: VerifiedPublicRandomness,
+    verified_vss_proof: ConsumedVerifiedCommonProofCapability,
 }
 
 impl ExactVerificationPrerequisiteFactory {
-    fn from_sources(sources: &PreparedExactSameSecretGenerationSources) -> Self {
-        let request_context = sources
-            .source_polynomials
-            .exact_same_secret_evidence_request_context();
+    fn new(
+        verified_public_randomness: VerifiedPublicRandomness,
+        verified_vss_proof: ConsumedVerifiedCommonProofCapability,
+    ) -> Self {
         Self {
-            protocol_version: request_context.protocol_version(),
-            suite_identifier: request_context.suite_identifier(),
-            ceremony_context_hash: sources.authorization.ceremony_context_hash(),
-            action_context_hash: sources.action_context_hash,
-            public_setup_seed: sources.public_setup_seed,
-            canonical_application_statement_bytes: sources
-                .canonical_application_statement_bytes
-                .clone(),
+            verified_public_randomness,
+            verified_vss_proof,
         }
     }
 
     fn build(&self) -> Result<VerifiedSameSecretLowDegreePrerequisite, String> {
-        test_same_secret_low_degree_prerequisite(
-            self.protocol_version,
-            self.suite_identifier,
-            self.ceremony_context_hash,
-            self.action_context_hash,
-            self.public_setup_seed,
-            &self.canonical_application_statement_bytes,
+        VerifiedSameSecretLowDegreePrerequisite::from_positive_verified_vss_evidence(
+            &self.verified_public_randomness,
+            self.verified_vss_proof.borrowed(),
         )
+        .map_err(|error| format!("mint exact verified VSS prerequisite: {error:?}"))
     }
 }
 
@@ -401,41 +388,32 @@ fn exact_application_slot(
     .map_err(|error| format!("construct exact runtime application slot: {error:?}"))
 }
 
-fn generate_exact_same_secret_proof(
-    sources: PreparedExactSameSecretGenerationSources,
-    prerequisite: &VerifiedSameSecretLowDegreePrerequisite,
-) -> Result<(Vec<u8>, u64, usize), String> {
-    let prefix_relation_plan = production_same_secret_relation()?.0;
-    let limits = CommonProofRuntimeLimits::new(
-        AUTOMATIC_ROW_CODE_WHIR_PROOF_ACCEPTANCE_BYTE_LENGTH,
-        MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
-        u64::try_from(MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH)
-            .map_err(|_| "exact output chunk length exceeds u64".to_owned())?,
-    )
-    .map_err(|error| format!("construct exact generation limits: {error:?}"))?;
-    let PreparedExactSameSecretGenerationSources {
-        authorization,
-        relation_plan,
-        relation_trees,
-        source_polynomials,
-        private_coins,
-        canonical_application_statement_bytes,
-        ..
-    } = sources;
-    let prepared =
-        crate::bgv::proof_suite::PreparedCommonProofGeneration::from_row_code_whir_sources(
-            authorization,
-            relation_plan,
-            canonical_application_statement_bytes,
-            relation_trees,
-            limits,
-            CommonProofGenerationSources::new(private_coins, source_polynomials),
-        )
-        .map_err(|error| format!("prepare exact runtime generation: {error:?}"))?;
+struct GeneratedCommonProofEvidence {
+    canonical_proof_bytes: Vec<u8>,
+    stream_descriptor: StreamDescriptor,
+    maximum_external_memory_byte_length: u64,
+    checkpoint_count: usize,
+}
+
+struct ExactTranscriptPrefixEvidence<'evidence> {
+    prerequisite: &'evidence VerifiedSameSecretLowDegreePrerequisite,
+    relation_plan: &'evidence CommonProofRelationPlanCapability,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn generate_prepared_common_proof(
+    prepared: PreparedCommonProofGeneration,
+    canonical_application_statement_bytes: &[u8],
+    application_statement_schema_identifier: u16,
+    roster_position: Option<u16>,
+    schedule_position: Option<u32>,
+    transcript_prefix: Option<ExactTranscriptPrefixEvidence<'_>>,
+    family_label: &str,
+) -> Result<GeneratedCommonProofEvidence, String> {
     let mut registry = CommonProofRuntimeRegistry::default();
     let operation = registry
         .begin_owned_generation(prepared)
-        .map_err(|error| format!("begin exact runtime generation: {error:?}"))?;
+        .map_err(|error| format!("begin {family_label} runtime generation: {error:?}"))?;
     let mut storage = FileBackedExternalMemory::new()?;
     let mut output_chunks = BTreeMap::<usize, Vec<u8>>::new();
     let mut checkpoint_count = 0_usize;
@@ -453,7 +431,7 @@ fn generate_exact_same_secret_proof(
             } => {
                 if last_stage != Some(stage) {
                     eprintln!(
-                        "exact aggregate-wide generation stage {stage:?}: {:?}",
+                        "{family_label} generation stage {stage:?}: {:?}",
                         started_at.elapsed()
                     );
                     last_stage = Some(stage);
@@ -511,13 +489,16 @@ fn generate_exact_same_secret_proof(
                 );
             }
             CommonProofGenerationWorkerPoll::AuthenticatedTranscriptPrefixRequired => {
+                let transcript_prefix = transcript_prefix.as_ref().ok_or_else(|| {
+                    format!("{family_label} unexpectedly requested an authenticated prefix")
+                })?;
                 let request = registry
                     .generation_authenticated_transcript_prefix_request(operation)
                     .map_err(|error| format!("read exact transcript-prefix request: {error:?}"))?;
                 let prepared = PreparedExactSameSecretTranscriptPrefix::prepare(
                     request,
-                    prerequisite,
-                    &prefix_relation_plan,
+                    transcript_prefix.prerequisite,
+                    transcript_prefix.relation_plan,
                 )
                 .map_err(|error| format!("prepare exact transcript prefix: {error:?}"))?;
                 registry
@@ -558,17 +539,203 @@ fn generate_exact_same_secret_proof(
         }
     }
 
-    let _generated_proof = registry
+    let generated_proof = registry
         .finish_owned_generation(operation)
-        .map_err(|error| format!("finish exact runtime generation: {error:?}"))?;
+        .map_err(|error| format!("finish {family_label} runtime generation: {error:?}"))?;
+    let stream_descriptor = registry
+        .preflight_generated_proof_pending_statement(
+            &generated_proof,
+            application_statement_schema_identifier,
+            roster_position,
+            schedule_position,
+            canonical_application_statement_bytes,
+        )
+        .map_err(|error| format!("bind {family_label} generated descriptor: {error:?}"))?;
+    registry
+        .release_generated_proof(generated_proof)
+        .map_err(|error| format!("retire {family_label} generated authority: {error:?}"))?;
     if storage.retained_secret_object_count() != 0 {
-        return Err("exact generation retained secret external-memory objects".to_owned());
+        return Err(format!(
+            "{family_label} generation retained secret external-memory objects"
+        ));
     }
-    Ok((
-        output_chunks.into_values().flatten().collect(),
-        storage.maximum_declared_byte_length(),
+    Ok(GeneratedCommonProofEvidence {
+        canonical_proof_bytes: output_chunks.into_values().flatten().collect(),
+        stream_descriptor,
+        maximum_external_memory_byte_length: storage.maximum_declared_byte_length(),
         checkpoint_count,
-    ))
+    })
+}
+
+fn generate_exact_same_secret_proof(
+    sources: PreparedExactSameSecretGenerationSources,
+    prerequisite: &VerifiedSameSecretLowDegreePrerequisite,
+) -> Result<GeneratedCommonProofEvidence, String> {
+    let prefix_relation_plan = production_same_secret_relation()?.0;
+    let limits = CommonProofRuntimeLimits::new(
+        AUTOMATIC_ROW_CODE_WHIR_PROOF_ACCEPTANCE_BYTE_LENGTH,
+        MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+        u64::try_from(MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH)
+            .map_err(|_| "exact output chunk length exceeds u64".to_owned())?,
+    )
+    .map_err(|error| format!("construct exact generation limits: {error:?}"))?;
+    let request_context = sources
+        .source_polynomials
+        .exact_same_secret_evidence_request_context();
+    let statement = decode_selected_same_secret_statement(
+        &sources.canonical_application_statement_bytes,
+        SelectedApplicationStatementContext::new(
+            request_context.protocol_version(),
+            request_context.suite_identifier(),
+            None,
+            None,
+        ),
+    )
+    .map_err(|error| format!("decode exact generation statement: {error:?}"))?;
+    let roster_position = statement.roster_position();
+    let PreparedExactSameSecretGenerationSources {
+        authorization,
+        relation_plan,
+        relation_trees,
+        source_polynomials,
+        private_coins,
+        canonical_application_statement_bytes,
+        ..
+    } = sources;
+    let prepared = PreparedCommonProofGeneration::from_row_code_whir_sources(
+        authorization,
+        relation_plan,
+        canonical_application_statement_bytes.clone(),
+        relation_trees,
+        limits,
+        CommonProofGenerationSources::new(private_coins, source_polynomials),
+    )
+    .map_err(|error| format!("prepare exact runtime generation: {error:?}"))?;
+    generate_prepared_common_proof(
+        prepared,
+        &canonical_application_statement_bytes,
+        SetupKeyRelationProofFamily::SameSecret.statement_schema_identifier(),
+        Some(roster_position),
+        None,
+        Some(ExactTranscriptPrefixEvidence {
+            prerequisite,
+            relation_plan: &prefix_relation_plan,
+        }),
+        "exact aggregate-wide same-secret proof",
+    )
+}
+
+fn generate_vss_prerequisite_proof(
+    evidence_sources: &ProductionSameSecretEvidenceSources,
+) -> Result<(GeneratedCommonProofEvidence, Vec<u8>), String> {
+    let (prepared, canonical_application_statement_bytes) =
+        prepare_production_vss_prerequisite_generation(evidence_sources)?;
+    let verified_context = evidence_sources.verified_public_randomness.context();
+    let statement = crate::bgv::proof_suite::decode_selected_vss_share_linkage_statement(
+        &canonical_application_statement_bytes,
+        SelectedApplicationStatementContext::new(
+            verified_context.protocol_version(),
+            verified_context.suite_identifier().into_bytes(),
+            None,
+            None,
+        ),
+    )
+    .map_err(|error| format!("decode VSS evidence statement: {error:?}"))?;
+    let generated = generate_prepared_common_proof(
+        prepared,
+        &canonical_application_statement_bytes,
+        ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+        Some(statement.roster_position()),
+        None,
+        None,
+        "selected VSS prerequisite proof",
+    )?;
+    Ok((generated, canonical_application_statement_bytes))
+}
+
+fn verification_proof_chunk(proof: &[u8], chunk_index: usize) -> Result<&[u8], String> {
+    let byte_start = chunk_index
+        .checked_mul(MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH)
+        .ok_or_else(|| "verification chunk offset overflowed".to_owned())?;
+    let byte_end = byte_start
+        .checked_add(MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH)
+        .map(|end| end.min(proof.len()))
+        .ok_or_else(|| "verification chunk extent overflowed".to_owned())?;
+    proof
+        .get(byte_start..byte_end)
+        .filter(|chunk| !chunk.is_empty())
+        .ok_or_else(|| format!("verification chunk {chunk_index} is absent"))
+}
+
+fn verify_vss_prerequisite_proof(
+    canonical_proof_bytes: &[u8],
+    stream_descriptor: StreamDescriptor,
+    canonical_application_statement_bytes: Vec<u8>,
+    verified_public_randomness: &VerifiedPublicRandomness,
+) -> Result<ConsumedVerifiedCommonProofCapability, String> {
+    let runtime_plan = selected_vss_proof_runtime_plan(&canonical_application_statement_bytes)
+        .map_err(|error| format!("derive VSS verification runtime plan: {error:?}"))?;
+    let statement_source =
+        VerifiedCommonProofStatementSource::from_test_verified_vss_statement_source(
+            verified_public_randomness,
+            canonical_application_statement_bytes,
+            stream_descriptor,
+            runtime_plan.relation_plan,
+            runtime_plan.limits,
+        )
+        .map_err(|error| format!("bind verified VSS statement source: {error:?}"))?;
+    let statement_trees =
+        VerifiedStatementOwnedTree::from_verified_committed_material_statement_source(
+            &statement_source,
+            verified_public_randomness,
+        )
+        .map_err(|error| format!("derive verified VSS statement trees: {error:?}"))?;
+    let prepared = statement_source
+        .prepare_exact_vss_evidence_verification(statement_trees)
+        .map_err(|error| format!("prepare production VSS verifier: {error:?}"))?;
+    let mut registry = CommonProofRuntimeRegistry::default();
+    let operation = registry
+        .preissue_verification_operation_handle()
+        .map_err(|error| format!("reserve VSS verification operation: {error:?}"))?;
+    registry
+        .begin_owned_verification_with_handle(prepared, operation)
+        .map_err(|error| format!("begin VSS verification: {error:?}"))?;
+    for (chunk_index, chunk_bytes) in canonical_proof_bytes
+        .chunks(MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH)
+        .enumerate()
+    {
+        registry
+            .absorb_verification_input_chunk(operation, chunk_index, chunk_bytes)
+            .map_err(|error| format!("ingest VSS proof chunk {chunk_index}: {error:?}"))?;
+    }
+    registry
+        .finish_verification_input(operation)
+        .map_err(|error| format!("finish VSS proof ingestion: {error:?}"))?;
+    while let CommonProofVerificationWorkerPoll::NeedsReadback {
+        first_chunk_index,
+        second_chunk_index,
+    } = registry
+        .poll_owned_verification(operation)
+        .map_err(|error| format!("poll VSS verification: {error:?}"))?
+    {
+        for chunk_index in [Some(first_chunk_index), second_chunk_index]
+            .into_iter()
+            .flatten()
+        {
+            let chunk_index = usize::try_from(chunk_index)
+                .map_err(|_| "VSS readback chunk index exceeds usize".to_owned())?;
+            let chunk_bytes = verification_proof_chunk(canonical_proof_bytes, chunk_index)?;
+            registry
+                .supply_verification_readback_chunk(operation, chunk_index, chunk_bytes)
+                .map_err(|error| format!("supply VSS readback chunk {chunk_index}: {error:?}"))?;
+        }
+    }
+    let verified_proof_handle = registry
+        .finish_owned_verification(operation)
+        .map_err(|error| format!("finish VSS verification: {error:?}"))?;
+    registry
+        .consume_verified_proof_for_protocol(&verified_proof_handle)
+        .map_err(|error| format!("retain verified VSS evidence authority: {error:?}"))
 }
 
 fn verify_exact_same_secret_proof(
@@ -948,14 +1115,38 @@ fn run_exact_context_hostile_cases(
 #[ignore = "manual exact aggregate-wide production proof round trip"]
 fn heavy_rust_kernel_exact_aggregate_wide_same_secret_proof_round_trip() {
     let started_at = Instant::now();
+    let evidence_sources =
+        production_same_secret_sources().expect("production exact runtime source");
+    let (vss_proof, vss_canonical_application_statement_bytes) =
+        generate_vss_prerequisite_proof(&evidence_sources)
+            .expect("generate production VSS prerequisite proof");
+    eprintln!(
+        "selected VSS prerequisite proof generated: {} bytes, {} peak declared external bytes, {} checkpoints, {:?}",
+        vss_proof.canonical_proof_bytes.len(),
+        vss_proof.maximum_external_memory_byte_length,
+        vss_proof.checkpoint_count,
+        started_at.elapsed(),
+    );
+    let verified_vss_proof = verify_vss_prerequisite_proof(
+        &vss_proof.canonical_proof_bytes,
+        vss_proof.stream_descriptor,
+        vss_canonical_application_statement_bytes,
+        &evidence_sources.verified_public_randomness,
+    )
+    .expect("production verifier accepts the VSS prerequisite proof");
     let ProductionSameSecretEvidenceSources {
         sources,
         authority_handle,
-    } = production_same_secret_sources().expect("production exact runtime source");
-    let prerequisite =
-        production_same_secret_prerequisite(&sources).expect("production exact VSS prerequisite");
-    let prerequisite_factory = ExactVerificationPrerequisiteFactory::from_sources(&sources);
-    let verification_prerequisite = production_same_secret_prerequisite(&sources)
+        action_private_randomness: _,
+        verified_public_randomness,
+    } = evidence_sources;
+    let prerequisite_factory =
+        ExactVerificationPrerequisiteFactory::new(verified_public_randomness, verified_vss_proof);
+    let prerequisite = prerequisite_factory
+        .build()
+        .expect("production exact VSS prerequisite");
+    let verification_prerequisite = prerequisite_factory
+        .build()
         .expect("independent production exact VSS prerequisite");
     let application_slot = exact_application_slot(&sources).expect("exact application slot");
     let verification_trees =
@@ -972,20 +1163,21 @@ fn heavy_rust_kernel_exact_aggregate_wide_same_secret_proof_round_trip() {
     )
     .expect("exact verification context");
 
-    let (proof, maximum_external_memory_byte_length, checkpoint_count) =
-        generate_exact_same_secret_proof(sources, &prerequisite)
-            .expect("generate exact aggregate-wide same-secret proof");
+    let generated_proof = generate_exact_same_secret_proof(sources, &prerequisite)
+        .expect("generate exact aggregate-wide same-secret proof");
+    let proof = &generated_proof.canonical_proof_bytes;
     eprintln!(
         "exact aggregate-wide proof generated: {} bytes, {} peak declared external bytes, {checkpoint_count} checkpoints, {:?}",
         proof.len(),
-        maximum_external_memory_byte_length,
+        generated_proof.maximum_external_memory_byte_length,
         started_at.elapsed(),
+        checkpoint_count = generated_proof.checkpoint_count,
     );
     assert!(proof.len() <= AUTOMATIC_ROW_CODE_WHIR_PROOF_ACCEPTANCE_BYTE_LENGTH);
-    assert!(checkpoint_count >= 6);
+    assert!(generated_proof.checkpoint_count >= 6);
 
     let metrics = verify_exact_same_secret_proof(
-        &proof,
+        proof,
         verification_prerequisite,
         verification_context.clone(),
     )
@@ -1004,16 +1196,16 @@ fn heavy_rust_kernel_exact_aggregate_wide_same_secret_proof_round_trip() {
     let hostile_targets = exact_same_secret_hostile_mutation_targets(
         &layout_prerequisite,
         verification_context.clone(),
-        &proof,
+        proof,
     )
     .expect("derive exact hostile mutation layout");
     run_exact_proof_hostile_byte_cases(
-        &proof,
+        proof,
         &prerequisite_factory,
         &verification_context,
         &hostile_targets,
     );
-    run_exact_context_hostile_cases(&proof, &prerequisite_factory, &verification_context);
+    run_exact_context_hostile_cases(proof, &prerequisite_factory, &verification_context);
 
     release_production_same_secret_authority(authority_handle)
         .expect("release production exact runtime authority");

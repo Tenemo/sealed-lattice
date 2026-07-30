@@ -873,6 +873,24 @@ impl VerifiedCommonProofStatementSource {
         self.verification_binding.binding_hash()
     }
 
+    /// Builds the genuine generic verifier for the native exact-proof
+    /// evidence path. The source was already derived from a verified public-
+    /// randomness terminal, and the production verifier rechecks the complete
+    /// selected VSS relation and statement-tree catalog here.
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(in crate::bgv::proof_suite) fn prepare_exact_vss_evidence_verification(
+        self,
+        statement_owned_trees: Vec<VerifiedStatementOwnedTree>,
+    ) -> Result<PreparedCommonProofVerification, CommonProofRuntimeError> {
+        ConsumedCommonProofVerificationInputs {
+            statement_source: CommonProofVerificationStatementSource::from_exact(self),
+            statement_owned_trees,
+            evaluator_auxiliary_roots: Vec::new(),
+            verified_column_evaluator: Box::new(RefusingVerifiedColumnEvaluator),
+        }
+        .prepare_exact_vss_evidence()
+    }
+
     pub(super) const fn verification_binding(&self) -> CommonProofVerificationBinding {
         self.verification_binding
     }

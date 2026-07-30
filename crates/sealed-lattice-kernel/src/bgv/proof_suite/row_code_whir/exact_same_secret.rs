@@ -44,17 +44,20 @@ use crate::{
             CommonProofPreChallengeSourcePoll, CommonProofPrivateCoinCoordinate,
             CommonProofPrivateCoinSamplingCatalog, CommonProofPrivateCoinSamplingOperation,
             CommonProofPrivateCoinSource, CommonProofSourcePolynomial,
-            PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
+            PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT, PreparedCommonProofGeneration,
             RecordingCommonProofPrivateCoinSource, RelationProofTreeInput,
             common_proof_private_coin_coordinate_derivation_context_hash,
             construct_reversed_relation_column, encode_common_proof_checkpoint_cursor_manifest,
+            vss_share_linkage_runtime::selected_vss_proof_runtime_plan,
         },
         setup::{
             PreparedExactSameSecretGenerationSources, SetupGenerationAuthorityHandle,
-            SetupGenerationKeyRelationApplication, populate_exact_same_secret_evidence_authority,
+            SetupGenerationKeyRelationApplication, SetupGenerationVssApplication,
+            VerifiedPublicRandomness, populate_exact_same_secret_evidence_authority,
             release_setup_generation_authority,
             resolve_setup_generation_key_relation_preparation_source,
-            with_setup_generation_key_relation,
+            resolve_setup_generation_vss_preparation_source, with_setup_generation_key_relation,
+            with_setup_generation_vss_material_for_exact_same_secret_evidence,
         },
     },
     foundation::{
@@ -105,6 +108,10 @@ const SOURCE_POLYNOMIAL_DIGEST_DOMAIN: &str =
 const SOURCE_CATALOG_DIGEST_DOMAIN: &str = "sealed-lattice/exact-same-secret/source-catalog/v1";
 #[cfg(all(test, not(target_arch = "wasm32")))]
 const EXACT_SAME_SECRET_EVIDENCE_REVISION: u8 = 4;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+const EXACT_SAME_SECRET_CHECKPOINT_LINEAGE_IDENTIFIER: [u8; 32] = [0x71; 32];
+#[cfg(all(test, not(target_arch = "wasm32")))]
+const VSS_PREREQUISITE_CHECKPOINT_LINEAGE_IDENTIFIER: [u8; 32] = [0x73; 32];
 const EXACT_TRANSCRIPT_HEADER_DOMAIN: &[u8] =
     b"sealed-lattice/exact-same-secret/transcript-header/v2";
 const LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT: usize =
@@ -391,6 +398,143 @@ impl VerifiedSameSecretLowDegreePrerequisite {
                 setup_proof_context_hash: terminal.setup_proof_context_hash(),
                 participant_identity: terminal.participant_identity(),
                 roster_position: terminal.roster_position(),
+                vss_application_statement_hash: verified_proof.application_statement_hash(),
+                vss_application_slot_hash: verified_proof.proof_application_slot_hash(),
+                vss_canonical_application_binding_hash: verified_proof
+                    .canonical_proof_application_binding_hash(),
+                vss_relation_plan_hash: relation_plan.relation_plan_hash(),
+                vss_relation_plan_variant_hash: relation_plan.relation_plan_variant_hash(),
+                vss_construction_plan_identity_hash,
+                vss_certificate_geometry_digest,
+                owning_verification_binding_hash: verified_proof.verification_binding_hash(),
+                owning_proof_header_hash: verified_proof.proof_header_hash(),
+                owning_proof_stream_digest: verified_proof.proof_stream_full_object_digest(),
+                ordered_input_roots,
+            },
+            ordered_input_roots,
+            &canonical_prior_proof_descriptor,
+        )
+    }
+
+    /// Mints the native construction-evidence prerequisite only after the
+    /// generic production verifier has accepted the exact selected VSS proof.
+    /// The source and public-randomness terminals are process-local authority;
+    /// no proof bytes, digest, or caller verdict can invoke this constructor.
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    fn from_positive_verified_vss_evidence(
+        verified_public_randomness: &VerifiedPublicRandomness,
+        verified_proof: BorrowedVerifiedCommonProofCapability<'_>,
+    ) -> Result<Self, RefusalReason> {
+        let statement_source = verified_proof
+            .statement_source()
+            .map_err(|_| RefusalReason::WrongHashOrRoot)?;
+        let relation_plan = statement_source.relation_plan_capability();
+        let canonical_application_statement_bytes =
+            statement_source.canonical_application_statement_bytes();
+        let verified_context = verified_public_randomness.context();
+        let statement = crate::bgv::proof_suite::decode_selected_vss_share_linkage_statement(
+            canonical_application_statement_bytes,
+            SelectedApplicationStatementContext::new(
+                verified_context.protocol_version(),
+                verified_context.suite_identifier().into_bytes(),
+                None,
+                None,
+            ),
+        )
+        .map_err(|_| RefusalReason::WrongTypeOrLength)?;
+        let ordered_input_roots = selected_vss_degree_zero_coefficient_roots(
+            statement.ordered_coefficient_material_roots(),
+        )?;
+        let proof_application_binding = statement_source.proof_application_binding();
+        let application_slot = proof_application_binding.application_slot();
+        let application_source_authority = statement_source.application_source_authority();
+        let vss_certificate_geometry_digest = relation_plan
+            .row_code_whir_construction_plan()
+            .selected_vss_low_degree_certificate_geometry_digest()
+            .map_err(|_| RefusalReason::WrongTypeOrLength)?;
+        let vss_construction_plan_identity_hash =
+            relation_plan.row_code_whir_construction_plan_identity_hash();
+        let canonical_prior_proof_descriptor = verified_proof
+            .proof_stream_descriptor()
+            .encode()
+            .map_err(|_| RefusalReason::WrongTypeOrLength)?;
+        let roster_position = statement.roster_position();
+        if relation_plan.application_statement_schema_identifier()
+            != ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+            || relation_plan.relation_plan_hash() != verified_proof.relation_plan_hash()
+            || relation_plan.relation_plan_variant_hash()
+                != verified_proof.relation_plan_variant_hash()
+            || verified_proof.schedule_position().is_some()
+            || verified_proof.top_count().is_some()
+            || verified_proof.protocol_version() != verified_context.protocol_version()
+            || verified_proof.suite_identifier() != verified_context.suite_identifier().into_bytes()
+            || verified_proof.ceremony_context_hash()
+                != verified_context.ceremony_context_hash().into_bytes()
+            || verified_proof.action_context_hash()
+                != verified_context.action_context_hash().into_bytes()
+            || verified_proof.board_object_hash()
+                != verified_public_randomness
+                    .setup_proof_context_hash()
+                    .into_bytes()
+            || statement.protocol_version() != verified_context.protocol_version()
+            || statement.suite_identifier() != verified_context.suite_identifier().into_bytes()
+            || statement.ceremony_context_hash()
+                != verified_context.ceremony_context_hash().into_bytes()
+            || statement.action_context_hash()
+                != verified_context.action_context_hash().into_bytes()
+            || statement.roster_hash() != verified_context.roster_hash().into_bytes()
+            || statement.public_setup_seed()
+                != verified_public_randomness.public_setup_seed().into_bytes()
+            || verified_public_randomness
+                .ordered_participant_identities()
+                .get(usize::from(roster_position))
+                .map(|identity| identity.into_bytes())
+                != Some(statement.participant_identity())
+            || application_slot.suite_identifier() != verified_context.suite_identifier()
+            || application_slot.ceremony_context_hash() != verified_context.ceremony_context_hash()
+            || application_slot.action_context_hash() != verified_context.action_context_hash()
+            || application_slot.application_statement_schema_identifier()
+                != ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+            || application_slot.roster_position() != Some(roster_position)
+            || application_slot.schedule_position().is_some()
+            || application_slot.producer_sequence().is_some()
+            || application_source_authority.application_source_object_hash()
+                != verified_public_randomness.setup_proof_context_hash()
+            || application_source_authority.producer_roster_position() != Some(roster_position)
+            || application_source_authority.schedule_position().is_some()
+            || application_source_authority.producer_sequence().is_some()
+            || application_source_authority.proof_stream_descriptor()
+                != verified_proof.proof_stream_descriptor()
+            || proof_application_binding.proof_header_hash().into_bytes()
+                != verified_proof.proof_header_hash()
+            || proof_application_binding.proof_stream_descriptor()
+                != verified_proof.proof_stream_descriptor()
+            || statement_source.application_statement_hash().into_bytes()
+                != verified_proof.application_statement_hash()
+            || statement_source.verification_binding_hash()
+                != verified_proof.verification_binding_hash()
+            || verified_proof.proof_stream_full_object_digest()
+                != verified_proof
+                    .proof_stream_descriptor()
+                    .full_object_digest
+                    .into_bytes()
+            || vss_construction_plan_identity_hash == [0_u8; Hash512::BYTE_LENGTH]
+        {
+            return Err(RefusalReason::WrongHashOrRoot);
+        }
+        Self::new(
+            VerifiedVssLowDegreeEvidenceBinding {
+                protocol_version: verified_context.protocol_version(),
+                suite_identifier: verified_context.suite_identifier().into_bytes(),
+                ceremony_context_hash: verified_context.ceremony_context_hash().into_bytes(),
+                action_context_hash: verified_context.action_context_hash().into_bytes(),
+                roster_hash: verified_context.roster_hash().into_bytes(),
+                public_setup_seed: verified_public_randomness.public_setup_seed().into_bytes(),
+                setup_proof_context_hash: verified_public_randomness
+                    .setup_proof_context_hash()
+                    .into_bytes(),
+                participant_identity: statement.participant_identity(),
+                roster_position,
                 vss_application_statement_hash: verified_proof.application_statement_hash(),
                 vss_application_slot_hash: verified_proof.proof_application_slot_hash(),
                 vss_canonical_application_binding_hash: verified_proof
@@ -1278,7 +1422,7 @@ fn test_same_secret_low_degree_prerequisite(
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
-fn production_same_secret_prerequisite(
+fn test_same_secret_prerequisite_from_production_sources(
     sources: &PreparedExactSameSecretGenerationSources,
 ) -> Result<VerifiedSameSecretLowDegreePrerequisite, String> {
     let request_context = sources
@@ -1298,6 +1442,8 @@ fn production_same_secret_prerequisite(
 struct ProductionSameSecretEvidenceSources {
     sources: PreparedExactSameSecretGenerationSources,
     authority_handle: SetupGenerationAuthorityHandle,
+    action_private_randomness: std::rc::Rc<crate::foundation::ActionPrivateRandomness>,
+    verified_public_randomness: VerifiedPublicRandomness,
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -1321,6 +1467,9 @@ fn production_same_secret_sources() -> Result<ProductionSameSecretEvidenceSource
         authority_population_started_at.elapsed(),
     );
     let sources = (|| {
+        let checkpoint_schedule_digest = relation_plan
+            .checkpoint_schedule_digest()
+            .map_err(|error| format!("derive production checkpoint schedule: {error:?}"))?;
         let preparation_source = resolve_setup_generation_key_relation_preparation_source(
             &authority.authority_handle,
             SetupKeyRelationProofFamily::SameSecret,
@@ -1348,6 +1497,8 @@ fn production_same_secret_sources() -> Result<ProductionSameSecretEvidenceSource
             &authority.action_private_randomness,
             application_slot,
             application_statement_hash,
+            EXACT_SAME_SECRET_CHECKPOINT_LINEAGE_IDENTIFIER,
+            checkpoint_schedule_digest,
         )
         .map_err(|error| format!("bind production proof attempt: {error:?}"))?;
         let decoded_statement = decode_selected_same_secret_statement(
@@ -1378,12 +1529,78 @@ fn production_same_secret_sources() -> Result<ProductionSameSecretEvidenceSource
         Ok(sources) => Ok(ProductionSameSecretEvidenceSources {
             sources,
             authority_handle: authority.authority_handle,
+            action_private_randomness: authority.action_private_randomness,
+            verified_public_randomness: authority.verified_public_randomness,
         }),
         Err(error) => {
             release_production_same_secret_authority(authority.authority_handle)?;
             Err(error)
         }
     }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+fn prepare_production_vss_prerequisite_generation(
+    evidence_sources: &ProductionSameSecretEvidenceSources,
+) -> Result<(PreparedCommonProofGeneration, Vec<u8>), String> {
+    let preparation_source =
+        resolve_setup_generation_vss_preparation_source(&evidence_sources.authority_handle)
+            .map_err(|error| format!("resolve production VSS statement: {error:?}"))?;
+    let canonical_application_statement_bytes = preparation_source
+        .canonical_application_statement_bytes()
+        .to_vec();
+    let runtime_plan = selected_vss_proof_runtime_plan(&canonical_application_statement_bytes)
+        .map_err(|error| format!("derive production VSS runtime plan: {error:?}"))?;
+    let checkpoint_schedule_digest = runtime_plan
+        .relation_plan
+        .checkpoint_schedule_digest()
+        .map_err(|error| format!("derive production VSS checkpoint schedule: {error:?}"))?;
+    let application_slot = ProofApplicationSlot::new(
+        Hash512::from_bytes(preparation_source.suite_identifier()),
+        Hash512::from_bytes(preparation_source.ceremony_context_hash()),
+        Hash512::from_bytes(preparation_source.action_context_hash()),
+        ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+        Some(preparation_source.roster_position()),
+        None,
+        None,
+    )
+    .map_err(|error| format!("construct production VSS application slot: {error:?}"))?;
+    let application_statement_hash = Hash512::from_bytes(verified_application_statement_hash(
+        preparation_source.protocol_version(),
+        preparation_source.suite_identifier(),
+        ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+        &canonical_application_statement_bytes,
+    ));
+    let prepared_attempt = prepare_exact_same_secret_evidence_attempt(
+        &evidence_sources.action_private_randomness,
+        application_slot,
+        application_statement_hash,
+        VSS_PREREQUISITE_CHECKPOINT_LINEAGE_IDENTIFIER,
+        checkpoint_schedule_digest,
+    )
+    .map_err(|error| format!("bind production VSS proof attempt: {error:?}"))?;
+    let decoded_statement = crate::bgv::proof_suite::decode_selected_vss_share_linkage_statement(
+        &canonical_application_statement_bytes,
+        SelectedApplicationStatementContext::new(
+            preparation_source.protocol_version(),
+            preparation_source.suite_identifier(),
+            None,
+            None,
+        ),
+    )
+    .map_err(|error| format!("decode production VSS statement: {error:?}"))?;
+    let application = SetupGenerationVssApplication::from_decoded_statement(
+        prepared_attempt,
+        &canonical_application_statement_bytes,
+        &decoded_statement,
+    );
+    let prepared_generation = with_setup_generation_vss_material_for_exact_same_secret_evidence(
+        &evidence_sources.authority_handle,
+        &application,
+        |source| source.prepare_common_generation(runtime_plan.relation_plan, runtime_plan.limits),
+    )
+    .map_err(|error| format!("prepare production VSS proof: {error:?}"))?;
+    Ok((prepared_generation, canonical_application_statement_bytes))
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -2773,7 +2990,7 @@ mod tests {
             .expect("derive exact transcript authority");
         let header = exact_transcript_header(
             transcript_authority.fiat_shamir_binding(),
-            production_same_secret_prerequisite(sources)
+            test_same_secret_prerequisite_from_production_sources(sources)
                 .expect("construct verified VSS prerequisite")
                 .binding_digest(),
         );
@@ -3535,6 +3752,7 @@ mod tests {
         let ProductionSameSecretEvidenceSources {
             mut sources,
             authority_handle,
+            ..
         } = production_same_secret_sources().expect("production source fixture");
         let store = ExactPolynomialStore::open().expect("open exact polynomial checkpoint");
         assert_eq!(sources.relation_plan_variant.ordered_columns().len(), 2_930);
@@ -3715,6 +3933,7 @@ mod tests {
         let ProductionSameSecretEvidenceSources {
             mut sources,
             authority_handle,
+            ..
         } = production_same_secret_sources().expect("production source fixture");
         let store = ExactPolynomialStore::open().expect("open exact polynomial checkpoint");
         let source_manifest = store
@@ -3789,7 +4008,7 @@ mod tests {
             .expect("derive exact transcript authority");
         let header = exact_transcript_header(
             transcript_authority.fiat_shamir_binding(),
-            production_same_secret_prerequisite(&sources)
+            test_same_secret_prerequisite_from_production_sources(&sources)
                 .expect("construct verified VSS prerequisite")
                 .binding_digest(),
         );
@@ -3934,6 +4153,7 @@ mod tests {
         let ProductionSameSecretEvidenceSources {
             mut sources,
             authority_handle,
+            ..
         } = production_same_secret_sources().expect("production source fixture");
         let store = ExactPolynomialStore::open().expect("open exact polynomial checkpoint");
         let source_manifest = store

@@ -4395,21 +4395,72 @@ impl<'statement> SetupGenerationVssApplication<'statement> {
     }
 }
 
+#[derive(Clone, Copy)]
+enum SetupGenerationVssRetainedAuthority<'authority> {
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    AllFamilies(&'authority SetupGenerationAuthority),
+    VssProof(&'authority SetupGenerationVssProofAuthority),
+}
+
+impl<'authority> SetupGenerationVssRetainedAuthority<'authority> {
+    const fn protocol_version(self) -> u16 {
+        match self {
+            #[cfg(all(test, not(target_arch = "wasm32")))]
+            Self::AllFamilies(authority) => authority.protocol_version,
+            Self::VssProof(authority) => authority.protocol_version,
+        }
+    }
+
+    const fn suite_identifier(self) -> [u8; Hash512::BYTE_LENGTH] {
+        match self {
+            #[cfg(all(test, not(target_arch = "wasm32")))]
+            Self::AllFamilies(authority) => authority.suite_identifier,
+            Self::VssProof(authority) => authority.suite_identifier,
+        }
+    }
+
+    fn ordered_coefficient_materials(self) -> &'authority [SetupGeneratedCommittedMaterial] {
+        match self {
+            #[cfg(all(test, not(target_arch = "wasm32")))]
+            Self::AllFamilies(authority) => authority.vss_material.ordered_coefficient_materials(),
+            Self::VssProof(authority) => authority.ordered_coefficient_materials(),
+        }
+    }
+
+    fn ordered_recipient_share_materials(self) -> &'authority [SetupGeneratedCommittedMaterial] {
+        match self {
+            #[cfg(all(test, not(target_arch = "wasm32")))]
+            Self::AllFamilies(authority) => {
+                authority.vss_material.ordered_recipient_share_materials()
+            }
+            Self::VssProof(authority) => authority.ordered_recipient_share_materials(),
+        }
+    }
+
+    fn action_private_randomness(self) -> &'authority Rc<ActionPrivateRandomness> {
+        match self {
+            #[cfg(all(test, not(target_arch = "wasm32")))]
+            Self::AllFamilies(authority) => &authority.action_private_randomness,
+            Self::VssProof(authority) => &authority.action_private_randomness,
+        }
+    }
+}
+
 /// Borrowed, non-serializable VSS generation source. Both public tree material
 /// and secret witness values remain inside the Rust callback that constructs
 /// the exact family adapter.
 pub(crate) struct SetupGenerationVssSource<'authority, 'statement> {
-    authority: &'authority SetupGenerationVssProofAuthority,
+    authority: SetupGenerationVssRetainedAuthority<'authority>,
     application: &'authority SetupGenerationVssApplication<'statement>,
 }
 
 impl SetupGenerationVssSource<'_, '_> {
     pub(crate) const fn protocol_version(&self) -> u16 {
-        self.authority.protocol_version
+        self.authority.protocol_version()
     }
 
     pub(crate) const fn suite_identifier(&self) -> [u8; Hash512::BYTE_LENGTH] {
-        self.authority.suite_identifier
+        self.authority.suite_identifier()
     }
 
     pub(crate) fn ordered_coefficient_materials(&self) -> &[SetupGeneratedCommittedMaterial] {
@@ -4454,7 +4505,7 @@ impl SetupGenerationVssSource<'_, '_> {
             )
             .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
         PrivateRandomnessCommonProofCoinSource::new(
-            Rc::clone(&self.authority.action_private_randomness),
+            Rc::clone(self.authority.action_private_randomness()),
             ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
             Hash512::from_bytes(pre_output_generation_binding_hash),
             attempt_identifier,
@@ -4548,7 +4599,7 @@ impl SetupGenerationVssSource<'_, '_> {
         .map_err(|_| RefusalReason::WrongContext)?;
         let mut witness_binding = self
             .authority
-            .action_private_randomness
+            .action_private_randomness()
             .begin_persistent_proof_witness_coin_binding(&persistent_proof_coin_input)
             .map_err(|_| RefusalReason::WrongContext)?;
         source_polynomials
@@ -6871,7 +6922,38 @@ where
             .pin_vss_application(application)
             .map_err(Error::from)?;
         operation(SetupGenerationVssSource {
-            authority,
+            authority: SetupGenerationVssRetainedAuthority::VssProof(authority),
+            application,
+        })
+    })
+}
+
+/// Native evidence may verify the exact VSS predecessor before unrelated
+/// setup-family outputs have been transported. This seam borrows the same
+/// browser-owned authority and production VSS source adapter without moving
+/// the authority into the post-release phase or minting any setup terminal.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) fn with_setup_generation_vss_material_for_exact_same_secret_evidence<Value, Error>(
+    handle: &SetupGenerationAuthorityHandle,
+    application: &SetupGenerationVssApplication<'_>,
+    operation: impl FnOnce(SetupGenerationVssSource<'_, '_>) -> Result<Value, Error>,
+) -> Result<Value, Error>
+where
+    Error: From<RefusalReason>,
+{
+    SETUP_GENERATION_AUTHORITY_REGISTRY.with(|registry| {
+        let mut registry = registry
+            .try_borrow_mut()
+            .map_err(|_| Error::from(RefusalReason::ConsumedState))?;
+        let authority = registry
+            .authorities
+            .get_mut(&handle.0)
+            .ok_or_else(|| Error::from(RefusalReason::ConsumedState))?;
+        authority
+            .pin_vss_application(application)
+            .map_err(Error::from)?;
+        operation(SetupGenerationVssSource {
+            authority: SetupGenerationVssRetainedAuthority::AllFamilies(authority),
             application,
         })
     })
@@ -7223,6 +7305,8 @@ mod tests {
             action_private_randomness,
             application_slot,
             application_statement_hash,
+            [0x71; 32],
+            Hash512::from_bytes([0x72; Hash512::BYTE_LENGTH]),
         )
         .expect("same-secret test attempt prepares");
         SetupGenerationKeyRelationApplication::from_runtime_binding(

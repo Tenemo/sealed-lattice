@@ -97,6 +97,7 @@ pub(in crate::bgv) use accepted_setup::{
 #[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) use accepted_setup::{
     PreparedExactSameSecretGenerationSources, populate_exact_same_secret_evidence_authority,
+    with_setup_generation_vss_material_for_exact_same_secret_evidence,
 };
 pub(crate) use accepted_setup::{
     SetupGenerationDealerPublicRecordSource, resolve_setup_generation_dealer_public_record_source,

@@ -170,8 +170,13 @@ pub(crate) fn prepare_exact_same_secret_evidence_attempt(
     action_private_randomness: &ActionPrivateRandomness,
     application_slot: ProofApplicationSlot,
     application_statement_hash: Hash512,
+    checkpoint_lineage_identifier: [u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
+    checkpoint_schedule_digest: Hash512,
 ) -> Result<PreparedActionProofAttemptSource, super::FoundationSchemaError> {
-    if application_statement_hash.into_bytes() == [0_u8; HASH_BYTE_LENGTH] {
+    if application_statement_hash.into_bytes() == [0_u8; HASH_BYTE_LENGTH]
+        || checkpoint_lineage_identifier == [0_u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH]
+        || checkpoint_schedule_digest.into_bytes() == [0_u8; HASH_BYTE_LENGTH]
+    {
         return Err(super::FoundationSchemaError::new(
             RefusalReason::OutsideSupportedProfile,
             "the exact same-secret evidence attempt has invalid limits",
@@ -203,8 +208,8 @@ pub(crate) fn prepare_exact_same_secret_evidence_attempt(
         application_statement_hash,
         checkpoint_continuation:
             AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
-                [0x71; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
-                Hash512::from_bytes([0x72; HASH_BYTE_LENGTH]),
+                checkpoint_lineage_identifier,
+                checkpoint_schedule_digest,
             ),
     })
 }

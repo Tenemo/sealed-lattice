@@ -45,6 +45,13 @@ impl ConsumedCommonProofVerificationInputs {
             .expect("consumed row-code WHIR inputs passed complete validation")
     }
 
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(super) fn prepare_exact_vss_evidence(
+        self,
+    ) -> Result<PreparedCommonProofVerification, CommonProofRuntimeError> {
+        self.prepare_row_code_whir(None)
+    }
+
     pub(in crate::bgv) fn prepare_with_setup_polynomial_prerequisite(
         self,
         prerequisite: VerifiedSetupPolynomialLowDegreePrerequisite,

@@ -105,6 +105,7 @@ struct RecipientPayloadLimb {
 pub(crate) struct ExactSameSecretEvidenceAuthority {
     pub(crate) action_private_randomness: Rc<ActionPrivateRandomness>,
     pub(crate) authority_handle: SetupGenerationAuthorityHandle,
+    pub(in crate::bgv) verified_public_randomness: VerifiedPublicRandomness,
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -184,6 +185,7 @@ pub(crate) fn populate_exact_same_secret_evidence_authority(
     Ok(ExactSameSecretEvidenceAuthority {
         action_private_randomness,
         authority_handle,
+        verified_public_randomness,
     })
 }
 

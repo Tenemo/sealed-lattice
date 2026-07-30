@@ -52,7 +52,7 @@ const ATTEMPT_IDENTIFIER_BYTE_LENGTH: usize = 32;
 const HANDLE_BYTE_LENGTH: usize = size_of::<u32>();
 
 #[derive(Debug)]
-enum VssShareLinkageRuntimeError {
+pub(in crate::bgv::proof_suite) enum VssShareLinkageRuntimeError {
     Accounting(SelectedProofAccountingError),
     Profile(ProofProfileError),
     Relation(RelationPlanError),
@@ -461,12 +461,12 @@ pub(in crate::bgv) fn consume_ordered_verified_vss_share_linkage_terminals(
     })
 }
 
-struct SelectedVssProofRuntimePlan {
-    relation_plan: CommonProofRelationPlanCapability,
-    limits: CommonProofRuntimeLimits,
+pub(in crate::bgv::proof_suite) struct SelectedVssProofRuntimePlan {
+    pub(in crate::bgv::proof_suite) relation_plan: CommonProofRelationPlanCapability,
+    pub(in crate::bgv::proof_suite) limits: CommonProofRuntimeLimits,
 }
 
-fn selected_vss_proof_runtime_plan(
+pub(in crate::bgv::proof_suite) fn selected_vss_proof_runtime_plan(
     canonical_application_statement_bytes: &[u8],
 ) -> Result<SelectedVssProofRuntimePlan, VssShareLinkageRuntimeError> {
     let statement_schema_identifier =
