@@ -414,6 +414,15 @@ impl ProvidedCommonProofSourcePolynomial {
             replay_identity,
         }
     }
+
+    pub(crate) fn into_parts(
+        self,
+    ) -> (
+        CommonProofSourcePolynomial,
+        CommonProofSourcePolynomialReplayIdentity,
+    ) {
+        (self.polynomial, self.replay_identity)
+    }
 }
 
 pub(crate) enum CommonProofSourcePolynomialProviderPoll {
@@ -482,6 +491,18 @@ pub(crate) trait CommonProofSourcePolynomialProvider {
         request: CommonProofSourcePolynomialRequest<'_>,
     ) -> Result<CommonProofSourcePolynomialProviderPoll, CommonProofProverError>;
 
+    /// Reconstructs one already-consumed source from the same retained,
+    /// authenticated family authority. The engine supplies the complete
+    /// checked request and compares the returned replay identity with the
+    /// identity bound during the canonical initial pass. Implementations must
+    /// not sample proof coins or accept caller-supplied polynomial material.
+    fn poll_replayed_source_polynomial(
+        &mut self,
+        _request: CommonProofSourcePolynomialRequest<'_>,
+    ) -> Result<CommonProofSourcePolynomialProviderPoll, CommonProofProverError> {
+        Err(CommonProofProverError::InvalidColumn)
+    }
+
     /// Returns the exact request represented by the most recent
     /// `AuthenticatedSourceReadRequired` poll. Keeping the request in provider
     /// state avoids copying the large request through each nested poll enum or
@@ -514,6 +535,10 @@ pub(crate) trait CommonProofSourcePolynomialProvider {
     }
 
     fn finish_bound_tree_leaf_salts(&mut self) -> Result<(), CommonProofProverError> {
+        Ok(())
+    }
+
+    fn finish_source_replay(&mut self) -> Result<(), CommonProofProverError> {
         Ok(())
     }
 }
@@ -625,6 +650,29 @@ pub(crate) struct CommonProofPreChallengeSourceCursor {
     trace_masks: BTreeMap<u32, RelationMaskDescriptor>,
     next_source_index: usize,
     source_identity_hasher: Option<StreamingHash512>,
+    ordered_replay_identities: Vec<CommonProofSourcePolynomialReplayIdentity>,
+}
+
+pub(crate) struct CommonProofSourceReplayIdentityCatalog {
+    aggregate_digest: [u8; 64],
+    ordered_replay_identities: Box<[CommonProofSourcePolynomialReplayIdentity]>,
+}
+
+impl CommonProofSourceReplayIdentityCatalog {
+    pub(crate) const fn aggregate_digest(&self) -> [u8; 64] {
+        self.aggregate_digest
+    }
+
+    pub(crate) fn identity_at(
+        &self,
+        source_index: usize,
+    ) -> Option<CommonProofSourcePolynomialReplayIdentity> {
+        self.ordered_replay_identities.get(source_index).copied()
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.ordered_replay_identities.len()
+    }
 }
 
 pub(crate) enum CommonProofPreChallengeSourcePoll {
@@ -670,6 +718,10 @@ impl CommonProofPreChallengeSourceCursor {
                 .map_err(|_| CommonProofProverError::CountOverflow)?
                 .to_le_bytes(),
         );
+        let mut ordered_replay_identities = Vec::new();
+        ordered_replay_identities
+            .try_reserve_exact(requested_column_ordinals.len())
+            .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
         Ok(Self {
             requested_column_ordinals,
             reversed_column_bindings: reversed_columns_by_source.into_iter().collect(),
@@ -677,6 +729,7 @@ impl CommonProofPreChallengeSourceCursor {
             trace_masks,
             next_source_index: 0,
             source_identity_hasher: Some(source_identity_hasher),
+            ordered_replay_identities,
         })
     }
 
@@ -727,6 +780,7 @@ impl CommonProofPreChallengeSourceCursor {
                 CommonProofProverError::InvalidInput,
             ))?
             .absorb_part(&coordinate_identity);
+        self.ordered_replay_identities.push(replay_identity);
         let source = match self.tree_roles.get(&column_ordinal) {
             Some(ProofTreeRole::BaseOracle) => mask_relation_column(
                 variant,
@@ -758,15 +812,23 @@ impl CommonProofPreChallengeSourceCursor {
     pub(crate) fn finish(
         &mut self,
         source_provider: &mut dyn CommonProofSourcePolynomialProvider,
-    ) -> Result<[u8; 64], CommonProofProverError> {
-        if self.next_source_index != self.requested_column_ordinals.len() {
+    ) -> Result<CommonProofSourceReplayIdentityCatalog, CommonProofProverError> {
+        if self.next_source_index != self.requested_column_ordinals.len()
+            || self.ordered_replay_identities.len() != self.requested_column_ordinals.len()
+        {
             return Err(CommonProofProverError::InvalidColumn);
         }
         source_provider.finish()?;
-        self.source_identity_hasher
+        let aggregate_digest = self
+            .source_identity_hasher
             .take()
             .map(StreamingHash512::finalize)
-            .ok_or(CommonProofProverError::InvalidInput)
+            .ok_or(CommonProofProverError::InvalidInput)?;
+        Ok(CommonProofSourceReplayIdentityCatalog {
+            aggregate_digest,
+            ordered_replay_identities: core::mem::take(&mut self.ordered_replay_identities)
+                .into_boxed_slice(),
+        })
     }
 
     pub(crate) fn reversed_column_bindings(&self) -> &[(u32, u32)] {
@@ -799,28 +861,13 @@ pub(crate) fn construct_reversed_relation_column<Coins>(
 where
     Coins: CommonProofPrivateCoinSource,
 {
-    let (reversed_columns_by_source, _) =
-        integer_lift_derived_columns(variant).map_err(CommonProofPrivateCoinError::Prover)?;
-    if reversed_columns_by_source.get(&source_column_ordinal) != Some(&reversed_column_ordinal) {
-        return Err(CommonProofPrivateCoinError::Prover(
-            CommonProofProverError::InvalidColumn,
-        ));
-    }
-    let trace_domain =
-        ProofEvaluationDomain::new_subgroup(usize::try_from(variant.trace_domain_size()).map_err(
-            |_| CommonProofPrivateCoinError::Prover(CommonProofProverError::CountOverflow),
-        )?)
-        .map_err(CommonProofProverError::from)
-        .map_err(CommonProofPrivateCoinError::Prover)?;
-    let mut reversed_rows =
-        base_trace_rows(&source, trace_domain).map_err(CommonProofPrivateCoinError::Prover)?;
-    drop(source);
-    reversed_rows.reverse();
-    trace_domain
-        .interpolate_base_polynomial_in_place(&mut reversed_rows)
-        .map_err(CommonProofProverError::from)
-        .map_err(CommonProofPrivateCoinError::Prover)?;
-    let reversed = CommonProofSourcePolynomial::from_protected_base_coefficients(reversed_rows);
+    let reversed = construct_unmasked_reversed_relation_column(
+        variant,
+        source_column_ordinal,
+        reversed_column_ordinal,
+        source,
+    )
+    .map_err(CommonProofPrivateCoinError::Prover)?;
     let descriptor = variant
         .ordered_columns()
         .get(usize::try_from(reversed_column_ordinal).map_err(|_| {
@@ -846,6 +893,29 @@ where
         coins,
         maximum_candidate_draws_per_output,
     )
+}
+
+fn construct_unmasked_reversed_relation_column(
+    variant: &RelationPlanVariant,
+    source_column_ordinal: u32,
+    reversed_column_ordinal: u32,
+    source: CommonProofSourcePolynomial,
+) -> Result<CommonProofSourcePolynomial, CommonProofProverError> {
+    let (reversed_columns_by_source, _) = integer_lift_derived_columns(variant)?;
+    if reversed_columns_by_source.get(&source_column_ordinal) != Some(&reversed_column_ordinal) {
+        return Err(CommonProofProverError::InvalidColumn);
+    }
+    let trace_domain = ProofEvaluationDomain::new_subgroup(
+        usize::try_from(variant.trace_domain_size())
+            .map_err(|_| CommonProofProverError::CountOverflow)?,
+    )?;
+    let mut reversed_rows = base_trace_rows(&source, trace_domain)?;
+    drop(source);
+    reversed_rows.reverse();
+    trace_domain
+        .interpolate_base_polynomial_in_place(&mut reversed_rows)
+        .map_err(CommonProofProverError::from)?;
+    Ok(CommonProofSourcePolynomial::from_protected_base_coefficients(reversed_rows))
 }
 
 #[cfg(test)]
@@ -958,6 +1028,111 @@ where
     Ok(coefficients)
 }
 
+/// Reconstructs one checked trace-mask polynomial from its private coordinate
+/// stream. The coin source authenticates that the replay consumes the exact
+/// stream prefix used by the original commitment; no transcript or public
+/// value can supply these samples.
+pub(crate) fn replay_relation_private_mask_polynomial<Coins>(
+    variant: &RelationPlanVariant,
+    column_ordinal: u32,
+    coins: &mut Coins,
+    maximum_candidate_draws_per_output: u32,
+) -> Result<Option<CommonProofSourcePolynomial>, CommonProofPrivateCoinError<Coins::Error>>
+where
+    Coins: CommonProofPrivateCoinSource,
+{
+    let Some(coefficient_count) =
+        relation_private_mask_tail_coefficient_count(variant, column_ordinal)
+            .map_err(CommonProofPrivateCoinError::Prover)?
+    else {
+        return Ok(None);
+    };
+    let descriptor = variant
+        .ordered_columns()
+        .get(usize::try_from(column_ordinal).map_err(|_| {
+            CommonProofPrivateCoinError::Prover(CommonProofProverError::CountOverflow)
+        })?)
+        .ok_or(CommonProofPrivateCoinError::Prover(
+            CommonProofProverError::InvalidColumn,
+        ))?;
+    let mask = trace_masks_by_column(variant)
+        .map_err(CommonProofPrivateCoinError::Prover)?
+        .get(&column_ordinal)
+        .copied()
+        .ok_or(CommonProofPrivateCoinError::Prover(
+            CommonProofProverError::InvalidMask,
+        ))?;
+    let coordinate = CommonProofPrivateCoinCoordinate::from_mask(mask.mask_coordinate());
+    let coordinate_count_per_coefficient = match descriptor.value_type() {
+        RelationColumnValueType::BaseField => 1,
+        RelationColumnValueType::ChallengeExtension => {
+            super::super::PROOF_CHALLENGE_EXTENSION_DEGREE
+        }
+    };
+    let sample_count = coefficient_count
+        .checked_mul(coordinate_count_per_coefficient)
+        .ok_or(CommonProofPrivateCoinError::Prover(
+            CommonProofProverError::CountOverflow,
+        ))?;
+    let mut samples = Zeroizing::new(Vec::new());
+    samples.try_reserve_exact(sample_count).map_err(|_| {
+        CommonProofPrivateCoinError::Prover(CommonProofProverError::AllocationLimitExceeded)
+    })?;
+    samples.resize(sample_count, 0);
+    coins
+        .replay_modulo_samples(
+            coordinate,
+            super::super::PROOF_BASE_FIELD_MODULUS,
+            maximum_candidate_draws_per_output,
+            &mut samples,
+        )
+        .map_err(CommonProofPrivateCoinError::CoinSource)?;
+
+    match descriptor.value_type() {
+        RelationColumnValueType::BaseField => {
+            let coefficients = samples
+                .iter()
+                .copied()
+                .map(ProofBaseFieldElement::from_canonical)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(CommonProofProverError::from)
+                .map_err(CommonProofPrivateCoinError::Prover)?;
+            Ok(Some(
+                CommonProofSourcePolynomial::from_protected_base_coefficients(Zeroizing::new(
+                    coefficients,
+                )),
+            ))
+        }
+        RelationColumnValueType::ChallengeExtension => {
+            let mut coefficients = Zeroizing::new(Vec::new());
+            coefficients
+                .try_reserve_exact(coefficient_count)
+                .map_err(|_| {
+                    CommonProofPrivateCoinError::Prover(
+                        CommonProofProverError::AllocationLimitExceeded,
+                    )
+                })?;
+            for coordinates in samples.chunks_exact(super::super::PROOF_CHALLENGE_EXTENSION_DEGREE)
+            {
+                let canonical_coordinates: [u64; super::super::PROOF_CHALLENGE_EXTENSION_DEGREE] =
+                    coordinates.try_into().map_err(|_| {
+                        CommonProofPrivateCoinError::Prover(CommonProofProverError::InvalidMask)
+                    })?;
+                coefficients.push(
+                    ProofChallengeExtensionElement::from_canonical_coordinates(
+                        canonical_coordinates,
+                    )
+                    .map_err(CommonProofProverError::from)
+                    .map_err(CommonProofPrivateCoinError::Prover)?,
+                );
+            }
+            Ok(Some(
+                CommonProofSourcePolynomial::from_protected_extension_coefficients(coefficients),
+            ))
+        }
+    }
+}
+
 /// Samples the separately committed opening-batch polynomial in secret mode.
 pub(crate) fn construct_opening_batch_mask<Coins>(
     variant: &RelationPlanVariant,
@@ -1000,6 +1175,12 @@ where
 pub(crate) enum CommonProofPrivateCoinError<CoinError> {
     Prover(CommonProofProverError),
     CoinSource(CoinError),
+}
+
+impl<CoinError> From<CommonProofProverError> for CommonProofPrivateCoinError<CoinError> {
+    fn from(error: CommonProofProverError) -> Self {
+        Self::Prover(error)
+    }
 }
 
 /// Applies `witness + (X^H - 1) mask` without changing coefficient order.
@@ -1563,7 +1744,7 @@ pub(crate) fn persisted_pre_challenge_column_coefficient_position_counts(
     Ok(counts)
 }
 
-fn validate_source_column(
+pub(crate) fn validate_source_column(
     descriptor: &RelationColumnDescriptor,
     source: &CommonProofSourcePolynomial,
     trace_domain_size: u64,
@@ -2362,14 +2543,6 @@ impl CommonProofAuxiliaryColumnReconstructionCatalog {
             .copied()
             .ok_or(CommonProofProverError::InvalidColumn)
     }
-
-    pub(crate) fn input_column_ordinals(
-        &self,
-        variant: &RelationPlanVariant,
-        column_ordinal: u32,
-    ) -> Result<Vec<u32>, CommonProofProverError> {
-        auxiliary_reconstruction_input_column_ordinals(variant, self.locator(column_ordinal)?)
-    }
 }
 
 fn reconstruction_component<'variant>(
@@ -2674,60 +2847,36 @@ fn auxiliary_reconstruction_program(
     }
 }
 
-pub(crate) fn auxiliary_private_mask_tail_coefficient_count(
+pub(crate) fn relation_private_mask_tail_coefficient_count(
     variant: &RelationPlanVariant,
     column_ordinal: u32,
 ) -> Result<Option<usize>, CommonProofProverError> {
+    let descriptor = variant
+        .ordered_columns()
+        .get(usize::try_from(column_ordinal).map_err(|_| CommonProofProverError::CountOverflow)?)
+        .ok_or(CommonProofProverError::InvalidColumn)?;
     let masks = trace_masks_by_column(variant)?;
     let mask = masks.get(&column_ordinal).copied();
-    match (variant.proof_privacy_mode(), mask) {
-        (ProofPrivacyMode::SecretBearing, Some(mask)) => {
+    match (variant.proof_privacy_mode(), descriptor.origin(), mask) {
+        (ProofPrivacyMode::SecretBearing, RelationColumnOrigin::Prover, Some(mask)) => {
             usize::try_from(mask.mask_degree_bound_exclusive())
                 .map(Some)
                 .map_err(|_| CommonProofProverError::CountOverflow)
         }
-        (ProofPrivacyMode::PublicOnly, None) => Ok(None),
+        (ProofPrivacyMode::SecretBearing, RelationColumnOrigin::Prover, None) => {
+            Err(CommonProofProverError::InvalidMask)
+        }
+        (ProofPrivacyMode::SecretBearing, _, None) | (ProofPrivacyMode::PublicOnly, _, None) => {
+            Ok(None)
+        }
         _ => Err(CommonProofProverError::InvalidMask),
     }
 }
 
-pub(crate) fn extract_auxiliary_private_mask_tail(
-    variant: &RelationPlanVariant,
-    column_ordinal: u32,
-    polynomial: &CommonProofSourcePolynomial,
-) -> Result<CommonProofSourcePolynomial, CommonProofProverError> {
-    let trace_value_count = usize::try_from(variant.trace_domain_size())
-        .map_err(|_| CommonProofProverError::CountOverflow)?;
-    let mask_coefficient_count =
-        auxiliary_private_mask_tail_coefficient_count(variant, column_ordinal)?
-            .ok_or(CommonProofProverError::InvalidMask)?;
-    let CommonProofSourcePolynomial::Base(coefficients) = polynomial else {
-        return Err(CommonProofProverError::InvalidColumn);
-    };
-    let maximum_coefficient_count = trace_value_count
-        .checked_add(mask_coefficient_count)
-        .ok_or(CommonProofProverError::CountOverflow)?;
-    if coefficients.is_empty() || coefficients.len() > maximum_coefficient_count {
-        return Err(CommonProofProverError::InvalidColumn);
-    }
-    let mut tail = Zeroizing::new(Vec::new());
-    tail.try_reserve_exact(mask_coefficient_count)
-        .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
-    for tail_index in 0..mask_coefficient_count {
-        tail.push(
-            coefficients
-                .get(trace_value_count + tail_index)
-                .copied()
-                .unwrap_or(ProofBaseFieldElement::ZERO),
-        );
-    }
-    Ok(CommonProofSourcePolynomial::from_protected_base_coefficients(tail))
-}
-
-/// Reconstructs one auxiliary column from checked pre-challenge inputs and an
-/// encrypted private-mask tail. The trace rows determine the unmasked witness;
-/// the tail restores exactly `witness + (X^H - 1) mask` without deriving any
-/// mask from public data.
+/// Reconstructs one auxiliary column from checked pre-challenge inputs and the
+/// exact mask coefficients replayed by private randomness custody. The trace
+/// rows determine the unmasked witness; the private coefficients restore
+/// `witness + (X^H - 1) mask` without deriving mask material from public data.
 pub(crate) struct CommonProofAuxiliaryColumnReconstructionCursor {
     program: AuxiliaryColumnReconstructionProgram,
     ordered_input_column_ordinals: Vec<u32>,
@@ -2760,8 +2909,8 @@ impl CommonProofAuxiliaryColumnReconstructionCursor {
                 .map_err(|_| CommonProofProverError::CountOverflow)?,
         )?;
         let mask_coefficient_count =
-            auxiliary_private_mask_tail_coefficient_count(variant, target_column_ordinal)?
-                .ok_or(CommonProofProverError::InvalidMask)?;
+            relation_private_mask_tail_coefficient_count(variant, target_column_ordinal)?
+                .unwrap_or_default();
         Ok(Self {
             program,
             ordered_input_column_ordinals,
@@ -3035,14 +3184,21 @@ impl CommonProofAuxiliaryColumnReconstructionCursor {
 
     pub(crate) fn finish(
         self,
-        mut private_mask_tail: Zeroizing<Vec<ProofBaseFieldElement>>,
+        mut private_mask_coefficients: Zeroizing<Vec<ProofBaseFieldElement>>,
     ) -> Result<CommonProofSourcePolynomial, CommonProofProverError> {
-        if private_mask_tail.len() != self.mask_coefficient_count {
+        if private_mask_coefficients.len() != self.mask_coefficient_count {
             return Err(CommonProofProverError::InvalidMask);
         }
         let mut coefficients = self.reconstruct_rows()?;
         self.trace_domain
             .interpolate_base_polynomial_in_place(&mut coefficients)?;
+        if self.mask_coefficient_count == 0 {
+            return if private_mask_coefficients.is_empty() {
+                Ok(CommonProofSourcePolynomial::from_protected_base_coefficients(coefficients))
+            } else {
+                Err(CommonProofProverError::InvalidMask)
+            };
+        }
         let trace_value_count = coefficients.len();
         coefficients
             .try_reserve_exact(self.mask_coefficient_count)
@@ -3053,9 +3209,9 @@ impl CommonProofAuxiliaryColumnReconstructionCursor {
                 .ok_or(CommonProofProverError::CountOverflow)?,
             ProofBaseFieldElement::ZERO,
         );
-        for (tail_index, mask_coefficient) in private_mask_tail.drain(..).enumerate() {
-            coefficients[tail_index] = coefficients[tail_index].subtract(mask_coefficient);
-            coefficients[trace_value_count + tail_index] = mask_coefficient;
+        for (mask_index, mask_coefficient) in private_mask_coefficients.drain(..).enumerate() {
+            coefficients[mask_index] = coefficients[mask_index].subtract(mask_coefficient);
+            coefficients[trace_value_count + mask_index] = mask_coefficient;
         }
         Ok(CommonProofSourcePolynomial::from_protected_base_coefficients(coefficients))
     }
@@ -3511,129 +3667,6 @@ impl CommonProofAuxiliaryColumnSynthesisCursor {
             && self.pending_output_rows.is_empty()
             && self.component_product_sum_rows.is_none()
     }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct RelationColumnReplayRequirement {
-    pub(super) pre_challenge_read_count: u64,
-    pub(super) auxiliary_synthesis_read_count: u64,
-}
-
-impl RelationColumnReplayRequirement {
-    pub(crate) const fn pre_challenge_read_count(self) -> u64 {
-        self.pre_challenge_read_count
-    }
-
-    pub(crate) const fn auxiliary_synthesis_read_count(self) -> u64 {
-        self.auxiliary_synthesis_read_count
-    }
-}
-
-#[derive(Clone, Copy)]
-enum RelationColumnReplayUse {
-    PreChallenge,
-    AuxiliarySynthesis,
-}
-
-pub(crate) fn relation_column_replay_requirements(
-    variant: &RelationPlanVariant,
-) -> Result<BTreeMap<u32, RelationColumnReplayRequirement>, CommonProofProverError> {
-    fn include_columns(
-        requirements: &mut BTreeMap<u32, RelationColumnReplayRequirement>,
-        column_ordinals: impl IntoIterator<Item = u32>,
-        replay_use: RelationColumnReplayUse,
-    ) -> Result<(), CommonProofProverError> {
-        let mut unique_column_ordinals = BTreeSet::new();
-        for column_ordinal in column_ordinals {
-            if !unique_column_ordinals.insert(column_ordinal) {
-                continue;
-            }
-            let requirement = requirements.entry(column_ordinal).or_default();
-            let count = match replay_use {
-                RelationColumnReplayUse::PreChallenge => &mut requirement.pre_challenge_read_count,
-                RelationColumnReplayUse::AuxiliarySynthesis => {
-                    &mut requirement.auxiliary_synthesis_read_count
-                }
-            };
-            *count = count
-                .checked_add(1)
-                .ok_or(CommonProofProverError::CountOverflow)?;
-        }
-        Ok(())
-    }
-
-    let (reversed_columns_by_source, _) = integer_lift_derived_columns(variant)?;
-    let mut requirements = BTreeMap::new();
-    include_columns(
-        &mut requirements,
-        reversed_columns_by_source.into_keys(),
-        RelationColumnReplayUse::PreChallenge,
-    )?;
-    for batch in variant.ordered_integer_lift_batches() {
-        for descriptor in &batch.ordered_negacyclic_automorphism_permutations {
-            include_columns(
-                &mut requirements,
-                [
-                    descriptor.source_low_column_ordinal,
-                    descriptor.source_high_column_ordinal,
-                    descriptor.target_low_column_ordinal,
-                    descriptor.target_high_column_ordinal,
-                    descriptor.mapped_low_position_column_ordinal,
-                    descriptor.low_negation_bit_column_ordinal,
-                    descriptor.mapped_high_position_column_ordinal,
-                    descriptor.high_negation_bit_column_ordinal,
-                    descriptor.target_low_position_column_ordinal,
-                    descriptor.target_high_position_column_ordinal,
-                ],
-                RelationColumnReplayUse::AuxiliarySynthesis,
-            )?;
-        }
-        for binding in &batch.ordered_reversed_column_bindings {
-            include_columns(
-                &mut requirements,
-                [binding.source_column_ordinal],
-                RelationColumnReplayUse::AuxiliarySynthesis,
-            )?;
-            include_columns(
-                &mut requirements,
-                [binding.reversed_column_ordinal],
-                RelationColumnReplayUse::AuxiliarySynthesis,
-            )?;
-        }
-        for component in &batch.ordered_components {
-            for descriptor in &component.ordered_convolution_products {
-                include_columns(
-                    &mut requirements,
-                    [
-                        descriptor.multiplicand_column_ordinal,
-                        descriptor.reversed_multiplier_column_ordinal,
-                    ],
-                    RelationColumnReplayUse::AuxiliarySynthesis,
-                )?;
-            }
-            for descriptor in &component.ordered_full_ring_negacyclic_products {
-                include_columns(
-                    &mut requirements,
-                    [
-                        descriptor.multiplicand_low_column_ordinal,
-                        descriptor.multiplicand_high_column_ordinal,
-                        descriptor.reversed_multiplier_low_column_ordinal,
-                        descriptor.reversed_multiplier_high_column_ordinal,
-                    ],
-                    RelationColumnReplayUse::AuxiliarySynthesis,
-                )?;
-            }
-            include_columns(
-                &mut requirements,
-                component
-                    .ordered_linear_terms
-                    .iter()
-                    .map(|term| term.column_ordinal),
-                RelationColumnReplayUse::AuxiliarySynthesis,
-            )?;
-        }
-    }
-    Ok(requirements)
 }
 
 #[cfg(test)]

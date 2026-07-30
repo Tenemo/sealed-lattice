@@ -38,6 +38,23 @@ fn require_selected_row_code_whir_runtime_geometry(
     variant: &RelationPlanVariant,
     relation_context: &RelationPlanCheckContext,
 ) -> Result<(), SelectedProofAccountingError> {
+    if selected_row_code_whir_runtime_geometry_failure(
+        construction_plan,
+        variant,
+        relation_context,
+    )?
+    .is_some()
+    {
+        return Err(SelectedProofAccountingError::ResourcePlanning);
+    }
+    Ok(())
+}
+
+fn selected_row_code_whir_runtime_geometry_failure(
+    construction_plan: &RowCodeWhirConstructionPlan,
+    variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
+) -> Result<Option<&'static str>, SelectedProofAccountingError> {
     use super::row_code_whir::construction_plan::{
         RowCodeWhirCheckpointBoundary, RowCodeWhirProofSectionRole,
     };
@@ -57,79 +74,212 @@ fn require_selected_row_code_whir_runtime_geometry(
                 .ok_or(SelectedProofAccountingError::CountOverflow)
         })?;
     let parameters = construction_plan.selected_parameters();
-    let external_memory = super::row_code_whir::planned_row_code_whir_external_memory_requirement(
-        construction_plan,
-        variant,
-        relation_context,
-    )
-    .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?;
+    let external_memory =
+        match super::row_code_whir::planned_row_code_whir_external_memory_requirement(
+            construction_plan,
+            variant,
+            relation_context,
+        ) {
+            Ok(external_memory) => external_memory,
+            Err(error) => return Ok(Some(external_memory_plan_failure_stage(error))),
+        };
     let maximum_external_memory_object_count =
         u32::try_from(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_COUNT)
             .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
 
-    if proof_sections.is_empty()
-        || checkpoints.is_empty()
-        || total_proof_section_item_count == 0
-        || proof_sections.iter().enumerate().any(|(ordinal, section)| {
+    macro_rules! return_failure_if {
+        ($condition:expr, $stage:literal) => {
+            if $condition {
+                return Ok(Some($stage));
+            }
+        };
+    }
+
+    return_failure_if!(proof_sections.is_empty(), "missing proof sections");
+    return_failure_if!(checkpoints.is_empty(), "missing checkpoints");
+    return_failure_if!(
+        total_proof_section_item_count == 0,
+        "empty proof-section payload"
+    );
+    return_failure_if!(
+        proof_sections.iter().enumerate().any(|(ordinal, section)| {
             u32::try_from(ordinal).ok() != Some(section.section_ordinal) || section.item_count == 0
-        })
-        || !matches!(
+        }),
+        "non-canonical proof-section inventory"
+    );
+    return_failure_if!(
+        !matches!(
             proof_sections.last().map(|section| section.role),
             Some(RowCodeWhirProofSectionRole::AggregateWideOpening)
-        )
-        || checkpoints.iter().enumerate().any(|(ordinal, checkpoint)| {
+        ),
+        "wrong terminal proof section"
+    );
+    return_failure_if!(
+        checkpoints.iter().enumerate().any(|(ordinal, checkpoint)| {
             u32::try_from(ordinal).ok() != Some(checkpoint.checkpoint_ordinal)
                 || checkpoint.next_transcript_operation_ordinal > transcript_operation_count
                 || checkpoint.next_proof_section_ordinal > proof_section_count
-        })
-        || checkpoints.windows(2).any(|pair| {
+        }),
+        "checkpoint ordinal or bound"
+    );
+    return_failure_if!(
+        checkpoints.windows(2).any(|pair| {
             pair[0].next_transcript_operation_ordinal > pair[1].next_transcript_operation_ordinal
                 || pair[0].next_proof_section_ordinal > pair[1].next_proof_section_ordinal
-        })
-        || !matches!(
+        }),
+        "non-monotonic checkpoint"
+    );
+    return_failure_if!(
+        !matches!(
             checkpoints.first().map(|checkpoint| checkpoint.boundary),
             Some(RowCodeWhirCheckpointBoundary::SourcesAndConstruction)
-        )
-        || checkpoints.last().is_none_or(|checkpoint| {
+        ),
+        "wrong initial checkpoint"
+    );
+    return_failure_if!(
+        checkpoints.last().is_none_or(|checkpoint| {
             !matches!(
                 checkpoint.boundary,
                 RowCodeWhirCheckpointBoundary::CompletedProofStream
             ) || checkpoint.next_transcript_operation_ordinal != transcript_operation_count
                 || checkpoint.next_proof_section_ordinal != proof_section_count
-        })
-        || parameters.outer_query_count != construction_plan.outer_query_count()
-        || parameters.direct_bound_query_count > parameters.outer_query_count
-        || parameters.prior_proof_bound_query_count > parameters.direct_bound_query_count
-        || whir_plan
+        }),
+        "wrong terminal checkpoint"
+    );
+    return_failure_if!(
+        parameters.outer_query_count != construction_plan.outer_query_count(),
+        "outer query mismatch"
+    );
+    return_failure_if!(
+        parameters.direct_bound_query_count > parameters.outer_query_count,
+        "direct queries exceed outer queries"
+    );
+    return_failure_if!(
+        parameters.prior_proof_bound_query_count > parameters.direct_bound_query_count,
+        "prior-proof queries exceed direct queries"
+    );
+    return_failure_if!(
+        whir_plan
             .rounds
             .first()
-            .is_none_or(|round| round.query_epoch.query_count != parameters.outer_query_count)
-        || external_memory.distinct_physical_object_count() == 0
-        || external_memory.object_lifecycle_count()
-            < external_memory.distinct_physical_object_count()
-        || external_memory.distinct_physical_object_count() > maximum_external_memory_object_count
-        || external_memory.step_count() == 0
-        || external_memory.maximum_chunk_byte_length()
-            != MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH
-        || external_memory.maximum_transaction_payload_byte_length()
-            < u64::from(external_memory.maximum_chunk_byte_length())
-        || external_memory.peak_stored_byte_length() == 0
-        || external_memory.peak_stored_byte_length()
-            > MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH
-        || external_memory.total_written_byte_length() == 0
-        || external_memory.total_read_byte_length() == 0
-        || external_memory.transaction_count()
-            < u64::from(external_memory.distinct_physical_object_count())
-        || external_memory.local_record_seal_invocation_count() == 0
-        || external_memory.local_record_seal_invocation_count()
-            > MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT
-        || external_memory.local_record_sealed_plaintext_byte_length() == 0
-        || external_memory.local_record_sealed_plaintext_byte_length()
-            > MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT
-    {
-        return Err(SelectedProofAccountingError::ResourcePlanning);
+            .is_none_or(|round| round.query_epoch.query_count != parameters.outer_query_count),
+        "first WHIR query mismatch"
+    );
+    return_failure_if!(
+        external_memory.distinct_physical_object_count() == 0,
+        "missing external-memory objects"
+    );
+    return_failure_if!(
+        external_memory.object_lifecycle_count() < external_memory.distinct_physical_object_count(),
+        "external-memory lifecycle count"
+    );
+    return_failure_if!(
+        external_memory.distinct_physical_object_count() > maximum_external_memory_object_count,
+        "external-memory object bound"
+    );
+    return_failure_if!(
+        external_memory.step_count() == 0,
+        "missing external-memory steps"
+    );
+    return_failure_if!(
+        external_memory.maximum_chunk_byte_length()
+            != MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+        "external-memory chunk bound"
+    );
+    return_failure_if!(
+        external_memory.maximum_transaction_payload_byte_length()
+            < u64::from(external_memory.maximum_chunk_byte_length()),
+        "external-memory transaction payload"
+    );
+    return_failure_if!(
+        external_memory.peak_stored_byte_length() == 0,
+        "missing external-memory storage"
+    );
+    return_failure_if!(
+        external_memory.peak_stored_byte_length()
+            > MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
+        "external-memory storage bound"
+    );
+    return_failure_if!(
+        external_memory.total_written_byte_length() == 0,
+        "missing external-memory writes"
+    );
+    return_failure_if!(
+        external_memory.total_read_byte_length() == 0,
+        "missing external-memory reads"
+    );
+    return_failure_if!(
+        external_memory.transaction_count()
+            < u64::from(external_memory.distinct_physical_object_count()),
+        "external-memory transaction count"
+    );
+    return_failure_if!(
+        external_memory.local_record_seal_invocation_count() == 0,
+        "missing local-record seals"
+    );
+    return_failure_if!(
+        external_memory.local_record_seal_invocation_count()
+            > MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT,
+        "local-record seal invocation bound"
+    );
+    return_failure_if!(
+        external_memory.local_record_sealed_plaintext_byte_length() == 0,
+        "missing local-record sealed bytes"
+    );
+    return_failure_if!(
+        external_memory.local_record_sealed_plaintext_byte_length()
+            > MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT,
+        "local-record sealed-byte bound"
+    );
+    Ok(None)
+}
+
+fn external_memory_plan_failure_stage(
+    error: super::CommonProofGenerationInitializationError,
+) -> &'static str {
+    use super::{
+        CommonProofGenerationInitializationError, CommonProofProverError, ProofExternalMemoryError,
+    };
+
+    match error {
+        CommonProofGenerationInitializationError::Prover(error) => match error {
+            CommonProofProverError::CanonicalEncoding => "external-memory canonical encoding",
+            CommonProofProverError::InvalidInput => "external-memory invalid input",
+            CommonProofProverError::InvalidColumn => "external-memory invalid column",
+            CommonProofProverError::InvalidMask => "external-memory invalid mask",
+            CommonProofProverError::InvalidQuotient => "external-memory invalid quotient",
+            CommonProofProverError::InvalidOpening => "external-memory invalid opening",
+            CommonProofProverError::InvalidTree => "external-memory invalid tree",
+            CommonProofProverError::CountOverflow => "external-memory count overflow",
+            CommonProofProverError::AllocationLimitExceeded => "external-memory allocation limit",
+            CommonProofProverError::ResidentMemoryLimitExceeded => {
+                "external-memory resident-memory limit"
+            }
+            CommonProofProverError::Field(_) => "external-memory field validation",
+            CommonProofProverError::Polynomial(_) => "external-memory polynomial validation",
+            CommonProofProverError::Merkle(_) => "external-memory Merkle validation",
+            CommonProofProverError::Relation(_) => "external-memory relation-plan validation",
+        },
+        CommonProofGenerationInitializationError::Profile(_) => {
+            "external-memory profile validation"
+        }
+        CommonProofGenerationInitializationError::Relation(_) => {
+            "external-memory relation validation"
+        }
+        CommonProofGenerationInitializationError::StoragePlan(error) => match error {
+            ProofExternalMemoryError::InvalidPlan => "invalid external-memory plan",
+            ProofExternalMemoryError::UnknownObject => "unknown external-memory object",
+            ProofExternalMemoryError::WrongStep => "wrong external-memory step",
+            ProofExternalMemoryError::InvalidLifecycle => "invalid external-memory lifecycle",
+            ProofExternalMemoryError::WrongOffsetOrLength => {
+                "wrong external-memory offset or length"
+            }
+            ProofExternalMemoryError::ResourceLimitExceeded => {
+                "external-memory resource limit exceeded"
+            }
+            ProofExternalMemoryError::Incomplete => "incomplete external-memory plan",
+        },
     }
-    Ok(())
 }
 
 pub(crate) fn selected_proof_runtime_limits(
@@ -229,6 +379,7 @@ pub(crate) mod resource_accounting {
         merkle::maximum_minimal_frontier_node_count,
         relation_plan::{BoundTreeConstructionKind, RelationColumnOrigin, RelationTreeDescriptor},
         row_code_whir::{
+            AUTOMATIC_ROW_CODE_WHIR_PROOF_ACCEPTANCE_BYTE_LENGTH,
             NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH,
             canonical_row_code_whir_aggregate_opening_section_byte_ledger,
             canonical_row_code_whir_family_body_byte_length_ceiling,
@@ -240,7 +391,6 @@ pub(crate) mod resource_accounting {
         selected_recipient_private_vss_payload_byte_length,
     };
 
-    const SELECTED_PROOF_SIZE_TARGET_BYTE_LENGTH: usize = 5 * 1_024 * 1_024;
     const MERKLE_DIGEST_BYTE_LENGTH: usize = 64;
     const SECTION_COUNT_BYTE_LENGTH: usize = core::mem::size_of::<u32>();
 
@@ -421,13 +571,16 @@ pub(crate) mod resource_accounting {
 
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub(crate) struct SelectedRowCodeWhirConstructionResourceAccounting {
+        construction_identity_byte_length: u64,
         construction_identity_hash: [u8; Hash512::BYTE_LENGTH],
+        logical_polynomials_per_physical_row: u64,
         outer_query_count: u32,
         direct_bound_query_count: u32,
         prior_proof_bound_query_count: u32,
         aggregate_logical_column_count: u32,
         aggregate_table_width: u32,
         opening_batch_count: u32,
+        scalar_opening_count: u32,
         transcript_operation_count: u32,
         ordered_proof_sections: Box<[SelectedRowCodeWhirProofSectionAccounting]>,
         ordered_checkpoints: Box<[SelectedRowCodeWhirCheckpointAccounting]>,
@@ -437,8 +590,16 @@ pub(crate) mod resource_accounting {
     }
 
     impl SelectedRowCodeWhirConstructionResourceAccounting {
+        pub(crate) const fn construction_identity_byte_length(&self) -> u64 {
+            self.construction_identity_byte_length
+        }
+
         pub(crate) const fn construction_identity_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
             self.construction_identity_hash
+        }
+
+        pub(crate) const fn logical_polynomials_per_physical_row(&self) -> u64 {
+            self.logical_polynomials_per_physical_row
         }
 
         pub(crate) const fn outer_query_count(&self) -> u32 {
@@ -463,6 +624,10 @@ pub(crate) mod resource_accounting {
 
         pub(crate) const fn opening_batch_count(&self) -> u32 {
             self.opening_batch_count
+        }
+
+        pub(crate) const fn scalar_opening_count(&self) -> u32 {
+            self.scalar_opening_count
         }
 
         pub(crate) const fn transcript_operation_count(&self) -> u32 {
@@ -510,7 +675,11 @@ pub(crate) mod resource_accounting {
         canonical_header_byte_length: u64,
         canonical_family_body_byte_length: u64,
         canonical_proof_byte_length: u64,
-        proof_size_target_margin_byte_length: u64,
+        nominal_proof_overage_byte_length: u64,
+        nominal_proof_headroom_byte_length: u64,
+        automatic_acceptance_overage_byte_length: u64,
+        automatic_acceptance_headroom_byte_length: u64,
+        absolute_bound_headroom_byte_length: u64,
         maximum_verifier_resident_byte_length: u64,
         generation_wasm_resident_hard_bound_byte_length: u64,
         external_memory_requirement: CommonProofExternalMemoryRequirement,
@@ -574,8 +743,24 @@ pub(crate) mod resource_accounting {
             self.canonical_proof_byte_length
         }
 
-        pub(crate) const fn proof_size_target_margin_byte_length(&self) -> u64 {
-            self.proof_size_target_margin_byte_length
+        pub(crate) const fn nominal_proof_overage_byte_length(&self) -> u64 {
+            self.nominal_proof_overage_byte_length
+        }
+
+        pub(crate) const fn nominal_proof_headroom_byte_length(&self) -> u64 {
+            self.nominal_proof_headroom_byte_length
+        }
+
+        pub(crate) const fn automatic_acceptance_overage_byte_length(&self) -> u64 {
+            self.automatic_acceptance_overage_byte_length
+        }
+
+        pub(crate) const fn automatic_acceptance_headroom_byte_length(&self) -> u64 {
+            self.automatic_acceptance_headroom_byte_length
+        }
+
+        pub(crate) const fn absolute_bound_headroom_byte_length(&self) -> u64 {
+            self.absolute_bound_headroom_byte_length
         }
 
         pub(crate) const fn maximum_verifier_resident_byte_length(&self) -> u64 {
@@ -762,6 +947,13 @@ pub(crate) mod resource_accounting {
     ) -> Result<SelectedRowCodeWhirConstructionResourceAccounting, SelectedProofAccountingError>
     {
         let parameters = construction_plan.selected_parameters();
+        let construction_identity_byte_length = u64::try_from(
+            construction_plan
+                .canonical_identity_bytes()
+                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
+                .len(),
+        )
+        .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
         let ordered_proof_sections = construction_plan
             .proof_sections()
             .iter()
@@ -795,6 +987,15 @@ pub(crate) mod resource_accounting {
                     })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
+        let scalar_opening_count =
+            construction_plan
+                .opening_batches()
+                .iter()
+                .try_fold(0_usize, |count, batch| {
+                    count
+                        .checked_add(batch.requested_aggregate_column_ordinals.len())
+                        .ok_or(SelectedProofAccountingError::CountOverflow)
+                })?;
         if ordered_proof_sections.is_empty()
             || ordered_checkpoints.is_empty()
             || ordered_query_epochs.is_empty()
@@ -803,9 +1004,14 @@ pub(crate) mod resource_accounting {
             return Err(SelectedProofAccountingError::InvalidProfile);
         }
         Ok(SelectedRowCodeWhirConstructionResourceAccounting {
+            construction_identity_byte_length,
             construction_identity_hash: construction_plan
                 .canonical_identity_hash()
                 .map_err(|_| SelectedProofAccountingError::InvalidProfile)?,
+            logical_polynomials_per_physical_row: u64::try_from(
+                parameters.logical_polynomials_per_physical_row,
+            )
+            .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
             outer_query_count: u32::try_from(construction_plan.outer_query_count())
                 .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
             direct_bound_query_count: u32::try_from(parameters.direct_bound_query_count)
@@ -819,6 +1025,8 @@ pub(crate) mod resource_accounting {
             aggregate_table_width: u32::try_from(construction_plan.aggregate_table_width())
                 .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
             opening_batch_count: u32::try_from(construction_plan.opening_batches().len())
+                .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+            scalar_opening_count: u32::try_from(scalar_opening_count)
                 .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
             transcript_operation_count: u32::try_from(
                 construction_plan.transcript_operations().len(),
@@ -1060,11 +1268,19 @@ pub(crate) mod resource_accounting {
                     variant.top_count(),
                 )
                 .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
-                require_selected_row_code_whir_runtime_geometry(
+                if let Some(stage) = selected_row_code_whir_runtime_geometry_failure(
                     &construction_plan,
                     variant,
                     &relation_context,
-                )?;
+                )? {
+                    return Err(SelectedProofAccountingError::VariantResourcePlanning {
+                        application_statement_schema_identifier: schema_identifier,
+                        schedule_position: variant.schedule_position(),
+                        top_count: variant.top_count(),
+                        stage,
+                        measured_byte_length: None,
+                    });
+                }
                 let relation_trees = selected_relation_tree_inputs(variant)?;
                 let bound_tree_entries =
                     build_relation_bound_public_tree_catalog_entries(&relation_trees)
@@ -1086,21 +1302,27 @@ pub(crate) mod resource_accounting {
                 let proof_byte_length = header_byte_length
                     .checked_add(body_byte_length)
                     .ok_or(SelectedProofAccountingError::CountOverflow)?;
-                if proof_byte_length == 0
-                    || proof_byte_length >= SELECTED_PROOF_SIZE_TARGET_BYTE_LENGTH
-                    || proof_byte_length >= NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH
-                    || proof_byte_length > MAXIMUM_COMMON_PROOF_BYTE_LENGTH
-                {
+                if proof_byte_length == 0 || proof_byte_length > MAXIMUM_COMMON_PROOF_BYTE_LENGTH {
                     return Err(SelectedProofAccountingError::VariantResourcePlanning {
                         application_statement_schema_identifier: schema_identifier,
                         schedule_position: variant.schedule_position(),
                         top_count: variant.top_count(),
-                        stage: "proof-size selection ceiling",
+                        stage: "proof-size absolute parser ceiling",
                         measured_byte_length: u64::try_from(proof_byte_length).ok(),
                     });
                 }
-                let proof_size_target_margin_byte_length =
-                    SELECTED_PROOF_SIZE_TARGET_BYTE_LENGTH - proof_byte_length;
+                let nominal_proof_overage_byte_length =
+                    proof_byte_length.saturating_sub(NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH);
+                let nominal_proof_headroom_byte_length =
+                    NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH.saturating_sub(proof_byte_length);
+                let automatic_acceptance_overage_byte_length = proof_byte_length
+                    .saturating_sub(AUTOMATIC_ROW_CODE_WHIR_PROOF_ACCEPTANCE_BYTE_LENGTH);
+                let automatic_acceptance_headroom_byte_length =
+                    AUTOMATIC_ROW_CODE_WHIR_PROOF_ACCEPTANCE_BYTE_LENGTH
+                        .saturating_sub(proof_byte_length);
+                let absolute_bound_headroom_byte_length = MAXIMUM_COMMON_PROOF_BYTE_LENGTH
+                    .checked_sub(proof_byte_length)
+                    .ok_or(SelectedProofAccountingError::CountOverflow)?;
                 let external_memory_requirement =
                     planned_row_code_whir_external_memory_requirement(
                         &construction_plan,
@@ -1181,15 +1403,39 @@ pub(crate) mod resource_accounting {
                         .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
                     canonical_proof_byte_length: u64::try_from(proof_byte_length)
                         .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
-                    proof_size_target_margin_byte_length: u64::try_from(
-                        proof_size_target_margin_byte_length,
+                    nominal_proof_overage_byte_length: u64::try_from(
+                        nominal_proof_overage_byte_length,
+                    )
+                    .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+                    nominal_proof_headroom_byte_length: u64::try_from(
+                        nominal_proof_headroom_byte_length,
+                    )
+                    .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+                    automatic_acceptance_overage_byte_length: u64::try_from(
+                        automatic_acceptance_overage_byte_length,
+                    )
+                    .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+                    automatic_acceptance_headroom_byte_length: u64::try_from(
+                        automatic_acceptance_headroom_byte_length,
+                    )
+                    .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+                    absolute_bound_headroom_byte_length: u64::try_from(
+                        absolute_bound_headroom_byte_length,
                     )
                     .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
                     maximum_verifier_resident_byte_length,
                     generation_wasm_resident_hard_bound_byte_length:
                         MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
                     external_memory_requirement,
-                    construction: construction_accounting(&construction_plan)?,
+                    construction: construction_accounting(&construction_plan).map_err(|_| {
+                        SelectedProofAccountingError::VariantResourcePlanning {
+                            application_statement_schema_identifier: schema_identifier,
+                            schedule_position: variant.schedule_position(),
+                            top_count: variant.top_count(),
+                            stage: "construction resource accounting",
+                            measured_byte_length: None,
+                        }
+                    })?,
                 });
             }
         }
@@ -1731,7 +1977,31 @@ pub(crate) mod resource_accounting {
         use super::*;
 
         #[test]
-        fn selected_row_code_whir_accounting_covers_every_variant_under_five_mebibytes() {
+        fn same_secret_canonical_header_accounting_is_construction_independent() {
+            let statement_context = SelectedApplicationStatementContext::new(
+                FOUNDATION_PROFILE.protocol_version,
+                [0; Hash512::BYTE_LENGTH],
+                None,
+                None,
+            );
+            let statement_bytes = canonical_selected_application_statement_for_ceiling(
+                ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+                statement_context,
+            )
+            .expect("the same-secret ceiling statement encodes");
+            let header = ProofObjectHeader::from_canonical_application_statement(
+                statement_bytes,
+                &CanonicalDecodeLimits::default(),
+            )
+            .expect("the same-secret ceiling header is canonical");
+            assert_eq!(
+                header.encode().expect("the ceiling header encodes").len(),
+                902
+            );
+        }
+
+        #[test]
+        fn selected_row_code_whir_accounting_records_every_soft_variance_and_absolute_headroom() {
             let rows = selected_proof_variant_resource_inventory()
                 .expect("selected row-code WHIR accounting derives");
             assert_eq!(
@@ -1743,13 +2013,201 @@ pub(crate) mod resource_accounting {
                     .collect(),
             );
             assert!(rows.len() > crate::bgv::proof_suite::FIRST_PROFILE_APPLICATION_FAMILIES.len());
+            let nominal_proof_byte_length = u64::try_from(NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH)
+                .expect("the nominal proof length fits u64");
+            let automatic_acceptance_byte_length =
+                u64::try_from(AUTOMATIC_ROW_CODE_WHIR_PROOF_ACCEPTANCE_BYTE_LENGTH)
+                    .expect("the automatic proof acceptance length fits u64");
+            let same_secret = rows
+                .iter()
+                .find(|row| {
+                    row.application_statement_schema_identifier()
+                        == ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER
+                })
+                .expect("the same-secret accounting row exists");
+            assert_eq!(same_secret.relation_column_count(), 2_930);
+            assert_eq!(same_secret.relation_constraint_count(), 4_046);
+            assert_eq!(same_secret.opening_claim_count(), 3_857);
+            assert_eq!(same_secret.canonical_header_byte_length(), 902);
+
+            let construction = same_secret.construction();
+            assert_eq!(construction.aggregate_logical_column_count(), 4);
+            assert_eq!(construction.opening_batch_count(), 1_008);
+            assert_eq!(construction.scalar_opening_count(), 1_782);
+            let phase_opening_byte_length = construction
+                .compact_frontiers()
+                .iter()
+                .filter(|frontier| frontier.role_code() == 1)
+                .map(|frontier| frontier.canonical_opening_byte_length())
+                .sum::<u64>();
+            let prior_proof_bound_opening_byte_length = construction
+                .compact_frontiers()
+                .iter()
+                .filter(|frontier| {
+                    frontier.role_code() == 2
+                        && frontier
+                            .associated_ordinal()
+                            .is_some_and(|ordinal| ordinal < 8)
+                })
+                .map(|frontier| frontier.canonical_opening_byte_length())
+                .sum::<u64>();
+            let direct_bound_opening_byte_length = construction
+                .compact_frontiers()
+                .iter()
+                .filter(|frontier| {
+                    frontier.role_code() == 2
+                        && frontier
+                            .associated_ordinal()
+                            .is_some_and(|ordinal| ordinal >= 8)
+                })
+                .map(|frontier| frontier.canonical_opening_byte_length())
+                .sum::<u64>();
+            assert_eq!(construction.compact_frontiers().len(), 14);
+            assert_eq!(phase_opening_byte_length, 1_330_524);
+            assert_eq!(prior_proof_bound_opening_byte_length, 421_920);
+            assert_eq!(direct_bound_opening_byte_length, 813_324);
+
+            let proof_section_item_count = |role_name: &str| {
+                construction
+                    .ordered_proof_sections()
+                    .iter()
+                    .filter(|section| section.role_name() == role_name)
+                    .map(|section| section.item_count())
+                    .sum::<u64>()
+            };
+            assert_eq!(proof_section_item_count("relation-commitment"), 3);
+            assert_eq!(proof_section_item_count("out-of-domain-evaluations"), 3_857);
+            assert_eq!(
+                proof_section_item_count("aggregate-wide-mask-evaluations"),
+                64
+            );
+            assert_eq!(proof_section_item_count("aggregate-commitment"), 1);
+            assert_eq!(proof_section_item_count("aggregate-wide-pad-commitment"), 1);
+            let non_opening_prefix_byte_length = u64::try_from(8 + core::mem::size_of::<u32>())
+                .expect("the fixed prefix length fits u64")
+                + 5 * 64
+                + (proof_section_item_count("out-of-domain-evaluations")
+                    + proof_section_item_count("aggregate-wide-mask-evaluations"))
+                    * u64::try_from(
+                        crate::bgv::proof_suite::PROOF_CHALLENGE_EXTENSION_DEGREE
+                            * core::mem::size_of::<u64>(),
+                    )
+                    .expect("the extension wire width fits u64");
+            assert_eq!(non_opening_prefix_byte_length, 157_172);
+            let aggregate_opening_byte_length = construction
+                .aggregate_opening_sections()
+                .iter()
+                .map(|section| section.byte_length())
+                .sum::<u64>();
+            assert_eq!(aggregate_opening_byte_length, 2_586_008);
+            let independently_reconciled_family_body_byte_length = non_opening_prefix_byte_length
+                + phase_opening_byte_length
+                + prior_proof_bound_opening_byte_length
+                + direct_bound_opening_byte_length
+                + aggregate_opening_byte_length;
+            assert_eq!(independently_reconciled_family_body_byte_length, 5_308_948);
+            assert_eq!(
+                same_secret.canonical_family_body_byte_length(),
+                independently_reconciled_family_body_byte_length
+            );
+            assert_eq!(same_secret.canonical_proof_byte_length(), 5_309_850);
+            assert_eq!(same_secret.nominal_proof_overage_byte_length(), 66_970);
+            assert_eq!(same_secret.nominal_proof_headroom_byte_length(), 0);
+            assert_eq!(same_secret.automatic_acceptance_overage_byte_length(), 0);
+
+            let engineering_review_rows = rows
+                .iter()
+                .filter(|row| row.automatic_acceptance_overage_byte_length() > 0)
+                .map(|row| {
+                    (
+                        row.application_statement_schema_identifier(),
+                        row.schedule_position(),
+                        row.top_count(),
+                        row.complete_action_application_multiplicity(),
+                        row.canonical_proof_byte_length(),
+                        row.automatic_acceptance_overage_byte_length(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let mut expected_engineering_review_rows = vec![
+                (0x1213, None, None, 1, 7_916_724, 52_404),
+                (0x1214, Some(0), None, 10, 18_747_444, 10_883_124),
+                (0x1215, Some(0), None, 1, 47_855_714, 39_991_394),
+                (0x1216, Some(0), None, 10, 37_289_242, 29_424_922),
+                (0x1217, Some(0), None, 10, 34_402_548, 26_538_228),
+            ];
+            expected_engineering_review_rows.extend((1_u16..=20).map(|top_count| {
+                (
+                    0x1218,
+                    None,
+                    Some(top_count),
+                    u32::from(top_count == FOUNDATION_PROFILE.option_count),
+                    111_358_732,
+                    103_494_412,
+                )
+            }));
+            expected_engineering_review_rows.extend([
+                (0x1621, None, None, 10, 20_365_522, 12_501_202),
+                (0x2110, None, None, 10, 41_388_818, 33_524_498),
+                (0x2111, None, None, 10, 32_928_554, 25_064_234),
+            ]);
+            assert_eq!(engineering_review_rows, expected_engineering_review_rows);
+
+            let active_evaluator_row = rows
+                .iter()
+                .find(|row| {
+                    row.application_statement_schema_identifier() == 0x1218
+                        && row.top_count() == Some(FOUNDATION_PROFILE.option_count)
+                })
+                .expect("the active evaluator accounting row exists");
+            assert_eq!(
+                active_evaluator_row.complete_action_application_multiplicity(),
+                1
+            );
+            assert!(
+                active_evaluator_row.canonical_proof_byte_length() > nominal_proof_byte_length * 20,
+                "the evaluator proof remains an orders-of-magnitude redesign signal"
+            );
+            assert!(
+                rows.iter()
+                    .filter(|row| {
+                        row.application_statement_schema_identifier() == 0x1218
+                            && row.top_count() != Some(FOUNDATION_PROFILE.option_count)
+                    })
+                    .all(|row| row.complete_action_application_multiplicity() == 0)
+            );
+
             for row in rows {
                 assert!(row.canonical_header_byte_length() > 0);
                 assert!(row.canonical_family_body_byte_length() > 0);
-                assert!(row.canonical_proof_byte_length() < 5 * 1_024 * 1_024);
+                assert!(
+                    row.canonical_proof_byte_length()
+                        <= u64::try_from(MAXIMUM_COMMON_PROOF_BYTE_LENGTH)
+                            .expect("the absolute proof bound fits u64")
+                );
                 assert_eq!(
-                    row.canonical_proof_byte_length() + row.proof_size_target_margin_byte_length(),
-                    5 * 1_024 * 1_024,
+                    row.nominal_proof_headroom_byte_length(),
+                    nominal_proof_byte_length.saturating_sub(row.canonical_proof_byte_length()),
+                );
+                assert_eq!(
+                    row.nominal_proof_overage_byte_length(),
+                    row.canonical_proof_byte_length()
+                        .saturating_sub(nominal_proof_byte_length),
+                );
+                assert_eq!(
+                    row.automatic_acceptance_headroom_byte_length(),
+                    automatic_acceptance_byte_length
+                        .saturating_sub(row.canonical_proof_byte_length()),
+                );
+                assert_eq!(
+                    row.automatic_acceptance_overage_byte_length(),
+                    row.canonical_proof_byte_length()
+                        .saturating_sub(automatic_acceptance_byte_length),
+                );
+                assert_eq!(
+                    row.canonical_proof_byte_length() + row.absolute_bound_headroom_byte_length(),
+                    u64::try_from(MAXIMUM_COMMON_PROOF_BYTE_LENGTH)
+                        .expect("the absolute proof bound fits u64"),
                 );
                 assert!(
                     row.maximum_verifier_resident_byte_length() > row.canonical_proof_byte_length()
@@ -1759,6 +2217,39 @@ pub(crate) mod resource_accounting {
                         <= row.generation_wasm_resident_hard_bound_byte_length()
                 );
             }
+        }
+
+        #[test]
+        fn first_relinearization_round_schedule_has_bounded_candidate_runtime_geometry() {
+            let relation_plans = selected_relation_plans().expect("selected relation plans derive");
+            let artifact = relation_plans
+                .iter()
+                .find(|artifact| {
+                    artifact.application_statement_schema_identifier()
+                        == ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER
+                })
+                .expect("the first relinearization-round plan exists");
+            let variant = artifact
+                .compiled_plan()
+                .select_variant(Some(0), None)
+                .expect("the first relinearization-round schedule exists");
+            let construction_plan =
+                RowCodeWhirConstructionPlan::for_selected_variant(artifact, Some(0), None)
+                    .expect("the first relinearization-round construction derives");
+            let context = selected_relation_plan_check_context(
+                ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER,
+            )
+            .expect("the first relinearization round has a relation context");
+            let failure = selected_row_code_whir_runtime_geometry_failure(
+                &construction_plan,
+                variant,
+                &context,
+            )
+            .expect("candidate runtime-geometry diagnostics derive");
+            assert_eq!(
+                failure, None,
+                "candidate runtime geometry failed: {failure:?}"
+            );
         }
 
         #[test]

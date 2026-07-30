@@ -20,6 +20,8 @@ describe('Rust kernel heavy runner', () => {
         );
         expect(arguments_).toContain(heavyRustKernelTestNamePrefix);
         expect(arguments_).toContain('--ignored');
+        expect(arguments_).toContain('--nocapture');
+        expect(arguments_).not.toContain('--show-output');
         expect(arguments_).toContain('--test-threads');
     });
 

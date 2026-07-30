@@ -7,7 +7,13 @@ use std::collections::BTreeMap;
 use num_bigint::BigUint;
 
 #[cfg(test)]
-use crate::foundation::ProofApplicationSlotCeilings;
+use crate::foundation::{
+    ACTION_RANDOMNESS_ROOT_BYTE_LENGTH, ActionRandomnessDerivationInput, ActionRandomnessRoot,
+    ParticipantIdentity, PersistentProofCoinInput, ProofApplicationSlot,
+    ProofApplicationSlotCeilings,
+};
+#[cfg(test)]
+use zeroize::Zeroizing;
 
 use crate::{
     foundation::{
@@ -162,6 +168,19 @@ pub(crate) trait CommonProofPrivateCoinSource {
         &mut self,
         coordinate: CommonProofPrivateCoinCoordinate,
         destination: &mut [u8],
+    ) -> Result<(), Self::Error>;
+
+    /// Replays a completed modulo-sampling coordinate from its private stream
+    /// origin without advancing the retained generation cursor. Implementations
+    /// must refuse unless the replay consumes exactly the same private stream
+    /// prefix as the original coordinate operation. This is a private custody
+    /// operation; transcript bytes and public inputs cannot implement it.
+    fn replay_modulo_samples(
+        &mut self,
+        coordinate: CommonProofPrivateCoinCoordinate,
+        modulus: u64,
+        maximum_candidate_draws_per_output: u32,
+        destination: &mut [u64],
     ) -> Result<(), Self::Error>;
 }
 
@@ -552,6 +571,23 @@ where
             .record_raw_byte_fill(coordinate, destination.len())
             .map_err(RecordingCommonProofPrivateCoinError::Catalog)
     }
+
+    fn replay_modulo_samples(
+        &mut self,
+        coordinate: CommonProofPrivateCoinCoordinate,
+        modulus: u64,
+        maximum_candidate_draws_per_output: u32,
+        destination: &mut [u64],
+    ) -> Result<(), Self::Error> {
+        self.source
+            .replay_modulo_samples(
+                coordinate,
+                modulus,
+                maximum_candidate_draws_per_output,
+                destination,
+            )
+            .map_err(RecordingCommonProofPrivateCoinError::Source)
+    }
 }
 
 /// Private proof coins that can expose their exact authenticated stream
@@ -754,8 +790,10 @@ fn common_proof_checkpoint_cursor_manifest_requirement_from_capacity(
             .checked_add(
                 u64::from(allocated_mask_cursor_count)
                     .checked_mul(
-                        u64::try_from(core::mem::size_of::<Option<PrivateRandomCursor>>())
-                            .map_err(|_| CommonProofCheckpointCursorManifestError::CountOverflow)?,
+                        u64::try_from(core::mem::size_of::<
+                            Option<RetainedCommonProofPrivateCoinOperation>,
+                        >())
+                        .map_err(|_| CommonProofCheckpointCursorManifestError::CountOverflow)?,
                     )
                     .ok_or(CommonProofCheckpointCursorManifestError::CountOverflow)?,
             )
@@ -861,7 +899,10 @@ fn validate_manifest_cursor_identity(
 pub(crate) enum PrivateRandomnessCommonProofCoinError {
     Custody(FoundationSchemaError),
     AllocationLimitExceeded,
+    CountOverflow,
     CoordinateOutsidePlan,
+    OperationMismatch,
+    ReplayCursorMismatch,
 }
 
 impl From<FoundationSchemaError> for PrivateRandomnessCommonProofCoinError {
@@ -870,23 +911,47 @@ impl From<FoundationSchemaError> for PrivateRandomnessCommonProofCoinError {
     }
 }
 
-#[derive(Clone)]
-struct RetainedCommonProofPrivateCoinCursors {
-    trace_masks: Box<[Option<PrivateRandomCursor>]>,
-    telescoping_masks: Box<[Option<PrivateRandomCursor>]>,
-    opening_masks: Box<[Option<PrivateRandomCursor>]>,
-    proof_salt: Option<Option<PrivateRandomCursor>>,
-    hiding_argument: Option<Option<PrivateRandomCursor>>,
+#[derive(Clone, Copy)]
+enum RetainedCommonProofPrivateCoinOperation {
+    ModuloSamples {
+        cursor: PrivateRandomCursor,
+        modulus: u64,
+        maximum_candidate_draws_per_output: u32,
+        output_count: u64,
+    },
+    RawByteFill {
+        cursor: PrivateRandomCursor,
+        byte_count: u64,
+    },
 }
 
-impl RetainedCommonProofPrivateCoinCursors {
+impl RetainedCommonProofPrivateCoinOperation {
+    const fn cursor(self) -> PrivateRandomCursor {
+        match self {
+            Self::ModuloSamples { cursor, .. } | Self::RawByteFill { cursor, .. } => cursor,
+        }
+    }
+}
+
+#[derive(Clone)]
+struct RetainedCommonProofPrivateCoinOperations {
+    trace_masks: Box<[Option<RetainedCommonProofPrivateCoinOperation>]>,
+    telescoping_masks: Box<[Option<RetainedCommonProofPrivateCoinOperation>]>,
+    opening_masks: Box<[Option<RetainedCommonProofPrivateCoinOperation>]>,
+    proof_salt: Option<Option<RetainedCommonProofPrivateCoinOperation>>,
+    hiding_argument: Option<Option<RetainedCommonProofPrivateCoinOperation>>,
+}
+
+impl RetainedCommonProofPrivateCoinOperations {
     fn new(
         capacity: CommonProofPrivateCoinCoordinateCapacity,
     ) -> Result<Self, PrivateRandomnessCommonProofCoinError> {
         fn allocate_slots(
             count: u32,
-        ) -> Result<Box<[Option<PrivateRandomCursor>]>, PrivateRandomnessCommonProofCoinError>
-        {
+        ) -> Result<
+            Box<[Option<RetainedCommonProofPrivateCoinOperation>]>,
+            PrivateRandomnessCommonProofCoinError,
+        > {
             let count = usize::try_from(count)
                 .map_err(|_| PrivateRandomnessCommonProofCoinError::AllocationLimitExceeded)?;
             let mut slots = Vec::new();
@@ -909,7 +974,7 @@ impl RetainedCommonProofPrivateCoinCursors {
     fn slot(
         &self,
         coordinate: CommonProofPrivateCoinCoordinate,
-    ) -> Option<&Option<PrivateRandomCursor>> {
+    ) -> Option<&Option<RetainedCommonProofPrivateCoinOperation>> {
         let ordinal = usize::try_from(coordinate.ordinal()).ok()?;
         match coordinate.purpose_class() {
             1 => self.trace_masks.get(ordinal),
@@ -924,7 +989,7 @@ impl RetainedCommonProofPrivateCoinCursors {
     fn slot_mut(
         &mut self,
         coordinate: CommonProofPrivateCoinCoordinate,
-    ) -> Option<&mut Option<PrivateRandomCursor>> {
+    ) -> Option<&mut Option<RetainedCommonProofPrivateCoinOperation>> {
         let ordinal = usize::try_from(coordinate.ordinal()).ok()?;
         match coordinate.purpose_class() {
             1 => self.trace_masks.get_mut(ordinal),
@@ -942,14 +1007,14 @@ impl RetainedCommonProofPrivateCoinCursors {
     {
         fn coordinate_cursor(
             purpose_class: u16,
-            (ordinal, cursor): (usize, &Option<PrivateRandomCursor>),
+            (ordinal, operation): (usize, &Option<RetainedCommonProofPrivateCoinOperation>),
         ) -> Option<(CommonProofPrivateCoinCoordinate, PrivateRandomCursor)> {
             Some((
                 CommonProofPrivateCoinCoordinate {
                     purpose_class,
                     ordinal: u32::try_from(ordinal).ok()?,
                 },
-                (*cursor)?,
+                operation.as_ref().copied()?.cursor(),
             ))
         }
 
@@ -969,11 +1034,21 @@ impl RetainedCommonProofPrivateCoinCursors {
                     .enumerate()
                     .filter_map(|entry| coordinate_cursor(3, entry)),
             )
-            .chain(self.hiding_argument.iter().filter_map(|cursor| {
-                cursor.map(|cursor| (CommonProofPrivateCoinCoordinate::hiding_argument(), cursor))
+            .chain(self.hiding_argument.iter().filter_map(|operation| {
+                operation.map(|operation| {
+                    (
+                        CommonProofPrivateCoinCoordinate::hiding_argument(),
+                        operation.cursor(),
+                    )
+                })
             }))
-            .chain(self.proof_salt.iter().filter_map(|cursor| {
-                cursor.map(|cursor| (CommonProofPrivateCoinCoordinate::proof_salt(), cursor))
+            .chain(self.proof_salt.iter().filter_map(|operation| {
+                operation.map(|operation| {
+                    (
+                        CommonProofPrivateCoinCoordinate::proof_salt(),
+                        operation.cursor(),
+                    )
+                })
             }))
     }
 }
@@ -986,7 +1061,7 @@ pub(crate) struct PrivateRandomnessCommonProofCoinSource {
     family_schema_identifier: u16,
     derivation_binding_hash: Hash512,
     attempt_identifier: PrivateRandomnessAttemptIdentifier,
-    retained_cursors: RetainedCommonProofPrivateCoinCursors,
+    retained_operations: RetainedCommonProofPrivateCoinOperations,
 }
 
 impl PrivateRandomnessCommonProofCoinSource {
@@ -1016,7 +1091,9 @@ impl PrivateRandomnessCommonProofCoinSource {
             family_schema_identifier,
             derivation_binding_hash,
             attempt_identifier,
-            retained_cursors: RetainedCommonProofPrivateCoinCursors::new(coordinate_capacity)?,
+            retained_operations: RetainedCommonProofPrivateCoinOperations::new(
+                coordinate_capacity,
+            )?,
         })
     }
 
@@ -1024,7 +1101,7 @@ impl PrivateRandomnessCommonProofCoinSource {
         &self,
     ) -> impl Iterator<Item = (CommonProofPrivateCoinCoordinate, PrivateRandomCursor)> + Clone + '_
     {
-        self.retained_cursors.cursors()
+        self.retained_operations.cursors()
     }
 
     fn stream_identity_for_coordinate(
@@ -1034,7 +1111,7 @@ impl PrivateRandomnessCommonProofCoinSource {
         (
             PrivateRandomnessDomain,
             Hash512,
-            Option<PrivateRandomCursor>,
+            Option<RetainedCommonProofPrivateCoinOperation>,
         ),
         PrivateRandomnessCommonProofCoinError,
     > {
@@ -1046,22 +1123,22 @@ impl PrivateRandomnessCommonProofCoinSource {
             self.derivation_binding_hash,
             coordinate,
         );
-        let retained_cursor = *self
-            .retained_cursors
+        let retained_operation = *self
+            .retained_operations
             .slot(coordinate)
             .ok_or(PrivateRandomnessCommonProofCoinError::CoordinateOutsidePlan)?;
-        Ok((domain, derivation_context_hash, retained_cursor))
+        Ok((domain, derivation_context_hash, retained_operation))
     }
 
-    fn retain_cursor(
+    fn retain_operation(
         &mut self,
         coordinate: CommonProofPrivateCoinCoordinate,
-        cursor: PrivateRandomCursor,
+        operation: RetainedCommonProofPrivateCoinOperation,
     ) -> Result<(), PrivateRandomnessCommonProofCoinError> {
         *self
-            .retained_cursors
+            .retained_operations
             .slot_mut(coordinate)
-            .ok_or(PrivateRandomnessCommonProofCoinError::CoordinateOutsidePlan)? = Some(cursor);
+            .ok_or(PrivateRandomnessCommonProofCoinError::CoordinateOutsidePlan)? = Some(operation);
         Ok(())
     }
 }
@@ -1075,8 +1152,25 @@ impl CommonProofPrivateCoinSource for PrivateRandomnessCommonProofCoinSource {
         modulus: u64,
         maximum_candidate_draws_per_output: u32,
     ) -> Result<u64, Self::Error> {
-        let (domain, derivation_context_hash, retained_cursor) =
+        let (domain, derivation_context_hash, retained_operation) =
             self.stream_identity_for_coordinate(coordinate)?;
+        let (retained_cursor, output_count) = match retained_operation {
+            Some(RetainedCommonProofPrivateCoinOperation::ModuloSamples {
+                cursor,
+                modulus: retained_modulus,
+                maximum_candidate_draws_per_output: retained_draw_ceiling,
+                output_count,
+            }) if retained_modulus == modulus
+                && retained_draw_ceiling == maximum_candidate_draws_per_output =>
+            {
+                (Some(cursor), output_count)
+            }
+            None => (None, 0),
+            Some(_) => return Err(PrivateRandomnessCommonProofCoinError::OperationMismatch),
+        };
+        let next_output_count = output_count
+            .checked_add(1)
+            .ok_or(PrivateRandomnessCommonProofCoinError::CountOverflow)?;
         let action_private_randomness = Rc::clone(&self.action_private_randomness);
         let mut stream = match retained_cursor {
             Some(cursor) => action_private_randomness.resume_stream(
@@ -1096,7 +1190,15 @@ impl CommonProofPrivateCoinSource for PrivateRandomnessCommonProofCoinSource {
             .map_err(PrivateRandomnessCommonProofCoinError::Custody);
         let cursor = stream.cursor();
         drop(stream);
-        self.retain_cursor(coordinate, cursor)?;
+        self.retain_operation(
+            coordinate,
+            RetainedCommonProofPrivateCoinOperation::ModuloSamples {
+                cursor,
+                modulus,
+                maximum_candidate_draws_per_output,
+                output_count: next_output_count,
+            },
+        )?;
         result
     }
 
@@ -1105,8 +1207,21 @@ impl CommonProofPrivateCoinSource for PrivateRandomnessCommonProofCoinSource {
         coordinate: CommonProofPrivateCoinCoordinate,
         destination: &mut [u8],
     ) -> Result<(), Self::Error> {
-        let (domain, derivation_context_hash, retained_cursor) =
+        let (domain, derivation_context_hash, retained_operation) =
             self.stream_identity_for_coordinate(coordinate)?;
+        let (retained_cursor, byte_count) = match retained_operation {
+            Some(RetainedCommonProofPrivateCoinOperation::RawByteFill { cursor, byte_count }) => {
+                (Some(cursor), byte_count)
+            }
+            None => (None, 0),
+            Some(_) => return Err(PrivateRandomnessCommonProofCoinError::OperationMismatch),
+        };
+        let next_byte_count = byte_count
+            .checked_add(
+                u64::try_from(destination.len())
+                    .map_err(|_| PrivateRandomnessCommonProofCoinError::CountOverflow)?,
+            )
+            .ok_or(PrivateRandomnessCommonProofCoinError::CountOverflow)?;
         let action_private_randomness = Rc::clone(&self.action_private_randomness);
         let mut stream = match retained_cursor {
             Some(cursor) => action_private_randomness.resume_stream(
@@ -1126,8 +1241,54 @@ impl CommonProofPrivateCoinSource for PrivateRandomnessCommonProofCoinSource {
             .map_err(PrivateRandomnessCommonProofCoinError::Custody);
         let cursor = stream.cursor();
         drop(stream);
-        self.retain_cursor(coordinate, cursor)?;
+        self.retain_operation(
+            coordinate,
+            RetainedCommonProofPrivateCoinOperation::RawByteFill {
+                cursor,
+                byte_count: next_byte_count,
+            },
+        )?;
         result
+    }
+
+    fn replay_modulo_samples(
+        &mut self,
+        coordinate: CommonProofPrivateCoinCoordinate,
+        modulus: u64,
+        maximum_candidate_draws_per_output: u32,
+        destination: &mut [u64],
+    ) -> Result<(), Self::Error> {
+        let (domain, derivation_context_hash, retained_operation) =
+            self.stream_identity_for_coordinate(coordinate)?;
+        let Some(RetainedCommonProofPrivateCoinOperation::ModuloSamples {
+            cursor: expected_cursor,
+            modulus: retained_modulus,
+            maximum_candidate_draws_per_output: retained_draw_ceiling,
+            output_count,
+        }) = retained_operation
+        else {
+            return Err(PrivateRandomnessCommonProofCoinError::ReplayCursorMismatch);
+        };
+        if retained_modulus != modulus
+            || retained_draw_ceiling != maximum_candidate_draws_per_output
+            || usize::try_from(output_count).ok() != Some(destination.len())
+        {
+            return Err(PrivateRandomnessCommonProofCoinError::OperationMismatch);
+        }
+        let mut stream = self.action_private_randomness.begin_stream(
+            domain,
+            derivation_context_hash,
+            self.attempt_identifier,
+        )?;
+        for sampled in destination {
+            *sampled = stream
+                .sample_modulo(modulus, maximum_candidate_draws_per_output)
+                .map_err(PrivateRandomnessCommonProofCoinError::Custody)?;
+        }
+        if stream.cursor() != expected_cursor {
+            return Err(PrivateRandomnessCommonProofCoinError::ReplayCursorMismatch);
+        }
+        Ok(())
     }
 }
 
@@ -1148,8 +1309,61 @@ impl CheckpointableCommonProofPrivateCoinSource for PrivateRandomnessCommonProof
 mod tests {
     use super::*;
 
+    fn production_private_coin_source(
+        trace_mask_count: u32,
+    ) -> PrivateRandomnessCommonProofCoinSource {
+        let action_private_randomness = Rc::new(
+            ActionRandomnessRoot::from_injected_bytes(Zeroizing::new(
+                [0x5a; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH],
+            ))
+            .derive(ActionRandomnessDerivationInput::new(
+                Hash512::from_bytes([0x11; Hash512::BYTE_LENGTH]),
+                Hash512::from_bytes([0x22; Hash512::BYTE_LENGTH]),
+                Hash512::from_bytes([0x33; Hash512::BYTE_LENGTH]),
+                ParticipantIdentity::from_bytes([0x44; ParticipantIdentity::BYTE_LENGTH]),
+            ))
+            .expect("the fixed action randomness derives"),
+        );
+        let application_slot = ProofApplicationSlot::new(
+            Hash512::from_bytes([0x11; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes([0x22; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes([0x33; Hash512::BYTE_LENGTH]),
+            ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+            Some(0),
+            None,
+            None,
+        )
+        .expect("the same-secret family has a canonical proof slot");
+        let proof_coin_input = PersistentProofCoinInput::new(
+            application_slot,
+            Hash512::from_bytes([0x66; Hash512::BYTE_LENGTH]),
+        )
+        .expect("the same-secret persistent proof input is canonical");
+        let mut witness_binding = action_private_randomness
+            .begin_persistent_proof_witness_coin_binding(&proof_coin_input)
+            .expect("the same-secret witness binding starts");
+        witness_binding
+            .absorb_canonical_bytes(b"sealed-lattice/test/common-proof-private-coin-replay/v1")
+            .expect("the replay-test witness domain is absorbed");
+        witness_binding
+            .absorb_canonical_bytes(b"exact private coordinate replay witness")
+            .expect("the replay-test witness bytes are absorbed");
+        let attempt_identifier = witness_binding
+            .finish()
+            .expect("the same-secret persistent proof attempt derives");
+        PrivateRandomnessCommonProofCoinSource::new(
+            action_private_randomness,
+            ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+            Hash512::from_bytes([0x71; Hash512::BYTE_LENGTH]),
+            attempt_identifier,
+            CommonProofPrivateCoinCoordinateCapacity::for_test(trace_mask_count, 0, 0, true, true),
+        )
+        .expect("the production private-coin source accepts the fixed test authority")
+    }
+
     struct SuccessfulRecordingDelegate {
         next_sample: u64,
+        replay_sample_start: u64,
         fill_byte: u8,
     }
 
@@ -1176,6 +1390,19 @@ mod tests {
             self.fill_byte = self.fill_byte.wrapping_add(1);
             Ok(())
         }
+
+        fn replay_modulo_samples(
+            &mut self,
+            _coordinate: CommonProofPrivateCoinCoordinate,
+            modulus: u64,
+            _maximum_candidate_draws_per_output: u32,
+            destination: &mut [u64],
+        ) -> Result<(), Self::Error> {
+            for (sample_ordinal, sampled) in destination.iter_mut().enumerate() {
+                *sampled = self.replay_sample_start.wrapping_add(sample_ordinal as u64) % modulus;
+            }
+            Ok(())
+        }
     }
 
     #[test]
@@ -1185,6 +1412,7 @@ mod tests {
         let salt_coordinate = CommonProofPrivateCoinCoordinate::proof_salt();
         let mut delegate = SuccessfulRecordingDelegate {
             next_sample: 19,
+            replay_sample_start: 19,
             fill_byte: 0xa5,
         };
         let mut observed = CommonProofPrivateCoinSamplingCatalog::default();
@@ -1195,6 +1423,12 @@ mod tests {
             assert_eq!(recording.sample_modulo(trace_coordinate, 17, 64), Ok(2));
             assert_eq!(recording.sample_modulo(trace_coordinate, 17, 64), Ok(3));
             assert_eq!(recording.sample_modulo(trace_coordinate, 17, 64), Ok(4));
+            let mut replayed = [0_u64; 3];
+            assert_eq!(
+                recording.replay_modulo_samples(trace_coordinate, 17, 64, &mut replayed),
+                Ok(())
+            );
+            assert_eq!(replayed, [2, 3, 4]);
             let mut raw_bytes = [0_u8; 11];
             assert_eq!(
                 recording.fill_raw_bytes(salt_coordinate, &mut raw_bytes),
@@ -1233,6 +1467,132 @@ mod tests {
         assert_eq!(exhaustion.numerator(), &BigUint::from(30_u8));
         assert_eq!(exhaustion.denominator(), &BigUint::from(256_u16).pow(64));
         assert!(exhaustion.is_at_most_inverse_power_of_two(128));
+    }
+
+    #[test]
+    fn production_private_coin_replay_round_trips_without_advancing_custody() {
+        let coordinate =
+            CommonProofPrivateCoinCoordinate::mask(1, 0).expect("trace-mask coordinate is valid");
+        let mut source = production_private_coin_source(1);
+        let original = (0..37)
+            .map(|_| {
+                source
+                    .sample_modulo(
+                        coordinate,
+                        PROOF_BASE_FIELD_MODULUS,
+                        crate::foundation::SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+                    )
+                    .expect("the production sampler yields one canonical field coordinate")
+            })
+            .collect::<Vec<_>>();
+        let manifest_before_replay = source
+            .checkpoint_cursor_manifest()
+            .expect("the consumed coordinate has a canonical checkpoint manifest");
+        let cursors_before_replay = source.cursors().collect::<Vec<_>>();
+
+        let mut replayed = vec![0_u64; original.len()];
+        source
+            .replay_modulo_samples(
+                coordinate,
+                PROOF_BASE_FIELD_MODULUS,
+                crate::foundation::SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+                &mut replayed,
+            )
+            .expect("the exact private coordinate operation replays");
+
+        assert_eq!(replayed, original);
+        assert_eq!(source.cursors().collect::<Vec<_>>(), cursors_before_replay);
+        assert_eq!(
+            source
+                .checkpoint_cursor_manifest()
+                .expect("replay preserves the checkpoint manifest"),
+            manifest_before_replay
+        );
+    }
+
+    #[test]
+    fn production_private_coin_replay_refuses_unconsumed_or_changed_operations() {
+        let coordinate =
+            CommonProofPrivateCoinCoordinate::mask(1, 0).expect("trace-mask coordinate is valid");
+        let outside_plan_coordinate =
+            CommonProofPrivateCoinCoordinate::mask(1, 1).expect("trace-mask coordinate is valid");
+        let draw_ceiling =
+            crate::foundation::SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT;
+        let mut source = production_private_coin_source(1);
+        let mut one_sample = [0_u64; 1];
+        assert_eq!(
+            source.replay_modulo_samples(
+                coordinate,
+                PROOF_BASE_FIELD_MODULUS,
+                draw_ceiling,
+                &mut one_sample,
+            ),
+            Err(PrivateRandomnessCommonProofCoinError::ReplayCursorMismatch)
+        );
+        assert_eq!(
+            source.replay_modulo_samples(
+                outside_plan_coordinate,
+                PROOF_BASE_FIELD_MODULUS,
+                draw_ceiling,
+                &mut one_sample,
+            ),
+            Err(PrivateRandomnessCommonProofCoinError::CoordinateOutsidePlan)
+        );
+
+        let original = (0..19)
+            .map(|_| {
+                source
+                    .sample_modulo(coordinate, PROOF_BASE_FIELD_MODULUS, draw_ceiling)
+                    .expect("the original private operation samples")
+            })
+            .collect::<Vec<_>>();
+        let manifest = source
+            .checkpoint_cursor_manifest()
+            .expect("the original operation has a canonical manifest");
+        let mut wrong_length = vec![0_u64; original.len() - 1];
+        assert_eq!(
+            source.replay_modulo_samples(
+                coordinate,
+                PROOF_BASE_FIELD_MODULUS,
+                draw_ceiling,
+                &mut wrong_length,
+            ),
+            Err(PrivateRandomnessCommonProofCoinError::OperationMismatch)
+        );
+        let mut right_length = vec![0_u64; original.len()];
+        assert_eq!(
+            source.replay_modulo_samples(
+                coordinate,
+                PROOF_BASE_FIELD_MODULUS - 2,
+                draw_ceiling,
+                &mut right_length,
+            ),
+            Err(PrivateRandomnessCommonProofCoinError::OperationMismatch)
+        );
+        assert_eq!(
+            source.replay_modulo_samples(
+                coordinate,
+                PROOF_BASE_FIELD_MODULUS,
+                draw_ceiling + 1,
+                &mut right_length,
+            ),
+            Err(PrivateRandomnessCommonProofCoinError::OperationMismatch)
+        );
+        source
+            .replay_modulo_samples(
+                coordinate,
+                PROOF_BASE_FIELD_MODULUS,
+                draw_ceiling,
+                &mut right_length,
+            )
+            .expect("failed altered replays do not disturb the exact replay");
+        assert_eq!(right_length, original);
+        assert_eq!(
+            source
+                .checkpoint_cursor_manifest()
+                .expect("refused replay attempts preserve the manifest"),
+            manifest
+        );
     }
 
     #[test]

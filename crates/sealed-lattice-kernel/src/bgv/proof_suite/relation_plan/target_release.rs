@@ -4689,7 +4689,20 @@ mod tests {
         PROOF_BASE_FIELD_MODULUS, construct_pre_challenge_relation_columns,
     };
 
-    struct DeterministicPrivateCoins(u64);
+    struct DeterministicPrivateCoins {
+        initial_sample: u64,
+        next_sample_by_coordinate:
+            std::collections::BTreeMap<CommonProofPrivateCoinCoordinate, u64>,
+    }
+
+    impl DeterministicPrivateCoins {
+        fn new(initial_sample: u64) -> Self {
+            Self {
+                initial_sample,
+                next_sample_by_coordinate: std::collections::BTreeMap::new(),
+            }
+        }
+    }
 
     #[derive(Clone, Copy)]
     struct BorrowedTargetReleaseWitnessSource<'input> {
@@ -4771,23 +4784,52 @@ mod tests {
 
         fn sample_modulo(
             &mut self,
-            _coordinate: CommonProofPrivateCoinCoordinate,
+            coordinate: CommonProofPrivateCoinCoordinate,
             modulus: u64,
             _maximum_candidate_draws_per_output: u32,
         ) -> Result<u64, Self::Error> {
-            let value = self.0 % modulus;
-            self.0 = self.0.wrapping_add(1);
+            let next_sample = self
+                .next_sample_by_coordinate
+                .entry(coordinate)
+                .or_insert(self.initial_sample);
+            let value = *next_sample % modulus;
+            *next_sample = next_sample.wrapping_add(1);
             Ok(value)
         }
 
         fn fill_raw_bytes(
             &mut self,
-            _coordinate: CommonProofPrivateCoinCoordinate,
+            coordinate: CommonProofPrivateCoinCoordinate,
             destination: &mut [u8],
         ) -> Result<(), Self::Error> {
+            let next_sample = self
+                .next_sample_by_coordinate
+                .entry(coordinate)
+                .or_insert(self.initial_sample);
             for byte in destination {
-                *byte = self.0 as u8;
-                self.0 = self.0.wrapping_add(1);
+                *byte = *next_sample as u8;
+                *next_sample = next_sample.wrapping_add(1);
+            }
+            Ok(())
+        }
+
+        fn replay_modulo_samples(
+            &mut self,
+            coordinate: CommonProofPrivateCoinCoordinate,
+            modulus: u64,
+            _maximum_candidate_draws_per_output: u32,
+            destination: &mut [u64],
+        ) -> Result<(), Self::Error> {
+            let expected_end = self
+                .next_sample_by_coordinate
+                .get(&coordinate)
+                .copied()
+                .ok_or(())?;
+            for (sample_ordinal, sampled) in destination.iter_mut().enumerate() {
+                *sampled = self.initial_sample.wrapping_add(sample_ordinal as u64) % modulus;
+            }
+            if self.initial_sample.wrapping_add(destination.len() as u64) != expected_end {
+                return Err(());
             }
             Ok(())
         }
@@ -5799,7 +5841,7 @@ mod tests {
             variant,
             request_context,
             &mut streaming_provider,
-            &mut DeterministicPrivateCoins(1),
+            &mut DeterministicPrivateCoins::new(1),
             128,
         )
         .expect("the block-streaming source covers every requested column");

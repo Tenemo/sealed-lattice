@@ -1,14 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use num_traits::ToPrimitive;
-
 use crate::foundation::{CanonicalItem, CanonicalItemType, CanonicalTuple};
 
 use super::super::transcript::{
     CommonProofApplicationChallengeGroup, CommonProofChallenge, CommonProofPrivacyMode,
     CommonProofRelationPrefixSchedule,
 };
-use super::model::RelationColumnOrigin;
 use super::{
     bounds::{RelationConstraintDescriptor, SemanticCellDescriptor},
     compiled_plan::RelationPlanCheckContext,
@@ -378,95 +375,6 @@ impl RelationPlanVariant {
 
     pub(crate) fn ordered_columns(&self) -> &[RelationColumnDescriptor] {
         &self.ordered_columns
-    }
-
-    /// Returns the smallest byte-aligned encoding of one checked trace value
-    /// when the relation proves that value lies in an injective integer
-    /// interval. Polynomial coefficients are deliberately not covered by this
-    /// bound; callers must preserve the complete masked coefficient tail when
-    /// using trace values as a replay representation.
-    pub(crate) fn compact_trace_encoding(
-        &self,
-        column_ordinal: u32,
-        context: &RelationPlanCheckContext,
-    ) -> Result<Option<RelationCompactTraceEncoding>, RelationPlanError> {
-        let descriptor = self
-            .ordered_columns
-            .get(usize::try_from(column_ordinal).map_err(|_| RelationPlanError::CountOverflow)?)
-            .ok_or(RelationPlanError::InvalidColumn)?;
-        let mut matching_semantic_cells = self
-            .ordered_semantic_cells
-            .iter()
-            .filter(|cell| cell.column_ordinal == column_ordinal);
-        let semantic_interval = matching_semantic_cells
-            .next()
-            .map(|cell| &cell.claimed_interval);
-        if matching_semantic_cells.next().is_some() {
-            return Err(RelationPlanError::InvalidSemanticCell);
-        }
-
-        let interval = if let Some(interval) = semantic_interval {
-            Some((
-                interval
-                    .minimum
-                    .to_i128()
-                    .ok_or(RelationPlanError::IntegerBoundOverflow)?,
-                interval
-                    .maximum
-                    .to_i128()
-                    .ok_or(RelationPlanError::IntegerBoundOverflow)?,
-            ))
-        } else if let RelationColumnOrigin::VerifierSequence {
-            verifier_source_ordinal,
-            ..
-        } = descriptor.origin()
-        {
-            match self.verifier_source(*verifier_source_ordinal) {
-                Some(RelationVerifierSource::RadixDecomposition { radix, .. }) if *radix >= 2 => {
-                    Some((0, i128::from(*radix - 1)))
-                }
-                Some(_) => None,
-                None => return Err(RelationPlanError::InvalidSource),
-            }
-        } else if let Some(modulus_reference) = descriptor.canonical_residue_modulus() {
-            Some((
-                0,
-                i128::from(
-                    context
-                        .resolved_modulus(modulus_reference)?
-                        .checked_sub(1)
-                        .ok_or(RelationPlanError::InvalidModulus)?,
-                ),
-            ))
-        } else {
-            None
-        };
-        let Some((minimum, maximum)) = interval else {
-            return Ok(None);
-        };
-        let base_field_modulus = i128::from(context.base_field_modulus);
-        if minimum > maximum || minimum <= -base_field_modulus || maximum >= base_field_modulus {
-            return Err(RelationPlanError::NoWrapBoundViolated);
-        }
-        let inclusive_range_maximum = u128::try_from(maximum - minimum)
-            .map_err(|_| RelationPlanError::IntegerBoundOverflow)?;
-        if inclusive_range_maximum >= context.base_field_modulus.into() {
-            return Err(RelationPlanError::NoWrapBoundViolated);
-        }
-        let significant_bit_count = u128::BITS - inclusive_range_maximum.leading_zeros();
-        let encoded_value_byte_length = u8::try_from(significant_bit_count.div_ceil(8).max(1))
-            .map_err(|_| RelationPlanError::IntegerBoundOverflow)?;
-        if encoded_value_byte_length
-            >= u8::try_from(core::mem::size_of::<u64>())
-                .map_err(|_| RelationPlanError::CountOverflow)?
-        {
-            return Ok(None);
-        }
-        Ok(Some(RelationCompactTraceEncoding {
-            minimum,
-            maximum,
-            encoded_value_byte_length,
-        }))
     }
 
     pub(crate) fn verifier_source(&self, ordinal: u32) -> Option<&RelationVerifierSource> {

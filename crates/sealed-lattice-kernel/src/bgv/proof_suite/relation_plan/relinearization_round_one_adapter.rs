@@ -685,6 +685,35 @@ impl CommonProofSourcePolynomialProvider for RelinearizationRoundOneSourcePolyno
         ))
     }
 
+    fn poll_replayed_source_polynomial(
+        &mut self,
+        request: CommonProofSourcePolynomialRequest<'_>,
+    ) -> Result<CommonProofSourcePolynomialProviderPoll, CommonProofProverError> {
+        if !self.source_polynomials_finished
+            || request.request_context() != self.request_context
+            || self
+                .requested_column_ordinals
+                .binary_search(&request.column_ordinal())
+                .is_err()
+            || self.relation_plan_variant.ordered_columns().get(
+                usize::try_from(request.column_ordinal())
+                    .map_err(|_| CommonProofProverError::CountOverflow)?,
+            ) != Some(request.descriptor())
+        {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        let column_ordinal = request.column_ordinal();
+        self.cached_quotient = None;
+        let polynomial = self.derive_source_polynomial(column_ordinal)?;
+        self.cached_quotient = None;
+        Ok(CommonProofSourcePolynomialProviderPoll::Ready(
+            ProvidedCommonProofSourcePolynomial::new(
+                polynomial,
+                self.replay_identity(column_ordinal)?,
+            ),
+        ))
+    }
+
     fn finish(&mut self) -> Result<(), CommonProofProverError> {
         if self.source_polynomials_finished
             || self.next_source_index != self.requested_column_ordinals.len()

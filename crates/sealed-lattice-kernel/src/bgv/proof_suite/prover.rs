@@ -161,6 +161,11 @@ mod quotient;
 mod relation_columns;
 
 pub(crate) use encoding::{CommonProofByteSink, canonical_proof_object_header_bytes};
+#[cfg(test)]
+pub(crate) use generation_storage::{
+    AUTOMATIC_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
+    NOMINAL_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
+};
 pub(crate) use generation_storage::{
     CommonProofExternalMemoryRequirement, CommonProofGenerationError,
     CommonProofGenerationInitializationError, CommonProofGenerationInput,
@@ -201,14 +206,13 @@ pub(crate) use relation_columns::{
     CommonProofSourcePolynomialProvider, CommonProofSourcePolynomialProviderPoll,
     CommonProofSourcePolynomialReplayIdentity, CommonProofSourcePolynomialRequest,
     CommonProofSourcePolynomialRequestContext, CommonProofSourceProviderMemoryAccounting,
-    ProvidedCommonProofSourcePolynomial, apply_trace_mask,
-    authenticated_pre_challenge_source_coefficient_position_counts,
-    auxiliary_private_mask_tail_coefficient_count, construct_opening_batch_mask,
-    construct_reversed_relation_column, extract_auxiliary_private_mask_tail,
+    CommonProofSourceReplayIdentityCatalog, ProvidedCommonProofSourcePolynomial, apply_trace_mask,
+    authenticated_pre_challenge_source_coefficient_position_counts, base_trace_rows,
+    construct_opening_batch_mask, construct_reversed_relation_column,
     ordered_integer_lift_auxiliary_column_ordinals,
-    persisted_pre_challenge_column_coefficient_position_counts,
-    relation_column_replay_requirements, relation_reversed_column_bindings,
-    requested_pre_challenge_source_column_ordinals, sample_private_extension_polynomial,
+    persisted_pre_challenge_column_coefficient_position_counts, relation_reversed_column_bindings,
+    replay_relation_private_mask_polynomial, requested_pre_challenge_source_column_ordinals,
+    sample_private_extension_polynomial, validate_source_column,
 };
 
 fn add_shifted_extension_polynomial(

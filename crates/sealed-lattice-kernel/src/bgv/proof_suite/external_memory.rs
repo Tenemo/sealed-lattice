@@ -70,10 +70,14 @@ pub(crate) const MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_BOUNDARY_TRANSFER_LIVE_BYT
     }
 };
 
-/// Absolute browser scratch safety bounds. The worker-side custody layer
-/// enforces the corresponding object and encrypted-record bounds before
-/// touching IndexedDB; phone qualification targets are measured separately.
+/// Browser scratch planning targets and the absolute safety bound. Values
+/// above the automatic target require an engineering review but remain valid
+/// when the exact plan stays within the hard bound.
 pub(crate) const MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_COUNT: usize = 4_096;
+#[cfg(test)]
+pub(crate) const NOMINAL_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH: u64 = 268_435_456;
+#[cfg(test)]
+pub(crate) const AUTOMATIC_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH: u64 = 402_653_184;
 pub(crate) const MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH: u64 = 1_073_741_824;
 
 mod executor;

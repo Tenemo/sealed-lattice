@@ -3640,7 +3640,8 @@ mod tests {
             }
             source_replay_identity_digest = cursor
                 .finish(&mut sources.source_polynomials)
-                .expect("finish exact production source traversal");
+                .expect("finish exact production source traversal")
+                .aggregate_digest();
             for (source_column_ordinal, reversed_column_ordinal) in &reversed_column_bindings {
                 let source = store
                     .read(*source_column_ordinal)

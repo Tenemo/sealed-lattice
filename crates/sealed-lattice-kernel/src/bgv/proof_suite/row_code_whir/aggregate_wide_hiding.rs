@@ -2264,6 +2264,28 @@ mod tests {
         ) -> Result<(), Self::Error> {
             Err("aggregate-wide material must not request raw bytes")
         }
+
+        fn replay_modulo_samples(
+            &mut self,
+            coordinate: CommonProofPrivateCoinCoordinate,
+            modulus: u64,
+            maximum_candidate_draws_per_output: u32,
+            destination: &mut [u64],
+        ) -> Result<(), Self::Error> {
+            if coordinate != CommonProofPrivateCoinCoordinate::hiding_argument()
+                || modulus != PROOF_BASE_FIELD_MODULUS
+                || maximum_candidate_draws_per_output == 0
+                || destination.len() != self.sample_count
+            {
+                return Err("unexpected aggregate-wide private-coin replay");
+            }
+            for (sample_ordinal, sampled) in destination.iter_mut().enumerate() {
+                *sampled = u64::try_from(sample_ordinal)
+                    .map_err(|_| "aggregate-wide sample ordinal exceeded u64")?
+                    % modulus;
+            }
+            Ok(())
+        }
     }
 
     fn selected_layout() -> AggregateWidePadLayout {

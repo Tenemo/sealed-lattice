@@ -150,6 +150,11 @@ pub(crate) use profile::{
 };
 #[cfg(test)]
 pub(crate) use prover::common_proof_checkpoint_cursor_manifest_requirement_for_variant;
+#[cfg(test)]
+pub(crate) use prover::{
+    AUTOMATIC_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
+    NOMINAL_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
+};
 pub(crate) use prover::{
     CheckpointableCommonProofPrivateCoinSource, CommonProofAuthenticatedSourceReadRequest,
     CommonProofBoundTreeLeafSaltRequest, CommonProofByteSink,
@@ -160,10 +165,10 @@ pub(crate) use prover::{
     CommonProofSourcePolynomial, CommonProofSourcePolynomialProvider,
     CommonProofSourcePolynomialProviderPoll, CommonProofSourcePolynomialReplayIdentity,
     CommonProofSourcePolynomialRequest, CommonProofSourcePolynomialRequestContext,
-    CommonProofSourceProviderMemoryAccounting, MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
-    PrivateRandomnessCommonProofCoinError, PrivateRandomnessCommonProofCoinSource,
-    ProvidedCommonProofSourcePolynomial, apply_trace_mask, canonical_proof_object_header_bytes,
-    construct_opening_batch_mask,
+    CommonProofSourceProviderMemoryAccounting, CommonProofSourceReplayIdentityCatalog,
+    MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, PrivateRandomnessCommonProofCoinError,
+    PrivateRandomnessCommonProofCoinSource, ProvidedCommonProofSourcePolynomial, apply_trace_mask,
+    canonical_proof_object_header_bytes, construct_opening_batch_mask,
 };
 #[cfg(test)]
 pub(crate) use prover::{

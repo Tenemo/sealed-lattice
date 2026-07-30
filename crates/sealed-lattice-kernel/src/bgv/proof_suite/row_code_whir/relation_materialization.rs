@@ -544,6 +544,17 @@ mod tests {
             destination.fill(0);
             Ok(())
         }
+
+        fn replay_modulo_samples(
+            &mut self,
+            _coordinate: CommonProofPrivateCoinCoordinate,
+            _modulus: u64,
+            _maximum_candidate_draws_per_output: u32,
+            destination: &mut [u64],
+        ) -> Result<(), Self::Error> {
+            destination.fill(0);
+            Ok(())
+        }
     }
 
     fn zero_base_polynomial() -> CommonProofSourcePolynomial {

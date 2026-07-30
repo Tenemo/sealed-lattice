@@ -30,9 +30,14 @@ use super::relation_plan::{
 use super::row_code_whir::RowCodeWhirConstructionPlan;
 use super::row_code_whir::{
     ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN, ROW_CODE_WHIR_AGGREGATE_NODE_DOMAIN,
+    ROW_CODE_WHIR_COMPACT_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW,
     ROW_CODE_WHIR_PHASE_COLUMN_LEAF_DOMAIN, ROW_CODE_WHIR_PHASE_COLUMN_NODE_DOMAIN,
     ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN, RowCodeWhirSelectedParameters,
     RowCodeWhirSoundnessAssumption,
+};
+#[cfg(test)]
+use super::selected_accounting::resource_accounting::{
+    SelectedProofVariantResourceAccounting, selected_proof_variant_resource_inventory,
 };
 
 use super::transcript::{
@@ -67,8 +72,9 @@ const ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_SCHEMA_IDENTIFIER: u16 = 0x2255;
 const ROW_CODE_WHIR_HASH_PROFILE_SCHEMA_IDENTIFIER: u16 = 0x2256;
 const SCHEMA_VERSION: u16 = 1;
 const PROOF_FAMILY_PROFILE_SCHEMA_VERSION: u16 = 2;
-const ROW_CODE_WHIR_CONSTRUCTION_PROFILE_SCHEMA_VERSION: u16 = 2;
-const PROOF_PROFILE_SET_VERSION: u16 = 5;
+const ROW_CODE_WHIR_CONSTRUCTION_PROFILE_SCHEMA_VERSION: u16 = 3;
+const ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_SCHEMA_VERSION: u16 = 2;
+const PROOF_PROFILE_SET_VERSION: u16 = 6;
 const SELECTED_ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_COUNT: usize = 31;
 const ROW_CODE_WHIR_HASH_ALGORITHM_IDENTIFIER: &str = "SHAKE256";
 const ROW_CODE_WHIR_DIGEST_BYTE_LENGTH: u16 = 64;
@@ -136,6 +142,202 @@ pub(crate) enum ProofProfileError {
     #[cfg(test)]
     DuplicateRootEdge,
     CountOverflow,
+}
+
+#[cfg(test)]
+mod construction_profile_decoder_tests {
+    use super::*;
+
+    fn hash_profile_tuple() -> CanonicalTuple {
+        CanonicalTuple::new(
+            ROW_CODE_WHIR_HASH_PROFILE_SCHEMA_IDENTIFIER,
+            SCHEMA_VERSION,
+            vec![
+                CanonicalItem::ascii(ROW_CODE_WHIR_HASH_ALGORITHM_IDENTIFIER)
+                    .expect("the selected hash identifier is ASCII"),
+                CanonicalItem::unsigned16(ROW_CODE_WHIR_DIGEST_BYTE_LENGTH),
+                CanonicalItem::fixed_bytes(ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN)
+                    .expect("the protocol domain encodes"),
+                CanonicalItem::fixed_bytes(ROW_CODE_WHIR_PHASE_COLUMN_LEAF_DOMAIN)
+                    .expect("the phase-leaf domain encodes"),
+                CanonicalItem::fixed_bytes(ROW_CODE_WHIR_PHASE_COLUMN_NODE_DOMAIN)
+                    .expect("the phase-node domain encodes"),
+                CanonicalItem::fixed_bytes(ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN)
+                    .expect("the aggregate-leaf domain encodes"),
+                CanonicalItem::fixed_bytes(ROW_CODE_WHIR_AGGREGATE_NODE_DOMAIN)
+                    .expect("the aggregate-node domain encodes"),
+                CanonicalItem::fixed_bytes(TRANSCRIPT_INITIAL_DOMAIN_BYTES)
+                    .expect("the transcript-initial domain encodes"),
+                CanonicalItem::fixed_bytes(TRANSCRIPT_ABSORB_DOMAIN_BYTES)
+                    .expect("the transcript-absorb domain encodes"),
+                CanonicalItem::fixed_bytes(TRANSCRIPT_CHALLENGE_HANDLE_DOMAIN_BYTES)
+                    .expect("the challenge-handle domain encodes"),
+                CanonicalItem::fixed_bytes(TRANSCRIPT_ACCEPTED_CHALLENGE_DOMAIN_BYTES)
+                    .expect("the accepted-challenge domain encodes"),
+                CanonicalItem::fixed_bytes(TRANSCRIPT_RESPONSE_BINDING_DOMAIN_BYTES)
+                    .expect("the response-binding domain encodes"),
+                CanonicalItem::fixed_bytes(TRANSCRIPT_RESPONSE_ROOT_DOMAIN_BYTES)
+                    .expect("the response-root domain encodes"),
+                CanonicalItem::fixed_bytes(TRANSCRIPT_CHALLENGE_EXPANSION_ACCUMULATOR_DOMAIN_BYTES)
+                    .expect("the challenge-expansion domain encodes"),
+            ],
+        )
+    }
+
+    fn construction_profile_tuple(row_width_override: Option<(u16, u64)>) -> CanonicalTuple {
+        let parameters = RowCodeWhirSelectedParameters::selected();
+        let mut items = vec![
+            CanonicalItem::unsigned64(
+                u64::try_from(parameters.logical_polynomial_coefficient_count)
+                    .expect("the coefficient count fits u64"),
+            ),
+            CanonicalItem::unsigned64(
+                u64::try_from(parameters.logical_polynomials_per_physical_row)
+                    .expect("the maximum row width fits u64"),
+            ),
+            CanonicalItem::unsigned64(
+                u64::try_from(parameters.physical_row_witness_variable_count)
+                    .expect("the witness-variable count fits u64"),
+            ),
+            CanonicalItem::unsigned64(
+                u64::try_from(parameters.row_code_log_inverse_rate)
+                    .expect("the row-code rate fits u64"),
+            ),
+            CanonicalItem::unsigned64(
+                u64::try_from(parameters.table_variable_count)
+                    .expect("the table-variable count fits u64"),
+            ),
+            CanonicalItem::unsigned64(
+                u64::try_from(parameters.polynomial_commitment_variable_count)
+                    .expect("the commitment-variable count fits u64"),
+            ),
+            CanonicalItem::unsigned64(
+                u64::try_from(parameters.starting_log_inverse_rate)
+                    .expect("the starting rate fits u64"),
+            ),
+            CanonicalItem::unsigned64(
+                u64::try_from(parameters.folding_factor).expect("the folding factor fits u64"),
+            ),
+            CanonicalItem::unsigned16(1),
+            CanonicalItem::unsigned64(
+                u64::try_from(parameters.security_level).expect("the security level fits u64"),
+            ),
+            CanonicalItem::unsigned64(
+                u64::try_from(parameters.proof_of_work_bits)
+                    .expect("the proof-of-work count fits u64"),
+            ),
+            CanonicalItem::unsigned64(
+                u64::try_from(parameters.outer_query_count)
+                    .expect("the outer query count fits u64"),
+            ),
+            CanonicalItem::unsigned64(
+                u64::try_from(parameters.direct_bound_query_count)
+                    .expect("the direct-bound query count fits u64"),
+            ),
+            CanonicalItem::unsigned64(
+                u64::try_from(parameters.prior_proof_bound_query_count)
+                    .expect("the prior-proof query count fits u64"),
+            ),
+            CanonicalItem::unsigned32(parameters.maximum_fiat_shamir_candidate_draws_per_output),
+            CanonicalItem::unsigned64(PROOF_EVALUATION_COSET_OFFSET),
+        ];
+        items.push(
+            CanonicalItem::nested_tuple(&hash_profile_tuple())
+                .expect("the selected hash profile nests"),
+        );
+        let references = expected_row_code_whir_construction_coordinates()
+            .into_iter()
+            .enumerate()
+            .map(
+                |(reference_index, (family, schedule_position, top_count))| {
+                    let schedule_position = schedule_position.map(CanonicalItem::unsigned32);
+                    let top_count = top_count.map(CanonicalItem::unsigned16);
+                    let expected_width =
+                        expected_row_code_whir_logical_polynomials_per_physical_row(family)
+                            .expect("the selected family has a row width");
+                    let row_width = row_width_override
+                        .filter(|(overridden_family, _)| *overridden_family == family)
+                        .map_or(expected_width, |(_, width)| width);
+                    CanonicalTuple::new(
+                        ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_SCHEMA_IDENTIFIER,
+                        ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_SCHEMA_VERSION,
+                        vec![
+                            CanonicalItem::unsigned16(family),
+                            CanonicalItem::optional(
+                                CanonicalItemType::Unsigned32,
+                                schedule_position.as_ref(),
+                            )
+                            .expect("the schedule position encodes"),
+                            CanonicalItem::optional(
+                                CanonicalItemType::Unsigned16,
+                                top_count.as_ref(),
+                            )
+                            .expect("the top count encodes"),
+                            CanonicalItem::unsigned64(row_width),
+                            CanonicalItem::unsigned64(
+                                u64::try_from(reference_index + 1)
+                                    .expect("the reference length fits u64"),
+                            ),
+                            CanonicalItem::hash512(
+                                [u8::try_from(reference_index + 1)
+                                    .expect("the reference ordinal fits u8");
+                                    64],
+                            ),
+                        ],
+                    )
+                },
+            )
+            .collect::<Vec<_>>();
+        let reference_items = references
+            .iter()
+            .map(|reference| {
+                CanonicalItem::nested_tuple(reference)
+                    .expect("the construction reference nests canonically")
+            })
+            .collect::<Vec<_>>();
+        items.push(
+            CanonicalItem::homogeneous_list(CanonicalItemType::NestedTuple, &reference_items)
+                .expect("the construction references encode"),
+        );
+        CanonicalTuple::new(
+            ROW_CODE_WHIR_CONSTRUCTION_PROFILE_SCHEMA_IDENTIFIER,
+            ROW_CODE_WHIR_CONSTRUCTION_PROFILE_SCHEMA_VERSION,
+            items,
+        )
+    }
+
+    #[test]
+    fn construction_profile_decoder_binds_family_specific_row_widths() {
+        let limits = CanonicalDecodeLimits::default();
+        verify_row_code_whir_construction_profile(&construction_profile_tuple(None), &limits)
+            .expect("the selected 64-way and eight-way row widths verify");
+
+        assert_eq!(
+            verify_row_code_whir_construction_profile(
+                &construction_profile_tuple(Some((
+                    ProofFamilies::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
+                    u64::try_from(
+                        RowCodeWhirSelectedParameters::selected()
+                            .logical_polynomials_per_physical_row,
+                    )
+                    .expect("the maximum row width fits u64"),
+                ))),
+                &limits,
+            ),
+            Err(ProofProfileError::InvalidSchedule),
+        );
+        assert_eq!(
+            verify_row_code_whir_construction_profile(
+                &construction_profile_tuple(Some((
+                    ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+                    u64::try_from(ROW_CODE_WHIR_COMPACT_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW)
+                        .expect("the compact row width fits u64"),
+                ))),
+                &limits,
+            ),
+            Err(ProofProfileError::InvalidSchedule),
+        );
+    }
 }
 
 impl From<RelationPlanError> for ProofProfileError {
@@ -923,8 +1125,8 @@ fn verify_row_code_whir_construction_references(
         require_profile_tuple(
             reference,
             ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_SCHEMA_IDENTIFIER,
-            SCHEMA_VERSION,
-            5,
+            ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_SCHEMA_VERSION,
+            6,
         )?;
         let observed = (
             profile_u16(&reference.items[0])?,
@@ -932,13 +1134,36 @@ fn verify_row_code_whir_construction_references(
             profile_optional_u16(&reference.items[2])?,
         );
         if observed != expected
-            || profile_u64(&reference.items[3])? == 0
-            || !identity_hashes.insert(profile_hash(&reference.items[4])?)
+            || profile_u64(&reference.items[3])?
+                != expected_row_code_whir_logical_polynomials_per_physical_row(observed.0)?
+            || profile_u64(&reference.items[4])? == 0
+            || !identity_hashes.insert(profile_hash(&reference.items[5])?)
         {
             return Err(ProofProfileError::InvalidSchedule);
         }
     }
     Ok(())
+}
+
+fn expected_row_code_whir_logical_polynomials_per_physical_row(
+    application_statement_schema_identifier: u16,
+) -> Result<u64, ProofProfileError> {
+    if !FIRST_PROFILE_APPLICATION_FAMILIES.contains(&application_statement_schema_identifier) {
+        return Err(ProofProfileError::UnsupportedFamily);
+    }
+    let logical_polynomials_per_physical_row = if matches!(
+        application_statement_schema_identifier,
+        ProofFamilies::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER
+            | ProofFamilies::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER
+            | ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+            | ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+    ) {
+        ROW_CODE_WHIR_COMPACT_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW
+    } else {
+        RowCodeWhirSelectedParameters::selected().logical_polynomials_per_physical_row
+    };
+    u64::try_from(logical_polynomials_per_physical_row)
+        .map_err(|_| ProofProfileError::CountOverflow)
 }
 
 fn expected_row_code_whir_construction_coordinates() -> Vec<(u16, Option<u32>, Option<u16>)> {
@@ -1517,45 +1742,30 @@ mod canonical_profile_artifact {
         application_statement_schema_identifier: u16,
         schedule_position: Option<u32>,
         top_count: Option<u16>,
+        logical_polynomials_per_physical_row: u64,
         canonical_identity_byte_length: u64,
         canonical_identity_hash: [u8; 64],
     }
 
     impl RowCodeWhirConstructionReference {
-        fn for_selected_variant(
-            artifact: &ValidatedRelationPlanArtifact,
-            variant: &RelationPlanVariant,
-        ) -> Result<(Self, RowCodeWhirSelectedParameters), ProofProfileError> {
-            let schedule_position = variant.schedule_position();
-            let top_count = variant.top_count();
-            let construction_plan = RowCodeWhirConstructionPlan::for_selected_variant(
-                artifact,
-                schedule_position,
-                top_count,
-            )
-            .map_err(|_| ProofProfileError::InvalidConstructionProfile)?;
-            let canonical_identity_bytes = construction_plan
-                .canonical_identity_bytes()
-                .map_err(|_| ProofProfileError::CanonicalEncoding)?;
-            let canonical_identity_byte_length = u64::try_from(canonical_identity_bytes.len())
-                .map_err(|_| ProofProfileError::CountOverflow)?;
+        fn from_resource_accounting(
+            accounting: &SelectedProofVariantResourceAccounting,
+        ) -> Result<Self, ProofProfileError> {
+            let construction = accounting.construction();
+            let canonical_identity_byte_length = construction.construction_identity_byte_length();
             if canonical_identity_byte_length == 0 {
                 return Err(ProofProfileError::CanonicalEncoding);
             }
-            let canonical_identity_hash = construction_plan
-                .canonical_identity_hash()
-                .map_err(|_| ProofProfileError::CanonicalEncoding)?;
-            Ok((
-                Self {
-                    application_statement_schema_identifier: artifact
-                        .application_statement_schema_identifier(),
-                    schedule_position,
-                    top_count,
-                    canonical_identity_byte_length,
-                    canonical_identity_hash,
-                },
-                construction_plan.selected_parameters(),
-            ))
+            Ok(Self {
+                application_statement_schema_identifier: accounting
+                    .application_statement_schema_identifier(),
+                schedule_position: accounting.schedule_position(),
+                top_count: accounting.top_count(),
+                logical_polynomials_per_physical_row: construction
+                    .logical_polynomials_per_physical_row(),
+                canonical_identity_byte_length,
+                canonical_identity_hash: construction.construction_identity_hash(),
+            })
         }
 
         fn coordinates(&self) -> (u16, Option<u32>, Option<u16>) {
@@ -1571,7 +1781,7 @@ mod canonical_profile_artifact {
             let top_count = self.top_count.map(CanonicalItem::unsigned16);
             Ok(CanonicalTuple::new(
                 ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_SCHEMA_IDENTIFIER,
-                SCHEMA_VERSION,
+                ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_SCHEMA_VERSION,
                 vec![
                     CanonicalItem::unsigned16(self.application_statement_schema_identifier),
                     CanonicalItem::optional(
@@ -1581,6 +1791,7 @@ mod canonical_profile_artifact {
                     .map_err(canonical_encoding_error)?,
                     CanonicalItem::optional(CanonicalItemType::Unsigned16, top_count.as_ref())
                         .map_err(canonical_encoding_error)?,
+                    CanonicalItem::unsigned64(self.logical_polynomials_per_physical_row),
                     CanonicalItem::unsigned64(self.canonical_identity_byte_length),
                     CanonicalItem::hash512(self.canonical_identity_hash),
                 ],
@@ -1590,7 +1801,7 @@ mod canonical_profile_artifact {
 
     #[derive(Clone, Debug, PartialEq, Eq)]
     struct RowCodeWhirConstructionProfile {
-        parameters: RowCodeWhirParameterProfile,
+        maximum_parameters: RowCodeWhirParameterProfile,
         hash_profile: RowCodeWhirHashProfile,
         ordered_references: Vec<RowCodeWhirConstructionReference>,
     }
@@ -1599,10 +1810,10 @@ mod canonical_profile_artifact {
         fn selected(
             relation_plans: &[ValidatedRelationPlanArtifact],
         ) -> Result<Self, ProofProfileError> {
-            let (parameters, ordered_references) =
+            let (maximum_parameters, ordered_references) =
                 derive_selected_row_code_whir_construction_catalog(relation_plans)?;
             let profile = Self {
-                parameters,
+                maximum_parameters,
                 hash_profile: RowCodeWhirHashProfile::selected(),
                 ordered_references,
             };
@@ -1615,7 +1826,7 @@ mod canonical_profile_artifact {
             relation_plans: &[ValidatedRelationPlanArtifact],
         ) -> Result<(), ProofProfileError> {
             validate_relation_plan_catalog(relation_plans)?;
-            self.parameters.validate()?;
+            self.maximum_parameters.validate()?;
             self.hash_profile.validate()?;
             if self.ordered_references.len() != SELECTED_ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_COUNT
             {
@@ -1649,6 +1860,13 @@ mod canonical_profile_artifact {
                     {
                         return Err(ProofProfileError::NonCanonicalOrder);
                     }
+                    if reference.logical_polynomials_per_physical_row
+                        != expected_row_code_whir_logical_polynomials_per_physical_row(
+                            artifact.application_statement_schema_identifier(),
+                        )?
+                    {
+                        return Err(ProofProfileError::InvalidConstructionProfile);
+                    }
                 }
             }
             if reference_index != self.ordered_references.len() {
@@ -1662,7 +1880,7 @@ mod canonical_profile_artifact {
             relation_plans: &[ValidatedRelationPlanArtifact],
         ) -> Result<CanonicalTuple, ProofProfileError> {
             self.validate(relation_plans)?;
-            let mut items = self.parameters.canonical_items();
+            let mut items = self.maximum_parameters.canonical_items();
             items.push(
                 CanonicalItem::nested_tuple(&self.hash_profile.canonical_tuple()?)
                     .map_err(canonical_encoding_error)?,
@@ -1691,27 +1909,17 @@ mod canonical_profile_artifact {
         ProofProfileError,
     > {
         validate_relation_plan_catalog(relation_plans)?;
-        let selected_parameters = RowCodeWhirSelectedParameters::selected();
-        let mut ordered_references = Vec::new();
-        for artifact in relation_plans {
-            for variant in artifact.compiled_plan().variants() {
-                let (reference, parameters) =
-                    RowCodeWhirConstructionReference::for_selected_variant(artifact, variant)?;
-                if RowCodeWhirParameterProfile::from_selected(parameters)?
-                    != RowCodeWhirParameterProfile::from_selected(selected_parameters)?
-                {
-                    return Err(ProofProfileError::InvalidConstructionProfile);
-                }
-                ordered_references.push(reference);
-            }
-        }
+        let maximum_parameters = RowCodeWhirParameterProfile::selected()?;
+        maximum_parameters.validate()?;
+        let ordered_references = selected_proof_variant_resource_inventory()
+            .map_err(|_| ProofProfileError::InvalidConstructionProfile)?
+            .iter()
+            .map(RowCodeWhirConstructionReference::from_resource_accounting)
+            .collect::<Result<Vec<_>, _>>()?;
         if ordered_references.len() != SELECTED_ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_COUNT {
             return Err(ProofProfileError::InvalidConstructionProfile);
         }
-        Ok((
-            RowCodeWhirParameterProfile::from_selected(selected_parameters)?,
-            ordered_references,
-        ))
+        Ok((maximum_parameters, ordered_references))
     }
 
     #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1776,12 +1984,12 @@ mod canonical_profile_artifact {
                 }
                 if self
                     .row_code_whir_construction_profile
-                    .parameters
+                    .maximum_parameters
                     .evaluation_coset_offset
                     != PROOF_EVALUATION_COSET_OFFSET
                     || self
                         .row_code_whir_construction_profile
-                        .parameters
+                        .maximum_parameters
                         .maximum_fiat_shamir_candidate_draws_per_output
                         != PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT
                 {
@@ -1918,36 +2126,36 @@ mod canonical_profile_artifact {
             self.proof_families.swap(0, 1);
 
             self.row_code_whir_construction_profile
-                .parameters
+                .maximum_parameters
                 .maximum_fiat_shamir_candidate_draws_per_output += 1;
             assert_eq!(
                 self.canonical_bytes(),
                 Err(ProofProfileError::InvalidSchedule)
             );
             self.row_code_whir_construction_profile
-                .parameters
+                .maximum_parameters
                 .maximum_fiat_shamir_candidate_draws_per_output -= 1;
 
             self.row_code_whir_construction_profile
-                .parameters
+                .maximum_parameters
                 .evaluation_coset_offset += 1;
             assert_eq!(
                 self.canonical_bytes(),
                 Err(ProofProfileError::InvalidSchedule)
             );
             self.row_code_whir_construction_profile
-                .parameters
+                .maximum_parameters
                 .evaluation_coset_offset -= 1;
 
             self.row_code_whir_construction_profile
-                .parameters
+                .maximum_parameters
                 .folding_factor += 1;
             assert_eq!(
                 self.canonical_bytes(),
                 Err(ProofProfileError::InvalidConstructionProfile)
             );
             self.row_code_whir_construction_profile
-                .parameters
+                .maximum_parameters
                 .folding_factor -= 1;
 
             self.row_code_whir_construction_profile
@@ -2005,6 +2213,19 @@ mod canonical_profile_artifact {
                 Err(ProofProfileError::NonCanonicalOrder)
             );
             self.row_code_whir_construction_profile.ordered_references[0].schedule_position = None;
+
+            let original_row_width = self.row_code_whir_construction_profile.ordered_references[0]
+                .logical_polynomials_per_physical_row;
+            self.row_code_whir_construction_profile.ordered_references[0]
+                .logical_polynomials_per_physical_row =
+                u64::try_from(ROW_CODE_WHIR_COMPACT_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW)
+                    .expect("the compact row width fits u64");
+            assert_eq!(
+                self.canonical_bytes(),
+                Err(ProofProfileError::InvalidConstructionProfile)
+            );
+            self.row_code_whir_construction_profile.ordered_references[0]
+                .logical_polynomials_per_physical_row = original_row_width;
 
             self.row_code_whir_construction_profile
                 .ordered_references

@@ -304,14 +304,6 @@ impl CommonProofReplayPolynomialPlan {
         self.object
     }
 
-    pub(crate) const fn object_byte_offset(self) -> u64 {
-        self.object_byte_offset
-    }
-
-    pub(crate) const fn seals_object(self) -> bool {
-        self.seals_object
-    }
-
     pub(crate) const fn value_type(self) -> RelationColumnValueType {
         self.value_type
     }
@@ -1259,7 +1251,13 @@ pub(crate) enum CommonProofGenerationInitializationError {
     StoragePlan(ProofExternalMemoryError),
 }
 
-/// Absolute WebAssembly-memory safety bound, distinct from phone qualification targets.
+/// WebAssembly planning targets and the absolute linear-memory safety bound.
+/// Values above the automatic target require an engineering review but remain
+/// valid when measured linear memory stays within the hard bound.
+#[cfg(test)]
+pub(crate) const NOMINAL_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH: u64 = 402_653_184;
+#[cfg(test)]
+pub(crate) const AUTOMATIC_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH: u64 = 603_979_776;
 pub(crate) const MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH: u64 = 671_088_640;
 
 const fn resident_value_byte_length(value_type: RelationColumnValueType) -> u64 {

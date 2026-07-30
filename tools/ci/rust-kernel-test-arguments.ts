@@ -40,7 +40,7 @@ export const cargoTestArgumentsForRustKernelHeavy = (
     // These proof and evaluator tests use Rayon internally. Serial libtest
     // scheduling prevents nested CPU and memory oversubscription while keeping
     // the implementation's own polynomial parallelism enabled.
+    '--nocapture',
     '--test-threads',
     '1',
-    '--show-output',
 ];

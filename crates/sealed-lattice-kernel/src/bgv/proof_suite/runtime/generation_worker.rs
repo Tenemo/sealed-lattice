@@ -202,6 +202,14 @@ trait ErasedCommonProofPrivateCoinSource {
         destination: &mut [u8],
     ) -> Result<(), CommonProofGenerationSourceError>;
 
+    fn replay_modulo_samples(
+        &mut self,
+        coordinate: CommonProofPrivateCoinCoordinate,
+        modulus: u64,
+        maximum_candidate_draws_per_output: u32,
+        destination: &mut [u64],
+    ) -> Result<(), CommonProofGenerationSourceError>;
+
     fn checkpoint_cursor_manifest(&self) -> Result<Vec<u8>, CommonProofGenerationSourceError>;
 }
 
@@ -230,6 +238,23 @@ where
     ) -> Result<(), CommonProofGenerationSourceError> {
         self.0
             .fill_raw_bytes(coordinate, destination)
+            .map_err(|_| CommonProofGenerationSourceError::PrivateCoinSource)
+    }
+
+    fn replay_modulo_samples(
+        &mut self,
+        coordinate: CommonProofPrivateCoinCoordinate,
+        modulus: u64,
+        maximum_candidate_draws_per_output: u32,
+        destination: &mut [u64],
+    ) -> Result<(), CommonProofGenerationSourceError> {
+        self.0
+            .replay_modulo_samples(
+                coordinate,
+                modulus,
+                maximum_candidate_draws_per_output,
+                destination,
+            )
             .map_err(|_| CommonProofGenerationSourceError::PrivateCoinSource)
     }
 
@@ -267,6 +292,21 @@ impl CommonProofPrivateCoinSource for CommonProofWorkerPrivateCoinSource {
         destination: &mut [u8],
     ) -> Result<(), Self::Error> {
         self.0.fill_raw_bytes(coordinate, destination)
+    }
+
+    fn replay_modulo_samples(
+        &mut self,
+        coordinate: CommonProofPrivateCoinCoordinate,
+        modulus: u64,
+        maximum_candidate_draws_per_output: u32,
+        destination: &mut [u64],
+    ) -> Result<(), Self::Error> {
+        self.0.replay_modulo_samples(
+            coordinate,
+            modulus,
+            maximum_candidate_draws_per_output,
+            destination,
+        )
     }
 }
 

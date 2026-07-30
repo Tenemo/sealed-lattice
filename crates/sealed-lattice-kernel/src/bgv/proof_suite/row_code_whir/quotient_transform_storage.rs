@@ -1,7 +1,7 @@
 //! Bounded transform planning for quotient materialization.
 //!
-//! Relation coefficients remain in the caller-owned replay objects. Each
-//! constraint transforms its required columns into constraint-local external
+//! Relation coefficients are reconstructed from authenticated sources and
+//! private coordinate replay. Each constraint transforms its required columns into constraint-local external
 //! vectors and releases them as soon as that constraint is accumulated. The
 //! transform itself runs in place in one domain-sized WASM buffer, then
 //! streams its result into external memory. Recomputing a column used by a
@@ -25,36 +25,25 @@ use crate::bgv::proof_suite::{
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::bgv::proof_suite) enum RowCodeWhirQuotientColumnSourcePlan {
-    Stored(CommonProofReplayPolynomialPlan),
-    Recomputed {
-        value_type: RelationColumnValueType,
-        coefficient_count: usize,
-    },
+pub(in crate::bgv::proof_suite) struct RowCodeWhirQuotientColumnSourcePlan {
+    value_type: RelationColumnValueType,
+    coefficient_count: usize,
 }
 
 impl RowCodeWhirQuotientColumnSourcePlan {
-    pub(super) const fn value_type(self) -> RelationColumnValueType {
-        match self {
-            Self::Stored(plan) => plan.value_type(),
-            Self::Recomputed { value_type, .. } => value_type,
+    pub(super) const fn new(value_type: RelationColumnValueType, coefficient_count: usize) -> Self {
+        Self {
+            value_type,
+            coefficient_count,
         }
+    }
+
+    pub(super) const fn value_type(self) -> RelationColumnValueType {
+        self.value_type
     }
 
     pub(super) const fn coefficient_count(self) -> usize {
-        match self {
-            Self::Stored(plan) => plan.coefficient_count(),
-            Self::Recomputed {
-                coefficient_count, ..
-            } => coefficient_count,
-        }
-    }
-
-    pub(super) const fn stored_plan(self) -> Option<CommonProofReplayPolynomialPlan> {
-        match self {
-            Self::Stored(plan) => Some(plan),
-            Self::Recomputed { .. } => None,
-        }
+        self.coefficient_count
     }
 }
 
@@ -150,7 +139,6 @@ pub(in crate::bgv::proof_suite) fn plan_row_code_whir_quotient_transform_storage
         variant,
         evaluation_domain.size(),
         relation_replay_polynomial_plans,
-        first_free_object_ordinal,
     )?;
     let constraint_catalog = common_proof_quotient_constraint_catalog(variant)?;
     for column_ordinal in constraint_catalog.column_usages().keys() {
@@ -246,11 +234,6 @@ pub(in crate::bgv::proof_suite) fn plan_row_code_whir_quotient_transform_storage
                 final_output_last_use_step,
             );
             let maximum_chunk_byte_length = u64::from(maximum_chunk_byte_length);
-            let source_read_byte_length = source_plan
-                .stored_plan()
-                .map_or(0, CommonProofReplayPolynomialPlan::exact_byte_length);
-            let source_read_transaction_count =
-                source_read_byte_length.div_ceil(maximum_chunk_byte_length);
             let output_append_transaction_count = output_plan
                 .exact_byte_length()
                 .div_ceil(maximum_chunk_byte_length);
@@ -262,10 +245,9 @@ pub(in crate::bgv::proof_suite) fn plan_row_code_whir_quotient_transform_storage
                 object_plans: [object_plan],
                 next_executor_step: expected_next_transform_step,
                 total_written_byte_length: output_plan.exact_byte_length(),
-                total_read_byte_length: source_read_byte_length,
-                transaction_count_excluding_deletions: source_read_transaction_count
-                    .checked_add(output_append_transaction_count)
-                    .and_then(|count| count.checked_add(2))
+                total_read_byte_length: 0,
+                transaction_count_excluding_deletions: output_append_transaction_count
+                    .checked_add(2)
                     .ok_or(CommonProofProverError::CountOverflow)?,
             };
             object_plans
@@ -381,10 +363,7 @@ fn validate_relation_replay_polynomial_plans(
     variant: &RelationPlanVariant,
     evaluation_domain_size: usize,
     relation_replay_polynomial_plans: &BTreeMap<u32, RowCodeWhirQuotientColumnSourcePlan>,
-    first_free_object_ordinal: u32,
 ) -> Result<(), CommonProofProverError> {
-    let mut source_object_segments =
-        BTreeMap::<ProofExternalMemoryObject, Vec<(u64, u64, bool)>>::new();
     for (column_ordinal, source_plan) in relation_replay_polynomial_plans {
         let descriptor = variant
             .ordered_columns()
@@ -402,37 +381,6 @@ fn validate_relation_replay_polynomial_plans(
             || source_plan.coefficient_count() > evaluation_domain_size
         {
             return Err(CommonProofProverError::InvalidColumn);
-        }
-        let Some(plan) = source_plan.stored_plan() else {
-            continue;
-        };
-        if plan.object().ordinal() >= first_free_object_ordinal {
-            return Err(CommonProofProverError::InvalidColumn);
-        }
-        let segment_end = plan
-            .object_byte_offset()
-            .checked_add(plan.exact_byte_length())
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        source_object_segments
-            .entry(plan.object())
-            .or_default()
-            .push((plan.object_byte_offset(), segment_end, plan.seals_object()));
-    }
-    for segments in source_object_segments.values_mut() {
-        segments.sort_unstable_by_key(|(start, _, _)| *start);
-        let mut expected_start = 0_u64;
-        let last_index = segments
-            .len()
-            .checked_sub(1)
-            .ok_or(CommonProofProverError::InvalidColumn)?;
-        for (segment_index, (start, end, seals_object)) in segments.iter().copied().enumerate() {
-            if start != expected_start
-                || end <= start
-                || seals_object != (segment_index == last_index)
-            {
-                return Err(CommonProofProverError::InvalidColumn);
-            }
-            expected_start = end;
         }
     }
     Ok(())
@@ -638,7 +586,7 @@ mod tests {
     }
 
     #[test]
-    fn quotient_transform_accepts_exact_replay_lengths_below_descriptor_ceilings() {
+    fn quotient_transform_accepts_exact_recomputed_lengths_below_descriptor_ceilings() {
         let relation_context = compact_public_aggregate_context();
         let compiled_plan = compile_collective_public_key_aggregate_relation_plan(
             &compact_public_aggregate_input(),
@@ -661,34 +609,22 @@ mod tests {
                     usize::try_from(descriptor.source_degree_bound_exclusive())
                         .expect("the compact descriptor ceiling fits usize");
                 let exact_coefficient_count = (descriptor_ceiling / 2).max(1);
-                let replay_plan = CommonProofReplayPolynomialPlan::new(
-                    ProofExternalMemoryObject::new(column_ordinal),
+                let source_plan = RowCodeWhirQuotientColumnSourcePlan::new(
                     descriptor.value_type(),
                     exact_coefficient_count,
-                )
-                .expect("the exact replay plan is valid");
-                (
-                    column_ordinal,
-                    RowCodeWhirQuotientColumnSourcePlan::Stored(replay_plan),
-                )
+                );
+                (column_ordinal, source_plan)
             })
             .collect::<BTreeMap<_, _>>();
-        let first_free_object_ordinal =
-            u32::try_from(replay_plans.len()).expect("the compact object count fits u32");
 
-        validate_relation_replay_polynomial_plans(
-            variant,
-            evaluation_domain.size(),
-            &replay_plans,
-            first_free_object_ordinal,
-        )
-        .expect("exact replay lengths below descriptor ceilings remain valid");
+        validate_relation_replay_polynomial_plans(variant, evaluation_domain.size(), &replay_plans)
+            .expect("exact recomputed lengths below descriptor ceilings remain valid");
         plan_row_code_whir_quotient_transform_storage(
             variant,
             &relation_context,
             evaluation_domain,
             &replay_plans,
-            first_free_object_ordinal,
+            0,
             11,
             1_024,
             ProofExternalMemoryProtection::PublicIntegrity,
@@ -718,20 +654,14 @@ mod tests {
                     u32::try_from(column_index).expect("the compact column ordinal fits u32");
                 let coefficient_count = usize::try_from(descriptor.source_degree_bound_exclusive())
                     .expect("the compact coefficient count fits usize");
-                let plan = CommonProofReplayPolynomialPlan::new(
-                    ProofExternalMemoryObject::new(column_ordinal),
+                let plan = RowCodeWhirQuotientColumnSourcePlan::new(
                     descriptor.value_type(),
                     coefficient_count,
-                )
-                .expect("the compact replay polynomial plan is valid");
-                (
-                    column_ordinal,
-                    RowCodeWhirQuotientColumnSourcePlan::Stored(plan),
-                )
+                );
+                (column_ordinal, plan)
             })
             .collect::<BTreeMap<_, _>>();
-        let first_free_object_ordinal = u32::try_from(relation_replay_polynomial_plans.len())
-            .expect("the compact object count fits u32");
+        let first_free_object_ordinal = 0;
         let first_executor_step = 11;
         let plan = plan_row_code_whir_quotient_transform_storage(
             variant,

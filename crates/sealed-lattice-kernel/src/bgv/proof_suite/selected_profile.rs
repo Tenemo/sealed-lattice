@@ -72,6 +72,8 @@ use super::ProofProfileSet;
 use super::profile::FirstProfileRootTopology;
 #[cfg(test)]
 use super::row_code_whir::RowCodeWhirSelectedParameters;
+#[cfg(test)]
+use super::selected_accounting::resource_accounting::selected_proof_variant_resource_inventory;
 
 #[cfg(test)]
 use crate::bgv::evaluator::program::selected_evaluator_program_set;
@@ -591,6 +593,8 @@ pub(crate) fn selected_ballot_validity_relation_compilation()
 pub(crate) fn selected_proof_profile_set(
     maximum_ballot_attempts_per_participant: u16,
 ) -> Result<ProofProfileSet, ProofProfileError> {
+    selected_proof_variant_resource_inventory()
+        .map_err(|_| ProofProfileError::InvalidConstructionProfile)?;
     let relation_plans = selected_relation_plans()?;
     ProofProfileSet::new(
         relation_plans,

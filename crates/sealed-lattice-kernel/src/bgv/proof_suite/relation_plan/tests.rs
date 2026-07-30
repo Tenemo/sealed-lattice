@@ -1840,17 +1840,30 @@ impl crate::bgv::proof_suite::CommonProofPrivateCoinSource for CoordinatePrivate
         );
         Ok(())
     }
+
+    fn replay_modulo_samples(
+        &mut self,
+        coordinate: crate::bgv::proof_suite::CommonProofPrivateCoinCoordinate,
+        modulus: u64,
+        _maximum_candidate_draws_per_output: u32,
+        destination: &mut [u64],
+    ) -> Result<(), Self::Error> {
+        destination.fill(
+            (u64::from(coordinate.purpose_class()) + u64::from(coordinate.ordinal()) + 1) % modulus,
+        );
+        Ok(())
+    }
 }
 
 #[test]
-fn encrypted_mask_tail_reconstruction_matches_every_auxiliary_program() {
+fn private_coordinate_replay_reconstructs_every_auxiliary_program() {
     use crate::bgv::proof_suite::{
         CommonProofChallenge, CommonProofSourcePolynomial, ProofBaseFieldElement,
         RelationApplicationChallengeAssignment,
         prover::{
             CommonProofAuxiliaryColumnReconstructionCatalog,
             CommonProofAuxiliaryColumnReconstructionCursor,
-            CommonProofAuxiliaryColumnSynthesisCursor, extract_auxiliary_private_mask_tail,
+            CommonProofAuxiliaryColumnSynthesisCursor, replay_relation_private_mask_polynomial,
         },
     };
 
@@ -1888,16 +1901,19 @@ fn encrypted_mask_tail_reconstruction_matches_every_auxiliary_program() {
                 .take_next_output(&variant, &mut private_coins, 128)
                 .expect("the compact masked output derives")
                 .expect("one compact masked output is pending");
-            let private_mask_tail =
-                extract_auxiliary_private_mask_tail(&variant, column_ordinal, &expected_polynomial)
-                    .expect("the exact private mask tail is extracted");
-            let CommonProofSourcePolynomial::Base(private_mask_tail_coefficients) =
-                &private_mask_tail
-            else {
-                panic!("the compact auxiliary tail must use the base field");
+            let private_mask = replay_relation_private_mask_polynomial(
+                &variant,
+                column_ordinal,
+                &mut private_coins,
+                128,
+            )
+            .expect("the exact private coordinate replays")
+            .expect("the masked auxiliary column has private mask material");
+            let CommonProofSourcePolynomial::Base(private_mask_coefficients) = &private_mask else {
+                panic!("the compact auxiliary mask must use the base field");
             };
             assert!(
-                private_mask_tail_coefficients
+                private_mask_coefficients
                     .iter()
                     .any(|coefficient| *coefficient != ProofBaseFieldElement::ZERO),
                 "the parity fixture must exercise nonzero private masking",
@@ -1930,13 +1946,11 @@ fn encrypted_mask_tail_reconstruction_matches_every_auxiliary_program() {
                     )
                     .expect("the exact reconstruction dependency is accepted");
             }
-            let CommonProofSourcePolynomial::Base(private_mask_tail_coefficients) =
-                private_mask_tail
-            else {
-                panic!("the compact auxiliary tail must use the base field");
+            let CommonProofSourcePolynomial::Base(private_mask_coefficients) = private_mask else {
+                panic!("the compact auxiliary mask must use the base field");
             };
             let reconstructed_polynomial = reconstruction
-                .finish(private_mask_tail_coefficients)
+                .finish(private_mask_coefficients)
                 .expect("the exact masked auxiliary polynomial reconstructs");
             assert_eq!(reconstructed_polynomial, expected_polynomial);
 
@@ -1958,18 +1972,23 @@ fn encrypted_mask_tail_reconstruction_matches_every_auxiliary_program() {
                     )
                     .expect("the tampered reconstruction dependency is accepted");
             }
-            let CommonProofSourcePolynomial::Base(mut tampered_private_mask_tail) =
-                extract_auxiliary_private_mask_tail(&variant, column_ordinal, &expected_polynomial)
-                    .expect("the tampered private mask tail is extracted")
+            let CommonProofSourcePolynomial::Base(mut tampered_private_mask) =
+                replay_relation_private_mask_polynomial(
+                    &variant,
+                    column_ordinal,
+                    &mut private_coins,
+                    128,
+                )
+                .expect("the exact private coordinate replays for the mutation")
+                .expect("the masked auxiliary column has private mask material")
             else {
-                panic!("the compact auxiliary tail must use the base field");
+                panic!("the compact auxiliary mask must use the base field");
             };
-            tampered_private_mask_tail[0] =
-                tampered_private_mask_tail[0].add(ProofBaseFieldElement::ONE);
+            tampered_private_mask[0] = tampered_private_mask[0].add(ProofBaseFieldElement::ONE);
             assert_ne!(
                 tampered_reconstruction
-                    .finish(tampered_private_mask_tail)
-                    .expect("the structurally valid tampered tail reconstructs"),
+                    .finish(tampered_private_mask)
+                    .expect("the structurally valid tampered mask reconstructs"),
                 expected_polynomial,
                 "changing private mask material must change the committed polynomial",
             );

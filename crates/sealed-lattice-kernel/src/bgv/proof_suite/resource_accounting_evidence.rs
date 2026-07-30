@@ -28,18 +28,26 @@ use crate::{
 };
 
 use super::{
-    FIRST_PROFILE_APPLICATION_FAMILIES, MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
-    MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
-    MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
+    AUTOMATIC_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, FIRST_PROFILE_APPLICATION_FAMILIES,
+    MAXIMUM_COMMON_PROOF_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
+    MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+    MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, NOMINAL_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
     external_memory::{
+        AUTOMATIC_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
         MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_COUNT,
         MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
+        NOMINAL_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
     },
+    field::PROOF_CHALLENGE_EXTENSION_DEGREE,
     phase_liveness_accounting::{
         SelectedCompleteActionPhaseLivenessAccounting,
         derive_selected_complete_action_phase_liveness_accounting,
     },
-    row_code_whir::NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH,
+    row_code_whir::{
+        AUTOMATIC_ROW_CODE_WHIR_PROOF_ACCEPTANCE_BYTE_LENGTH,
+        NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH,
+        ROW_CODE_WHIR_COMPACT_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW, RowCodeWhirSelectedParameters,
+    },
     selected_accounting::resource_accounting::{
         SelectedCompleteActionMaterialResourceAccounting,
         derive_selected_complete_action_material_resource_accounting,
@@ -49,8 +57,8 @@ use super::{
 };
 
 const RECORD_KIND: &str = "pair-character-candidate-static-resource-accounting";
-const RECORD_VERSION: u16 = 4;
-const RECORD_HASH_DOMAIN: &str = "sealed-lattice/pair-character-static-resource-accounting/v4";
+const RECORD_VERSION: u16 = 6;
+const RECORD_HASH_DOMAIN: &str = "sealed-lattice/pair-character-static-resource-accounting/v6";
 const SOURCE_HASH_DOMAIN: &str =
     "sealed-lattice/pair-character-static-resource-accounting/source/v1";
 const BUILD_HASH_DOMAIN: &str = "sealed-lattice/pair-character-static-resource-accounting/build/v1";
@@ -58,7 +66,6 @@ const CANDIDATE_INPUT_HASH_DOMAIN: &str =
     "sealed-lattice/pair-character-static-resource-accounting/input/v2";
 const ATTACHMENT_FILE_NAME: &str = "pair-character-candidate-static-resource-accounting.json";
 const MAXIMUM_EXACT_JSON_INTEGER: u64 = 9_007_199_254_740_991;
-const PROOF_SIZE_TARGET_BYTE_LENGTH: u64 = 5 * 1_024 * 1_024;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -120,12 +127,17 @@ struct CandidateInputIdentity {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct StaticResourceCaps {
-    proof_size_target_byte_length: u64,
+    nominal_proof_byte_length: u64,
+    automatic_proof_acceptance_byte_length: u64,
     common_authenticated_stream_hard_limit_byte_length: u64,
     maximum_proof_output_chunk_byte_length: u64,
     maximum_external_memory_transaction_chunk_byte_length: u64,
     maximum_external_memory_object_count: u64,
+    nominal_external_memory_stored_byte_length: u64,
+    automatic_external_memory_stored_byte_length: u64,
     maximum_external_memory_stored_byte_length: u64,
+    nominal_proof_wasm_resident_byte_length: u64,
+    automatic_proof_wasm_resident_byte_length: u64,
     maximum_proof_wasm_resident_byte_length: u64,
     maximum_local_record_seal_invocations_per_active_root: u64,
     maximum_local_record_sealed_plaintext_bytes_per_active_root: u64,
@@ -154,7 +166,11 @@ struct ProofVariantAccounting {
     canonical_header_byte_length: u64,
     canonical_family_body_byte_length: u64,
     canonical_proof_byte_length: u64,
-    proof_size_target_margin_byte_length: u64,
+    nominal_proof_overage_byte_length: u64,
+    nominal_proof_headroom_byte_length: u64,
+    automatic_acceptance_overage_byte_length: u64,
+    automatic_acceptance_headroom_byte_length: u64,
+    absolute_bound_headroom_byte_length: u64,
     maximum_verifier_resident_byte_length: u64,
     generation_wasm_resident_hard_bound_byte_length: u64,
     external_memory: ExternalMemoryAccounting,
@@ -170,6 +186,11 @@ struct ExternalMemoryAccounting {
     distinct_physical_object_count: u32,
     object_lifecycle_count: u32,
     peak_stored_byte_length: u64,
+    nominal_stored_overage_byte_length: u64,
+    nominal_stored_headroom_byte_length: u64,
+    automatic_stored_overage_byte_length: u64,
+    automatic_stored_headroom_byte_length: u64,
+    absolute_stored_headroom_byte_length: u64,
     total_written_byte_length: u64,
     total_read_byte_length: u64,
     transaction_count: u64,
@@ -180,13 +201,16 @@ struct ExternalMemoryAccounting {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ConstructionAccounting {
+    construction_identity_byte_length: u64,
     construction_identity_hash_hex: String,
+    logical_polynomials_per_physical_row: u64,
     outer_query_count: u32,
     direct_bound_query_count: u32,
     prior_proof_bound_query_count: u32,
     aggregate_logical_column_count: u32,
     aggregate_table_width: u32,
     opening_batch_count: u32,
+    scalar_opening_count: u32,
     transcript_operation_count: u32,
     ordered_proof_sections: Vec<ProofSectionAccounting>,
     ordered_checkpoints: Vec<CheckpointAccounting>,
@@ -378,7 +402,12 @@ fn selected_target_share_proof_byte_length_ceiling() -> Result<u64, String> {
 
 fn derive_caps() -> Result<StaticResourceCaps, String> {
     Ok(StaticResourceCaps {
-        proof_size_target_byte_length: PROOF_SIZE_TARGET_BYTE_LENGTH,
+        nominal_proof_byte_length: u64::try_from(NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH)
+            .map_err(|_| "nominal proof length exceeds u64".to_owned())?,
+        automatic_proof_acceptance_byte_length: u64::try_from(
+            AUTOMATIC_ROW_CODE_WHIR_PROOF_ACCEPTANCE_BYTE_LENGTH,
+        )
+        .map_err(|_| "automatic proof acceptance length exceeds u64".to_owned())?,
         common_authenticated_stream_hard_limit_byte_length: u64::try_from(
             MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
         )
@@ -394,8 +423,14 @@ fn derive_caps() -> Result<StaticResourceCaps, String> {
             MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_COUNT,
         )
         .map_err(|_| "external-memory object count exceeds u64".to_owned())?,
+        nominal_external_memory_stored_byte_length:
+            NOMINAL_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
+        automatic_external_memory_stored_byte_length:
+            AUTOMATIC_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
         maximum_external_memory_stored_byte_length:
             MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
+        nominal_proof_wasm_resident_byte_length: NOMINAL_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
+        automatic_proof_wasm_resident_byte_length: AUTOMATIC_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
         maximum_proof_wasm_resident_byte_length: MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
         maximum_local_record_seal_invocations_per_active_root:
             MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT,
@@ -431,8 +466,13 @@ fn derive_proof_variants() -> Result<Vec<ProofVariantAccounting>, String> {
                 canonical_header_byte_length: variant.canonical_header_byte_length(),
                 canonical_family_body_byte_length: variant.canonical_family_body_byte_length(),
                 canonical_proof_byte_length: variant.canonical_proof_byte_length(),
-                proof_size_target_margin_byte_length: variant
-                    .proof_size_target_margin_byte_length(),
+                nominal_proof_overage_byte_length: variant.nominal_proof_overage_byte_length(),
+                nominal_proof_headroom_byte_length: variant.nominal_proof_headroom_byte_length(),
+                automatic_acceptance_overage_byte_length: variant
+                    .automatic_acceptance_overage_byte_length(),
+                automatic_acceptance_headroom_byte_length: variant
+                    .automatic_acceptance_headroom_byte_length(),
+                absolute_bound_headroom_byte_length: variant.absolute_bound_headroom_byte_length(),
                 maximum_verifier_resident_byte_length: variant
                     .maximum_verifier_resident_byte_length(),
                 generation_wasm_resident_hard_bound_byte_length: variant
@@ -445,6 +485,21 @@ fn derive_proof_variants() -> Result<Vec<ProofVariantAccounting>, String> {
                     distinct_physical_object_count: external.distinct_physical_object_count(),
                     object_lifecycle_count: external.object_lifecycle_count(),
                     peak_stored_byte_length: external.peak_stored_byte_length(),
+                    nominal_stored_overage_byte_length: external
+                        .peak_stored_byte_length()
+                        .saturating_sub(NOMINAL_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH),
+                    nominal_stored_headroom_byte_length:
+                        NOMINAL_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH
+                            .saturating_sub(external.peak_stored_byte_length()),
+                    automatic_stored_overage_byte_length: external
+                        .peak_stored_byte_length()
+                        .saturating_sub(AUTOMATIC_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH),
+                    automatic_stored_headroom_byte_length:
+                        AUTOMATIC_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH
+                            .saturating_sub(external.peak_stored_byte_length()),
+                    absolute_stored_headroom_byte_length:
+                        MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH
+                            .saturating_sub(external.peak_stored_byte_length()),
                     total_written_byte_length: external.total_written_byte_length(),
                     total_read_byte_length: external.total_read_byte_length(),
                     transaction_count: external.transaction_count(),
@@ -454,15 +509,20 @@ fn derive_proof_variants() -> Result<Vec<ProofVariantAccounting>, String> {
                         .local_record_sealed_plaintext_byte_length(),
                 },
                 construction: ConstructionAccounting {
+                    construction_identity_byte_length: construction
+                        .construction_identity_byte_length(),
                     construction_identity_hash_hex: to_hex(
                         &construction.construction_identity_hash(),
                     ),
+                    logical_polynomials_per_physical_row: construction
+                        .logical_polynomials_per_physical_row(),
                     outer_query_count: construction.outer_query_count(),
                     direct_bound_query_count: construction.direct_bound_query_count(),
                     prior_proof_bound_query_count: construction.prior_proof_bound_query_count(),
                     aggregate_logical_column_count: construction.aggregate_logical_column_count(),
                     aggregate_table_width: construction.aggregate_table_width(),
                     opening_batch_count: construction.opening_batch_count(),
+                    scalar_opening_count: construction.scalar_opening_count(),
                     transcript_operation_count: construction.transcript_operation_count(),
                     ordered_proof_sections: construction
                         .ordered_proof_sections()
@@ -611,7 +671,39 @@ fn material_accounting(
 }
 
 fn verify_record(record: &StaticResourceAccountingRecord) -> Result<(), String> {
-    if record.candidate_input.participant_count != 10
+    let nominal_proof_byte_length = u64::try_from(NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH)
+        .map_err(|_| "nominal proof length exceeds u64".to_owned())?;
+    let automatic_proof_acceptance_byte_length =
+        u64::try_from(AUTOMATIC_ROW_CODE_WHIR_PROOF_ACCEPTANCE_BYTE_LENGTH)
+            .map_err(|_| "automatic proof acceptance length exceeds u64".to_owned())?;
+    if record.caps.nominal_proof_byte_length != nominal_proof_byte_length
+        || record.caps.automatic_proof_acceptance_byte_length
+            != automatic_proof_acceptance_byte_length
+        || record.caps.automatic_proof_acceptance_byte_length
+            > record
+                .caps
+                .common_authenticated_stream_hard_limit_byte_length
+        || record.caps.nominal_external_memory_stored_byte_length
+            != NOMINAL_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH
+        || record.caps.automatic_external_memory_stored_byte_length
+            != AUTOMATIC_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH
+        || record.caps.maximum_external_memory_stored_byte_length
+            != MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH
+        || record.caps.nominal_external_memory_stored_byte_length
+            > record.caps.automatic_external_memory_stored_byte_length
+        || record.caps.automatic_external_memory_stored_byte_length
+            > record.caps.maximum_external_memory_stored_byte_length
+        || record.caps.nominal_proof_wasm_resident_byte_length
+            != NOMINAL_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
+        || record.caps.automatic_proof_wasm_resident_byte_length
+            != AUTOMATIC_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
+        || record.caps.maximum_proof_wasm_resident_byte_length
+            != MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
+        || record.caps.nominal_proof_wasm_resident_byte_length
+            > record.caps.automatic_proof_wasm_resident_byte_length
+        || record.caps.automatic_proof_wasm_resident_byte_length
+            > record.caps.maximum_proof_wasm_resident_byte_length
+        || record.candidate_input.participant_count != 10
         || record.ordered_proof_variants.len() != 31
         || record.complete_action.ordered_proof_families.len()
             != FIRST_PROFILE_APPLICATION_FAMILIES.len()
@@ -645,6 +737,28 @@ fn verify_record(record: &StaticResourceAccountingRecord) -> Result<(), String> 
     let mut logical_count = 0_u64;
     let mut proof_byte_ceiling = 0_u64;
     for variant in &record.ordered_proof_variants {
+        let expected_logical_polynomials_per_physical_row = if matches!(
+            variant.application_statement_schema_identifier,
+            ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofApplicationSlotCeilings::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofApplicationSlotCeilings::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+        ) {
+            u64::try_from(ROW_CODE_WHIR_COMPACT_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW)
+                .map_err(|_| "compact row width exceeds u64".to_owned())?
+        } else {
+            u64::try_from(
+                RowCodeWhirSelectedParameters::selected()
+                    .logical_polynomials_per_physical_row,
+            )
+            .map_err(|_| "maximum row width exceeds u64".to_owned())?
+        };
+        let opening_evaluation_byte_length = variant
+            .construction
+            .aggregate_opening_sections
+            .iter()
+            .find(|section| section.section_name == "opening-evaluations")
+            .map(|section| section.byte_length);
         if !selectors.insert((
             variant.application_statement_schema_identifier,
             variant.selector.schedule_position,
@@ -655,15 +769,50 @@ fn verify_record(record: &StaticResourceAccountingRecord) -> Result<(), String> 
                 .canonical_header_byte_length
                 .checked_add(variant.canonical_family_body_byte_length)
                 != Some(variant.canonical_proof_byte_length)
-            || variant.canonical_proof_byte_length >= record.caps.proof_size_target_byte_length
-            || variant
-                .canonical_proof_byte_length
-                .checked_add(variant.proof_size_target_margin_byte_length)
-                != Some(record.caps.proof_size_target_byte_length)
+            || variant.canonical_proof_byte_length == 0
+            || variant.canonical_proof_byte_length
+                > record
+                    .caps
+                    .common_authenticated_stream_hard_limit_byte_length
+            || variant.nominal_proof_headroom_byte_length
+                != record
+                    .caps
+                    .nominal_proof_byte_length
+                    .saturating_sub(variant.canonical_proof_byte_length)
+            || variant.nominal_proof_overage_byte_length
+                != variant
+                    .canonical_proof_byte_length
+                    .saturating_sub(record.caps.nominal_proof_byte_length)
+            || variant.automatic_acceptance_overage_byte_length
+                != variant
+                    .canonical_proof_byte_length
+                    .saturating_sub(record.caps.automatic_proof_acceptance_byte_length)
+            || variant.automatic_acceptance_headroom_byte_length
+                != record
+                    .caps
+                    .automatic_proof_acceptance_byte_length
+                    .saturating_sub(variant.canonical_proof_byte_length)
+            || variant.absolute_bound_headroom_byte_length
+                != record
+                    .caps
+                    .common_authenticated_stream_hard_limit_byte_length
+                    .saturating_sub(variant.canonical_proof_byte_length)
             || variant.maximum_verifier_resident_byte_length
                 > record.caps.maximum_proof_wasm_resident_byte_length
+            || variant.construction.construction_identity_byte_length == 0
+            || variant.construction.logical_polynomials_per_physical_row
+                != expected_logical_polynomials_per_physical_row
             || variant.construction.aggregate_logical_column_count
                 > variant.construction.aggregate_table_width
+            || variant.construction.scalar_opening_count == 0
+            || opening_evaluation_byte_length
+                != Some(
+                    u64::from(variant.construction.scalar_opening_count)
+                        * u64::try_from(
+                            PROOF_CHALLENGE_EXTENSION_DEGREE * core::mem::size_of::<u64>(),
+                        )
+                        .map_err(|_| "challenge-field wire width exceeds u64".to_owned())?,
+                )
             || variant.construction.compact_frontiers.is_empty()
             || variant.construction.aggregate_opening_sections.is_empty()
         {
@@ -691,6 +840,29 @@ fn verify_record(record: &StaticResourceAccountingRecord) -> Result<(), String> 
                 .is_none_or(|count| count > MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_COUNT)
             || external.peak_stored_byte_length
                 > MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH
+            || external.nominal_stored_overage_byte_length
+                != external
+                    .peak_stored_byte_length
+                    .saturating_sub(record.caps.nominal_external_memory_stored_byte_length)
+            || external.nominal_stored_headroom_byte_length
+                != record
+                    .caps
+                    .nominal_external_memory_stored_byte_length
+                    .saturating_sub(external.peak_stored_byte_length)
+            || external.automatic_stored_overage_byte_length
+                != external
+                    .peak_stored_byte_length
+                    .saturating_sub(record.caps.automatic_external_memory_stored_byte_length)
+            || external.automatic_stored_headroom_byte_length
+                != record
+                    .caps
+                    .automatic_external_memory_stored_byte_length
+                    .saturating_sub(external.peak_stored_byte_length)
+            || external.absolute_stored_headroom_byte_length
+                != record
+                    .caps
+                    .maximum_external_memory_stored_byte_length
+                    .saturating_sub(external.peak_stored_byte_length)
             || external.local_record_seal_invocation_count
                 > MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT
             || external.local_record_sealed_plaintext_byte_length
@@ -972,10 +1144,62 @@ mod tests {
         let record = derive_static_resource_accounting_record()
             .expect("selected static resource accounting derives");
         let mut oversized = record.clone();
-        oversized.ordered_proof_variants[0].canonical_proof_byte_length =
-            PROOF_SIZE_TARGET_BYTE_LENGTH;
+        let oversized_proof_byte_length = oversized
+            .caps
+            .common_authenticated_stream_hard_limit_byte_length
+            .checked_add(1)
+            .expect("the oversized proof length fits u64");
+        let nominal_proof_byte_length = oversized.caps.nominal_proof_byte_length;
+        let automatic_proof_acceptance_byte_length =
+            oversized.caps.automatic_proof_acceptance_byte_length;
+        let oversized_variant = &mut oversized.ordered_proof_variants[0];
+        oversized_variant.canonical_family_body_byte_length = oversized_proof_byte_length
+            .checked_sub(oversized_variant.canonical_header_byte_length)
+            .expect("the oversized proof exceeds its header");
+        oversized_variant.canonical_proof_byte_length = oversized_proof_byte_length;
+        oversized_variant.nominal_proof_overage_byte_length =
+            oversized_proof_byte_length.saturating_sub(nominal_proof_byte_length);
+        oversized_variant.nominal_proof_headroom_byte_length = 0;
+        oversized_variant.automatic_acceptance_overage_byte_length =
+            oversized_proof_byte_length.saturating_sub(automatic_proof_acceptance_byte_length);
+        oversized_variant.automatic_acceptance_headroom_byte_length = 0;
+        oversized_variant.absolute_bound_headroom_byte_length = 0;
         assert_eq!(
             verify_record(&oversized),
+            Err("selected proof variant accounting is inconsistent".to_owned()),
+        );
+
+        let mut wrong_variance = record.clone();
+        wrong_variance.ordered_proof_variants[0].nominal_proof_overage_byte_length += 1;
+        assert_eq!(
+            verify_record(&wrong_variance),
+            Err("selected proof variant accounting is inconsistent".to_owned()),
+        );
+
+        let mut wrong_scratch_variance = record.clone();
+        wrong_scratch_variance.ordered_proof_variants[0]
+            .external_memory
+            .absolute_stored_headroom_byte_length += 1;
+        assert_eq!(
+            verify_record(&wrong_scratch_variance),
+            Err("selected proof external-memory accounting exceeds its bound".to_owned()),
+        );
+
+        let mut wrong_scalar_opening_count = record.clone();
+        wrong_scalar_opening_count.ordered_proof_variants[0]
+            .construction
+            .scalar_opening_count += 1;
+        assert_eq!(
+            verify_record(&wrong_scalar_opening_count),
+            Err("selected proof variant accounting is inconsistent".to_owned()),
+        );
+
+        let mut wrong_row_width = record.clone();
+        wrong_row_width.ordered_proof_variants[0]
+            .construction
+            .logical_polynomials_per_physical_row += 1;
+        assert_eq!(
+            verify_record(&wrong_row_width),
             Err("selected proof variant accounting is inconsistent".to_owned()),
         );
 
@@ -1034,11 +1258,75 @@ mod tests {
         verify_record(&record).expect("selected static resource accounting closes");
         assert_eq!(record.candidate_input.participant_count, 10);
         assert_eq!(record.ordered_proof_variants.len(), 31);
+        assert_eq!(
+            record.caps.nominal_proof_byte_length,
+            u64::try_from(NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH)
+                .expect("the nominal proof length fits u64"),
+        );
+        assert_eq!(
+            record.caps.automatic_proof_acceptance_byte_length,
+            u64::try_from(AUTOMATIC_ROW_CODE_WHIR_PROOF_ACCEPTANCE_BYTE_LENGTH)
+                .expect("the automatic proof acceptance length fits u64"),
+        );
         assert!(record.ordered_proof_variants.iter().all(|variant| {
             variant.canonical_proof_byte_length
-                < u64::try_from(NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH)
-                    .expect("proof target fits u64")
+                <= record
+                    .caps
+                    .common_authenticated_stream_hard_limit_byte_length
         }));
+        let same_secret = record
+            .ordered_proof_variants
+            .iter()
+            .find(|variant| {
+                variant.application_statement_schema_identifier
+                    == ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER
+            })
+            .expect("the same-secret accounting row exists");
+        assert_eq!(same_secret.canonical_proof_byte_length, 5_309_850);
+        assert_eq!(same_secret.nominal_proof_overage_byte_length, 66_970);
+        assert_eq!(same_secret.automatic_acceptance_overage_byte_length, 0);
+        assert_eq!(
+            same_secret.external_memory.peak_stored_byte_length,
+            849_756_760
+        );
+        assert_eq!(
+            same_secret
+                .external_memory
+                .nominal_stored_overage_byte_length,
+            581_321_304,
+        );
+        assert_eq!(
+            same_secret
+                .external_memory
+                .automatic_stored_overage_byte_length,
+            447_103_576,
+        );
+        assert_eq!(
+            same_secret
+                .external_memory
+                .absolute_stored_headroom_byte_length,
+            223_985_064,
+        );
+        let engineering_review_rows = record
+            .ordered_proof_variants
+            .iter()
+            .filter(|variant| variant.automatic_acceptance_overage_byte_length > 0)
+            .map(|variant| {
+                (
+                    variant.application_statement_schema_identifier,
+                    variant.canonical_proof_byte_length,
+                    variant.automatic_acceptance_overage_byte_length,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            engineering_review_rows,
+            vec![(
+                ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+                7_916_724,
+                52_404,
+            )],
+        );
         let material = derive_selected_complete_action_material_resource_accounting()
             .expect("selected material accounting closes");
         assert_eq!(

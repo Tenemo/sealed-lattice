@@ -73,14 +73,13 @@ use crate::bgv::proof_suite::prover::{
     CommonProofReplayPolynomialEncoding, CommonProofReplayPolynomialPlan,
     CommonProofReplayPolynomialRangeDestination, CommonProofReplayPolynomialRangeReader,
     CommonProofReplayPolynomialReader, CommonProofReplayPolynomialRef,
-    CommonProofReplayPolynomialWriter,
+    CommonProofReplayPolynomialWriter, apply_trace_mask,
     authenticated_pre_challenge_source_coefficient_position_counts,
-    auxiliary_private_mask_tail_coefficient_count, canonical_proof_object_header_bytes,
-    common_proof_quotient_constraint_catalog, construct_reversed_relation_column,
-    extract_auxiliary_private_mask_tail, ordered_integer_lift_auxiliary_column_ordinals,
-    persisted_pre_challenge_column_coefficient_position_counts,
-    relation_column_replay_requirements, relation_reversed_column_bindings,
+    canonical_proof_object_header_bytes, construct_reversed_relation_column,
+    ordered_integer_lift_auxiliary_column_ordinals,
+    persisted_pre_challenge_column_coefficient_position_counts, relation_reversed_column_bindings,
     requested_pre_challenge_source_column_ordinals, validate_generation_relation_trees,
+    validate_source_column,
 };
 use crate::bgv::proof_suite::relation_plan::{
     BoundTreeConstructionKind, BoundTreeRootUse, ProofPrivacyMode, RelationColumnOrigin,
@@ -95,8 +94,9 @@ use crate::bgv::proof_suite::{
     CommonProofGenerationInitializationError, CommonProofGenerationInput,
     CommonProofGenerationPoll, CommonProofGenerationStage, CommonProofProverError,
     CommonProofSourcePolynomial, CommonProofSourcePolynomialProvider,
-    CommonProofSourcePolynomialRequestContext, MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
-    MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+    CommonProofSourcePolynomialProviderPoll, CommonProofSourcePolynomialReplayIdentity,
+    CommonProofSourcePolynomialRequestContext, CommonProofSourceReplayIdentityCatalog,
+    MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
     MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, ProofBaseFieldElement,
     ProofChallengeExtensionElement, ProofEvaluationDomain, ProofExternalMemory,
     ProofExternalMemoryExecutor, ProofExternalMemoryExecutorError, ProofExternalMemoryUsage,
@@ -147,7 +147,6 @@ enum RowCodeWhirGenerationPhase {
     Cancelled,
 }
 
-const SOURCE_REPLAY_ISSUED_STEP: u32 = 0;
 const AUXILIARY_REPLAY_ISSUED_STEP: u32 = 1;
 const FIRST_QUOTIENT_TRANSFORM_STEP: u32 = 2;
 const ROW_PAD_SEED_BYTE_LENGTH: usize = 3 * 32;
@@ -258,135 +257,302 @@ enum RowCodeWhirRelationPolynomialReaderError<StorageError> {
     Storage(ProofExternalMemoryExecutorError<StorageError>),
 }
 
-struct RecomputedAuxiliaryPolynomialReader {
-    reconstruction: CommonProofAuxiliaryColumnReconstructionCursor,
-    input_plans: BTreeMap<u32, CommonProofReplayPolynomialPlan>,
-    active_input: Option<(u32, CommonProofReplayPolynomialReader)>,
-    private_mask_tail_reader: CommonProofReplayPolynomialRangeReader,
-    private_mask_tail: Zeroizing<Vec<ProofBaseFieldElement>>,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RowCodeWhirRelationPolynomialReaderPoll {
+    ArithmeticStepCompleted,
+    StorageTransactionCompleted,
+    AuthenticatedSourceReadRequired,
+    Complete,
 }
 
-impl RecomputedAuxiliaryPolynomialReader {
+struct RecomputedSourcePolynomialReader {
+    request_context: CommonProofSourcePolynomialRequestContext,
+    column_ordinal: u32,
+    descriptor: crate::bgv::proof_suite::relation_plan::RelationColumnDescriptor,
+    expected_replay_identity: CommonProofSourcePolynomialReplayIdentity,
+    trace_domain_size: u64,
+    polynomial: Option<CommonProofSourcePolynomial>,
+    private_mask: Option<CommonProofSourcePolynomial>,
+}
+
+impl RecomputedSourcePolynomialReader {
     fn new(
-        reconstruction: CommonProofAuxiliaryColumnReconstructionCursor,
-        input_plans: BTreeMap<u32, CommonProofReplayPolynomialPlan>,
-        private_mask_tail_plan: CommonProofReplayPolynomialPlan,
+        request_context: CommonProofSourcePolynomialRequestContext,
+        column_ordinal: u32,
+        descriptor: crate::bgv::proof_suite::relation_plan::RelationColumnDescriptor,
+        expected_replay_identity: CommonProofSourcePolynomialReplayIdentity,
+        trace_domain_size: u64,
+        private_mask: Option<CommonProofSourcePolynomial>,
     ) -> Result<Self, CommonProofProverError> {
-        let mask_coefficient_count = reconstruction.mask_coefficient_count();
-        if private_mask_tail_plan.value_type() != RelationColumnValueType::BaseField
-            || private_mask_tail_plan.coefficient_count() != mask_coefficient_count
-            || reconstruction
-                .ordered_input_column_ordinals()
-                .iter()
-                .any(|column_ordinal| !input_plans.contains_key(column_ordinal))
-            || input_plans.len() != reconstruction.ordered_input_column_ordinals().len()
-        {
-            return Err(CommonProofProverError::InvalidColumn);
-        }
-        let private_mask_tail_reader = CommonProofReplayPolynomialRangeReader::new(
-            private_mask_tail_plan,
-            0..mask_coefficient_count,
-        )?;
         Ok(Self {
-            reconstruction,
-            input_plans,
-            active_input: None,
-            private_mask_tail_reader,
-            private_mask_tail: Zeroizing::new(vec![
-                ProofBaseFieldElement::ZERO;
-                mask_coefficient_count
-            ]),
+            request_context,
+            column_ordinal,
+            descriptor,
+            expected_replay_identity,
+            trace_domain_size,
+            polynomial: None,
+            private_mask,
         })
     }
 
     fn advance<Storage: ProofExternalMemory>(
         &mut self,
+        source_provider: &mut dyn CommonProofSourcePolynomialProvider,
         executor: &mut ProofExternalMemoryExecutor,
         storage: &mut Storage,
-    ) -> Result<bool, RowCodeWhirRelationPolynomialReaderError<Storage::Error>> {
-        loop {
-            if let Some((_, reader)) = self.active_input.as_mut() {
-                let complete = reader
-                    .advance(executor, storage)
-                    .map_err(RowCodeWhirRelationPolynomialReaderError::Storage)?;
-                if !complete {
-                    return Ok(false);
-                }
-                let (column_ordinal, reader) = self.active_input.take().ok_or(
-                    RowCodeWhirRelationPolynomialReaderError::Prover(
-                        CommonProofProverError::InvalidColumn,
-                    ),
-                )?;
-                let polynomial = reader
-                    .finish()
-                    .map_err(RowCodeWhirRelationPolynomialReaderError::Prover)?;
-                self.reconstruction
-                    .accept_input_column(column_ordinal, polynomial)
-                    .map_err(RowCodeWhirRelationPolynomialReaderError::Prover)?;
-                return Ok(false);
-            }
-            if let Some(column_ordinal) = self.reconstruction.next_input_column_ordinal() {
-                let plan = self.input_plans.get(&column_ordinal).copied().ok_or(
-                    RowCodeWhirRelationPolynomialReaderError::Prover(
-                        CommonProofProverError::InvalidColumn,
-                    ),
-                )?;
-                self.active_input = Some((
-                    column_ordinal,
-                    CommonProofReplayPolynomialReader::new(plan)
-                        .map_err(RowCodeWhirRelationPolynomialReaderError::Prover)?,
-                ));
-                continue;
-            }
-            return self
-                .private_mask_tail_reader
-                .advance(
-                    executor,
-                    storage,
-                    CommonProofReplayPolynomialRangeDestination::Base(&mut self.private_mask_tail),
+    ) -> Result<
+        RowCodeWhirRelationPolynomialReaderPoll,
+        RowCodeWhirRelationPolynomialReaderError<Storage::Error>,
+    > {
+        if self.polynomial.is_none() {
+            let provided = match source_provider
+                .poll_replayed_source_polynomial(
+                    self.request_context
+                        .request(self.column_ordinal, &self.descriptor),
                 )
-                .map_err(RowCodeWhirRelationPolynomialReaderError::Storage);
+                .map_err(RowCodeWhirRelationPolynomialReaderError::Prover)?
+            {
+                CommonProofSourcePolynomialProviderPoll::Ready(provided) => provided,
+                CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired => {
+                    return Ok(
+                        RowCodeWhirRelationPolynomialReaderPoll::AuthenticatedSourceReadRequired,
+                    );
+                }
+            };
+            let (polynomial, replay_identity) = provided.into_parts();
+            if replay_identity != self.expected_replay_identity {
+                return Err(RowCodeWhirRelationPolynomialReaderError::Prover(
+                    CommonProofProverError::InvalidColumn,
+                ));
+            }
+            validate_source_column(&self.descriptor, &polynomial, self.trace_domain_size)
+                .map_err(RowCodeWhirRelationPolynomialReaderError::Prover)?;
+            self.polynomial = Some(polynomial);
+            return Ok(RowCodeWhirRelationPolynomialReaderPoll::ArithmeticStepCompleted);
         }
+        let _ = (executor, storage);
+        Ok(RowCodeWhirRelationPolynomialReaderPoll::Complete)
     }
 
     fn finish(self) -> Result<CommonProofSourcePolynomial, CommonProofProverError> {
-        if self.active_input.is_some() || !self.private_mask_tail_reader.is_complete() {
+        let polynomial = self
+            .polynomial
+            .ok_or(CommonProofProverError::InvalidColumn)?;
+        match self.private_mask {
+            Some(private_mask) => {
+                apply_trace_mask(polynomial, self.trace_domain_size, private_mask)
+            }
+            None => Ok(polynomial),
+        }
+    }
+}
+
+struct RecomputedReversedPolynomialReader {
+    source_reader: Box<RowCodeWhirRelationPolynomialReader>,
+    trace_domain_size: u64,
+    unmasked_reversed: Option<CommonProofSourcePolynomial>,
+    private_mask: Option<CommonProofSourcePolynomial>,
+}
+
+impl RecomputedReversedPolynomialReader {
+    fn advance<Storage: ProofExternalMemory>(
+        &mut self,
+        source_provider: &mut dyn CommonProofSourcePolynomialProvider,
+        executor: &mut ProofExternalMemoryExecutor,
+        storage: &mut Storage,
+    ) -> Result<
+        RowCodeWhirRelationPolynomialReaderPoll,
+        RowCodeWhirRelationPolynomialReaderError<Storage::Error>,
+    > {
+        if self.unmasked_reversed.is_none() {
+            match self
+                .source_reader
+                .advance(source_provider, executor, storage)?
+            {
+                RowCodeWhirRelationPolynomialReaderPoll::Complete => {
+                    let source_reader = core::mem::replace(
+                        &mut self.source_reader,
+                        Box::new(RowCodeWhirRelationPolynomialReader::Consumed),
+                    );
+                    let source = source_reader
+                        .finish()
+                        .map_err(RowCodeWhirRelationPolynomialReaderError::Prover)?;
+                    self.unmasked_reversed = Some(
+                        reconstruct_reversed_polynomial(self.trace_domain_size, source)
+                            .map_err(RowCodeWhirRelationPolynomialReaderError::Prover)?,
+                    );
+                    return Ok(RowCodeWhirRelationPolynomialReaderPoll::ArithmeticStepCompleted);
+                }
+                progress => return Ok(progress),
+            }
+        }
+        Ok(RowCodeWhirRelationPolynomialReaderPoll::Complete)
+    }
+
+    fn finish(self) -> Result<CommonProofSourcePolynomial, CommonProofProverError> {
+        let unmasked_reversed = self
+            .unmasked_reversed
+            .ok_or(CommonProofProverError::InvalidColumn)?;
+        match self.private_mask {
+            Some(private_mask) => {
+                apply_trace_mask(unmasked_reversed, self.trace_domain_size, private_mask)
+            }
+            None => Ok(unmasked_reversed),
+        }
+    }
+}
+
+fn reconstruct_reversed_polynomial(
+    trace_domain_size: u64,
+    source: CommonProofSourcePolynomial,
+) -> Result<CommonProofSourcePolynomial, CommonProofProverError> {
+    let trace_domain = ProofEvaluationDomain::new_subgroup(
+        usize::try_from(trace_domain_size).map_err(|_| CommonProofProverError::CountOverflow)?,
+    )?;
+    let mut reversed_rows =
+        crate::bgv::proof_suite::prover::base_trace_rows(&source, trace_domain)?;
+    drop(source);
+    reversed_rows.reverse();
+    trace_domain.interpolate_base_polynomial_in_place(&mut reversed_rows)?;
+    Ok(CommonProofSourcePolynomial::from_protected_base_coefficients(reversed_rows))
+}
+
+struct RecomputedAuxiliaryPolynomialReader {
+    reconstruction: CommonProofAuxiliaryColumnReconstructionCursor,
+    input_readers: Vec<(u32, RowCodeWhirRelationPolynomialReader)>,
+    next_input_index: usize,
+    private_mask: Zeroizing<Vec<ProofBaseFieldElement>>,
+}
+
+impl RecomputedAuxiliaryPolynomialReader {
+    fn new(
+        reconstruction: CommonProofAuxiliaryColumnReconstructionCursor,
+        input_readers: Vec<(u32, RowCodeWhirRelationPolynomialReader)>,
+        private_mask: Option<CommonProofSourcePolynomial>,
+    ) -> Result<Self, CommonProofProverError> {
+        let mask_coefficient_count = reconstruction.mask_coefficient_count();
+        let private_mask = match private_mask {
+            Some(CommonProofSourcePolynomial::Base(coefficients))
+                if coefficients.len() == mask_coefficient_count =>
+            {
+                coefficients
+            }
+            None if mask_coefficient_count == 0 => Zeroizing::new(Vec::new()),
+            _ => return Err(CommonProofProverError::InvalidMask),
+        };
+        if input_readers
+            .iter()
+            .map(|(column_ordinal, _)| *column_ordinal)
+            .ne(reconstruction
+                .ordered_input_column_ordinals()
+                .iter()
+                .copied())
+        {
             return Err(CommonProofProverError::InvalidColumn);
         }
-        self.reconstruction.finish(self.private_mask_tail)
+        Ok(Self {
+            reconstruction,
+            input_readers,
+            next_input_index: 0,
+            private_mask,
+        })
+    }
+
+    fn advance<Storage: ProofExternalMemory>(
+        &mut self,
+        source_provider: &mut dyn CommonProofSourcePolynomialProvider,
+        executor: &mut ProofExternalMemoryExecutor,
+        storage: &mut Storage,
+    ) -> Result<
+        RowCodeWhirRelationPolynomialReaderPoll,
+        RowCodeWhirRelationPolynomialReaderError<Storage::Error>,
+    > {
+        if let Some((column_ordinal, reader)) = self.input_readers.get_mut(self.next_input_index) {
+            match reader.advance(source_provider, executor, storage)? {
+                RowCodeWhirRelationPolynomialReaderPoll::Complete => {
+                    let reader =
+                        core::mem::replace(reader, RowCodeWhirRelationPolynomialReader::Consumed);
+                    self.reconstruction
+                        .accept_input_column(
+                            *column_ordinal,
+                            reader
+                                .finish()
+                                .map_err(RowCodeWhirRelationPolynomialReaderError::Prover)?,
+                        )
+                        .map_err(RowCodeWhirRelationPolynomialReaderError::Prover)?;
+                    self.next_input_index = self.next_input_index.checked_add(1).ok_or(
+                        RowCodeWhirRelationPolynomialReaderError::Prover(
+                            CommonProofProverError::CountOverflow,
+                        ),
+                    )?;
+                    return Ok(RowCodeWhirRelationPolynomialReaderPoll::ArithmeticStepCompleted);
+                }
+                progress => return Ok(progress),
+            }
+        }
+        Ok(RowCodeWhirRelationPolynomialReaderPoll::Complete)
+    }
+
+    fn finish(self) -> Result<CommonProofSourcePolynomial, CommonProofProverError> {
+        if self.next_input_index != self.input_readers.len() {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        self.reconstruction.finish(self.private_mask)
     }
 }
 
 enum RowCodeWhirRelationPolynomialReader {
     Stored(CommonProofReplayPolynomialReader),
+    RecomputedSource(RecomputedSourcePolynomialReader),
+    RecomputedReversed(RecomputedReversedPolynomialReader),
     RecomputedAuxiliary(RecomputedAuxiliaryPolynomialReader),
+    Consumed,
 }
 
 impl RowCodeWhirRelationPolynomialReader {
     fn advance<Storage: ProofExternalMemory>(
         &mut self,
+        source_provider: &mut dyn CommonProofSourcePolynomialProvider,
         executor: &mut ProofExternalMemoryExecutor,
         storage: &mut Storage,
-    ) -> Result<bool, RowCodeWhirRelationPolynomialReaderError<Storage::Error>> {
+    ) -> Result<
+        RowCodeWhirRelationPolynomialReaderPoll,
+        RowCodeWhirRelationPolynomialReaderError<Storage::Error>,
+    > {
         match self {
             Self::Stored(reader) => reader
                 .advance(executor, storage)
+                .map(|complete| {
+                    if complete {
+                        RowCodeWhirRelationPolynomialReaderPoll::Complete
+                    } else {
+                        RowCodeWhirRelationPolynomialReaderPoll::StorageTransactionCompleted
+                    }
+                })
                 .map_err(RowCodeWhirRelationPolynomialReaderError::Storage),
-            Self::RecomputedAuxiliary(reader) => reader.advance(executor, storage),
+            Self::RecomputedSource(reader) => reader.advance(source_provider, executor, storage),
+            Self::RecomputedReversed(reader) => reader.advance(source_provider, executor, storage),
+            Self::RecomputedAuxiliary(reader) => reader.advance(source_provider, executor, storage),
+            Self::Consumed => Err(RowCodeWhirRelationPolynomialReaderError::Prover(
+                CommonProofProverError::InvalidColumn,
+            )),
         }
     }
 
     fn finish(self) -> Result<CommonProofSourcePolynomial, CommonProofProverError> {
         match self {
             Self::Stored(reader) => reader.finish(),
+            Self::RecomputedSource(reader) => reader.finish(),
+            Self::RecomputedReversed(reader) => reader.finish(),
             Self::RecomputedAuxiliary(reader) => reader.finish(),
+            Self::Consumed => Err(CommonProofProverError::InvalidColumn),
         }
     }
 }
 
 enum RowCodeWhirRelationPolynomialRangeReader {
     Stored(CommonProofReplayPolynomialRangeReader),
-    RecomputedAuxiliary {
+    Recomputed {
         reader: Option<RowCodeWhirRelationPolynomialReader>,
         coefficient_range: core::ops::Range<usize>,
     },
@@ -395,26 +561,38 @@ enum RowCodeWhirRelationPolynomialRangeReader {
 impl RowCodeWhirRelationPolynomialRangeReader {
     fn advance<Storage: ProofExternalMemory>(
         &mut self,
+        source_provider: &mut dyn CommonProofSourcePolynomialProvider,
         executor: &mut ProofExternalMemoryExecutor,
         storage: &mut Storage,
         destination: CommonProofReplayPolynomialRangeDestination<'_>,
-    ) -> Result<bool, RowCodeWhirRelationPolynomialReaderError<Storage::Error>> {
+    ) -> Result<
+        RowCodeWhirRelationPolynomialReaderPoll,
+        RowCodeWhirRelationPolynomialReaderError<Storage::Error>,
+    > {
         match self {
             Self::Stored(reader) => reader
                 .advance(executor, storage, destination)
+                .map(|complete| {
+                    if complete {
+                        RowCodeWhirRelationPolynomialReaderPoll::Complete
+                    } else {
+                        RowCodeWhirRelationPolynomialReaderPoll::StorageTransactionCompleted
+                    }
+                })
                 .map_err(RowCodeWhirRelationPolynomialReaderError::Storage),
-            Self::RecomputedAuxiliary {
+            Self::Recomputed {
                 reader,
                 coefficient_range,
             } => {
-                if !reader
+                match reader
                     .as_mut()
                     .ok_or(RowCodeWhirRelationPolynomialReaderError::Prover(
                         CommonProofProverError::InvalidColumn,
                     ))?
-                    .advance(executor, storage)?
+                    .advance(source_provider, executor, storage)?
                 {
-                    return Ok(false);
+                    RowCodeWhirRelationPolynomialReaderPoll::Complete => {}
+                    progress => return Ok(progress),
                 }
                 let reader =
                     reader
@@ -433,7 +611,16 @@ impl RowCodeWhirRelationPolynomialRangeReader {
                         && coefficient_range.end <= coefficients.len() =>
                     {
                         destination.copy_from_slice(&coefficients[coefficient_range.clone()]);
-                        Ok(true)
+                        Ok(RowCodeWhirRelationPolynomialReaderPoll::Complete)
+                    }
+                    (
+                        CommonProofSourcePolynomial::Extension(coefficients),
+                        CommonProofReplayPolynomialRangeDestination::Extension(destination),
+                    ) if destination.len() == coefficient_range.len()
+                        && coefficient_range.end <= coefficients.len() =>
+                    {
+                        destination.copy_from_slice(&coefficients[coefficient_range.clone()]);
+                        Ok(RowCodeWhirRelationPolynomialReaderPoll::Complete)
                     }
                     _ => Err(RowCodeWhirRelationPolynomialReaderError::Prover(
                         CommonProofProverError::InvalidColumn,
@@ -834,8 +1021,7 @@ enum RowCodeWhirPhasePolynomialBinding {
 
 struct RowCodeWhirGenerationStoragePlan {
     external_memory_plan: ProofExternalMemoryPlan,
-    relation_polynomial_plans: BTreeMap<u32, CommonProofReplayPolynomialPlan>,
-    auxiliary_mask_tail_plans: BTreeMap<u32, CommonProofReplayPolynomialPlan>,
+    relation_polynomial_shapes: BTreeMap<u32, (RelationColumnValueType, usize)>,
     auxiliary_reconstruction_catalog: CommonProofAuxiliaryColumnReconstructionCatalog,
     opened_polynomial_plans:
         BTreeMap<RowCodeWhirOpenedPolynomialSource, CommonProofReplayPolynomialPlan>,
@@ -1080,56 +1266,6 @@ impl RowCodeWhirGenerationStoragePlan {
             ));
         }
 
-        let mut aggregate_phase_replay_counts = BTreeMap::<u32, u64>::new();
-        for chunk in construction_plan
-            .base_phase
-            .iter()
-            .chain(construction_plan.auxiliary_phase.iter())
-            .flat_map(|phase| &phase.rows)
-            .flat_map(|row| row.logical_polynomial_chunks.iter().flatten())
-        {
-            let replay_count = aggregate_phase_replay_counts
-                .entry(chunk.column_ordinal)
-                .or_default();
-            *replay_count = replay_count.checked_add(1).ok_or(
-                CommonProofGenerationInitializationError::Prover(
-                    CommonProofProverError::CountOverflow,
-                ),
-            )?;
-        }
-        let mut phase_replay_counts = BTreeMap::<u32, u64>::new();
-        for phase in construction_plan
-            .base_phase
-            .iter()
-            .chain(construction_plan.auxiliary_phase.iter())
-        {
-            let stripe_count = phase
-                .geometry
-                .encoded_column_count
-                .div_ceil(MAXIMUM_PHASE_COMMITMENT_STRIPE_COLUMN_COUNT);
-            let stripe_count = u64::try_from(stripe_count).map_err(|_| {
-                CommonProofGenerationInitializationError::Prover(
-                    CommonProofProverError::CountOverflow,
-                )
-            })?;
-            let commitment_and_opening_replay_count = stripe_count.checked_mul(2).ok_or(
-                CommonProofGenerationInitializationError::Prover(
-                    CommonProofProverError::CountOverflow,
-                ),
-            )?;
-            for chunk in phase
-                .rows
-                .iter()
-                .flat_map(|row| row.logical_polynomial_chunks.iter().flatten())
-            {
-                let replay_count = phase_replay_counts.entry(chunk.column_ordinal).or_default();
-                *replay_count = replay_count
-                    .checked_add(commitment_and_opening_replay_count)
-                    .ok_or(CommonProofGenerationInitializationError::Prover(
-                        CommonProofProverError::CountOverflow,
-                    ))?;
-            }
-        }
         let auxiliary_columns = construction_plan
             .auxiliary_phase
             .iter()
@@ -1137,48 +1273,7 @@ impl RowCodeWhirGenerationStoragePlan {
             .flat_map(|row| row.logical_polynomial_chunks.iter().flatten())
             .map(|chunk| chunk.column_ordinal)
             .collect::<BTreeSet<_>>();
-        let mut relation_opening_read_counts = BTreeMap::<u32, u64>::new();
-        let mut aggregate_bound_replay_counts = BTreeMap::<u32, u64>::new();
-        for claim in variant.ordered_opening_claims() {
-            if claim.source_class() != RelationOpeningSourceClass::TreeColumn {
-                continue;
-            }
-            let column_ordinal =
-                claim
-                    .column_ordinal()
-                    .ok_or(CommonProofGenerationInitializationError::Prover(
-                        CommonProofProverError::InvalidOpening,
-                    ))?;
-            let read_count = relation_opening_read_counts
-                .entry(column_ordinal)
-                .or_default();
-            *read_count = read_count.checked_add(1).ok_or(
-                CommonProofGenerationInitializationError::Prover(
-                    CommonProofProverError::CountOverflow,
-                ),
-            )?;
-            if variant
-                .ordered_columns()
-                .get(usize::try_from(column_ordinal).map_err(|_| {
-                    CommonProofGenerationInitializationError::Prover(
-                        CommonProofProverError::CountOverflow,
-                    )
-                })?)
-                .is_some_and(|column| {
-                    matches!(column.origin(), RelationColumnOrigin::BoundTree { .. })
-                })
-            {
-                let aggregate_replay_count = aggregate_bound_replay_counts
-                    .entry(column_ordinal)
-                    .or_default();
-                *aggregate_replay_count = aggregate_replay_count.checked_add(1).ok_or(
-                    CommonProofGenerationInitializationError::Prover(
-                        CommonProofProverError::CountOverflow,
-                    ),
-                )?;
-            }
-        }
-        let mut bound_tree_replay_counts = BTreeMap::<u32, u64>::new();
+        let mut bound_tree_columns = BTreeSet::new();
         for tree in variant.ordered_trees() {
             let RelationTreeDescriptor::BoundPublic {
                 ordered_column_ordinals,
@@ -1188,21 +1283,14 @@ impl RowCodeWhirGenerationStoragePlan {
                 continue;
             };
             for column_ordinal in ordered_column_ordinals {
-                let replay_count = bound_tree_replay_counts.entry(*column_ordinal).or_default();
-                *replay_count = replay_count.checked_add(1).ok_or(
-                    CommonProofGenerationInitializationError::Prover(
-                        CommonProofProverError::CountOverflow,
-                    ),
-                )?;
+                bound_tree_columns.insert(*column_ordinal);
             }
         }
         let mut replay_columns = requested_source_columns.clone();
         replay_columns.extend(reversed_columns.iter().copied());
         replay_columns.extend(auxiliary_columns.iter().copied());
-        replay_columns.extend(bound_tree_replay_counts.keys().copied());
+        replay_columns.extend(bound_tree_columns);
 
-        let replay_requirements = relation_column_replay_requirements(variant)
-            .map_err(CommonProofGenerationInitializationError::Prover)?;
         let source_coefficient_position_counts =
             persisted_pre_challenge_column_coefficient_position_counts(variant)
                 .map_err(CommonProofGenerationInitializationError::Prover)?;
@@ -1224,13 +1312,9 @@ impl RowCodeWhirGenerationStoragePlan {
         let maximum_chunk_byte_length =
             u64::from(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH);
         let mut object_plans = Vec::new();
-        let mut relation_polynomial_plans = BTreeMap::new();
         let mut maximum_total_written_byte_length = 0_u64;
         let mut maximum_total_read_byte_length = 0_u64;
         let mut maximum_transaction_count = 1_u64;
-        let trace_value_count = usize::try_from(variant.trace_domain_size()).map_err(|_| {
-            CommonProofGenerationInitializationError::Prover(CommonProofProverError::CountOverflow)
-        })?;
 
         let ordered_auxiliary_columns = ordered_integer_lift_auxiliary_column_ordinals(variant)
             .map_err(CommonProofGenerationInitializationError::Prover)?;
@@ -1257,122 +1341,7 @@ impl RowCodeWhirGenerationStoragePlan {
             ));
         }
 
-        let mut direct_replay_counts = BTreeMap::new();
-        for column_ordinal in &replay_columns {
-            let replay_requirement = replay_requirements
-                .get(column_ordinal)
-                .copied()
-                .unwrap_or_default();
-            let aggregate_phase_replay_count = aggregate_phase_replay_counts
-                .get(column_ordinal)
-                .copied()
-                .unwrap_or_default()
-                .checked_mul(2)
-                .ok_or(CommonProofGenerationInitializationError::Prover(
-                    CommonProofProverError::CountOverflow,
-                ))?;
-            let aggregate_bound_replay_count = aggregate_bound_replay_counts
-                .get(column_ordinal)
-                .copied()
-                .unwrap_or_default()
-                .checked_mul(2)
-                .ok_or(CommonProofGenerationInitializationError::Prover(
-                    CommonProofProverError::CountOverflow,
-                ))?;
-            let total_read_count = replay_requirement
-                .pre_challenge_read_count()
-                .checked_add(replay_requirement.auxiliary_synthesis_read_count())
-                .and_then(|count| {
-                    count.checked_add(
-                        phase_replay_counts
-                            .get(column_ordinal)
-                            .copied()
-                            .unwrap_or_default(),
-                    )
-                })
-                .and_then(|count| count.checked_add(aggregate_phase_replay_count))
-                .and_then(|count| count.checked_add(aggregate_bound_replay_count))
-                .and_then(|count| {
-                    count.checked_add(
-                        relation_opening_read_counts
-                            .get(column_ordinal)
-                            .copied()
-                            .unwrap_or_default(),
-                    )
-                })
-                .and_then(|count| {
-                    count.checked_add(
-                        bound_tree_replay_counts
-                            .get(column_ordinal)
-                            .copied()
-                            .unwrap_or_default(),
-                    )
-                })
-                .ok_or(CommonProofGenerationInitializationError::Prover(
-                    CommonProofProverError::CountOverflow,
-                ))?;
-            direct_replay_counts.insert(*column_ordinal, total_read_count);
-        }
-        let quotient_constraint_catalog = common_proof_quotient_constraint_catalog(variant)
-            .map_err(CommonProofGenerationInitializationError::Prover)?;
-        let mut recomputed_auxiliary_columns = BTreeSet::new();
-        for column_ordinal in &ordered_auxiliary_columns {
-            if auxiliary_private_mask_tail_coefficient_count(variant, *column_ordinal)
-                .map_err(CommonProofGenerationInitializationError::Prover)?
-                .is_some()
-            {
-                recomputed_auxiliary_columns.insert(*column_ordinal);
-            }
-        }
-        let mut auxiliary_replay_counts = BTreeMap::new();
-        let mut auxiliary_reconstruction_source_read_counts = BTreeMap::<u32, u64>::new();
-        for column_ordinal in &recomputed_auxiliary_columns {
-            let quotient_read_count = quotient_constraint_catalog
-                .column_usages()
-                .get(column_ordinal)
-                .map(|usage| u64::try_from(usage.constraint_use_count()))
-                .transpose()
-                .map_err(|_| {
-                    CommonProofGenerationInitializationError::Prover(
-                        CommonProofProverError::CountOverflow,
-                    )
-                })?
-                .unwrap_or_default();
-            let replay_count = direct_replay_counts
-                .get(column_ordinal)
-                .copied()
-                .unwrap_or_default()
-                .checked_add(quotient_read_count)
-                .ok_or(CommonProofGenerationInitializationError::Prover(
-                    CommonProofProverError::CountOverflow,
-                ))?;
-            if replay_count == 0 {
-                return Err(CommonProofGenerationInitializationError::Prover(
-                    CommonProofProverError::InvalidColumn,
-                ));
-            }
-            auxiliary_replay_counts.insert(*column_ordinal, replay_count);
-            for source_column_ordinal in auxiliary_reconstruction_catalog
-                .input_column_ordinals(variant, *column_ordinal)
-                .map_err(CommonProofGenerationInitializationError::Prover)?
-            {
-                if auxiliary_columns.contains(&source_column_ordinal) {
-                    return Err(CommonProofGenerationInitializationError::Prover(
-                        CommonProofProverError::InvalidColumn,
-                    ));
-                }
-                let source_read_count = auxiliary_reconstruction_source_read_counts
-                    .entry(source_column_ordinal)
-                    .or_default();
-                *source_read_count = source_read_count.checked_add(replay_count).ok_or(
-                    CommonProofGenerationInitializationError::Prover(
-                        CommonProofProverError::CountOverflow,
-                    ),
-                )?;
-            }
-        }
-
-        let replay_descriptor = |column_ordinal| {
+        let replay_shape = |column_ordinal| {
             let descriptor = variant
                 .ordered_columns()
                 .get(usize::try_from(column_ordinal).map_err(|_| {
@@ -1392,153 +1361,11 @@ impl RowCodeWhirGenerationStoragePlan {
                     CommonProofProverError::CountOverflow,
                 )
             })?;
-            let total_read_count = direct_replay_counts
-                .get(&column_ordinal)
-                .copied()
-                .unwrap_or_default()
-                .checked_add(
-                    auxiliary_reconstruction_source_read_counts
-                        .get(&column_ordinal)
-                        .copied()
-                        .unwrap_or_default(),
-                )
-                .ok_or(CommonProofGenerationInitializationError::Prover(
-                    CommonProofProverError::CountOverflow,
-                ))?;
-            let encoding = match variant
-                .compact_trace_encoding(column_ordinal, relation_context)
-                .map_err(CommonProofGenerationInitializationError::Relation)?
-            {
-                Some(interval) if coefficient_count >= trace_value_count => {
-                    CommonProofReplayPolynomialEncoding::CompactBaseTrace {
-                        trace_value_count,
-                        interval,
-                    }
-                }
-                _ => CommonProofReplayPolynomialEncoding::CanonicalCoefficients,
-            };
-            PackedReplayPolynomialDescriptor::new_with_encoding(
-                column_ordinal,
+            Ok::<_, CommonProofGenerationInitializationError>((
                 descriptor.value_type(),
                 coefficient_count,
-                total_read_count,
-                encoding,
-            )
+            ))
         };
-        let source_descriptors = requested_source_column_ordinals
-            .iter()
-            .copied()
-            .map(&replay_descriptor)
-            .collect::<Result<Vec<_>, _>>()?;
-        let reversed_descriptors = reversed_column_bindings
-            .iter()
-            .map(|(_, reversed_column_ordinal)| replay_descriptor(*reversed_column_ordinal))
-            .collect::<Result<Vec<_>, _>>()?;
-        let stored_auxiliary_descriptors = ordered_auxiliary_columns
-            .iter()
-            .copied()
-            .filter(|column_ordinal| !recomputed_auxiliary_columns.contains(column_ordinal))
-            .map(&replay_descriptor)
-            .collect::<Result<Vec<_>, _>>()?;
-        let auxiliary_mask_tail_descriptors = ordered_auxiliary_columns
-            .iter()
-            .copied()
-            .filter(|column_ordinal| recomputed_auxiliary_columns.contains(column_ordinal))
-            .map(|column_ordinal| {
-                let descriptor = variant
-                    .ordered_columns()
-                    .get(usize::try_from(column_ordinal).map_err(|_| {
-                        CommonProofGenerationInitializationError::Prover(
-                            CommonProofProverError::CountOverflow,
-                        )
-                    })?)
-                    .ok_or(CommonProofGenerationInitializationError::Prover(
-                        CommonProofProverError::InvalidColumn,
-                    ))?;
-                let mask_coefficient_count =
-                    auxiliary_private_mask_tail_coefficient_count(variant, column_ordinal)
-                        .map_err(CommonProofGenerationInitializationError::Prover)?
-                        .ok_or(CommonProofGenerationInitializationError::Prover(
-                            CommonProofProverError::InvalidMask,
-                        ))?;
-                let full_coefficient_count = trace_value_count
-                    .checked_add(mask_coefficient_count)
-                    .ok_or(CommonProofGenerationInitializationError::Prover(
-                        CommonProofProverError::CountOverflow,
-                    ))?;
-                if descriptor.value_type() != RelationColumnValueType::BaseField
-                    || full_coefficient_count
-                        > usize::try_from(descriptor.source_degree_bound_exclusive()).map_err(
-                            |_| {
-                                CommonProofGenerationInitializationError::Prover(
-                                    CommonProofProverError::CountOverflow,
-                                )
-                            },
-                        )?
-                {
-                    return Err(CommonProofGenerationInitializationError::Prover(
-                        CommonProofProverError::InvalidColumn,
-                    ));
-                }
-                PackedReplayPolynomialDescriptor::new(
-                    column_ordinal,
-                    RelationColumnValueType::BaseField,
-                    mask_coefficient_count,
-                    auxiliary_replay_counts
-                        .get(&column_ordinal)
-                        .copied()
-                        .ok_or(CommonProofGenerationInitializationError::Prover(
-                            CommonProofProverError::InvalidColumn,
-                        ))?,
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        for (descriptors, issued_step) in [
-            (source_descriptors.as_slice(), SOURCE_REPLAY_ISSUED_STEP),
-            (reversed_descriptors.as_slice(), SOURCE_REPLAY_ISSUED_STEP),
-            (
-                stored_auxiliary_descriptors.as_slice(),
-                AUXILIARY_REPLAY_ISSUED_STEP,
-            ),
-        ] {
-            append_packed_replay_polynomial_plans(
-                descriptors,
-                protection,
-                issued_step,
-                &mut object_plans,
-                &mut relation_polynomial_plans,
-                &mut maximum_total_written_byte_length,
-                &mut maximum_total_read_byte_length,
-                &mut maximum_transaction_count,
-            )?;
-        }
-        let mut auxiliary_mask_tail_plans = BTreeMap::new();
-        append_packed_replay_polynomial_plans(
-            &auxiliary_mask_tail_descriptors,
-            protection,
-            AUXILIARY_REPLAY_ISSUED_STEP,
-            &mut object_plans,
-            &mut auxiliary_mask_tail_plans,
-            &mut maximum_total_written_byte_length,
-            &mut maximum_total_read_byte_length,
-            &mut maximum_transaction_count,
-        )?;
-        let planned_replay_columns = relation_polynomial_plans
-            .keys()
-            .copied()
-            .chain(auxiliary_mask_tail_plans.keys().copied())
-            .collect::<BTreeSet<_>>();
-        if planned_replay_columns != replay_columns
-            || auxiliary_mask_tail_plans
-                .keys()
-                .copied()
-                .collect::<BTreeSet<_>>()
-                != recomputed_auxiliary_columns
-        {
-            return Err(CommonProofGenerationInitializationError::Prover(
-                CommonProofProverError::InvalidColumn,
-            ));
-        }
         let quotient_phase_stripe_count = u64::try_from(
             construction_plan
                 .quotient_phase
@@ -1604,7 +1431,6 @@ impl RowCodeWhirGenerationStoragePlan {
             ));
         }
 
-        let relation_object_plan_count = object_plans.len();
         let mut opened_polynomial_plans = BTreeMap::new();
         let mut opened_descriptors = Vec::new();
         for source in expected_opened_sources.iter().copied() {
@@ -1686,6 +1512,7 @@ impl RowCodeWhirGenerationStoragePlan {
                 CommonProofProverError::InvalidColumn,
             ));
         }
+        let replay_object_plan_count = object_plans.len();
         let evaluation_domain = construction_plan
             .quotient_computation_evaluation_domain(relation_context)
             .map_err(|_| {
@@ -1693,52 +1520,23 @@ impl RowCodeWhirGenerationStoragePlan {
                     CommonProofProverError::InvalidQuotient,
                 )
             })?;
-        let mut quotient_source_plans = relation_polynomial_plans
+        let relation_polynomial_shapes = replay_columns
             .iter()
-            .map(|(column_ordinal, plan)| {
-                (
-                    *column_ordinal,
-                    RowCodeWhirQuotientColumnSourcePlan::Stored(*plan),
-                )
+            .copied()
+            .map(|column_ordinal| {
+                let (value_type, coefficient_count) = replay_shape(column_ordinal)?;
+                Ok((column_ordinal, (value_type, coefficient_count)))
             })
-            .collect::<BTreeMap<_, _>>();
-        for column_ordinal in &recomputed_auxiliary_columns {
-            let descriptor = variant
-                .ordered_columns()
-                .get(usize::try_from(*column_ordinal).map_err(|_| {
-                    CommonProofGenerationInitializationError::Prover(
-                        CommonProofProverError::CountOverflow,
-                    )
-                })?)
-                .ok_or(CommonProofGenerationInitializationError::Prover(
-                    CommonProofProverError::InvalidColumn,
-                ))?;
-            let coefficient_count = trace_value_count
-                .checked_add(
-                    auxiliary_private_mask_tail_coefficient_count(variant, *column_ordinal)
-                        .map_err(CommonProofGenerationInitializationError::Prover)?
-                        .ok_or(CommonProofGenerationInitializationError::Prover(
-                            CommonProofProverError::InvalidMask,
-                        ))?,
-                )
-                .ok_or(CommonProofGenerationInitializationError::Prover(
-                    CommonProofProverError::CountOverflow,
-                ))?;
-            if quotient_source_plans
-                .insert(
+            .collect::<Result<BTreeMap<_, _>, CommonProofGenerationInitializationError>>()?;
+        let quotient_source_plans = relation_polynomial_shapes
+            .iter()
+            .map(|(column_ordinal, (value_type, coefficient_count))| {
+                Ok((
                     *column_ordinal,
-                    RowCodeWhirQuotientColumnSourcePlan::Recomputed {
-                        value_type: descriptor.value_type(),
-                        coefficient_count,
-                    },
-                )
-                .is_some()
-            {
-                return Err(CommonProofGenerationInitializationError::Prover(
-                    CommonProofProverError::InvalidColumn,
-                ));
-            }
-        }
+                    RowCodeWhirQuotientColumnSourcePlan::new(*value_type, *coefficient_count),
+                ))
+            })
+            .collect::<Result<BTreeMap<_, _>, CommonProofGenerationInitializationError>>()?;
         if quotient_source_plans
             .keys()
             .copied()
@@ -1789,19 +1587,14 @@ impl RowCodeWhirGenerationStoragePlan {
                 ProofExternalMemoryError::ResourceLimitExceeded,
             ),
         )?;
-        for (object_plan_index, object_plan) in object_plans.iter_mut().enumerate() {
-            let (issued_step, seal_step) = if object_plan_index < relation_object_plan_count {
-                (object_plan.issued_step(), object_plan.seal_step())
-            } else {
-                (quotient_materialization_step, quotient_materialization_step)
-            };
+        for object_plan in &mut object_plans {
             *object_plan = ProofExternalMemoryObjectPlan::new_with_maximum_append_count(
                 object_plan.object(),
                 object_plan.protection(),
                 object_plan.exact_byte_length(),
                 object_plan.maximum_append_count(),
-                issued_step,
-                seal_step,
+                quotient_materialization_step,
+                quotient_materialization_step,
                 retained_start_step,
             );
         }
@@ -1915,6 +1708,22 @@ impl RowCodeWhirGenerationStoragePlan {
                 ),
             );
         }
+        let final_relation_replay_step = step_count.checked_sub(1).ok_or(
+            CommonProofGenerationInitializationError::StoragePlan(
+                ProofExternalMemoryError::InvalidPlan,
+            ),
+        )?;
+        for object_plan in object_plans.iter_mut().take(replay_object_plan_count) {
+            *object_plan = ProofExternalMemoryObjectPlan::new_with_maximum_append_count(
+                object_plan.object(),
+                object_plan.protection(),
+                object_plan.exact_byte_length(),
+                object_plan.maximum_append_count(),
+                object_plan.issued_step(),
+                object_plan.seal_step(),
+                final_relation_replay_step,
+            );
+        }
         let (maximum_stored_byte_length, peak_live_object_count, largest_deletion_count) =
             exact_external_memory_liveness(&object_plans)?;
         let maximum_transaction_operation_count =
@@ -1933,8 +1742,7 @@ impl RowCodeWhirGenerationStoragePlan {
         .map_err(CommonProofGenerationInitializationError::StoragePlan)?;
         Ok(Self {
             external_memory_plan,
-            relation_polynomial_plans,
-            auxiliary_mask_tail_plans,
+            relation_polynomial_shapes,
             auxiliary_reconstruction_catalog,
             opened_polynomial_plans,
             quotient_transform_plans: quotient_transform_storage_plan.transform_plans,
@@ -2298,13 +2106,13 @@ pub(in crate::bgv::proof_suite) struct RowCodeWhirGenerationStateMachine {
     same_secret_source_manifest: SameSecretAuthenticatedSourceManifest,
     source_cursor: Option<CommonProofPreChallengeSourceCursor>,
     source_replay_identity_digest: Option<[u8; HASH_BYTE_LENGTH]>,
+    source_replay_identity_catalog: Option<CommonProofSourceReplayIdentityCatalog>,
     reversed_column_bindings: Vec<(u32, u32)>,
     next_reversed_column_binding_index: usize,
     loaded_source_polynomial_count: usize,
     pending_authenticated_source_read: Option<CommonProofAuthenticatedSourceReadRequest>,
     pending_replay_polynomial: Option<PendingRowCodeWhirReplayPolynomial>,
-    relation_replay_polynomial_plans: BTreeMap<u32, CommonProofReplayPolynomialPlan>,
-    auxiliary_mask_tail_plans: BTreeMap<u32, CommonProofReplayPolynomialPlan>,
+    relation_polynomial_shapes: BTreeMap<u32, (RelationColumnValueType, usize)>,
     auxiliary_reconstruction_catalog: CommonProofAuxiliaryColumnReconstructionCatalog,
     opened_replay_polynomial_plans:
         BTreeMap<RowCodeWhirOpenedPolynomialSource, CommonProofReplayPolynomialPlan>,
@@ -2515,13 +2323,13 @@ impl RowCodeWhirGenerationStateMachine {
             same_secret_source_manifest,
             source_cursor: Some(source_cursor),
             source_replay_identity_digest: None,
+            source_replay_identity_catalog: None,
             reversed_column_bindings,
             next_reversed_column_binding_index: 0,
             loaded_source_polynomial_count: 0,
             pending_authenticated_source_read: None,
             pending_replay_polynomial: None,
-            relation_replay_polynomial_plans: generation_storage_plan.relation_polynomial_plans,
-            auxiliary_mask_tail_plans: generation_storage_plan.auxiliary_mask_tail_plans,
+            relation_polynomial_shapes: generation_storage_plan.relation_polynomial_shapes,
             auxiliary_reconstruction_catalog: generation_storage_plan
                 .auxiliary_reconstruction_catalog,
             opened_replay_polynomial_plans: generation_storage_plan.opened_polynomial_plans,
@@ -2691,8 +2499,7 @@ impl RowCodeWhirGenerationStateMachine {
         request: CommonProofAuthenticatedSourceReadRequest,
         authenticated_bytes: Zeroizing<Box<[u8]>>,
     ) -> Result<(), CommonProofProverError> {
-        if self.phase != RowCodeWhirGenerationPhase::LoadingAuthenticatedSources
-            || self.pending_authenticated_source_read != Some(request)
+        if self.pending_authenticated_source_read != Some(request)
             || authenticated_bytes.len()
                 != usize::try_from(request.source_byte_length())
                     .map_err(|_| CommonProofProverError::CountOverflow)?
@@ -3084,6 +2891,11 @@ impl RowCodeWhirGenerationStateMachine {
         if self.phase == RowCodeWhirGenerationPhase::Complete {
             return Ok(CommonProofGenerationPoll::Complete);
         }
+        if self.pending_authenticated_source_read.is_some() {
+            return Err(CommonProofGenerationError::Prover(
+                CommonProofProverError::InvalidInput,
+            ));
+        }
         if let Some(writer) = self.active_replay_polynomial_writer.as_mut() {
             let polynomial = &self
                 .pending_replay_polynomial
@@ -3161,7 +2973,7 @@ impl RowCodeWhirGenerationStateMachine {
         }
 
         if let Some(active) = self.active_aggregate_source_read.as_mut() {
-            let complete = {
+            let progress = {
                 let ActiveExactSameSecretAggregateSourceRead {
                     reader,
                     source_range,
@@ -3169,6 +2981,11 @@ impl RowCodeWhirGenerationStateMachine {
                 } = active;
                 reader
                     .advance(
+                        self.source_polynomial_provider.as_deref_mut().ok_or(
+                            CommonProofGenerationError::Prover(
+                                CommonProofProverError::InvalidInput,
+                            ),
+                        )?,
                         self.external_memory_executor.as_mut().ok_or(
                             CommonProofGenerationError::Prover(
                                 CommonProofProverError::InvalidInput,
@@ -3179,58 +2996,71 @@ impl RowCodeWhirGenerationStateMachine {
                     )
                     .map_err(map_relation_polynomial_reader_error)?
             };
-            if complete {
-                let completed = self.active_aggregate_source_read.take().ok_or(
-                    CommonProofGenerationError::Prover(CommonProofProverError::InvalidInput),
-                )?;
-                self.exact_same_secret_aggregate_source
-                    .as_mut()
-                    .ok_or(CommonProofGenerationError::Prover(
-                        CommonProofProverError::InvalidInput,
-                    ))?
-                    .supply_source_range(
-                        completed.action,
-                        completed.source_range.into_source_polynomial(),
-                    )
-                    .map_err(CommonProofGenerationError::Prover)?;
+            if let Some(poll) = self
+                .pending_poll_for_relation_reader_progress(progress)
+                .map_err(CommonProofGenerationError::Prover)?
+            {
+                return Ok(poll);
             }
-            return Ok(CommonProofGenerationPoll::StorageTransactionCompleted);
+            let completed = self.active_aggregate_source_read.take().ok_or(
+                CommonProofGenerationError::Prover(CommonProofProverError::InvalidInput),
+            )?;
+            self.exact_same_secret_aggregate_source
+                .as_mut()
+                .ok_or(CommonProofGenerationError::Prover(
+                    CommonProofProverError::InvalidInput,
+                ))?
+                .supply_source_range(
+                    completed.action,
+                    completed.source_range.into_source_polynomial(),
+                )
+                .map_err(CommonProofGenerationError::Prover)?;
+            return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
         }
 
         if let Some(active) = self.active_replay_polynomial_reader.as_mut() {
-            let complete = active
+            let progress = active
                 .reader
                 .advance(
+                    self.source_polynomial_provider.as_deref_mut().ok_or(
+                        CommonProofGenerationError::Prover(CommonProofProverError::InvalidInput),
+                    )?,
                     self.external_memory_executor.as_mut().ok_or(
                         CommonProofGenerationError::Prover(CommonProofProverError::InvalidInput),
                     )?,
                     storage,
                 )
                 .map_err(map_relation_polynomial_reader_error)?;
-            if complete {
-                let active = self.active_replay_polynomial_reader.take().ok_or(
-                    CommonProofGenerationError::Prover(CommonProofProverError::InvalidInput),
-                )?;
-                let source = active
-                    .reader
-                    .finish()
-                    .map_err(CommonProofGenerationError::Prover)?;
-                match active.continuation {
-                    RowCodeWhirReplayReadContinuation::ReversedColumn {
+            if let Some(poll) = self
+                .pending_poll_for_relation_reader_progress(progress)
+                .map_err(CommonProofGenerationError::Prover)?
+            {
+                return Ok(poll);
+            }
+            let active = self.active_replay_polynomial_reader.take().ok_or(
+                CommonProofGenerationError::Prover(CommonProofProverError::InvalidInput),
+            )?;
+            let source = active
+                .reader
+                .finish()
+                .map_err(CommonProofGenerationError::Prover)?;
+            match active.continuation {
+                RowCodeWhirReplayReadContinuation::ReversedColumn {
+                    source_column_ordinal,
+                    reversed_column_ordinal,
+                } => {
+                    let reversed = construct_reversed_relation_column(
+                        &self.relation_plan_variant,
                         source_column_ordinal,
                         reversed_column_ordinal,
-                    } => {
-                        let reversed = construct_reversed_relation_column(
-                            &self.relation_plan_variant,
-                            source_column_ordinal,
-                            reversed_column_ordinal,
-                            source,
-                            coins,
-                            self.relation_context
-                                .maximum_fiat_shamir_candidate_draws_per_output,
-                        )
-                        .map_err(map_private_coin_error)?;
-                        self.begin_replay_polynomial_write(
+                        source,
+                        coins,
+                        self.relation_context
+                            .maximum_fiat_shamir_candidate_draws_per_output,
+                    )
+                    .map_err(map_private_coin_error)?;
+                    let _persisted = self
+                        .begin_replay_polynomial_write(
                             RowCodeWhirReplayPolynomialTarget::RelationColumn(
                                 reversed_column_ordinal,
                             ),
@@ -3238,127 +3068,134 @@ impl RowCodeWhirGenerationStateMachine {
                             RowCodeWhirReplayWriteContinuation::ReversedColumn,
                         )
                         .map_err(CommonProofGenerationError::Prover)?;
-                        self.next_reversed_column_binding_index = self
-                            .next_reversed_column_binding_index
-                            .checked_add(1)
-                            .ok_or(CommonProofGenerationError::Prover(
+                    self.next_reversed_column_binding_index = self
+                        .next_reversed_column_binding_index
+                        .checked_add(1)
+                        .ok_or(CommonProofGenerationError::Prover(
+                            CommonProofProverError::CountOverflow,
+                        ))?;
+                }
+                RowCodeWhirReplayReadContinuation::AuxiliaryColumn { column_ordinal } => {
+                    self.auxiliary_materialization
+                        .as_mut()
+                        .ok_or(CommonProofGenerationError::Prover(
+                            CommonProofProverError::InvalidColumn,
+                        ))?
+                        .supply_input(column_ordinal, source)
+                        .map_err(CommonProofGenerationError::Prover)?;
+                }
+                RowCodeWhirReplayReadContinuation::OutOfDomainOpening { claim_index } => {
+                    let claim = self
+                        .relation_plan_variant
+                        .ordered_opening_claims()
+                        .get(claim_index)
+                        .copied()
+                        .ok_or(CommonProofGenerationError::Prover(
+                            CommonProofProverError::InvalidOpening,
+                        ))?;
+                    let opening_point = self
+                        .opening_points
+                        .get(usize::try_from(claim.opening_point_ordinal()).map_err(|_| {
+                            CommonProofGenerationError::Prover(
                                 CommonProofProverError::CountOverflow,
-                            ))?;
-                    }
-                    RowCodeWhirReplayReadContinuation::AuxiliaryColumn { column_ordinal } => {
-                        self.auxiliary_materialization
-                            .as_mut()
-                            .ok_or(CommonProofGenerationError::Prover(
-                                CommonProofProverError::InvalidColumn,
-                            ))?
-                            .supply_input(column_ordinal, source)
-                            .map_err(CommonProofGenerationError::Prover)?;
-                    }
-                    RowCodeWhirReplayReadContinuation::OutOfDomainOpening { claim_index } => {
-                        let claim = self
-                            .relation_plan_variant
-                            .ordered_opening_claims()
-                            .get(claim_index)
-                            .copied()
-                            .ok_or(CommonProofGenerationError::Prover(
-                                CommonProofProverError::InvalidOpening,
-                            ))?;
-                        let opening_point = self
-                            .opening_points
-                            .get(usize::try_from(claim.opening_point_ordinal()).map_err(|_| {
-                                CommonProofGenerationError::Prover(
-                                    CommonProofProverError::CountOverflow,
-                                )
-                            })?)
-                            .copied()
-                            .ok_or(CommonProofGenerationError::Prover(
-                                CommonProofProverError::InvalidOpening,
-                            ))?;
-                        let evaluation = evaluate_opening_claim(&claim, &source, opening_point)
-                            .map_err(CommonProofGenerationError::Prover)?;
-                        if claim.source_class() == RelationOpeningSourceClass::BatchMask {
-                            if !self.opening_batch_mask_chunk_evaluations.is_empty() {
-                                return Err(CommonProofGenerationError::Prover(
-                                    CommonProofProverError::InvalidOpening,
-                                ));
-                            }
-                            self.opening_batch_mask_chunk_evaluations =
-                                evaluate_opening_batch_mask_chunks(
-                                    &source,
-                                    opening_point,
-                                    self.opening_batch_mask_chunk_evaluation_count()
-                                        .map_err(CommonProofGenerationError::Prover)?,
-                                )
-                                .map_err(CommonProofGenerationError::Prover)?;
-                        }
-                        self.out_of_domain_evaluations.push(evaluation);
-                        self.phase = RowCodeWhirGenerationPhase::EvaluatingOutOfDomainOpenings {
-                            next_claim_index: claim_index.checked_add(1).ok_or(
-                                CommonProofGenerationError::Prover(
-                                    CommonProofProverError::CountOverflow,
-                                ),
-                            )?,
-                        };
-                    }
-                    RowCodeWhirReplayReadContinuation::BoundTreeColumn {
-                        bound_tree_ordinal,
-                        column_position,
-                        column_ordinal,
-                    } => {
-                        if self.phase
-                            != RowCodeWhirGenerationPhase::MaterializingBoundAuthentications
-                            || bound_tree_ordinal != self.next_bound_tree_ordinal
-                            || column_position != self.bound_tree_evaluated_columns.len()
-                        {
+                            )
+                        })?)
+                        .copied()
+                        .ok_or(CommonProofGenerationError::Prover(
+                            CommonProofProverError::InvalidOpening,
+                        ))?;
+                    let evaluation = evaluate_opening_claim(&claim, &source, opening_point)
+                        .map_err(CommonProofGenerationError::Prover)?;
+                    if claim.source_class() == RelationOpeningSourceClass::BatchMask {
+                        if !self.opening_batch_mask_chunk_evaluations.is_empty() {
                             return Err(CommonProofGenerationError::Prover(
-                                CommonProofProverError::InvalidTree,
+                                CommonProofProverError::InvalidOpening,
                             ));
                         }
-                        let CommonProofSourcePolynomial::Base(coefficients) = source else {
-                            return Err(CommonProofGenerationError::Prover(
-                                CommonProofProverError::InvalidColumn,
-                            ));
-                        };
-                        let evaluation_domain_size = self
-                            .construction_plan
-                            .bound_trees
-                            .get(bound_tree_ordinal)
-                            .and_then(|tree| usize::try_from(tree.evaluation_domain_size).ok())
-                            .ok_or(CommonProofGenerationError::Prover(
+                        self.opening_batch_mask_chunk_evaluations =
+                            evaluate_opening_batch_mask_chunks(
+                                &source,
+                                opening_point,
+                                self.opening_batch_mask_chunk_evaluation_count()
+                                    .map_err(CommonProofGenerationError::Prover)?,
+                            )
+                            .map_err(CommonProofGenerationError::Prover)?;
+                    }
+                    self.out_of_domain_evaluations.push(evaluation);
+                    self.phase = RowCodeWhirGenerationPhase::EvaluatingOutOfDomainOpenings {
+                        next_claim_index: claim_index.checked_add(1).ok_or(
+                            CommonProofGenerationError::Prover(
                                 CommonProofProverError::CountOverflow,
-                            ))?;
-                        let evaluation_domain = ProofEvaluationDomain::new(
-                            evaluation_domain_size,
-                            self.relation_context.evaluation_coset_offset,
-                        )
+                            ),
+                        )?,
+                    };
+                }
+                RowCodeWhirReplayReadContinuation::BoundTreeColumn {
+                    bound_tree_ordinal,
+                    column_position,
+                    column_ordinal,
+                } => {
+                    if self.phase != RowCodeWhirGenerationPhase::MaterializingBoundAuthentications
+                        || bound_tree_ordinal != self.next_bound_tree_ordinal
+                        || column_position != self.bound_tree_evaluated_columns.len()
+                    {
+                        return Err(CommonProofGenerationError::Prover(
+                            CommonProofProverError::InvalidTree,
+                        ));
+                    }
+                    let CommonProofSourcePolynomial::Base(coefficients) = source else {
+                        return Err(CommonProofGenerationError::Prover(
+                            CommonProofProverError::InvalidColumn,
+                        ));
+                    };
+                    let evaluation_domain_size = self
+                        .construction_plan
+                        .bound_trees
+                        .get(bound_tree_ordinal)
+                        .and_then(|tree| usize::try_from(tree.evaluation_domain_size).ok())
+                        .ok_or(CommonProofGenerationError::Prover(
+                            CommonProofProverError::CountOverflow,
+                        ))?;
+                    let evaluation_domain = ProofEvaluationDomain::new(
+                        evaluation_domain_size,
+                        self.relation_context.evaluation_coset_offset,
+                    )
+                    .map_err(|_| {
+                        CommonProofGenerationError::Prover(CommonProofProverError::InvalidTree)
+                    })?;
+                    let evaluations = evaluation_domain
+                        .evaluate_base_polynomial(&coefficients)
                         .map_err(|_| {
-                            CommonProofGenerationError::Prover(CommonProofProverError::InvalidTree)
-                        })?;
-                        let evaluations = evaluation_domain
-                            .evaluate_base_polynomial(&coefficients)
-                            .map_err(|_| {
-                                CommonProofGenerationError::Prover(
-                                    CommonProofProverError::InvalidColumn,
-                                )
-                            })?;
-                        let has_stored_polynomial = self
-                            .relation_replay_polynomial_plans
-                            .contains_key(&column_ordinal);
-                        let has_private_mask_tail =
-                            self.auxiliary_mask_tail_plans.contains_key(&column_ordinal);
-                        if evaluations.len() != evaluation_domain_size
-                            || has_stored_polynomial == has_private_mask_tail
-                        {
-                            return Err(CommonProofGenerationError::Prover(
+                            CommonProofGenerationError::Prover(
                                 CommonProofProverError::InvalidColumn,
-                            ));
-                        }
-                        self.bound_tree_evaluated_columns
-                            .push(Zeroizing::new(evaluations));
+                            )
+                        })?;
+                    let is_bound_public_column = self
+                        .relation_plan_variant
+                        .ordered_columns()
+                        .get(usize::try_from(column_ordinal).map_err(|_| {
+                            CommonProofGenerationError::Prover(
+                                CommonProofProverError::CountOverflow,
+                            )
+                        })?)
+                        .is_some_and(|column| {
+                            matches!(column.origin(), RelationColumnOrigin::BoundTree { .. })
+                        });
+                    if evaluations.len() != evaluation_domain_size
+                        || !self
+                            .relation_polynomial_shapes
+                            .contains_key(&column_ordinal)
+                        || !is_bound_public_column
+                    {
+                        return Err(CommonProofGenerationError::Prover(
+                            CommonProofProverError::InvalidColumn,
+                        ));
                     }
+                    self.bound_tree_evaluated_columns
+                        .push(Zeroizing::new(evaluations));
                 }
             }
-            return Ok(CommonProofGenerationPoll::StorageTransactionCompleted);
+            return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
         }
 
         if self.active_quotient_transform.is_some() {
@@ -3371,7 +3208,7 @@ impl RowCodeWhirGenerationStateMachine {
                 ))?;
             return match phase {
                 ActiveRowCodeWhirQuotientTransformPhase::Reading => {
-                    let complete = self
+                    let progress = self
                         .active_quotient_transform
                         .as_mut()
                         .and_then(|active| active.reader.as_mut())
@@ -3379,6 +3216,11 @@ impl RowCodeWhirGenerationStateMachine {
                             CommonProofProverError::InvalidQuotient,
                         ))?
                         .advance(
+                            self.source_polynomial_provider.as_deref_mut().ok_or(
+                                CommonProofGenerationError::Prover(
+                                    CommonProofProverError::InvalidInput,
+                                ),
+                            )?,
                             self.external_memory_executor.as_mut().ok_or(
                                 CommonProofGenerationError::Prover(
                                     CommonProofProverError::InvalidInput,
@@ -3387,25 +3229,27 @@ impl RowCodeWhirGenerationStateMachine {
                             storage,
                         )
                         .map_err(map_relation_polynomial_reader_error)?;
-                    if complete {
-                        let active = self.active_quotient_transform.as_mut().ok_or(
-                            CommonProofGenerationError::Prover(
-                                CommonProofProverError::InvalidQuotient,
-                            ),
-                        )?;
-                        active.polynomial = Some(
-                            active
-                                .reader
-                                .take()
-                                .ok_or(CommonProofGenerationError::Prover(
-                                    CommonProofProverError::InvalidQuotient,
-                                ))?
-                                .finish()
-                                .map_err(CommonProofGenerationError::Prover)?,
-                        );
-                        active.phase = ActiveRowCodeWhirQuotientTransformPhase::Transforming;
+                    if let Some(poll) = self
+                        .pending_poll_for_relation_reader_progress(progress)
+                        .map_err(CommonProofGenerationError::Prover)?
+                    {
+                        return Ok(poll);
                     }
-                    Ok(CommonProofGenerationPoll::StorageTransactionCompleted)
+                    let active = self.active_quotient_transform.as_mut().ok_or(
+                        CommonProofGenerationError::Prover(CommonProofProverError::InvalidQuotient),
+                    )?;
+                    active.polynomial = Some(
+                        active
+                            .reader
+                            .take()
+                            .ok_or(CommonProofGenerationError::Prover(
+                                CommonProofProverError::InvalidQuotient,
+                            ))?
+                            .finish()
+                            .map_err(CommonProofGenerationError::Prover)?,
+                    );
+                    active.phase = ActiveRowCodeWhirQuotientTransformPhase::Transforming;
+                    Ok(CommonProofGenerationPoll::ArithmeticStepCompleted)
                 }
                 ActiveRowCodeWhirQuotientTransformPhase::Transforming => {
                     let active = self.active_quotient_transform.as_mut().ok_or(
@@ -3518,55 +3362,62 @@ impl RowCodeWhirGenerationStateMachine {
         }
 
         if let Some(reader) = self.active_phase_polynomial_reader.as_mut() {
-            let complete = reader
+            let progress = reader
                 .advance(
+                    self.source_polynomial_provider.as_deref_mut().ok_or(
+                        CommonProofGenerationError::Prover(CommonProofProverError::InvalidInput),
+                    )?,
                     self.external_memory_executor.as_mut().ok_or(
                         CommonProofGenerationError::Prover(CommonProofProverError::InvalidInput),
                     )?,
                     storage,
                 )
                 .map_err(map_relation_polynomial_reader_error)?;
-            if complete {
-                let reader = self.active_phase_polynomial_reader.take().ok_or(
-                    CommonProofGenerationError::Prover(CommonProofProverError::InvalidInput),
-                )?;
-                let polynomial = reader
-                    .finish()
-                    .map_err(CommonProofGenerationError::Prover)?;
-                match self.active_phase_polynomial_binding.take().ok_or(
-                    CommonProofGenerationError::Prover(CommonProofProverError::InvalidColumn),
-                )? {
-                    RowCodeWhirPhasePolynomialBinding::Relation {
+            if let Some(poll) = self
+                .pending_poll_for_relation_reader_progress(progress)
+                .map_err(CommonProofGenerationError::Prover)?
+            {
+                return Ok(poll);
+            }
+            let reader = self.active_phase_polynomial_reader.take().ok_or(
+                CommonProofGenerationError::Prover(CommonProofProverError::InvalidInput),
+            )?;
+            let polynomial = reader
+                .finish()
+                .map_err(CommonProofGenerationError::Prover)?;
+            match self.active_phase_polynomial_binding.take().ok_or(
+                CommonProofGenerationError::Prover(CommonProofProverError::InvalidColumn),
+            )? {
+                RowCodeWhirPhasePolynomialBinding::Relation {
+                    logical_block_index,
+                    column_ordinal,
+                    coefficient_chunk_ordinal,
+                } => self
+                    .copy_relation_phase_polynomial_chunk(
                         logical_block_index,
                         column_ordinal,
                         coefficient_chunk_ordinal,
-                    } => self
-                        .copy_relation_phase_polynomial_chunk(
-                            logical_block_index,
-                            column_ordinal,
-                            coefficient_chunk_ordinal,
-                            polynomial,
-                        )
-                        .map_err(CommonProofGenerationError::Prover)?,
-                    RowCodeWhirPhasePolynomialBinding::Opened {
+                        polynomial,
+                    )
+                    .map_err(CommonProofGenerationError::Prover)?,
+                RowCodeWhirPhasePolynomialBinding::Opened {
+                    logical_block_index,
+                    source,
+                    coefficient_chunk_ordinal,
+                } => self
+                    .copy_quotient_phase_polynomial_chunk(
                         logical_block_index,
                         source,
                         coefficient_chunk_ordinal,
-                    } => self
-                        .copy_quotient_phase_polynomial_chunk(
-                            logical_block_index,
-                            source,
-                            coefficient_chunk_ordinal,
-                            polynomial,
-                        )
-                        .map_err(CommonProofGenerationError::Prover)?,
-                }
-                self.next_phase_logical_chunk_index =
-                    self.next_phase_logical_chunk_index.checked_add(1).ok_or(
-                        CommonProofGenerationError::Prover(CommonProofProverError::CountOverflow),
-                    )?;
+                        polynomial,
+                    )
+                    .map_err(CommonProofGenerationError::Prover)?,
             }
-            return Ok(CommonProofGenerationPoll::StorageTransactionCompleted);
+            self.next_phase_logical_chunk_index =
+                self.next_phase_logical_chunk_index.checked_add(1).ok_or(
+                    CommonProofGenerationError::Prover(CommonProofProverError::CountOverflow),
+                )?;
+            return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
         }
 
         match self.phase {
@@ -3644,12 +3495,21 @@ impl RowCodeWhirGenerationStateMachine {
                                     CommonProofProverError::InvalidColumn,
                                 )
                             })?;
-                        self.begin_replay_polynomial_write(
-                            RowCodeWhirReplayPolynomialTarget::RelationColumn(column_ordinal),
-                            polynomial,
-                            RowCodeWhirReplayWriteContinuation::AuthenticatedSource,
-                        )
-                        .map_err(CommonProofGenerationError::Prover)?;
+                        let persisted = self
+                            .begin_replay_polynomial_write(
+                                RowCodeWhirReplayPolynomialTarget::RelationColumn(column_ordinal),
+                                polynomial,
+                                RowCodeWhirReplayWriteContinuation::AuthenticatedSource,
+                            )
+                            .map_err(CommonProofGenerationError::Prover)?;
+                        if !persisted {
+                            self.loaded_source_polynomial_count = self
+                                .loaded_source_polynomial_count
+                                .checked_add(1)
+                                .ok_or(CommonProofGenerationError::Prover(
+                                    CommonProofProverError::CountOverflow,
+                                ))?;
+                        }
                     }
                     CommonProofPreChallengeSourcePoll::Complete => {
                         if self.loaded_source_polynomial_count
@@ -3674,7 +3534,7 @@ impl RowCodeWhirGenerationStateMachine {
                                 CommonProofProverError::InvalidColumn,
                             ));
                         }
-                        let source_replay_identity_digest = self
+                        let source_replay_identity_catalog = self
                             .source_cursor
                             .as_mut()
                             .ok_or(CommonProofGenerationError::Prover(
@@ -3688,9 +3548,10 @@ impl RowCodeWhirGenerationStateMachine {
                             .map_err(CommonProofGenerationError::Prover)?;
                         self.source_replay_identity_digest =
                             Some(bind_same_secret_source_replay_identity(
-                                source_replay_identity_digest,
+                                source_replay_identity_catalog.aggregate_digest(),
                                 self.same_secret_source_manifest.catalog_hash(),
                             ));
+                        self.source_replay_identity_catalog = Some(source_replay_identity_catalog);
                         self.source_cursor = None;
                         self.phase = RowCodeWhirGenerationPhase::ConstructingReversedColumns;
                     }
@@ -3742,8 +3603,8 @@ impl RowCodeWhirGenerationStateMachine {
                 self.active_replay_polynomial_reader =
                     Some(ActiveRowCodeWhirReplayPolynomialReader {
                         reader: self
-                            .relation_polynomial_reader(source_column_ordinal)
-                            .map_err(CommonProofGenerationError::Prover)?,
+                            .relation_polynomial_reader(source_column_ordinal, coins)
+                            .map_err(map_private_coin_error)?,
                         continuation: RowCodeWhirReplayReadContinuation::ReversedColumn {
                             source_column_ordinal,
                             reversed_column_ordinal,
@@ -3810,8 +3671,8 @@ impl RowCodeWhirGenerationStateMachine {
                 Ok(CommonProofGenerationPoll::ArithmeticStepCompleted)
             }
             RowCodeWhirGenerationPhase::CommittingBasePhase => self
-                .poll_relation_phase_commitment(RowCodeWhirPhase::Base)
-                .map_err(CommonProofGenerationError::Prover),
+                .poll_relation_phase_commitment(RowCodeWhirPhase::Base, coins)
+                .map_err(map_private_coin_error),
             RowCodeWhirGenerationPhase::AwaitingAuthenticatedTranscriptPrefix => {
                 if self.construction_plan.base_phase.is_some()
                     != self.phase_root(RowCodeWhirPhase::Base).is_some()
@@ -3911,8 +3772,8 @@ impl RowCodeWhirGenerationStateMachine {
                         self.active_replay_polynomial_reader =
                             Some(ActiveRowCodeWhirReplayPolynomialReader {
                                 reader: self
-                                    .relation_polynomial_reader(column_ordinal)
-                                    .map_err(CommonProofGenerationError::Prover)?,
+                                    .relation_polynomial_reader(column_ordinal, coins)
+                                    .map_err(map_private_coin_error)?,
                                 continuation: RowCodeWhirReplayReadContinuation::AuxiliaryColumn {
                                     column_ordinal,
                                 },
@@ -3922,12 +3783,13 @@ impl RowCodeWhirGenerationStateMachine {
                         column_ordinal,
                         polynomial,
                     } => {
-                        self.begin_replay_polynomial_write(
-                            RowCodeWhirReplayPolynomialTarget::RelationColumn(column_ordinal),
-                            polynomial,
-                            RowCodeWhirReplayWriteContinuation::AuxiliaryColumn,
-                        )
-                        .map_err(CommonProofGenerationError::Prover)?;
+                        let _persisted = self
+                            .begin_replay_polynomial_write(
+                                RowCodeWhirReplayPolynomialTarget::RelationColumn(column_ordinal),
+                                polynomial,
+                                RowCodeWhirReplayWriteContinuation::AuxiliaryColumn,
+                            )
+                            .map_err(CommonProofGenerationError::Prover)?;
                     }
                     RowCodeWhirAuxiliaryRelationMaterializationAction::Progressed => {}
                     RowCodeWhirAuxiliaryRelationMaterializationAction::Complete => {
@@ -3943,8 +3805,8 @@ impl RowCodeWhirGenerationStateMachine {
                 Ok(CommonProofGenerationPoll::ArithmeticStepCompleted)
             }
             RowCodeWhirGenerationPhase::CommittingAuxiliaryPhase => self
-                .poll_relation_phase_commitment(RowCodeWhirPhase::Auxiliary)
-                .map_err(CommonProofGenerationError::Prover),
+                .poll_relation_phase_commitment(RowCodeWhirPhase::Auxiliary, coins)
+                .map_err(map_private_coin_error),
             RowCodeWhirGenerationPhase::PreparingQuotient => {
                 self.external_memory_executor
                     .as_mut()
@@ -4039,18 +3901,24 @@ impl RowCodeWhirGenerationStateMachine {
                         component_ordinal,
                         polynomial,
                     } => {
-                        self.begin_replay_polynomial_write(
-                            RowCodeWhirReplayPolynomialTarget::OpenedPolynomial(
-                                RowCodeWhirOpenedPolynomialSource::QuotientComponent {
+                        let persisted = self
+                            .begin_replay_polynomial_write(
+                                RowCodeWhirReplayPolynomialTarget::OpenedPolynomial(
+                                    RowCodeWhirOpenedPolynomialSource::QuotientComponent {
+                                        component_ordinal,
+                                    },
+                                ),
+                                CommonProofSourcePolynomial::Extension(polynomial),
+                                RowCodeWhirReplayWriteContinuation::QuotientComponent {
                                     component_ordinal,
                                 },
-                            ),
-                            CommonProofSourcePolynomial::Extension(polynomial),
-                            RowCodeWhirReplayWriteContinuation::QuotientComponent {
-                                component_ordinal,
-                            },
-                        )
-                        .map_err(CommonProofGenerationError::Prover)?;
+                            )
+                            .map_err(CommonProofGenerationError::Prover)?;
+                        if !persisted {
+                            return Err(CommonProofGenerationError::Prover(
+                                CommonProofProverError::InvalidColumn,
+                            ));
+                        }
                         Ok(CommonProofGenerationPoll::ArithmeticStepCompleted)
                     }
                     RowCodeWhirQuotientMaterializationAction::Complete => {
@@ -4072,13 +3940,9 @@ impl RowCodeWhirGenerationStateMachine {
                             ),
                         )?;
                         let column_ordinal = transform_key.column_ordinal();
-                        let source_is_stored = plan.source().stored_plan().is_some();
-                        if source_is_stored
-                            != self
-                                .relation_replay_polynomial_plans
-                                .contains_key(&column_ordinal)
-                            || source_is_stored
-                                == self.auxiliary_mask_tail_plans.contains_key(&column_ordinal)
+                        if !self
+                            .relation_polynomial_shapes
+                            .contains_key(&column_ordinal)
                         {
                             return Err(CommonProofGenerationError::Prover(
                                 CommonProofProverError::InvalidColumn,
@@ -4089,8 +3953,8 @@ impl RowCodeWhirGenerationStateMachine {
                             plan,
                             phase: ActiveRowCodeWhirQuotientTransformPhase::Reading,
                             reader: Some(
-                                self.relation_polynomial_reader(column_ordinal)
-                                    .map_err(CommonProofGenerationError::Prover)?,
+                                self.relation_polynomial_reader(column_ordinal, coins)
+                                    .map_err(map_private_coin_error)?,
                             ),
                             polynomial: None,
                             writer: None,
@@ -4137,14 +4001,22 @@ impl RowCodeWhirGenerationStateMachine {
                     ));
                 }
                 if let Some(opening_batch_mask) = opening_batch_mask {
-                    self.begin_replay_polynomial_write(
-                        RowCodeWhirReplayPolynomialTarget::OpenedPolynomial(
-                            RowCodeWhirOpenedPolynomialSource::OpeningBatchMask { mask_ordinal: 0 },
-                        ),
-                        CommonProofSourcePolynomial::Extension(opening_batch_mask),
-                        RowCodeWhirReplayWriteContinuation::OpeningBatchMask,
-                    )
-                    .map_err(CommonProofGenerationError::Prover)?;
+                    let persisted = self
+                        .begin_replay_polynomial_write(
+                            RowCodeWhirReplayPolynomialTarget::OpenedPolynomial(
+                                RowCodeWhirOpenedPolynomialSource::OpeningBatchMask {
+                                    mask_ordinal: 0,
+                                },
+                            ),
+                            CommonProofSourcePolynomial::Extension(opening_batch_mask),
+                            RowCodeWhirReplayWriteContinuation::OpeningBatchMask,
+                        )
+                        .map_err(CommonProofGenerationError::Prover)?;
+                    if !persisted {
+                        return Err(CommonProofGenerationError::Prover(
+                            CommonProofProverError::InvalidColumn,
+                        ));
+                    }
                 }
                 self.phase = RowCodeWhirGenerationPhase::CommittingQuotientPhase;
                 Ok(CommonProofGenerationPoll::ArithmeticStepCompleted)
@@ -4300,11 +4172,9 @@ impl RowCodeWhirGenerationStateMachine {
                 }
                 self.active_replay_polynomial_reader =
                     Some(ActiveRowCodeWhirReplayPolynomialReader {
-                        reader: self.polynomial_reader(target).map_err(|_| {
-                            CommonProofGenerationError::Prover(
-                                CommonProofProverError::InvalidOpening,
-                            )
-                        })?,
+                        reader: self
+                            .polynomial_reader(target, coins)
+                            .map_err(map_private_coin_error)?,
                         continuation: RowCodeWhirReplayReadContinuation::OutOfDomainOpening {
                             claim_index: next_claim_index,
                         },
@@ -4372,8 +4242,8 @@ impl RowCodeWhirGenerationStateMachine {
                     ))?
                     .next_action();
                 if let Some(action) = next_action {
-                    self.begin_exact_same_secret_aggregate_source_read(action)
-                        .map_err(CommonProofGenerationError::Prover)?;
+                    self.begin_exact_same_secret_aggregate_source_read(action, coins)
+                        .map_err(map_private_coin_error)?;
                     return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
                 }
                 let batch = self
@@ -4709,7 +4579,6 @@ impl RowCodeWhirGenerationStateMachine {
                         ))?
                         .finish_bound_tree_leaf_salts()
                         .map_err(CommonProofGenerationError::Prover)?;
-                    self.source_polynomial_provider = None;
                     let first_phase = self.construction_plan.phase_order.first().copied().ok_or(
                         CommonProofGenerationError::Prover(CommonProofProverError::InvalidInput),
                     )?;
@@ -4760,8 +4629,8 @@ impl RowCodeWhirGenerationStateMachine {
                     self.active_replay_polynomial_reader =
                         Some(ActiveRowCodeWhirReplayPolynomialReader {
                             reader: self
-                                .relation_polynomial_reader(column_ordinal)
-                                .map_err(CommonProofGenerationError::Prover)?,
+                                .relation_polynomial_reader(column_ordinal, coins)
+                                .map_err(map_private_coin_error)?,
                             continuation: RowCodeWhirReplayReadContinuation::BoundTreeColumn {
                                 bound_tree_ordinal: self.next_bound_tree_ordinal,
                                 column_position,
@@ -4813,11 +4682,11 @@ impl RowCodeWhirGenerationStateMachine {
                 Ok(CommonProofGenerationPoll::ArithmeticStepCompleted)
             }
             RowCodeWhirGenerationPhase::MaterializingBasePhaseOpenings => self
-                .poll_relation_phase_commitment(RowCodeWhirPhase::Base)
-                .map_err(CommonProofGenerationError::Prover),
+                .poll_relation_phase_commitment(RowCodeWhirPhase::Base, coins)
+                .map_err(map_private_coin_error),
             RowCodeWhirGenerationPhase::MaterializingAuxiliaryPhaseOpenings => self
-                .poll_relation_phase_commitment(RowCodeWhirPhase::Auxiliary)
-                .map_err(CommonProofGenerationError::Prover),
+                .poll_relation_phase_commitment(RowCodeWhirPhase::Auxiliary, coins)
+                .map_err(map_private_coin_error),
             RowCodeWhirGenerationPhase::MaterializingQuotientPhaseOpenings => self
                 .poll_quotient_phase_commitment()
                 .map_err(CommonProofGenerationError::Prover),
@@ -5041,8 +4910,7 @@ impl RowCodeWhirGenerationStateMachine {
                             .finish()
                             .map_err(CommonProofGenerationError::StoragePlan)?;
                         self.terminal_external_memory_usage = Some(usage);
-                        self.relation_replay_polynomial_plans.clear();
-                        self.auxiliary_mask_tail_plans.clear();
+                        self.relation_polynomial_shapes.clear();
                         self.auxiliary_reconstruction_challenges.clear();
                         self.opened_replay_polynomial_plans.clear();
                         self.quotient_transform_plans.clear();
@@ -5189,8 +5057,7 @@ impl RowCodeWhirGenerationStateMachine {
         self.phase_authenticated_columns = std::array::from_fn(|_| None);
         self.phase_opening_frontiers = std::array::from_fn(|_| None);
         self.exact_same_secret_phase_openings = None;
-        self.relation_replay_polynomial_plans.clear();
-        self.auxiliary_mask_tail_plans.clear();
+        self.relation_polynomial_shapes.clear();
         self.opened_replay_polynomial_plans.clear();
         self.quotient_transform_plans.clear();
         self.aggregate_source_table = None;
@@ -5202,92 +5069,179 @@ impl RowCodeWhirGenerationStateMachine {
         Ok(())
     }
 
-    fn relation_polynomial_reader(
+    fn relation_polynomial_reader<Coins>(
         &self,
         column_ordinal: u32,
-    ) -> Result<RowCodeWhirRelationPolynomialReader, CommonProofProverError> {
-        let stored_plan = self
-            .relation_replay_polynomial_plans
-            .get(&column_ordinal)
-            .copied();
-        let private_mask_tail_plan = self.auxiliary_mask_tail_plans.get(&column_ordinal).copied();
-        match (stored_plan, private_mask_tail_plan) {
-            (Some(plan), None) => CommonProofReplayPolynomialReader::new(plan)
-                .map(RowCodeWhirRelationPolynomialReader::Stored),
-            (None, Some(private_mask_tail_plan)) => {
-                if !self
-                    .auxiliary_reconstruction_catalog
-                    .contains(column_ordinal)
-                    || self.auxiliary_reconstruction_challenges.is_empty()
-                {
-                    return Err(CommonProofProverError::InvalidColumn);
-                }
-                let reconstruction = CommonProofAuxiliaryColumnReconstructionCursor::new(
-                    &self.relation_plan_variant,
-                    &self.relation_context,
-                    &self.auxiliary_reconstruction_challenges,
-                    &self.auxiliary_reconstruction_catalog,
-                    column_ordinal,
-                )?;
-                let input_plans = reconstruction
-                    .ordered_input_column_ordinals()
-                    .iter()
-                    .copied()
-                    .map(|input_column_ordinal| {
-                        self.relation_replay_polynomial_plans
-                            .get(&input_column_ordinal)
-                            .copied()
-                            .map(|plan| (input_column_ordinal, plan))
-                            .ok_or(CommonProofProverError::InvalidColumn)
-                    })
-                    .collect::<Result<BTreeMap<_, _>, _>>()?;
-                RecomputedAuxiliaryPolynomialReader::new(
-                    reconstruction,
-                    input_plans,
-                    private_mask_tail_plan,
+        coins: &mut Coins,
+    ) -> Result<RowCodeWhirRelationPolynomialReader, CommonProofPrivateCoinError<Coins::Error>>
+    where
+        Coins: crate::bgv::proof_suite::CommonProofPrivateCoinSource,
+    {
+        let private_mask =
+            crate::bgv::proof_suite::prover::replay_relation_private_mask_polynomial(
+                &self.relation_plan_variant,
+                column_ordinal,
+                coins,
+                crate::foundation::SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+            )?;
+        if let Ok(source_index) = self
+            .construction_plan
+            .requested_source_column_ordinals
+            .binary_search(&column_ordinal)
+        {
+            let descriptor = self
+                .relation_plan_variant
+                .ordered_columns()
+                .get(
+                    usize::try_from(column_ordinal)
+                        .map_err(|_| CommonProofProverError::CountOverflow)?,
                 )
-                .map(RowCodeWhirRelationPolynomialReader::RecomputedAuxiliary)
+                .cloned()
+                .ok_or(CommonProofProverError::InvalidColumn)?;
+            let catalog = self
+                .source_replay_identity_catalog
+                .as_ref()
+                .filter(|catalog| {
+                    catalog.len()
+                        == self
+                            .construction_plan
+                            .requested_source_column_ordinals
+                            .len()
+                })
+                .ok_or(CommonProofProverError::InvalidColumn)?;
+            return RecomputedSourcePolynomialReader::new(
+                self.source_request_context,
+                column_ordinal,
+                descriptor,
+                catalog
+                    .identity_at(source_index)
+                    .ok_or(CommonProofProverError::InvalidColumn)?,
+                self.relation_plan_variant.trace_domain_size(),
+                private_mask,
+            )
+            .map(RowCodeWhirRelationPolynomialReader::RecomputedSource)
+            .map_err(CommonProofPrivateCoinError::Prover);
+        }
+        if let Some((source_column_ordinal, _)) = self
+            .reversed_column_bindings
+            .iter()
+            .find(|(_, reversed_column_ordinal)| *reversed_column_ordinal == column_ordinal)
+            .copied()
+        {
+            return Ok(RowCodeWhirRelationPolynomialReader::RecomputedReversed(
+                RecomputedReversedPolynomialReader {
+                    source_reader: Box::new(
+                        self.relation_polynomial_reader(source_column_ordinal, coins)?,
+                    ),
+                    trace_domain_size: self.relation_plan_variant.trace_domain_size(),
+                    unmasked_reversed: None,
+                    private_mask,
+                },
+            ));
+        }
+        if self
+            .auxiliary_reconstruction_catalog
+            .contains(column_ordinal)
+            && !self.auxiliary_reconstruction_challenges.is_empty()
+        {
+            let reconstruction = CommonProofAuxiliaryColumnReconstructionCursor::new(
+                &self.relation_plan_variant,
+                &self.relation_context,
+                &self.auxiliary_reconstruction_challenges,
+                &self.auxiliary_reconstruction_catalog,
+                column_ordinal,
+            )?;
+            let input_readers = reconstruction
+                .ordered_input_column_ordinals()
+                .iter()
+                .copied()
+                .map(|input_column_ordinal| {
+                    Ok((
+                        input_column_ordinal,
+                        self.relation_polynomial_reader(input_column_ordinal, coins)?,
+                    ))
+                })
+                .collect::<Result<Vec<_>, CommonProofPrivateCoinError<Coins::Error>>>()?;
+            return RecomputedAuxiliaryPolynomialReader::new(
+                reconstruction,
+                input_readers,
+                private_mask,
+            )
+            .map(RowCodeWhirRelationPolynomialReader::RecomputedAuxiliary)
+            .map_err(CommonProofPrivateCoinError::Prover);
+        }
+        Err(CommonProofPrivateCoinError::Prover(
+            CommonProofProverError::InvalidColumn,
+        ))
+    }
+
+    fn pending_poll_for_relation_reader_progress(
+        &mut self,
+        progress: RowCodeWhirRelationPolynomialReaderPoll,
+    ) -> Result<Option<CommonProofGenerationPoll>, CommonProofProverError> {
+        match progress {
+            RowCodeWhirRelationPolynomialReaderPoll::ArithmeticStepCompleted => {
+                Ok(Some(CommonProofGenerationPoll::ArithmeticStepCompleted))
             }
-            _ => Err(CommonProofProverError::InvalidColumn),
+            RowCodeWhirRelationPolynomialReaderPoll::StorageTransactionCompleted => {
+                Ok(Some(CommonProofGenerationPoll::StorageTransactionCompleted))
+            }
+            RowCodeWhirRelationPolynomialReaderPoll::AuthenticatedSourceReadRequired => {
+                let request = self
+                    .source_polynomial_provider
+                    .as_deref()
+                    .ok_or(CommonProofProverError::InvalidInput)?
+                    .pending_authenticated_source_read_request()?
+                    .ok_or(CommonProofProverError::InvalidColumn)?;
+                if self
+                    .pending_authenticated_source_read
+                    .replace(request)
+                    .is_some()
+                {
+                    return Err(CommonProofProverError::InvalidInput);
+                }
+                Ok(Some(CommonProofGenerationPoll::ArithmeticStepCompleted))
+            }
+            RowCodeWhirRelationPolynomialReaderPoll::Complete => Ok(None),
         }
     }
 
-    fn polynomial_reader(
+    fn polynomial_reader<Coins>(
         &self,
         target: RowCodeWhirReplayPolynomialTarget,
-    ) -> Result<RowCodeWhirRelationPolynomialReader, CommonProofProverError> {
+        coins: &mut Coins,
+    ) -> Result<RowCodeWhirRelationPolynomialReader, CommonProofPrivateCoinError<Coins::Error>>
+    where
+        Coins: crate::bgv::proof_suite::CommonProofPrivateCoinSource,
+    {
         match target {
             RowCodeWhirReplayPolynomialTarget::RelationColumn(column_ordinal) => {
-                self.relation_polynomial_reader(column_ordinal)
+                self.relation_polynomial_reader(column_ordinal, coins)
             }
-            RowCodeWhirReplayPolynomialTarget::OpenedPolynomial(source) => self
-                .opened_replay_polynomial_plans
-                .get(&source)
-                .copied()
-                .ok_or(CommonProofProverError::InvalidColumn)
-                .and_then(CommonProofReplayPolynomialReader::new)
-                .map(RowCodeWhirRelationPolynomialReader::Stored),
+            RowCodeWhirReplayPolynomialTarget::OpenedPolynomial(source) => {
+                Ok(RowCodeWhirRelationPolynomialReader::Stored(
+                    CommonProofReplayPolynomialReader::new(
+                        self.opened_replay_polynomial_plans
+                            .get(&source)
+                            .copied()
+                            .ok_or(CommonProofProverError::InvalidColumn)?,
+                    )?,
+                ))
+            }
         }
     }
 
-    fn polynomial_range_reader(
+    fn polynomial_range_reader<Coins>(
         &self,
         target: RowCodeWhirReplayPolynomialTarget,
         coefficient_range: core::ops::Range<usize>,
-    ) -> Result<RowCodeWhirRelationPolynomialRangeReader, CommonProofProverError> {
+        coins: &mut Coins,
+    ) -> Result<RowCodeWhirRelationPolynomialRangeReader, CommonProofPrivateCoinError<Coins::Error>>
+    where
+        Coins: crate::bgv::proof_suite::CommonProofPrivateCoinSource,
+    {
         match target {
-            RowCodeWhirReplayPolynomialTarget::RelationColumn(column_ordinal)
-                if self
-                    .relation_replay_polynomial_plans
-                    .contains_key(&column_ordinal) =>
-            {
-                let plan = self.relation_replay_polynomial_plans[&column_ordinal];
-                CommonProofReplayPolynomialRangeReader::new(plan, coefficient_range)
-                    .map(RowCodeWhirRelationPolynomialRangeReader::Stored)
-            }
-            RowCodeWhirReplayPolynomialTarget::RelationColumn(column_ordinal)
-                if self.auxiliary_mask_tail_plans.contains_key(&column_ordinal) =>
-            {
+            RowCodeWhirReplayPolynomialTarget::RelationColumn(column_ordinal) => {
                 let descriptor = self
                     .relation_plan_variant
                     .ordered_columns()
@@ -5301,14 +5255,12 @@ impl RowCodeWhirGenerationStateMachine {
                         > usize::try_from(descriptor.source_degree_bound_exclusive())
                             .map_err(|_| CommonProofProverError::CountOverflow)?
                 {
-                    return Err(CommonProofProverError::InvalidColumn);
+                    return Err(CommonProofProverError::InvalidColumn.into());
                 }
-                Ok(
-                    RowCodeWhirRelationPolynomialRangeReader::RecomputedAuxiliary {
-                        reader: Some(self.relation_polynomial_reader(column_ordinal)?),
-                        coefficient_range,
-                    },
-                )
+                Ok(RowCodeWhirRelationPolynomialRangeReader::Recomputed {
+                    reader: Some(self.relation_polynomial_reader(column_ordinal, coins)?),
+                    coefficient_range,
+                })
             }
             RowCodeWhirReplayPolynomialTarget::OpenedPolynomial(source) => {
                 let plan = self
@@ -5318,19 +5270,23 @@ impl RowCodeWhirGenerationStateMachine {
                     .ok_or(CommonProofProverError::InvalidColumn)?;
                 CommonProofReplayPolynomialRangeReader::new(plan, coefficient_range)
                     .map(RowCodeWhirRelationPolynomialRangeReader::Stored)
+                    .map_err(CommonProofPrivateCoinError::Prover)
             }
-            _ => Err(CommonProofProverError::InvalidColumn),
         }
     }
 
-    fn begin_exact_same_secret_aggregate_source_read(
+    fn begin_exact_same_secret_aggregate_source_read<Coins>(
         &mut self,
         action: ExactSameSecretAggregateSourceAction,
-    ) -> Result<(), CommonProofProverError> {
+        coins: &mut Coins,
+    ) -> Result<(), CommonProofPrivateCoinError<Coins::Error>>
+    where
+        Coins: crate::bgv::proof_suite::CommonProofPrivateCoinSource,
+    {
         if self.phase != RowCodeWhirGenerationPhase::MaterializingAggregateSource
             || self.active_aggregate_source_read.is_some()
         {
-            return Err(CommonProofProverError::InvalidInput);
+            return Err(CommonProofProverError::InvalidInput.into());
         }
         let target = match action.target() {
             ExactSameSecretAggregateSourceTarget::RelationColumn { column_ordinal } => {
@@ -5341,34 +5297,11 @@ impl RowCodeWhirGenerationStateMachine {
             }
         };
         let (value_type, coefficient_count) = match target {
-            RowCodeWhirReplayPolynomialTarget::RelationColumn(column_ordinal) => {
-                if let Some(plan) = self
-                    .relation_replay_polynomial_plans
-                    .get(&column_ordinal)
-                    .copied()
-                {
-                    if self.auxiliary_mask_tail_plans.contains_key(&column_ordinal) {
-                        return Err(CommonProofProverError::InvalidColumn);
-                    }
-                    (plan.value_type(), plan.coefficient_count())
-                } else if self.auxiliary_mask_tail_plans.contains_key(&column_ordinal) {
-                    let descriptor = self
-                        .relation_plan_variant
-                        .ordered_columns()
-                        .get(
-                            usize::try_from(column_ordinal)
-                                .map_err(|_| CommonProofProverError::CountOverflow)?,
-                        )
-                        .ok_or(CommonProofProverError::InvalidColumn)?;
-                    (
-                        descriptor.value_type(),
-                        usize::try_from(descriptor.source_degree_bound_exclusive())
-                            .map_err(|_| CommonProofProverError::CountOverflow)?,
-                    )
-                } else {
-                    return Err(CommonProofProverError::InvalidColumn);
-                }
-            }
+            RowCodeWhirReplayPolynomialTarget::RelationColumn(column_ordinal) => self
+                .relation_polynomial_shapes
+                .get(&column_ordinal)
+                .copied()
+                .ok_or(CommonProofProverError::InvalidColumn)?,
             RowCodeWhirReplayPolynomialTarget::OpenedPolynomial(source) => {
                 let plan = self
                     .opened_replay_polynomial_plans
@@ -5386,10 +5319,13 @@ impl RowCodeWhirGenerationStateMachine {
             || coefficient_count != action.source_coefficient_count()
             || source_range_end > action.source_coefficient_count()
         {
-            return Err(CommonProofProverError::InvalidColumn);
+            return Err(CommonProofProverError::InvalidColumn.into());
         }
-        let reader =
-            self.polynomial_range_reader(target, action.source_range_start()..source_range_end)?;
+        let reader = self.polynomial_range_reader(
+            target,
+            action.source_range_start()..source_range_end,
+            coins,
+        )?;
         self.active_aggregate_source_read = Some(ActiveExactSameSecretAggregateSourceRead {
             action,
             reader,
@@ -5403,7 +5339,7 @@ impl RowCodeWhirGenerationStateMachine {
         target: RowCodeWhirReplayPolynomialTarget,
         polynomial: CommonProofSourcePolynomial,
         continuation: RowCodeWhirReplayWriteContinuation,
-    ) -> Result<(), CommonProofProverError> {
+    ) -> Result<bool, CommonProofProverError> {
         if self.active_replay_polynomial_writer.is_some()
             || self.pending_replay_polynomial.is_some()
         {
@@ -5411,24 +5347,41 @@ impl RowCodeWhirGenerationStateMachine {
         }
         let (plan, persisted_polynomial) = match target {
             RowCodeWhirReplayPolynomialTarget::RelationColumn(column_ordinal) => {
-                let stored_plan = self
-                    .relation_replay_polynomial_plans
+                let is_recomputed_relation_column = self
+                    .construction_plan
+                    .requested_source_column_ordinals
+                    .binary_search(&column_ordinal)
+                    .is_ok()
+                    || self
+                        .reversed_column_bindings
+                        .iter()
+                        .any(|(_, reversed)| *reversed == column_ordinal)
+                    || self
+                        .auxiliary_reconstruction_catalog
+                        .contains(column_ordinal);
+                let Some((expected_value_type, expected_coefficient_count)) = self
+                    .relation_polynomial_shapes
                     .get(&column_ordinal)
-                    .copied();
-                let private_mask_tail_plan =
-                    self.auxiliary_mask_tail_plans.get(&column_ordinal).copied();
-                match (stored_plan, private_mask_tail_plan) {
-                    (Some(plan), None) => (plan, polynomial),
-                    (None, Some(plan)) => (
-                        plan,
-                        extract_auxiliary_private_mask_tail(
-                            &self.relation_plan_variant,
-                            column_ordinal,
-                            &polynomial,
-                        )?,
-                    ),
-                    _ => return Err(CommonProofProverError::InvalidColumn),
+                    .copied()
+                else {
+                    return Err(CommonProofProverError::InvalidColumn);
+                };
+                let has_expected_shape = match (&polynomial, expected_value_type) {
+                    (
+                        CommonProofSourcePolynomial::Base(coefficients),
+                        RelationColumnValueType::BaseField,
+                    ) => coefficients.len() == expected_coefficient_count,
+                    (
+                        CommonProofSourcePolynomial::Extension(coefficients),
+                        RelationColumnValueType::ChallengeExtension,
+                    ) => coefficients.len() == expected_coefficient_count,
+                    _ => false,
+                };
+                if !is_recomputed_relation_column || !has_expected_shape {
+                    return Err(CommonProofProverError::InvalidColumn);
                 }
+                drop(polynomial);
+                return Ok(false);
             }
             RowCodeWhirReplayPolynomialTarget::OpenedPolynomial(source) => (
                 self.opened_replay_polynomial_plans
@@ -5448,7 +5401,7 @@ impl RowCodeWhirGenerationStateMachine {
             continuation,
         });
         self.active_replay_polynomial_writer = Some(writer);
-        Ok(())
+        Ok(true)
     }
 
     fn phase_root(&self, phase: RowCodeWhirPhase) -> Option<ColumnDigest> {
@@ -5510,7 +5463,7 @@ impl RowCodeWhirGenerationStateMachine {
         phase: RowCodeWhirPhase,
     ) -> Result<(), CommonProofProverError> {
         if !self.construction_plan.phase_order.contains(&phase) {
-            return Err(CommonProofProverError::InvalidInput);
+            return Err(CommonProofProverError::InvalidInput.into());
         }
         match phase {
             RowCodeWhirPhase::Base => {
@@ -5556,6 +5509,11 @@ impl RowCodeWhirGenerationStateMachine {
             self.begin_authenticated_phase_openings(next_phase)
         } else {
             self.finish_exact_same_secret_phase_openings()?;
+            self.source_polynomial_provider
+                .as_deref_mut()
+                .ok_or(CommonProofProverError::InvalidInput)?
+                .finish_source_replay()?;
+            self.source_polynomial_provider = None;
             self.phase = RowCodeWhirGenerationPhase::CompletingAggregateCommitment;
             Ok(())
         }
@@ -5922,12 +5880,16 @@ impl RowCodeWhirGenerationStateMachine {
         Ok(())
     }
 
-    fn poll_relation_phase_commitment(
+    fn poll_relation_phase_commitment<Coins>(
         &mut self,
         phase_role: RowCodeWhirPhase,
-    ) -> Result<CommonProofGenerationPoll, CommonProofProverError> {
+        coins: &mut Coins,
+    ) -> Result<CommonProofGenerationPoll, CommonProofPrivateCoinError<Coins::Error>>
+    where
+        Coins: crate::bgv::proof_suite::CommonProofPrivateCoinSource,
+    {
         if self.active_phase_commitment != Some(phase_role) {
-            return Err(CommonProofProverError::InvalidInput);
+            return Err(CommonProofProverError::InvalidInput.into());
         }
         let phase = match phase_role {
             RowCodeWhirPhase::Base => self.construction_plan.base_phase.as_ref(),
@@ -5987,7 +5949,7 @@ impl RowCodeWhirGenerationStateMachine {
                         self.advance_authenticated_phase_openings(RowCodeWhirPhase::Auxiliary)?;
                     }
                     (_, RowCodeWhirPhase::Quotient) => {
-                        return Err(CommonProofProverError::InvalidInput);
+                        return Err(CommonProofProverError::InvalidInput.into());
                     }
                 }
             } else {
@@ -6012,7 +5974,7 @@ impl RowCodeWhirGenerationStateMachine {
                 return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
             };
             self.active_phase_polynomial_reader =
-                Some(self.relation_polynomial_reader(chunk.column_ordinal)?);
+                Some(self.relation_polynomial_reader(chunk.column_ordinal, coins)?);
             self.active_phase_polynomial_binding =
                 Some(RowCodeWhirPhasePolynomialBinding::Relation {
                     logical_block_index,
@@ -6031,7 +5993,7 @@ impl RowCodeWhirGenerationStateMachine {
             ),
             ProofPrivacyMode::PublicOnly => {
                 if self.row_pad_seeds.is_some() {
-                    return Err(CommonProofProverError::InvalidInput);
+                    return Err(CommonProofProverError::InvalidInput.into());
                 }
                 RowCodeHighHalfSource::CanonicalPublicZeros
             }
@@ -6886,8 +6848,10 @@ mod tests {
         bgv::proof_suite::{
             ValidatedRelationPlanArtifact, compile_same_secret_relation_plan,
             external_memory::{
+                AUTOMATIC_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
                 MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_COUNT,
                 MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
+                NOMINAL_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
             },
             selected_relation_plan_check_context, selected_same_secret_relation_plan_input,
         },
@@ -6932,6 +6896,41 @@ mod tests {
             artifact.checked_context(),
         )
         .expect("the selected same-secret storage plan stays within absolute custody bounds");
+
+        assert_eq!(requirement.step_count(), 14_276);
+        assert_eq!(requirement.distinct_physical_object_count(), 29);
+        assert_eq!(requirement.object_lifecycle_count(), 10_231);
+        assert_eq!(requirement.peak_stored_byte_length(), 849_756_760);
+        assert_eq!(requirement.total_written_byte_length(), 6_219_960_920);
+        assert_eq!(requirement.total_read_byte_length(), 20_840_270_280);
+        assert_eq!(requirement.transaction_count(), 57_468);
+        assert_eq!(requirement.local_record_seal_invocation_count(), 31_518);
+        assert_eq!(
+            requirement.local_record_sealed_plaintext_byte_length(),
+            6_220_052_999,
+        );
+        assert_eq!(
+            requirement
+                .peak_stored_byte_length()
+                .saturating_sub(NOMINAL_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH),
+            581_321_304,
+        );
+        assert_eq!(
+            requirement
+                .peak_stored_byte_length()
+                .saturating_sub(AUTOMATIC_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH),
+            447_103_576,
+        );
+        assert_eq!(
+            MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH
+                .checked_sub(requirement.peak_stored_byte_length()),
+            Some(223_985_064),
+        );
+        assert!(
+            requirement.peak_stored_byte_length()
+                < NOMINAL_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH * 4,
+            "the reviewed scratch variance is bounded, not orders of magnitude",
+        );
 
         assert!(
             requirement.object_lifecycle_count() > requirement.distinct_physical_object_count(),
