@@ -105,7 +105,7 @@ pub(in crate::bgv::proof_suite::row_code_whir) enum StreamingAggregateWideCommit
         source_commitment: AggregateWideCommitment,
         pad_commitment: AggregateWideCommitment,
     },
-    Complete(StreamingAggregateWideCommitmentOutput),
+    Complete(Box<StreamingAggregateWideCommitmentOutput>),
 }
 
 struct DetachedOpeningPreparation {
@@ -309,7 +309,7 @@ pub(in crate::bgv::proof_suite::row_code_whir) enum StreamingAggregateWideProofB
 pub(in crate::bgv::proof_suite::row_code_whir) enum StreamingAggregateWideProofPoll {
     ArithmeticStepCompleted(StreamingAggregateWideProofBoundary),
     StorageTransactionCompleted(StreamingAggregateWideProofBoundary),
-    Complete(AggregateWideOpeningProof),
+    Complete(Box<AggregateWideOpeningProof>),
 }
 
 pub(in crate::bgv::proof_suite::row_code_whir) enum StreamingAggregateWideError<StorageError> {
@@ -533,7 +533,7 @@ impl StreamingAggregateWideCommitmentGeneration {
                 })?;
                 match preparation
                     .poll(challenger, executor, storage)
-                    .map_err(|error| StreamingAggregateWideError::Storage(error))?
+                    .map_err(StreamingAggregateWideError::Storage)?
                 {
                     DetachedOpeningPreparationPoll::StorageTransactionCompleted => {
                         Ok(StreamingAggregateWideCommitmentPoll::StorageTransactionCompleted)
@@ -599,7 +599,7 @@ impl StreamingAggregateWideCommitmentGeneration {
                 ))
             }
             StreamingAggregateWideCommitmentStage::Complete => {
-                Ok(StreamingAggregateWideCommitmentPoll::Complete(
+                Ok(StreamingAggregateWideCommitmentPoll::Complete(Box::new(
                     StreamingAggregateWideCommitmentOutput {
                         source_commitment: self.source_commitment.take().ok_or_else(|| {
                             Self::geometry_error("aggregate-wide completed source root is missing")
@@ -608,7 +608,7 @@ impl StreamingAggregateWideCommitmentGeneration {
                             Self::geometry_error("aggregate-wide completed prover data is missing")
                         })?,
                     },
-                ))
+                )))
             }
         }
     }
@@ -748,7 +748,7 @@ impl StreamingAggregateWideProofGeneration {
                 })?;
                 match compression
                     .poll(executor, storage)
-                    .map_err(|error| StreamingAggregateWideError::Storage(error))?
+                    .map_err(StreamingAggregateWideError::Storage)?
                 {
                     ExternalSourceCompressionPoll::StorageTransactionCompleted => Ok(
                         StreamingAggregateWideProofPoll::StorageTransactionCompleted(
@@ -834,7 +834,7 @@ impl StreamingAggregateWideProofGeneration {
                         executor,
                         storage,
                     )
-                    .map_err(|error| StreamingAggregateWideError::Storage(error))?;
+                    .map_err(StreamingAggregateWideError::Storage)?;
                 if complete {
                     self.stage = StreamingAggregateWideProofStage::ReadCurrentRoot;
                 } else {
@@ -860,9 +860,9 @@ impl StreamingAggregateWideProofGeneration {
                 };
                 match oracle_poll {
                     RecomputableOraclePoll::StorageTransactionCompleted => {
-                        return Err(Self::geometry_error(
+                        Err(Self::geometry_error(
                             "resident aggregate-wide root requested external storage",
-                        ));
+                        ))
                     }
                     RecomputableOraclePoll::ArithmeticStepCompleted => {
                         self.current_oracle_pass = Some(oracle_pass);
@@ -1072,7 +1072,7 @@ impl StreamingAggregateWideProofGeneration {
                 let query_index_schedule = challenger
                     .sampled_query_index_schedule()
                     .map_err(Self::geometry_error)?;
-                Ok(StreamingAggregateWideProofPoll::Complete(
+                Ok(StreamingAggregateWideProofPoll::Complete(Box::new(
                     AggregateWideOpeningProof::new(
                         self.committed_pad.commitment().clone(),
                         self.evaluations.take().ok_or_else(|| {
@@ -1085,7 +1085,7 @@ impl StreamingAggregateWideProofGeneration {
                         })?,
                         query_index_schedule,
                     ),
-                ))
+                )))
             }
         }
     }

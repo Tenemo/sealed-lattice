@@ -159,6 +159,11 @@ const ROW_CODE_WHIR_TRANSCRIPT_PREFIX_AUTHORITY_BINDING_DOMAIN: &str =
 const SAME_SECRET_SOURCE_REPLAY_IDENTITY_HASH_DOMAIN: &str =
     "sealed-lattice/row-code-whir/same-secret-source-replay-identity/v1";
 
+type RowCodeWhirGenerationPollResult<StorageError, CoinError, SinkError> = Result<
+    CommonProofGenerationPoll,
+    CommonProofGenerationError<StorageError, CoinError, SinkError>,
+>;
+
 /// Construction-selected authority for the relation-prefix transcript.
 ///
 /// Same-secret alone borrows an already verified VSS low-degree result and
@@ -167,7 +172,7 @@ const SAME_SECRET_SOURCE_REPLAY_IDENTITY_HASH_DOMAIN: &str =
 /// proof header and checked construction plan.
 pub(in crate::bgv::proof_suite) enum RowCodeWhirTranscriptPrefixAuthority {
     Direct,
-    VerifiedVss(ExactSameSecretTranscriptPrefixAuthorityBinding),
+    VerifiedVss(Box<ExactSameSecretTranscriptPrefixAuthorityBinding>),
 }
 
 impl RowCodeWhirTranscriptPrefixAuthority {
@@ -553,7 +558,7 @@ impl RowCodeWhirRelationPolynomialReader {
 enum RowCodeWhirRelationPolynomialRangeReader {
     Stored(CommonProofReplayPolynomialRangeReader),
     Recomputed {
-        reader: Option<RowCodeWhirRelationPolynomialReader>,
+        reader: Option<Box<RowCodeWhirRelationPolynomialReader>>,
         coefficient_range: core::ops::Range<usize>,
     },
 }
@@ -856,12 +861,11 @@ impl ActiveExactBoundTreeAuthenticationBuilder {
                     digest,
                 )?;
             }
-            if level == self.pending_left_digests.len() {
-                if leaf_index != self.leaf_count - 1
-                    || self.recomputed_root.replace(digest).is_some()
-                {
-                    return Err(CommonProofProverError::InvalidTree);
-                }
+            if level == self.pending_left_digests.len()
+                && (leaf_index != self.leaf_count - 1
+                    || self.recomputed_root.replace(digest).is_some())
+            {
+                return Err(CommonProofProverError::InvalidTree);
             }
             self.next_leaf_index = self
                 .next_leaf_index
@@ -1549,18 +1553,21 @@ impl RowCodeWhirGenerationStoragePlan {
         }
         let quotient_transform_storage_plan: super::RowCodeWhirQuotientTransformStoragePlan =
             plan_row_code_whir_quotient_transform_storage(
-                variant,
-                relation_context,
-                evaluation_domain,
-                &quotient_source_plans,
-                u32::try_from(object_plans.len()).map_err(|_| {
-                    CommonProofGenerationInitializationError::StoragePlan(
-                        ProofExternalMemoryError::ResourceLimitExceeded,
-                    )
-                })?,
-                FIRST_QUOTIENT_TRANSFORM_STEP,
-                MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
-                protection,
+                super::RowCodeWhirQuotientTransformStorageRequest {
+                    variant,
+                    relation_context,
+                    evaluation_domain,
+                    relation_replay_polynomial_plans: &quotient_source_plans,
+                    first_free_object_ordinal: u32::try_from(object_plans.len()).map_err(|_| {
+                        CommonProofGenerationInitializationError::StoragePlan(
+                            ProofExternalMemoryError::ResourceLimitExceeded,
+                        )
+                    })?,
+                    first_executor_step: FIRST_QUOTIENT_TRANSFORM_STEP,
+                    maximum_chunk_byte_length:
+                        MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+                    protection,
+                },
             )
             .map_err(CommonProofGenerationInitializationError::Prover)?;
         if quotient_transform_storage_plan
@@ -2873,10 +2880,7 @@ impl RowCodeWhirGenerationStateMachine {
         storage: &mut Storage,
         coins: &mut Coins,
         sink: &mut Sink,
-    ) -> Result<
-        CommonProofGenerationPoll,
-        CommonProofGenerationError<Storage::Error, Coins::Error, Sink::Error>,
-    >
+    ) -> RowCodeWhirGenerationPollResult<Storage::Error, Coins::Error, Sink::Error>
     where
         Storage: ProofExternalMemory,
         Coins: crate::bgv::proof_suite::CommonProofPrivateCoinSource,
@@ -4722,6 +4726,7 @@ impl RowCodeWhirGenerationStateMachine {
                         CommonProofGenerationError::Prover(CommonProofProverError::InvalidInput),
                     ),
                     StreamingAggregateWideCommitmentPoll::Complete(output) => {
+                        let output = *output;
                         let observed_commitment = self.aggregate_commitment.take().ok_or(
                             CommonProofGenerationError::Prover(
                                 CommonProofProverError::InvalidInput,
@@ -4786,7 +4791,7 @@ impl RowCodeWhirGenerationStateMachine {
                     }
                     StreamingAggregateWideProofPoll::Complete(proof) => {
                         self.aggregate_proof_generation = None;
-                        if self.aggregate_wide_opening_proof.replace(proof).is_some() {
+                        if self.aggregate_wide_opening_proof.replace(*proof).is_some() {
                             return Err(CommonProofGenerationError::Prover(
                                 CommonProofProverError::InvalidInput,
                             ));
@@ -5258,7 +5263,9 @@ impl RowCodeWhirGenerationStateMachine {
                     return Err(CommonProofProverError::InvalidColumn.into());
                 }
                 Ok(RowCodeWhirRelationPolynomialRangeReader::Recomputed {
-                    reader: Some(self.relation_polynomial_reader(column_ordinal, coins)?),
+                    reader: Some(Box::new(
+                        self.relation_polynomial_reader(column_ordinal, coins)?,
+                    )),
                     coefficient_range,
                 })
             }
@@ -5463,7 +5470,7 @@ impl RowCodeWhirGenerationStateMachine {
         phase: RowCodeWhirPhase,
     ) -> Result<(), CommonProofProverError> {
         if !self.construction_plan.phase_order.contains(&phase) {
-            return Err(CommonProofProverError::InvalidInput.into());
+            return Err(CommonProofProverError::InvalidInput);
         }
         match phase {
             RowCodeWhirPhase::Base => {
@@ -6405,8 +6412,13 @@ impl RowCodeWhirGenerationStateMachine {
             .partition_point(|column_index| *column_index < active_column_range.start);
         let following_active_position = traversal_indices
             .partition_point(|column_index| *column_index < active_column_range.end);
-        for active_position in first_active_position..following_active_position {
-            let column_index = traversal_indices[active_position];
+        for (active_position, column_index) in traversal_indices
+            .iter()
+            .copied()
+            .enumerate()
+            .take(following_active_position)
+            .skip(first_active_position)
+        {
             let value = encoded_row
                 .get(column_index)
                 .copied()

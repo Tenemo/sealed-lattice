@@ -24,8 +24,8 @@ use crate::bgv::{
 };
 
 enum ConsumedSetupPolynomialBoundPrerequisite {
-    PublicKeyShare(VerifiedSetupPolynomialLowDegreePrerequisite),
-    EvaluatorSources(VerifiedEvaluatorSourceLowDegreePrerequisite),
+    PublicKeyShare(Box<VerifiedSetupPolynomialLowDegreePrerequisite>),
+    EvaluatorSources(Box<VerifiedEvaluatorSourceLowDegreePrerequisite>),
 }
 
 /// One consumed set of positively verified inputs. This value is process local
@@ -50,7 +50,7 @@ impl ConsumedCommonProofVerificationInputs {
         prerequisite: VerifiedSetupPolynomialLowDegreePrerequisite,
     ) -> Result<PreparedCommonProofVerification, CommonProofRuntimeError> {
         self.prepare_row_code_whir(Some(
-            ConsumedSetupPolynomialBoundPrerequisite::PublicKeyShare(prerequisite),
+            ConsumedSetupPolynomialBoundPrerequisite::PublicKeyShare(Box::new(prerequisite)),
         ))
     }
 
@@ -59,7 +59,7 @@ impl ConsumedCommonProofVerificationInputs {
         prerequisite: VerifiedEvaluatorSourceLowDegreePrerequisite,
     ) -> Result<PreparedCommonProofVerification, CommonProofRuntimeError> {
         self.prepare_row_code_whir(Some(
-            ConsumedSetupPolynomialBoundPrerequisite::EvaluatorSources(prerequisite),
+            ConsumedSetupPolynomialBoundPrerequisite::EvaluatorSources(Box::new(prerequisite)),
         ))
     }
 

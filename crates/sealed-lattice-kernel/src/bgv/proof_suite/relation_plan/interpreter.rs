@@ -1930,13 +1930,17 @@ fn independent_truncated_polynomial_product(
                 .ok_or(RelationPlanError::CountOverflow)?,
         );
     let mut result = vec![ProofChallengeExtensionElement::ZERO; output_length];
-    for output_ordinal in 0..output_length {
+    for (output_ordinal, output) in result.iter_mut().enumerate() {
         let minimum_left_ordinal = output_ordinal.saturating_sub(right.len().saturating_sub(1));
         let maximum_left_ordinal = output_ordinal.min(left.len().saturating_sub(1));
-        for left_ordinal in minimum_left_ordinal..=maximum_left_ordinal {
+        for (left_ordinal, left_value) in left
+            .iter()
+            .enumerate()
+            .take(maximum_left_ordinal + 1)
+            .skip(minimum_left_ordinal)
+        {
             let right_ordinal = output_ordinal - left_ordinal;
-            result[output_ordinal] =
-                result[output_ordinal].add(left[left_ordinal].multiply(right[right_ordinal]));
+            *output = output.add(left_value.multiply(right[right_ordinal]));
         }
     }
     Ok(result)

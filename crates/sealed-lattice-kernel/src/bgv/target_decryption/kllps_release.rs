@@ -23,8 +23,8 @@ use crate::{
         evaluator::{
             engine::Ciphertext,
             noise_recurrence::{
-                TargetReleaseNoiseStage, direct_ballot_target_noise_bounds,
-                direct_ballot_target_release_noise_trace,
+                DirectBallotTargetReleaseNoiseInput, TargetReleaseNoiseStage,
+                direct_ballot_target_noise_bounds, direct_ballot_target_release_noise_trace,
             },
             top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL,
         },
@@ -3082,17 +3082,18 @@ pub(crate) fn selected_factor_four_flooding_bound() -> CanonicalResult<BigUint> 
             )
         })?;
     let flooding_coefficient_bound = factor_four_required_flooding_bound(&evaluation_error_bound)?;
-    let release_trace = direct_ballot_target_release_noise_trace(
-        u64::from(FOUNDATION_PROFILE.participant_count),
-        usize::from(FOUNDATION_PROFILE.participant_count),
-        usize::from(FOUNDATION_PROFILE.option_count),
-        MINIMUM_SCORE,
-        MAXIMUM_SCORE,
-        KLLPS_DENOMINATOR_CLEARING_FACTOR,
-        KLLPS_RECONSTRUCTION_THRESHOLD,
-        MAXIMUM_AUTHORIZED_COEFFICIENT_NORM,
-        &flooding_coefficient_bound,
-    )?;
+    let release_trace =
+        direct_ballot_target_release_noise_trace(DirectBallotTargetReleaseNoiseInput {
+            participant_count: u64::from(FOUNDATION_PROFILE.participant_count),
+            ballot_count: usize::from(FOUNDATION_PROFILE.participant_count),
+            option_count: usize::from(FOUNDATION_PROFILE.option_count),
+            minimum_score: MINIMUM_SCORE,
+            maximum_score: MAXIMUM_SCORE,
+            denominator_clearing_factor: KLLPS_DENOMINATOR_CLEARING_FACTOR,
+            reconstruction_threshold: KLLPS_RECONSTRUCTION_THRESHOLD,
+            maximum_authorized_coefficient_norm: MAXIMUM_AUTHORIZED_COEFFICIENT_NORM,
+            flooding_coefficient_bound: &flooding_coefficient_bound,
+        })?;
     let scaled_c2_left =
         factor_four_scaled_c2_left(&evaluation_error_bound, &flooding_coefficient_bound);
     if release_trace.last().is_none_or(|bound| {

@@ -1448,7 +1448,7 @@ fn candidate_view_refuses_wrong_cutoff_roster_order_and_package_order() {
     let mut board_verifier = fixture.verifier();
     assert_eq!(
         board_verifier
-            .verify_unordered_carriers(&[wrong_cutoff_list.clone()])
+            .verify_unordered_carriers(std::slice::from_ref(&wrong_cutoff_list))
             .into_result()
             .expect_err("candidate-list board ingestion rejects another cutoff"),
         RefusalReason::WrongHashOrRoot

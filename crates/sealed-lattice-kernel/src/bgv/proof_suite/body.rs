@@ -306,9 +306,7 @@ fn canonical_base_field_list(values: &[ProofTreeValue]) -> Result<CanonicalItem,
         .try_reserve_exact(values.len())
         .map_err(|_| ProofBodyError::AllocationLimitExceeded)?;
     for value in values {
-        let value = match value {
-            ProofTreeValue::Base(value) => value,
-        };
+        let ProofTreeValue::Base(value) = value;
         items.push(
             CanonicalItem::from_canonical_bytes(
                 CanonicalItemType::FieldElement,

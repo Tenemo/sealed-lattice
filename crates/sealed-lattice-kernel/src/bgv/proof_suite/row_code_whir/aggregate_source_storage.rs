@@ -274,7 +274,7 @@ fn recomputable_vector_read_transaction_count(
                 .map_err(|_| "aggregate folding factor exceeds u32".to_owned())?,
         )
         .ok_or_else(|| "aggregate encoded width overflowed".to_owned())?;
-    if element_count == 0 || element_count % encoded_width != 0 {
+    if element_count == 0 || !element_count.is_multiple_of(encoded_width) {
         return Err("aggregate recomputable vector does not split evenly".to_owned());
     }
     let segment_transaction_count = contiguous_element_transaction_count(
@@ -302,7 +302,7 @@ fn recomputable_table_read_transaction_count(
     if table_width == 0
         || !table_width.is_power_of_two()
         || column_element_count == 0
-        || column_element_count % encoded_width != 0
+        || !column_element_count.is_multiple_of(encoded_width)
     {
         return Err("aggregate recomputable table does not split evenly".to_owned());
     }

@@ -122,6 +122,27 @@ struct EncryptedEvaluatorHarness {
     constants: BTreeMap<[u8; 64], TestConstant>,
 }
 
+#[derive(Clone, Copy)]
+struct ExactErrorObservationContext<'a> {
+    categories: &'a [&'static str],
+    stages: &'a [EvaluatorCompilerStage],
+    case_name: &'a str,
+}
+
+impl<'a> ExactErrorObservationContext<'a> {
+    const fn new(
+        categories: &'a [&'static str],
+        stages: &'a [EvaluatorCompilerStage],
+        case_name: &'a str,
+    ) -> Self {
+        Self {
+            categories,
+            stages,
+            case_name,
+        }
+    }
+}
+
 struct ExactErrorLedger {
     expected_observation_counts: BTreeMap<&'static str, usize>,
     observation_counts: BTreeMap<&'static str, usize>,
@@ -152,19 +173,9 @@ impl ExactErrorLedger {
         observer: &ExactDecryptionErrorObserver,
         ciphertext: &Ciphertext,
         expected_lanes: &OracleRingValue,
-        categories: &[&'static str],
-        stages: &[EvaluatorCompilerStage],
-        case_name: &str,
+        context: ExactErrorObservationContext<'_>,
     ) {
-        self.observe_internal(
-            observer,
-            ciphertext,
-            expected_lanes,
-            categories,
-            stages,
-            case_name,
-            None,
-        );
+        self.observe_internal(observer, ciphertext, expected_lanes, context, None);
     }
 
     fn observe_with_symbolic_bound(
@@ -172,18 +183,14 @@ impl ExactErrorLedger {
         observer: &ExactDecryptionErrorObserver,
         ciphertext: &Ciphertext,
         expected_lanes: &OracleRingValue,
-        categories: &[&'static str],
-        stages: &[EvaluatorCompilerStage],
-        case_name: &str,
+        context: ExactErrorObservationContext<'_>,
         symbolic_bound: &SymbolicCiphertextBound,
     ) {
         self.observe_internal(
             observer,
             ciphertext,
             expected_lanes,
-            categories,
-            stages,
-            case_name,
+            context,
             Some(symbolic_bound),
         );
     }
@@ -193,11 +200,14 @@ impl ExactErrorLedger {
         observer: &ExactDecryptionErrorObserver,
         ciphertext: &Ciphertext,
         expected_lanes: &OracleRingValue,
-        categories: &[&'static str],
-        stages: &[EvaluatorCompilerStage],
-        case_name: &str,
+        context: ExactErrorObservationContext<'_>,
         symbolic_bound: Option<&SymbolicCiphertextBound>,
     ) {
+        let ExactErrorObservationContext {
+            categories,
+            stages,
+            case_name,
+        } = context;
         let expected_coefficients =
             encode_extension_lanes_to_plaintext_coefficients(expected_lanes)
                 .expect("expected encrypted semantic lanes encode");
@@ -483,28 +493,23 @@ fn production_evaluator_execution_releases_four_threshold_shares() {
             .expect("aggregate and authenticated evaluator store share one context"),
     )
     .expect("production evaluator execution begins");
-    loop {
-        match execution
-            .advance()
-            .expect("production evaluator polling advances")
-        {
-            SelectedEvaluatorExecutionProgress::StoreReadRequired(request) => {
-                let start = usize::try_from(request.store_byte_offset())
-                    .expect("requested store offset fits usize");
-                let end = start
-                    .checked_add(request.byte_length())
-                    .expect("requested store range fits usize");
-                execution
-                    .absorb_next_store_chunk(
-                        request.store_byte_offset(),
-                        store_bytes
-                            .get(start..end)
-                            .expect("poll requests an authenticated in-store range"),
-                    )
-                    .expect("exact authenticated evaluator-store range is accepted");
-            }
-            SelectedEvaluatorExecutionProgress::Complete => break,
-        }
+    while let SelectedEvaluatorExecutionProgress::StoreReadRequired(request) = execution
+        .advance()
+        .expect("production evaluator polling advances")
+    {
+        let start = usize::try_from(request.store_byte_offset())
+            .expect("requested store offset fits usize");
+        let end = start
+            .checked_add(request.byte_length())
+            .expect("requested store range fits usize");
+        execution
+            .absorb_next_store_chunk(
+                request.store_byte_offset(),
+                store_bytes
+                    .get(start..end)
+                    .expect("poll requests an authenticated in-store range"),
+            )
+            .expect("exact authenticated evaluator-store range is accepted");
     }
     let verified_execution = execution
         .finish()
@@ -983,9 +988,7 @@ impl EncryptedEvaluatorHarness {
                     &self.error_observer,
                     &ciphertext,
                     &expected_lanes,
-                    &["fresh character"],
-                    &[],
-                    case_name,
+                    ExactErrorObservationContext::new(&["fresh character"], &[], case_name),
                 );
             }
             let leaf = schedule
@@ -1053,9 +1056,7 @@ impl EncryptedEvaluatorHarness {
                     &self.error_observer,
                     &root.ciphertext,
                     &root.expected_lanes,
-                    &["product normalization"],
-                    &[],
-                    case_name,
+                    ExactErrorObservationContext::new(&["product normalization"], &[], case_name),
                 );
             }
         }
@@ -1160,9 +1161,7 @@ impl EncryptedEvaluatorHarness {
                     expected_registers[register_ordinal]
                         .as_ref()
                         .expect("selected input shadow is live"),
-                    &["compiler stage"],
-                    &stages,
-                    case_name,
+                    ExactErrorObservationContext::new(&["compiler stage"], &stages, case_name),
                     &symbolic_trace.pair_character_input_bounds()[register_ordinal],
                 );
             }
@@ -1240,9 +1239,11 @@ impl EncryptedEvaluatorHarness {
                             &self.error_observer,
                             &ciphertext_output,
                             &expected_output,
-                            &operation_categories,
-                            &stages,
-                            case_name,
+                            ExactErrorObservationContext::new(
+                                &operation_categories,
+                                &stages,
+                                case_name,
+                            ),
                             symbolic_bound,
                         );
                     }
@@ -1376,9 +1377,11 @@ impl EncryptedEvaluatorHarness {
                         &self.error_observer,
                         &switched,
                         expected_output,
-                        &["evaluator modulus switch"],
-                        &[],
-                        case_name,
+                        ExactErrorObservationContext::new(
+                            &["evaluator modulus switch"],
+                            &[],
+                            case_name,
+                        ),
                     );
                 }
                 while switched.level > target_level {
@@ -1389,9 +1392,11 @@ impl EncryptedEvaluatorHarness {
                             &self.error_observer,
                             &switched,
                             expected_output,
-                            &["evaluator modulus switch"],
-                            &[],
-                            case_name,
+                            ExactErrorObservationContext::new(
+                                &["evaluator modulus switch"],
+                                &[],
+                                case_name,
+                            ),
                         );
                     }
                 }
@@ -1425,9 +1430,11 @@ impl EncryptedEvaluatorHarness {
                         &self.error_observer,
                         &tensor,
                         expected_output,
-                        &["evaluator ciphertext multiplication"],
-                        &[],
-                        case_name,
+                        ExactErrorObservationContext::new(
+                            &["evaluator ciphertext multiplication"],
+                            &[],
+                            case_name,
+                        ),
                     );
                 }
                 let relinearized = relinearize(&tensor, &self.relinearization_key)
@@ -1437,9 +1444,11 @@ impl EncryptedEvaluatorHarness {
                         &self.error_observer,
                         &relinearized,
                         expected_output,
-                        &["evaluator relinearization"],
-                        &[],
-                        case_name,
+                        ExactErrorObservationContext::new(
+                            &["evaluator relinearization"],
+                            &[],
+                            case_name,
+                        ),
                     );
                 }
                 if instruction.opcode() == EvaluatorOpcode::CiphertextMultiplyRelinearizeAndDrop {
@@ -1565,9 +1574,7 @@ impl EncryptedEvaluatorHarness {
                 &self.error_observer,
                 &tensor,
                 &expected_lanes,
-                &["product multiplication"],
-                &[],
-                case_name,
+                ExactErrorObservationContext::new(&["product multiplication"], &[], case_name),
             );
         }
         let relinearized = relinearize(&tensor, &self.relinearization_key)
@@ -1577,9 +1584,7 @@ impl EncryptedEvaluatorHarness {
                 &self.error_observer,
                 &relinearized,
                 &expected_lanes,
-                &["product relinearization"],
-                &[],
-                case_name,
+                ExactErrorObservationContext::new(&["product relinearization"], &[], case_name),
             );
         }
         let mut output = EncryptedProductState {
@@ -1616,9 +1621,7 @@ fn switch_product_state_to_level(
                 error_observer,
                 &state.ciphertext,
                 &state.expected_lanes,
-                &["product modulus switch"],
-                &[],
-                case_name,
+                ExactErrorObservationContext::new(&["product modulus switch"], &[], case_name),
             );
         }
     }

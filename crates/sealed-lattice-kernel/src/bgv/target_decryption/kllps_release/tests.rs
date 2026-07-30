@@ -256,17 +256,17 @@ fn selected_eight_prime_target_basis_satisfies_the_exact_factor_four_theorem_bou
     );
     let release_traces_by_ballot_count = (1..=10)
         .map(|ballot_count| {
-            direct_ballot_target_release_noise_trace(
-                10,
+            direct_ballot_target_release_noise_trace(DirectBallotTargetReleaseNoiseInput {
+                participant_count: 10,
                 ballot_count,
-                20,
-                1,
-                10,
-                KLLPS_DENOMINATOR_CLEARING_FACTOR,
-                KLLPS_RECONSTRUCTION_THRESHOLD,
-                MAXIMUM_AUTHORIZED_COEFFICIENT_NORM,
-                &flooding_bound,
-            )
+                option_count: 20,
+                minimum_score: 1,
+                maximum_score: 10,
+                denominator_clearing_factor: KLLPS_DENOMINATOR_CLEARING_FACTOR,
+                reconstruction_threshold: KLLPS_RECONSTRUCTION_THRESHOLD,
+                maximum_authorized_coefficient_norm: MAXIMUM_AUTHORIZED_COEFFICIENT_NORM,
+                flooding_coefficient_bound: &flooding_bound,
+            })
             .expect("every accepted ballot count has an evaluator-to-release recurrence")
         })
         .collect::<Vec<_>>();

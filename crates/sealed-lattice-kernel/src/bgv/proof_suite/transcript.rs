@@ -141,10 +141,10 @@ impl ObservedPublicSamplerRow {
             u32::try_from(PROOF_CHALLENGE_EXTENSION_DEGREE)
                 .map_err(|_| TranscriptError::ChallengeCounterOverflow)?,
         );
-        if let Some(forbidden_cardinality_ceiling) = &forbidden_cardinality_ceiling {
-            if forbidden_cardinality_ceiling >= &target_cardinality {
-                return Err(TranscriptError::InvalidCommonProofSchedule);
-            }
+        if let Some(forbidden_cardinality_ceiling) = &forbidden_cardinality_ceiling
+            && forbidden_cardinality_ceiling >= &target_cardinality
+        {
+            return Err(TranscriptError::InvalidCommonProofSchedule);
         }
         Ok(Self)
     }
@@ -1623,6 +1623,17 @@ pub(crate) struct CommonProofTranscript {
     observed_public_sampler_trace: Option<ObservedPublicSamplerTrace>,
 }
 
+struct CommonProofTranscriptInitialization<'a> {
+    protocol_version: u16,
+    suite_id: [u8; 64],
+    row_code_whir_construction_plan_identity_hash: [u8; 64],
+    application_statement_schema_identifier: u16,
+    canonical_proof_object_header_bytes: &'a [u8],
+    relation_prefix_schedule: CommonProofRelationPrefixSchedule,
+    row_code_whir_transcript_operations: Option<Vec<RowCodeWhirTranscriptOperation>>,
+    row_code_whir_live_role_schedule: Option<RowCodeWhirLiveRoleSchedule>,
+}
+
 impl CommonProofTranscript {
     #[cfg(test)]
     pub(crate) fn new_relation_prefix(
@@ -1633,16 +1644,16 @@ impl CommonProofTranscript {
         canonical_proof_object_header_bytes: &[u8],
         schedule: CommonProofRelationPrefixSchedule,
     ) -> Result<Self, TranscriptError> {
-        Self::new_with_schedule(
+        Self::new_with_schedule(CommonProofTranscriptInitialization {
             protocol_version,
             suite_id,
             row_code_whir_construction_plan_identity_hash,
             application_statement_schema_identifier,
             canonical_proof_object_header_bytes,
-            schedule,
-            None,
-            None,
-        )
+            relation_prefix_schedule: schedule,
+            row_code_whir_transcript_operations: None,
+            row_code_whir_live_role_schedule: None,
+        })
     }
 
     pub(in crate::bgv::proof_suite) fn new_relation_prefix_for_construction_plan(
@@ -1664,28 +1675,33 @@ impl CommonProofTranscript {
             .map_err(|_| TranscriptError::InvalidCommonProofSchedule)?;
         let live_role_schedule =
             RowCodeWhirLiveRoleSchedule::for_construction_plan(construction_plan)?;
-        Self::new_with_schedule(
+        Self::new_with_schedule(CommonProofTranscriptInitialization {
             protocol_version,
             suite_id,
-            construction_plan_identity_hash,
+            row_code_whir_construction_plan_identity_hash: construction_plan_identity_hash,
             application_statement_schema_identifier,
             canonical_proof_object_header_bytes,
-            schedule,
-            Some(construction_plan.transcript_operations().to_vec()),
-            Some(live_role_schedule),
-        )
+            relation_prefix_schedule: schedule,
+            row_code_whir_transcript_operations: Some(
+                construction_plan.transcript_operations().to_vec(),
+            ),
+            row_code_whir_live_role_schedule: Some(live_role_schedule),
+        })
     }
 
     fn new_with_schedule(
-        protocol_version: u16,
-        suite_id: [u8; 64],
-        row_code_whir_construction_plan_identity_hash: [u8; 64],
-        application_statement_schema_identifier: u16,
-        canonical_proof_object_header_bytes: &[u8],
-        relation_prefix_schedule: CommonProofRelationPrefixSchedule,
-        row_code_whir_transcript_operations: Option<Vec<RowCodeWhirTranscriptOperation>>,
-        row_code_whir_live_role_schedule: Option<RowCodeWhirLiveRoleSchedule>,
+        initialization: CommonProofTranscriptInitialization<'_>,
     ) -> Result<Self, TranscriptError> {
+        let CommonProofTranscriptInitialization {
+            protocol_version,
+            suite_id,
+            row_code_whir_construction_plan_identity_hash,
+            application_statement_schema_identifier,
+            canonical_proof_object_header_bytes,
+            relation_prefix_schedule,
+            row_code_whir_transcript_operations,
+            row_code_whir_live_role_schedule,
+        } = initialization;
         let mut accepted_out_of_domain_points = Vec::new();
         accepted_out_of_domain_points
             .try_reserve_exact(usize::from(

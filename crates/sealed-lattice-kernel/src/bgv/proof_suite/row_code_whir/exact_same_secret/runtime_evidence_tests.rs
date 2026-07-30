@@ -6,8 +6,11 @@ use std::{
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
-use super::super::AUTOMATIC_ROW_CODE_WHIR_PROOF_ACCEPTANCE_BYTE_LENGTH;
-use super::exact_proof::ExactSameSecretVerificationMetrics;
+use super::super::{AUTOMATIC_ROW_CODE_WHIR_PROOF_ACCEPTANCE_BYTE_LENGTH, GOLDILOCKS_MODULUS};
+use super::exact_proof::{
+    ExactProofHostileMutationTarget, ExactProofHostileMutationTargetKind,
+    ExactSameSecretVerificationMetrics, exact_same_secret_hostile_mutation_targets,
+};
 use super::*;
 use crate::{
     bgv::{
@@ -39,6 +42,45 @@ struct FileBackedExternalMemory {
     next_file_identifier: u64,
     current_declared_byte_length: u64,
     maximum_declared_byte_length: u64,
+}
+
+#[derive(Clone)]
+struct ExactVerificationPrerequisiteFactory {
+    protocol_version: u16,
+    suite_identifier: [u8; Hash512::BYTE_LENGTH],
+    ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
+    action_context_hash: [u8; Hash512::BYTE_LENGTH],
+    public_setup_seed: [u8; Hash512::BYTE_LENGTH],
+    canonical_application_statement_bytes: Vec<u8>,
+}
+
+impl ExactVerificationPrerequisiteFactory {
+    fn from_sources(sources: &PreparedExactSameSecretGenerationSources) -> Self {
+        let request_context = sources
+            .source_polynomials
+            .exact_same_secret_evidence_request_context();
+        Self {
+            protocol_version: request_context.protocol_version(),
+            suite_identifier: request_context.suite_identifier(),
+            ceremony_context_hash: sources.authorization.ceremony_context_hash(),
+            action_context_hash: sources.action_context_hash,
+            public_setup_seed: sources.public_setup_seed,
+            canonical_application_statement_bytes: sources
+                .canonical_application_statement_bytes
+                .clone(),
+        }
+    }
+
+    fn build(&self) -> Result<VerifiedSameSecretLowDegreePrerequisite, String> {
+        test_same_secret_low_degree_prerequisite(
+            self.protocol_version,
+            self.suite_identifier,
+            self.ceremony_context_hash,
+            self.action_context_hash,
+            self.public_setup_seed,
+            &self.canonical_application_statement_bytes,
+        )
+    }
 }
 
 impl FileBackedExternalMemory {
@@ -566,6 +608,342 @@ fn verify_exact_same_secret_proof(
     final_verification.finish()
 }
 
+fn assert_exact_proof_refuses(
+    proof: &[u8],
+    prerequisite_factory: &ExactVerificationPrerequisiteFactory,
+    verification_context: ExactSameSecretVerificationContext,
+    label: &str,
+) {
+    let error = verify_exact_same_secret_proof(
+        proof,
+        prerequisite_factory
+            .build()
+            .expect("rebuild exact verification prerequisite"),
+        verification_context,
+    )
+    .expect_err(label);
+    eprintln!("exact hostile case refused ({label}): {error}");
+}
+
+fn flipped_exact_proof_target(proof: &[u8], target: &ExactProofHostileMutationTarget) -> Vec<u8> {
+    assert!(
+        !target.byte_range.is_empty() && target.byte_range.end <= proof.len(),
+        "hostile mutation target {} is outside the proof",
+        target.label
+    );
+    let mut mutated = proof.to_vec();
+    mutated[target.byte_range.start] ^= 1;
+    mutated
+}
+
+fn distinct_frontier_node_offsets(
+    proof: &[u8],
+    target: &ExactProofHostileMutationTarget,
+) -> (usize, usize) {
+    assert_eq!(target.kind, ExactProofHostileMutationTargetKind::Frontier);
+    assert_eq!(target.byte_range.len() % 64, 0);
+    let node_offsets = (target.byte_range.start..target.byte_range.end)
+        .step_by(64)
+        .collect::<Vec<_>>();
+    for (first_ordinal, first_offset) in node_offsets.iter().enumerate() {
+        for second_offset in &node_offsets[first_ordinal + 1..] {
+            if proof[*first_offset..*first_offset + 64]
+                != proof[*second_offset..*second_offset + 64]
+            {
+                return (*first_offset, *second_offset);
+            }
+        }
+    }
+    panic!(
+        "hostile frontier {} has no two distinct nodes",
+        target.label
+    );
+}
+
+fn run_exact_proof_hostile_byte_cases(
+    proof: &[u8],
+    prerequisite_factory: &ExactVerificationPrerequisiteFactory,
+    verification_context: &ExactSameSecretVerificationContext,
+    targets: &[ExactProofHostileMutationTarget],
+) {
+    let mut labels = std::collections::BTreeSet::new();
+    for target in targets {
+        assert!(
+            labels.insert(target.label.clone()),
+            "duplicate hostile label"
+        );
+        if target.kind == ExactProofHostileMutationTargetKind::Count
+            || target.label.contains("proof-of-work witness")
+        {
+            continue;
+        }
+        let mutated = flipped_exact_proof_target(proof, target);
+        assert_exact_proof_refuses(
+            &mutated,
+            prerequisite_factory,
+            verification_context.clone(),
+            &format!("altered {}", target.label),
+        );
+    }
+
+    for count_label in [
+        "out-of-domain evaluation count",
+        "quotient phase frontier count",
+        "bound tree 10 frontier count",
+        "aggregate-wide opening count",
+        "WHIR terminal fresh-pad frontier count",
+    ] {
+        let target = targets
+            .iter()
+            .find(|target| target.label == count_label)
+            .unwrap_or_else(|| panic!("missing hostile count target {count_label}"));
+        assert_eq!(target.kind, ExactProofHostileMutationTargetKind::Count);
+        assert_eq!(target.byte_range.len(), core::mem::size_of::<u32>());
+        let mut mutated = proof.to_vec();
+        mutated[target.byte_range.clone()].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert_exact_proof_refuses(
+            &mutated,
+            prerequisite_factory,
+            verification_context.clone(),
+            &format!("oversized {count_label}"),
+        );
+    }
+
+    let noncanonical_target = targets
+        .iter()
+        .find(|target| target.label == "terminal non-Boolean opening evaluation")
+        .expect("terminal non-Boolean mutation target");
+    assert_eq!(
+        noncanonical_target.kind,
+        ExactProofHostileMutationTargetKind::Field
+    );
+    let mut noncanonical = proof.to_vec();
+    noncanonical[noncanonical_target.byte_range.start
+        ..noncanonical_target.byte_range.start + core::mem::size_of::<u64>()]
+        .copy_from_slice(&GOLDILOCKS_MODULUS.to_le_bytes());
+    assert_exact_proof_refuses(
+        &noncanonical,
+        prerequisite_factory,
+        verification_context.clone(),
+        "noncanonical terminal field encoding",
+    );
+
+    for frontier_label in [
+        "base phase compact frontier",
+        "WHIR terminal source compact frontier",
+    ] {
+        let target = targets
+            .iter()
+            .find(|target| target.label == frontier_label)
+            .unwrap_or_else(|| panic!("missing hostile frontier target {frontier_label}"));
+        let (first_offset, second_offset) = distinct_frontier_node_offsets(proof, target);
+
+        let mut duplicated = proof.to_vec();
+        let first_node = duplicated[first_offset..first_offset + 64].to_vec();
+        duplicated[second_offset..second_offset + 64].copy_from_slice(&first_node);
+        assert_exact_proof_refuses(
+            &duplicated,
+            prerequisite_factory,
+            verification_context.clone(),
+            &format!("duplicated {frontier_label} node"),
+        );
+
+        let mut reordered = proof.to_vec();
+        let first_node = reordered[first_offset..first_offset + 64].to_vec();
+        let second_node = reordered[second_offset..second_offset + 64].to_vec();
+        reordered[first_offset..first_offset + 64].copy_from_slice(&second_node);
+        reordered[second_offset..second_offset + 64].copy_from_slice(&first_node);
+        assert_exact_proof_refuses(
+            &reordered,
+            prerequisite_factory,
+            verification_context.clone(),
+            &format!("reordered {frontier_label} nodes"),
+        );
+    }
+
+    let mut trailing = proof.to_vec();
+    trailing.push(0);
+    assert_exact_proof_refuses(
+        &trailing,
+        prerequisite_factory,
+        verification_context.clone(),
+        "trailing proof byte",
+    );
+    assert_exact_proof_refuses(
+        &proof[..proof.len() - 1],
+        prerequisite_factory,
+        verification_context.clone(),
+        "truncated terminal proof byte",
+    );
+    assert_exact_proof_refuses(
+        &proof[..verification_context
+            .canonical_proof_object_header_bytes
+            .len()],
+        prerequisite_factory,
+        verification_context.clone(),
+        "proof body omitted after canonical header",
+    );
+}
+
+fn run_exact_context_hostile_cases(
+    proof: &[u8],
+    prerequisite_factory: &ExactVerificationPrerequisiteFactory,
+    verification_context: &ExactSameSecretVerificationContext,
+) {
+    let application_slot = verification_context.application_slot;
+    let rebuild_context =
+        |protocol_version: u16,
+         application_slot: ProofApplicationSlot,
+         canonical_application_statement_bytes: Vec<u8>,
+         statement_owned_trees: Vec<VerifiedStatementOwnedTree>| {
+            ExactSameSecretVerificationContext::new(
+                protocol_version,
+                application_slot,
+                canonical_application_statement_bytes,
+                statement_owned_trees,
+            )
+        };
+
+    let mut wrong_suite_identifier = application_slot.suite_identifier().into_bytes();
+    wrong_suite_identifier[0] ^= 1;
+    let wrong_suite_slot = ProofApplicationSlot::new(
+        Hash512::from_bytes(wrong_suite_identifier),
+        application_slot.ceremony_context_hash(),
+        application_slot.action_context_hash(),
+        application_slot.application_statement_schema_identifier(),
+        application_slot.roster_position(),
+        application_slot.schedule_position(),
+        application_slot.producer_sequence(),
+    )
+    .expect("construct wrong-suite hostile slot");
+    assert_exact_proof_refuses(
+        proof,
+        prerequisite_factory,
+        rebuild_context(
+            verification_context.protocol_version,
+            wrong_suite_slot,
+            verification_context
+                .canonical_application_statement_bytes
+                .clone(),
+            verification_context.statement_owned_trees.clone(),
+        )
+        .expect("construct wrong-suite hostile context"),
+        "wrong suite identity",
+    );
+
+    let mut wrong_ceremony_context_hash = application_slot.ceremony_context_hash().into_bytes();
+    wrong_ceremony_context_hash[0] ^= 1;
+    let wrong_ceremony_slot = ProofApplicationSlot::new(
+        application_slot.suite_identifier(),
+        Hash512::from_bytes(wrong_ceremony_context_hash),
+        application_slot.action_context_hash(),
+        application_slot.application_statement_schema_identifier(),
+        application_slot.roster_position(),
+        application_slot.schedule_position(),
+        application_slot.producer_sequence(),
+    )
+    .expect("construct wrong-ceremony hostile slot");
+    assert_exact_proof_refuses(
+        proof,
+        prerequisite_factory,
+        rebuild_context(
+            verification_context.protocol_version,
+            wrong_ceremony_slot,
+            verification_context
+                .canonical_application_statement_bytes
+                .clone(),
+            verification_context.statement_owned_trees.clone(),
+        )
+        .expect("construct wrong-ceremony hostile context"),
+        "wrong manifest-bound ceremony context",
+    );
+
+    let mut wrong_action_context_hash = application_slot.action_context_hash().into_bytes();
+    wrong_action_context_hash[0] ^= 1;
+    let wrong_action_slot = ProofApplicationSlot::new(
+        application_slot.suite_identifier(),
+        application_slot.ceremony_context_hash(),
+        Hash512::from_bytes(wrong_action_context_hash),
+        application_slot.application_statement_schema_identifier(),
+        application_slot.roster_position(),
+        application_slot.schedule_position(),
+        application_slot.producer_sequence(),
+    )
+    .expect("construct wrong-action hostile slot");
+    assert_exact_proof_refuses(
+        proof,
+        prerequisite_factory,
+        rebuild_context(
+            verification_context.protocol_version,
+            wrong_action_slot,
+            verification_context
+                .canonical_application_statement_bytes
+                .clone(),
+            verification_context.statement_owned_trees.clone(),
+        )
+        .expect("construct wrong-action hostile context"),
+        "wrong action context",
+    );
+
+    assert_exact_proof_refuses(
+        proof,
+        prerequisite_factory,
+        rebuild_context(
+            verification_context.protocol_version + 1,
+            application_slot,
+            verification_context
+                .canonical_application_statement_bytes
+                .clone(),
+            verification_context.statement_owned_trees.clone(),
+        )
+        .expect("construct wrong-version hostile context"),
+        "wrong protocol version",
+    );
+
+    let mut wrong_statement = verification_context
+        .canonical_application_statement_bytes
+        .clone();
+    let final_statement_byte = wrong_statement
+        .last_mut()
+        .expect("exact application statement is nonempty");
+    *final_statement_byte ^= 1;
+    match rebuild_context(
+        verification_context.protocol_version,
+        application_slot,
+        wrong_statement,
+        verification_context.statement_owned_trees.clone(),
+    ) {
+        Ok(wrong_statement_context) => assert_exact_proof_refuses(
+            proof,
+            prerequisite_factory,
+            wrong_statement_context,
+            "altered canonical application statement",
+        ),
+        Err(error) => eprintln!("altered canonical application statement refused: {error}"),
+    }
+
+    for tree_ordinal in 0..verification_context.statement_owned_trees.len() {
+        let mut wrong_trees = verification_context.statement_owned_trees.clone();
+        let mut wrong_root = wrong_trees[tree_ordinal].expected_root();
+        wrong_root[0] ^= 1;
+        wrong_trees[tree_ordinal] = wrong_trees[tree_ordinal].with_test_expected_root(wrong_root);
+        assert_exact_proof_refuses(
+            proof,
+            prerequisite_factory,
+            rebuild_context(
+                verification_context.protocol_version,
+                application_slot,
+                verification_context
+                    .canonical_application_statement_bytes
+                    .clone(),
+                wrong_trees,
+            )
+            .expect("construct wrong-public-root hostile context"),
+            &format!("wrong public input root {tree_ordinal}"),
+        );
+    }
+}
+
 #[test]
 #[ignore = "manual exact aggregate-wide production proof round trip"]
 fn heavy_rust_kernel_exact_aggregate_wide_same_secret_proof_round_trip() {
@@ -576,6 +954,7 @@ fn heavy_rust_kernel_exact_aggregate_wide_same_secret_proof_round_trip() {
     } = production_same_secret_sources().expect("production exact runtime source");
     let prerequisite =
         production_same_secret_prerequisite(&sources).expect("production exact VSS prerequisite");
+    let prerequisite_factory = ExactVerificationPrerequisiteFactory::from_sources(&sources);
     let verification_prerequisite = production_same_secret_prerequisite(&sources)
         .expect("independent production exact VSS prerequisite");
     let application_slot = exact_application_slot(&sources).expect("exact application slot");
@@ -605,9 +984,12 @@ fn heavy_rust_kernel_exact_aggregate_wide_same_secret_proof_round_trip() {
     assert!(proof.len() <= AUTOMATIC_ROW_CODE_WHIR_PROOF_ACCEPTANCE_BYTE_LENGTH);
     assert!(checkpoint_count >= 6);
 
-    let metrics =
-        verify_exact_same_secret_proof(&proof, verification_prerequisite, verification_context)
-            .expect("fresh exact verifier accepts generated aggregate-wide proof");
+    let metrics = verify_exact_same_secret_proof(
+        &proof,
+        verification_prerequisite,
+        verification_context.clone(),
+    )
+    .expect("fresh exact verifier accepts generated aggregate-wide proof");
     assert_eq!(metrics.proof_byte_length, proof.len());
     assert!(metrics.maximum_resident_decoded_payload_byte_length < 64 * 1_024 * 1_024);
     assert_eq!(metrics.query_count, 387);
@@ -615,6 +997,23 @@ fn heavy_rust_kernel_exact_aggregate_wide_same_secret_proof_round_trip() {
         "exact aggregate-wide proof verified in {:?}",
         started_at.elapsed()
     );
+
+    let layout_prerequisite = prerequisite_factory
+        .build()
+        .expect("build exact hostile-layout prerequisite");
+    let hostile_targets = exact_same_secret_hostile_mutation_targets(
+        &layout_prerequisite,
+        verification_context.clone(),
+        &proof,
+    )
+    .expect("derive exact hostile mutation layout");
+    run_exact_proof_hostile_byte_cases(
+        &proof,
+        &prerequisite_factory,
+        &verification_context,
+        &hostile_targets,
+    );
+    run_exact_context_hostile_cases(&proof, &prerequisite_factory, &verification_context);
 
     release_production_same_secret_authority(authority_handle)
         .expect("release production exact runtime authority");

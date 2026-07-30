@@ -27,7 +27,7 @@ enum CommonProofStorageTransactionPass {
         request: ProofExternalMemoryTransactionRequest,
         copied_to_host: bool,
     },
-    Replaying(ProofExternalMemoryTransactionReplay),
+    Replaying(Box<ProofExternalMemoryTransactionReplay>),
     Cancelled,
 }
 
@@ -236,7 +236,7 @@ impl CommonProofStorageTransactionRuntime {
         };
         match ProofExternalMemoryTransactionReplay::new(request, read_results) {
             Ok(replay) => {
-                self.pass = CommonProofStorageTransactionPass::Replaying(replay);
+                self.pass = CommonProofStorageTransactionPass::Replaying(Box::new(replay));
                 Ok(())
             }
             Err(_) => {
@@ -262,7 +262,7 @@ impl CommonProofStorageTransactionRuntime {
         let CommonProofStorageTransactionPass::Replaying(replay) = previous else {
             unreachable!("the replay state was checked before replacement")
         };
-        let (active_operations, read_results) = replay
+        let (active_operations, read_results) = (*replay)
             .into_recycled_storage(&mut self.recycled_append_bytes)
             .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?;
         if !read_results.is_empty() {

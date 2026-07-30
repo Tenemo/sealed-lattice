@@ -66,7 +66,8 @@ pub(in crate::bgv::proof_suite) use generation_state::{
 };
 pub(in crate::bgv::proof_suite) use quotient_transform_storage::{
     RowCodeWhirQuotientColumnSourcePlan, RowCodeWhirQuotientColumnTransformPlan,
-    RowCodeWhirQuotientTransformStoragePlan, plan_row_code_whir_quotient_transform_storage,
+    RowCodeWhirQuotientTransformStoragePlan, RowCodeWhirQuotientTransformStorageRequest,
+    plan_row_code_whir_quotient_transform_storage,
 };
 #[cfg(test)]
 pub(crate) use verification::row_code_whir_verification_resident_memory_ceiling;

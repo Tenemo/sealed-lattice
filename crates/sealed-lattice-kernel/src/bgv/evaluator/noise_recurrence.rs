@@ -131,21 +131,36 @@ pub(crate) struct TargetReleaseNoiseStageBound {
     pub(crate) scaled_no_wrap_margin: BigInt,
 }
 
+pub(crate) struct DirectBallotTargetReleaseNoiseInput<'a> {
+    pub(crate) participant_count: u64,
+    pub(crate) ballot_count: usize,
+    pub(crate) option_count: usize,
+    pub(crate) minimum_score: u64,
+    pub(crate) maximum_score: u64,
+    pub(crate) denominator_clearing_factor: u64,
+    pub(crate) reconstruction_threshold: usize,
+    pub(crate) maximum_authorized_coefficient_norm: u64,
+    pub(crate) flooding_coefficient_bound: &'a BigUint,
+}
+
 /// Continues the exact evaluator target bound through positive BGV-to-BFV
 /// conversion, one partial share, flooding, authorized interpolation, full
 /// reconstruction, and plaintext decode. The final margin is exactly
 /// `2q - p * (4 * E)`, so positivity is equivalent to the strict C2 bound.
 pub(crate) fn direct_ballot_target_release_noise_trace(
-    participant_count: u64,
-    ballot_count: usize,
-    option_count: usize,
-    minimum_score: u64,
-    maximum_score: u64,
-    denominator_clearing_factor: u64,
-    reconstruction_threshold: usize,
-    maximum_authorized_coefficient_norm: u64,
-    flooding_coefficient_bound: &BigUint,
+    input: DirectBallotTargetReleaseNoiseInput<'_>,
 ) -> CanonicalResult<Vec<TargetReleaseNoiseStageBound>> {
+    let DirectBallotTargetReleaseNoiseInput {
+        participant_count,
+        ballot_count,
+        option_count,
+        minimum_score,
+        maximum_score,
+        denominator_clearing_factor,
+        reconstruction_threshold,
+        maximum_authorized_coefficient_norm,
+        flooding_coefficient_bound,
+    } = input;
     if denominator_clearing_factor == 0
         || reconstruction_threshold == 0
         || maximum_authorized_coefficient_norm == 0

@@ -1794,7 +1794,7 @@ impl AggregateWidePadClaim {
 }
 
 enum MaskedPlainState {
-    Initial(PrefixInitialSumcheckProver<ChallengeField, ChallengeField>),
+    Initial(Box<PrefixInitialSumcheckProver<ChallengeField, ChallengeField>>),
     Residual(SumcheckProver<ChallengeField, ChallengeField>),
 }
 
@@ -1857,7 +1857,7 @@ impl PrecommittedMaskedSumcheck {
         Challenger: FieldChallenger<ChallengeField> + GrindingChallenger<Witness = ChallengeField>,
     {
         Self::begin(
-            MaskedPlainState::Initial(plain_state),
+            MaskedPlainState::Initial(Box::new(plain_state)),
             masks,
             ChallengeField::ZERO,
             false,

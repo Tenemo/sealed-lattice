@@ -929,7 +929,7 @@ enum RuntimeCommonProofByteSink {
         stream_domain: super::CanonicalStreamDomain,
         limits: CommonProofRuntimeLimits,
     },
-    Active(PollableCommonProofByteSink),
+    Active(Box<PollableCommonProofByteSink>),
     Cancelled,
 }
 
@@ -945,7 +945,7 @@ impl RuntimeCommonProofByteSink {
                     declared_byte_length,
                     *limits,
                 )?;
-                *self = Self::Active(sink);
+                *self = Self::Active(Box::new(sink));
                 Ok(())
             }
             Self::Active(_) => Ok(()),
@@ -1092,12 +1092,12 @@ impl PreparedCommonProofGeneration {
             .row_code_whir_construction_plan()
             .requires_verified_vss_bound_prerequisite()
         {
-            RowCodeWhirTranscriptPrefixAuthority::VerifiedVss(
+            RowCodeWhirTranscriptPrefixAuthority::VerifiedVss(Box::new(
                 authorization.exact_same_secret_transcript_prefix_authority_binding(
                     &canonical_application_statement_bytes,
                     &relation_plan,
                 )?,
-            )
+            ))
         } else {
             RowCodeWhirTranscriptPrefixAuthority::Direct
         };
@@ -1135,7 +1135,7 @@ type OwnedCommonProofGenerationError = CommonProofGenerationError<
 pub(crate) enum CommonProofGenerationWorkerError {
     Runtime(CommonProofRuntimeError),
     AuthenticatedSource,
-    Generation(OwnedCommonProofGenerationError),
+    Generation,
     Cleanup,
 }
 
@@ -1947,7 +1947,7 @@ impl CommonProofGenerationWorker {
                 | PollableCommonProofByteSinkError::ChunkAwaitingCommit
                 | PollableCommonProofByteSinkError::ChunkAwaitingReadback,
             )) => self.poll(),
-            Err(error) => Err(CommonProofGenerationWorkerError::Generation(error)),
+            Err(_) => Err(CommonProofGenerationWorkerError::Generation),
             Ok(CommonProofGenerationPoll::StorageTransactionCompleted) => self.progress_poll(),
             Ok(CommonProofGenerationPoll::AuthenticatedTranscriptPrefixRequired) => {
                 Ok(CommonProofGenerationWorkerPoll::AuthenticatedTranscriptPrefixRequired)
@@ -2075,8 +2075,8 @@ impl CommonProofGenerationWorker {
                     .poll(&mut self.storage, &mut self.private_coins, &mut self.output);
             match result {
                 Ok(_) => self.storage.transaction_completed()?,
-                Err(error) => {
-                    return Err(CommonProofGenerationWorkerError::Generation(error));
+                Err(_) => {
+                    return Err(CommonProofGenerationWorkerError::Generation);
                 }
             }
             self.generation_transaction_must_replay_before_cancellation = false;

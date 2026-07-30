@@ -8,6 +8,8 @@ use std::collections::BTreeMap;
 
 #[cfg(test)]
 use std::collections::BTreeSet;
+#[cfg(test)]
+use std::ops::Range;
 
 use p3_challenger::CanObserve;
 use p3_field::{Field, PrimeCharacteristicRing, PrimeField64};
@@ -4677,6 +4679,313 @@ fn checked_exact_proof_prefix_byte_length(
     Ok(byte_length)
 }
 
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ExactProofHostileMutationTargetKind {
+    Count,
+    Field,
+    Frontier,
+    Header,
+    Root,
+}
+
+#[cfg(test)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct ExactProofHostileMutationTarget {
+    pub(super) label: String,
+    pub(super) byte_range: Range<usize>,
+    pub(super) kind: ExactProofHostileMutationTargetKind,
+}
+
+#[cfg(test)]
+struct ExactProofMutationScanner<'a> {
+    canonical_proof: &'a [u8],
+    offset: usize,
+    targets: Vec<ExactProofHostileMutationTarget>,
+}
+
+#[cfg(test)]
+impl<'a> ExactProofMutationScanner<'a> {
+    fn new(canonical_proof: &'a [u8], header_byte_length: usize) -> Result<Self, String> {
+        if header_byte_length == 0 || header_byte_length >= canonical_proof.len() {
+            return Err("exact mutation scan has an invalid proof-object header length".to_owned());
+        }
+        Ok(Self {
+            canonical_proof,
+            offset: header_byte_length,
+            targets: vec![ExactProofHostileMutationTarget {
+                label: "proof-object header".to_owned(),
+                byte_range: 0..header_byte_length,
+                kind: ExactProofHostileMutationTargetKind::Header,
+            }],
+        })
+    }
+
+    fn take_bytes(&mut self, byte_length: usize, label: &str) -> Result<Range<usize>, String> {
+        let following_offset = self
+            .offset
+            .checked_add(byte_length)
+            .filter(|following_offset| *following_offset <= self.canonical_proof.len())
+            .ok_or_else(|| format!("exact mutation scan truncated at {label}"))?;
+        let byte_range = self.offset..following_offset;
+        self.offset = following_offset;
+        Ok(byte_range)
+    }
+
+    fn record_bytes(
+        &mut self,
+        byte_length: usize,
+        label: impl Into<String>,
+        kind: ExactProofHostileMutationTargetKind,
+    ) -> Result<Range<usize>, String> {
+        let label = label.into();
+        let byte_range = self.take_bytes(byte_length, &label)?;
+        if byte_range.is_empty() {
+            return Err(format!("exact mutation target {label} is empty"));
+        }
+        self.targets.push(ExactProofHostileMutationTarget {
+            label,
+            byte_range: byte_range.clone(),
+            kind,
+        });
+        Ok(byte_range)
+    }
+
+    fn read_count(&mut self, label: impl Into<String>) -> Result<usize, String> {
+        let label = label.into();
+        let byte_range = self.record_bytes(
+            core::mem::size_of::<u32>(),
+            label,
+            ExactProofHostileMutationTargetKind::Count,
+        )?;
+        Ok(u32::from_le_bytes(
+            self.canonical_proof[byte_range]
+                .try_into()
+                .map_err(|_| "exact mutation count has the wrong width".to_owned())?,
+        ) as usize)
+    }
+
+    fn record_field_bytes(
+        &mut self,
+        byte_length: usize,
+        label: impl Into<String>,
+    ) -> Result<Range<usize>, String> {
+        self.record_bytes(
+            byte_length,
+            label,
+            ExactProofHostileMutationTargetKind::Field,
+        )
+    }
+
+    fn finish(self) -> Result<Vec<ExactProofHostileMutationTarget>, String> {
+        if self.offset != self.canonical_proof.len() {
+            return Err(format!(
+                "exact mutation scan left {} trailing proof bytes",
+                self.canonical_proof.len() - self.offset
+            ));
+        }
+        Ok(self.targets)
+    }
+}
+
+#[cfg(test)]
+fn exact_phase_label(phase: RowCodeWhirPhase) -> &'static str {
+    match phase {
+        RowCodeWhirPhase::Base => "base",
+        RowCodeWhirPhase::Auxiliary => "auxiliary",
+        RowCodeWhirPhase::Quotient => "quotient",
+    }
+}
+
+/// Replays the production construction and the transported counts to locate
+/// hostile-test mutations. No producer-supplied coordinate or width determines
+/// the layout.
+#[cfg(test)]
+pub(super) fn exact_same_secret_hostile_mutation_targets(
+    prerequisite: &VerifiedSameSecretLowDegreePrerequisite,
+    verification_context: ExactSameSecretVerificationContext,
+    canonical_proof: &[u8],
+) -> Result<Vec<ExactProofHostileMutationTarget>, String> {
+    let canonical_header = verification_context
+        .canonical_proof_object_header_bytes
+        .clone();
+    if !canonical_proof.starts_with(&canonical_header) {
+        return Err("exact mutation scan proof has the wrong canonical header".to_owned());
+    }
+    let prepared_relation = prepare_exact_same_secret_relation(prerequisite, verification_context)?;
+    let construction_plan = &prepared_relation
+        .verified_relation
+        .row_code_whir_construction_plan;
+    let shape = prepared_relation.verified_relation.proof_shape;
+    let mut scanner = ExactProofMutationScanner::new(canonical_proof, canonical_header.len())?;
+
+    let wire_magic = scanner.record_bytes(
+        EXACT_PROOF_WIRE_MAGIC.len(),
+        "exact family wire magic",
+        ExactProofHostileMutationTargetKind::Header,
+    )?;
+    if canonical_proof[wire_magic] != *EXACT_PROOF_WIRE_MAGIC {
+        return Err("exact mutation scan found the wrong family wire magic".to_owned());
+    }
+    for phase in &construction_plan.phase_order {
+        scanner.record_bytes(
+            64,
+            format!("{} phase root", exact_phase_label(*phase)),
+            ExactProofHostileMutationTargetKind::Root,
+        )?;
+    }
+
+    let out_of_domain_count = scanner.read_count("out-of-domain evaluation count")?;
+    if out_of_domain_count != shape.opening_claim_count {
+        return Err("exact mutation scan found the wrong opening-claim count".to_owned());
+    }
+    let extension_byte_length = PROOF_CHALLENGE_EXTENSION_DEGREE
+        .checked_mul(core::mem::size_of::<u64>())
+        .ok_or_else(|| "exact mutation extension width overflowed".to_owned())?;
+    for opening_ordinal in 0..out_of_domain_count {
+        if opening_ordinal == 0 || opening_ordinal + 1 == out_of_domain_count {
+            scanner.record_field_bytes(
+                extension_byte_length,
+                if opening_ordinal + 1 == out_of_domain_count {
+                    "terminal relation evaluation".to_owned()
+                } else {
+                    format!("relation evaluation {opening_ordinal}")
+                },
+            )?;
+        } else {
+            scanner.take_bytes(extension_byte_length, "relation evaluation")?;
+        }
+    }
+    for mask_chunk_ordinal in 0..EXACT_OPENING_BATCH_MASK_CHUNK_COUNT {
+        if mask_chunk_ordinal == 0 || mask_chunk_ordinal + 1 == EXACT_OPENING_BATCH_MASK_CHUNK_COUNT
+        {
+            scanner.record_field_bytes(
+                extension_byte_length,
+                format!("opening-batch mask evaluation {mask_chunk_ordinal}"),
+            )?;
+        } else {
+            scanner.take_bytes(extension_byte_length, "opening-batch mask evaluation")?;
+        }
+    }
+    scanner.record_bytes(
+        64,
+        "aggregate source root",
+        ExactProofHostileMutationTargetKind::Root,
+    )?;
+    scanner.record_bytes(
+        64,
+        "aggregate-wide pad root",
+        ExactProofHostileMutationTargetKind::Root,
+    )?;
+
+    for phase in &construction_plan.phase_order {
+        let phase_label = exact_phase_label(*phase);
+        let row_count = match phase {
+            RowCodeWhirPhase::Base => shape.base_row_count,
+            RowCodeWhirPhase::Auxiliary => shape.auxiliary_row_count,
+            RowCodeWhirPhase::Quotient => shape.quotient_row_count,
+        };
+        let opening_byte_length = shape
+            .outer_query_count
+            .checked_mul(row_count)
+            .and_then(|count| count.checked_mul(core::mem::size_of::<u64>()))
+            .ok_or_else(|| format!("exact {phase_label} opening length overflowed"))?;
+        scanner.record_field_bytes(
+            opening_byte_length,
+            format!("{phase_label} phase opening values"),
+        )?;
+        let frontier_count = scanner.read_count(format!("{phase_label} phase frontier count"))?;
+        if frontier_count == 0 || frontier_count > shape.maximum_frontier_count()? {
+            return Err(format!(
+                "exact {phase_label} mutation frontier has the wrong count"
+            ));
+        }
+        scanner.record_bytes(
+            frontier_count
+                .checked_mul(64)
+                .ok_or_else(|| format!("exact {phase_label} frontier length overflowed"))?,
+            format!("{phase_label} phase compact frontier"),
+            ExactProofHostileMutationTargetKind::Frontier,
+        )?;
+    }
+
+    for (bound_tree_ordinal, entry) in prepared_relation.bound_tree_entries.iter().enumerate() {
+        let query_count = shape.bound_tree_query_count(bound_tree_ordinal)?;
+        let row_width = entry
+            .materialized_row_width()
+            .map_err(|error| format!("derive exact bound row width: {error:?}"))?;
+        let salt_byte_length = if entry.requires_persistent_leaf_salt() {
+            COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH
+        } else {
+            0
+        };
+        let leaf_byte_length = row_width
+            .checked_mul(2)
+            .and_then(|count| count.checked_mul(core::mem::size_of::<u64>()))
+            .and_then(|length| length.checked_add(salt_byte_length))
+            .ok_or_else(|| "exact bound mutation leaf length overflowed".to_owned())?;
+        scanner.record_field_bytes(
+            query_count
+                .checked_mul(leaf_byte_length)
+                .ok_or_else(|| "exact bound mutation opening length overflowed".to_owned())?,
+            format!("bound tree {bound_tree_ordinal} opening values"),
+        )?;
+        let frontier_count =
+            scanner.read_count(format!("bound tree {bound_tree_ordinal} frontier count"))?;
+        if frontier_count == 0
+            || frontier_count > ExactProofShape::maximum_bound_frontier_count(query_count)?
+        {
+            return Err(format!(
+                "exact bound tree {bound_tree_ordinal} mutation frontier has the wrong count"
+            ));
+        }
+        scanner.record_bytes(
+            frontier_count
+                .checked_mul(64)
+                .ok_or_else(|| "exact bound mutation frontier length overflowed".to_owned())?,
+            format!("bound tree {bound_tree_ordinal} compact frontier"),
+            ExactProofHostileMutationTargetKind::Frontier,
+        )?;
+    }
+
+    let aggregate_wide_start = scanner.offset;
+    let configuration = super::super::hiding_whir::selected_hiding_whir_config(
+        construction_plan.selected_parameters(),
+    )
+    .map_err(|error| format!("derive aggregate-wide mutation configuration: {error:?}"))?;
+    let aggregate_wide_targets =
+        super::super::aggregate_wide_wire::aggregate_wide_hostile_mutation_targets(
+            &configuration,
+            &canonical_proof[aggregate_wide_start..],
+            &expected_opening_widths(construction_plan),
+            shape.aggregate_table_width,
+        )?;
+    for target in aggregate_wide_targets {
+        let kind = match target.kind {
+            super::super::aggregate_wide_wire::AggregateWideHostileMutationTargetKind::Count => {
+                ExactProofHostileMutationTargetKind::Count
+            }
+            super::super::aggregate_wide_wire::AggregateWideHostileMutationTargetKind::Field => {
+                ExactProofHostileMutationTargetKind::Field
+            }
+            super::super::aggregate_wide_wire::AggregateWideHostileMutationTargetKind::Frontier => {
+                ExactProofHostileMutationTargetKind::Frontier
+            }
+            super::super::aggregate_wide_wire::AggregateWideHostileMutationTargetKind::Root => {
+                ExactProofHostileMutationTargetKind::Root
+            }
+        };
+        scanner.targets.push(ExactProofHostileMutationTarget {
+            label: target.label,
+            byte_range: aggregate_wide_start + target.byte_range.start
+                ..aggregate_wide_start + target.byte_range.end,
+            kind,
+        });
+    }
+    scanner.offset = canonical_proof.len();
+    scanner.finish()
+}
+
 /// Exact worst-case family-body length for the construction-driven encoder.
 ///
 /// The ceiling follows the same section order and widths as
@@ -4941,7 +5250,7 @@ impl ExactSameSecretIncrementalDecoder {
         validate_exact_declared_proof_byte_length(declared_proof_byte_length)?;
         if bound_tree_entries.len() != EXACT_BOUND_TREE_COUNT
             || opening_widths.is_empty()
-            || opening_widths.iter().any(|width| *width == 0)
+            || opening_widths.contains(&0)
             || bound_tree_entries.iter().any(|entry| {
                 entry
                     .materialized_row_width()
@@ -5703,4 +6012,19 @@ fn checked_u32(value: usize, label: &str) -> Result<u32, String> {
 }
 
 #[cfg(test)]
-mod aggregate_wide_tests {}
+mod aggregate_wide_tests {
+    use super::*;
+
+    #[test]
+    fn exact_declared_proof_length_enforces_both_allocation_boundaries() {
+        assert!(validate_exact_declared_proof_byte_length(1).is_ok());
+        assert!(
+            validate_exact_declared_proof_byte_length(MAXIMUM_COMMON_PROOF_BYTE_LENGTH).is_ok()
+        );
+        assert!(validate_exact_declared_proof_byte_length(0).is_err());
+        assert!(
+            validate_exact_declared_proof_byte_length(MAXIMUM_COMMON_PROOF_BYTE_LENGTH + 1)
+                .is_err()
+        );
+    }
+}

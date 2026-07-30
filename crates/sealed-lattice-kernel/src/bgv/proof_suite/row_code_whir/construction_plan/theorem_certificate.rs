@@ -1786,19 +1786,20 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
         complete_verifier_oracle_ledger.complete_hash_query_count,
         complete_verifier_oracle_ledger.complete_equation_count_ceiling,
     );
-    let exact_failure_magnitude = derive_exact_failure_magnitude_certificate(
-        plan,
-        relation_variant,
-        &catalog,
-        &selected_plan_state_predicate,
-        &code_state_rows,
-        &fold_rows,
-        &shift_rows,
-        &aggregate_wide_masking,
-        initial_constraint_batch_numerator,
-        logical_verifier_message_count,
-        &cms19_arithmetic,
-    )?;
+    let exact_failure_magnitude =
+        derive_exact_failure_magnitude_certificate(ExactFailureMagnitudeDerivationInput {
+            plan,
+            relation_variant,
+            catalog: &catalog,
+            selected_plan_state_predicate: &selected_plan_state_predicate,
+            code_state_rows: &code_state_rows,
+            fold_rows: &fold_rows,
+            shift_rows: &shift_rows,
+            aggregate_wide_masking: &aggregate_wide_masking,
+            initial_constraint_batch_numerator,
+            logical_verifier_message_count,
+            cms19_arithmetic: &cms19_arithmetic,
+        })?;
     let cms19_strong_state_hash_chain = derive_cms19_strong_state_hash_chain_certificate(
         plan,
         &catalog,
@@ -1807,17 +1808,18 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
         &selected_plan_state_predicate,
         logical_verifier_message_count,
     )?;
-    let cms19_state_predicate = derive_cms19_state_predicate_certificate(
-        &selected_plan_state_predicate,
-        plan,
-        &code_state_rows,
-        &interleaved_unique_decoding_rows,
-        &cms19_strong_state_hash_chain,
-        &relation_compiler_interpreter_semantics,
-        &polynomial_protocol_extractor,
-        &point_constraint_extractor,
-        &exact_failure_magnitude,
-    );
+    let cms19_state_predicate =
+        derive_cms19_state_predicate_certificate(Cms19StatePredicateCertificateInput {
+            selected_plan_state_predicate: &selected_plan_state_predicate,
+            plan,
+            code_state_rows: &code_state_rows,
+            interleaved_unique_decoding_rows: &interleaved_unique_decoding_rows,
+            strong_state_hash_chain: &cms19_strong_state_hash_chain,
+            relation_compiler_interpreter_semantics: &relation_compiler_interpreter_semantics,
+            polynomial_protocol_extractor: &polynomial_protocol_extractor,
+            point_constraint_extractor: &point_constraint_extractor,
+            exact_failure_magnitude: &exact_failure_magnitude,
+        });
     let cms19_applicability = Cms19ApplicabilityCertificate {
         transform: Cms19Transform::OriginalBcsStrongStateHashChainSectionEightSix,
         transcript_equation_count,
@@ -3311,17 +3313,32 @@ fn derive_cms19_strong_state_hash_chain_certificate(
     Ok(certificate)
 }
 
+struct Cms19StatePredicateCertificateInput<'a> {
+    selected_plan_state_predicate: &'a SelectedPlanStatePredicateCertificate,
+    plan: &'a RowCodeWhirConstructionPlan,
+    code_state_rows: &'a [WhirCodeStateRow],
+    interleaved_unique_decoding_rows: &'a [InterleavedUniqueDecodingRow],
+    strong_state_hash_chain: &'a Cms19StrongStateHashChainCertificate,
+    relation_compiler_interpreter_semantics: &'a RelationCompilerInterpreterSemanticCertificate,
+    polynomial_protocol_extractor: &'a ExactPolynomialProtocolExtractorCertificate,
+    point_constraint_extractor: &'a ExactPointConstraintExtractorCertificate,
+    exact_failure_magnitude: &'a ExactFailureMagnitudeCertificate,
+}
+
 fn derive_cms19_state_predicate_certificate(
-    selected_plan_state_predicate: &SelectedPlanStatePredicateCertificate,
-    plan: &RowCodeWhirConstructionPlan,
-    code_state_rows: &[WhirCodeStateRow],
-    interleaved_unique_decoding_rows: &[InterleavedUniqueDecodingRow],
-    strong_state_hash_chain: &Cms19StrongStateHashChainCertificate,
-    relation_compiler_interpreter_semantics: &RelationCompilerInterpreterSemanticCertificate,
-    polynomial_protocol_extractor: &ExactPolynomialProtocolExtractorCertificate,
-    point_constraint_extractor: &ExactPointConstraintExtractorCertificate,
-    exact_failure_magnitude: &ExactFailureMagnitudeCertificate,
+    input: Cms19StatePredicateCertificateInput<'_>,
 ) -> Cms19StatePredicateCertificate {
+    let Cms19StatePredicateCertificateInput {
+        selected_plan_state_predicate,
+        plan,
+        code_state_rows,
+        interleaved_unique_decoding_rows,
+        strong_state_hash_chain,
+        relation_compiler_interpreter_semantics,
+        polynomial_protocol_extractor,
+        point_constraint_extractor,
+        exact_failure_magnitude,
+    } = input;
     let selected_plan_state_is_total = selected_plan_state_predicate.is_total_for_plan(plan);
     let expected_code_state_count = plan
         .whir
@@ -3901,16 +3918,35 @@ fn exact_owner_count(
     u64::try_from(count).map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)
 }
 
+#[derive(Clone, Copy)]
+struct ExactFailureMagnitudeDerivationInput<'a> {
+    plan: &'a RowCodeWhirConstructionPlan,
+    relation_variant: &'a RelationPlanVariant,
+    catalog: &'a RowCodeWhirOracleEquationCatalog,
+    selected_plan_state_predicate: &'a SelectedPlanStatePredicateCertificate,
+    code_state_rows: &'a [WhirCodeStateRow],
+    fold_rows: &'a [WhirFoldFailureRow],
+    shift_rows: &'a [WhirShiftFailureRow],
+    aggregate_wide_masking: &'a AggregateWideMaskingCertificate,
+    initial_constraint_batch_numerator: u64,
+    logical_verifier_message_count: u64,
+    cms19_arithmetic: &'a Cms19ArithmeticCertificate,
+}
+
 fn derive_exact_algebraic_failure_rows(
-    plan: &RowCodeWhirConstructionPlan,
+    input: ExactFailureMagnitudeDerivationInput<'_>,
     owner_rows: &[ExactFailureOwnerRow],
     theta_rows: &[ExactThetaFailureRow],
-    code_state_rows: &[WhirCodeStateRow],
-    fold_rows: &[WhirFoldFailureRow],
-    shift_rows: &[WhirShiftFailureRow],
-    aggregate_wide_masking: &AggregateWideMaskingCertificate,
-    initial_constraint_batch_numerator: u64,
 ) -> Result<Vec<ExactAlgebraicFailureRow>, WhirTheoremCertificateError> {
+    let ExactFailureMagnitudeDerivationInput {
+        plan,
+        code_state_rows,
+        fold_rows,
+        shift_rows,
+        aggregate_wide_masking,
+        initial_constraint_batch_numerator,
+        ..
+    } = input;
     let theta_numerator = theta_rows
         .iter()
         .map(|row| row.bad_set_numerator.clone())
@@ -4138,49 +4174,26 @@ fn sum_algebraic_numerator(algebraic_rows: &[ExactAlgebraicFailureRow]) -> BigUi
 }
 
 fn derive_exact_failure_magnitude_certificate(
-    plan: &RowCodeWhirConstructionPlan,
-    relation_variant: &RelationPlanVariant,
-    catalog: &RowCodeWhirOracleEquationCatalog,
-    selected_plan_state_predicate: &SelectedPlanStatePredicateCertificate,
-    code_state_rows: &[WhirCodeStateRow],
-    fold_rows: &[WhirFoldFailureRow],
-    shift_rows: &[WhirShiftFailureRow],
-    aggregate_wide_masking: &AggregateWideMaskingCertificate,
-    initial_constraint_batch_numerator: u64,
-    logical_verifier_message_count: u64,
-    cms19_arithmetic: &Cms19ArithmeticCertificate,
+    input: ExactFailureMagnitudeDerivationInput<'_>,
 ) -> Result<ExactFailureMagnitudeCertificate, WhirTheoremCertificateError> {
-    derive_exact_failure_magnitude_certificate_with_mutation(
+    derive_exact_failure_magnitude_certificate_with_mutation(input, |_| {})
+}
+
+fn derive_exact_failure_magnitude_certificate_with_mutation(
+    input: ExactFailureMagnitudeDerivationInput<'_>,
+    mutate: impl FnOnce(&mut ExactFailureMagnitudeCertificate),
+) -> Result<ExactFailureMagnitudeCertificate, WhirTheoremCertificateError> {
+    let ExactFailureMagnitudeDerivationInput {
         plan,
         relation_variant,
         catalog,
         selected_plan_state_predicate,
         code_state_rows,
-        fold_rows,
-        shift_rows,
         aggregate_wide_masking,
-        initial_constraint_batch_numerator,
         logical_verifier_message_count,
         cms19_arithmetic,
-        |_| {},
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn derive_exact_failure_magnitude_certificate_with_mutation(
-    plan: &RowCodeWhirConstructionPlan,
-    relation_variant: &RelationPlanVariant,
-    catalog: &RowCodeWhirOracleEquationCatalog,
-    selected_plan_state_predicate: &SelectedPlanStatePredicateCertificate,
-    code_state_rows: &[WhirCodeStateRow],
-    fold_rows: &[WhirFoldFailureRow],
-    shift_rows: &[WhirShiftFailureRow],
-    aggregate_wide_masking: &AggregateWideMaskingCertificate,
-    initial_constraint_batch_numerator: u64,
-    logical_verifier_message_count: u64,
-    cms19_arithmetic: &Cms19ArithmeticCertificate,
-    mutate: impl FnOnce(&mut ExactFailureMagnitudeCertificate),
-) -> Result<ExactFailureMagnitudeCertificate, WhirTheoremCertificateError> {
+        ..
+    } = input;
     let owner_rows = derive_exact_failure_owner_rows(selected_plan_state_predicate)?;
     if owner_rows
         .iter()
@@ -4204,16 +4217,7 @@ fn derive_exact_failure_magnitude_certificate_with_mutation(
     {
         return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
     }
-    let algebraic_rows = derive_exact_algebraic_failure_rows(
-        plan,
-        &owner_rows,
-        &theta_rows,
-        code_state_rows,
-        fold_rows,
-        shift_rows,
-        aggregate_wide_masking,
-        initial_constraint_batch_numerator,
-    )?;
+    let algebraic_rows = derive_exact_algebraic_failure_rows(input, &owner_rows, &theta_rows)?;
     let query_failure_probability_ceiling = sum_query_probability_ceiling(&query_rows)?;
     let algebraic_failure_probability_ceiling = ExactBigFraction::new(
         sum_algebraic_numerator(&algebraic_rows),
@@ -4276,52 +4280,31 @@ fn derive_exact_failure_magnitude_certificate_with_mutation(
         complete_qrom_mass_gate_holds,
     };
     mutate(&mut certificate);
-    validate_exact_failure_magnitude_certificate(
-        &certificate,
+    validate_exact_failure_magnitude_certificate(&certificate, input)?;
+    Ok(certificate)
+}
+
+fn validate_exact_failure_magnitude_certificate(
+    certificate: &ExactFailureMagnitudeCertificate,
+    input: ExactFailureMagnitudeDerivationInput<'_>,
+) -> Result<(), WhirTheoremCertificateError> {
+    let ExactFailureMagnitudeDerivationInput {
         plan,
         relation_variant,
         catalog,
         selected_plan_state_predicate,
         code_state_rows,
-        fold_rows,
-        shift_rows,
         aggregate_wide_masking,
-        initial_constraint_batch_numerator,
         logical_verifier_message_count,
         cms19_arithmetic,
-    )?;
-    Ok(certificate)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn validate_exact_failure_magnitude_certificate(
-    certificate: &ExactFailureMagnitudeCertificate,
-    plan: &RowCodeWhirConstructionPlan,
-    relation_variant: &RelationPlanVariant,
-    catalog: &RowCodeWhirOracleEquationCatalog,
-    selected_plan_state_predicate: &SelectedPlanStatePredicateCertificate,
-    code_state_rows: &[WhirCodeStateRow],
-    fold_rows: &[WhirFoldFailureRow],
-    shift_rows: &[WhirShiftFailureRow],
-    aggregate_wide_masking: &AggregateWideMaskingCertificate,
-    initial_constraint_batch_numerator: u64,
-    logical_verifier_message_count: u64,
-    cms19_arithmetic: &Cms19ArithmeticCertificate,
-) -> Result<(), WhirTheoremCertificateError> {
+        ..
+    } = input;
     let expected_owner_rows = derive_exact_failure_owner_rows(selected_plan_state_predicate)?;
     let expected_query_rows =
         derive_exact_query_failure_rows(plan, code_state_rows, aggregate_wide_masking)?;
     let expected_theta_rows = derive_exact_theta_failure_rows(relation_variant, catalog)?;
-    let expected_algebraic_rows = derive_exact_algebraic_failure_rows(
-        plan,
-        &expected_owner_rows,
-        &expected_theta_rows,
-        code_state_rows,
-        fold_rows,
-        shift_rows,
-        aggregate_wide_masking,
-        initial_constraint_batch_numerator,
-    )?;
+    let expected_algebraic_rows =
+        derive_exact_algebraic_failure_rows(input, &expected_owner_rows, &expected_theta_rows)?;
     let expected_extension_field_cardinality = BigUint::from(PROOF_BASE_FIELD_MODULUS).pow(
         u32::try_from(PROOF_CHALLENGE_EXTENSION_DEGREE)
             .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
@@ -4399,51 +4382,27 @@ fn validate_exact_failure_magnitude_certificate(
 }
 
 #[cfg(test)]
-#[allow(clippy::too_many_arguments)]
 fn checked_exact_failure_magnitude_with_fault(
-    plan: &RowCodeWhirConstructionPlan,
-    relation_variant: &RelationPlanVariant,
-    catalog: &RowCodeWhirOracleEquationCatalog,
-    selected_plan_state_predicate: &SelectedPlanStatePredicateCertificate,
-    code_state_rows: &[WhirCodeStateRow],
-    fold_rows: &[WhirFoldFailureRow],
-    shift_rows: &[WhirShiftFailureRow],
-    aggregate_wide_masking: &AggregateWideMaskingCertificate,
-    initial_constraint_batch_numerator: u64,
-    logical_verifier_message_count: u64,
-    cms19_arithmetic: &Cms19ArithmeticCertificate,
+    input: ExactFailureMagnitudeDerivationInput<'_>,
     fault: ExactFailureMagnitudeFault,
 ) -> Result<ExactFailureMagnitudeCertificate, WhirTheoremCertificateError> {
-    derive_exact_failure_magnitude_certificate_with_mutation(
-        plan,
-        relation_variant,
-        catalog,
-        selected_plan_state_predicate,
-        code_state_rows,
-        fold_rows,
-        shift_rows,
-        aggregate_wide_masking,
-        initial_constraint_batch_numerator,
-        logical_verifier_message_count,
-        cms19_arithmetic,
-        |certificate| match fault {
-            ExactFailureMagnitudeFault::DropFirstQueryRow => {
-                certificate.query_rows.remove(0);
-            }
-            ExactFailureMagnitudeFault::ReduceFirstQueryAgreementCeiling => {
-                certificate.query_rows[0].agreement_ceiling -= 1;
-            }
-            ExactFailureMagnitudeFault::DropRelationCompositionOwner => {
-                certificate.algebraic_rows[1].owner_kinds.clear();
-            }
-            ExactFailureMagnitudeFault::ReduceAggregateWideBaseNumerator => {
-                certificate.algebraic_rows[12].numerator -= BigUint::one();
-            }
-            ExactFailureMagnitudeFault::ChangeVerifierHashQueryCount => {
-                certificate.cms19_verifier_hash_query_count += 1;
-            }
-        },
-    )
+    derive_exact_failure_magnitude_certificate_with_mutation(input, |certificate| match fault {
+        ExactFailureMagnitudeFault::DropFirstQueryRow => {
+            certificate.query_rows.remove(0);
+        }
+        ExactFailureMagnitudeFault::ReduceFirstQueryAgreementCeiling => {
+            certificate.query_rows[0].agreement_ceiling -= 1;
+        }
+        ExactFailureMagnitudeFault::DropRelationCompositionOwner => {
+            certificate.algebraic_rows[1].owner_kinds.clear();
+        }
+        ExactFailureMagnitudeFault::ReduceAggregateWideBaseNumerator => {
+            certificate.algebraic_rows[12].numerator -= BigUint::one();
+        }
+        ExactFailureMagnitudeFault::ChangeVerifierHashQueryCount => {
+            certificate.cms19_verifier_hash_query_count += 1;
+        }
+    })
 }
 
 fn selected_same_secret_construction_plan() -> RowCodeWhirConstructionPlan {
@@ -5289,17 +5248,20 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
     ] {
         assert_eq!(
             checked_exact_failure_magnitude_with_fault(
-                &plan,
-                extractor_variant,
-                &failure_catalog,
-                &certificate.selected_plan_state_predicate,
-                &certificate.code_state_rows,
-                &certificate.fold_rows,
-                &certificate.shift_rows,
-                &certificate.aggregate_wide_masking,
-                certificate.initial_constraint_batch_numerator,
-                certificate.logical_verifier_message_count,
-                &certificate.cms19_arithmetic,
+                ExactFailureMagnitudeDerivationInput {
+                    plan: &plan,
+                    relation_variant: extractor_variant,
+                    catalog: &failure_catalog,
+                    selected_plan_state_predicate: &certificate.selected_plan_state_predicate,
+                    code_state_rows: &certificate.code_state_rows,
+                    fold_rows: &certificate.fold_rows,
+                    shift_rows: &certificate.shift_rows,
+                    aggregate_wide_masking: &certificate.aggregate_wide_masking,
+                    initial_constraint_batch_numerator: certificate
+                        .initial_constraint_batch_numerator,
+                    logical_verifier_message_count: certificate.logical_verifier_message_count,
+                    cms19_arithmetic: &certificate.cms19_arithmetic,
+                },
                 fault,
             ),
             Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence),
@@ -5410,8 +5372,8 @@ fn independent_unique_decoder_and_explicit_constraint_filter_cover_hostile_words
 
     for error_count in [0_usize, 1, RADIUS] {
         let mut received = codeword.clone();
-        for error_ordinal in 0..error_count {
-            received[error_ordinal] = (received[error_ordinal]
+        for (error_ordinal, received_value) in received.iter_mut().enumerate().take(error_count) {
+            *received_value = (*received_value
                 + u64::try_from(error_ordinal + 1).expect("error fits u64"))
                 % MODULUS;
         }
@@ -5444,10 +5406,9 @@ fn independent_unique_decoder_and_explicit_constraint_filter_cover_hostile_words
     );
 
     let mut beyond_radius = codeword;
-    for error_ordinal in 0..=RADIUS {
-        beyond_radius[error_ordinal] = (beyond_radius[error_ordinal]
-            + u64::try_from(error_ordinal + 1).expect("error fits u64"))
-            % MODULUS;
+    for (error_ordinal, received_value) in beyond_radius.iter_mut().enumerate().take(RADIUS + 1) {
+        *received_value =
+            (*received_value + u64::try_from(error_ordinal + 1).expect("error fits u64")) % MODULUS;
     }
     assert!(
         berlekamp_welch_unique_decode(

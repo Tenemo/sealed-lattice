@@ -121,16 +121,31 @@ pub(in crate::bgv::proof_suite) struct RowCodeWhirQuotientTransformStoragePlan {
     pub(super) peak_active_output_count: u32,
 }
 
+pub(in crate::bgv::proof_suite) struct RowCodeWhirQuotientTransformStorageRequest<'a> {
+    pub(in crate::bgv::proof_suite) variant: &'a RelationPlanVariant,
+    pub(in crate::bgv::proof_suite) relation_context: &'a RelationPlanCheckContext,
+    pub(in crate::bgv::proof_suite) evaluation_domain: ProofEvaluationDomain,
+    pub(in crate::bgv::proof_suite) relation_replay_polynomial_plans:
+        &'a BTreeMap<u32, RowCodeWhirQuotientColumnSourcePlan>,
+    pub(in crate::bgv::proof_suite) first_free_object_ordinal: u32,
+    pub(in crate::bgv::proof_suite) first_executor_step: u32,
+    pub(in crate::bgv::proof_suite) maximum_chunk_byte_length: u32,
+    pub(in crate::bgv::proof_suite) protection: ProofExternalMemoryProtection,
+}
+
 pub(in crate::bgv::proof_suite) fn plan_row_code_whir_quotient_transform_storage(
-    variant: &RelationPlanVariant,
-    relation_context: &RelationPlanCheckContext,
-    evaluation_domain: ProofEvaluationDomain,
-    relation_replay_polynomial_plans: &BTreeMap<u32, RowCodeWhirQuotientColumnSourcePlan>,
-    first_free_object_ordinal: u32,
-    first_executor_step: u32,
-    maximum_chunk_byte_length: u32,
-    protection: ProofExternalMemoryProtection,
+    request: RowCodeWhirQuotientTransformStorageRequest<'_>,
 ) -> Result<RowCodeWhirQuotientTransformStoragePlan, CommonProofProverError> {
+    let RowCodeWhirQuotientTransformStorageRequest {
+        variant,
+        relation_context,
+        evaluation_domain,
+        relation_replay_polynomial_plans,
+        first_free_object_ordinal,
+        first_executor_step,
+        maximum_chunk_byte_length,
+        protection,
+    } = request;
     if maximum_chunk_byte_length == 0 {
         return Err(CommonProofProverError::InvalidInput);
     }
@@ -619,16 +634,16 @@ mod tests {
 
         validate_relation_replay_polynomial_plans(variant, evaluation_domain.size(), &replay_plans)
             .expect("exact recomputed lengths below descriptor ceilings remain valid");
-        plan_row_code_whir_quotient_transform_storage(
+        plan_row_code_whir_quotient_transform_storage(RowCodeWhirQuotientTransformStorageRequest {
             variant,
-            &relation_context,
+            relation_context: &relation_context,
             evaluation_domain,
-            &replay_plans,
-            0,
-            11,
-            1_024,
-            ProofExternalMemoryProtection::PublicIntegrity,
-        )
+            relation_replay_polynomial_plans: &replay_plans,
+            first_free_object_ordinal: 0,
+            first_executor_step: 11,
+            maximum_chunk_byte_length: 1_024,
+            protection: ProofExternalMemoryProtection::PublicIntegrity,
+        })
         .expect("the quotient planner zero-pads exact replay vectors in its transform buffer");
     }
 
@@ -664,14 +679,16 @@ mod tests {
         let first_free_object_ordinal = 0;
         let first_executor_step = 11;
         let plan = plan_row_code_whir_quotient_transform_storage(
-            variant,
-            &relation_context,
-            evaluation_domain,
-            &relation_replay_polynomial_plans,
-            first_free_object_ordinal,
-            first_executor_step,
-            1_024,
-            ProofExternalMemoryProtection::PublicIntegrity,
+            RowCodeWhirQuotientTransformStorageRequest {
+                variant,
+                relation_context: &relation_context,
+                evaluation_domain,
+                relation_replay_polynomial_plans: &relation_replay_polynomial_plans,
+                first_free_object_ordinal,
+                first_executor_step,
+                maximum_chunk_byte_length: 1_024,
+                protection: ProofExternalMemoryProtection::PublicIntegrity,
+            },
         )
         .expect("the compact quotient transform plan is bounded");
         let constraint_catalog = common_proof_quotient_constraint_catalog(variant)

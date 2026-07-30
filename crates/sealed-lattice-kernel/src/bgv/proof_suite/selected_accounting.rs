@@ -340,6 +340,9 @@ pub(crate) fn selected_proof_runtime_limits(
 }
 
 #[cfg(test)]
+pub(crate) use resource_accounting::selected_complete_proof_resource_accounting;
+
+#[cfg(test)]
 pub(crate) mod resource_accounting {
     use std::{
         collections::{BTreeMap, BTreeSet},
@@ -2653,6 +2656,3 @@ pub(crate) mod resource_accounting {
         }
     }
 }
-
-#[cfg(test)]
-pub(crate) use resource_accounting::selected_complete_proof_resource_accounting;

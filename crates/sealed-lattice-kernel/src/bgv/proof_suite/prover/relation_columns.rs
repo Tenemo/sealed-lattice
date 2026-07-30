@@ -2545,11 +2545,11 @@ impl CommonProofAuxiliaryColumnReconstructionCatalog {
     }
 }
 
-fn reconstruction_component<'variant>(
-    variant: &'variant RelationPlanVariant,
+fn reconstruction_component(
+    variant: &RelationPlanVariant,
     locator: AuxiliaryColumnReconstructionLocator,
     component_index: usize,
-) -> Result<&'variant RelationIntegerLiftComponentDescriptor, CommonProofProverError> {
+) -> Result<&RelationIntegerLiftComponentDescriptor, CommonProofProverError> {
     variant
         .ordered_integer_lift_batches()
         .get(locator.batch_index)

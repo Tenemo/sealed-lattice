@@ -233,15 +233,17 @@ pub(in crate::bgv::proof_suite::row_code_whir) struct ExactSameSecretAggregateMa
     row_pad_seeds: Option<Zeroizing<[[u8; 32]; 3]>>,
 }
 
+type ExactSameSecretAggregateMaterializedParts = (
+    ExactSameSecretAggregateWitness,
+    ExactSameSecretAggregateMetadata,
+    ExtensionFieldChallenger,
+    Option<Zeroizing<[[u8; 32]; 3]>>,
+);
+
 impl ExactSameSecretAggregateMaterializedSource {
     pub(in crate::bgv::proof_suite::row_code_whir) fn into_parts(
         self,
-    ) -> (
-        ExactSameSecretAggregateWitness,
-        ExactSameSecretAggregateMetadata,
-        ExtensionFieldChallenger,
-        Option<Zeroizing<[[u8; 32]; 3]>>,
-    ) {
+    ) -> ExactSameSecretAggregateMaterializedParts {
         (
             self.witness,
             self.metadata,
@@ -1345,10 +1347,7 @@ mod tests {
             })
             .collect::<std::collections::BTreeSet<_>>();
         assert_eq!(all_indices.len(), 5 * TABLE_WIDTH);
-        assert!(matches!(
-            interleaved_source_index(0, TABLE_WIDTH, TABLE_WIDTH),
-            Err(_)
-        ));
+        assert!(interleaved_source_index(0, TABLE_WIDTH, TABLE_WIDTH).is_err());
     }
 
     #[test]

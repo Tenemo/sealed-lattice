@@ -344,19 +344,18 @@ thread_local! {
             RefCell::new(SetupKeyRelationGenerationStatementSourceRegistry::default());
 }
 
+type DecodedSetupKeyRelationStatementBinding = (
+    [u8; Hash512::BYTE_LENGTH],
+    u16,
+    Vec<[u8; Hash512::BYTE_LENGTH]>,
+);
+
 fn decode_authenticated_setup_key_relation_statement_binding(
     family: SetupKeyRelationProofFamily,
     protocol_version: u16,
     suite_identifier: [u8; Hash512::BYTE_LENGTH],
     canonical_application_statement_bytes: &[u8],
-) -> Result<
-    (
-        [u8; Hash512::BYTE_LENGTH],
-        u16,
-        Vec<[u8; Hash512::BYTE_LENGTH]>,
-    ),
-    CommonProofRuntimeError,
-> {
+) -> Result<DecodedSetupKeyRelationStatementBinding, CommonProofRuntimeError> {
     let statement_context =
         SelectedApplicationStatementContext::new(protocol_version, suite_identifier, None, None);
     match family {

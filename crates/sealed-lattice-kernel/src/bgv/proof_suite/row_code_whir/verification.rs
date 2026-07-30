@@ -1520,7 +1520,7 @@ impl RowCodeWhirIncrementalDecoder {
             .map(|batch| batch.requested_aggregate_column_ordinals.len())
             .collect::<Vec<_>>();
         if opening_widths.is_empty()
-            || opening_widths.iter().any(|width| *width == 0)
+            || opening_widths.contains(&0)
             || prepared_relation.bound_tree_entries.len()
                 != prepared_relation.construction_plan.bound_trees.len()
             || prepared_relation.bound_tree_entries.iter().any(|entry| {

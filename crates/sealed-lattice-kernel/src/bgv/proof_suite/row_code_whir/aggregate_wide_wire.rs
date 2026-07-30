@@ -10,6 +10,9 @@ use p3_sumcheck::{OpeningBatch, zk::ZkSumcheckData};
 use p3_symmetric::MerkleCap;
 use p3_whir::{BaseCaseZkProof, BlindedMask, MaskOpeningPair, QueryOpening};
 
+#[cfg(test)]
+use core::ops::Range;
+
 use super::aggregate_wide_hiding::{AggregateWideOpeningProof, AggregateWidePadLayout};
 use super::aggregate_wide_pcs::AggregateWideCommitment;
 use super::hiding_whir::SelectedHidingWhirConfig;
@@ -427,6 +430,340 @@ pub(super) fn decode_compact_aggregate_wide_opening(
         rounds,
         base_case,
     })
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum AggregateWideHostileMutationTargetKind {
+    Count,
+    Field,
+    Frontier,
+    Root,
+}
+
+#[cfg(test)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct AggregateWideHostileMutationTarget {
+    pub(super) label: String,
+    pub(super) byte_range: Range<usize>,
+    pub(super) kind: AggregateWideHostileMutationTargetKind,
+}
+
+#[cfg(test)]
+struct AggregateWideMutationScanner<'a> {
+    canonical: &'a [u8],
+    offset: usize,
+    targets: Vec<AggregateWideHostileMutationTarget>,
+}
+
+#[cfg(test)]
+impl<'a> AggregateWideMutationScanner<'a> {
+    const fn new(canonical: &'a [u8]) -> Self {
+        Self {
+            canonical,
+            offset: 0,
+            targets: Vec::new(),
+        }
+    }
+
+    fn take_bytes(&mut self, byte_length: usize, label: &str) -> Result<Range<usize>, String> {
+        let following_offset = self
+            .offset
+            .checked_add(byte_length)
+            .filter(|following_offset| *following_offset <= self.canonical.len())
+            .ok_or_else(|| format!("aggregate-wide mutation scan truncated at {label}"))?;
+        let byte_range = self.offset..following_offset;
+        self.offset = following_offset;
+        Ok(byte_range)
+    }
+
+    fn record_bytes(
+        &mut self,
+        byte_length: usize,
+        label: impl Into<String>,
+        kind: AggregateWideHostileMutationTargetKind,
+    ) -> Result<Range<usize>, String> {
+        let label = label.into();
+        let byte_range = self.take_bytes(byte_length, &label)?;
+        if byte_range.is_empty() {
+            return Err(format!("aggregate-wide mutation target {label} is empty"));
+        }
+        self.targets.push(AggregateWideHostileMutationTarget {
+            label,
+            byte_range: byte_range.clone(),
+            kind,
+        });
+        Ok(byte_range)
+    }
+
+    fn take_field_vector(
+        &mut self,
+        field_count: usize,
+        label: &str,
+        record: bool,
+    ) -> Result<Range<usize>, String> {
+        let byte_length = field_count
+            .checked_mul(CHALLENGE_FIELD_LIMB_COUNT)
+            .and_then(|limb_count| limb_count.checked_mul(core::mem::size_of::<u64>()))
+            .ok_or_else(|| format!("aggregate-wide mutation field length overflowed at {label}"))?;
+        if record {
+            self.record_bytes(
+                byte_length,
+                label,
+                AggregateWideHostileMutationTargetKind::Field,
+            )
+        } else {
+            self.take_bytes(byte_length, label)
+        }
+    }
+
+    fn read_count(&mut self, label: impl Into<String>) -> Result<usize, String> {
+        let label = label.into();
+        let byte_range = self.record_bytes(
+            core::mem::size_of::<u32>(),
+            label,
+            AggregateWideHostileMutationTargetKind::Count,
+        )?;
+        Ok(u32::from_le_bytes(
+            self.canonical[byte_range]
+                .try_into()
+                .map_err(|_| "aggregate-wide mutation count has the wrong width".to_owned())?,
+        ) as usize)
+    }
+
+    fn scan_sumcheck(
+        &mut self,
+        label: impl Into<String>,
+        ell_zk: usize,
+        round_count: usize,
+        proof_of_work_bits: usize,
+    ) -> Result<(), String> {
+        let wire_length = ell_zk
+            .checked_sub(1)
+            .ok_or_else(|| "aggregate-wide mutation sumcheck mask length is zero".to_owned())?;
+        let per_round_field_count = wire_length
+            .checked_add(usize::from(proof_of_work_bits > 0))
+            .ok_or_else(|| "aggregate-wide mutation sumcheck width overflowed".to_owned())?;
+        let field_count = round_count
+            .checked_mul(per_round_field_count)
+            .and_then(|count| count.checked_add(1))
+            .ok_or_else(|| "aggregate-wide mutation sumcheck length overflowed".to_owned())?;
+        self.take_field_vector(field_count, &label.into(), true)?;
+        Ok(())
+    }
+
+    fn scan_query_batch(
+        &mut self,
+        label: &str,
+        query_count: usize,
+        leaf_count: usize,
+        row_width: usize,
+    ) -> Result<(), String> {
+        if query_count == 0
+            || leaf_count == 0
+            || !leaf_count.is_power_of_two()
+            || query_count > leaf_count
+            || row_width == 0
+        {
+            return Err(format!(
+                "aggregate-wide mutation query geometry is invalid at {label}"
+            ));
+        }
+        self.take_field_vector(
+            query_count.checked_mul(row_width).ok_or_else(|| {
+                format!("aggregate-wide mutation row count overflowed at {label}")
+            })?,
+            &format!("{label} opening values"),
+            true,
+        )?;
+        let frontier_count = self.read_count(format!("{label} frontier count"))?;
+        let maximum_frontier_count = query_count
+            .checked_mul(leaf_count.ilog2() as usize)
+            .ok_or_else(|| {
+                format!("aggregate-wide mutation frontier bound overflowed at {label}")
+            })?;
+        if frontier_count > maximum_frontier_count {
+            return Err(format!(
+                "aggregate-wide mutation frontier at {label} exceeds its checked maximum"
+            ));
+        }
+        if frontier_count == 0 {
+            return Err(format!(
+                "aggregate-wide mutation frontier at {label} is unexpectedly empty"
+            ));
+        }
+        self.record_bytes(
+            frontier_count
+                .checked_mul(core::mem::size_of::<MerkleNode>())
+                .ok_or_else(|| {
+                    format!("aggregate-wide mutation frontier length overflowed at {label}")
+                })?,
+            format!("{label} compact frontier"),
+            AggregateWideHostileMutationTargetKind::Frontier,
+        )?;
+        Ok(())
+    }
+
+    fn finish(self) -> Result<Vec<AggregateWideHostileMutationTarget>, String> {
+        if self.offset != self.canonical.len() {
+            return Err(format!(
+                "aggregate-wide mutation scan left {} trailing bytes",
+                self.canonical.len() - self.offset
+            ));
+        }
+        Ok(self.targets)
+    }
+}
+
+/// Locates hostile-test mutations by replaying the selected production wire
+/// geometry. The proof never supplies query coordinates or section widths.
+#[cfg(test)]
+pub(super) fn aggregate_wide_hostile_mutation_targets(
+    configuration: &SelectedHidingWhirConfig,
+    canonical: &[u8],
+    expected_opening_widths: &[usize],
+    table_width: usize,
+) -> Result<Vec<AggregateWideHostileMutationTarget>, String> {
+    if canonical.is_empty()
+        || table_width == 0
+        || expected_opening_widths.is_empty()
+        || expected_opening_widths
+            .iter()
+            .any(|width| *width == 0 || *width > table_width)
+    {
+        return Err("aggregate-wide mutation scan has invalid verifier geometry".to_owned());
+    }
+    let pad_layout = AggregateWidePadLayout::derive(configuration)?;
+    let mut scanner = AggregateWideMutationScanner::new(canonical);
+    let wire_magic = scanner.take_bytes(WIRE_MAGIC.len(), "wire magic")?;
+    if canonical[wire_magic] != *WIRE_MAGIC {
+        return Err("aggregate-wide mutation scan found the wrong wire magic".to_owned());
+    }
+    let variable_count = scanner.read_count("aggregate-wide variable count")?;
+    let opening_count = scanner.read_count("aggregate-wide opening count")?;
+    let encoded_table_width = scanner.read_count("aggregate-wide table width")?;
+    if variable_count != configuration.num_variables
+        || opening_count != expected_opening_widths.len()
+        || encoded_table_width != table_width
+    {
+        return Err("aggregate-wide mutation scan found the wrong header geometry".to_owned());
+    }
+
+    for (opening_ordinal, opening_width) in expected_opening_widths.iter().enumerate() {
+        let record = opening_ordinal == 0 || opening_ordinal + 1 == expected_opening_widths.len();
+        scanner.take_field_vector(
+            *opening_width,
+            &if opening_ordinal + 1 == expected_opening_widths.len() {
+                "terminal non-Boolean opening evaluation".to_owned()
+            } else {
+                format!("aggregate opening evaluation {opening_ordinal}")
+            },
+            record,
+        )?;
+    }
+    scanner.scan_sumcheck(
+        "initial WHIR sumcheck",
+        configuration.zk.ell_zk,
+        configuration.round_folding_factor(0),
+        configuration.starting_folding_pow_bits,
+    )?;
+
+    for (round_ordinal, round_configuration) in configuration.round_parameters.iter().enumerate() {
+        scanner.record_bytes(
+            core::mem::size_of::<MerkleNode>(),
+            format!("WHIR round {round_ordinal} root"),
+            AggregateWideHostileMutationTargetKind::Root,
+        )?;
+        scanner.take_field_vector(
+            pad_layout.switch_mask_range(round_ordinal)?.len(),
+            &format!("WHIR round {round_ordinal} switch-mask delta"),
+            true,
+        )?;
+        if round_configuration.pow_bits > 0 {
+            scanner.take_field_vector(
+                1,
+                &format!("WHIR round {round_ordinal} proof-of-work witness"),
+                true,
+            )?;
+        }
+        let folding_factor = configuration.round_folding_factor(round_ordinal);
+        scanner.scan_query_batch(
+            &format!("WHIR round {round_ordinal}"),
+            round_configuration.num_queries,
+            round_configuration.domain_size >> folding_factor,
+            1 << folding_factor,
+        )?;
+        scanner.scan_sumcheck(
+            format!("WHIR round {round_ordinal} follow-up sumcheck"),
+            configuration.zk.ell_zk,
+            configuration.round_folding_factor(round_ordinal + 1),
+            round_configuration.folding_pow_bits,
+        )?;
+    }
+
+    scanner.record_bytes(
+        core::mem::size_of::<MerkleNode>(),
+        "WHIR fresh-main root",
+        AggregateWideHostileMutationTargetKind::Root,
+    )?;
+    scanner.record_bytes(
+        core::mem::size_of::<MerkleNode>(),
+        "WHIR fresh-pad root",
+        AggregateWideHostileMutationTargetKind::Root,
+    )?;
+    scanner.take_field_vector(1, "WHIR terminal masked claim", true)?;
+    let final_configuration = configuration.final_round_config();
+    scanner.take_field_vector(
+        1 << final_configuration.num_variables,
+        "WHIR blinded terminal message",
+        true,
+    )?;
+    scanner.take_field_vector(
+        configuration.oracle_randomness[configuration.n_rounds()],
+        "WHIR blinded terminal randomness",
+        true,
+    )?;
+    scanner.take_field_vector(
+        pad_layout.message_length(),
+        "WHIR blinded pad message",
+        true,
+    )?;
+    scanner.take_field_vector(
+        configuration.mask_queries,
+        "WHIR blinded pad randomness",
+        true,
+    )?;
+    if configuration.final_pow_bits > 0 {
+        scanner.take_field_vector(1, "WHIR terminal proof-of-work witness", true)?;
+    }
+
+    let source_leaf_count = final_configuration.domain_size >> final_configuration.folding_factor;
+    scanner.scan_query_batch(
+        "WHIR terminal source",
+        configuration.final_queries,
+        source_leaf_count,
+        1 << final_configuration.folding_factor,
+    )?;
+    scanner.scan_query_batch(
+        "WHIR terminal fresh-main",
+        configuration.final_queries,
+        source_leaf_count,
+        1,
+    )?;
+    let pad_leaf_count = pad_codeword_domain_size(configuration, &pad_layout);
+    scanner.scan_query_batch(
+        "WHIR terminal carried-pad",
+        configuration.mask_queries,
+        pad_leaf_count,
+        1,
+    )?;
+    scanner.scan_query_batch(
+        "WHIR terminal fresh-pad",
+        configuration.mask_queries,
+        pad_leaf_count,
+        1,
+    )?;
+    scanner.finish()
 }
 
 fn validate_top_level_shape(

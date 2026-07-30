@@ -125,7 +125,7 @@ impl RecomputableOraclePass {
         let encoded_height = source_height
             .checked_mul(inverse_rate)
             .ok_or_else(|| "recomputable oracle encoded height overflowed".to_owned())?;
-        if randomness.len() % ENCODED_ORACLE_WIDTH != 0
+        if !randomness.len().is_multiple_of(ENCODED_ORACLE_WIDTH)
             || query_indices.windows(2).any(|pair| pair[0] >= pair[1])
             || query_indices
                 .last()
@@ -352,11 +352,17 @@ impl RecomputableOraclePass {
                     .encoded_values
                     .as_ref()
                     .ok_or_else(|| Self::geometry("recomputable encoded column is absent"))?;
-                for row_index in self.current_absorb_offset..end {
+                for (row_index, encoded_value) in encoded_values
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .take(end)
+                    .skip(self.current_absorb_offset)
+                {
                     self.leaf_states[row_index] = self.leaf_hasher.absorb_column(
                         self.leaf_states[row_index],
                         self.current_column_index,
-                        encoded_values[row_index],
+                        encoded_value,
                     );
                 }
                 for (query_ordinal, query_index) in self.query_indices.iter().copied().enumerate() {
