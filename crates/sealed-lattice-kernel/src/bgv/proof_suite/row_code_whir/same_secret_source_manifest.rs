@@ -1,4 +1,4 @@
-//! Checked production source geometry for the selected same-secret relation.
+//! Checked production source geometry for every selected row-code relation.
 //!
 //! This module deliberately exposes no decoder or serialization surface. The
 //! manifest is derived only from the checked relation and construction owners,
@@ -28,8 +28,8 @@ use super::construction_plan::{
 };
 
 const SAME_SECRET_AUTHENTICATED_SOURCE_MANIFEST_HASH_DOMAIN: &str =
-    "sealed-lattice/proof/same-secret-authenticated-source-manifest/v2";
-const SAME_SECRET_AUTHENTICATED_SOURCE_MANIFEST_VERSION: u16 = 2;
+    "sealed-lattice/proof/authenticated-source-manifest/v3";
+const SAME_SECRET_AUTHENTICATED_SOURCE_MANIFEST_VERSION: u16 = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::bgv::proof_suite) enum SameSecretAuthenticatedSourceManifestError {
@@ -124,6 +124,7 @@ struct SameSecretBoundMaterialSaltTreeDescriptor {
     source_trace_domain_size: u64,
     evaluation_domain_size: u64,
     leaf_count: u64,
+    low_degree_mode: RowCodeWhirBoundLowDegreeMode,
     encoded_query_salt_count: u64,
     ordered_column_ordinals: Box<[u32]>,
 }
@@ -251,7 +252,7 @@ impl SameSecretAuthenticatedSourceManifest {
         )
     }
 
-    pub(in crate::bgv::proof_suite) fn bound_material_input_tree_count(
+    pub(in crate::bgv::proof_suite) fn bound_material_tree_count(
         &self,
     ) -> Result<u64, SameSecretAuthenticatedSourceManifestError> {
         checked_len(self.bound_material_salt_trees.len())
@@ -600,13 +601,19 @@ fn derive_bound_material_salt_catalog(
 > {
     let mut output = Vec::new();
     for tree in &construction_plan.bound_trees {
-        if tree.construction_kind != BoundTreeConstructionKind::CommittedMaterial
-            || tree.root_use != BoundTreeRootUse::Input
-        {
+        if tree.construction_kind != BoundTreeConstructionKind::CommittedMaterial {
             continue;
         }
-        if tree.low_degree_mode != RowCodeWhirBoundLowDegreeMode::PriorVssProofRequired
-            || tree.query_count != construction_plan.parameters.prior_proof_bound_query_count
+        let expected_query_count = match tree.low_degree_mode {
+            RowCodeWhirBoundLowDegreeMode::PriorVssProofRequired
+            | RowCodeWhirBoundLowDegreeMode::PriorSetupPolynomialProofRequired => {
+                construction_plan.parameters.prior_proof_bound_query_count
+            }
+            RowCodeWhirBoundLowDegreeMode::Direct => {
+                construction_plan.parameters.direct_bound_query_count
+            }
+        };
+        if tree.query_count != expected_query_count
             || tree.query_count == 0
             || tree.leaf_count == 0
             || !tree.leaf_count.is_power_of_two()
@@ -674,15 +681,15 @@ fn derive_bound_material_salt_catalog(
             evaluation_domain_size: tree.evaluation_domain_size,
             leaf_count: u64::try_from(tree.leaf_count)
                 .map_err(|_| SameSecretAuthenticatedSourceManifestError::CountOverflow)?,
+            low_degree_mode: tree.low_degree_mode,
             encoded_query_salt_count: u64::try_from(tree.query_count)
                 .map_err(|_| SameSecretAuthenticatedSourceManifestError::CountOverflow)?,
             ordered_column_ordinals: ordered_column_ordinals.to_vec().into_boxed_slice(),
         });
     }
-    if output.is_empty()
-        || output
-            .windows(2)
-            .any(|window| window[0].bound_tree_ordinal >= window[1].bound_tree_ordinal)
+    if output
+        .windows(2)
+        .any(|window| window[0].bound_tree_ordinal >= window[1].bound_tree_ordinal)
     {
         return Err(SameSecretAuthenticatedSourceManifestError::BoundMaterialCatalogMismatch);
     }
@@ -776,6 +783,14 @@ fn encode_bound_material_salt_tree(
     encoded.extend_from_slice(&tree.source_trace_domain_size.to_le_bytes());
     encoded.extend_from_slice(&tree.evaluation_domain_size.to_le_bytes());
     encoded.extend_from_slice(&tree.leaf_count.to_le_bytes());
+    encoded.extend_from_slice(
+        &match tree.low_degree_mode {
+            RowCodeWhirBoundLowDegreeMode::PriorVssProofRequired => 1_u16,
+            RowCodeWhirBoundLowDegreeMode::Direct => 2_u16,
+            RowCodeWhirBoundLowDegreeMode::PriorSetupPolynomialProofRequired => 3_u16,
+        }
+        .to_le_bytes(),
+    );
     encoded.extend_from_slice(&tree.encoded_query_salt_count.to_le_bytes());
     encoded.extend_from_slice(&checked_len(tree.ordered_column_ordinals.len())?.to_le_bytes());
     for column_ordinal in &tree.ordered_column_ordinals {
@@ -806,7 +821,8 @@ mod tests {
     use crate::{
         bgv::proof_suite::{
             ValidatedRelationPlanArtifact, compile_same_secret_relation_plan,
-            selected_relation_plan_check_context, selected_same_secret_relation_plan_input,
+            selected_relation_plan_check_context, selected_relation_plans,
+            selected_same_secret_relation_plan_input,
         },
         foundation::ProofApplicationSlotCeilings,
         hashing::hash_framed_parts_512,
@@ -860,6 +876,28 @@ mod tests {
             &relation_context,
         )
         .expect("the selected source manifest derives");
+        let bound_material_trees = construction_plan
+            .bound_trees
+            .iter()
+            .filter(|tree| tree.construction_kind == BoundTreeConstructionKind::CommittedMaterial)
+            .collect::<Vec<_>>();
+        assert_eq!(bound_material_trees.len(), 8);
+        assert!(bound_material_trees.iter().all(|tree| {
+            tree.root_use == BoundTreeRootUse::Input
+                && tree.low_degree_mode == RowCodeWhirBoundLowDegreeMode::PriorVssProofRequired
+                && tree.leaf_count == 8_388_608
+                && tree.query_count == construction_plan.parameters.prior_proof_bound_query_count
+        }));
+        let independently_derived_logical_salt_count = bound_material_trees
+            .iter()
+            .try_fold(0_u64, |total, tree| {
+                total.checked_add(
+                    u64::try_from(tree.leaf_count)
+                        .expect("the selected material-tree leaf count fits u64"),
+                )
+            })
+            .expect("the selected logical salt count fits u64");
+        assert_eq!(independently_derived_logical_salt_count, 67_108_864);
 
         assert_eq!(manifest.authenticated_source_polynomial_count(), Ok(2_018));
         assert_eq!(
@@ -872,14 +910,14 @@ mod tests {
         );
         assert_eq!(manifest.deterministic_reversed_column_count(), Ok(12));
         assert_eq!(manifest.stored_pre_challenge_column_count(), Ok(2_030));
-        assert_eq!(manifest.bound_material_input_tree_count(), Ok(8));
+        assert_eq!(manifest.bound_material_tree_count(), Ok(8));
         assert_eq!(
             manifest.logical_bound_material_leaf_salt_count(),
-            Ok(8_388_608),
+            Ok(independently_derived_logical_salt_count),
         );
         assert_eq!(
             manifest.logical_bound_material_leaf_salt_byte_length(),
-            Ok(1_073_741_824),
+            Ok(8_589_934_592),
         );
         assert_eq!(
             manifest.encoded_queried_bound_material_leaf_salt_count(),
@@ -1000,8 +1038,88 @@ mod tests {
             manifest.bound_material_salt_trees[0].leaf_count -= 1;
         });
         mutate_and_require_rejection(|manifest| {
+            manifest.bound_material_salt_trees[0].low_degree_mode =
+                RowCodeWhirBoundLowDegreeMode::Direct;
+        });
+        mutate_and_require_rejection(|manifest| {
             manifest.bound_material_salt_trees[0].encoded_query_salt_count -= 1;
         });
+    }
+
+    #[test]
+    fn selected_family_manifests_bind_each_candidate_specific_material_catalog() {
+        let artifacts = selected_relation_plans().expect("the selected relation plans derive");
+        let mut observed_vss_manifest = false;
+        let mut observed_empty_material_catalog = false;
+
+        for artifact in &artifacts {
+            let schema_identifier = artifact.application_statement_schema_identifier();
+            let relation_context = selected_relation_plan_check_context(schema_identifier)
+                .expect("each selected family has an exact relation context");
+            for relation_variant in artifact.compiled_plan().variants() {
+                let construction_plan = RowCodeWhirConstructionPlan::for_selected_variant(
+                    artifact,
+                    relation_variant.schedule_position(),
+                    relation_variant.top_count(),
+                )
+                .expect("each candidate-specific construction plan derives");
+                let manifest = SameSecretAuthenticatedSourceManifest::derive(
+                    &construction_plan,
+                    relation_variant,
+                    &relation_context,
+                )
+                .unwrap_or_else(|error| {
+                    panic!("schema {schema_identifier:#06x} source manifest failed: {error:?}")
+                });
+                let expected_material_trees = construction_plan
+                    .bound_trees
+                    .iter()
+                    .filter(|tree| {
+                        tree.construction_kind == BoundTreeConstructionKind::CommittedMaterial
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    manifest.bound_material_tree_count(),
+                    Ok(u64::try_from(expected_material_trees.len())
+                        .expect("the selected material-tree count fits u64")),
+                );
+                for (manifest_tree, construction_tree) in manifest
+                    .bound_material_salt_trees
+                    .iter()
+                    .zip(expected_material_trees)
+                {
+                    assert_eq!(
+                        manifest_tree.relation_tree_ordinal,
+                        construction_tree.relation_tree_ordinal
+                    );
+                    assert_eq!(manifest_tree.root_use, construction_tree.root_use);
+                    assert_eq!(
+                        manifest_tree.low_degree_mode,
+                        construction_tree.low_degree_mode
+                    );
+                    assert_eq!(
+                        manifest_tree.encoded_query_salt_count,
+                        u64::try_from(construction_tree.query_count)
+                            .expect("the selected query count fits u64"),
+                    );
+                }
+
+                if schema_identifier
+                    == ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+                {
+                    observed_vss_manifest = true;
+                    assert_eq!(manifest.bound_material_tree_count(), Ok(112));
+                    assert!(manifest.bound_material_salt_trees.iter().all(|tree| {
+                        tree.root_use == BoundTreeRootUse::Output
+                            && tree.low_degree_mode == RowCodeWhirBoundLowDegreeMode::Direct
+                    }));
+                }
+                observed_empty_material_catalog |= manifest.bound_material_salt_trees.is_empty();
+            }
+        }
+
+        assert!(observed_vss_manifest);
+        assert!(observed_empty_material_catalog);
     }
 
     #[test]

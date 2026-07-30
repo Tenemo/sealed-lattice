@@ -82,9 +82,8 @@ use crate::bgv::proof_suite::prover::{
     validate_source_column,
 };
 use crate::bgv::proof_suite::relation_plan::{
-    BoundTreeConstructionKind, BoundTreeRootUse, ProofPrivacyMode, RelationColumnOrigin,
-    RelationColumnValueType, RelationOpeningClaimDescriptor, RelationOpeningSourceClass,
-    RelationTreeDescriptor,
+    BoundTreeConstructionKind, ProofPrivacyMode, RelationColumnOrigin, RelationColumnValueType,
+    RelationOpeningClaimDescriptor, RelationOpeningSourceClass, RelationTreeDescriptor,
 };
 use crate::bgv::proof_suite::transcript::{
     RowCodeWhirTranscript, RowCodeWhirTranscriptCheckpointCursor,
@@ -1847,15 +1846,16 @@ fn checked_same_secret_source_manifest(
             CommonProofProverError::CountOverflow,
         ))?;
 
-    let input_bound_trees = construction_plan
+    let bound_material_salt_trees = construction_plan
         .bound_trees
         .iter()
-        .filter(|tree| tree.root_use == BoundTreeRootUse::Input)
+        .filter(|tree| tree.construction_kind == BoundTreeConstructionKind::CommittedMaterial)
         .collect::<Vec<_>>();
-    let expected_input_bound_tree_count = u64::try_from(input_bound_trees.len()).map_err(|_| {
-        CommonProofGenerationInitializationError::Prover(CommonProofProverError::CountOverflow)
-    })?;
-    let expected_logical_salt_count = input_bound_trees
+    let expected_bound_material_tree_count = u64::try_from(bound_material_salt_trees.len())
+        .map_err(|_| {
+            CommonProofGenerationInitializationError::Prover(CommonProofProverError::CountOverflow)
+        })?;
+    let expected_logical_salt_count = bound_material_salt_trees
         .iter()
         .try_fold(0_u64, |total, tree| {
             total
@@ -1866,7 +1866,7 @@ fn checked_same_secret_source_manifest(
                 .ok_or(CommonProofProverError::CountOverflow)
         })
         .map_err(CommonProofGenerationInitializationError::Prover)?;
-    let expected_encoded_salt_count = input_bound_trees
+    let expected_encoded_salt_count = bound_material_salt_trees
         .iter()
         .try_fold(0_u64, |total, tree| {
             total
@@ -1903,10 +1903,8 @@ fn checked_same_secret_source_manifest(
             .stored_pre_challenge_column_count()
             .map_err(map_error)?
             != expected_stored_column_count
-        || manifest
-            .bound_material_input_tree_count()
-            .map_err(map_error)?
-            != expected_input_bound_tree_count
+        || manifest.bound_material_tree_count().map_err(map_error)?
+            != expected_bound_material_tree_count
         || manifest
             .logical_bound_material_leaf_salt_count()
             .map_err(map_error)?
@@ -1960,7 +1958,7 @@ fn checked_same_secret_source_manifest(
     }
     validation.finish().map_err(map_error)?;
 
-    for tree in input_bound_trees {
+    for tree in bound_material_salt_trees {
         let leaf_count = u64::try_from(tree.leaf_count).map_err(|_| {
             CommonProofGenerationInitializationError::Prover(CommonProofProverError::CountOverflow)
         })?;
@@ -6854,13 +6852,15 @@ mod tests {
     use crate::{
         bgv::proof_suite::{
             ValidatedRelationPlanArtifact, compile_same_secret_relation_plan,
+            compile_vss_share_linkage_relation_plan,
             external_memory::{
                 AUTOMATIC_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
                 MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_COUNT,
                 MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
                 NOMINAL_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
             },
-            selected_relation_plan_check_context, selected_same_secret_relation_plan_input,
+            selected_committed_material_relation_plan_input, selected_relation_plan_check_context,
+            selected_same_secret_relation_plan_input,
         },
         foundation::{
             MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT,
@@ -6868,6 +6868,47 @@ mod tests {
             ProofApplicationSlotCeilings,
         },
     };
+
+    #[test]
+    fn selected_vss_generation_manifest_accepts_direct_output_material() {
+        let schema_identifier =
+            ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER;
+        let relation_context = selected_relation_plan_check_context(schema_identifier)
+            .expect("the selected VSS relation context exists");
+        let relation_input = selected_committed_material_relation_plan_input()
+            .expect("the selected committed-material input derives");
+        let compiled_plan =
+            compile_vss_share_linkage_relation_plan(&relation_input, &relation_context)
+                .expect("the selected VSS relation compiles");
+        let artifact = ValidatedRelationPlanArtifact::from_owned_compiled_plan(
+            compiled_plan,
+            &relation_context,
+        )
+        .expect("the selected VSS relation validates");
+        let relation_variant = artifact
+            .compiled_plan()
+            .variants()
+            .first()
+            .expect("the selected VSS relation has one variant");
+        let construction_plan = RowCodeWhirConstructionPlan::for_selected_variant(
+            &artifact,
+            relation_variant.schedule_position(),
+            relation_variant.top_count(),
+        )
+        .expect("the selected VSS construction plan derives");
+        let reversed_column_bindings = relation_reversed_column_bindings(relation_variant)
+            .expect("the selected VSS reversed-column catalog derives");
+
+        let manifest = checked_same_secret_source_manifest(
+            &construction_plan,
+            relation_variant,
+            artifact.checked_context(),
+            &reversed_column_bindings,
+        )
+        .expect("generation accepts the candidate-specific VSS source manifest");
+
+        assert_eq!(manifest.bound_material_tree_count(), Ok(112));
+    }
 
     #[test]
     fn generation_private_mask_sampler_ceiling_is_distinct_from_fiat_shamir() {
