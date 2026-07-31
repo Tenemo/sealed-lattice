@@ -34,6 +34,106 @@ const ENCODED_ORACLE_WIDTH: usize = 8;
 const MAXIMUM_ARITHMETIC_ROWS_PER_POLL: usize = 1 << 15;
 pub(super) const AGGREGATE_ORACLE_LEAF_STATE_STRIPE_ROW_COUNT: usize = 1 << 20;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RecomputableOracleEncodingGeometry {
+    source_height: usize,
+    encoded_height: usize,
+    randomness_rows: usize,
+}
+
+impl RecomputableOracleEncodingGeometry {
+    fn derive(
+        source_variable_count: usize,
+        folding_factor: usize,
+        inverse_rate: usize,
+        randomness_element_count: usize,
+    ) -> Result<Self, String> {
+        if folding_factor != ENCODED_ORACLE_WIDTH.ilog2() as usize
+            || folding_factor > source_variable_count
+            || inverse_rate == 0
+            || !inverse_rate.is_power_of_two()
+        {
+            return Err("recomputable oracle has an unsupported encoding geometry".to_owned());
+        }
+        if !randomness_element_count.is_multiple_of(ENCODED_ORACLE_WIDTH) {
+            return Err("recomputable oracle has invalid randomness or queries".to_owned());
+        }
+        let source_logarithmic_height = u32::try_from(source_variable_count - folding_factor)
+            .map_err(|_| "recomputable oracle source height exceeds u32".to_owned())?;
+        let source_height = 1_usize
+            .checked_shl(source_logarithmic_height)
+            .ok_or_else(|| "recomputable oracle source height overflowed".to_owned())?;
+        let encoded_height = source_height
+            .checked_mul(inverse_rate)
+            .ok_or_else(|| "recomputable oracle encoded height overflowed".to_owned())?;
+        let randomness_rows = randomness_element_count / ENCODED_ORACLE_WIDTH;
+        if source_height
+            .checked_add(randomness_rows)
+            .is_none_or(|occupied| occupied > encoded_height)
+        {
+            return Err("recomputable oracle randomness exceeds the encoded column".to_owned());
+        }
+        Ok(Self {
+            source_height,
+            encoded_height,
+            randomness_rows,
+        })
+    }
+}
+
+/// The exact coefficient-to-row map instantiated by the production
+/// recomputable-oracle constructor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg(test)]
+pub(super) struct RecomputableOracleAffineMapDescriptor {
+    pub(super) interleaving_width: usize,
+    pub(super) message_length_per_lane: usize,
+    pub(super) randomness_length_per_lane: usize,
+    pub(super) evaluation_domain_size: usize,
+    pub(super) randomness_exponent_start: usize,
+    pub(super) fixed_zero_suffix_length: usize,
+    pub(super) evaluation_domain_logarithmic_size: usize,
+}
+
+#[cfg(test)]
+pub(super) fn checked_recomputable_oracle_affine_map(
+    source_variable_count: usize,
+    folding_factor: usize,
+    inverse_rate: usize,
+    randomness_length_per_lane: usize,
+) -> Result<RecomputableOracleAffineMapDescriptor, String> {
+    let randomness_element_count = randomness_length_per_lane
+        .checked_mul(ENCODED_ORACLE_WIDTH)
+        .ok_or_else(|| "recomputable oracle randomness length overflowed".to_owned())?;
+    let geometry = RecomputableOracleEncodingGeometry::derive(
+        source_variable_count,
+        folding_factor,
+        inverse_rate,
+        randomness_element_count,
+    )?;
+    Ok(RecomputableOracleAffineMapDescriptor {
+        interleaving_width: ENCODED_ORACLE_WIDTH,
+        message_length_per_lane: geometry.source_height,
+        randomness_length_per_lane: geometry.randomness_rows,
+        evaluation_domain_size: geometry.encoded_height,
+        randomness_exponent_start: geometry.source_height,
+        fixed_zero_suffix_length: geometry
+            .encoded_height
+            .checked_sub(
+                geometry
+                    .source_height
+                    .checked_add(geometry.randomness_rows)
+                    .ok_or_else(|| {
+                        "recomputable oracle occupied coefficient count overflowed".to_owned()
+                    })?,
+            )
+            .ok_or_else(|| {
+                "recomputable oracle occupied coefficient count overflowed".to_owned()
+            })?,
+        evaluation_domain_logarithmic_size: geometry.encoded_height.ilog2() as usize,
+    })
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum RecomputableOracleSource {
     ExternalTable(AggregateSourceTable),
@@ -139,36 +239,25 @@ impl RecomputableOraclePass {
         query_indices: &[usize],
         maximum_stripe_row_count: usize,
     ) -> Result<Self, String> {
-        if folding_factor != ENCODED_ORACLE_WIDTH.ilog2() as usize
-            || folding_factor > source_variable_count
-            || inverse_rate == 0
-            || !inverse_rate.is_power_of_two()
-            || maximum_stripe_row_count == 0
-            || !maximum_stripe_row_count.is_power_of_two()
-        {
+        if maximum_stripe_row_count == 0 || !maximum_stripe_row_count.is_power_of_two() {
             return Err("recomputable oracle has an unsupported encoding geometry".to_owned());
         }
-        let source_height = 1_usize
-            .checked_shl((source_variable_count - folding_factor) as u32)
-            .ok_or_else(|| "recomputable oracle source height overflowed".to_owned())?;
-        let encoded_height = source_height
-            .checked_mul(inverse_rate)
-            .ok_or_else(|| "recomputable oracle encoded height overflowed".to_owned())?;
-        if !randomness.len().is_multiple_of(ENCODED_ORACLE_WIDTH)
-            || query_indices.windows(2).any(|pair| pair[0] >= pair[1])
+        let encoding_geometry = RecomputableOracleEncodingGeometry::derive(
+            source_variable_count,
+            folding_factor,
+            inverse_rate,
+            randomness.len(),
+        )?;
+        if query_indices.windows(2).any(|pair| pair[0] >= pair[1])
             || query_indices
                 .last()
-                .is_some_and(|index| *index >= encoded_height)
+                .is_some_and(|index| *index >= encoding_geometry.encoded_height)
         {
             return Err("recomputable oracle has invalid randomness or queries".to_owned());
         }
-        let randomness_rows = randomness.len() / ENCODED_ORACLE_WIDTH;
-        if source_height
-            .checked_add(randomness_rows)
-            .is_none_or(|occupied| occupied > encoded_height)
-        {
-            return Err("recomputable oracle randomness exceeds the encoded column".to_owned());
-        }
+        let source_height = encoding_geometry.source_height;
+        let encoded_height = encoding_geometry.encoded_height;
+        let randomness_rows = encoding_geometry.randomness_rows;
         match &source {
             RecomputableOracleSource::ExternalTable(table) => {
                 if table.stacked_variable_count() != source_variable_count
@@ -804,6 +893,8 @@ fn capture_digest(
 mod tests {
     use p3_commit::Mmcs;
     use p3_dft::{Radix2Dit, TwoAdicSubgroupDft};
+    use p3_field::TwoAdicField;
+    use p3_goldilocks::Goldilocks;
     use p3_matrix::dense::RowMajorMatrix;
 
     use super::super::aggregate_source_storage::{AggregateSourceValues, AggregateSourceWriter};
@@ -815,6 +906,84 @@ mod tests {
     };
     use crate::bgv::proof_suite::relation_plan::RelationColumnValueType;
     use crate::bgv::proof_suite::row_code_whir::CommitmentScheme;
+
+    #[test]
+    fn recomputable_oracle_rows_match_the_independent_coefficient_evaluation_map() {
+        const SOURCE_VARIABLE_COUNT: usize = 7;
+        const FOLDING_FACTOR: usize = 3;
+        const INVERSE_RATE: usize = 2;
+        const RANDOMNESS_LENGTH_PER_LANE: usize = 2;
+        let descriptor = checked_recomputable_oracle_affine_map(
+            SOURCE_VARIABLE_COUNT,
+            FOLDING_FACTOR,
+            INVERSE_RATE,
+            RANDOMNESS_LENGTH_PER_LANE,
+        )
+        .expect("derive the production affine map");
+        assert_eq!(
+            descriptor,
+            RecomputableOracleAffineMapDescriptor {
+                interleaving_width: 8,
+                message_length_per_lane: 16,
+                randomness_length_per_lane: 2,
+                evaluation_domain_size: 32,
+                randomness_exponent_start: 16,
+                fixed_zero_suffix_length: 14,
+                evaluation_domain_logarithmic_size: 5,
+            }
+        );
+
+        let source = ChallengeField::zero_vec(1 << SOURCE_VARIABLE_COUNT);
+        let randomness = (0..descriptor.interleaving_width * RANDOMNESS_LENGTH_PER_LANE)
+            .map(|coordinate| ChallengeField::from_u64(1_000 + coordinate as u64 * 37))
+            .collect::<Vec<_>>();
+        let query_indices = [0, 1, 7, 19, 31];
+        let mut pass = RecomputableOraclePass::new_with_maximum_stripe_row_count(
+            RecomputableOracleSource::ResidentPolynomial,
+            SOURCE_VARIABLE_COUNT,
+            FOLDING_FACTOR,
+            INVERSE_RATE,
+            randomness.clone(),
+            &query_indices,
+            8,
+        )
+        .expect("the focused recomputable pass is valid");
+        let source = p3_multilinear_util::poly::Poly::new(source);
+        let output = loop {
+            match pass
+                .poll_resident(PolyView::Scalar(&source))
+                .expect("the focused recomputable pass advances")
+            {
+                RecomputableOraclePoll::ArithmeticStepCompleted => {}
+                RecomputableOraclePoll::StorageTransactionCompleted => {
+                    panic!("a resident pass cannot request storage")
+                }
+                RecomputableOraclePoll::Complete(output) => break output,
+            }
+        };
+
+        let domain_generator = ChallengeField::from(Goldilocks::two_adic_generator(
+            descriptor.evaluation_domain_logarithmic_size,
+        ));
+        for (query_ordinal, query_index) in query_indices.iter().copied().enumerate() {
+            let evaluation_point = domain_generator.exp_u64(query_index as u64);
+            for lane_index in 0..descriptor.interleaving_width {
+                let expected = (0..RANDOMNESS_LENGTH_PER_LANE)
+                    .map(|randomness_index| {
+                        randomness[lane_index * RANDOMNESS_LENGTH_PER_LANE + randomness_index]
+                            * evaluation_point.exp_u64(
+                                (descriptor.randomness_exponent_start + randomness_index) as u64,
+                            )
+                    })
+                    .sum::<ChallengeField>();
+                assert_eq!(
+                    output.rows[query_ordinal][lane_index], expected,
+                    "query {query_index}, lane {lane_index}",
+                );
+            }
+        }
+    }
+
     #[test]
     fn resident_striped_recomputation_matches_the_configured_mmcs_root_and_paths() {
         let source_variable_count = 7;

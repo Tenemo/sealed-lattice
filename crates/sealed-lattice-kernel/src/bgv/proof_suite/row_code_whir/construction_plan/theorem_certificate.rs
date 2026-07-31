@@ -12,6 +12,7 @@ use std::time::Instant;
 
 use num_bigint::BigUint;
 use num_traits::{One, Zero};
+use p3_whir::{FoldedRsCode, MaskCodeShape};
 
 use super::shared_query_partition::{SharedQueryEventClass, selected_shared_query_partition};
 use super::*;
@@ -19,16 +20,26 @@ use crate::bgv::proof_suite::relation_plan::{
     RelationCompilerInterpreterSemanticCertificate, checked_relation_compiler_interpreter_semantics,
 };
 use crate::bgv::proof_suite::row_code_whir::{
-    ColumnStreamableLeafHasher, ColumnStreamableLeafOracleFrame,
+    ChallengeField, ColumnStreamableLeafHasher, ColumnStreamableLeafOracleFrame,
     ColumnStreamableLeafOracleFrameDescriptor, MERKLE_DIGEST_WORD_LENGTH,
     ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN, ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN,
     aggregate_leaf_hasher,
-    aggregate_wide_hiding::AggregateWideMaskingCertificate,
+    aggregate_wide_hiding::{
+        AGGREGATE_WIDE_PAD_LOG_INVERSE_RATE, AggregateWideChronologyEvent,
+        AggregateWideChronologyRow, AggregateWideDerivedAffineIdentity,
+        AggregateWideFoldAffineMapDescriptor, AggregateWideFoldLimbOrder,
+        AggregateWideJointAffineRankVerification, AggregateWideJointAffineViewKind,
+        AggregateWideJointAffineViewRow, AggregateWideMaskingCertificate,
+        AggregateWideNonlinearViewBoundary, checked_fold_limb_affine_map,
+    },
     exact_same_secret::{
         ExactExtractorCorrespondenceFault, ExactPointConstraintExtractorCertificate,
         ExactPolynomialProtocolExtractorCertificate,
         checked_exact_same_secret_extractor_correspondence,
         checked_exact_same_secret_extractor_correspondence_with_fault,
+    },
+    recomputable_oracle::{
+        RecomputableOracleAffineMapDescriptor, checked_recomputable_oracle_affine_map,
     },
     row_encoding::{
         PRIVATE_ROW_HIGH_HALF_DOMAIN, PRIVATE_ROW_PAD_PHASE_COUNT,
@@ -2014,6 +2025,1326 @@ impl Cms19ApplicabilityCertificate {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProductionAggregateWideCodeRole {
+    SourceOracle { epoch_ordinal: u32 },
+    AggregatePad,
+    FreshSource,
+    FreshPad,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProductionAggregateWideCodeEncoder {
+    RecomputableOraclePass,
+    FoldedRsCode,
+    MaskCodeShape,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProductionAggregateWideQuerySchedule {
+    SourceEpoch { epoch_ordinal: u32 },
+    Pad,
+}
+
+/// Exact coefficient placement and evaluation geometry used by one committed
+/// codeword class. Every encoder named here materializes
+/// `[message | randomness | zero suffix]` and evaluates it over the natural
+/// two-adic subgroup. The row binds that production placement to the shared
+/// transcript query vector that consumes it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ProductionAggregateWideCodeAffineMapRow {
+    role: ProductionAggregateWideCodeRole,
+    encoder: ProductionAggregateWideCodeEncoder,
+    query_schedule: ProductionAggregateWideQuerySchedule,
+    interleaving_width: usize,
+    message_length_per_lane: usize,
+    randomness_length_per_lane: usize,
+    evaluation_domain_size: usize,
+    randomness_exponent_start: usize,
+    fixed_zero_suffix_length: usize,
+    evaluation_domain_logarithmic_size: usize,
+    shared_query_count: usize,
+}
+
+impl ProductionAggregateWideCodeAffineMapRow {
+    fn is_complete(self) -> bool {
+        let occupied_coefficient_count = self
+            .message_length_per_lane
+            .checked_add(self.randomness_length_per_lane);
+        let exact_domain_partition = occupied_coefficient_count
+            .and_then(|occupied| occupied.checked_add(self.fixed_zero_suffix_length))
+            == Some(self.evaluation_domain_size);
+        let encoder_matches_role = match (self.role, self.encoder, self.query_schedule) {
+            (
+                ProductionAggregateWideCodeRole::SourceOracle { epoch_ordinal },
+                ProductionAggregateWideCodeEncoder::RecomputableOraclePass,
+                ProductionAggregateWideQuerySchedule::SourceEpoch {
+                    epoch_ordinal: query_epoch,
+                },
+            ) => self.interleaving_width == 8 && epoch_ordinal == query_epoch,
+            (
+                ProductionAggregateWideCodeRole::FreshSource,
+                ProductionAggregateWideCodeEncoder::FoldedRsCode,
+                ProductionAggregateWideQuerySchedule::SourceEpoch { .. },
+            ) => self.interleaving_width == 1,
+            (
+                ProductionAggregateWideCodeRole::AggregatePad
+                | ProductionAggregateWideCodeRole::FreshPad,
+                ProductionAggregateWideCodeEncoder::MaskCodeShape,
+                ProductionAggregateWideQuerySchedule::Pad,
+            ) => self.interleaving_width == 1,
+            _ => false,
+        };
+        self.message_length_per_lane > 0
+            && self.randomness_length_per_lane > 0
+            && self.shared_query_count == self.randomness_length_per_lane
+            && self.evaluation_domain_size.is_power_of_two()
+            && self.evaluation_domain_logarithmic_size
+                == self.evaluation_domain_size.ilog2() as usize
+            && self.randomness_exponent_start == self.message_length_per_lane
+            && exact_domain_partition
+            && encoder_matches_role
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ProductionAggregateWideFoldAffineMapRow {
+    epoch_ordinal: u32,
+    map: AggregateWideFoldAffineMapDescriptor,
+}
+
+impl ProductionAggregateWideFoldAffineMapRow {
+    fn is_complete_for(self, code: ProductionAggregateWideCodeAffineMapRow) -> bool {
+        matches!(
+            code.role,
+            ProductionAggregateWideCodeRole::SourceOracle { epoch_ordinal }
+                if epoch_ordinal == self.epoch_ordinal
+        ) && self.map.limb_count == code.interleaving_width
+            && self.map.input_coordinate_count_per_limb == code.randomness_length_per_lane
+            && self.map.output_coordinate_count == code.randomness_length_per_lane
+            && self.map.limb_order
+                == AggregateWideFoldLimbOrder::FirstChallengeSelectsMostSignificantLimbBit
+            && u32::try_from(self.map.folding_variable_count)
+                .ok()
+                .and_then(|variable_count| 1_usize.checked_shl(variable_count))
+                == Some(code.interleaving_width)
+    }
+}
+
+/// Independent production-side specialization of the aggregate-wide affine
+/// certificate. The masking certificate derives coefficient maps from the
+/// prover's private-material layout. This certificate instead walks the
+/// construction plan's verifier transcript and supplied-opening catalogs, then
+/// requires both derivations to agree row for row.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ProductionAggregateWideViewCorrespondenceCertificate {
+    construction_plan_identity_hash: [u8; 64],
+    affine_rows: Vec<AggregateWideJointAffineViewRow>,
+    derived_affine_identities: Vec<AggregateWideDerivedAffineIdentity>,
+    chronology: Vec<AggregateWideChronologyRow>,
+    nonlinear_view_boundary: AggregateWideNonlinearViewBoundary,
+    supplied_commitment_roles: Vec<linear_bcs_transcript::LinearBcsCommittedOracleRole>,
+    code_affine_maps: Vec<ProductionAggregateWideCodeAffineMapRow>,
+    fold_affine_maps: Vec<ProductionAggregateWideFoldAffineMapRow>,
+    transcript_affine_coordinate_count: usize,
+    primary_opened_affine_coordinate_count: usize,
+    derived_opened_affine_coordinate_count: usize,
+    delegated_opening_evaluation_coordinate_count: usize,
+    transcript_derived_affine_coordinate_count: usize,
+    aggregate_wide_extension_challenge_count: usize,
+    aggregate_wide_distinct_query_vector_count: usize,
+    aggregate_wide_proof_of_work_witness_count: usize,
+}
+
+impl ProductionAggregateWideViewCorrespondenceCertificate {
+    fn is_complete(&self, aggregate_wide_masking: &AggregateWideMaskingCertificate) -> bool {
+        let masking_private_coordinate_count = aggregate_wide_masking.joint_affine_view_summary().0;
+        let affine_private_coordinate_count =
+            self.affine_rows.iter().try_fold(0_usize, |count, row| {
+                count.checked_add(row.private_coordinate_count)
+            });
+        let affine_rank = self
+            .affine_rows
+            .iter()
+            .try_fold(0_usize, |rank, row| rank.checked_add(row.joint_view_rank));
+        let affine_conditional_entropy_dimension =
+            self.affine_rows.iter().try_fold(0_usize, |dimension, row| {
+                dimension.checked_add(row.conditional_entropy_dimension)
+            });
+        let opened_affine_coordinate_count = self
+            .transcript_affine_coordinate_count
+            .checked_add(self.primary_opened_affine_coordinate_count);
+        let code_maps_are_complete = self
+            .code_affine_maps
+            .iter()
+            .copied()
+            .all(ProductionAggregateWideCodeAffineMapRow::is_complete);
+        let source_code_maps_are_canonical = self
+            .code_affine_maps
+            .iter()
+            .take(self.fold_affine_maps.len())
+            .enumerate()
+            .all(|(epoch_index, code)| {
+                u32::try_from(epoch_index).is_ok_and(|epoch_ordinal| {
+                    code.role == (ProductionAggregateWideCodeRole::SourceOracle { epoch_ordinal })
+                        && code.query_schedule
+                            == (ProductionAggregateWideQuerySchedule::SourceEpoch { epoch_ordinal })
+                })
+            });
+        let source_code_maps_match_masking = self
+            .code_affine_maps
+            .iter()
+            .take(self.fold_affine_maps.len())
+            .enumerate()
+            .all(|(epoch_index, code)| {
+                aggregate_wide_masking
+                    .folded_source_code_geometry(epoch_index)
+                    .is_some_and(
+                        |(message_length, randomness_length, domain_size, query_count, width)| {
+                            (
+                                code.message_length_per_lane,
+                                code.randomness_length_per_lane,
+                                code.evaluation_domain_size,
+                                code.shared_query_count,
+                                code.interleaving_width,
+                            ) == (
+                                message_length,
+                                randomness_length,
+                                domain_size,
+                                query_count,
+                                width,
+                            )
+                        },
+                    )
+            })
+            && aggregate_wide_masking
+                .folded_source_code_geometry(self.fold_affine_maps.len())
+                .is_none();
+        let terminal_epoch_ordinal = self
+            .fold_affine_maps
+            .len()
+            .checked_sub(1)
+            .and_then(|epoch| u32::try_from(epoch).ok());
+        let terminal_code_maps_are_canonical = terminal_epoch_ordinal.is_some_and(|terminal| {
+            matches!(
+                self.code_affine_maps
+                    .get(self.fold_affine_maps.len())
+                    .map(|row| (row.role, row.query_schedule)),
+                Some((
+                    ProductionAggregateWideCodeRole::AggregatePad,
+                    ProductionAggregateWideQuerySchedule::Pad,
+                ))
+            ) && matches!(
+                self.code_affine_maps
+                    .get(self.fold_affine_maps.len() + 1)
+                    .map(|row| (row.role, row.query_schedule)),
+                Some((
+                    ProductionAggregateWideCodeRole::FreshSource,
+                    ProductionAggregateWideQuerySchedule::SourceEpoch { epoch_ordinal },
+                )) if epoch_ordinal == terminal
+            ) && matches!(
+                self.code_affine_maps
+                    .get(self.fold_affine_maps.len() + 2)
+                    .map(|row| (row.role, row.query_schedule)),
+                Some((
+                    ProductionAggregateWideCodeRole::FreshPad,
+                    ProductionAggregateWideQuerySchedule::Pad,
+                ))
+            )
+        });
+        let terminal_code_maps_match_masking = [
+            (
+                self.fold_affine_maps.len(),
+                aggregate_wide_masking.pad_code_geometry(),
+            ),
+            (
+                self.fold_affine_maps.len() + 1,
+                aggregate_wide_masking.fresh_source_code_geometry(),
+            ),
+            (
+                self.fold_affine_maps.len() + 2,
+                aggregate_wide_masking.fresh_pad_code_geometry(),
+            ),
+        ]
+        .into_iter()
+        .all(
+            |(code_index, (message_length, randomness_length, domain_size, query_count, width))| {
+                self.code_affine_maps.get(code_index).is_some_and(|code| {
+                    (
+                        code.message_length_per_lane,
+                        code.randomness_length_per_lane,
+                        code.evaluation_domain_size,
+                        code.shared_query_count,
+                        code.interleaving_width,
+                    ) == (
+                        message_length,
+                        randomness_length,
+                        domain_size,
+                        query_count,
+                        width,
+                    )
+                })
+            },
+        );
+        let fold_maps_are_complete = self.fold_affine_maps.len() + 3 == self.code_affine_maps.len()
+            && self
+                .fold_affine_maps
+                .iter()
+                .copied()
+                .zip(self.code_affine_maps.iter().copied())
+                .all(|(fold, code)| fold.is_complete_for(code));
+        self.construction_plan_identity_hash != [0_u8; 64]
+            && self.affine_rows == aggregate_wide_masking.joint_affine_view_rows()
+            && self.derived_affine_identities == aggregate_wide_masking.derived_affine_identities()
+            && self.chronology == aggregate_wide_masking.chronology()
+            && self.nonlinear_view_boundary == aggregate_wide_masking.nonlinear_view_boundary()
+            && code_maps_are_complete
+            && source_code_maps_are_canonical
+            && source_code_maps_match_masking
+            && terminal_code_maps_are_canonical
+            && terminal_code_maps_match_masking
+            && fold_maps_are_complete
+            && affine_private_coordinate_count == Some(masking_private_coordinate_count)
+            && affine_rank == opened_affine_coordinate_count
+            && affine_conditional_entropy_dimension
+                == opened_affine_coordinate_count
+                    .and_then(|opened| masking_private_coordinate_count.checked_sub(opened))
+            && self.derived_opened_affine_coordinate_count > 0
+            && self.delegated_opening_evaluation_coordinate_count > 0
+            && self.transcript_derived_affine_coordinate_count > 0
+            && self.aggregate_wide_extension_challenge_count > 0
+            && self.aggregate_wide_distinct_query_vector_count > 0
+            && self.supplied_commitment_roles.len()
+                == self.nonlinear_view_boundary.commitment_root_count
+            && self.aggregate_wide_proof_of_work_witness_count
+                <= self.aggregate_wide_extension_challenge_count
+    }
+
+    fn is_complete_for(
+        &self,
+        plan: &RowCodeWhirConstructionPlan,
+        aggregate_wide_masking: &AggregateWideMaskingCertificate,
+    ) -> bool {
+        plan.canonical_identity_hash()
+            .is_ok_and(|identity| identity == self.construction_plan_identity_hash)
+            && self.is_complete(aggregate_wide_masking)
+    }
+}
+
+fn unique_transcript_observation(
+    plan: &RowCodeWhirConstructionPlan,
+    expected_role: RowCodeWhirObservationRole,
+) -> Result<(usize, usize), WhirTheoremCertificateError> {
+    let mut matching = plan.transcript_operations().iter().enumerate().filter_map(
+        |(operation_index, operation)| match operation {
+            RowCodeWhirTranscriptOperation::ObserveExtensionValues {
+                role, value_count, ..
+            } if *role == expected_role => Some((operation_index, *value_count)),
+            _ => None,
+        },
+    );
+    let row = matching
+        .next()
+        .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+    if matching.next().is_some() || row.1 == 0 {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    Ok(row)
+}
+
+fn unique_transcript_extension_challenge(
+    plan: &RowCodeWhirConstructionPlan,
+    expected_role: RowCodeWhirExtensionRole,
+) -> Result<usize, WhirTheoremCertificateError> {
+    let mut matching = plan.transcript_operations().iter().enumerate().filter_map(
+        |(operation_index, operation)| match operation {
+            RowCodeWhirTranscriptOperation::SampleExtension { role, .. }
+                if *role == expected_role =>
+            {
+                Some(operation_index)
+            }
+            _ => None,
+        },
+    );
+    let operation_index = matching
+        .next()
+        .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+    if matching.next().is_some() {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    Ok(operation_index)
+}
+
+fn unique_transcript_commitment(
+    plan: &RowCodeWhirConstructionPlan,
+    expected_role: RowCodeWhirCommitmentRole,
+) -> Result<usize, WhirTheoremCertificateError> {
+    let mut matching = plan.transcript_operations().iter().enumerate().filter_map(
+        |(operation_index, operation)| match operation {
+            RowCodeWhirTranscriptOperation::ObserveCommitment { role }
+                if *role == expected_role =>
+            {
+                Some(operation_index)
+            }
+            _ => None,
+        },
+    );
+    let operation_index = matching
+        .next()
+        .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+    if matching.next().is_some() {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    Ok(operation_index)
+}
+
+fn unique_transcript_query_vector(
+    plan: &RowCodeWhirConstructionPlan,
+    expected_role: RowCodeWhirQueryRole,
+) -> Result<(usize, usize, usize), WhirTheoremCertificateError> {
+    let mut matching = plan.transcript_operations().iter().enumerate().filter_map(
+        |(operation_index, operation)| match operation {
+            RowCodeWhirTranscriptOperation::SampleDistinctIndices {
+                role,
+                upper_bound,
+                output_count,
+            } if *role == expected_role => Some((operation_index, *upper_bound, *output_count)),
+            _ => None,
+        },
+    );
+    let row = matching
+        .next()
+        .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+    if matching.next().is_some() || row.1 == 0 || row.2 == 0 || row.2 > row.1 {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    Ok(row)
+}
+
+fn unique_supplied_commitment_opening(
+    transcript_plan: &linear_bcs_transcript::LinearBcsTranscriptPlan,
+    expected_role: linear_bcs_transcript::LinearBcsCommittedOracleRole,
+) -> Result<
+    linear_bcs_transcript::LinearBcsSuppliedCommitmentOpeningPlan,
+    WhirTheoremCertificateError,
+> {
+    let mut matching = transcript_plan
+        .supplied_commitment_openings()
+        .iter()
+        .copied()
+        .filter(|opening| opening.commitment_role == expected_role);
+    let opening = matching
+        .next()
+        .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+    if matching.next().is_some()
+        || opening.payload_leaf_count == 0
+        || opening.query_count == 0
+        || opening.query_count > opening.payload_leaf_count
+        || opening.query_order
+            != linear_bcs_transcript::LinearBcsOpeningQueryOrder::AcceptedTranscriptOrder
+        || opening.merkle_traversal_order
+            != linear_bcs_transcript::LinearBcsMerkleTraversalOrder::SortedCoordinates
+    {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    Ok(opening)
+}
+
+fn checked_affine_view_row(
+    row: AggregateWideJointAffineViewRow,
+) -> Result<AggregateWideJointAffineViewRow, WhirTheoremCertificateError> {
+    if row.private_coordinate_count == 0
+        || row.joint_view_rank == 0
+        || row
+            .joint_view_rank
+            .checked_add(row.conditional_entropy_dimension)
+            != Some(row.private_coordinate_count)
+    {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    Ok(row)
+}
+
+fn derive_production_aggregate_wide_view_correspondence(
+    plan: &RowCodeWhirConstructionPlan,
+    aggregate_wide_masking: &AggregateWideMaskingCertificate,
+) -> Result<ProductionAggregateWideViewCorrespondenceCertificate, WhirTheoremCertificateError> {
+    let configuration =
+        super::super::hiding_whir::selected_hiding_whir_config(plan.selected_parameters())
+            .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+    let round_count = configuration.n_rounds();
+    if plan.whir.rounds.len() != round_count
+        || configuration.sumcheck_mask.message_len != 3
+        || configuration.round_folding_factor(0) != 3
+    {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    let linear_transcript_plan = plan
+        .linear_bcs_transcript_plan()
+        .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+
+    let mut code_affine_maps = Vec::with_capacity(
+        round_count
+            .checked_add(4)
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+    );
+    let mut fold_affine_maps = Vec::with_capacity(round_count + 1);
+    let mut source_variable_count = configuration.num_variables;
+    for epoch_index in 0..=round_count {
+        let epoch_ordinal = u32::try_from(epoch_index)
+            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+        let folding_factor = configuration.round_folding_factor(epoch_index);
+        let inverse_rate = if epoch_index == 0 {
+            1_usize
+                .checked_shl(
+                    u32::try_from(configuration.starting_log_inv_rate)
+                        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+                )
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?
+        } else {
+            configuration.inv_rate(epoch_index - 1)
+        };
+        let (
+            message_length_per_lane,
+            randomness_length_per_lane,
+            evaluation_domain_size,
+            shared_query_count,
+            interleaving_width,
+        ) = aggregate_wide_masking
+            .folded_source_code_geometry(epoch_index)
+            .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+        let production_map = checked_recomputable_oracle_affine_map(
+            source_variable_count,
+            folding_factor,
+            inverse_rate,
+            randomness_length_per_lane,
+        )
+        .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+        if production_map
+            != (RecomputableOracleAffineMapDescriptor {
+                interleaving_width,
+                message_length_per_lane,
+                randomness_length_per_lane,
+                evaluation_domain_size,
+                randomness_exponent_start: message_length_per_lane,
+                fixed_zero_suffix_length: evaluation_domain_size
+                    .checked_sub(
+                        message_length_per_lane
+                            .checked_add(randomness_length_per_lane)
+                            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+                    )
+                    .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?,
+                evaluation_domain_logarithmic_size: evaluation_domain_size.ilog2() as usize,
+            })
+        {
+            return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+        }
+        let code_map = ProductionAggregateWideCodeAffineMapRow {
+            role: ProductionAggregateWideCodeRole::SourceOracle { epoch_ordinal },
+            encoder: ProductionAggregateWideCodeEncoder::RecomputableOraclePass,
+            query_schedule: ProductionAggregateWideQuerySchedule::SourceEpoch { epoch_ordinal },
+            interleaving_width: production_map.interleaving_width,
+            message_length_per_lane: production_map.message_length_per_lane,
+            randomness_length_per_lane: production_map.randomness_length_per_lane,
+            evaluation_domain_size: production_map.evaluation_domain_size,
+            randomness_exponent_start: production_map.randomness_exponent_start,
+            fixed_zero_suffix_length: production_map.fixed_zero_suffix_length,
+            evaluation_domain_logarithmic_size: production_map.evaluation_domain_logarithmic_size,
+            shared_query_count,
+        };
+        if !code_map.is_complete() {
+            return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+        }
+        let raw_randomness_length = randomness_length_per_lane
+            .checked_mul(interleaving_width)
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+        let fold_map = ProductionAggregateWideFoldAffineMapRow {
+            epoch_ordinal,
+            map: checked_fold_limb_affine_map(
+                raw_randomness_length,
+                randomness_length_per_lane,
+                folding_factor,
+            )
+            .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?,
+        };
+        if !fold_map.is_complete_for(code_map) {
+            return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+        }
+        code_affine_maps.push(code_map);
+        fold_affine_maps.push(fold_map);
+        source_variable_count = source_variable_count
+            .checked_sub(folding_factor)
+            .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+    }
+
+    let (pad_message_length, pad_randomness_length, pad_domain_size, pad_query_count, pad_width) =
+        aggregate_wide_masking.pad_code_geometry();
+    let production_pad_shape = MaskCodeShape::new(
+        pad_message_length,
+        pad_randomness_length,
+        AGGREGATE_WIDE_PAD_LOG_INVERSE_RATE,
+    );
+    if production_pad_shape.message_len != pad_message_length
+        || production_pad_shape.randomness_len != pad_randomness_length
+        || production_pad_shape.domain_size != pad_domain_size
+    {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    let pad_zero_suffix_length = pad_domain_size
+        .checked_sub(
+            pad_message_length
+                .checked_add(pad_randomness_length)
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+        )
+        .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+    code_affine_maps.push(ProductionAggregateWideCodeAffineMapRow {
+        role: ProductionAggregateWideCodeRole::AggregatePad,
+        encoder: ProductionAggregateWideCodeEncoder::MaskCodeShape,
+        query_schedule: ProductionAggregateWideQuerySchedule::Pad,
+        interleaving_width: pad_width,
+        message_length_per_lane: pad_message_length,
+        randomness_length_per_lane: pad_randomness_length,
+        evaluation_domain_size: pad_domain_size,
+        randomness_exponent_start: pad_message_length,
+        fixed_zero_suffix_length: pad_zero_suffix_length,
+        evaluation_domain_logarithmic_size: pad_domain_size.ilog2() as usize,
+        shared_query_count: pad_query_count,
+    });
+
+    let (
+        fresh_source_message_length,
+        fresh_source_randomness_length,
+        fresh_source_domain_size,
+        fresh_source_query_count,
+        fresh_source_width,
+    ) = aggregate_wide_masking.fresh_source_code_geometry();
+    if !fresh_source_message_length.is_power_of_two()
+        || !fresh_source_domain_size.is_power_of_two()
+        || fresh_source_message_length
+            .checked_add(fresh_source_randomness_length)
+            .is_none_or(|occupied| occupied > fresh_source_domain_size)
+    {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    let production_fresh_source_code = FoldedRsCode::<ChallengeField>::new(
+        fresh_source_message_length,
+        fresh_source_randomness_length,
+        fresh_source_domain_size,
+    );
+    if production_fresh_source_code.message_len != fresh_source_message_length
+        || production_fresh_source_code.randomness_len != fresh_source_randomness_length
+        || production_fresh_source_code.domain_size != fresh_source_domain_size
+    {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    let terminal_epoch_ordinal =
+        u32::try_from(round_count).map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+    code_affine_maps.push(ProductionAggregateWideCodeAffineMapRow {
+        role: ProductionAggregateWideCodeRole::FreshSource,
+        encoder: ProductionAggregateWideCodeEncoder::FoldedRsCode,
+        query_schedule: ProductionAggregateWideQuerySchedule::SourceEpoch {
+            epoch_ordinal: terminal_epoch_ordinal,
+        },
+        interleaving_width: fresh_source_width,
+        message_length_per_lane: fresh_source_message_length,
+        randomness_length_per_lane: fresh_source_randomness_length,
+        evaluation_domain_size: fresh_source_domain_size,
+        randomness_exponent_start: fresh_source_message_length,
+        fixed_zero_suffix_length: fresh_source_domain_size
+            .checked_sub(
+                fresh_source_message_length
+                    .checked_add(fresh_source_randomness_length)
+                    .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+            )
+            .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?,
+        evaluation_domain_logarithmic_size: fresh_source_domain_size.ilog2() as usize,
+        shared_query_count: fresh_source_query_count,
+    });
+
+    let (
+        fresh_pad_message_length,
+        fresh_pad_randomness_length,
+        fresh_pad_domain_size,
+        fresh_pad_query_count,
+        fresh_pad_width,
+    ) = aggregate_wide_masking.fresh_pad_code_geometry();
+    let production_fresh_pad_shape = MaskCodeShape::new(
+        fresh_pad_message_length,
+        fresh_pad_randomness_length,
+        AGGREGATE_WIDE_PAD_LOG_INVERSE_RATE,
+    );
+    if production_fresh_pad_shape != production_pad_shape {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    code_affine_maps.push(ProductionAggregateWideCodeAffineMapRow {
+        role: ProductionAggregateWideCodeRole::FreshPad,
+        encoder: ProductionAggregateWideCodeEncoder::MaskCodeShape,
+        query_schedule: ProductionAggregateWideQuerySchedule::Pad,
+        interleaving_width: fresh_pad_width,
+        message_length_per_lane: fresh_pad_message_length,
+        randomness_length_per_lane: fresh_pad_randomness_length,
+        evaluation_domain_size: fresh_pad_domain_size,
+        randomness_exponent_start: fresh_pad_message_length,
+        fixed_zero_suffix_length: fresh_pad_domain_size
+            .checked_sub(
+                fresh_pad_message_length
+                    .checked_add(fresh_pad_randomness_length)
+                    .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+            )
+            .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?,
+        evaluation_domain_logarithmic_size: fresh_pad_domain_size.ilog2() as usize,
+        shared_query_count: fresh_pad_query_count,
+    });
+    if code_affine_maps
+        .iter()
+        .copied()
+        .any(|row| !row.is_complete())
+    {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+
+    let mut affine_rows = Vec::with_capacity(
+        (round_count + 1)
+            .checked_mul(2)
+            .and_then(|count| count.checked_add(3))
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+    );
+    let mut transcript_affine_coordinate_count = 0_usize;
+    for batch_index in 0..=round_count {
+        let batch_ordinal = u32::try_from(batch_index)
+            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+        let (_, mask_claim_coordinate_count) = unique_transcript_observation(
+            plan,
+            RowCodeWhirObservationRole::MaskedSumcheckMaskClaim { batch_ordinal },
+        )?;
+        if mask_claim_coordinate_count != 1 {
+            return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+        }
+        unique_transcript_extension_challenge(
+            plan,
+            RowCodeWhirExtensionRole::MaskedSumcheckEpsilon { batch_ordinal },
+        )?;
+        let folding_factor = configuration.round_folding_factor(batch_index);
+        let mut polynomial_coordinate_count = 0_usize;
+        for round_index in 0..folding_factor {
+            let round_ordinal = u32::try_from(round_index)
+                .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+            let (_, coordinate_count) = unique_transcript_observation(
+                plan,
+                RowCodeWhirObservationRole::MaskedSumcheckPolynomial {
+                    batch_ordinal,
+                    round_ordinal,
+                },
+            )?;
+            if coordinate_count
+                != configuration
+                    .sumcheck_mask
+                    .message_len
+                    .checked_sub(1)
+                    .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?
+            {
+                return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+            }
+            unique_transcript_extension_challenge(
+                plan,
+                RowCodeWhirExtensionRole::MaskedSumcheckRound {
+                    batch_ordinal,
+                    round_ordinal,
+                },
+            )?;
+            polynomial_coordinate_count = polynomial_coordinate_count
+                .checked_add(coordinate_count)
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+        }
+        let visible_coordinate_count = mask_claim_coordinate_count
+            .checked_add(polynomial_coordinate_count)
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+        let private_coordinate_count = folding_factor
+            .checked_mul(configuration.sumcheck_mask.message_len)
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+        affine_rows.push(checked_affine_view_row(AggregateWideJointAffineViewRow {
+            kind: AggregateWideJointAffineViewKind::SumcheckTranscript { batch_ordinal },
+            private_coordinate_count,
+            joint_view_rank: visible_coordinate_count,
+            conditional_entropy_dimension: private_coordinate_count
+                .checked_sub(visible_coordinate_count)
+                .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?,
+            rank_verification: AggregateWideJointAffineRankVerification::SumcheckConstantMinor {
+                mask_count: folding_factor,
+                coefficients_per_mask: configuration.sumcheck_mask.message_len,
+                visible_coordinate_count,
+                absolute_determinant: 64,
+            },
+        })?);
+        transcript_affine_coordinate_count = transcript_affine_coordinate_count
+            .checked_add(visible_coordinate_count)
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    }
+
+    let mut primary_opened_affine_coordinate_count = 0_usize;
+    let mut primary_source_commitment_roles = Vec::with_capacity(round_count + 1);
+    for epoch_index in 0..=round_count {
+        let epoch_ordinal = u32::try_from(epoch_index)
+            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+        let commitment_role = if epoch_index == 0 {
+            linear_bcs_transcript::LinearBcsCommittedOracleRole::Aggregate
+        } else {
+            linear_bcs_transcript::LinearBcsCommittedOracleRole::WhirRound {
+                round_ordinal: epoch_ordinal - 1,
+            }
+        };
+        let opening = unique_supplied_commitment_opening(&linear_transcript_plan, commitment_role)?;
+        let (_, query_domain_size, shared_query_count) = unique_transcript_query_vector(
+            plan,
+            RowCodeWhirQueryRole::WhirEpoch { epoch_ordinal },
+        )?;
+        let (
+            _message_length,
+            randomness_length_per_lane,
+            code_domain_size,
+            certificate_query_count,
+            interleaving_width,
+        ) = aggregate_wide_masking
+            .folded_source_code_geometry(epoch_index)
+            .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+        if opening.owner
+            != (linear_bcs_transcript::LinearBcsSuppliedCommitmentOpeningOwner::WhirEpoch {
+                epoch_ordinal,
+            })
+            || opening.payload_leaf_count != code_domain_size
+            || opening.payload_leaf_count != query_domain_size
+            || opening.query_count != shared_query_count
+            || certificate_query_count != shared_query_count
+            || randomness_length_per_lane != shared_query_count
+        {
+            return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+        }
+        let source_randomness_coordinate_count = randomness_length_per_lane
+            .checked_mul(interleaving_width)
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+        let source_query_coordinate_count = shared_query_count
+            .checked_mul(interleaving_width)
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+        primary_opened_affine_coordinate_count = primary_opened_affine_coordinate_count
+            .checked_add(source_query_coordinate_count)
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+        let row = if epoch_index < round_count {
+            let (_, switch_identity_coordinate_count) = unique_transcript_observation(
+                plan,
+                RowCodeWhirObservationRole::SwitchMaskDelta {
+                    round_ordinal: epoch_ordinal,
+                },
+            )?;
+            transcript_affine_coordinate_count = transcript_affine_coordinate_count
+                .checked_add(switch_identity_coordinate_count)
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+            AggregateWideJointAffineViewRow {
+                kind: AggregateWideJointAffineViewKind::SourceQueriesAndSwitchDelta {
+                    epoch_ordinal,
+                },
+                private_coordinate_count: source_randomness_coordinate_count
+                    .checked_add(switch_identity_coordinate_count)
+                    .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+                joint_view_rank: source_query_coordinate_count
+                    .checked_add(switch_identity_coordinate_count)
+                    .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+                conditional_entropy_dimension: 0,
+                rank_verification:
+                    AggregateWideJointAffineRankVerification::SourceQueryAndSwitchBlockTriangular {
+                        interleaving_width,
+                        randomness_length_per_lane,
+                        shared_query_count,
+                        switch_identity_coordinate_count,
+                    },
+            }
+        } else {
+            AggregateWideJointAffineViewRow {
+                kind: AggregateWideJointAffineViewKind::TerminalSourceQueries { epoch_ordinal },
+                private_coordinate_count: source_randomness_coordinate_count,
+                joint_view_rank: source_query_coordinate_count,
+                conditional_entropy_dimension: 0,
+                rank_verification:
+                    AggregateWideJointAffineRankVerification::SharedQueryGeneralizedVandermonde {
+                        interleaving_width,
+                        randomness_length_per_lane,
+                        shared_query_count,
+                    },
+            }
+        };
+        affine_rows.push(checked_affine_view_row(row)?);
+        primary_source_commitment_roles.push(commitment_role);
+    }
+
+    let pad_epoch_ordinal = u32::try_from(round_count + 1)
+        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let (_, pad_query_domain_size, pad_query_count) = unique_transcript_query_vector(
+        plan,
+        RowCodeWhirQueryRole::WhirEpoch {
+            epoch_ordinal: pad_epoch_ordinal,
+        },
+    )?;
+    let (
+        pad_message_length,
+        pad_randomness_length,
+        pad_domain_size,
+        certificate_pad_query_count,
+        pad_interleaving_width,
+    ) = aggregate_wide_masking.pad_code_geometry();
+    let pad_opening = unique_supplied_commitment_opening(
+        &linear_transcript_plan,
+        linear_bcs_transcript::LinearBcsCommittedOracleRole::AggregateWidePad,
+    )?;
+    if pad_opening.owner
+        != (linear_bcs_transcript::LinearBcsSuppliedCommitmentOpeningOwner::WhirEpoch {
+            epoch_ordinal: pad_epoch_ordinal,
+        })
+        || pad_opening.payload_leaf_count != pad_domain_size
+        || pad_opening.payload_leaf_count != pad_query_domain_size
+        || pad_opening.query_count != pad_query_count
+        || certificate_pad_query_count != pad_query_count
+        || pad_randomness_length != pad_query_count
+    {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    let pad_private_coordinate_count = pad_randomness_length
+        .checked_mul(pad_interleaving_width)
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let pad_query_coordinate_count = pad_query_count
+        .checked_mul(pad_interleaving_width)
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    affine_rows.push(checked_affine_view_row(AggregateWideJointAffineViewRow {
+        kind: AggregateWideJointAffineViewKind::PadQueries,
+        private_coordinate_count: pad_private_coordinate_count,
+        joint_view_rank: pad_query_coordinate_count,
+        conditional_entropy_dimension: 0,
+        rank_verification:
+            AggregateWideJointAffineRankVerification::SharedQueryGeneralizedVandermonde {
+                interleaving_width: pad_interleaving_width,
+                randomness_length_per_lane: pad_randomness_length,
+                shared_query_count: pad_query_count,
+            },
+    })?);
+    primary_opened_affine_coordinate_count = primary_opened_affine_coordinate_count
+        .checked_add(pad_query_coordinate_count)
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+
+    let terminal_epoch_ordinal =
+        u32::try_from(round_count).map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let (
+        fresh_source_message_length,
+        fresh_source_randomness_length,
+        fresh_source_domain_size,
+        fresh_source_query_count,
+        fresh_source_width,
+    ) = aggregate_wide_masking.fresh_source_code_geometry();
+    let fresh_source_opening = unique_supplied_commitment_opening(
+        &linear_transcript_plan,
+        linear_bcs_transcript::LinearBcsCommittedOracleRole::BaseFreshSource,
+    )?;
+    let (_, blinded_source_message_count) =
+        unique_transcript_observation(plan, RowCodeWhirObservationRole::BaseBlindedSourceMessage)?;
+    let (_, blinded_source_randomness_count) = unique_transcript_observation(
+        plan,
+        RowCodeWhirObservationRole::BaseBlindedSourceRandomness,
+    )?;
+    if fresh_source_opening.owner
+        != (linear_bcs_transcript::LinearBcsSuppliedCommitmentOpeningOwner::WhirEpoch {
+            epoch_ordinal: terminal_epoch_ordinal,
+        })
+        || fresh_source_opening.payload_leaf_count != fresh_source_domain_size
+        || fresh_source_opening.query_count != fresh_source_query_count
+        || fresh_source_width != 1
+        || blinded_source_message_count != fresh_source_message_length
+        || blinded_source_randomness_count != fresh_source_randomness_length
+    {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    let fresh_source_coordinate_count = fresh_source_message_length
+        .checked_add(fresh_source_randomness_length)
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    affine_rows.push(checked_affine_view_row(AggregateWideJointAffineViewRow {
+        kind: AggregateWideJointAffineViewKind::FreshSourceReveal,
+        private_coordinate_count: fresh_source_coordinate_count,
+        joint_view_rank: fresh_source_coordinate_count,
+        conditional_entropy_dimension: 0,
+        rank_verification: AggregateWideJointAffineRankVerification::CoordinateIdentity,
+    })?);
+    transcript_affine_coordinate_count = transcript_affine_coordinate_count
+        .checked_add(fresh_source_coordinate_count)
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+
+    let (
+        fresh_pad_message_length,
+        fresh_pad_randomness_length,
+        fresh_pad_domain_size,
+        fresh_pad_query_count,
+        fresh_pad_width,
+    ) = aggregate_wide_masking.fresh_pad_code_geometry();
+    let fresh_pad_opening = unique_supplied_commitment_opening(
+        &linear_transcript_plan,
+        linear_bcs_transcript::LinearBcsCommittedOracleRole::BaseFreshPad,
+    )?;
+    let (_, blinded_pad_message_count) =
+        unique_transcript_observation(plan, RowCodeWhirObservationRole::BaseBlindedPadMessage)?;
+    let (_, blinded_pad_randomness_count) =
+        unique_transcript_observation(plan, RowCodeWhirObservationRole::BaseBlindedPadRandomness)?;
+    if fresh_pad_opening.owner
+        != (linear_bcs_transcript::LinearBcsSuppliedCommitmentOpeningOwner::WhirEpoch {
+            epoch_ordinal: pad_epoch_ordinal,
+        })
+        || fresh_pad_opening.payload_leaf_count != fresh_pad_domain_size
+        || fresh_pad_opening.query_count != fresh_pad_query_count
+        || fresh_pad_width != 1
+        || fresh_pad_message_length != pad_message_length
+        || fresh_pad_randomness_length != pad_randomness_length
+        || blinded_pad_message_count != fresh_pad_message_length
+        || blinded_pad_randomness_count != fresh_pad_randomness_length
+    {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    let fresh_pad_coordinate_count = fresh_pad_message_length
+        .checked_add(fresh_pad_randomness_length)
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    affine_rows.push(checked_affine_view_row(AggregateWideJointAffineViewRow {
+        kind: AggregateWideJointAffineViewKind::FreshPadReveal,
+        private_coordinate_count: fresh_pad_coordinate_count,
+        joint_view_rank: fresh_pad_coordinate_count,
+        conditional_entropy_dimension: 0,
+        rank_verification: AggregateWideJointAffineRankVerification::CoordinateIdentity,
+    })?);
+    transcript_affine_coordinate_count = transcript_affine_coordinate_count
+        .checked_add(fresh_pad_coordinate_count)
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+
+    let derived_opened_affine_coordinate_count = fresh_source_opening
+        .query_count
+        .checked_mul(fresh_source_width)
+        .and_then(|count| {
+            fresh_pad_opening
+                .query_count
+                .checked_mul(fresh_pad_width)
+                .and_then(|fresh_pad_count| count.checked_add(fresh_pad_count))
+        })
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let delegated_opening_evaluation_coordinate_count =
+        plan.opening_batches()
+            .iter()
+            .try_fold(0_usize, |count, batch| {
+                count
+                    .checked_add(batch.requested_aggregate_column_ordinals.len())
+                    .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+            })?;
+
+    let mut derived_affine_identities = Vec::new();
+    for batch_index in 0..=round_count {
+        let batch_ordinal = u32::try_from(batch_index)
+            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+        derived_affine_identities.push(
+            AggregateWideDerivedAffineIdentity::SumcheckResidualFromTranscript { batch_ordinal },
+        );
+    }
+    for epoch_index in 0..=round_count {
+        derived_affine_identities.push(
+            AggregateWideDerivedAffineIdentity::FoldedRandomnessFromInterleavedLanes {
+                epoch_ordinal: u32::try_from(epoch_index)
+                    .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+            },
+        );
+    }
+    for round_index in 0..round_count {
+        derived_affine_identities.push(
+            AggregateWideDerivedAffineIdentity::SwitchMaskFromPadAndDelta {
+                round_ordinal: u32::try_from(round_index)
+                    .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+            },
+        );
+    }
+    derived_affine_identities.extend([
+        AggregateWideDerivedAffineIdentity::FreshSourceQueriesFromRevealAndCarriedQueries,
+        AggregateWideDerivedAffineIdentity::FreshPadQueriesFromRevealAndCarriedQueries,
+        AggregateWideDerivedAffineIdentity::MaskedClaimFromRevealsAndPublicTarget,
+        AggregateWideDerivedAffineIdentity::TerminalSourceCovectorFromCheckedConstraints,
+        AggregateWideDerivedAffineIdentity::TerminalPadCovectorFromCheckedClaims,
+    ]);
+
+    let aggregate_commitment_position =
+        unique_transcript_commitment(plan, RowCodeWhirCommitmentRole::Aggregate)?;
+    let pad_commitment_position =
+        unique_transcript_commitment(plan, RowCodeWhirCommitmentRole::AggregateWidePad)?;
+    let (initial_sumcheck_position, _) = unique_transcript_observation(
+        plan,
+        RowCodeWhirObservationRole::MaskedSumcheckMaskClaim { batch_ordinal: 0 },
+    )?;
+    let mut chronology_positions = vec![
+        (
+            aggregate_commitment_position,
+            AggregateWideChronologyEvent::InitialSourceCommitmentObserved,
+        ),
+        (
+            pad_commitment_position,
+            AggregateWideChronologyEvent::PadCommitmentObserved,
+        ),
+        (
+            initial_sumcheck_position,
+            AggregateWideChronologyEvent::PrecommittedSumcheck { batch_ordinal: 0 },
+        ),
+    ];
+    for round_index in 0..round_count {
+        let round_ordinal = u32::try_from(round_index)
+            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+        chronology_positions.push((
+            unique_transcript_commitment(
+                plan,
+                RowCodeWhirCommitmentRole::WhirRound { round_ordinal },
+            )?,
+            AggregateWideChronologyEvent::FoldedSourceCommitmentObserved { round_ordinal },
+        ));
+        chronology_positions.push((
+            unique_transcript_observation(
+                plan,
+                RowCodeWhirObservationRole::SwitchMaskDelta { round_ordinal },
+            )?
+            .0,
+            AggregateWideChronologyEvent::SwitchDeltaObserved { round_ordinal },
+        ));
+        chronology_positions.push((
+            unique_transcript_query_vector(
+                plan,
+                RowCodeWhirQueryRole::WhirEpoch {
+                    epoch_ordinal: round_ordinal,
+                },
+            )?
+            .0,
+            AggregateWideChronologyEvent::SourceQueryVectorSampled {
+                epoch_ordinal: round_ordinal,
+            },
+        ));
+        let following_batch_ordinal = round_ordinal + 1;
+        chronology_positions.push((
+            unique_transcript_observation(
+                plan,
+                RowCodeWhirObservationRole::MaskedSumcheckMaskClaim {
+                    batch_ordinal: following_batch_ordinal,
+                },
+            )?
+            .0,
+            AggregateWideChronologyEvent::PrecommittedSumcheck {
+                batch_ordinal: following_batch_ordinal,
+            },
+        ));
+    }
+    let fresh_source_commitment_position =
+        unique_transcript_commitment(plan, RowCodeWhirCommitmentRole::BaseFreshSource)?;
+    let fresh_pad_commitment_position =
+        unique_transcript_commitment(plan, RowCodeWhirCommitmentRole::BaseFreshPad)?;
+    if fresh_source_commitment_position >= fresh_pad_commitment_position {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    chronology_positions.push((
+        fresh_pad_commitment_position,
+        AggregateWideChronologyEvent::FreshBaseCommitmentsObserved,
+    ));
+    chronology_positions.push((
+        unique_transcript_observation(plan, RowCodeWhirObservationRole::BaseMaskedClaim)?.0,
+        AggregateWideChronologyEvent::FreshBaseClaimObserved,
+    ));
+    chronology_positions.push((
+        unique_transcript_extension_challenge(plan, RowCodeWhirExtensionRole::BaseCaseBlinding)?,
+        AggregateWideChronologyEvent::FreshBaseChallengeSampled,
+    ));
+    let reveal_positions = [
+        unique_transcript_observation(plan, RowCodeWhirObservationRole::BaseBlindedSourceMessage)?
+            .0,
+        unique_transcript_observation(
+            plan,
+            RowCodeWhirObservationRole::BaseBlindedSourceRandomness,
+        )?
+        .0,
+        unique_transcript_observation(plan, RowCodeWhirObservationRole::BaseBlindedPadMessage)?.0,
+        unique_transcript_observation(plan, RowCodeWhirObservationRole::BaseBlindedPadRandomness)?
+            .0,
+    ];
+    if reveal_positions
+        .windows(2)
+        .any(|positions| positions[0] >= positions[1])
+    {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    chronology_positions.push((
+        reveal_positions[3],
+        AggregateWideChronologyEvent::FreshBaseRevealsObserved,
+    ));
+    chronology_positions.push((
+        unique_transcript_query_vector(
+            plan,
+            RowCodeWhirQueryRole::WhirEpoch {
+                epoch_ordinal: terminal_epoch_ordinal,
+            },
+        )?
+        .0,
+        AggregateWideChronologyEvent::SourceQueryVectorSampled {
+            epoch_ordinal: terminal_epoch_ordinal,
+        },
+    ));
+    chronology_positions.push((
+        unique_transcript_query_vector(
+            plan,
+            RowCodeWhirQueryRole::WhirEpoch {
+                epoch_ordinal: pad_epoch_ordinal,
+            },
+        )?
+        .0,
+        AggregateWideChronologyEvent::PadQueryVectorSampled,
+    ));
+    if chronology_positions
+        .windows(2)
+        .any(|positions| positions[0].0 >= positions[1].0)
+    {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    let mut chronology = Vec::with_capacity(chronology_positions.len().saturating_add(1));
+    chronology.push(AggregateWideChronologyRow {
+        ordinal: 0,
+        immediate_predecessor: None,
+        event: AggregateWideChronologyEvent::PrivateMaterialSampled,
+    });
+    for (_, event) in chronology_positions {
+        let ordinal = u32::try_from(chronology.len())
+            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+        chronology.push(AggregateWideChronologyRow {
+            ordinal,
+            immediate_predecessor: ordinal.checked_sub(1),
+            event,
+        });
+    }
+
+    let supplied_commitment_roles = linear_transcript_plan
+        .supplied_commitment_openings()
+        .iter()
+        .filter_map(|opening| match opening.commitment_role {
+            linear_bcs_transcript::LinearBcsCommittedOracleRole::RelationPhase { .. } => None,
+            role => Some(role),
+        })
+        .collect::<Vec<_>>();
+    let mut expected_supplied_commitment_roles = Vec::with_capacity(round_count + 4);
+    expected_supplied_commitment_roles.extend([
+        linear_bcs_transcript::LinearBcsCommittedOracleRole::Aggregate,
+        linear_bcs_transcript::LinearBcsCommittedOracleRole::AggregateWidePad,
+    ]);
+    expected_supplied_commitment_roles.extend(
+        (0..round_count)
+            .map(u32::try_from)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?
+            .into_iter()
+            .map(
+                |round_ordinal| linear_bcs_transcript::LinearBcsCommittedOracleRole::WhirRound {
+                    round_ordinal,
+                },
+            ),
+    );
+    expected_supplied_commitment_roles.extend([
+        linear_bcs_transcript::LinearBcsCommittedOracleRole::BaseFreshSource,
+        linear_bcs_transcript::LinearBcsCommittedOracleRole::BaseFreshPad,
+    ]);
+    if supplied_commitment_roles != expected_supplied_commitment_roles
+        || primary_source_commitment_roles.len() != round_count + 1
+        || ColumnStreamableLeafHasher::intermediate_output_bit_length()
+            != CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH
+        || ColumnStreamableLeafHasher::final_output_bit_length()
+            != CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH
+    {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    let nonlinear_view_boundary = AggregateWideNonlinearViewBoundary {
+        commitment_root_count: supplied_commitment_roles.len(),
+        compact_frontier_count: supplied_commitment_roles.len(),
+        code_switch_image_count: round_count,
+        fold_image_count: primary_source_commitment_roles.len(),
+        hash_output_bit_length: CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH,
+    };
+
+    let aggregate_wide_extension_challenge_count = plan
+        .transcript_operations()
+        .iter()
+        .filter(|operation| {
+            matches!(
+                operation,
+                RowCodeWhirTranscriptOperation::SampleExtension {
+                    role: RowCodeWhirExtensionRole::OpeningBatching
+                        | RowCodeWhirExtensionRole::MaskedSumcheckEpsilon { .. }
+                        | RowCodeWhirExtensionRole::MaskedSumcheckRound { .. }
+                        | RowCodeWhirExtensionRole::RoundCheckpoint { .. }
+                        | RowCodeWhirExtensionRole::RoundCombination { .. }
+                        | RowCodeWhirExtensionRole::BaseCaseBlinding,
+                    ..
+                }
+            )
+        })
+        .count();
+    let aggregate_wide_distinct_query_vector_count = plan
+        .transcript_operations()
+        .iter()
+        .filter(|operation| {
+            matches!(
+                operation,
+                RowCodeWhirTranscriptOperation::SampleDistinctIndices {
+                    role: RowCodeWhirQueryRole::WhirEpoch { .. },
+                    ..
+                }
+            )
+        })
+        .count();
+    let initial_sumcheck_witness_count = usize::from(configuration.starting_folding_pow_bits > 0)
+        .checked_mul(configuration.round_folding_factor(0))
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let round_witness_count = configuration.round_parameters.iter().enumerate().try_fold(
+        0_usize,
+        |count, (round_index, round)| {
+            let commitment_witness_count = usize::from(round.pow_bits > 0);
+            let following_sumcheck_witness_count = usize::from(round.folding_pow_bits > 0)
+                .checked_mul(configuration.round_folding_factor(round_index + 1))
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+            count
+                .checked_add(commitment_witness_count)
+                .and_then(|value| value.checked_add(following_sumcheck_witness_count))
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+        },
+    )?;
+    let aggregate_wide_proof_of_work_witness_count = initial_sumcheck_witness_count
+        .checked_add(round_witness_count)
+        .and_then(|count| count.checked_add(usize::from(configuration.final_pow_bits > 0)))
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let transcript_derived_affine_coordinate_count = round_count
+        .checked_add(1)
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+
+    let certificate = ProductionAggregateWideViewCorrespondenceCertificate {
+        construction_plan_identity_hash: plan
+            .canonical_identity_hash()
+            .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?,
+        affine_rows,
+        derived_affine_identities,
+        chronology,
+        nonlinear_view_boundary,
+        supplied_commitment_roles,
+        code_affine_maps,
+        fold_affine_maps,
+        transcript_affine_coordinate_count,
+        primary_opened_affine_coordinate_count,
+        derived_opened_affine_coordinate_count,
+        delegated_opening_evaluation_coordinate_count,
+        transcript_derived_affine_coordinate_count,
+        aggregate_wide_extension_challenge_count,
+        aggregate_wide_distinct_query_vector_count,
+        aggregate_wide_proof_of_work_witness_count,
+    };
+    if !certificate.is_complete_for(plan, aggregate_wide_masking) {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    Ok(certificate)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::bgv::proof_suite) struct RowCodeWhirFailurePartitionCertificate {
     code_state_rows: Vec<WhirCodeStateRow>,
@@ -2039,6 +3370,7 @@ pub(in crate::bgv::proof_suite) struct RowCodeWhirFailurePartitionCertificate {
     exact_failure_magnitude: ExactFailureMagnitudeCertificate,
     construction_masking: ConstructionMaskingCertificate,
     aggregate_wide_masking: AggregateWideMaskingCertificate,
+    production_aggregate_wide_views: ProductionAggregateWideViewCorrespondenceCertificate,
     private_row_pad_generator_hybrid: PrivateRowPadGeneratorHybridCertificate,
     relation_compiler_interpreter_semantics: RelationCompilerInterpreterSemanticCertificate,
     polynomial_protocol_extractor: ExactPolynomialProtocolExtractorCertificate,
@@ -2078,6 +3410,15 @@ impl RowCodeWhirFailurePartitionCertificate {
         self.commitment_subtree_extraction.is_complete()
             && self.construction_masking.is_complete()
             && self.aggregate_wide_masking.is_complete()
+            && self
+                .production_aggregate_wide_views
+                .is_complete(&self.aggregate_wide_masking)
+            && self
+                .production_aggregate_wide_views
+                .construction_plan_identity_hash
+                == self
+                    .polynomial_protocol_extractor
+                    .construction_plan_identity_hash()
             && self.private_row_pad_generator_hybrid.is_complete()
             && self.relation_compiler_interpreter_semantics.is_complete()
             && self.polynomial_protocol_extractor.is_complete()
@@ -2125,6 +3466,7 @@ struct RowCodeWhirProductionGeometryCertificate {
     relation_compiler_interpreter_semantics: RelationCompilerInterpreterSemanticCertificate,
     construction_masking: ConstructionMaskingCertificate,
     aggregate_wide_masking: AggregateWideMaskingCertificate,
+    production_aggregate_wide_views: ProductionAggregateWideViewCorrespondenceCertificate,
     private_row_pad_generator_hybrid: PrivateRowPadGeneratorHybridCertificate,
     whir_geometry: ProductionWhirGeometryCertificate,
     prefix_stacking: PrefixStackingCertificate,
@@ -2207,6 +3549,13 @@ impl RowCodeWhirProductionGeometryCertificate {
         if !self.relation_compiler_interpreter_semantics.is_complete()
             || !self.construction_masking.is_complete()
             || !self.aggregate_wide_masking.is_complete()
+            || !self
+                .production_aggregate_wide_views
+                .is_complete(&self.aggregate_wide_masking)
+            || self
+                .production_aggregate_wide_views
+                .construction_plan_identity_hash
+                != self.construction_plan_identity_hash
             || !self.private_row_pad_generator_hybrid.is_complete()
         {
             return Some(
@@ -2687,6 +4036,14 @@ fn checked_row_code_whir_production_geometry_certificate_with_masking(
             WhirTheoremCertificateError::IncompleteMaskingCorrespondence,
         ));
     }
+    let production_aggregate_wide_views =
+        derive_production_aggregate_wide_view_correspondence(plan, aggregate_wide_masking)
+            .map_err(|error| {
+                contextualize(
+                    ProductionGeometryCertificateStage::MaskingCorrespondence,
+                    error,
+                )
+            })?;
     let private_row_pad_generator_hybrid = PrivateRowPadGeneratorHybridCertificate::derive(plan)
         .map_err(|error| {
             contextualize(
@@ -2813,6 +4170,7 @@ fn checked_row_code_whir_production_geometry_certificate_with_masking(
         relation_compiler_interpreter_semantics,
         construction_masking,
         aggregate_wide_masking: aggregate_wide_masking.clone(),
+        production_aggregate_wide_views,
         private_row_pad_generator_hybrid,
         whir_geometry,
         prefix_stacking,
@@ -3051,6 +4409,8 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
     {
         return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
     }
+    let production_aggregate_wide_views =
+        derive_production_aggregate_wide_view_correspondence(plan, &aggregate_wide_masking)?;
     let private_row_pad_generator_hybrid = PrivateRowPadGeneratorHybridCertificate::derive(plan)
         .map_err(|_| WhirTheoremCertificateError::IncompleteRowPadGeneratorHybrid)?;
     if !private_row_pad_generator_hybrid.is_complete_for_plan(plan) {
@@ -3431,6 +4791,7 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
         exact_failure_magnitude,
         construction_masking,
         aggregate_wide_masking,
+        production_aggregate_wide_views,
         private_row_pad_generator_hybrid,
         relation_compiler_interpreter_semantics,
         polynomial_protocol_extractor,
@@ -6390,6 +7751,205 @@ fn selected_same_secret_construction_plan() -> RowCodeWhirConstructionPlan {
         .expect("the selected same-secret relation validates");
     RowCodeWhirConstructionPlan::for_selected_variant(&artifact, None, None)
         .expect("the selected same-secret construction plan derives")
+}
+
+#[test]
+fn production_aggregate_wide_views_bind_every_affine_and_nonlinear_catalog() {
+    let plan = selected_same_secret_construction_plan();
+    let configuration =
+        super::super::hiding_whir::selected_hiding_whir_config(plan.selected_parameters())
+            .expect("the selected hiding configuration derives");
+    let masking = AggregateWideMaskingCertificate::derive(&configuration)
+        .expect("the aggregate-wide masking certificate derives");
+    let certificate = derive_production_aggregate_wide_view_correspondence(&plan, &masking)
+        .expect("the production aggregate-wide view correspondence derives");
+
+    assert!(certificate.is_complete_for(&plan, &masking));
+    assert_eq!(certificate.affine_rows.len(), 15);
+    assert_eq!(
+        certificate
+            .affine_rows
+            .iter()
+            .map(|row| (
+                row.private_coordinate_count,
+                row.joint_view_rank,
+                row.conditional_entropy_dimension,
+            ))
+            .collect::<Vec<_>>(),
+        [
+            (9, 7, 2),
+            (9, 7, 2),
+            (9, 7, 2),
+            (9, 7, 2),
+            (9, 7, 2),
+            (9, 7, 2),
+            (3_483, 3_483, 0),
+            (2_592, 2_592, 0),
+            (2_412, 2_412, 0),
+            (2_376, 2_376, 0),
+            (2_367, 2_367, 0),
+            (2_104, 2_104, 0),
+            (393, 393, 0),
+            (327, 327, 0),
+            (1_917, 1_917, 0),
+        ]
+    );
+    assert_eq!(certificate.transcript_affine_coordinate_count, 3_756);
+    assert_eq!(certificate.primary_opened_affine_coordinate_count, 14_257);
+    assert_eq!(certificate.derived_opened_affine_coordinate_count, 656);
+    assert_eq!(
+        certificate.delegated_opening_evaluation_coordinate_count,
+        SAME_SECRET_SCALAR_OPENING_COUNT as usize
+    );
+    assert_eq!(certificate.transcript_derived_affine_coordinate_count, 6);
+    assert_eq!(certificate.aggregate_wide_extension_challenge_count, 36);
+    assert_eq!(certificate.aggregate_wide_distinct_query_vector_count, 7);
+    assert_eq!(certificate.aggregate_wide_proof_of_work_witness_count, 0);
+    assert_eq!(certificate.supplied_commitment_roles.len(), 9);
+    assert_eq!(
+        certificate
+            .code_affine_maps
+            .iter()
+            .map(|row| (
+                row.message_length_per_lane,
+                row.randomness_length_per_lane,
+                row.evaluation_domain_size,
+                row.interleaving_width,
+                row.shared_query_count,
+                row.randomness_exponent_start,
+                row.fixed_zero_suffix_length,
+                row.evaluation_domain_logarithmic_size,
+            ))
+            .collect::<Vec<_>>(),
+        [
+            (2_097_152, 387, 8_388_608, 8, 387, 2_097_152, 6_291_069, 23),
+            (262_144, 288, 4_194_304, 8, 288, 262_144, 3_931_872, 22),
+            (32_768, 268, 2_097_152, 8, 268, 32_768, 2_064_116, 21),
+            (4_096, 264, 1_048_576, 8, 264, 4_096, 1_044_216, 20),
+            (512, 263, 524_288, 8, 263, 512, 523_513, 19),
+            (64, 263, 262_144, 8, 263, 64, 261_817, 18),
+            (1_524, 393, 8_192, 1, 393, 1_524, 6_275, 13),
+            (64, 263, 262_144, 1, 263, 64, 261_817, 18),
+            (1_524, 393, 8_192, 1, 393, 1_524, 6_275, 13),
+        ],
+    );
+    assert_eq!(
+        certificate
+            .fold_affine_maps
+            .iter()
+            .map(|row| (
+                row.epoch_ordinal,
+                row.map.limb_count,
+                row.map.input_coordinate_count_per_limb,
+                row.map.output_coordinate_count,
+                row.map.folding_variable_count,
+            ))
+            .collect::<Vec<_>>(),
+        [
+            (0, 8, 387, 387, 3),
+            (1, 8, 288, 288, 3),
+            (2, 8, 268, 268, 3),
+            (3, 8, 264, 264, 3),
+            (4, 8, 263, 263, 3),
+            (5, 8, 263, 263, 3),
+        ],
+    );
+    assert_eq!(certificate.derived_affine_identities.len(), 22);
+    assert_eq!(certificate.chronology.len(), 30);
+    assert_eq!(
+        certificate.nonlinear_view_boundary,
+        AggregateWideNonlinearViewBoundary {
+            commitment_root_count: 9,
+            compact_frontier_count: 9,
+            code_switch_image_count: 5,
+            fold_image_count: 6,
+            hash_output_bit_length: 512,
+        }
+    );
+
+    let mut deficient_rank = certificate.clone();
+    deficient_rank.affine_rows[0].joint_view_rank -= 1;
+    assert!(!deficient_rank.is_complete_for(&plan, &masking));
+
+    let mut altered_sumcheck_map = certificate.clone();
+    altered_sumcheck_map.affine_rows[0].rank_verification =
+        AggregateWideJointAffineRankVerification::SumcheckConstantMinor {
+            mask_count: 3,
+            coefficients_per_mask: 3,
+            visible_coordinate_count: 7,
+            absolute_determinant: 1,
+        };
+    assert!(!altered_sumcheck_map.is_complete_for(&plan, &masking));
+
+    let mut omitted_nonlinear_root = certificate.clone();
+    omitted_nonlinear_root.supplied_commitment_roles.pop();
+    assert!(!omitted_nonlinear_root.is_complete_for(&plan, &masking));
+
+    let mut shifted_randomness_block = certificate.clone();
+    shifted_randomness_block.code_affine_maps[0].randomness_exponent_start += 1;
+    shifted_randomness_block.code_affine_maps[0].fixed_zero_suffix_length -= 1;
+    assert!(!shifted_randomness_block.is_complete_for(&plan, &masking));
+
+    let mut changed_fold_lane_count = certificate.clone();
+    changed_fold_lane_count.fold_affine_maps[0].map.limb_count /= 2;
+    assert!(!changed_fold_lane_count.is_complete_for(&plan, &masking));
+
+    let mut wrong_fresh_source_query_epoch = certificate.clone();
+    wrong_fresh_source_query_epoch.code_affine_maps[7].query_schedule =
+        ProductionAggregateWideQuerySchedule::SourceEpoch { epoch_ordinal: 4 };
+    assert!(!wrong_fresh_source_query_epoch.is_complete_for(&plan, &masking));
+
+    let mut changed_query_schedule = plan.clone();
+    let changed_query = changed_query_schedule
+        .transcript_operations
+        .iter_mut()
+        .find(|operation| {
+            matches!(
+                operation,
+                RowCodeWhirTranscriptOperation::SampleDistinctIndices {
+                    role: RowCodeWhirQueryRole::WhirEpoch { epoch_ordinal: 0 },
+                    ..
+                }
+            )
+        })
+        .expect("the first WHIR query vector exists");
+    let RowCodeWhirTranscriptOperation::SampleDistinctIndices { output_count, .. } = changed_query
+    else {
+        unreachable!("the matching operation has the checked shape");
+    };
+    *output_count -= 1;
+    assert_eq!(
+        derive_production_aggregate_wide_view_correspondence(&changed_query_schedule, &masking),
+        Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence),
+    );
+
+    let mut omitted_reveal_coordinate = plan.clone();
+    let omitted_reveal = omitted_reveal_coordinate
+        .transcript_operations
+        .iter_mut()
+        .find(|operation| {
+            matches!(
+                operation,
+                RowCodeWhirTranscriptOperation::ObserveExtensionValues {
+                    role: RowCodeWhirObservationRole::BaseBlindedPadMessage,
+                    ..
+                }
+            )
+        })
+        .expect("the fresh-pad reveal exists");
+    let RowCodeWhirTranscriptOperation::ObserveExtensionValues { value_count, .. } = omitted_reveal
+    else {
+        unreachable!("the matching operation has the checked shape");
+    };
+    *value_count -= 1;
+    assert_eq!(
+        derive_production_aggregate_wide_view_correspondence(&omitted_reveal_coordinate, &masking),
+        Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence),
+    );
+
+    let mut challenge_dependent_pad = certificate;
+    challenge_dependent_pad.chronology.swap(2, 3);
+    assert!(!challenge_dependent_pad.is_complete_for(&plan, &masking));
 }
 
 #[test]

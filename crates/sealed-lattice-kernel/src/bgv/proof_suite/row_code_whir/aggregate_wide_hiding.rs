@@ -341,7 +341,7 @@ impl AggregateWideQueryPrivateCodeRow {
 /// already sampled public transcript challenges.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg(test)]
-enum AggregateWideJointAffineViewKind {
+pub(super) enum AggregateWideJointAffineViewKind {
     SumcheckTranscript { batch_ordinal: u32 },
     SourceQueriesAndSwitchDelta { epoch_ordinal: u32 },
     TerminalSourceQueries { epoch_ordinal: u32 },
@@ -350,13 +350,49 @@ enum AggregateWideJointAffineViewKind {
     FreshPadReveal,
 }
 
+/// A structural rank proof for one independently sampled private-material
+/// block. These cases mirror the actual production maps rather than inferring
+/// rank from equal input and output counts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg(test)]
-struct AggregateWideJointAffineViewRow {
-    kind: AggregateWideJointAffineViewKind,
-    private_coordinate_count: usize,
-    joint_view_rank: usize,
-    conditional_entropy_dimension: usize,
+pub(super) enum AggregateWideJointAffineRankVerification {
+    /// The selected three-round sumcheck map has a challenge-independent
+    /// nonzero `7 x 7` minor inside its exact `7 x 9` coefficient map.
+    SumcheckConstantMinor {
+        mask_count: usize,
+        coefficients_per_mask: usize,
+        visible_coordinate_count: usize,
+        absolute_determinant: u64,
+    },
+    /// Source query evaluations form one square generalized Vandermonde block
+    /// per interleaved lane. The switch image adds a disjoint `-I` block on
+    /// the relevant pad slice, making the complete joint map block triangular.
+    SourceQueryAndSwitchBlockTriangular {
+        interleaving_width: usize,
+        randomness_length_per_lane: usize,
+        shared_query_count: usize,
+        switch_identity_coordinate_count: usize,
+    },
+    /// One square generalized Vandermonde block per lane. Every lane reuses
+    /// the same distinct query vector; it does not receive an independent
+    /// query schedule.
+    SharedQueryGeneralizedVandermonde {
+        interleaving_width: usize,
+        randomness_length_per_lane: usize,
+        shared_query_count: usize,
+    },
+    /// A fresh vector is added coordinate-wise with coefficient one.
+    CoordinateIdentity,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg(test)]
+pub(super) struct AggregateWideJointAffineViewRow {
+    pub(super) kind: AggregateWideJointAffineViewKind,
+    pub(super) private_coordinate_count: usize,
+    pub(super) joint_view_rank: usize,
+    pub(super) conditional_entropy_dimension: usize,
+    pub(super) rank_verification: AggregateWideJointAffineRankVerification,
 }
 
 #[cfg(test)]
@@ -371,6 +407,61 @@ impl AggregateWideJointAffineViewRow {
         {
             return Err("aggregate-wide joint affine-view row has invalid rank".to_owned());
         }
+        let rank_geometry_is_exact = match self.rank_verification {
+            AggregateWideJointAffineRankVerification::SumcheckConstantMinor {
+                mask_count,
+                coefficients_per_mask,
+                visible_coordinate_count,
+                absolute_determinant,
+            } => {
+                mask_count == 3
+                    && coefficients_per_mask == 3
+                    && visible_coordinate_count == 7
+                    && absolute_determinant == 64
+                    && mask_count.checked_mul(coefficients_per_mask)
+                        == Some(self.private_coordinate_count)
+                    && self.joint_view_rank == visible_coordinate_count
+            }
+            AggregateWideJointAffineRankVerification::SourceQueryAndSwitchBlockTriangular {
+                interleaving_width,
+                randomness_length_per_lane,
+                shared_query_count,
+                switch_identity_coordinate_count,
+            } => {
+                interleaving_width > 0
+                    && randomness_length_per_lane == shared_query_count
+                    && switch_identity_coordinate_count > 0
+                    && interleaving_width
+                        .checked_mul(randomness_length_per_lane)
+                        .and_then(|count| count.checked_add(switch_identity_coordinate_count))
+                        == Some(self.private_coordinate_count)
+                    && interleaving_width
+                        .checked_mul(shared_query_count)
+                        .and_then(|count| count.checked_add(switch_identity_coordinate_count))
+                        == Some(self.joint_view_rank)
+            }
+            AggregateWideJointAffineRankVerification::SharedQueryGeneralizedVandermonde {
+                interleaving_width,
+                randomness_length_per_lane,
+                shared_query_count,
+            } => {
+                interleaving_width > 0
+                    && randomness_length_per_lane == shared_query_count
+                    && interleaving_width.checked_mul(randomness_length_per_lane)
+                        == Some(self.private_coordinate_count)
+                    && interleaving_width.checked_mul(shared_query_count)
+                        == Some(self.joint_view_rank)
+            }
+            AggregateWideJointAffineRankVerification::CoordinateIdentity => {
+                self.private_coordinate_count == self.joint_view_rank
+                    && self.conditional_entropy_dimension == 0
+            }
+        };
+        if !rank_geometry_is_exact {
+            return Err(
+                "aggregate-wide joint affine-view row lacks its structural rank proof".to_owned(),
+            );
+        }
         Ok(())
     }
 }
@@ -380,7 +471,7 @@ impl AggregateWideJointAffineViewRow {
 /// twice merely because the wire transports both sides of a linear check.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg(test)]
-enum AggregateWideDerivedAffineIdentity {
+pub(super) enum AggregateWideDerivedAffineIdentity {
     SumcheckResidualFromTranscript { batch_ordinal: u32 },
     FoldedRandomnessFromInterleavedLanes { epoch_ordinal: u32 },
     SwitchMaskFromPadAndDelta { round_ordinal: u32 },
@@ -395,7 +486,7 @@ enum AggregateWideDerivedAffineIdentity {
 /// has the strict immediate predecessor named by its ordinal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg(test)]
-enum AggregateWideChronologyEvent {
+pub(super) enum AggregateWideChronologyEvent {
     PrivateMaterialSampled,
     InitialSourceCommitmentObserved,
     PadCommitmentObserved,
@@ -412,10 +503,10 @@ enum AggregateWideChronologyEvent {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg(test)]
-struct AggregateWideChronologyRow {
-    ordinal: u32,
-    immediate_predecessor: Option<u32>,
-    event: AggregateWideChronologyEvent,
+pub(super) struct AggregateWideChronologyRow {
+    pub(super) ordinal: u32,
+    pub(super) immediate_predecessor: Option<u32>,
+    pub(super) event: AggregateWideChronologyEvent,
 }
 
 /// Hash-derived and commitment-derived views are deliberately kept outside the
@@ -424,12 +515,12 @@ struct AggregateWideChronologyRow {
 /// QROM zero knowledge.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg(test)]
-struct AggregateWideNonlinearViewBoundary {
-    commitment_root_count: usize,
-    compact_frontier_count: usize,
-    code_switch_image_count: usize,
-    fold_image_count: usize,
-    hash_output_bit_length: usize,
+pub(super) struct AggregateWideNonlinearViewBoundary {
+    pub(super) commitment_root_count: usize,
+    pub(super) compact_frontier_count: usize,
+    pub(super) code_switch_image_count: usize,
+    pub(super) fold_image_count: usize,
+    pub(super) hash_output_bit_length: usize,
 }
 
 /// Deployment-to-ideal replacement ledger for the private samples consumed by
@@ -770,6 +861,12 @@ fn aggregate_wide_joint_affine_view_rows(
             conditional_entropy_dimension: private_coordinate_count
                 .checked_sub(joint_view_rank)
                 .ok_or_else(|| "aggregate-wide sumcheck rank exceeds its input".to_owned())?,
+            rank_verification: AggregateWideJointAffineRankVerification::SumcheckConstantMinor {
+                mask_count: batch.masks.len(),
+                coefficients_per_mask: configuration.sumcheck_mask.message_len,
+                visible_coordinate_count: joint_view_rank,
+                absolute_determinant: 64,
+            },
         });
     }
     for (epoch_ordinal, code) in folded_source_codes.iter().copied().enumerate() {
@@ -792,6 +889,13 @@ fn aggregate_wide_joint_affine_view_rows(
                     .checked_add(switch_coordinate_count)
                     .ok_or_else(|| "aggregate-wide source-and-switch rank overflowed".to_owned())?,
                 conditional_entropy_dimension: 0,
+                rank_verification:
+                    AggregateWideJointAffineRankVerification::SourceQueryAndSwitchBlockTriangular {
+                        interleaving_width: code.interleaving_width,
+                        randomness_length_per_lane: code.randomness_length,
+                        shared_query_count: code.maximum_distinct_query_count,
+                        switch_identity_coordinate_count: switch_coordinate_count,
+                    },
             });
         } else {
             rows.push(AggregateWideJointAffineViewRow {
@@ -801,6 +905,12 @@ fn aggregate_wide_joint_affine_view_rows(
                 private_coordinate_count: source_randomness_count,
                 joint_view_rank: query_rank,
                 conditional_entropy_dimension: 0,
+                rank_verification:
+                    AggregateWideJointAffineRankVerification::SharedQueryGeneralizedVandermonde {
+                        interleaving_width: code.interleaving_width,
+                        randomness_length_per_lane: code.randomness_length,
+                        shared_query_count: code.maximum_distinct_query_count,
+                    },
             });
         }
     }
@@ -809,6 +919,12 @@ fn aggregate_wide_joint_affine_view_rows(
         private_coordinate_count: pad_code.private_randomness_coordinate_count()?,
         joint_view_rank: pad_code.transported_query_coordinate_count()?,
         conditional_entropy_dimension: 0,
+        rank_verification:
+            AggregateWideJointAffineRankVerification::SharedQueryGeneralizedVandermonde {
+                interleaving_width: pad_code.interleaving_width,
+                randomness_length_per_lane: pad_code.randomness_length,
+                shared_query_count: pad_code.maximum_distinct_query_count,
+            },
     });
     let fresh_source_coordinate_count = fresh_source_code
         .message_length
@@ -819,6 +935,7 @@ fn aggregate_wide_joint_affine_view_rows(
         private_coordinate_count: fresh_source_coordinate_count,
         joint_view_rank: fresh_source_coordinate_count,
         conditional_entropy_dimension: 0,
+        rank_verification: AggregateWideJointAffineRankVerification::CoordinateIdentity,
     });
     let fresh_pad_coordinate_count = fresh_pad_code
         .message_length
@@ -829,6 +946,7 @@ fn aggregate_wide_joint_affine_view_rows(
         private_coordinate_count: fresh_pad_coordinate_count,
         joint_view_rank: fresh_pad_coordinate_count,
         conditional_entropy_dimension: 0,
+        rank_verification: AggregateWideJointAffineRankVerification::CoordinateIdentity,
     });
     for row in &rows {
         row.validate()?;
@@ -1516,6 +1634,22 @@ impl AggregateWideMaskingCertificate {
             self.generator_hybrid.maximum_candidate_draws_per_output,
             self.generator_hybrid.ceremony_application_multiplicity,
         )
+    }
+
+    pub(super) fn joint_affine_view_rows(&self) -> &[AggregateWideJointAffineViewRow] {
+        &self.joint_affine_view_rows
+    }
+
+    pub(super) fn derived_affine_identities(&self) -> &[AggregateWideDerivedAffineIdentity] {
+        &self.derived_affine_identities
+    }
+
+    pub(super) fn chronology(&self) -> &[AggregateWideChronologyRow] {
+        &self.chronology
+    }
+
+    pub(super) const fn nonlinear_view_boundary(&self) -> AggregateWideNonlinearViewBoundary {
+        self.nonlinear_view_boundary
     }
 }
 
@@ -2211,22 +2345,79 @@ impl AggregateWideSourceConstraints {
     }
 }
 
+fn checked_fold_limb_count(
+    raw_randomness_length: usize,
+    folded_length: usize,
+    folding_variable_count: usize,
+) -> Result<usize, String> {
+    if folded_length == 0 {
+        return Err("interleaved oracle randomness has an empty folded limb".to_owned());
+    }
+    let limb_count = 1_usize
+        .checked_shl(
+            u32::try_from(folding_variable_count)
+                .map_err(|_| "folding variable count exceeds u32".to_owned())?,
+        )
+        .ok_or_else(|| "folding limb count overflowed".to_owned())?;
+    if limb_count
+        .checked_mul(folded_length)
+        .is_none_or(|expected_length| raw_randomness_length != expected_length)
+    {
+        return Err("interleaved oracle randomness has the wrong length".to_owned());
+    }
+    Ok(limb_count)
+}
+
+/// Exact lane-major map used to fold the private encoding coefficients carried
+/// by one production oracle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg(test)]
+pub(super) enum AggregateWideFoldLimbOrder {
+    FirstChallengeSelectsMostSignificantLimbBit,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg(test)]
+pub(super) struct AggregateWideFoldAffineMapDescriptor {
+    pub(super) limb_count: usize,
+    pub(super) input_coordinate_count_per_limb: usize,
+    pub(super) output_coordinate_count: usize,
+    pub(super) folding_variable_count: usize,
+    pub(super) limb_order: AggregateWideFoldLimbOrder,
+}
+
+#[cfg(test)]
+pub(super) fn checked_fold_limb_affine_map(
+    raw_randomness_length: usize,
+    folded_length: usize,
+    folding_variable_count: usize,
+) -> Result<AggregateWideFoldAffineMapDescriptor, String> {
+    let limb_count =
+        checked_fold_limb_count(raw_randomness_length, folded_length, folding_variable_count)?;
+    Ok(AggregateWideFoldAffineMapDescriptor {
+        limb_count,
+        input_coordinate_count_per_limb: folded_length,
+        output_coordinate_count: folded_length,
+        folding_variable_count,
+        limb_order: AggregateWideFoldLimbOrder::FirstChallengeSelectsMostSignificantLimbBit,
+    })
+}
+
 pub(super) fn fold_limb_randomness(
     raw_randomness: &[ChallengeField],
     folded_length: usize,
     randomness: &Point<ChallengeField>,
 ) -> Result<Vec<ChallengeField>, String> {
-    let limb_count = 1_usize
-        .checked_shl(
-            u32::try_from(randomness.num_variables())
-                .map_err(|_| "folding variable count exceeds u32".to_owned())?,
-        )
-        .ok_or_else(|| "folding limb count overflowed".to_owned())?;
-    if raw_randomness.len() != limb_count * folded_length {
-        return Err("interleaved oracle randomness has the wrong length".to_owned());
-    }
+    let limb_count = checked_fold_limb_count(
+        raw_randomness.len(),
+        folded_length,
+        randomness.num_variables(),
+    )?;
     let weights =
         p3_multilinear_util::poly::Poly::new_from_point(randomness.as_slice(), ChallengeField::ONE);
+    if weights.as_slice().len() != limb_count {
+        return Err("interleaved oracle fold weight count is inconsistent".to_owned());
+    }
     let mut folded = ChallengeField::zero_vec(folded_length);
     for (limb, weight) in raw_randomness
         .chunks_exact(folded_length)
@@ -2261,7 +2452,7 @@ mod tests {
     use p3_challenger::{
         CanObserve, CanSample, CanSampleBits, FieldChallenger, GrindingChallenger,
     };
-    use p3_field::{PrimeCharacteristicRing, dot_product};
+    use p3_field::{Field, PrimeCharacteristicRing, TwoAdicField, dot_product};
     use p3_multilinear_util::poly::Poly;
     use p3_sumcheck::{
         product_polynomial::ProductPolynomial,
@@ -2761,23 +2952,108 @@ mod tests {
     }
 
     #[test]
-    fn folded_interleaved_randomness_matches_limb_dot_products() {
-        let randomness = Point::new(vec![
-            ChallengeField::from_u64(2),
-            ChallengeField::from_u64(3),
-        ]);
-        let raw = (1..=12).map(ChallengeField::from_u64).collect::<Vec<_>>();
-        let folded = fold_limb_randomness(&raw, 3, &randomness).expect("fold randomness");
-        let weights = p3_multilinear_util::poly::Poly::new_from_point(
-            randomness.as_slice(),
-            ChallengeField::ONE,
+    fn selected_pad_encoder_uses_the_certified_message_randomness_and_zero_partition() {
+        let configuration = selected_hiding_whir_config(RowCodeWhirSelectedParameters::selected())
+            .expect("the selected hiding configuration derives");
+        let layout = AggregateWidePadLayout::derive(&configuration)
+            .expect("the selected aggregate-wide pad layout derives");
+        let shape = MaskCodeShape::new(
+            layout.message_length(),
+            configuration.mask_queries,
+            AGGREGATE_WIDE_PAD_LOG_INVERSE_RATE,
         );
-        for coordinate in 0..3 {
-            let expected = (0..4)
-                .map(|limb| weights.as_slice()[limb] * raw[limb * 3 + coordinate])
-                .sum::<ChallengeField>();
-            assert_eq!(folded[coordinate], expected);
+        assert_eq!(
+            (shape.message_len, shape.randomness_len, shape.domain_size,),
+            (1_524, 393, 8_192),
+        );
+
+        let mut message = ChallengeField::zero_vec(shape.message_len);
+        message[0] = ChallengeField::from_u64(5);
+        message[shape.message_len - 1] = ChallengeField::from_u64(7);
+        let mut randomness = ChallengeField::zero_vec(shape.randomness_len);
+        randomness[0] = ChallengeField::from_u64(11);
+        randomness[shape.randomness_len - 1] = ChallengeField::from_u64(13);
+        let encoded = shape.encode_with_randomness(&message, &randomness);
+        let generator = ChallengeField::two_adic_generator(shape.domain_size.ilog2() as usize);
+        for position in [0, 1, 17, shape.domain_size / 2 - 1, shape.domain_size - 1] {
+            let point = generator.exp_u64(position as u64);
+            let expected = message[0]
+                + message[shape.message_len - 1] * point.exp_u64((shape.message_len - 1) as u64)
+                + randomness[0] * point.exp_u64(shape.message_len as u64)
+                + randomness[shape.randomness_len - 1]
+                    * point.exp_u64((shape.message_len + shape.randomness_len - 1) as u64);
+            assert_eq!(
+                encoded.values[position], expected,
+                "selected pad position {position}",
+            );
         }
+    }
+
+    #[test]
+    fn folded_interleaved_randomness_matches_the_independent_lexicographic_affine_map() {
+        for folding_variable_count in 0..=5 {
+            let randomness = Point::new(
+                (0..folding_variable_count)
+                    .map(|variable_index| {
+                        ChallengeField::from_u64(
+                            u64::try_from(variable_index * 17 + 2)
+                                .expect("the focused challenge fits u64"),
+                        )
+                    })
+                    .collect(),
+            );
+            let limb_count = 1_usize << folding_variable_count;
+            for folded_length in 1..=7 {
+                let raw = (0..limb_count * folded_length)
+                    .map(|coordinate| {
+                        ChallengeField::from_u64(
+                            u64::try_from(coordinate * 29 + folded_length * 11 + 1)
+                                .expect("the focused coefficient fits u64"),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                let descriptor =
+                    checked_fold_limb_affine_map(raw.len(), folded_length, folding_variable_count)
+                        .expect("derive the production fold map");
+                assert_eq!(descriptor.limb_count, limb_count);
+                assert_eq!(descriptor.input_coordinate_count_per_limb, folded_length);
+                assert_eq!(descriptor.output_coordinate_count, folded_length);
+                assert_eq!(descriptor.folding_variable_count, folding_variable_count);
+                assert_eq!(
+                    descriptor.limb_order,
+                    AggregateWideFoldLimbOrder::FirstChallengeSelectsMostSignificantLimbBit,
+                );
+
+                let folded = fold_limb_randomness(&raw, folded_length, &randomness)
+                    .expect("fold randomness");
+                for coordinate in 0..folded_length {
+                    let expected = (0..limb_count)
+                        .map(|limb| {
+                            let weight = randomness.as_slice().iter().enumerate().fold(
+                                ChallengeField::ONE,
+                                |weight, (variable_index, challenge)| {
+                                    let limb_bit_index =
+                                        folding_variable_count - 1 - variable_index;
+                                    if limb & (1 << limb_bit_index) == 0 {
+                                        weight * (ChallengeField::ONE - *challenge)
+                                    } else {
+                                        weight * *challenge
+                                    }
+                                },
+                            );
+                            weight * raw[limb * folded_length + coordinate]
+                        })
+                        .sum::<ChallengeField>();
+                    assert_eq!(
+                        folded[coordinate], expected,
+                        "folding variables {folding_variable_count}, folded length {folded_length}, coordinate {coordinate}",
+                    );
+                }
+            }
+        }
+        let one_challenge = Point::new(vec![ChallengeField::from_u64(7)]);
+        assert!(fold_limb_randomness(&[], 0, &Point::default()).is_err());
+        assert!(fold_limb_randomness(&[ChallengeField::ONE], 1, &one_challenge).is_err());
     }
 
     #[test]

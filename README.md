@@ -73,6 +73,15 @@ Works today:
   refuses the former 256-bit seed geometry at the declared quantum query
   budget. This is component evidence under the stated KMAC and ideal-oracle
   assumptions, not a complete zero-knowledge theorem.
+- The aggregate-wide masking certificate now has an independent production
+  correspondence for all 15 affine-view blocks. It walks the deployed
+  transcript and commitment-opening catalogs, binds the six recomputable
+  source encoders plus the aggregate pad and two fresh encoders, and checks the
+  exact message, randomness, zero-suffix, two-adic evaluation, shared-query,
+  code-switch, and lexicographic fold maps. The selected joint view has 18,025
+  private extension coordinates, rank 18,013, and residual conditional entropy
+  12. This is component correspondence; it does not establish construction-wide
+  Fiat-Shamir privacy or soundness.
 - Checked construction-geometry certificates derive for all 31 production
   identities: 27 width-64, log-inverse-rate-two (inverse-rate-four)
   identities, including evaluator top counts 1 through 20, and four width-8,
@@ -96,10 +105,10 @@ Not yet:
   malicious-verifier zero knowledge, or quantum-random-oracle zero knowledge.
 - Exact construction-wide classical and quantum-random-oracle soundness is not
   established. The selected same-secret aggregate-leaf predecessor
-  correspondence, collision arithmetic, and all production geometry
-  certificates now derive, but the complete production-to-affine-view
-  correspondence, ceremony-level failure partition, and soundness for an
-  emitted transported proof remain open.
+  correspondence, collision arithmetic, aggregate-wide production affine
+  correspondence, and all production geometry certificates now derive. The
+  remaining construction views, ceremony-level failure partition, and
+  soundness correspondence for an emitted transported proof remain open.
 - The static liveness model has not yet been confirmed by a completed native
   proof or release-WebAssembly browser measurement. Complete participant
   transport accounting is also open, and the proof corpus has not been
