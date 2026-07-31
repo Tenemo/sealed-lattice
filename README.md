@@ -66,6 +66,13 @@ Works today:
   predecessor closure derives `1,232,362` verifier hash queries and `1,229,573`
   accepting equations, and the construction and hash-profile identities bind
   the 512-bit state, digest width, and three canonical frame tags.
+- Secret-bearing phase-row padding now uses three KMAC-derived 512-bit seeds.
+  The selected same-secret certificate inventories 62 framed SHAKE streams,
+  130,023,424 accepted field outputs, seed collision, bounded rejection
+  exhaustion, and classical and quantum secret-prefix replacement terms. It
+  refuses the former 256-bit seed geometry at the declared quantum query
+  budget. This is component evidence under the stated KMAC and ideal-oracle
+  assumptions, not a complete zero-knowledge theorem.
 - Checked construction-geometry certificates derive for all 31 production
   identities: 27 width-64, log-inverse-rate-two (inverse-rate-four)
   identities, including evaluator top counts 1 through 20, and four width-8,
@@ -78,8 +85,8 @@ Works today:
   same-secret prover live set, including source ownership, replay readers,
   DFTs, Merkle frontiers, proof material, transcript state, private material,
   browser-bridge copies, a WebAssembly runtime reserve, and allocator overhead.
-  Its maximum is `556,008,729` bytes, within the automatic planning band and
-  `115,079,911` bytes below the hard WebAssembly bound. Bound-tree
+  Its maximum is `556,008,657` bytes, within the automatic planning band and
+  `115,079,983` bytes below the hard WebAssembly bound. Bound-tree
   authentication uses one in-place DFT and one evaluated stripe instead of
   retaining complete evaluated columns.
 

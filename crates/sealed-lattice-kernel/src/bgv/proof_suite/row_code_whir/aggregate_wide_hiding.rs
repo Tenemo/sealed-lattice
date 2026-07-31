@@ -546,6 +546,13 @@ impl AggregateWideGeneratorHybridCertificate {
                     query_budget: DECLARED_ADVERSARIAL_QUERY_BUDGET,
                 }
             )
+            || !matches!(
+                self.quantum_hybrid[0].1,
+                MaskGeneratorHybridLoss::QuantumSecretSearch {
+                    secret_bit_length: 512,
+                    query_budget: DECLARED_ADVERSARIAL_QUERY_BUDGET,
+                }
+            )
             || !classical_reductions_are_exact
             || !quantum_reductions_are_exact
             || self.deployed_hybrid[3].1 != MaskGeneratorHybridLoss::Exact

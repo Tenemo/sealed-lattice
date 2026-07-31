@@ -70,6 +70,11 @@ use std::collections::BTreeMap;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 use super::NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+use super::row_encoding::{
+    PRIVATE_ROW_PAD_PHASE_COUNT, PRIVATE_ROW_PAD_SEED_BYTE_LENGTH,
+    PRIVATE_ROW_PAD_SEED_MATERIAL_BYTE_LENGTH, PrivateRowPadSeed, PrivateRowPadSeeds,
+};
 use super::{column_commitment::ColumnDigest, row_encoding::RowEncodingGeometry};
 use crate::bgv::proof_suite::relation_plan::{RelationOpeningSourceClass, RelationTreeDescriptor};
 
@@ -132,7 +137,7 @@ const TEST_VERIFIED_VSS_PROOF_RESULT_DIGEST: [u8; Hash512::BYTE_LENGTH] =
 #[cfg(test)]
 const QUOTIENT_COMPONENT_CHUNK_COUNT: usize = 2;
 #[cfg(all(test, not(target_arch = "wasm32")))]
-const EXACT_ROW_PAD_SEED_BYTE_LENGTH: usize = core::mem::size_of::<[[u8; 32]; 3]>();
+const EXACT_ROW_PAD_SEED_BYTE_LENGTH: usize = PRIVATE_ROW_PAD_SEED_MATERIAL_BYTE_LENGTH;
 
 /// Opaque authority proving that the same-secret input roots already passed
 /// the selected VSS low-degree verification.
@@ -1643,7 +1648,7 @@ fn exact_private_coin_sampling_catalog(
 #[cfg(all(test, not(target_arch = "wasm32")))]
 fn derive_exact_row_pad_seeds(
     sources: &mut PreparedExactSameSecretGenerationSources,
-) -> Result<[[u8; 32]; 3], String> {
+) -> Result<PrivateRowPadSeeds, String> {
     let mut seed_bytes = zeroize::Zeroizing::new([0_u8; EXACT_ROW_PAD_SEED_BYTE_LENGTH]);
     sources
         .private_coins
@@ -1652,17 +1657,21 @@ fn derive_exact_row_pad_seeds(
             seed_bytes.as_mut(),
         )
         .map_err(|error| format!("derive production-private row-pad seeds: {error:?}"))?;
-    Ok([
-        seed_bytes[0..32]
-            .try_into()
-            .map_err(|_| "base row-pad seed has the wrong length".to_owned())?,
-        seed_bytes[32..64]
-            .try_into()
-            .map_err(|_| "auxiliary row-pad seed has the wrong length".to_owned())?,
-        seed_bytes[64..96]
-            .try_into()
-            .map_err(|_| "quotient row-pad seed has the wrong length".to_owned())?,
-    ])
+    let mut row_pad_seeds = [[0_u8; PRIVATE_ROW_PAD_SEED_BYTE_LENGTH]; PRIVATE_ROW_PAD_PHASE_COUNT];
+    for (phase_seed_ordinal, phase_seed) in row_pad_seeds.iter_mut().enumerate() {
+        let seed_start = phase_seed_ordinal
+            .checked_mul(PRIVATE_ROW_PAD_SEED_BYTE_LENGTH)
+            .ok_or_else(|| "row-pad seed start overflowed".to_owned())?;
+        let seed_end = seed_start
+            .checked_add(PRIVATE_ROW_PAD_SEED_BYTE_LENGTH)
+            .ok_or_else(|| "row-pad seed end overflowed".to_owned())?;
+        phase_seed.copy_from_slice(
+            seed_bytes
+                .get(seed_start..seed_end)
+                .ok_or_else(|| "row-pad seed range is incomplete".to_owned())?,
+        );
+    }
+    Ok(row_pad_seeds)
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -1734,7 +1743,7 @@ mod native_checkpoint {
     pub(super) fn commit_phase_rows<Source: RecomputableRowSource>(
         source: &Source,
         geometry: RowEncodingGeometry,
-        secret_row_pad_seed: &[u8; 32],
+        secret_row_pad_seed: &PrivateRowPadSeed,
     ) -> Result<ColumnDigest, String> {
         let mut column_hasher =
             StreamingColumnHasher::new(geometry.row_count, geometry.encoded_column_count)?;
@@ -3097,8 +3106,8 @@ mod tests {
         let catalog =
             exact_private_coin_sampling_catalog(&variant).expect("derive exact private coins");
         assert_eq!(
-            EXACT_ROW_PAD_SEED_BYTE_LENGTH, 96,
-            "the exact three row-pad seeds must consume one 96-byte raw fill"
+            EXACT_ROW_PAD_SEED_BYTE_LENGTH, 192,
+            "the exact three row-pad seeds must consume one 192-byte raw fill"
         );
 
         let base_phase_catalog = exact_trace_private_coin_catalog_for_tree_role(
@@ -3115,7 +3124,7 @@ mod tests {
         let proof_salt_coordinate = CommonProofPrivateCoinCoordinate::proof_salt();
         assert_eq!(
             base_phase_catalog.entry(proof_salt_coordinate),
-            Some(CommonProofPrivateCoinSamplingOperation::RawByteFill { byte_count: 96 })
+            Some(CommonProofPrivateCoinSamplingOperation::RawByteFill { byte_count: 192 })
         );
         assert_eq!(auxiliary_phase_catalog.entry(proof_salt_coordinate), None);
         assert_eq!(quotient_phase_catalog.entry(proof_salt_coordinate), None);

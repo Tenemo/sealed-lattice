@@ -348,7 +348,8 @@ mod tests {
 
     use super::*;
     use crate::bgv::proof_suite::row_code_whir::row_encoding::{
-        RowCodeHighHalfSource, RowEncodingGeometry, encode_row, padded_base_row_coefficients,
+        PRIVATE_ROW_PAD_SEED_BYTE_LENGTH, RowCodeHighHalfSource, RowEncodingGeometry, encode_row,
+        padded_base_row_coefficients,
     };
 
     #[test]
@@ -410,7 +411,7 @@ mod tests {
     fn bounded_phase_row_dft_matches_the_canonical_private_and_public_encodings() {
         let geometry = RowEncodingGeometry::new_weighted_batch_with_log_inverse_rate(4, 4, 2)
             .expect("the focused row geometry is valid");
-        let private_seed = [0x5a_u8; 32];
+        let private_seed = [0x5a_u8; PRIVATE_ROW_PAD_SEED_BYTE_LENGTH];
         for row_index in 0..geometry.row_count {
             let witness = (0..geometry.witness_values_per_row)
                 .map(|value_index| {

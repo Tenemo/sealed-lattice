@@ -41,6 +41,15 @@ pub(crate) enum MaskGeneratorHybridLoss {
         secret_bit_length: u32,
         query_budget: u128,
     },
+    /// The hop loses at most `(2 * query_budget + 1)^2 / 2^secret_bit_length`.
+    ///
+    /// This is the generic quantum search bound for a uniformly sampled
+    /// secret when the adversary can check candidates through a quantum
+    /// oracle. It is deliberately distinct from classical guessing.
+    QuantumSecretSearch {
+        secret_bit_length: u32,
+        query_budget: u128,
+    },
     /// The hop is a computational reduction, not a statistical step.
     ///
     /// A number here would be invented. The ledger records the assumption, the
@@ -142,13 +151,14 @@ impl MaskGeneratorHybridHop {
     }
 }
 
-/// The ordered hop ledger for the deployed mask generator.
+/// The ordered hop ledger through one raw private block stream.
 ///
 /// The order is the deployment order: entropy, then key hierarchy, then block
-/// stream, then input distinctness, then the sampler. A masking argument may
-/// assume uniform independent samples only after all five hops are discharged.
-pub(crate) fn deployed_mask_generator_hybrid()
--> [(MaskGeneratorHybridHop, MaskGeneratorHybridLoss); 5] {
+/// stream, then input distinctness. A construction that consumes raw bytes
+/// adds its own downstream expansion argument; a direct modular sampler adds
+/// the rejection-sampler hop below.
+pub(crate) fn deployed_private_stream_hybrid()
+-> [(MaskGeneratorHybridHop, MaskGeneratorHybridLoss); 4] {
     [
         (
             MaskGeneratorHybridHop::ActionRootEntropy,
@@ -177,24 +187,21 @@ pub(crate) fn deployed_mask_generator_hybrid()
             MaskGeneratorHybridHop::FramedInputInjectivity,
             MaskGeneratorHybridLoss::Exact,
         ),
-        (
-            MaskGeneratorHybridHop::RejectionSamplerUniformity,
-            MaskGeneratorHybridLoss::ExactGivenHonestAbort {
-                abort_event: MaskGeneratorHonestAbortEvent::RejectionSamplerExhaustion,
-            },
-        ),
     ]
 }
 
-/// The same ledger with every computational hop raised to its quantum form.
+/// The private-stream ledger in the quantum-query model.
 ///
-/// A QROM masking argument cannot reuse the classical hops: a superposition
-/// adversary may query the replaced function in superposition, so each PRF hop
-/// needs the strictly stronger assumption. Nothing else changes, because the
-/// injectivity and sampler hops are structural.
-pub(crate) fn quantum_mask_generator_hybrid()
--> [(MaskGeneratorHybridHop, MaskGeneratorHybridLoss); 5] {
-    let mut ledger = deployed_mask_generator_hybrid();
+/// The root-entropy hop uses quantum search rather than classical guessing,
+/// and both KMAC hops require quantum pseudorandomness. Framed-input
+/// injectivity remains exact.
+pub(crate) fn quantum_private_stream_hybrid()
+-> [(MaskGeneratorHybridHop, MaskGeneratorHybridLoss); 4] {
+    let mut ledger = deployed_private_stream_hybrid();
+    ledger[0].1 = MaskGeneratorHybridLoss::QuantumSecretSearch {
+        secret_bit_length: byte_length_in_bits(ACTION_RANDOMNESS_ROOT_BYTE_LENGTH),
+        query_budget: DECLARED_ADVERSARIAL_QUERY_BUDGET,
+    };
     for (_, loss) in &mut ledger {
         if let MaskGeneratorHybridLoss::ComputationalReduction {
             assumption,
@@ -214,6 +221,42 @@ pub(crate) fn quantum_mask_generator_hybrid()
         }
     }
     ledger
+}
+
+/// The ordered hop ledger for direct modular samples.
+pub(crate) fn deployed_mask_generator_hybrid()
+-> [(MaskGeneratorHybridHop, MaskGeneratorHybridLoss); 5] {
+    let private_stream = deployed_private_stream_hybrid();
+    [
+        private_stream[0],
+        private_stream[1],
+        private_stream[2],
+        private_stream[3],
+        (
+            MaskGeneratorHybridHop::RejectionSamplerUniformity,
+            MaskGeneratorHybridLoss::ExactGivenHonestAbort {
+                abort_event: MaskGeneratorHonestAbortEvent::RejectionSamplerExhaustion,
+            },
+        ),
+    ]
+}
+
+/// The direct modular-sample ledger in the quantum-query model.
+pub(crate) fn quantum_mask_generator_hybrid()
+-> [(MaskGeneratorHybridHop, MaskGeneratorHybridLoss); 5] {
+    let private_stream = quantum_private_stream_hybrid();
+    [
+        private_stream[0],
+        private_stream[1],
+        private_stream[2],
+        private_stream[3],
+        (
+            MaskGeneratorHybridHop::RejectionSamplerUniformity,
+            MaskGeneratorHybridLoss::ExactGivenHonestAbort {
+                abort_event: MaskGeneratorHonestAbortEvent::RejectionSamplerExhaustion,
+            },
+        ),
+    ]
 }
 
 const fn byte_length_in_bits(byte_length: usize) -> u32 {
@@ -340,9 +383,9 @@ mod tests {
         );
     }
 
-    /// A quantum masking argument may not reuse the classical PRF hops.
+    /// A quantum masking argument may not reuse classical guessing or PRF hops.
     #[test]
-    fn quantum_hybrid_raises_only_the_computational_hops() {
+    fn quantum_hybrid_raises_every_query_model_dependent_hop() {
         let classical = deployed_mask_generator_hybrid();
         let quantum = quantum_mask_generator_hybrid();
         assert_eq!(classical.map(|(hop, _)| hop), quantum.map(|(hop, _)| hop));
@@ -350,6 +393,15 @@ mod tests {
             classical.iter().zip(&quantum).enumerate()
         {
             match classical_loss {
+                MaskGeneratorHybridLoss::SecretGuessing { .. } => {
+                    assert_eq!(
+                        *quantum_loss,
+                        MaskGeneratorHybridLoss::QuantumSecretSearch {
+                            secret_bit_length: 512,
+                            query_budget: DECLARED_ADVERSARIAL_QUERY_BUDGET,
+                        },
+                    );
+                }
                 MaskGeneratorHybridLoss::ComputationalReduction { .. } => {
                     assert_ne!(classical_loss, quantum_loss, "hop {index} did not change");
                     let MaskGeneratorHybridLoss::ComputationalReduction { assumption, .. } =
@@ -365,6 +417,14 @@ mod tests {
                 _ => assert_eq!(classical_loss, quantum_loss, "hop {index} changed"),
             }
         }
+        assert_eq!(
+            deployed_private_stream_hybrid(),
+            deployed_mask_generator_hybrid()[..4],
+        );
+        assert_eq!(
+            quantum_private_stream_hybrid(),
+            quantum_mask_generator_hybrid()[..4],
+        );
         assert_eq!(
             MaskGeneratorHybridAssumption::Kmac256QuantumPseudorandomFunction.identifier(),
             "kmac256-quantum-pseudorandom-function",

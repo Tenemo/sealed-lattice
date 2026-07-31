@@ -17,7 +17,14 @@ use crate::bgv::proof_suite::{
     PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT, ProofBaseFieldElement,
 };
 
-const PRIVATE_ROW_HIGH_HALF_DOMAIN: &[u8] = b"sealed-lattice/streaming-row-pad/v1";
+pub(super) const PRIVATE_ROW_HIGH_HALF_DOMAIN: &[u8] = b"sealed-lattice/streaming-row-pad/v2";
+pub(super) const PRIVATE_ROW_PAD_SEED_BYTE_LENGTH: usize = 64;
+pub(super) const PRIVATE_ROW_PAD_PHASE_COUNT: usize = 3;
+pub(super) const PRIVATE_ROW_PAD_SEED_MATERIAL_BYTE_LENGTH: usize =
+    PRIVATE_ROW_PAD_PHASE_COUNT * PRIVATE_ROW_PAD_SEED_BYTE_LENGTH;
+pub(super) type PrivateRowPadSeed = [u8; PRIVATE_ROW_PAD_SEED_BYTE_LENGTH];
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(super) type PrivateRowPadSeeds = [PrivateRowPadSeed; PRIVATE_ROW_PAD_PHASE_COUNT];
 #[cfg(test)]
 pub(super) const ROW_CODE_LOG_INV_RATE: usize = 2;
 
@@ -30,11 +37,11 @@ pub(super) const ROW_CODE_LOG_INV_RATE: usize = 2;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum RowCodeHighHalfSource<'seed> {
     CanonicalPublicZeros,
-    PrivateMaskSeed(&'seed [u8; 32]),
+    PrivateMaskSeed(&'seed PrivateRowPadSeed),
 }
 
-impl<'seed> From<&'seed [u8; 32]> for RowCodeHighHalfSource<'seed> {
-    fn from(private_seed: &'seed [u8; 32]) -> Self {
+impl<'seed> From<&'seed PrivateRowPadSeed> for RowCodeHighHalfSource<'seed> {
+    fn from(private_seed: &'seed PrivateRowPadSeed) -> Self {
         Self::PrivateMaskSeed(private_seed)
     }
 }
@@ -329,7 +336,7 @@ fn append_row_high_half(
 fn derive_private_row_high_half(
     geometry: RowEncodingGeometry,
     row_index: usize,
-    private_seed: &[u8; 32],
+    private_seed: &PrivateRowPadSeed,
 ) -> Result<Vec<Goldilocks>, RowEncodingError> {
     let mut reader = private_row_high_half_reader(geometry, row_index, private_seed);
     derive_private_row_high_half_from_candidates(geometry.pad_value_count(), || {
@@ -342,16 +349,48 @@ fn derive_private_row_high_half(
 fn private_row_high_half_reader(
     geometry: RowEncodingGeometry,
     row_index: usize,
-    private_seed: &[u8; 32],
+    private_seed: &PrivateRowPadSeed,
 ) -> impl XofReader {
     let mut state = Shake256::default();
-    state.update(&(PRIVATE_ROW_HIGH_HALF_DOMAIN.len() as u64).to_le_bytes());
-    state.update(PRIVATE_ROW_HIGH_HALF_DOMAIN);
-    state.update(private_seed);
-    state.update(&(geometry.row_count as u64).to_le_bytes());
-    state.update(&(geometry.witness_values_per_row as u64).to_le_bytes());
-    state.update(&(row_index as u64).to_le_bytes());
+    visit_private_row_high_half_xof_input_parts(geometry, row_index, private_seed, |part| {
+        state.update(part);
+    });
     state.finalize_xof()
+}
+
+fn visit_private_row_high_half_xof_input_parts(
+    geometry: RowEncodingGeometry,
+    row_index: usize,
+    private_seed: &PrivateRowPadSeed,
+    mut visit: impl FnMut(&[u8]),
+) {
+    let domain_byte_length = (PRIVATE_ROW_HIGH_HALF_DOMAIN.len() as u64).to_le_bytes();
+    let row_count = (geometry.row_count as u64).to_le_bytes();
+    let witness_values_per_row = (geometry.witness_values_per_row as u64).to_le_bytes();
+    let row_index = (row_index as u64).to_le_bytes();
+    for part in [
+        domain_byte_length.as_slice(),
+        PRIVATE_ROW_HIGH_HALF_DOMAIN,
+        private_seed.as_slice(),
+        row_count.as_slice(),
+        witness_values_per_row.as_slice(),
+        row_index.as_slice(),
+    ] {
+        visit(part);
+    }
+}
+
+#[cfg(test)]
+pub(super) fn private_row_high_half_xof_input_bytes(
+    geometry: RowEncodingGeometry,
+    row_index: usize,
+    private_seed: &PrivateRowPadSeed,
+) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    visit_private_row_high_half_xof_input_parts(geometry, row_index, private_seed, |part| {
+        bytes.extend_from_slice(part);
+    });
+    bytes
 }
 
 fn derive_private_row_high_half_from_candidates(
@@ -443,7 +482,7 @@ mod tests {
             let witness = (0..geometry.witness_values_per_row)
                 .map(|index| Goldilocks::from_u64(index as u64 * 19 + 11))
                 .collect::<Vec<_>>();
-            let seed = [witness_variable_count_per_row as u8; 32];
+            let seed = [witness_variable_count_per_row as u8; PRIVATE_ROW_PAD_SEED_BYTE_LENGTH];
             let coefficients =
                 padded_row_coefficients(geometry, 3, &witness, &seed).expect("valid padded row");
             let encoded = encode_row(geometry, 3, &witness, &seed).expect("valid encoded row");
@@ -464,8 +503,8 @@ mod tests {
     fn private_high_halves_are_recomputable_domain_separated_and_byte_stable() {
         let geometry = RowEncodingGeometry::new(8, 5).expect("valid row geometry");
         let witness = vec![Goldilocks::ZERO; geometry.witness_values_per_row];
-        let private_seed = [7_u8; 32];
-        let different_private_seed = [8_u8; 32];
+        let private_seed = [7_u8; PRIVATE_ROW_PAD_SEED_BYTE_LENGTH];
+        let different_private_seed = [8_u8; PRIVATE_ROW_PAD_SEED_BYTE_LENGTH];
         let first = padded_row_coefficients(
             geometry,
             2,
@@ -503,14 +542,14 @@ mod tests {
         assert_eq!(
             private_high_half_prefix,
             [
-                17_430_977_488_077_981_331,
-                13_756_202_890_566_730_034,
-                15_732_332_081_728_082_493,
-                16_084_400_137_907_358_694,
-                12_151_837_950_350_672_020,
-                6_079_371_940_936_520_614,
-                6_473_835_573_199_951_724,
-                14_036_611_626_177_606_630,
+                6_645_843_431_585_673_738,
+                17_924_498_531_685_365_569,
+                1_209_470_546_136_710_254,
+                12_909_837_768_841_462_571,
+                5_358_607_777_776_252_191,
+                11_575_283_767_032_415_302,
+                4_077_034_257_465_865_420,
+                8_018_090_511_388_552_529,
             ]
         );
         assert!(
@@ -518,6 +557,62 @@ mod tests {
                 .iter()
                 .any(|value| value.as_canonical_u64() != 0)
         );
+    }
+
+    #[test]
+    fn private_high_half_xof_frame_binds_seed_geometry_and_row() {
+        let geometry = RowEncodingGeometry::new(8, 5).expect("valid row geometry");
+        let different_row_count =
+            RowEncodingGeometry::new(16, 5).expect("valid different row-count geometry");
+        let different_witness_width =
+            RowEncodingGeometry::new(8, 6).expect("valid different witness-width geometry");
+        let seed = [7_u8; PRIVATE_ROW_PAD_SEED_BYTE_LENGTH];
+        let different_seed = [8_u8; PRIVATE_ROW_PAD_SEED_BYTE_LENGTH];
+        let frame = private_row_high_half_xof_input_bytes(geometry, 2, &seed);
+        let domain_start = size_of::<u64>();
+        let seed_start = domain_start + PRIVATE_ROW_HIGH_HALF_DOMAIN.len();
+        let geometry_start = seed_start + PRIVATE_ROW_PAD_SEED_BYTE_LENGTH;
+        let expected_byte_length = geometry_start + 3 * size_of::<u64>();
+
+        assert_eq!(
+            PRIVATE_ROW_HIGH_HALF_DOMAIN,
+            b"sealed-lattice/streaming-row-pad/v2"
+        );
+        assert_eq!(frame.len(), expected_byte_length);
+        assert_eq!(
+            &frame[..domain_start],
+            &(PRIVATE_ROW_HIGH_HALF_DOMAIN.len() as u64).to_le_bytes()
+        );
+        assert_eq!(
+            &frame[domain_start..seed_start],
+            PRIVATE_ROW_HIGH_HALF_DOMAIN
+        );
+        assert_eq!(
+            &frame[seed_start..geometry_start],
+            seed.as_slice(),
+            "the complete 512-bit secret prefix is framed before public coordinates",
+        );
+        assert_eq!(
+            &frame[geometry_start..geometry_start + 8],
+            &(geometry.row_count as u64).to_le_bytes()
+        );
+        assert_eq!(
+            &frame[geometry_start + 8..geometry_start + 16],
+            &(geometry.witness_values_per_row as u64).to_le_bytes()
+        );
+        assert_eq!(
+            &frame[geometry_start + 16..geometry_start + 24],
+            &2_u64.to_le_bytes()
+        );
+
+        for distinct_frame in [
+            private_row_high_half_xof_input_bytes(geometry, 3, &seed),
+            private_row_high_half_xof_input_bytes(different_row_count, 2, &seed),
+            private_row_high_half_xof_input_bytes(different_witness_width, 2, &seed),
+            private_row_high_half_xof_input_bytes(geometry, 2, &different_seed),
+        ] {
+            assert_ne!(frame, distinct_frame);
+        }
     }
 
     #[test]
@@ -589,7 +684,7 @@ mod tests {
             );
         }
 
-        let private_seed = [9_u8; 32];
+        let private_seed = [9_u8; PRIVATE_ROW_PAD_SEED_BYTE_LENGTH];
         let private_coefficients = padded_row_coefficients(
             geometry,
             4,
@@ -646,7 +741,7 @@ mod tests {
     fn zero_private_mask_seed_does_not_alias_canonical_public_zeros() {
         let geometry = RowEncodingGeometry::new(8, 5).expect("valid row geometry");
         let witness = vec![Goldilocks::ZERO; geometry.witness_values_per_row];
-        let zero_private_seed = [0_u8; 32];
+        let zero_private_seed = [0_u8; PRIVATE_ROW_PAD_SEED_BYTE_LENGTH];
         let public_source = RowCodeHighHalfSource::CanonicalPublicZeros;
         let private_source = RowCodeHighHalfSource::PrivateMaskSeed(&zero_private_seed);
         assert_ne!(public_source, private_source);
@@ -703,7 +798,7 @@ mod tests {
             geometry,
             2,
             Zeroizing::new(reserved),
-            RowCodeHighHalfSource::PrivateMaskSeed(&[0x39_u8; 32]),
+            RowCodeHighHalfSource::PrivateMaskSeed(&[0x39_u8; PRIVATE_ROW_PAD_SEED_BYTE_LENGTH]),
         )
         .expect("the reserved base row pads in place");
         assert_eq!(padded.len(), geometry.padded_coefficient_count);
@@ -804,7 +899,7 @@ mod tests {
         assert!(RowEncodingGeometry::new(3, 4).is_err());
         let geometry = RowEncodingGeometry::new(8, 4).expect("valid row geometry");
         let witness = vec![Goldilocks::ZERO; geometry.witness_values_per_row];
-        let private_seed = [0_u8; 32];
+        let private_seed = [0_u8; PRIVATE_ROW_PAD_SEED_BYTE_LENGTH];
         for high_half_source in [
             RowCodeHighHalfSource::CanonicalPublicZeros,
             RowCodeHighHalfSource::PrivateMaskSeed(&private_seed),

@@ -32,7 +32,10 @@ use super::super::{
     ProofChallengeExtensionElement, ProofEvaluationDomain, ProofTreeRole, RelationPlanCheckContext,
     RelationPlanError, ValidatedRelationPlanArtifact,
 };
-use super::row_encoding::RowEncodingGeometry;
+use super::row_encoding::{
+    PRIVATE_ROW_HIGH_HALF_DOMAIN, PRIVATE_ROW_PAD_PHASE_COUNT, PRIVATE_ROW_PAD_SEED_BYTE_LENGTH,
+    PRIVATE_ROW_PAD_SEED_MATERIAL_BYTE_LENGTH, RowEncodingGeometry,
+};
 use super::{
     ROW_CODE_WHIR_AGGREGATE_LEAF_FRAME_TAGS, ROW_CODE_WHIR_AGGREGATE_LEAF_STATE_BYTE_LENGTH,
     ROW_CODE_WHIR_MERKLE_DIGEST_BYTE_LENGTH,
@@ -93,7 +96,7 @@ pub(super) const ROW_CODE_WHIR_PRIOR_PROOF_BOUND_QUERY_COUNT: usize = 40;
 const ROW_CODE_WHIR_FOLDING_FACTOR: usize = 3;
 const ROW_CODE_WHIR_SECURITY_LEVEL: usize = 262;
 const ROW_CODE_WHIR_PROOF_OF_WORK_BITS: usize = 0;
-const ROW_CODE_WHIR_CONSTRUCTION_PLAN_IDENTITY_ENCODING_VERSION: u16 = 10;
+const ROW_CODE_WHIR_CONSTRUCTION_PLAN_IDENTITY_ENCODING_VERSION: u16 = 11;
 const ROW_CODE_WHIR_CONSTRUCTION_PLAN_IDENTITY_HASH_DOMAIN: &str =
     "sealed-lattice/proof/row-code-whir/construction-plan/v1";
 const ROW_CODE_WHIR_ORACLE_EQUATION_CATALOG_ENCODING_VERSION: u16 = 2;
@@ -1364,6 +1367,10 @@ impl RowCodeWhirConstructionPlan {
         encoder.push_u16(ROW_CODE_WHIR_AGGREGATE_LEAF_STATE_BYTE_LENGTH);
         encoder.push_u16(ROW_CODE_WHIR_MERKLE_DIGEST_BYTE_LENGTH);
         encoder.push_bytes(&ROW_CODE_WHIR_AGGREGATE_LEAF_FRAME_TAGS)?;
+        encoder.push_bytes(PRIVATE_ROW_HIGH_HALF_DOMAIN)?;
+        encoder.push_usize(PRIVATE_ROW_PAD_PHASE_COUNT)?;
+        encoder.push_usize(PRIVATE_ROW_PAD_SEED_BYTE_LENGTH)?;
+        encoder.push_usize(PRIVATE_ROW_PAD_SEED_MATERIAL_BYTE_LENGTH)?;
         encoder.push_u16(self.application_statement_schema_identifier);
         encoder.push_optional_u32(self.schedule_position);
         encoder.push_optional_u16(self.top_count);
@@ -6473,33 +6480,35 @@ mod tests {
     }
 
     #[test]
-    fn construction_identity_binds_aggregate_leaf_frames_and_output_widths() {
+    fn construction_identity_binds_leaf_and_private_row_pad_hash_geometry() {
         let identity = selected_same_secret_construction_plan()
             .canonical_identity_bytes()
             .expect("the selected construction identity encodes");
+        let mut expected_prefix = Vec::new();
+        expected_prefix.extend_from_slice(
+            &ROW_CODE_WHIR_CONSTRUCTION_PLAN_IDENTITY_ENCODING_VERSION.to_le_bytes(),
+        );
+        expected_prefix
+            .extend_from_slice(&ROW_CODE_WHIR_AGGREGATE_LEAF_STATE_BYTE_LENGTH.to_le_bytes());
+        expected_prefix.extend_from_slice(&ROW_CODE_WHIR_MERKLE_DIGEST_BYTE_LENGTH.to_le_bytes());
+        expected_prefix.extend_from_slice(
+            &(ROW_CODE_WHIR_AGGREGATE_LEAF_FRAME_TAGS.len() as u64).to_le_bytes(),
+        );
+        expected_prefix.extend_from_slice(&ROW_CODE_WHIR_AGGREGATE_LEAF_FRAME_TAGS);
+        expected_prefix
+            .extend_from_slice(&(PRIVATE_ROW_HIGH_HALF_DOMAIN.len() as u64).to_le_bytes());
+        expected_prefix.extend_from_slice(PRIVATE_ROW_HIGH_HALF_DOMAIN);
+        expected_prefix.extend_from_slice(&(PRIVATE_ROW_PAD_PHASE_COUNT as u64).to_le_bytes());
+        expected_prefix.extend_from_slice(&(PRIVATE_ROW_PAD_SEED_BYTE_LENGTH as u64).to_le_bytes());
+        expected_prefix
+            .extend_from_slice(&(PRIVATE_ROW_PAD_SEED_MATERIAL_BYTE_LENGTH as u64).to_le_bytes());
 
         assert_eq!(
-            &identity[..17],
-            &[
-                ROW_CODE_WHIR_CONSTRUCTION_PLAN_IDENTITY_ENCODING_VERSION as u8,
-                (ROW_CODE_WHIR_CONSTRUCTION_PLAN_IDENTITY_ENCODING_VERSION >> 8) as u8,
-                ROW_CODE_WHIR_AGGREGATE_LEAF_STATE_BYTE_LENGTH as u8,
-                (ROW_CODE_WHIR_AGGREGATE_LEAF_STATE_BYTE_LENGTH >> 8) as u8,
-                ROW_CODE_WHIR_MERKLE_DIGEST_BYTE_LENGTH as u8,
-                (ROW_CODE_WHIR_MERKLE_DIGEST_BYTE_LENGTH >> 8) as u8,
-                3,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                ROW_CODE_WHIR_AGGREGATE_LEAF_FRAME_TAGS[0],
-                ROW_CODE_WHIR_AGGREGATE_LEAF_FRAME_TAGS[1],
-                ROW_CODE_WHIR_AGGREGATE_LEAF_FRAME_TAGS[2],
-            ],
+            ROW_CODE_WHIR_CONSTRUCTION_PLAN_IDENTITY_ENCODING_VERSION,
+            11
         );
+        assert_eq!(expected_prefix.len(), 84);
+        assert_eq!(&identity[..expected_prefix.len()], expected_prefix,);
     }
 
     #[test]

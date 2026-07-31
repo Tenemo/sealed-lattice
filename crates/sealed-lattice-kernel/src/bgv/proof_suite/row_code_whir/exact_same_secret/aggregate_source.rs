@@ -41,8 +41,11 @@ use super::super::opening_schedule::{
     derive_point_row_weights, divide_polynomial_opening, opening_schedule_continuation,
     phase_has_private_row_padding, phase_index, reduction_block_coefficient_start,
 };
+#[cfg(test)]
+use super::super::row_encoding::PRIVATE_ROW_PAD_SEED_BYTE_LENGTH;
 use super::super::row_encoding::{
-    RowCodeHighHalfSource, RowEncodingGeometry, padded_row_coefficients,
+    PRIVATE_ROW_PAD_PHASE_COUNT, PrivateRowPadSeed, RowCodeHighHalfSource, RowEncodingGeometry,
+    padded_row_coefficients,
 };
 use super::super::same_secret_source_manifest::SameSecretAuthenticatedSourceManifest;
 use super::super::{ChallengeField, ExtensionFieldChallenger};
@@ -230,14 +233,14 @@ pub(in crate::bgv::proof_suite::row_code_whir) struct ExactSameSecretAggregateMa
     pub(in crate::bgv::proof_suite::row_code_whir) witness: ExactSameSecretAggregateWitness,
     pub(in crate::bgv::proof_suite::row_code_whir) metadata: ExactSameSecretAggregateMetadata,
     challenger: ExtensionFieldChallenger,
-    row_pad_seeds: Option<Zeroizing<[[u8; 32]; 3]>>,
+    row_pad_seeds: Option<Zeroizing<Box<[PrivateRowPadSeed]>>>,
 }
 
 type ExactSameSecretAggregateMaterializedParts = (
     ExactSameSecretAggregateWitness,
     ExactSameSecretAggregateMetadata,
     ExtensionFieldChallenger,
-    Option<Zeroizing<[[u8; 32]; 3]>>,
+    Option<Zeroizing<Box<[PrivateRowPadSeed]>>>,
 );
 
 impl ExactSameSecretAggregateMaterializedSource {
@@ -260,7 +263,7 @@ pub(in crate::bgv::proof_suite::row_code_whir) struct ExactSameSecretAggregateSo
     construction_plan: RowCodeWhirConstructionPlan,
     actions: Vec<ExactSameSecretAggregateSourceAction>,
     next_action_index: usize,
-    row_pad_seeds: Option<Zeroizing<[[u8; 32]; 3]>>,
+    row_pad_seeds: Option<Zeroizing<Box<[PrivateRowPadSeed]>>>,
     phase_row_witness: Vec<Goldilocks>,
     aggregate_columns: Option<Vec<Vec<ChallengeField>>>,
     current_batch_ordinal: usize,
@@ -286,7 +289,7 @@ impl ExactSameSecretAggregateSource {
         opening_points: Vec<ProofChallengeExtensionElement>,
         out_of_domain_evaluations: &[ProofChallengeExtensionElement],
         opening_batch_mask_chunk_evaluations: &[ProofChallengeExtensionElement],
-        row_pad_seeds: Option<Zeroizing<[[u8; 32]; 3]>>,
+        row_pad_seeds: Option<Zeroizing<Box<[PrivateRowPadSeed]>>>,
         row_code_whir_transcript: RowCodeWhirTranscript,
     ) -> Result<Self, CommonProofProverError> {
         let expected_mask_evaluation_count = construction_plan
@@ -298,6 +301,9 @@ impl ExactSameSecretAggregateSource {
             || out_of_domain_evaluations.len() != relation_variant.ordered_opening_claims().len()
             || opening_batch_mask_chunk_evaluations.len() != expected_mask_evaluation_count
             || phase_has_private_row_padding(relation_variant) != row_pad_seeds.is_some()
+            || row_pad_seeds
+                .as_ref()
+                .is_some_and(|seeds| seeds.len() != PRIVATE_ROW_PAD_PHASE_COUNT)
         {
             return Err(CommonProofProverError::InvalidInput);
         }
@@ -1358,7 +1364,9 @@ mod tests {
             construction_plan,
             actions: vec![expected_action],
             next_action_index: 0,
-            row_pad_seeds: Some(Zeroizing::new([[1_u8; 32]; 3])),
+            row_pad_seeds: Some(Zeroizing::new(Box::<[PrivateRowPadSeed]>::from(
+                [[1_u8; PRIVATE_ROW_PAD_SEED_BYTE_LENGTH]; PRIVATE_ROW_PAD_PHASE_COUNT],
+            ))),
             phase_row_witness: Vec::new(),
             aggregate_columns: None,
             current_batch_ordinal: 0,

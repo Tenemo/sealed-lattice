@@ -30,12 +30,22 @@ use crate::bgv::proof_suite::row_code_whir::{
         checked_exact_same_secret_extractor_correspondence,
         checked_exact_same_secret_extractor_correspondence_with_fault,
     },
+    row_encoding::{
+        PRIVATE_ROW_HIGH_HALF_DOMAIN, PRIVATE_ROW_PAD_PHASE_COUNT,
+        PRIVATE_ROW_PAD_SEED_BYTE_LENGTH, PRIVATE_ROW_PAD_SEED_MATERIAL_BYTE_LENGTH,
+        private_row_high_half_xof_input_bytes,
+    },
 };
 use crate::bgv::proof_suite::{
     ConstructionMaskingCertificate, PROOF_CHALLENGE_EXTENSION_DEGREE,
     ValidatedRelationPlanArtifact, checked_zero_knowledge_mask_image_for_parameters,
     compile_same_secret_relation_plan, selected_relation_plans,
     selected_same_secret_relation_plan_input,
+};
+use crate::foundation::{
+    DECLARED_ADVERSARIAL_QUERY_BUDGET, MaskGeneratorHybridAssumption, MaskGeneratorHybridHop,
+    MaskGeneratorHybridLoss, PRIVATE_RANDOMNESS_BLOCK_BYTE_LENGTH, deployed_private_stream_hybrid,
+    quantum_private_stream_hybrid,
 };
 
 const WHIR_SUMCHECK_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE: u64 = 3;
@@ -79,6 +89,7 @@ pub(in crate::bgv::proof_suite) enum WhirTheoremCertificateError {
     IncompleteTranscriptMapping,
     IncompleteOracleEquationMapping,
     IncompleteMaskingCorrespondence,
+    IncompleteRowPadGeneratorHybrid,
     IncompleteRelationSemanticCorrespondence,
     IncompletePolynomialExtractorCorrespondence,
     IncompleteFailureMagnitudeCorrespondence,
@@ -97,6 +108,7 @@ pub(in crate::bgv::proof_suite) enum ProductionGeometryCertificateStage {
     HidingConfiguration,
     RelationSemantics,
     MaskingCorrespondence,
+    RowPadGeneratorHybrid,
     WhirGeometry,
     PrefixStacking,
     OracleEquationCatalog,
@@ -118,6 +130,7 @@ pub(in crate::bgv::proof_suite) enum ProductionGeometryCertificateFailure {
     IncompleteTranscriptMapping,
     IncompleteOracleEquationMapping,
     IncompleteMaskingCorrespondence,
+    IncompleteRowPadGeneratorHybrid,
     IncompleteRelationSemanticCorrespondence,
     IncompletePolynomialExtractorCorrespondence,
     IncompleteFailureMagnitudeCorrespondence,
@@ -148,6 +161,9 @@ impl From<WhirTheoremCertificateError> for ProductionGeometryCertificateFailure 
             }
             WhirTheoremCertificateError::IncompleteMaskingCorrespondence => {
                 Self::IncompleteMaskingCorrespondence
+            }
+            WhirTheoremCertificateError::IncompleteRowPadGeneratorHybrid => {
+                Self::IncompleteRowPadGeneratorHybrid
             }
             WhirTheoremCertificateError::IncompleteRelationSemanticCorrespondence => {
                 Self::IncompleteRelationSemanticCorrespondence
@@ -480,6 +496,401 @@ fn greatest_common_divisor_big(mut left: BigUint, mut right: BigUint) -> BigUint
         right = remainder;
     }
     left
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PrivateRowPadXofModel {
+    ClassicalSecretPrefixRandomOracle,
+    QuantumSecretPrefixRandomOracleSaitoXagawaYamakawaLemmaTwoTwo,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PrivateRowPadConcreteXof {
+    Shake256,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PrivateRowPadPhaseCensus {
+    phase: RowCodeWhirPhase,
+    row_count: usize,
+    witness_values_per_row: usize,
+    xof_call_count: usize,
+    accepted_field_output_count: usize,
+}
+
+/// Deployment-to-uniform bridge for the private high half of every phase row.
+///
+/// This is a construction-level masking certificate, not a family simulator.
+/// It first uses the action-private KMAC hybrid to replace the three raw phase
+/// seeds, then applies the secret-prefix random-oracle lemma separately to each
+/// active phase function, and finally conditions on bounded rejection-sampler
+/// success. Fixed SHAKE256 remains the named concrete ideal-XOF/QRO assumption;
+/// the certificate does not claim that the fixed function is a random oracle.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PrivateRowPadGeneratorHybridCertificate {
+    proof_privacy_mode: ProofPrivacyMode,
+    deployed_private_stream_hybrid: [(MaskGeneratorHybridHop, MaskGeneratorHybridLoss); 4],
+    quantum_private_stream_hybrid: [(MaskGeneratorHybridHop, MaskGeneratorHybridLoss); 4],
+    concrete_xof: PrivateRowPadConcreteXof,
+    classical_xof_model: PrivateRowPadXofModel,
+    quantum_xof_model: PrivateRowPadXofModel,
+    xof_domain: Vec<u8>,
+    sampled_phase_seed_count: usize,
+    active_phase_seed_count: usize,
+    phase_seed_byte_length: usize,
+    phase_seed_material_byte_length: usize,
+    private_stream_block_byte_length: usize,
+    phase_rows: Vec<PrivateRowPadPhaseCensus>,
+    framed_xof_input_count: usize,
+    framed_xof_inputs_are_injective_given_distinct_phase_seeds: bool,
+    accepted_field_output_count: usize,
+    maximum_candidate_draws_per_output: u32,
+    maximum_candidate_draw_count: u64,
+    maximum_xof_output_byte_length: u64,
+    classical_action_root_guessing_advantage: ExactBigFraction,
+    quantum_action_root_search_advantage: ExactBigFraction,
+    seed_collision_probability: ExactBigFraction,
+    classical_secret_prefix_replacement_advantage: ExactBigFraction,
+    quantum_secret_prefix_replacement_advantage: ExactBigFraction,
+    rejection_sampler_exhaustion_probability: ExactBigFraction,
+    production_frame_binding_established: bool,
+}
+
+impl PrivateRowPadGeneratorHybridCertificate {
+    fn derive(plan: &RowCodeWhirConstructionPlan) -> Result<Self, WhirTheoremCertificateError> {
+        Self::derive_with_seed_byte_length(plan, PRIVATE_ROW_PAD_SEED_BYTE_LENGTH)
+    }
+
+    fn derive_with_seed_byte_length(
+        plan: &RowCodeWhirConstructionPlan,
+        phase_seed_byte_length: usize,
+    ) -> Result<Self, WhirTheoremCertificateError> {
+        if phase_seed_byte_length == 0 {
+            return Err(WhirTheoremCertificateError::IncompleteRowPadGeneratorHybrid);
+        }
+        let phase_seed_bit_length = phase_seed_byte_length
+            .checked_mul(u8::BITS as usize)
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+        if !phase_seed_bit_length.is_multiple_of(2) {
+            return Err(WhirTheoremCertificateError::IncompleteRowPadGeneratorHybrid);
+        }
+        let secret_bearing = plan.proof_privacy_mode == ProofPrivacyMode::SecretBearing;
+        let mut phase_rows = Vec::new();
+        if secret_bearing {
+            for phase in &plan.phase_order {
+                let geometry = row_pad_phase_geometry(plan, *phase)
+                    .ok_or(WhirTheoremCertificateError::IncompleteRowPadGeneratorHybrid)?;
+                let accepted_field_output_count = geometry
+                    .row_count
+                    .checked_mul(geometry.pad_value_count())
+                    .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+                phase_rows.push(PrivateRowPadPhaseCensus {
+                    phase: *phase,
+                    row_count: geometry.row_count,
+                    witness_values_per_row: geometry.witness_values_per_row,
+                    xof_call_count: geometry.row_count,
+                    accepted_field_output_count,
+                });
+            }
+        }
+        let active_phase_seed_count = phase_rows.len();
+        let framed_xof_input_count = phase_rows.iter().try_fold(0_usize, |total, phase| {
+            total
+                .checked_add(phase.xof_call_count)
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+        })?;
+        let accepted_field_output_count = phase_rows.iter().try_fold(0_usize, |total, phase| {
+            total
+                .checked_add(phase.accepted_field_output_count)
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+        })?;
+        let maximum_candidate_draws_per_output = plan
+            .parameters
+            .maximum_fiat_shamir_candidate_draws_per_output;
+        let maximum_candidate_draw_count = u64::try_from(accepted_field_output_count)
+            .ok()
+            .and_then(|output_count| {
+                output_count.checked_mul(u64::from(maximum_candidate_draws_per_output))
+            })
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+        let maximum_xof_output_byte_length = maximum_candidate_draw_count
+            .checked_mul(size_of::<u64>() as u64)
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+
+        let active_phase_seed_count_big = BigUint::from(active_phase_seed_count);
+        let action_root_space = BigUint::one() << 512_usize;
+        let classical_action_root_guessing_advantage = if secret_bearing {
+            ExactBigFraction::new(
+                BigUint::from(DECLARED_ADVERSARIAL_QUERY_BUDGET),
+                action_root_space.clone(),
+            )?
+        } else {
+            ExactBigFraction::zero()
+        };
+        let quantum_action_root_search_advantage = if secret_bearing {
+            let quantum_search_amplitude = BigUint::from(2_u8)
+                * BigUint::from(DECLARED_ADVERSARIAL_QUERY_BUDGET)
+                + BigUint::one();
+            ExactBigFraction::new(
+                &quantum_search_amplitude * &quantum_search_amplitude,
+                action_root_space,
+            )?
+        } else {
+            ExactBigFraction::zero()
+        };
+        let seed_space = BigUint::one() << phase_seed_bit_length;
+        let seed_collision_pair_count = active_phase_seed_count
+            .checked_mul(active_phase_seed_count.saturating_sub(1))
+            .and_then(|ordered_pair_count| ordered_pair_count.checked_div(2))
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+        let seed_collision_probability =
+            ExactBigFraction::new(BigUint::from(seed_collision_pair_count), seed_space.clone())?;
+        let classical_secret_prefix_replacement_advantage = ExactBigFraction::new(
+            &active_phase_seed_count_big * BigUint::from(DECLARED_ADVERSARIAL_QUERY_BUDGET),
+            seed_space,
+        )?;
+        // Saito--Xagawa--Yamakawa, Lemma 2.2: one secret-prefix function costs
+        // at most 2 q / sqrt(2^k). Sequential replacement pays once per active
+        // phase seed.
+        let quantum_secret_prefix_replacement_advantage = ExactBigFraction::new(
+            &active_phase_seed_count_big
+                * BigUint::from(2_u8)
+                * BigUint::from(DECLARED_ADVERSARIAL_QUERY_BUDGET),
+            BigUint::one() << (phase_seed_bit_length / 2),
+        )?;
+        let candidate_space = BigUint::one() << u64::BITS as usize;
+        let rejected_candidate_count = &candidate_space % BigUint::from(PROOF_BASE_FIELD_MODULUS);
+        let rejection_sampler_exhaustion_probability = if accepted_field_output_count == 0 {
+            ExactBigFraction::zero()
+        } else {
+            ExactBigFraction::new(
+                rejected_candidate_count.pow(maximum_candidate_draws_per_output)
+                    * BigUint::from(accepted_field_output_count),
+                candidate_space.pow(maximum_candidate_draws_per_output),
+            )?
+        };
+
+        let production_frame_binding_established = phase_seed_byte_length
+            == PRIVATE_ROW_PAD_SEED_BYTE_LENGTH
+            && PRIVATE_ROW_PAD_SEED_MATERIAL_BYTE_LENGTH
+                == PRIVATE_ROW_PAD_PHASE_COUNT * PRIVATE_ROW_PAD_SEED_BYTE_LENGTH;
+        let framed_xof_inputs_are_injective_given_distinct_phase_seeds =
+            if secret_bearing && production_frame_binding_established {
+                row_pad_production_frames_are_injective(plan, &phase_rows)?
+            } else {
+                !secret_bearing
+            };
+        let certificate = Self {
+            proof_privacy_mode: plan.proof_privacy_mode,
+            deployed_private_stream_hybrid: deployed_private_stream_hybrid(),
+            quantum_private_stream_hybrid: quantum_private_stream_hybrid(),
+            concrete_xof: PrivateRowPadConcreteXof::Shake256,
+            classical_xof_model: PrivateRowPadXofModel::ClassicalSecretPrefixRandomOracle,
+            quantum_xof_model:
+                PrivateRowPadXofModel::QuantumSecretPrefixRandomOracleSaitoXagawaYamakawaLemmaTwoTwo,
+            xof_domain: PRIVATE_ROW_HIGH_HALF_DOMAIN.to_vec(),
+            sampled_phase_seed_count: usize::from(secret_bearing)
+                .checked_mul(PRIVATE_ROW_PAD_PHASE_COUNT)
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+            active_phase_seed_count,
+            phase_seed_byte_length,
+            phase_seed_material_byte_length: phase_seed_byte_length
+                .checked_mul(PRIVATE_ROW_PAD_PHASE_COUNT)
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+            private_stream_block_byte_length: PRIVATE_RANDOMNESS_BLOCK_BYTE_LENGTH,
+            phase_rows,
+            framed_xof_input_count,
+            framed_xof_inputs_are_injective_given_distinct_phase_seeds,
+            accepted_field_output_count,
+            maximum_candidate_draws_per_output,
+            maximum_candidate_draw_count,
+            maximum_xof_output_byte_length,
+            classical_action_root_guessing_advantage,
+            quantum_action_root_search_advantage,
+            seed_collision_probability,
+            classical_secret_prefix_replacement_advantage,
+            quantum_secret_prefix_replacement_advantage,
+            rejection_sampler_exhaustion_probability,
+            production_frame_binding_established,
+        };
+        Ok(certificate)
+    }
+
+    fn is_complete_for_plan(&self, plan: &RowCodeWhirConstructionPlan) -> bool {
+        self.is_complete()
+            && Self::derive_with_seed_byte_length(plan, self.phase_seed_byte_length)
+                .is_ok_and(|expected| expected == *self)
+    }
+
+    fn is_complete(&self) -> bool {
+        let secret_bearing = self.proof_privacy_mode == ProofPrivacyMode::SecretBearing;
+        let expected_private_stream_hops = [
+            MaskGeneratorHybridHop::ActionRootEntropy,
+            MaskGeneratorHybridHop::ActionKeyHierarchyReplacement,
+            MaskGeneratorHybridHop::BlockStreamReplacement,
+            MaskGeneratorHybridHop::FramedInputInjectivity,
+        ];
+        self.deployed_private_stream_hybrid == deployed_private_stream_hybrid()
+            && self.quantum_private_stream_hybrid == quantum_private_stream_hybrid()
+            && self
+                .deployed_private_stream_hybrid
+                .map(|(hop, _)| hop)
+                == expected_private_stream_hops
+            && self
+                .quantum_private_stream_hybrid
+                .map(|(hop, _)| hop)
+                == expected_private_stream_hops
+            && matches!(
+                self.deployed_private_stream_hybrid[0].1,
+                MaskGeneratorHybridLoss::SecretGuessing {
+                    secret_bit_length: 512,
+                    query_budget: DECLARED_ADVERSARIAL_QUERY_BUDGET,
+                }
+            )
+            && matches!(
+                self.quantum_private_stream_hybrid[0].1,
+                MaskGeneratorHybridLoss::QuantumSecretSearch {
+                    secret_bit_length: 512,
+                    query_budget: DECLARED_ADVERSARIAL_QUERY_BUDGET,
+                }
+            )
+            && matches!(
+                self.deployed_private_stream_hybrid[1].1,
+                MaskGeneratorHybridLoss::ComputationalReduction {
+                    assumption: MaskGeneratorHybridAssumption::Kmac256PseudorandomFunction,
+                    key_bit_length: 512,
+                    classical_query_budget: DECLARED_ADVERSARIAL_QUERY_BUDGET,
+                }
+            )
+            && matches!(
+                self.quantum_private_stream_hybrid[1].1,
+                MaskGeneratorHybridLoss::ComputationalReduction {
+                    assumption: MaskGeneratorHybridAssumption::Kmac256QuantumPseudorandomFunction,
+                    key_bit_length: 512,
+                    classical_query_budget: DECLARED_ADVERSARIAL_QUERY_BUDGET,
+                }
+            )
+            && matches!(
+                self.deployed_private_stream_hybrid[2].1,
+                MaskGeneratorHybridLoss::ComputationalReduction {
+                    assumption: MaskGeneratorHybridAssumption::Kmac256PseudorandomFunction,
+                    key_bit_length: 512,
+                    classical_query_budget: DECLARED_ADVERSARIAL_QUERY_BUDGET,
+                }
+            )
+            && matches!(
+                self.quantum_private_stream_hybrid[2].1,
+                MaskGeneratorHybridLoss::ComputationalReduction {
+                    assumption: MaskGeneratorHybridAssumption::Kmac256QuantumPseudorandomFunction,
+                    key_bit_length: 512,
+                    classical_query_budget: DECLARED_ADVERSARIAL_QUERY_BUDGET,
+                }
+            )
+            && self.deployed_private_stream_hybrid[3].1 == MaskGeneratorHybridLoss::Exact
+            && self.quantum_private_stream_hybrid[3].1 == MaskGeneratorHybridLoss::Exact
+            && self.concrete_xof == PrivateRowPadConcreteXof::Shake256
+            && self.classical_xof_model
+                == PrivateRowPadXofModel::ClassicalSecretPrefixRandomOracle
+            && self.quantum_xof_model
+                == PrivateRowPadXofModel::QuantumSecretPrefixRandomOracleSaitoXagawaYamakawaLemmaTwoTwo
+            && self.xof_domain == PRIVATE_ROW_HIGH_HALF_DOMAIN
+            && self.phase_seed_byte_length == PRIVATE_ROW_PAD_SEED_BYTE_LENGTH
+            && self.phase_seed_material_byte_length
+                == PRIVATE_ROW_PAD_SEED_MATERIAL_BYTE_LENGTH
+            && self.private_stream_block_byte_length == PRIVATE_RANDOMNESS_BLOCK_BYTE_LENGTH
+            && self.phase_seed_byte_length == self.private_stream_block_byte_length
+            && self.maximum_candidate_draws_per_output
+                == PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT
+            && self.production_frame_binding_established
+            && if secret_bearing {
+                self.sampled_phase_seed_count == PRIVATE_ROW_PAD_PHASE_COUNT
+                    && self.active_phase_seed_count == self.phase_rows.len()
+                    && self.active_phase_seed_count > 0
+                    && self.active_phase_seed_count <= self.sampled_phase_seed_count
+                    && self.framed_xof_input_count > 0
+                    && self.framed_xof_inputs_are_injective_given_distinct_phase_seeds
+                    && self.accepted_field_output_count > 0
+                    && self
+                        .classical_action_root_guessing_advantage
+                        .is_at_most_inverse_power_of_two(CMS19_ADVERSARIAL_QUERY_EXPONENT)
+                    && self
+                        .quantum_action_root_search_advantage
+                        .is_at_most_inverse_power_of_two(CMS19_ADVERSARIAL_QUERY_EXPONENT)
+                    && self.seed_collision_probability
+                        .is_at_most_inverse_power_of_two(CMS19_ADVERSARIAL_QUERY_EXPONENT)
+                    && self
+                        .classical_secret_prefix_replacement_advantage
+                        .is_at_most_inverse_power_of_two(CMS19_ADVERSARIAL_QUERY_EXPONENT)
+                    && self
+                        .quantum_secret_prefix_replacement_advantage
+                        .is_at_most_inverse_power_of_two(CMS19_ADVERSARIAL_QUERY_EXPONENT)
+                    && self
+                        .rejection_sampler_exhaustion_probability
+                        .is_at_most_inverse_power_of_two(128)
+            } else {
+                self.sampled_phase_seed_count == 0
+                    && self.active_phase_seed_count == 0
+                    && self.phase_rows.is_empty()
+                    && self.framed_xof_input_count == 0
+                    && self.accepted_field_output_count == 0
+                    && self.maximum_candidate_draw_count == 0
+                    && self.maximum_xof_output_byte_length == 0
+                    && self
+                        .classical_action_root_guessing_advantage
+                        .numerator
+                        .is_zero()
+                    && self
+                        .quantum_action_root_search_advantage
+                        .numerator
+                        .is_zero()
+            }
+    }
+}
+
+fn row_pad_phase_geometry(
+    plan: &RowCodeWhirConstructionPlan,
+    phase: RowCodeWhirPhase,
+) -> Option<RowEncodingGeometry> {
+    match phase {
+        RowCodeWhirPhase::Base => plan.base_phase.as_ref().map(|phase| phase.geometry),
+        RowCodeWhirPhase::Auxiliary => plan.auxiliary_phase.as_ref().map(|phase| phase.geometry),
+        RowCodeWhirPhase::Quotient => Some(plan.quotient_phase.geometry),
+    }
+}
+
+fn row_pad_production_frames_are_injective(
+    plan: &RowCodeWhirConstructionPlan,
+    phase_rows: &[PrivateRowPadPhaseCensus],
+) -> Result<bool, WhirTheoremCertificateError> {
+    let mut frames = BTreeSet::new();
+    for (phase_seed_ordinal, phase) in phase_rows.iter().enumerate() {
+        let geometry = row_pad_phase_geometry(plan, phase.phase)
+            .ok_or(WhirTheoremCertificateError::IncompleteRowPadGeneratorHybrid)?;
+        if geometry.row_count != phase.row_count
+            || geometry.witness_values_per_row != phase.witness_values_per_row
+        {
+            return Err(WhirTheoremCertificateError::IncompleteRowPadGeneratorHybrid);
+        }
+        let mut seed = [0_u8; PRIVATE_ROW_PAD_SEED_BYTE_LENGTH];
+        seed[0] = u8::try_from(phase_seed_ordinal + 1)
+            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+        for row_index in 0..phase.row_count {
+            let frame = private_row_high_half_xof_input_bytes(geometry, row_index, &seed);
+            let expected_frame_byte_length = size_of::<u64>()
+                .checked_add(PRIVATE_ROW_HIGH_HALF_DOMAIN.len())
+                .and_then(|length| length.checked_add(PRIVATE_ROW_PAD_SEED_BYTE_LENGTH))
+                .and_then(|length| length.checked_add(3 * size_of::<u64>()))
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+            if frame.len() != expected_frame_byte_length || !frames.insert(frame) {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(frames.len()
+        == phase_rows
+            .iter()
+            .map(|phase| phase.row_count)
+            .sum::<usize>())
 }
 
 fn falling_factorial(
@@ -1628,6 +2039,7 @@ pub(in crate::bgv::proof_suite) struct RowCodeWhirFailurePartitionCertificate {
     exact_failure_magnitude: ExactFailureMagnitudeCertificate,
     construction_masking: ConstructionMaskingCertificate,
     aggregate_wide_masking: AggregateWideMaskingCertificate,
+    private_row_pad_generator_hybrid: PrivateRowPadGeneratorHybridCertificate,
     relation_compiler_interpreter_semantics: RelationCompilerInterpreterSemanticCertificate,
     polynomial_protocol_extractor: ExactPolynomialProtocolExtractorCertificate,
     point_constraint_extractor: ExactPointConstraintExtractorCertificate,
@@ -1666,6 +2078,7 @@ impl RowCodeWhirFailurePartitionCertificate {
         self.commitment_subtree_extraction.is_complete()
             && self.construction_masking.is_complete()
             && self.aggregate_wide_masking.is_complete()
+            && self.private_row_pad_generator_hybrid.is_complete()
             && self.relation_compiler_interpreter_semantics.is_complete()
             && self.polynomial_protocol_extractor.is_complete()
             && self.point_constraint_extractor.is_complete()
@@ -1712,6 +2125,7 @@ struct RowCodeWhirProductionGeometryCertificate {
     relation_compiler_interpreter_semantics: RelationCompilerInterpreterSemanticCertificate,
     construction_masking: ConstructionMaskingCertificate,
     aggregate_wide_masking: AggregateWideMaskingCertificate,
+    private_row_pad_generator_hybrid: PrivateRowPadGeneratorHybridCertificate,
     whir_geometry: ProductionWhirGeometryCertificate,
     prefix_stacking: PrefixStackingCertificate,
     state_epoch_rows: Vec<StateEpochRow>,
@@ -1793,6 +2207,7 @@ impl RowCodeWhirProductionGeometryCertificate {
         if !self.relation_compiler_interpreter_semantics.is_complete()
             || !self.construction_masking.is_complete()
             || !self.aggregate_wide_masking.is_complete()
+            || !self.private_row_pad_generator_hybrid.is_complete()
         {
             return Some(
                 ProductionGeometryCertificateFailure::IncompleteRelationOrMaskingCertificate,
@@ -2272,6 +2687,19 @@ fn checked_row_code_whir_production_geometry_certificate_with_masking(
             WhirTheoremCertificateError::IncompleteMaskingCorrespondence,
         ));
     }
+    let private_row_pad_generator_hybrid = PrivateRowPadGeneratorHybridCertificate::derive(plan)
+        .map_err(|error| {
+            contextualize(
+                ProductionGeometryCertificateStage::RowPadGeneratorHybrid,
+                error,
+            )
+        })?;
+    if !private_row_pad_generator_hybrid.is_complete_for_plan(plan) {
+        return Err(contextualize(
+            ProductionGeometryCertificateStage::RowPadGeneratorHybrid,
+            WhirTheoremCertificateError::IncompleteRowPadGeneratorHybrid,
+        ));
+    }
     let whir_geometry = derive_production_whir_geometry_certificate(plan, aggregate_wide_masking)
         .map_err(|error| {
         contextualize(ProductionGeometryCertificateStage::WhirGeometry, error)
@@ -2385,6 +2813,7 @@ fn checked_row_code_whir_production_geometry_certificate_with_masking(
         relation_compiler_interpreter_semantics,
         construction_masking,
         aggregate_wide_masking: aggregate_wide_masking.clone(),
+        private_row_pad_generator_hybrid,
         whir_geometry,
         prefix_stacking,
         state_epoch_rows,
@@ -2621,6 +3050,11 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
         || !construction_masking.aggregate_wide_views_delegate_to_precommitted_pad()
     {
         return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    let private_row_pad_generator_hybrid = PrivateRowPadGeneratorHybridCertificate::derive(plan)
+        .map_err(|_| WhirTheoremCertificateError::IncompleteRowPadGeneratorHybrid)?;
+    if !private_row_pad_generator_hybrid.is_complete_for_plan(plan) {
+        return Err(WhirTheoremCertificateError::IncompleteRowPadGeneratorHybrid);
     }
 
     let encoded_oracles = plan
@@ -2997,6 +3431,7 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
         exact_failure_magnitude,
         construction_masking,
         aggregate_wide_masking,
+        private_row_pad_generator_hybrid,
         relation_compiler_interpreter_semantics,
         polynomial_protocol_extractor,
         point_constraint_extractor,
@@ -5955,6 +6390,174 @@ fn selected_same_secret_construction_plan() -> RowCodeWhirConstructionPlan {
         .expect("the selected same-secret relation validates");
     RowCodeWhirConstructionPlan::for_selected_variant(&artifact, None, None)
         .expect("the selected same-secret construction plan derives")
+}
+
+#[test]
+fn production_row_pad_hybrid_refuses_256_bit_secret_prefixes() {
+    let plan = selected_same_secret_construction_plan();
+    let certificate = PrivateRowPadGeneratorHybridCertificate::derive(&plan)
+        .expect("the production row-pad generator hybrid derives");
+
+    assert!(certificate.is_complete_for_plan(&plan));
+    assert_eq!(certificate.sampled_phase_seed_count, 3);
+    assert_eq!(certificate.active_phase_seed_count, 3);
+    assert_eq!(certificate.phase_seed_byte_length, 64);
+    assert_eq!(certificate.phase_seed_material_byte_length, 192);
+    assert_eq!(certificate.private_stream_block_byte_length, 64);
+    assert_eq!(
+        certificate
+            .phase_rows
+            .iter()
+            .map(|phase| (phase.phase, phase.row_count))
+            .collect::<Vec<_>>(),
+        vec![
+            (RowCodeWhirPhase::Base, 32),
+            (RowCodeWhirPhase::Auxiliary, 15),
+            (RowCodeWhirPhase::Quotient, 15),
+        ],
+    );
+    assert!(
+        certificate
+            .phase_rows
+            .iter()
+            .all(|phase| phase.witness_values_per_row == 1 << 21)
+    );
+    assert_eq!(certificate.framed_xof_input_count, 62);
+    assert_eq!(certificate.accepted_field_output_count, 130_023_424);
+    assert_eq!(certificate.maximum_candidate_draws_per_output, 128);
+    assert_eq!(certificate.maximum_candidate_draw_count, 16_642_998_272);
+    assert_eq!(certificate.maximum_xof_output_byte_length, 133_143_986_176,);
+    assert!(
+        certificate
+            .classical_action_root_guessing_advantage
+            .is_at_most_inverse_power_of_two(432)
+    );
+    assert!(
+        certificate
+            .classical_action_root_guessing_advantage
+            .is_greater_than_inverse_power_of_two(433)
+    );
+    assert!(
+        certificate
+            .quantum_action_root_search_advantage
+            .is_at_most_inverse_power_of_two(350)
+    );
+    assert!(
+        certificate
+            .quantum_action_root_search_advantage
+            .is_greater_than_inverse_power_of_two(351)
+    );
+    assert!(
+        certificate
+            .seed_collision_probability
+            .is_at_most_inverse_power_of_two(510)
+    );
+    assert!(
+        certificate
+            .seed_collision_probability
+            .is_greater_than_inverse_power_of_two(511)
+    );
+    assert!(
+        certificate
+            .classical_secret_prefix_replacement_advantage
+            .is_at_most_inverse_power_of_two(430)
+    );
+    assert!(
+        certificate
+            .classical_secret_prefix_replacement_advantage
+            .is_greater_than_inverse_power_of_two(431)
+    );
+    assert!(
+        certificate
+            .quantum_secret_prefix_replacement_advantage
+            .is_at_most_inverse_power_of_two(173)
+    );
+    assert!(
+        certificate
+            .quantum_secret_prefix_replacement_advantage
+            .is_greater_than_inverse_power_of_two(174)
+    );
+    assert!(
+        certificate
+            .rejection_sampler_exhaustion_probability
+            .is_at_most_inverse_power_of_two(128)
+    );
+
+    let rejected_256_bit =
+        PrivateRowPadGeneratorHybridCertificate::derive_with_seed_byte_length(&plan, 32)
+            .expect("the rejected 256-bit candidate still has exact accounting");
+    assert_eq!(rejected_256_bit.phase_seed_byte_length, 32);
+    assert!(
+        rejected_256_bit
+            .quantum_secret_prefix_replacement_advantage
+            .is_at_most_inverse_power_of_two(45)
+    );
+    assert!(
+        rejected_256_bit
+            .quantum_secret_prefix_replacement_advantage
+            .is_greater_than_inverse_power_of_two(46)
+    );
+    assert!(
+        !rejected_256_bit
+            .quantum_secret_prefix_replacement_advantage
+            .is_at_most_inverse_power_of_two(CMS19_ADVERSARIAL_QUERY_EXPONENT)
+    );
+    assert!(!rejected_256_bit.is_complete_for_plan(&plan));
+
+    let mut wrong_domain = certificate.clone();
+    wrong_domain.xof_domain.push(0);
+    assert!(!wrong_domain.is_complete_for_plan(&plan));
+
+    let mut missing_phase = certificate.clone();
+    missing_phase.phase_rows.pop();
+    assert!(!missing_phase.is_complete_for_plan(&plan));
+
+    let mut noninjective_frames = certificate.clone();
+    noninjective_frames.framed_xof_inputs_are_injective_given_distinct_phase_seeds = false;
+    assert!(!noninjective_frames.is_complete_for_plan(&plan));
+
+    let mut unbounded_quantum_replacement = certificate.clone();
+    unbounded_quantum_replacement.quantum_secret_prefix_replacement_advantage =
+        ExactBigFraction::from_u64(1, 1).expect("one is a valid exact fraction");
+    assert!(!unbounded_quantum_replacement.is_complete_for_plan(&plan));
+
+    let mut unbounded_action_root_search = certificate.clone();
+    unbounded_action_root_search.quantum_action_root_search_advantage =
+        ExactBigFraction::from_u64(1, 1).expect("one is a valid exact fraction");
+    assert!(!unbounded_action_root_search.is_complete_for_plan(&plan));
+
+    let mut reordered_phase_plan = plan.clone();
+    reordered_phase_plan.phase_order.swap(0, 1);
+    assert!(!certificate.is_complete_for_plan(&reordered_phase_plan));
+
+    let mut changed_row_geometry_plan = plan.clone();
+    changed_row_geometry_plan
+        .base_phase
+        .as_mut()
+        .expect("the selected plan has a base phase")
+        .geometry
+        .row_count += 1;
+    assert!(!certificate.is_complete_for_plan(&changed_row_geometry_plan));
+
+    let mut public_only_plan = plan.clone();
+    public_only_plan.proof_privacy_mode = ProofPrivacyMode::PublicOnly;
+    let public_only_certificate =
+        PrivateRowPadGeneratorHybridCertificate::derive(&public_only_plan)
+            .expect("the public-only row-pad ledger derives");
+    assert!(public_only_certificate.is_complete_for_plan(&public_only_plan));
+    assert_eq!(public_only_certificate.sampled_phase_seed_count, 0);
+    assert!(public_only_certificate.phase_rows.is_empty());
+    assert_eq!(public_only_certificate.framed_xof_input_count, 0);
+    assert_eq!(public_only_certificate.accepted_field_output_count, 0);
+
+    let mut classical_block_replacement_in_quantum_ledger = certificate;
+    classical_block_replacement_in_quantum_ledger.quantum_private_stream_hybrid[2].1 =
+        MaskGeneratorHybridLoss::ComputationalReduction {
+            assumption: MaskGeneratorHybridAssumption::Kmac256PseudorandomFunction,
+            key_bit_length: 512,
+            classical_query_budget: DECLARED_ADVERSARIAL_QUERY_BUDGET,
+        };
+    assert!(!classical_block_replacement_in_quantum_ledger.is_complete_for_plan(&plan));
 }
 
 fn assert_public_key_share_prefix_stacking_is_derived_from_its_production_plan(

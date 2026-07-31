@@ -60,7 +60,11 @@ use super::{
         RowCodeWhirProofSectionRole,
     },
     plan_row_code_whir_quotient_transform_storage,
-    row_encoding::{RowCodeHighHalfSource, RowEncodingGeometry, padded_base_row_coefficients},
+    row_encoding::{
+        PRIVATE_ROW_PAD_PHASE_COUNT, PRIVATE_ROW_PAD_SEED_BYTE_LENGTH,
+        PRIVATE_ROW_PAD_SEED_MATERIAL_BYTE_LENGTH, PrivateRowPadSeed, RowCodeHighHalfSource,
+        RowEncodingGeometry, padded_base_row_coefficients,
+    },
 };
 use crate::bgv::proof_suite::external_memory::{
     ProofExternalMemoryError, ProofExternalMemoryObject, ProofExternalMemoryObjectPlan,
@@ -159,7 +163,6 @@ enum RowCodeWhirGenerationPhase {
 
 const AUXILIARY_REPLAY_ISSUED_STEP: u32 = 1;
 const FIRST_QUOTIENT_TRANSFORM_STEP: u32 = 2;
-const ROW_PAD_SEED_BYTE_LENGTH: usize = 3 * 32;
 pub(super) const MAXIMUM_PHASE_COMMITMENT_STRIPE_COLUMN_COUNT: usize = 1 << 20;
 const MAXIMUM_ROW_CODE_WHIR_TRANSCRIPT_CHECKPOINT_CURSOR_BYTE_LENGTH: usize = 16 * 1_024;
 const ROW_CODE_WHIR_CHECKPOINT_COMMITTED_STATE_HASH_DOMAIN: &str =
@@ -2602,7 +2605,9 @@ fn derive_generation_liveness(
     )
     .ok()
     .and_then(|count| count.checked_mul(extension_element_byte_length))
-    .and_then(|byte_length| byte_length.checked_add(u64::try_from(ROW_PAD_SEED_BYTE_LENGTH).ok()?))
+    .and_then(|byte_length| {
+        byte_length.checked_add(u64::try_from(PRIVATE_ROW_PAD_SEED_MATERIAL_BYTE_LENGTH).ok()?)
+    })
     .ok_or(CommonProofProverError::CountOverflow)?;
 
     derive_complete_generation_liveness(
@@ -2665,7 +2670,7 @@ pub(in crate::bgv::proof_suite) struct RowCodeWhirGenerationStateMachine {
     external_memory_requirement: CommonProofExternalMemoryRequirement,
     active_replay_polynomial_writer: Option<CommonProofReplayPolynomialWriter>,
     active_replay_polynomial_reader: Option<ActiveRowCodeWhirReplayPolynomialReader>,
-    row_pad_seeds: Option<Zeroizing<[[u8; 32]; 3]>>,
+    row_pad_seeds: Option<Zeroizing<Box<[PrivateRowPadSeed]>>>,
     phase_commitment_builder: Option<StripedColumnCommitmentBuilder>,
     active_phase_commitment: Option<RowCodeWhirPhase>,
     active_phase_materialization_purpose: Option<RowCodeWhirPhaseMaterializationPurpose>,
@@ -4182,30 +4187,38 @@ impl RowCodeWhirGenerationStateMachine {
                 let row_pad_seeds = match self.construction_plan.proof_privacy_mode {
                     ProofPrivacyMode::SecretBearing => {
                         let mut row_pad_seed_bytes =
-                            Zeroizing::new([0_u8; ROW_PAD_SEED_BYTE_LENGTH]);
+                            Zeroizing::new([0_u8; PRIVATE_ROW_PAD_SEED_MATERIAL_BYTE_LENGTH]);
                         coins
                             .fill_raw_bytes(
                                 CommonProofPrivateCoinCoordinate::proof_salt(),
                                 row_pad_seed_bytes.as_mut(),
                             )
                             .map_err(CommonProofGenerationError::CoinSource)?;
-                        Some(Zeroizing::new([
-                            row_pad_seed_bytes[0..32].try_into().map_err(|_| {
-                                CommonProofGenerationError::Prover(
-                                    CommonProofProverError::InvalidInput,
-                                )
-                            })?,
-                            row_pad_seed_bytes[32..64].try_into().map_err(|_| {
-                                CommonProofGenerationError::Prover(
-                                    CommonProofProverError::InvalidInput,
-                                )
-                            })?,
-                            row_pad_seed_bytes[64..96].try_into().map_err(|_| {
-                                CommonProofGenerationError::Prover(
-                                    CommonProofProverError::InvalidInput,
-                                )
-                            })?,
-                        ]))
+                        let mut row_pad_seeds =
+                            [[0_u8; PRIVATE_ROW_PAD_SEED_BYTE_LENGTH]; PRIVATE_ROW_PAD_PHASE_COUNT];
+                        for (phase_seed_ordinal, phase_seed) in row_pad_seeds.iter_mut().enumerate()
+                        {
+                            let seed_start = phase_seed_ordinal
+                                .checked_mul(PRIVATE_ROW_PAD_SEED_BYTE_LENGTH)
+                                .ok_or(CommonProofGenerationError::Prover(
+                                    CommonProofProverError::CountOverflow,
+                                ))?;
+                            let seed_end = seed_start
+                                .checked_add(PRIVATE_ROW_PAD_SEED_BYTE_LENGTH)
+                                .ok_or(CommonProofGenerationError::Prover(
+                                    CommonProofProverError::CountOverflow,
+                                ))?;
+                            phase_seed.copy_from_slice(
+                                row_pad_seed_bytes.get(seed_start..seed_end).ok_or(
+                                    CommonProofGenerationError::Prover(
+                                        CommonProofProverError::InvalidInput,
+                                    ),
+                                )?,
+                            );
+                        }
+                        Some(Zeroizing::new(Box::<[PrivateRowPadSeed]>::from(
+                            row_pad_seeds,
+                        )))
                     }
                     ProofPrivacyMode::PublicOnly => None,
                 };
@@ -8008,10 +8021,10 @@ mod tests {
         assert_eq!(canonical_statement.len(), 884);
         assert_eq!(relation_variant_payload_byte_length, 4_986_144);
         assert_eq!(relation_context_payload_byte_length, 736);
-        // Two explicit u16 streaming-leaf widths are now part of the
-        // construction identity.
-        assert_eq!(construction_identity_byte_length, 1_046_065);
-        assert_eq!(size_of::<RowCodeWhirGenerationStateMachine>(), 19_872);
+        // The streaming-leaf frame tags and the complete row-pad XOF geometry
+        // are part of the construction identity.
+        assert_eq!(construction_identity_byte_length, 1_046_143);
+        assert_eq!(size_of::<RowCodeWhirGenerationStateMachine>(), 19_712);
         assert_eq!(size_of::<super::super::RowCodeWhirChallenger>(), 528);
         assert_eq!(
             accounting.loading_persistent_resident_byte_length(),
@@ -8136,7 +8149,7 @@ mod tests {
                 0,
                 0,
                 0,
-                65_179_680,
+                65_179_608,
             ),
             (
                 GenerationPhaseLivenessKind::SourceReplay,
@@ -8144,7 +8157,7 @@ mod tests {
                 0,
                 0,
                 0,
-                158_172_387,
+                158_172_315,
             ),
             (
                 GenerationPhaseLivenessKind::RelationMaterialization,
@@ -8152,7 +8165,7 @@ mod tests {
                 0,
                 0,
                 1_185_104,
-                159_505_629,
+                159_505_557,
             ),
             (
                 GenerationPhaseLivenessKind::PhaseCommitment,
@@ -8160,7 +8173,7 @@ mod tests {
                 134_217_728,
                 210_195_392,
                 0,
-                450_085_659,
+                450_085_587,
             ),
             (
                 GenerationPhaseLivenessKind::QuotientPreparation,
@@ -8168,7 +8181,7 @@ mod tests {
                 0,
                 0,
                 7_280_808,
-                166_363_296,
+                166_363_224,
             ),
             (
                 GenerationPhaseLivenessKind::AggregateSource,
@@ -8176,7 +8189,7 @@ mod tests {
                 0,
                 0,
                 353_632_304,
-                556_008_729,
+                556_008_657,
             ),
             (
                 GenerationPhaseLivenessKind::AggregateOpeningPreparation,
@@ -8184,7 +8197,7 @@ mod tests {
                 0,
                 0,
                 167_772_160,
-                251_364_579,
+                251_364_507,
             ),
             (
                 GenerationPhaseLivenessKind::AggregateCommitment,
@@ -8192,7 +8205,7 @@ mod tests {
                 335_544_320,
                 67_108_864,
                 0,
-                515_605_731,
+                515_605_659,
             ),
             (
                 GenerationPhaseLivenessKind::BoundTreeAuthentication,
@@ -8200,7 +8213,7 @@ mod tests {
                 134_217_728,
                 67_108_864,
                 0,
-                289_113_315,
+                289_113_243,
             ),
             (
                 GenerationPhaseLivenessKind::WhirOpening,
@@ -8208,7 +8221,7 @@ mod tests {
                 335_544_320,
                 67_108_864,
                 0,
-                515_605_731,
+                515_605_659,
             ),
             (
                 GenerationPhaseLivenessKind::CanonicalEncoding,
@@ -8216,7 +8229,7 @@ mod tests {
                 0,
                 0,
                 0,
-                62_620_899,
+                62_620_827,
             ),
         ];
         assert_eq!(complete_liveness.rows().len(), expected_rows.len());
@@ -8225,7 +8238,7 @@ mod tests {
         {
             assert_eq!(row.phase(), phase);
             assert_eq!(row.wasm_runtime_baseline_byte_length(), 33_554_432);
-            assert_eq!(row.engine_control_byte_length(), 10_200_193);
+            assert_eq!(row.engine_control_byte_length(), 10_200_033);
             assert_eq!(
                 row.source_provider_byte_length(),
                 if phase == GenerationPhaseLivenessKind::LoadingAuthenticatedSources {
@@ -8246,7 +8259,7 @@ mod tests {
                 },
             );
             assert_eq!(row.transcript_byte_length(), 207_400);
-            assert_eq!(row.private_material_byte_length(), 721_096);
+            assert_eq!(row.private_material_byte_length(), 721_192);
             assert_eq!(row.bridge_copy_byte_length(), 2_097_508);
             assert_eq!(row.specialized_workspace_byte_length(), specialized);
             let owned_byte_length = row
@@ -8275,7 +8288,7 @@ mod tests {
         }
         assert_eq!(
             complete_liveness.maximum_live_set_byte_length(),
-            556_008_729,
+            556_008_657,
         );
         assert_eq!(
             complete_liveness
@@ -8283,17 +8296,17 @@ mod tests {
                 .saturating_sub(
                     crate::bgv::proof_suite::prover::NOMINAL_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
                 ),
-            153_355_545,
+            153_355_473,
         );
         assert_eq!(
             crate::bgv::proof_suite::prover::AUTOMATIC_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
                 .checked_sub(complete_liveness.maximum_live_set_byte_length()),
-            Some(47_971_047),
+            Some(47_971_119),
         );
         assert_eq!(
             MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
                 .checked_sub(complete_liveness.maximum_live_set_byte_length()),
-            Some(115_079_911),
+            Some(115_079_983),
         );
     }
 
