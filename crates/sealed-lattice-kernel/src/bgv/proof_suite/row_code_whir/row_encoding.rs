@@ -1,15 +1,21 @@
 //! Recomputable row encoding with an explicit public or private high half.
 
+#[cfg(test)]
 use p3_dft::{Radix2Bowers, TwoAdicSubgroupDft};
-use p3_field::{Field, PrimeCharacteristicRing, TwoAdicField};
+#[cfg(test)]
+use p3_field::Field;
+use p3_field::{PrimeCharacteristicRing, TwoAdicField};
 use p3_goldilocks::Goldilocks;
 use sha3::{
     Shake256,
     digest::{ExtendableOutput, Update, XofReader},
 };
+use zeroize::Zeroizing;
 
 use super::GOLDILOCKS_MODULUS;
-use crate::bgv::proof_suite::PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT;
+use crate::bgv::proof_suite::{
+    PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT, ProofBaseFieldElement,
+};
 
 const PRIVATE_ROW_HIGH_HALF_DOMAIN: &[u8] = b"sealed-lattice/streaming-row-pad/v1";
 #[cfg(test)]
@@ -44,6 +50,10 @@ pub(super) enum RowEncodingError {
         actual_value_count: usize,
         expected_value_count: usize,
     },
+    EncodedRowCapacityInsufficient {
+        actual_capacity: usize,
+        required_capacity: usize,
+    },
     PrivateHighHalfCandidateDrawsExhausted {
         output_index: usize,
     },
@@ -66,6 +76,13 @@ impl core::fmt::Display for RowEncodingError {
             } => write!(
                 formatter,
                 "row {row_index} has {actual_value_count} witness values, expected {expected_value_count}"
+            ),
+            Self::EncodedRowCapacityInsufficient {
+                actual_capacity,
+                required_capacity,
+            } => write!(
+                formatter,
+                "row buffer capacity {actual_capacity} is below encoded-domain capacity {required_capacity}"
             ),
             Self::PrivateHighHalfCandidateDrawsExhausted { output_index } => write!(
                 formatter,
@@ -168,6 +185,7 @@ impl RowEncodingGeometry {
     }
 }
 
+#[cfg(test)]
 pub(super) fn encode_row<'seed>(
     geometry: RowEncodingGeometry,
     row_index: usize,
@@ -230,6 +248,63 @@ pub(super) fn padded_row_coefficients<'seed>(
     Ok(coefficients)
 }
 
+/// Extends an owned base-field witness into the exact padded row message
+/// without allocating a second witness-sized vector.
+///
+/// The caller is expected to reserve the encoded-domain capacity before
+/// loading the witness. The same allocation can then be extended here and
+/// handed to the bounded in-place coset DFT.
+pub(super) fn padded_base_row_coefficients<'seed>(
+    geometry: RowEncodingGeometry,
+    row_index: usize,
+    mut witness_values: Zeroizing<Vec<ProofBaseFieldElement>>,
+    high_half_source: impl Into<RowCodeHighHalfSource<'seed>>,
+) -> Result<Zeroizing<Vec<ProofBaseFieldElement>>, RowEncodingError> {
+    if row_index >= geometry.row_count {
+        return Err(RowEncodingError::RowIndexOutsideGeometry {
+            row_index,
+            row_count: geometry.row_count,
+        });
+    }
+    if witness_values.len() != geometry.witness_values_per_row {
+        return Err(RowEncodingError::WitnessValueCountMismatch {
+            row_index,
+            actual_value_count: witness_values.len(),
+            expected_value_count: geometry.witness_values_per_row,
+        });
+    }
+    if witness_values.capacity() < geometry.encoded_column_count {
+        return Err(RowEncodingError::EncodedRowCapacityInsufficient {
+            actual_capacity: witness_values.capacity(),
+            required_capacity: geometry.encoded_column_count,
+        });
+    }
+
+    match high_half_source.into() {
+        RowCodeHighHalfSource::CanonicalPublicZeros => {
+            witness_values.resize(
+                geometry.padded_coefficient_count,
+                ProofBaseFieldElement::ZERO,
+            );
+        }
+        RowCodeHighHalfSource::PrivateMaskSeed(private_seed) => {
+            let mut reader = private_row_high_half_reader(geometry, row_index, private_seed);
+            append_private_row_high_half_from_candidates(
+                geometry.pad_value_count(),
+                || {
+                    let mut bytes = [0_u8; 8];
+                    reader.read(&mut bytes);
+                    u64::from_le_bytes(bytes)
+                },
+                |candidate| {
+                    witness_values.push(ProofBaseFieldElement::from_reduced(u128::from(candidate)));
+                },
+            )?;
+        }
+    }
+    Ok(witness_values)
+}
+
 fn append_row_high_half(
     coefficients: &mut Vec<Goldilocks>,
     geometry: RowEncodingGeometry,
@@ -256,14 +331,7 @@ fn derive_private_row_high_half(
     row_index: usize,
     private_seed: &[u8; 32],
 ) -> Result<Vec<Goldilocks>, RowEncodingError> {
-    let mut state = Shake256::default();
-    state.update(&(PRIVATE_ROW_HIGH_HALF_DOMAIN.len() as u64).to_le_bytes());
-    state.update(PRIVATE_ROW_HIGH_HALF_DOMAIN);
-    state.update(private_seed);
-    state.update(&(geometry.row_count as u64).to_le_bytes());
-    state.update(&(geometry.witness_values_per_row as u64).to_le_bytes());
-    state.update(&(row_index as u64).to_le_bytes());
-    let mut reader = state.finalize_xof();
+    let mut reader = private_row_high_half_reader(geometry, row_index, private_seed);
     derive_private_row_high_half_from_candidates(geometry.pad_value_count(), || {
         let mut bytes = [0_u8; 8];
         reader.read(&mut bytes);
@@ -271,22 +339,48 @@ fn derive_private_row_high_half(
     })
 }
 
+fn private_row_high_half_reader(
+    geometry: RowEncodingGeometry,
+    row_index: usize,
+    private_seed: &[u8; 32],
+) -> impl XofReader {
+    let mut state = Shake256::default();
+    state.update(&(PRIVATE_ROW_HIGH_HALF_DOMAIN.len() as u64).to_le_bytes());
+    state.update(PRIVATE_ROW_HIGH_HALF_DOMAIN);
+    state.update(private_seed);
+    state.update(&(geometry.row_count as u64).to_le_bytes());
+    state.update(&(geometry.witness_values_per_row as u64).to_le_bytes());
+    state.update(&(row_index as u64).to_le_bytes());
+    state.finalize_xof()
+}
+
 fn derive_private_row_high_half_from_candidates(
     output_count: usize,
     mut next_candidate: impl FnMut() -> u64,
 ) -> Result<Vec<Goldilocks>, RowEncodingError> {
     let mut high_half = Vec::with_capacity(output_count);
+    append_private_row_high_half_from_candidates(output_count, &mut next_candidate, |candidate| {
+        high_half.push(Goldilocks::from_u64(candidate))
+    })?;
+    Ok(high_half)
+}
+
+fn append_private_row_high_half_from_candidates(
+    output_count: usize,
+    mut next_candidate: impl FnMut() -> u64,
+    mut append_candidate: impl FnMut(u64),
+) -> Result<(), RowEncodingError> {
     'next_output: for output_index in 0..output_count {
         for _ in 0..PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT {
             let candidate = next_candidate();
             if candidate < GOLDILOCKS_MODULUS {
-                high_half.push(Goldilocks::from_u64(candidate));
+                append_candidate(candidate);
                 continue 'next_output;
             }
         }
         return Err(RowEncodingError::PrivateHighHalfCandidateDrawsExhausted { output_index });
     }
-    Ok(high_half)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -576,6 +670,44 @@ mod tests {
                 .any(|coefficient| *coefficient != Goldilocks::ZERO)
         );
         assert_ne!(public_coefficients, private_coefficients);
+    }
+
+    #[test]
+    fn bounded_base_row_requires_and_reuses_the_encoded_domain_capacity() {
+        let geometry = RowEncodingGeometry::new_weighted_batch_with_log_inverse_rate(4, 4, 2)
+            .expect("the focused geometry is valid");
+        let undersized = Zeroizing::new(vec![
+            ProofBaseFieldElement::ONE;
+            geometry.witness_values_per_row
+        ]);
+        assert!(matches!(
+            padded_base_row_coefficients(
+                geometry,
+                0,
+                undersized,
+                RowCodeHighHalfSource::CanonicalPublicZeros,
+            ),
+            Err(RowEncodingError::EncodedRowCapacityInsufficient {
+                required_capacity,
+                ..
+            }) if required_capacity == geometry.encoded_column_count
+        ));
+
+        let mut reserved = Vec::new();
+        reserved
+            .try_reserve_exact(geometry.encoded_column_count)
+            .expect("the focused encoded row reservation succeeds");
+        reserved.resize(geometry.witness_values_per_row, ProofBaseFieldElement::ONE);
+        let reserved_capacity = reserved.capacity();
+        let padded = padded_base_row_coefficients(
+            geometry,
+            2,
+            Zeroizing::new(reserved),
+            RowCodeHighHalfSource::PrivateMaskSeed(&[0x39_u8; 32]),
+        )
+        .expect("the reserved base row pads in place");
+        assert_eq!(padded.len(), geometry.padded_coefficient_count);
+        assert_eq!(padded.capacity(), reserved_capacity);
     }
 
     #[test]

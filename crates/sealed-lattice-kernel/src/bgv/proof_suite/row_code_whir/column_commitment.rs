@@ -11,6 +11,8 @@ use sha3::{
 };
 use tiny_keccak::keccakf;
 
+use crate::bgv::proof_suite::ProofBaseFieldElement;
+
 // The project security ledger models Fiat-Shamir with 512-bit random-oracle
 // outputs. Keep the outer matrix commitment at the same width: truncating it
 // to 320 bits would cap generic collision work at 160 bits before the
@@ -102,24 +104,48 @@ impl StreamingColumnHasher {
         })
     }
 
+    #[cfg(test)]
     pub(super) fn absorb_row(&mut self, encoded_row: &[Goldilocks]) -> Result<(), String> {
+        self.absorb_canonical_row(
+            encoded_row.len(),
+            encoded_row.iter().map(|value| value.as_canonical_u64()),
+        )
+    }
+
+    pub(super) fn absorb_base_row(
+        &mut self,
+        encoded_row: &[ProofBaseFieldElement],
+    ) -> Result<(), String> {
+        self.absorb_canonical_row(
+            encoded_row.len(),
+            encoded_row.iter().map(|value| value.canonical()),
+        )
+    }
+
+    fn absorb_canonical_row(
+        &mut self,
+        encoded_column_count: usize,
+        canonical_values: impl ExactSizeIterator<Item = u64>,
+    ) -> Result<(), String> {
         if self.absorbed_row_count == self.expected_row_count {
             return Err(format!(
                 "column commitment received more than {} rows",
                 self.expected_row_count
             ));
         }
-        if encoded_row.len() != self.states.len() {
+        if encoded_column_count != self.states.len()
+            || canonical_values.len() != encoded_column_count
+        {
             return Err(format!(
                 "encoded row has {} columns, expected {}",
-                encoded_row.len(),
+                encoded_column_count,
                 self.states.len()
             ));
         }
 
         let rate_word = self.next_rate_word;
-        for (state, value) in self.states.iter_mut().zip(encoded_row) {
-            state[rate_word] ^= value.as_canonical_u64();
+        for (state, value) in self.states.iter_mut().zip(canonical_values) {
+            state[rate_word] ^= value;
         }
         self.next_rate_word += 1;
         if self.next_rate_word == SHAKE256_RATE_WORD_LENGTH {
@@ -259,6 +285,7 @@ impl StripedColumnCommitmentBuilder {
             .map(|hasher| self.next_column_index..self.next_column_index + hasher.states.len())
     }
 
+    #[cfg(test)]
     pub(super) fn absorb_active_stripe_row(
         &mut self,
         row_index: usize,
@@ -275,6 +302,24 @@ impl StripedColumnCommitmentBuilder {
             ));
         }
         hasher.absorb_row(encoded_row_stripe)
+    }
+
+    pub(super) fn absorb_active_stripe_base_row(
+        &mut self,
+        row_index: usize,
+        encoded_row_stripe: &[ProofBaseFieldElement],
+    ) -> Result<(), String> {
+        let hasher = self
+            .active_stripe_hasher
+            .as_mut()
+            .ok_or_else(|| "column commitment has no active stripe".to_owned())?;
+        if row_index != hasher.absorbed_row_count {
+            return Err(format!(
+                "column commitment received row {row_index}, expected {}",
+                hasher.absorbed_row_count
+            ));
+        }
+        hasher.absorb_base_row(encoded_row_stripe)
     }
 
     /// Completes the current stripe after every row was replayed. Returns
@@ -869,6 +914,46 @@ mod tests {
         builder
             .finish_commitment()
             .expect("complete striped commitment")
+    }
+
+    #[test]
+    fn base_field_stripes_match_the_canonical_goldilocks_commitment_and_frontier() {
+        let rows = sample_rows(7, 32);
+        let opened_column_indices = [0, 3, 11, 16, 30];
+        let expected = build_striped_commitment(&rows, 9, &opened_column_indices);
+        let base_rows = rows
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|value| {
+                        ProofBaseFieldElement::from_reduced(u128::from(value.as_canonical_u64()))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let mut builder = StripedColumnCommitmentBuilder::new_with_opened_columns(
+            base_rows.len(),
+            base_rows[0].len(),
+            9,
+            &opened_column_indices,
+        )
+        .expect("the base-field stripe geometry is valid");
+        while let Some(active_range) = builder.active_column_range() {
+            for (row_index, row) in base_rows.iter().enumerate() {
+                builder
+                    .absorb_active_stripe_base_row(row_index, &row[active_range.clone()])
+                    .expect("the base-field stripe row is canonical");
+            }
+            builder
+                .complete_active_stripe()
+                .expect("the base-field stripe completes");
+        }
+        assert_eq!(
+            builder
+                .finish_commitment()
+                .expect("the base-field commitment completes"),
+            expected,
+        );
     }
 
     #[test]

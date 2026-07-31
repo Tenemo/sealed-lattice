@@ -11,7 +11,6 @@
 //! bind is a derived quantity rather than a chosen one. It does not yet replace
 //! the operative opening argument.
 
-#[cfg(test)]
 pub(super) mod static_accounting;
 
 use p3_whir::{FoldingFactor, ProtocolParameters, ZkParameters, ZkWhirConfig};

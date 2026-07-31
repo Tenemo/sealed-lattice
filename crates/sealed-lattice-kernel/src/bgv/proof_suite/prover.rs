@@ -193,6 +193,7 @@ pub(crate) use quotient::{
     CommonProofConstraintStreamQuotientBuilder, CommonProofQuotientComponentCursor,
     CommonProofQuotientConstraintTransformKey, CommonProofQuotientEvaluationProgress,
     CommonProofQuotientEvaluationReadRequest, common_proof_quotient_constraint_catalog,
+    common_proof_quotient_materialization_liveness,
 };
 #[cfg(test)]
 pub(crate) use quotient::{construct_composed_quotient_polynomial, decompose_composed_quotient};
@@ -208,8 +209,8 @@ pub(crate) use relation_columns::{
     CommonProofSourcePolynomialRequestContext, CommonProofSourceProviderMemoryAccounting,
     CommonProofSourceReplayIdentityCatalog, ProvidedCommonProofSourcePolynomial, apply_trace_mask,
     authenticated_pre_challenge_source_coefficient_position_counts, base_trace_rows,
-    construct_opening_batch_mask, construct_reversed_relation_column,
-    ordered_integer_lift_auxiliary_column_ordinals,
+    common_proof_auxiliary_materialization_liveness, construct_opening_batch_mask,
+    construct_reversed_relation_column, ordered_integer_lift_auxiliary_column_ordinals,
     persisted_pre_challenge_column_coefficient_position_counts, relation_reversed_column_bindings,
     replay_relation_private_mask_polynomial, requested_pre_challenge_source_column_ordinals,
     sample_private_extension_polynomial, validate_source_column,

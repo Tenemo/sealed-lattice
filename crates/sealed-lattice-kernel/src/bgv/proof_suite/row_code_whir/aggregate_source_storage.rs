@@ -413,6 +413,17 @@ impl AggregateSourceTable {
     pub(super) fn stacked_variable_count(&self) -> usize {
         self.table_variable_count + self.columns.len().ilog2() as usize
     }
+
+    pub(super) fn resident_owned_payload_byte_length(&self) -> Result<u64, String> {
+        u64::try_from(self.columns.capacity())
+            .ok()
+            .and_then(|count| {
+                u64::try_from(core::mem::size_of::<ExternalPolynomialVector>())
+                    .ok()
+                    .and_then(|element_byte_length| count.checked_mul(element_byte_length))
+            })
+            .ok_or_else(|| "aggregate source table resident payload overflowed".to_owned())
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

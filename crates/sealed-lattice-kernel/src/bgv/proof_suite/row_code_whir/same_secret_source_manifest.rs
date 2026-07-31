@@ -145,6 +145,46 @@ pub(in crate::bgv::proof_suite) struct SameSecretAuthenticatedSourceManifest {
 }
 
 impl SameSecretAuthenticatedSourceManifest {
+    pub(in crate::bgv::proof_suite) fn resident_owned_payload_byte_length(
+        &self,
+    ) -> Result<u64, SameSecretAuthenticatedSourceManifestError> {
+        fn slice_byte_length<T>(
+            length: usize,
+        ) -> Result<u64, SameSecretAuthenticatedSourceManifestError> {
+            u64::try_from(length)
+                .ok()
+                .and_then(|count| {
+                    u64::try_from(core::mem::size_of::<T>())
+                        .ok()
+                        .and_then(|element_byte_length| count.checked_mul(element_byte_length))
+                })
+                .ok_or(SameSecretAuthenticatedSourceManifestError::CountOverflow)
+        }
+
+        let mut total = slice_byte_length::<SameSecretAuthenticatedSourceDescriptor>(
+            self.authenticated_sources.len(),
+        )?
+        .checked_add(slice_byte_length::<SameSecretReversedColumnBinding>(
+            self.reversed_column_bindings.len(),
+        )?)
+        .and_then(|total| {
+            slice_byte_length::<SameSecretBoundMaterialSaltTreeDescriptor>(
+                self.bound_material_salt_trees.len(),
+            )
+            .ok()
+            .and_then(|byte_length| total.checked_add(byte_length))
+        })
+        .ok_or(SameSecretAuthenticatedSourceManifestError::CountOverflow)?;
+        for tree in &self.bound_material_salt_trees {
+            total = total
+                .checked_add(slice_byte_length::<u32>(
+                    tree.ordered_column_ordinals.len(),
+                )?)
+                .ok_or(SameSecretAuthenticatedSourceManifestError::CountOverflow)?;
+        }
+        Ok(total)
+    }
+
     pub(in crate::bgv::proof_suite) fn derive(
         construction_plan: &RowCodeWhirConstructionPlan,
         relation_variant: &RelationPlanVariant,

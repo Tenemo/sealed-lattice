@@ -83,6 +83,7 @@ pub(in crate::bgv::proof_suite::row_code_whir) use aggregate_source::{
     ExactSameSecretAggregateSourceAction, ExactSameSecretAggregateSourceBatch,
     ExactSameSecretAggregateSourceTarget, ExactSameSecretAggregateWitness,
 };
+pub(in crate::bgv::proof_suite) use exact_proof::canonical_row_code_whir_family_body_byte_length_ceiling;
 pub(in crate::bgv::proof_suite::row_code_whir) use exact_proof::{
     ExactBoundLeafOpening, ExactBoundTreeAuthentication, ExactSameSecretPhaseOpenings,
     ExactSameSecretProof, ExactSameSecretProofEncodingProgress, ExactSameSecretProofSinkEncoder,
@@ -93,7 +94,6 @@ pub(in crate::bgv::proof_suite) use exact_proof::{
     ExactExtractorCorrespondenceFault, ExactPointConstraintExtractorCertificate,
     ExactPolynomialProtocolExtractorCertificate,
     canonical_row_code_whir_aggregate_opening_section_byte_ledger,
-    canonical_row_code_whir_family_body_byte_length_ceiling,
     checked_exact_same_secret_extractor_correspondence,
     checked_exact_same_secret_extractor_correspondence_with_fault,
 };

@@ -15,6 +15,9 @@ enum ProofExternalMemoryObjectState {
     Cancelled,
 }
 
+pub(super) const PROOF_EXTERNAL_MEMORY_OBJECT_STATE_BYTE_LENGTH: usize =
+    core::mem::size_of::<ProofExternalMemoryObjectState>();
+
 struct ValidatedAppendTransition {
     plan_index: usize,
     written_byte_length: u64,

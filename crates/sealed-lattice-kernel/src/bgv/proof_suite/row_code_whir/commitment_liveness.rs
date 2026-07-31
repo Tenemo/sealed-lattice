@@ -4,14 +4,21 @@ use core::mem::size_of;
 
 use super::{
     ChallengeField, ColumnStreamableLeafState, MERKLE_DIGEST_WORD_LENGTH,
+    column_commitment::StreamingColumnHasher,
     construction_plan::RowCodeWhirConstructionPlan,
     recomputable_oracle::{
         AGGREGATE_ORACLE_LEAF_STATE_STRIPE_ROW_COUNT, aggregate_oracle_leaf_state_stripe_count,
     },
 };
-use crate::bgv::proof_suite::MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH;
+use crate::bgv::proof_suite::relation_plan::{BoundTreeConstructionKind, RelationColumnValueType};
+use crate::bgv::proof_suite::{
+    MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, ProofBaseFieldElement,
+    external_memory::MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_BOUNDARY_TRANSFER_LIVE_BYTE_LENGTH,
+    merkle::maximum_minimal_frontier_node_count, prover::CommonProofSourceProviderMemoryAccounting,
+};
 
 const ROOT_AND_OPENING_PASS_COUNT: u64 = 2;
+pub(super) const BOUND_TREE_AUTHENTICATION_STRIPE_LEAF_COUNT: usize = 1 << 20;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct AggregateCommitmentEpochLiveness {
@@ -72,6 +79,7 @@ impl AggregateCommitmentLiveness {
         self.maximum_leaf_state_stripe_byte_length
     }
 
+    #[cfg(test)]
     pub(super) const fn maximum_algorithm_live_set_byte_length(&self) -> u64 {
         self.maximum_algorithm_live_set_byte_length
     }
@@ -229,6 +237,684 @@ pub(super) fn derive_aggregate_commitment_liveness(
         final_hash_query_count,
         merkle_parent_hash_query_count,
     })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct BoundTreeAuthenticationLiveness {
+    tree_count: u64,
+    committed_material_tree_count: u64,
+    maximum_leaf_count: u64,
+    maximum_row_width: u64,
+    maximum_stripe_count: u64,
+    maximum_dft_buffer_byte_length: u64,
+    maximum_evaluated_stripe_byte_length: u64,
+    maximum_algorithm_live_set_byte_length: u64,
+    full_column_dft_count: u64,
+    leaf_hash_query_count: u64,
+    merkle_parent_hash_query_count: u64,
+    logical_salt_delivery_count: u64,
+}
+
+impl BoundTreeAuthenticationLiveness {
+    #[cfg(test)]
+    pub(super) const fn tree_count(self) -> u64 {
+        self.tree_count
+    }
+
+    #[cfg(test)]
+    pub(super) const fn committed_material_tree_count(self) -> u64 {
+        self.committed_material_tree_count
+    }
+
+    #[cfg(test)]
+    pub(super) const fn maximum_leaf_count(self) -> u64 {
+        self.maximum_leaf_count
+    }
+
+    #[cfg(test)]
+    pub(super) const fn maximum_row_width(self) -> u64 {
+        self.maximum_row_width
+    }
+
+    #[cfg(test)]
+    pub(super) const fn maximum_stripe_count(self) -> u64 {
+        self.maximum_stripe_count
+    }
+
+    #[cfg(test)]
+    pub(super) const fn maximum_dft_buffer_byte_length(self) -> u64 {
+        self.maximum_dft_buffer_byte_length
+    }
+
+    #[cfg(test)]
+    pub(super) const fn maximum_evaluated_stripe_byte_length(self) -> u64 {
+        self.maximum_evaluated_stripe_byte_length
+    }
+
+    #[cfg(test)]
+    pub(super) const fn maximum_algorithm_live_set_byte_length(self) -> u64 {
+        self.maximum_algorithm_live_set_byte_length
+    }
+
+    #[cfg(test)]
+    pub(super) const fn full_column_dft_count(self) -> u64 {
+        self.full_column_dft_count
+    }
+
+    #[cfg(test)]
+    pub(super) const fn leaf_hash_query_count(self) -> u64 {
+        self.leaf_hash_query_count
+    }
+
+    #[cfg(test)]
+    pub(super) const fn merkle_parent_hash_query_count(self) -> u64 {
+        self.merkle_parent_hash_query_count
+    }
+
+    #[cfg(test)]
+    pub(super) const fn logical_salt_delivery_count(self) -> u64 {
+        self.logical_salt_delivery_count
+    }
+
+    #[cfg(test)]
+    pub(super) const fn total_hash_query_count(self) -> Option<u64> {
+        self.leaf_hash_query_count
+            .checked_add(self.merkle_parent_hash_query_count)
+    }
+}
+
+pub(super) fn derive_bound_tree_authentication_liveness(
+    construction_plan: &RowCodeWhirConstructionPlan,
+) -> Result<BoundTreeAuthenticationLiveness, String> {
+    if construction_plan.bound_trees.is_empty() {
+        return Err("bound-tree authentication has no trees".to_owned());
+    }
+    let mut committed_material_tree_count = 0_u64;
+    let mut maximum_leaf_count = 0_u64;
+    let mut maximum_row_width = 0_u64;
+    let mut maximum_stripe_count = 0_u64;
+    let mut maximum_dft_buffer_byte_length = 0_u64;
+    let mut maximum_evaluated_stripe_byte_length = 0_u64;
+    let mut maximum_algorithm_live_set_byte_length = 0_u64;
+    let mut full_column_dft_count = 0_u64;
+    let mut leaf_hash_query_count = 0_u64;
+    let mut merkle_parent_hash_query_count = 0_u64;
+    let mut logical_salt_delivery_count = 0_u64;
+    for tree in &construction_plan.bound_trees {
+        if tree.leaf_count == 0
+            || !tree.leaf_count.is_power_of_two()
+            || tree.evaluation_domain_size
+                != u64::try_from(tree.leaf_count)
+                    .ok()
+                    .and_then(|count| count.checked_mul(2))
+                    .ok_or_else(|| "bound-tree evaluation domain overflows".to_owned())?
+            || tree.ordered_columns.is_empty()
+            || tree
+                .ordered_columns
+                .iter()
+                .any(|column| column.value_type != RelationColumnValueType::BaseField)
+        {
+            return Err("bound-tree authentication geometry is invalid".to_owned());
+        }
+        let leaf_count = u64::try_from(tree.leaf_count)
+            .map_err(|_| "bound-tree leaf count exceeds u64".to_owned())?;
+        let row_width = u64::try_from(tree.ordered_columns.len())
+            .map_err(|_| "bound-tree row width exceeds u64".to_owned())?;
+        let stripe_count = u64::try_from(
+            tree.leaf_count
+                .div_ceil(BOUND_TREE_AUTHENTICATION_STRIPE_LEAF_COUNT),
+        )
+        .map_err(|_| "bound-tree stripe count exceeds u64".to_owned())?;
+        let evaluation_byte_length = tree
+            .evaluation_domain_size
+            .checked_mul(size_of::<crate::bgv::proof_suite::ProofBaseFieldElement>() as u64)
+            .ok_or_else(|| "bound-tree DFT byte length overflows".to_owned())?;
+        let stripe_leaf_count = u64::try_from(
+            tree.leaf_count
+                .min(BOUND_TREE_AUTHENTICATION_STRIPE_LEAF_COUNT),
+        )
+        .map_err(|_| "bound-tree stripe leaf count exceeds u64".to_owned())?;
+        let stripe_byte_length = stripe_leaf_count
+            .checked_mul(2)
+            .and_then(|count| count.checked_mul(row_width))
+            .and_then(|count| {
+                count
+                    .checked_mul(size_of::<crate::bgv::proof_suite::ProofBaseFieldElement>() as u64)
+            })
+            .ok_or_else(|| "bound-tree stripe byte length overflows".to_owned())?;
+        let algorithm_live_byte_length = evaluation_byte_length
+            .checked_add(stripe_byte_length)
+            .ok_or_else(|| "bound-tree algorithm live set overflows".to_owned())?;
+        if algorithm_live_byte_length > MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH {
+            return Err("bound-tree algorithm live set exceeds the hard WASM bound".to_owned());
+        }
+        maximum_leaf_count = maximum_leaf_count.max(leaf_count);
+        maximum_row_width = maximum_row_width.max(row_width);
+        maximum_stripe_count = maximum_stripe_count.max(stripe_count);
+        maximum_dft_buffer_byte_length = maximum_dft_buffer_byte_length.max(evaluation_byte_length);
+        maximum_evaluated_stripe_byte_length =
+            maximum_evaluated_stripe_byte_length.max(stripe_byte_length);
+        maximum_algorithm_live_set_byte_length =
+            maximum_algorithm_live_set_byte_length.max(algorithm_live_byte_length);
+        full_column_dft_count = full_column_dft_count
+            .checked_add(
+                stripe_count
+                    .checked_mul(row_width)
+                    .ok_or_else(|| "bound-tree DFT count overflows".to_owned())?,
+            )
+            .ok_or_else(|| "bound-tree DFT count overflows".to_owned())?;
+        leaf_hash_query_count = leaf_hash_query_count
+            .checked_add(leaf_count)
+            .ok_or_else(|| "bound-tree leaf hash count overflows".to_owned())?;
+        merkle_parent_hash_query_count = merkle_parent_hash_query_count
+            .checked_add(
+                leaf_count
+                    .checked_sub(1)
+                    .ok_or_else(|| "bound-tree parent count underflows".to_owned())?,
+            )
+            .ok_or_else(|| "bound-tree parent hash count overflows".to_owned())?;
+        if tree.construction_kind == BoundTreeConstructionKind::CommittedMaterial {
+            committed_material_tree_count = committed_material_tree_count
+                .checked_add(1)
+                .ok_or_else(|| "committed-material tree count overflows".to_owned())?;
+            logical_salt_delivery_count = logical_salt_delivery_count
+                .checked_add(leaf_count)
+                .ok_or_else(|| "bound-tree salt delivery count overflows".to_owned())?;
+        }
+    }
+    Ok(BoundTreeAuthenticationLiveness {
+        tree_count: u64::try_from(construction_plan.bound_trees.len())
+            .map_err(|_| "bound-tree count exceeds u64".to_owned())?,
+        committed_material_tree_count,
+        maximum_leaf_count,
+        maximum_row_width,
+        maximum_stripe_count,
+        maximum_dft_buffer_byte_length,
+        maximum_evaluated_stripe_byte_length,
+        maximum_algorithm_live_set_byte_length,
+        full_column_dft_count,
+        leaf_hash_query_count,
+        merkle_parent_hash_query_count,
+        logical_salt_delivery_count,
+    })
+}
+
+const WASM_RUNTIME_BASELINE_RESERVE_BYTE_LENGTH: u64 = 32 * 1_024 * 1_024;
+const ALLOCATOR_OVERHEAD_DENOMINATOR: u64 = 8;
+const MERKLE_DIGEST_BYTE_LENGTH: u64 = 64;
+const PHASE_MERKLE_NODE_RESERVE_BYTE_LENGTH: u64 = 64;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum GenerationPhaseLivenessKind {
+    LoadingAuthenticatedSources,
+    SourceReplay,
+    RelationMaterialization,
+    PhaseCommitment,
+    QuotientPreparation,
+    AggregateSource,
+    AggregateOpeningPreparation,
+    AggregateCommitment,
+    BoundTreeAuthentication,
+    WhirOpening,
+    CanonicalEncoding,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct GenerationPhaseLivenessRow {
+    phase: GenerationPhaseLivenessKind,
+    wasm_runtime_baseline_byte_length: u64,
+    engine_control_byte_length: u64,
+    source_provider_byte_length: u64,
+    replay_reader_byte_length: u64,
+    dft_buffer_byte_length: u64,
+    merkle_and_frontier_byte_length: u64,
+    proof_accumulator_byte_length: u64,
+    transcript_byte_length: u64,
+    private_material_byte_length: u64,
+    bridge_copy_byte_length: u64,
+    specialized_workspace_byte_length: u64,
+    allocator_overhead_byte_length: u64,
+    total_byte_length: u64,
+}
+
+impl GenerationPhaseLivenessRow {
+    #[cfg(test)]
+    pub(super) const fn phase(self) -> GenerationPhaseLivenessKind {
+        self.phase
+    }
+
+    #[cfg(test)]
+    pub(super) const fn wasm_runtime_baseline_byte_length(self) -> u64 {
+        self.wasm_runtime_baseline_byte_length
+    }
+
+    #[cfg(test)]
+    pub(super) const fn engine_control_byte_length(self) -> u64 {
+        self.engine_control_byte_length
+    }
+
+    #[cfg(test)]
+    pub(super) const fn source_provider_byte_length(self) -> u64 {
+        self.source_provider_byte_length
+    }
+
+    #[cfg(test)]
+    pub(super) const fn replay_reader_byte_length(self) -> u64 {
+        self.replay_reader_byte_length
+    }
+
+    #[cfg(test)]
+    pub(super) const fn dft_buffer_byte_length(self) -> u64 {
+        self.dft_buffer_byte_length
+    }
+
+    #[cfg(test)]
+    pub(super) const fn merkle_and_frontier_byte_length(self) -> u64 {
+        self.merkle_and_frontier_byte_length
+    }
+
+    #[cfg(test)]
+    pub(super) const fn proof_accumulator_byte_length(self) -> u64 {
+        self.proof_accumulator_byte_length
+    }
+
+    #[cfg(test)]
+    pub(super) const fn transcript_byte_length(self) -> u64 {
+        self.transcript_byte_length
+    }
+
+    #[cfg(test)]
+    pub(super) const fn private_material_byte_length(self) -> u64 {
+        self.private_material_byte_length
+    }
+
+    #[cfg(test)]
+    pub(super) const fn bridge_copy_byte_length(self) -> u64 {
+        self.bridge_copy_byte_length
+    }
+
+    #[cfg(test)]
+    pub(super) const fn specialized_workspace_byte_length(self) -> u64 {
+        self.specialized_workspace_byte_length
+    }
+
+    #[cfg(test)]
+    pub(super) const fn allocator_overhead_byte_length(self) -> u64 {
+        self.allocator_overhead_byte_length
+    }
+
+    #[cfg(test)]
+    pub(super) const fn total_byte_length(self) -> u64 {
+        self.total_byte_length
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct CompleteGenerationLiveness {
+    rows: Vec<GenerationPhaseLivenessRow>,
+    maximum_live_set_byte_length: u64,
+}
+
+impl CompleteGenerationLiveness {
+    #[cfg(test)]
+    pub(super) fn rows(&self) -> &[GenerationPhaseLivenessRow] {
+        &self.rows
+    }
+
+    pub(super) const fn maximum_live_set_byte_length(&self) -> u64 {
+        self.maximum_live_set_byte_length
+    }
+
+    pub(super) fn phase_count(&self) -> usize {
+        self.rows.len()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct CompleteGenerationLivenessInput {
+    pub(super) engine_control_byte_length: u64,
+    pub(super) source_provider: CommonProofSourceProviderMemoryAccounting,
+    pub(super) maximum_replay_reader_byte_length: u64,
+    pub(super) auxiliary_materialization_byte_length: u64,
+    pub(super) quotient_preparation_byte_length: u64,
+    pub(super) aggregate_source_batch_byte_length: u64,
+    pub(super) aggregate_source_row_byte_length: u64,
+    pub(super) aggregate_opening_preparation_byte_length: u64,
+    pub(super) proof_accumulator_byte_length: u64,
+    pub(super) transcript_byte_length: u64,
+    pub(super) private_material_byte_length: u64,
+    pub(super) proof_transport_bridge_byte_length: u64,
+}
+
+pub(super) fn derive_complete_generation_liveness(
+    construction_plan: &RowCodeWhirConstructionPlan,
+    input: CompleteGenerationLivenessInput,
+) -> Result<CompleteGenerationLiveness, String> {
+    if input.engine_control_byte_length == 0
+        || input
+            .source_provider
+            .loading_persistent_resident_byte_length()
+            == 0
+        || input
+            .source_provider
+            .post_source_polynomial_finish_persistent_resident_byte_length()
+            == 0
+        || input
+            .source_provider
+            .maximum_returned_source_polynomial_byte_length()
+            == 0
+        || input.maximum_replay_reader_byte_length == 0
+        || input.proof_accumulator_byte_length == 0
+        || input.transcript_byte_length == 0
+        || input.proof_transport_bridge_byte_length == 0
+    {
+        return Err("complete proof-generation liveness omitted a required allocation".to_owned());
+    }
+    let aggregate = derive_aggregate_commitment_liveness(construction_plan)?;
+    let bound = derive_bound_tree_authentication_liveness(construction_plan)?;
+    let (phase_dft_byte_length, phase_merkle_byte_length) =
+        maximum_phase_commitment_algorithm_liveness(construction_plan)?;
+    let common_bridge_byte_length =
+        MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_BOUNDARY_TRANSFER_LIVE_BYTE_LENGTH
+            .checked_add(input.proof_transport_bridge_byte_length)
+            .ok_or_else(|| "proof bridge liveness overflowed".to_owned())?;
+    let post_source_provider_byte_length = input
+        .source_provider
+        .post_source_polynomial_finish_persistent_resident_byte_length();
+    let common = |phase,
+                  source_provider_byte_length,
+                  replay_reader_byte_length,
+                  dft_buffer_byte_length,
+                  merkle_and_frontier_byte_length,
+                  proof_accumulator_byte_length,
+                  specialized_workspace_byte_length| {
+        generation_phase_liveness_row(
+            phase,
+            input.engine_control_byte_length,
+            source_provider_byte_length,
+            replay_reader_byte_length,
+            dft_buffer_byte_length,
+            merkle_and_frontier_byte_length,
+            proof_accumulator_byte_length,
+            input.transcript_byte_length,
+            input.private_material_byte_length,
+            common_bridge_byte_length,
+            specialized_workspace_byte_length,
+        )
+    };
+    let loading_source_provider_byte_length = input
+        .source_provider
+        .loading_persistent_resident_byte_length()
+        .checked_add(
+            input
+                .source_provider
+                .additional_loading_transient_byte_length(),
+        )
+        .ok_or_else(|| "source loading liveness overflowed".to_owned())?;
+    // Replay readers hand their owned coefficient vector to the next phase.
+    // A phase-row or bound-tree DFT is constructed only after its reader is
+    // removed from the state machine; aggregate and WHIR DFTs likewise consume
+    // the external column vector. These rows therefore model source replay as
+    // a distinct live snapshot instead of summing a dead reader allocation
+    // with its successor DFT buffer.
+    let mut rows = vec![
+        common(
+            GenerationPhaseLivenessKind::LoadingAuthenticatedSources,
+            loading_source_provider_byte_length,
+            input
+                .source_provider
+                .maximum_returned_source_polynomial_byte_length(),
+            0,
+            0,
+            0,
+            0,
+        )?,
+        common(
+            GenerationPhaseLivenessKind::SourceReplay,
+            post_source_provider_byte_length,
+            input.maximum_replay_reader_byte_length,
+            0,
+            0,
+            input.proof_accumulator_byte_length,
+            0,
+        )?,
+        common(
+            GenerationPhaseLivenessKind::RelationMaterialization,
+            post_source_provider_byte_length,
+            input.maximum_replay_reader_byte_length,
+            0,
+            0,
+            input.proof_accumulator_byte_length,
+            input.auxiliary_materialization_byte_length,
+        )?,
+        common(
+            GenerationPhaseLivenessKind::PhaseCommitment,
+            post_source_provider_byte_length,
+            0,
+            phase_dft_byte_length,
+            phase_merkle_byte_length,
+            input.proof_accumulator_byte_length,
+            0,
+        )?,
+        common(
+            GenerationPhaseLivenessKind::QuotientPreparation,
+            post_source_provider_byte_length,
+            input.maximum_replay_reader_byte_length,
+            0,
+            0,
+            input.proof_accumulator_byte_length,
+            input.quotient_preparation_byte_length,
+        )?,
+        common(
+            GenerationPhaseLivenessKind::AggregateSource,
+            post_source_provider_byte_length,
+            input.maximum_replay_reader_byte_length,
+            0,
+            0,
+            input.proof_accumulator_byte_length,
+            input
+                .aggregate_source_batch_byte_length
+                .checked_add(input.aggregate_source_row_byte_length)
+                .ok_or_else(|| "aggregate source liveness overflowed".to_owned())?,
+        )?,
+        common(
+            GenerationPhaseLivenessKind::AggregateOpeningPreparation,
+            post_source_provider_byte_length,
+            0,
+            0,
+            0,
+            input.proof_accumulator_byte_length,
+            input.aggregate_opening_preparation_byte_length,
+        )?,
+        common(
+            GenerationPhaseLivenessKind::AggregateCommitment,
+            post_source_provider_byte_length,
+            0,
+            aggregate.maximum_dft_buffer_byte_length,
+            aggregate.maximum_leaf_state_stripe_byte_length,
+            input.proof_accumulator_byte_length,
+            0,
+        )?,
+        common(
+            GenerationPhaseLivenessKind::BoundTreeAuthentication,
+            post_source_provider_byte_length,
+            0,
+            bound.maximum_dft_buffer_byte_length,
+            bound.maximum_evaluated_stripe_byte_length,
+            input.proof_accumulator_byte_length,
+            0,
+        )?,
+        common(
+            GenerationPhaseLivenessKind::WhirOpening,
+            post_source_provider_byte_length,
+            0,
+            aggregate.maximum_dft_buffer_byte_length,
+            aggregate.maximum_leaf_state_stripe_byte_length,
+            input.proof_accumulator_byte_length,
+            0,
+        )?,
+        common(
+            GenerationPhaseLivenessKind::CanonicalEncoding,
+            post_source_provider_byte_length,
+            0,
+            0,
+            0,
+            input.proof_accumulator_byte_length,
+            0,
+        )?,
+    ];
+    let maximum_live_set_byte_length = rows
+        .iter()
+        .map(|row| row.total_byte_length)
+        .max()
+        .ok_or_else(|| "proof generation has no liveness rows".to_owned())?;
+    if maximum_live_set_byte_length > MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH {
+        return Err(format!(
+            "complete proof-generation live set {maximum_live_set_byte_length} exceeds the hard WASM bound"
+        ));
+    }
+    rows.shrink_to_fit();
+    Ok(CompleteGenerationLiveness {
+        rows,
+        maximum_live_set_byte_length,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn generation_phase_liveness_row(
+    phase: GenerationPhaseLivenessKind,
+    engine_control_byte_length: u64,
+    source_provider_byte_length: u64,
+    replay_reader_byte_length: u64,
+    dft_buffer_byte_length: u64,
+    merkle_and_frontier_byte_length: u64,
+    proof_accumulator_byte_length: u64,
+    transcript_byte_length: u64,
+    private_material_byte_length: u64,
+    bridge_copy_byte_length: u64,
+    specialized_workspace_byte_length: u64,
+) -> Result<GenerationPhaseLivenessRow, String> {
+    let allocator_owned_byte_length = [
+        engine_control_byte_length,
+        source_provider_byte_length,
+        replay_reader_byte_length,
+        dft_buffer_byte_length,
+        merkle_and_frontier_byte_length,
+        proof_accumulator_byte_length,
+        transcript_byte_length,
+        private_material_byte_length,
+        bridge_copy_byte_length,
+        specialized_workspace_byte_length,
+    ]
+    .into_iter()
+    .try_fold(0_u64, |total, byte_length| {
+        total
+            .checked_add(byte_length)
+            .ok_or_else(|| "proof phase liveness overflowed".to_owned())
+    })?;
+    let allocator_overhead_byte_length =
+        allocator_owned_byte_length.div_ceil(ALLOCATOR_OVERHEAD_DENOMINATOR);
+    let total_byte_length = WASM_RUNTIME_BASELINE_RESERVE_BYTE_LENGTH
+        .checked_add(allocator_owned_byte_length)
+        .and_then(|total| total.checked_add(allocator_overhead_byte_length))
+        .ok_or_else(|| "complete proof phase liveness overflowed".to_owned())?;
+    Ok(GenerationPhaseLivenessRow {
+        phase,
+        wasm_runtime_baseline_byte_length: WASM_RUNTIME_BASELINE_RESERVE_BYTE_LENGTH,
+        engine_control_byte_length,
+        source_provider_byte_length,
+        replay_reader_byte_length,
+        dft_buffer_byte_length,
+        merkle_and_frontier_byte_length,
+        proof_accumulator_byte_length,
+        transcript_byte_length,
+        private_material_byte_length,
+        bridge_copy_byte_length,
+        specialized_workspace_byte_length,
+        allocator_overhead_byte_length,
+        total_byte_length,
+    })
+}
+
+fn maximum_phase_commitment_algorithm_liveness(
+    construction_plan: &RowCodeWhirConstructionPlan,
+) -> Result<(u64, u64), String> {
+    let trace_geometries = construction_plan
+        .base_phase
+        .iter()
+        .chain(construction_plan.auxiliary_phase.iter())
+        .map(|phase| phase.geometry);
+    let geometries =
+        trace_geometries.chain(core::iter::once(construction_plan.quotient_phase.geometry));
+    let mut maximum_dft_byte_length = 0_u64;
+    let mut maximum_merkle_byte_length = 0_u64;
+    for geometry in geometries {
+        let encoded_column_count = geometry.encoded_column_count;
+        let dft_byte_length = u64::try_from(encoded_column_count)
+            .ok()
+            .and_then(|count| count.checked_mul(size_of::<ProofBaseFieldElement>() as u64))
+            .ok_or_else(|| "phase DFT liveness overflowed".to_owned())?;
+        let stripe_column_count = encoded_column_count
+            .min(super::generation_state::MAXIMUM_PHASE_COMMITMENT_STRIPE_COLUMN_COUNT);
+        let hash_state_byte_length = u64::try_from(
+            StreamingColumnHasher::exact_state_byte_length(stripe_column_count)
+                .ok_or_else(|| "phase hash-state liveness overflowed".to_owned())?,
+        )
+        .map_err(|_| "phase hash-state liveness exceeds u64".to_owned())?;
+        let opening_value_byte_length = u64::try_from(
+            construction_plan
+                .parameters
+                .outer_query_count
+                .checked_mul(geometry.row_count)
+                .and_then(|count| count.checked_mul(size_of::<ProofBaseFieldElement>()))
+                .ok_or_else(|| "phase opening liveness overflowed".to_owned())?,
+        )
+        .map_err(|_| "phase opening liveness exceeds u64".to_owned())?;
+        let frontier_node_count = maximum_minimal_frontier_node_count(
+            encoded_column_count,
+            construction_plan.parameters.outer_query_count,
+        )
+        .map_err(|_| "phase frontier liveness geometry is invalid".to_owned())?;
+        let frontier_byte_length = u64::try_from(frontier_node_count)
+            .ok()
+            .and_then(|count| count.checked_mul(MERKLE_DIGEST_BYTE_LENGTH))
+            .ok_or_else(|| "phase frontier liveness overflowed".to_owned())?;
+        let stack_byte_length = u64::from(encoded_column_count.ilog2() + 1)
+            .checked_mul(PHASE_MERKLE_NODE_RESERVE_BYTE_LENGTH)
+            .ok_or_else(|| "phase Merkle stack liveness overflowed".to_owned())?;
+        let merkle_byte_length = hash_state_byte_length
+            .checked_add(opening_value_byte_length)
+            .and_then(|count| count.checked_add(frontier_byte_length))
+            .and_then(|count| count.checked_add(stack_byte_length))
+            .ok_or_else(|| "phase Merkle liveness overflowed".to_owned())?;
+        maximum_dft_byte_length = maximum_dft_byte_length.max(dft_byte_length);
+        maximum_merkle_byte_length = maximum_merkle_byte_length.max(merkle_byte_length);
+    }
+    Ok((maximum_dft_byte_length, maximum_merkle_byte_length))
+}
+
+pub(super) fn noncompact_aggregate_opening_path_byte_length(
+    construction_plan: &RowCodeWhirConstructionPlan,
+) -> Result<u64, String> {
+    construction_plan
+        .whir_plan()
+        .rounds
+        .iter()
+        .map(|round| (round.encoded_oracle, round.query_epoch))
+        .chain(core::iter::once((
+            construction_plan.whir_plan().final_round.encoded_oracle,
+            construction_plan.whir_plan().final_round.query_epoch,
+        )))
+        .try_fold(0_u64, |total, (oracle, epoch)| {
+            u64::try_from(epoch.query_count)
+                .ok()
+                .and_then(|query_count| {
+                    query_count.checked_mul(u64::from(oracle.leaf_count.ilog2()))
+                })
+                .and_then(|node_count| node_count.checked_mul(MERKLE_DIGEST_BYTE_LENGTH))
+                .and_then(|byte_length| total.checked_add(byte_length))
+                .ok_or_else(|| "aggregate opening path liveness overflowed".to_owned())
+        })
 }
 
 #[cfg(test)]
@@ -467,5 +1153,83 @@ mod tests {
             * &adversarial_query_bound
             * &adversarial_query_bound;
         assert!((qrom_numerator << 128_usize) < (BigUint::one() << 512_usize));
+    }
+
+    #[test]
+    fn selected_bound_tree_stripes_derive_the_complete_lower_bound_work() {
+        let (plan, _) = selected_same_secret_construction();
+        let accounting = derive_bound_tree_authentication_liveness(&plan)
+            .expect("the bound-tree liveness accounting derives");
+
+        assert_eq!(accounting.tree_count(), 11);
+        assert_eq!(accounting.committed_material_tree_count(), 8);
+        assert_eq!(accounting.maximum_leaf_count(), 8_388_608);
+        assert_eq!(accounting.maximum_row_width(), 4);
+        assert_eq!(accounting.maximum_stripe_count(), 8);
+        assert_eq!(accounting.maximum_dft_buffer_byte_length(), 134_217_728);
+        assert_eq!(
+            accounting.maximum_evaluated_stripe_byte_length(),
+            67_108_864
+        );
+        assert_eq!(
+            accounting.maximum_algorithm_live_set_byte_length(),
+            201_326_592
+        );
+        assert_eq!(accounting.full_column_dft_count(), 352);
+        assert_eq!(accounting.leaf_hash_query_count(), 92_274_688);
+        assert_eq!(accounting.merkle_parent_hash_query_count(), 92_274_677);
+        assert_eq!(
+            accounting
+                .total_hash_query_count()
+                .expect("the bound-tree hash count adds"),
+            184_549_365,
+        );
+        assert_eq!(accounting.logical_salt_delivery_count(), 67_108_864);
+    }
+
+    fn minimal_complete_generation_liveness_input() -> CompleteGenerationLivenessInput {
+        CompleteGenerationLivenessInput {
+            engine_control_byte_length: 1,
+            source_provider: CommonProofSourceProviderMemoryAccounting::new(1, 1, 0, 1),
+            maximum_replay_reader_byte_length: 1,
+            auxiliary_materialization_byte_length: 0,
+            quotient_preparation_byte_length: 0,
+            aggregate_source_batch_byte_length: 0,
+            aggregate_source_row_byte_length: 0,
+            aggregate_opening_preparation_byte_length: 0,
+            proof_accumulator_byte_length: 1,
+            transcript_byte_length: 1,
+            private_material_byte_length: 0,
+            proof_transport_bridge_byte_length: 1,
+        }
+    }
+
+    #[test]
+    fn complete_generation_liveness_refuses_an_omitted_required_allocation() {
+        let (plan, _) = selected_same_secret_construction();
+        let mut input = minimal_complete_generation_liveness_input();
+        input.engine_control_byte_length = 0;
+        assert_eq!(
+            derive_complete_generation_liveness(&plan, input),
+            Err("complete proof-generation liveness omitted a required allocation".to_owned(),),
+        );
+
+        let mut input = minimal_complete_generation_liveness_input();
+        input.source_provider = CommonProofSourceProviderMemoryAccounting::new(0, 0, 0, 0);
+        assert_eq!(
+            derive_complete_generation_liveness(&plan, input),
+            Err("complete proof-generation liveness omitted a required allocation".to_owned(),),
+        );
+    }
+
+    #[test]
+    fn complete_generation_liveness_refuses_a_whole_phase_over_the_hard_bound() {
+        let (plan, _) = selected_same_secret_construction();
+        let mut input = minimal_complete_generation_liveness_input();
+        input.engine_control_byte_length = MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH;
+        assert!(
+            derive_complete_generation_liveness(&plan, input)
+                .is_err_and(|error| error.contains("exceeds the hard WASM bound")),
+        );
     }
 }

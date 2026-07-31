@@ -866,7 +866,209 @@ pub(in crate::bgv::proof_suite) struct RowCodeWhirConstructionPlan {
     pub(super) parameters: RowCodeWhirSelectedParameters,
 }
 
+fn resident_vector_allocation_byte_length<T>(
+    capacity: usize,
+) -> Result<u64, RowCodeWhirConstructionPlanError> {
+    u64::try_from(capacity)
+        .ok()
+        .and_then(|count| {
+            u64::try_from(core::mem::size_of::<T>())
+                .ok()
+                .and_then(|element_byte_length| count.checked_mul(element_byte_length))
+        })
+        .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)
+}
+
+fn add_resident_allocation(
+    total: &mut u64,
+    byte_length: u64,
+) -> Result<(), RowCodeWhirConstructionPlanError> {
+    *total = total
+        .checked_add(byte_length)
+        .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?;
+    Ok(())
+}
+
 impl RowCodeWhirConstructionPlan {
+    /// Exact heap allocation retained by this concrete plan value.
+    ///
+    /// The caller invokes this on the clone that generation will retain, so
+    /// vector capacities rather than logical lengths are counted. Element
+    /// storage includes nested vector headers; the nested allocations
+    /// themselves are added explicitly below.
+    pub(in crate::bgv::proof_suite) fn resident_owned_payload_byte_length(
+        &self,
+    ) -> Result<u64, RowCodeWhirConstructionPlanError> {
+        let mut total = self
+            .relation_prefix_schedule
+            .resident_owned_payload_byte_length()
+            .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?;
+        add_resident_allocation(
+            &mut total,
+            resident_vector_allocation_byte_length::<u32>(
+                self.requested_source_column_ordinals.capacity(),
+            )?,
+        )?;
+        for phase in self.base_phase.iter().chain(self.auxiliary_phase.iter()) {
+            add_resident_allocation(
+                &mut total,
+                resident_vector_allocation_byte_length::<RowCodeWhirTracePhaseRow>(
+                    phase.rows.capacity(),
+                )?,
+            )?;
+            for row in &phase.rows {
+                add_resident_allocation(
+                    &mut total,
+                    resident_vector_allocation_byte_length::<u32>(
+                        row.opening_point_ordinals.capacity(),
+                    )?,
+                )?;
+            }
+        }
+        add_resident_allocation(
+            &mut total,
+            resident_vector_allocation_byte_length::<RowCodeWhirQuotientPhaseRow>(
+                self.quotient_phase.rows.capacity(),
+            )?,
+        )?;
+        for row in &self.quotient_phase.rows {
+            add_resident_allocation(
+                &mut total,
+                resident_vector_allocation_byte_length::<u32>(
+                    row.opening_point_ordinals.capacity(),
+                )?,
+            )?;
+        }
+        add_resident_allocation(
+            &mut total,
+            resident_vector_allocation_byte_length::<RowCodeWhirBoundTreePlan>(
+                self.bound_trees.capacity(),
+            )?,
+        )?;
+        for tree in &self.bound_trees {
+            add_resident_allocation(
+                &mut total,
+                resident_vector_allocation_byte_length::<RowCodeWhirBoundColumnPlan>(
+                    tree.ordered_columns.capacity(),
+                )?,
+            )?;
+            for column in &tree.ordered_columns {
+                add_resident_allocation(
+                    &mut total,
+                    resident_vector_allocation_byte_length::<u32>(
+                        column.opening_point_ordinals.capacity(),
+                    )?,
+                )?;
+            }
+        }
+        add_resident_allocation(
+            &mut total,
+            resident_vector_allocation_byte_length::<RowCodeWhirBoundReductionBlockPlan>(
+                self.bound_reduction_blocks.capacity(),
+            )?,
+        )?;
+        for block in &self.bound_reduction_blocks {
+            add_resident_allocation(
+                &mut total,
+                resident_vector_allocation_byte_length::<u32>(
+                    block.ordered_bound_tree_ordinals.capacity(),
+                )?,
+            )?;
+            add_resident_allocation(
+                &mut total,
+                resident_vector_allocation_byte_length::<u8>(block.selector_prefix.capacity())?,
+            )?;
+            add_resident_allocation(
+                &mut total,
+                resident_vector_allocation_byte_length::<Vec<u8>>(
+                    block.degree_suffix_prefixes.capacity(),
+                )?,
+            )?;
+            for prefix in &block.degree_suffix_prefixes {
+                add_resident_allocation(
+                    &mut total,
+                    resident_vector_allocation_byte_length::<u8>(prefix.capacity())?,
+                )?;
+            }
+        }
+        add_resident_allocation(
+            &mut total,
+            resident_vector_allocation_byte_length::<RowCodeWhirAggregateColumnRole>(
+                self.aggregate_column_roles.capacity(),
+            )?,
+        )?;
+        add_resident_allocation(
+            &mut total,
+            resident_vector_allocation_byte_length::<RowCodeWhirPhase>(
+                self.phase_order.capacity(),
+            )?,
+        )?;
+        add_resident_allocation(
+            &mut total,
+            resident_vector_allocation_byte_length::<u32>(
+                self.bound_opening_column_ordinals.capacity(),
+            )?,
+        )?;
+        add_resident_allocation(
+            &mut total,
+            resident_vector_allocation_byte_length::<RowCodeWhirRoundPlan>(
+                self.whir.rounds.capacity(),
+            )?,
+        )?;
+        add_resident_allocation(
+            &mut total,
+            resident_vector_allocation_byte_length::<RowCodeWhirOpeningBatchPlan>(
+                self.opening_batches.capacity(),
+            )?,
+        )?;
+        for batch in &self.opening_batches {
+            add_resident_allocation(
+                &mut total,
+                resident_vector_allocation_byte_length::<u32>(
+                    batch.requested_aggregate_column_ordinals.capacity(),
+                )?,
+            )?;
+        }
+        add_resident_allocation(
+            &mut total,
+            self.transcript_operations_resident_owned_payload_byte_length()?,
+        )?;
+        add_resident_allocation(
+            &mut total,
+            resident_vector_allocation_byte_length::<RowCodeWhirProofSectionPlan>(
+                self.proof_sections.capacity(),
+            )?,
+        )?;
+        add_resident_allocation(
+            &mut total,
+            resident_vector_allocation_byte_length::<RowCodeWhirCheckpointPlan>(
+                self.checkpoints.capacity(),
+            )?,
+        )?;
+        Ok(total)
+    }
+
+    pub(in crate::bgv::proof_suite) fn transcript_operations_resident_owned_payload_byte_length(
+        &self,
+    ) -> Result<u64, RowCodeWhirConstructionPlanError> {
+        let mut total = resident_vector_allocation_byte_length::<RowCodeWhirTranscriptOperation>(
+            self.transcript_operations.capacity(),
+        )?;
+        for operation in &self.transcript_operations {
+            if let RowCodeWhirTranscriptOperation::ObserveProtocolSchedule { canonical_values } =
+                operation
+            {
+                add_resident_allocation(
+                    &mut total,
+                    resident_vector_allocation_byte_length::<ProofChallengeExtensionElement>(
+                        canonical_values.capacity(),
+                    )?,
+                )?;
+            }
+        }
+        Ok(total)
+    }
+
     pub(in crate::bgv::proof_suite) fn for_selected_variant(
         artifact: &ValidatedRelationPlanArtifact,
         schedule_position: Option<u32>,

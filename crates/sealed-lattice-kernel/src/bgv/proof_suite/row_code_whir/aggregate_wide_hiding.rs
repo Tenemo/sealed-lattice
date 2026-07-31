@@ -181,7 +181,6 @@ impl AggregateWidePadLayout {
             .ok_or_else(|| "aggregate-wide switch mask is outside the pad layout".to_owned())
     }
 
-    #[cfg(test)]
     pub(super) fn switch_delta_count(&self) -> usize {
         self.switch_mask_ranges.iter().map(Range::len).sum()
     }

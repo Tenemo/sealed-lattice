@@ -250,6 +250,30 @@ pub(crate) struct ProofExternalMemoryPlan {
 }
 
 impl ProofExternalMemoryPlan {
+    pub(crate) fn executor_resident_owned_payload_byte_length(
+        &self,
+    ) -> Result<u64, ProofExternalMemoryError> {
+        let plan_byte_length = u64::try_from(self.objects.capacity())
+            .ok()
+            .and_then(|count| {
+                u64::try_from(core::mem::size_of::<ProofExternalMemoryObjectPlan>())
+                    .ok()
+                    .and_then(|element_byte_length| count.checked_mul(element_byte_length))
+            })
+            .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
+        let state_byte_length = u64::try_from(self.objects.len())
+            .ok()
+            .and_then(|count| {
+                u64::try_from(super::executor::PROOF_EXTERNAL_MEMORY_OBJECT_STATE_BYTE_LENGTH)
+                    .ok()
+                    .and_then(|element_byte_length| count.checked_mul(element_byte_length))
+            })
+            .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
+        plan_byte_length
+            .checked_add(state_byte_length)
+            .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         step_count: u32,

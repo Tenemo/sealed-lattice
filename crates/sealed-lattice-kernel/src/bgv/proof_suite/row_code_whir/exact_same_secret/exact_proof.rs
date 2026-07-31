@@ -4992,7 +4992,6 @@ pub(super) fn exact_same_secret_hostile_mutation_targets(
 /// `encode_exact_same_secret_prefix`. Every Merkle contribution uses the
 /// maximum coordinate-derived compact frontier for the checked query count;
 /// the aggregate-wide suffix comes from the selected masking wire ledger.
-#[cfg(test)]
 pub(in crate::bgv::proof_suite) fn canonical_row_code_whir_family_body_byte_length_ceiling(
     construction_plan: &RowCodeWhirConstructionPlan,
     relation_variant: &RelationPlanVariant,
@@ -5137,7 +5136,6 @@ pub(in crate::bgv::proof_suite) fn canonical_row_code_whir_family_body_byte_leng
         .ok_or_else(|| "row-code WHIR complete family-body length overflowed".to_owned())
 }
 
-#[cfg(test)]
 pub(in crate::bgv::proof_suite) fn canonical_row_code_whir_aggregate_opening_section_byte_ledger(
     construction_plan: &RowCodeWhirConstructionPlan,
 ) -> Result<Vec<(&'static str, usize)>, String> {
@@ -5154,13 +5152,11 @@ pub(in crate::bgv::proof_suite) fn canonical_row_code_whir_aggregate_opening_sec
         construction_plan.selected_parameters(),
     )
     .map_err(|error| format!("derive selected aggregate-wide configuration: {error:?}"))?;
-    let hiding_census = super::super::hiding_whir::SelectedHidingMaskCensus::derive(&configuration);
     Ok(
         super::super::hiding_whir::static_accounting::aggregate_wide_pad_opening_byte_ledger(
             &configuration,
-            &hiding_census,
             opening_evaluation_count,
-        )
+        )?
         .sections
         .into_iter()
         .map(|(section, byte_length)| (section.identifier(), byte_length))

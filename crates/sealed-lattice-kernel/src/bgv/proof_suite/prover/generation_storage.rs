@@ -311,6 +311,66 @@ impl CommonProofReplayPolynomialPlan {
     pub(crate) const fn coefficient_count(self) -> usize {
         self.coefficient_count
     }
+
+    pub(crate) fn maximum_reader_live_byte_length(self) -> Result<u64, CommonProofProverError> {
+        let resident_polynomial_byte_length = u64::try_from(self.coefficient_count)
+            .ok()
+            .and_then(|count| count.checked_mul(resident_value_byte_length(self.value_type)))
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        match self.encoding {
+            CommonProofReplayPolynomialEncoding::CanonicalCoefficients => {
+                Ok(resident_polynomial_byte_length)
+            }
+            CommonProofReplayPolynomialEncoding::CompactBaseTrace { .. } => self
+                .exact_byte_length
+                .checked_add(
+                    resident_polynomial_byte_length
+                        .checked_mul(2)
+                        .ok_or(CommonProofProverError::CountOverflow)?,
+                )
+                .ok_or(CommonProofProverError::CountOverflow),
+        }
+    }
+
+    pub(crate) fn maximum_writer_live_byte_length(self) -> Result<u64, CommonProofProverError> {
+        let resident_polynomial_byte_length = u64::try_from(self.coefficient_count)
+            .ok()
+            .and_then(|count| count.checked_mul(resident_value_byte_length(self.value_type)))
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        match self.encoding {
+            CommonProofReplayPolynomialEncoding::CanonicalCoefficients => {
+                resident_polynomial_byte_length
+                    .checked_add(u64::from(
+                        MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+                    ))
+                    .and_then(|length| {
+                        length.checked_add(resident_value_byte_length(self.value_type))
+                    })
+                    .ok_or(CommonProofProverError::CountOverflow)
+            }
+            CommonProofReplayPolynomialEncoding::CompactBaseTrace {
+                trace_value_count, ..
+            } => {
+                let trace_byte_length = u64::try_from(trace_value_count)
+                    .ok()
+                    .and_then(|count| count.checked_mul(core::mem::size_of::<u64>() as u64))
+                    .ok_or(CommonProofProverError::CountOverflow)?;
+                let encoding_peak = resident_polynomial_byte_length
+                    .checked_add(trace_byte_length)
+                    .and_then(|length| length.checked_add(self.exact_byte_length))
+                    .ok_or(CommonProofProverError::CountOverflow)?;
+                let writing_peak = resident_polynomial_byte_length
+                    .checked_add(self.exact_byte_length)
+                    .and_then(|length| {
+                        length.checked_add(u64::from(
+                            MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+                        ))
+                    })
+                    .ok_or(CommonProofProverError::CountOverflow)?;
+                Ok(encoding_peak.max(writing_peak))
+            }
+        }
+    }
 }
 
 pub(crate) enum CommonProofReplayPolynomialRef<'polynomial> {

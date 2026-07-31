@@ -47,6 +47,9 @@ pub(in crate::bgv::proof_suite) use construction_plan::{
 };
 
 pub(in crate::bgv) use exact_same_secret::VerifiedSameSecretLowDegreePrerequisite;
+#[cfg(test)]
+pub(in crate::bgv::proof_suite) use exact_same_secret::canonical_row_code_whir_aggregate_opening_section_byte_ledger;
+pub(in crate::bgv::proof_suite) use exact_same_secret::canonical_row_code_whir_family_body_byte_length_ceiling;
 pub(in crate::bgv::proof_suite) use exact_same_secret::{
     ExactSameSecretAuthenticatedTranscriptPrefixRequest, ExactSameSecretFiatShamirBinding,
     ExactSameSecretTranscriptPrefixAuthorityBinding, PreparedExactSameSecretTranscriptPrefix,
@@ -55,11 +58,6 @@ pub(crate) use exact_same_secret::{
     ExactSameSecretFinalProofVerification, ExactSameSecretIncrementalVerification,
     PreparedExactSameSecretVerification, exact_same_secret_verification_resident_memory_accounting,
     exact_same_secret_verification_runtime_limits, prepare_exact_same_secret_verification,
-};
-#[cfg(test)]
-pub(in crate::bgv::proof_suite) use exact_same_secret::{
-    canonical_row_code_whir_aggregate_opening_section_byte_ledger,
-    canonical_row_code_whir_family_body_byte_length_ceiling,
 };
 pub(in crate::bgv::proof_suite) use generation_state::{
     RowCodeWhirGenerationStateMachine, RowCodeWhirTranscriptPrefixAuthority,

@@ -61,6 +61,14 @@ Works today:
   in aligned `2^20`-row stripes. The selected construction derives a
   `402,653,184`-byte DFT-plus-leaf-state core and preserves the canonical roots
   and proof-size ledger.
+- Production-derived phase-liveness accounting now covers the complete
+  same-secret prover live set, including source ownership, replay readers,
+  DFTs, Merkle frontiers, proof material, transcript state, private material,
+  browser-bridge copies, a WebAssembly runtime reserve, and allocator overhead.
+  Its maximum is `556,008,729` bytes, within the automatic planning band and
+  `115,079,911` bytes below the hard WebAssembly bound. Bound-tree
+  authentication uses one in-place DFT and one evaluated stripe instead of
+  retaining complete evaluated columns.
 
 Not yet:
 
@@ -71,11 +79,9 @@ Not yet:
   leaf calls and meets their collision allocation, but semantic
   state-transition correspondence and the complete construction-level
   composition theorem remain open.
-- Complete proof-generation liveness and participant transport accounting are
-  also open. Aggregate commitment recomputation has a bounded algorithm core,
-  but current full-width bound-tree materialization consumes most of the hard
-  WebAssembly memory allowance before the remaining prover, encoder, bridge,
-  and allocator state is counted. The complete proof corpus has not been
+- The static liveness model has not yet been confirmed by a completed native
+  proof or release-WebAssembly browser measurement. Complete participant
+  transport accounting is also open, and the proof corpus has not been
   reconciled into per-participant traffic.
 - No full-width exact proof has completed on the current implementation, and no
   release WebAssembly proof has been generated and freshly verified across the

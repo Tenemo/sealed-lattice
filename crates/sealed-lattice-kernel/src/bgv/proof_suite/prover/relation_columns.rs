@@ -684,6 +684,76 @@ pub(crate) enum CommonProofPreChallengeSourcePoll {
 }
 
 impl CommonProofPreChallengeSourceCursor {
+    pub(crate) fn resident_owned_payload_byte_length(&self) -> Result<u64, CommonProofProverError> {
+        fn vector_byte_length<T>(capacity: usize) -> Result<u64, CommonProofProverError> {
+            u64::try_from(capacity)
+                .ok()
+                .and_then(|count| {
+                    u64::try_from(core::mem::size_of::<T>())
+                        .ok()
+                        .and_then(|element_byte_length| count.checked_mul(element_byte_length))
+                })
+                .ok_or(CommonProofProverError::CountOverflow)
+        }
+
+        const BTREE_ENTRY_LINK_WORD_COUNT: u64 = 6;
+        let btree_entry_overhead_byte_length = BTREE_ENTRY_LINK_WORD_COUNT
+            .checked_mul(
+                u64::try_from(core::mem::size_of::<usize>())
+                    .map_err(|_| CommonProofProverError::CountOverflow)?,
+            )
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        let tree_role_entry_byte_length =
+            u64::try_from(core::mem::size_of::<(u32, ProofTreeRole)>())
+                .map_err(|_| CommonProofProverError::CountOverflow)?
+                .checked_add(btree_entry_overhead_byte_length)
+                .ok_or(CommonProofProverError::CountOverflow)?;
+        let mask_entry_byte_length =
+            u64::try_from(core::mem::size_of::<(u32, RelationMaskDescriptor)>())
+                .map_err(|_| CommonProofProverError::CountOverflow)?
+                .checked_add(btree_entry_overhead_byte_length)
+                .ok_or(CommonProofProverError::CountOverflow)?;
+        vector_byte_length::<u32>(self.requested_column_ordinals.capacity())?
+            .checked_add(vector_byte_length::<(u32, u32)>(
+                self.reversed_column_bindings.capacity(),
+            )?)
+            .and_then(|total| {
+                u64::try_from(self.tree_roles.len())
+                    .ok()
+                    .and_then(|count| count.checked_mul(tree_role_entry_byte_length))
+                    .and_then(|byte_length| total.checked_add(byte_length))
+            })
+            .and_then(|total| {
+                u64::try_from(self.trace_masks.len())
+                    .ok()
+                    .and_then(|count| count.checked_mul(mask_entry_byte_length))
+                    .and_then(|byte_length| total.checked_add(byte_length))
+            })
+            .and_then(|total| {
+                vector_byte_length::<CommonProofSourcePolynomialReplayIdentity>(
+                    self.ordered_replay_identities.capacity(),
+                )
+                .ok()
+                .and_then(|byte_length| total.checked_add(byte_length))
+            })
+            .ok_or(CommonProofProverError::CountOverflow)
+    }
+
+    pub(crate) fn completed_replay_identity_catalog_resident_owned_payload_byte_length(
+        &self,
+    ) -> Result<u64, CommonProofProverError> {
+        u64::try_from(self.requested_column_ordinals.len())
+            .ok()
+            .and_then(|count| {
+                u64::try_from(core::mem::size_of::<
+                    CommonProofSourcePolynomialReplayIdentity,
+                >())
+                .ok()
+                .and_then(|element_byte_length| count.checked_mul(element_byte_length))
+            })
+            .ok_or(CommonProofProverError::CountOverflow)
+    }
+
     pub(crate) fn new(
         variant: &RelationPlanVariant,
         request_context: CommonProofSourcePolynomialRequestContext,
@@ -2235,6 +2305,111 @@ impl AuxiliaryColumnSynthesisTask {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CommonProofAuxiliaryMaterializationLiveness {
+    maximum_synthesis_live_trace_row_count: usize,
+    maximum_recomputation_live_trace_row_count: usize,
+    maximum_private_mask_coefficient_count: usize,
+}
+
+impl CommonProofAuxiliaryMaterializationLiveness {
+    pub(crate) const fn maximum_synthesis_live_trace_row_count(self) -> usize {
+        self.maximum_synthesis_live_trace_row_count
+    }
+
+    pub(crate) const fn maximum_recomputation_live_trace_row_count(self) -> usize {
+        self.maximum_recomputation_live_trace_row_count
+    }
+
+    pub(crate) const fn maximum_private_mask_coefficient_count(self) -> usize {
+        self.maximum_private_mask_coefficient_count
+    }
+}
+
+/// Derives the exact descriptor-local row multiplicities owned by auxiliary
+/// synthesis and later reconstruction. The returned counts include input
+/// rows, persistent component accumulators, output rows, and task-local
+/// transpose or suffix buffers. They deliberately exclude the independently
+/// accounted source-provider and external-memory transfer buffers.
+pub(crate) fn common_proof_auxiliary_materialization_liveness(
+    variant: &RelationPlanVariant,
+) -> Result<CommonProofAuxiliaryMaterializationLiveness, CommonProofProverError> {
+    let mut maximum_synthesis_live_trace_row_count = 0_usize;
+    for batch in variant.ordered_integer_lift_batches() {
+        if !batch
+            .ordered_negacyclic_automorphism_permutations
+            .is_empty()
+        {
+            maximum_synthesis_live_trace_row_count = maximum_synthesis_live_trace_row_count.max(14);
+        }
+        if !batch.ordered_reversed_column_bindings.is_empty() {
+            maximum_synthesis_live_trace_row_count = maximum_synthesis_live_trace_row_count.max(2);
+        }
+        for component in &batch.ordered_components {
+            maximum_synthesis_live_trace_row_count = maximum_synthesis_live_trace_row_count.max(1);
+            if !component.ordered_convolution_products.is_empty() {
+                maximum_synthesis_live_trace_row_count =
+                    maximum_synthesis_live_trace_row_count.max(5);
+            }
+            if !component.ordered_full_ring_negacyclic_products.is_empty() {
+                maximum_synthesis_live_trace_row_count =
+                    maximum_synthesis_live_trace_row_count.max(9);
+            }
+            let linear_input_count = unique_column_ordinals(
+                component
+                    .ordered_linear_terms
+                    .iter()
+                    .map(|term| term.column_ordinal),
+            )
+            .len();
+            maximum_synthesis_live_trace_row_count = maximum_synthesis_live_trace_row_count.max(
+                linear_input_count
+                    .checked_add(3)
+                    .ok_or(CommonProofProverError::CountOverflow)?,
+            );
+            maximum_synthesis_live_trace_row_count = maximum_synthesis_live_trace_row_count.max(2);
+        }
+    }
+
+    let catalog = CommonProofAuxiliaryColumnReconstructionCatalog::new(variant)?;
+    let mut maximum_recomputation_live_trace_row_count = 0_usize;
+    let mut maximum_private_mask_coefficient_count = 0_usize;
+    for target_column_ordinal in catalog.ordered_column_ordinals() {
+        let locator = catalog.locator(target_column_ordinal)?;
+        let input_count = auxiliary_reconstruction_input_column_ordinals(variant, locator)?.len();
+        let task_local_row_count = match locator.kind {
+            AuxiliaryColumnReconstructionKind::NegacyclicAutomorphismPermutation { .. } => 4,
+            AuxiliaryColumnReconstructionKind::ReversedBindingPrefix { .. }
+            | AuxiliaryColumnReconstructionKind::ReversedBindingSuffix { .. }
+            | AuxiliaryColumnReconstructionKind::ConvolutionSuffix { .. }
+            | AuxiliaryColumnReconstructionKind::FullRingSuffix { .. } => 1,
+            AuxiliaryColumnReconstructionKind::ConvolutionTranspose { .. } => 2,
+            AuxiliaryColumnReconstructionKind::FullRingTranspose { .. } => 3,
+            AuxiliaryColumnReconstructionKind::LinearEvaluation { .. } => 2,
+            AuxiliaryColumnReconstructionKind::ProductAccumulator { .. } => 5,
+        };
+        let reconstruction_row_count = input_count
+            .checked_add(task_local_row_count)
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        let resize_row_count = input_count
+            .checked_add(2)
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        maximum_recomputation_live_trace_row_count = maximum_recomputation_live_trace_row_count
+            .max(reconstruction_row_count)
+            .max(resize_row_count);
+        maximum_private_mask_coefficient_count = maximum_private_mask_coefficient_count.max(
+            relation_private_mask_tail_coefficient_count(variant, target_column_ordinal)?
+                .unwrap_or_default(),
+        );
+    }
+
+    Ok(CommonProofAuxiliaryMaterializationLiveness {
+        maximum_synthesis_live_trace_row_count,
+        maximum_recomputation_live_trace_row_count,
+        maximum_private_mask_coefficient_count,
+    })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AuxiliaryColumnReconstructionKind {
     NegacyclicAutomorphismPermutation {
         permutation_index: usize,
@@ -2531,6 +2706,28 @@ impl CommonProofAuxiliaryColumnReconstructionCatalog {
 
     pub(crate) fn ordered_column_ordinals(&self) -> impl Iterator<Item = u32> + '_ {
         self.locators.keys().copied()
+    }
+
+    pub(crate) fn resident_owned_payload_byte_length(&self) -> Result<u64, CommonProofProverError> {
+        const BTREE_ENTRY_LINK_WORD_COUNT: u64 = 6;
+        let entry_byte_length = u64::try_from(core::mem::size_of::<(
+            u32,
+            AuxiliaryColumnReconstructionLocator,
+        )>())
+        .map_err(|_| CommonProofProverError::CountOverflow)?
+        .checked_add(
+            BTREE_ENTRY_LINK_WORD_COUNT
+                .checked_mul(
+                    u64::try_from(core::mem::size_of::<usize>())
+                        .map_err(|_| CommonProofProverError::CountOverflow)?,
+                )
+                .ok_or(CommonProofProverError::CountOverflow)?,
+        )
+        .ok_or(CommonProofProverError::CountOverflow)?;
+        u64::try_from(self.locators.len())
+            .ok()
+            .and_then(|count| count.checked_mul(entry_byte_length))
+            .ok_or(CommonProofProverError::CountOverflow)
     }
 
     fn locator(

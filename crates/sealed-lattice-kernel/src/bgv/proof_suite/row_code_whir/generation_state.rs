@@ -9,7 +9,6 @@
 use core::mem::size_of;
 use std::collections::{BTreeMap, BTreeSet};
 
-use p3_field::PrimeCharacteristicRing;
 use p3_goldilocks::Goldilocks;
 use zeroize::Zeroizing;
 
@@ -18,7 +17,8 @@ use super::aggregate_source_storage::{
 };
 use super::aggregate_wide_hiding::{
     AggregateWideHidingMaterialGeneration, AggregateWideHidingMaterialGenerationError,
-    AggregateWideHidingMaterialGenerationPoll, AggregateWideOpeningProof,
+    AggregateWideHidingMaterialGenerationPoll, AggregateWideHidingMaterialShape,
+    AggregateWideOpeningProof,
 };
 use super::aggregate_wide_prover::{
     StreamingAggregateWideCommitmentGeneration, StreamingAggregateWideCommitmentPoll,
@@ -42,19 +42,25 @@ use super::same_secret_source_manifest::{
     SameSecretAuthenticatedSourceManifest, SameSecretAuthenticatedSourceManifestError,
 };
 use super::{
-    AuthenticatedColumn, ExactSameSecretAuthenticatedTranscriptPrefixRequest,
+    AuthenticatedColumn, ChallengeField, ExactSameSecretAuthenticatedTranscriptPrefixRequest,
     ExactSameSecretTranscriptPrefixAuthorityBinding, ExtensionFieldChallenger,
     PreparedExactSameSecretTranscriptPrefix, RowCodeWhirConstructionPlan,
     RowCodeWhirQuotientColumnSourcePlan, RowCodeWhirQuotientColumnTransformPlan,
     aggregate_wide_pcs::{AggregateWideCommitment, aggregate_wide_pcs_for_construction_plan},
+    bounded_dft::BoundedBaseCosetDft,
+    canonical_row_code_whir_family_body_byte_length_ceiling,
     column_commitment::{ColumnDigest, StripedColumnCommitmentBuilder},
-    commitment_liveness::derive_aggregate_commitment_liveness,
+    commitment_liveness::{
+        BOUND_TREE_AUTHENTICATION_STRIPE_LEAF_COUNT, CompleteGenerationLiveness,
+        CompleteGenerationLivenessInput, derive_complete_generation_liveness,
+        noncompact_aggregate_opening_path_byte_length,
+    },
     construction_plan::{
         ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT, RowCodeWhirCheckpointBoundary,
         RowCodeWhirOpenedPolynomialSource, RowCodeWhirPhase, RowCodeWhirProofSectionRole,
     },
     plan_row_code_whir_quotient_transform_storage,
-    row_encoding::{RowCodeHighHalfSource, encode_row},
+    row_encoding::{RowCodeHighHalfSource, RowEncodingGeometry, padded_base_row_coefficients},
 };
 use crate::bgv::proof_suite::external_memory::{
     ProofExternalMemoryError, ProofExternalMemoryObject, ProofExternalMemoryObjectPlan,
@@ -74,9 +80,10 @@ use crate::bgv::proof_suite::prover::{
     CommonProofReplayPolynomialEncoding, CommonProofReplayPolynomialPlan,
     CommonProofReplayPolynomialRangeDestination, CommonProofReplayPolynomialRangeReader,
     CommonProofReplayPolynomialReader, CommonProofReplayPolynomialRef,
-    CommonProofReplayPolynomialWriter, apply_trace_mask,
+    CommonProofReplayPolynomialWriter, CommonProofSourceProviderMemoryAccounting, apply_trace_mask,
     authenticated_pre_challenge_source_coefficient_position_counts,
-    canonical_proof_object_header_bytes, construct_reversed_relation_column,
+    canonical_proof_object_header_bytes, common_proof_auxiliary_materialization_liveness,
+    common_proof_quotient_materialization_liveness, construct_reversed_relation_column,
     ordered_integer_lift_auxiliary_column_ordinals,
     persisted_pre_challenge_column_coefficient_position_counts, relation_reversed_column_bindings,
     requested_pre_challenge_source_column_ordinals, validate_generation_relation_trees,
@@ -153,7 +160,7 @@ enum RowCodeWhirGenerationPhase {
 const AUXILIARY_REPLAY_ISSUED_STEP: u32 = 1;
 const FIRST_QUOTIENT_TRANSFORM_STEP: u32 = 2;
 const ROW_PAD_SEED_BYTE_LENGTH: usize = 3 * 32;
-const MAXIMUM_PHASE_COMMITMENT_STRIPE_COLUMN_COUNT: usize = 1 << 20;
+pub(super) const MAXIMUM_PHASE_COMMITMENT_STRIPE_COLUMN_COUNT: usize = 1 << 20;
 const MAXIMUM_ROW_CODE_WHIR_TRANSCRIPT_CHECKPOINT_CURSOR_BYTE_LENGTH: usize = 16 * 1_024;
 const ROW_CODE_WHIR_CHECKPOINT_COMMITTED_STATE_HASH_DOMAIN: &str =
     "sealed-lattice/row-code-whir/checkpoint-committed-state/v1";
@@ -649,9 +656,16 @@ const EXACT_BOUND_AUTHENTICATION_LEAVES_PER_POLL: usize = 4_096;
 struct ActiveExactBoundTreeAuthenticationBuilder {
     entry: ProofTreeCatalogEntry,
     leaf_count: usize,
+    row_width: usize,
+    evaluation_domain: ProofEvaluationDomain,
+    ordered_column_ordinals: Vec<u32>,
     query_indices: Vec<usize>,
     next_query_position: usize,
-    evaluated_columns: Vec<Zeroizing<Vec<ProofBaseFieldElement>>>,
+    maximum_stripe_leaf_count: usize,
+    current_stripe_start: usize,
+    current_stripe_end: usize,
+    evaluated_column_stripes: Vec<Zeroizing<Vec<ProofBaseFieldElement>>>,
+    active_column_dft: Option<BoundedBaseCosetDft>,
     opened_leaves: Vec<ExactBoundLeafOpening>,
     frontier_coordinates: Vec<(u32, u64)>,
     frontier_digests: Vec<Option<[u8; HASH_BYTE_LENGTH]>>,
@@ -665,7 +679,26 @@ impl ActiveExactBoundTreeAuthenticationBuilder {
         entry: ProofTreeCatalogEntry,
         leaf_count: usize,
         query_indices: &[usize],
-        evaluated_columns: Vec<Zeroizing<Vec<ProofBaseFieldElement>>>,
+        evaluation_domain: ProofEvaluationDomain,
+        ordered_column_ordinals: &[u32],
+    ) -> Result<Self, CommonProofProverError> {
+        Self::new_with_maximum_stripe_leaf_count(
+            entry,
+            leaf_count,
+            query_indices,
+            evaluation_domain,
+            ordered_column_ordinals,
+            BOUND_TREE_AUTHENTICATION_STRIPE_LEAF_COUNT,
+        )
+    }
+
+    fn new_with_maximum_stripe_leaf_count(
+        entry: ProofTreeCatalogEntry,
+        leaf_count: usize,
+        query_indices: &[usize],
+        evaluation_domain: ProofEvaluationDomain,
+        ordered_column_ordinals: &[u32],
+        maximum_stripe_leaf_count: usize,
     ) -> Result<Self, CommonProofProverError> {
         let evaluation_count = leaf_count
             .checked_mul(2)
@@ -677,10 +710,10 @@ impl ActiveExactBoundTreeAuthenticationBuilder {
             || !leaf_count.is_power_of_two()
             || row_width == 0
             || entry.bound_root().is_none()
-            || evaluated_columns.len() != row_width
-            || evaluated_columns
-                .iter()
-                .any(|evaluations| evaluations.len() != evaluation_count)
+            || evaluation_domain.size() != evaluation_count
+            || ordered_column_ordinals.len() != row_width
+            || maximum_stripe_leaf_count == 0
+            || !maximum_stripe_leaf_count.is_power_of_two()
             || query_indices.is_empty()
             || query_indices.windows(2).any(|pair| pair[0] >= pair[1])
             || query_indices
@@ -689,11 +722,17 @@ impl ActiveExactBoundTreeAuthenticationBuilder {
         {
             return Err(CommonProofProverError::InvalidTree);
         }
-        let evaluated_column_byte_length = evaluation_count
-            .checked_mul(row_width)
+        let stripe_leaf_count = leaf_count.min(maximum_stripe_leaf_count);
+        let algorithm_live_byte_length = evaluation_count
+            .checked_add(
+                stripe_leaf_count
+                    .checked_mul(2)
+                    .and_then(|value_count| value_count.checked_mul(row_width))
+                    .ok_or(CommonProofProverError::CountOverflow)?,
+            )
             .and_then(|element_count| element_count.checked_mul(size_of::<ProofBaseFieldElement>()))
             .ok_or(CommonProofProverError::CountOverflow)?;
-        if u64::try_from(evaluated_column_byte_length).map_or(true, |byte_length| {
+        if u64::try_from(algorithm_live_byte_length).map_or(true, |byte_length| {
             byte_length > MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
         }) {
             return Err(CommonProofProverError::ResidentMemoryLimitExceeded);
@@ -724,9 +763,16 @@ impl ActiveExactBoundTreeAuthenticationBuilder {
         Ok(Self {
             entry,
             leaf_count,
+            row_width,
+            evaluation_domain,
+            ordered_column_ordinals: ordered_column_ordinals.to_vec(),
             query_indices: retained_query_indices,
             next_query_position: 0,
-            evaluated_columns,
+            maximum_stripe_leaf_count,
+            current_stripe_start: 0,
+            current_stripe_end: stripe_leaf_count,
+            evaluated_column_stripes: Vec::with_capacity(row_width),
+            active_column_dft: None,
             opened_leaves,
             frontier_coordinates,
             frontier_digests,
@@ -734,6 +780,41 @@ impl ActiveExactBoundTreeAuthenticationBuilder {
             next_leaf_index: 0,
             recomputed_root: None,
         })
+    }
+
+    fn next_column_request(&self) -> Option<(usize, u32)> {
+        if self.recomputed_root.is_some()
+            || self.active_column_dft.is_some()
+            || self.evaluated_column_stripes.len() >= self.row_width
+            || self.next_leaf_index != self.current_stripe_start
+        {
+            return None;
+        }
+        let column_position = self.evaluated_column_stripes.len();
+        self.ordered_column_ordinals
+            .get(column_position)
+            .copied()
+            .map(|column_ordinal| (column_position, column_ordinal))
+    }
+
+    fn begin_column(
+        &mut self,
+        column_position: usize,
+        column_ordinal: u32,
+        coefficients: Zeroizing<Vec<ProofBaseFieldElement>>,
+    ) -> Result<(), CommonProofProverError> {
+        if self.active_column_dft.is_some()
+            || self.next_column_request() != Some((column_position, column_ordinal))
+            || coefficients.is_empty()
+            || coefficients.len() > self.evaluation_domain.size()
+        {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        self.active_column_dft = Some(
+            BoundedBaseCosetDft::new(coefficients, self.evaluation_domain)
+                .map_err(|_| CommonProofProverError::InvalidColumn)?,
+        );
+        Ok(())
     }
 
     fn capture_frontier_digest(
@@ -766,25 +847,76 @@ impl ActiveExactBoundTreeAuthenticationBuilder {
         if self.recomputed_root.is_some() || self.next_leaf_index >= self.leaf_count {
             return Err(CommonProofProverError::InvalidTree);
         }
+        if let Some(active_dft) = self.active_column_dft.as_mut() {
+            if !active_dft
+                .poll()
+                .map_err(|_| CommonProofProverError::InvalidColumn)?
+            {
+                return Ok(false);
+            }
+            let evaluations = self
+                .active_column_dft
+                .take()
+                .ok_or(CommonProofProverError::InvalidColumn)?
+                .into_values()
+                .map_err(|_| CommonProofProverError::InvalidColumn)?;
+            if evaluations.len() != self.evaluation_domain.size()
+                || self.current_stripe_end <= self.current_stripe_start
+                || self.current_stripe_end > self.leaf_count
+            {
+                return Err(CommonProofProverError::InvalidColumn);
+            }
+            let stripe_leaf_count = self.current_stripe_end - self.current_stripe_start;
+            let mut stripe = Zeroizing::new(Vec::new());
+            stripe
+                .try_reserve_exact(
+                    stripe_leaf_count
+                        .checked_mul(2)
+                        .ok_or(CommonProofProverError::CountOverflow)?,
+                )
+                .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
+            stripe.extend_from_slice(
+                &evaluations[self.current_stripe_start..self.current_stripe_end],
+            );
+            let opposite_start = self
+                .leaf_count
+                .checked_add(self.current_stripe_start)
+                .ok_or(CommonProofProverError::CountOverflow)?;
+            let opposite_end = self
+                .leaf_count
+                .checked_add(self.current_stripe_end)
+                .ok_or(CommonProofProverError::CountOverflow)?;
+            stripe.extend_from_slice(&evaluations[opposite_start..opposite_end]);
+            self.evaluated_column_stripes.push(stripe);
+            return Ok(false);
+        }
+        if self.evaluated_column_stripes.len() != self.row_width
+            || self.next_leaf_index < self.current_stripe_start
+            || self.next_leaf_index >= self.current_stripe_end
+        {
+            return Err(CommonProofProverError::InvalidTree);
+        }
         let poll_end = self
             .next_leaf_index
             .checked_add(EXACT_BOUND_AUTHENTICATION_LEAVES_PER_POLL)
             .ok_or(CommonProofProverError::CountOverflow)?
-            .min(self.leaf_count);
+            .min(self.current_stripe_end);
         while self.next_leaf_index < poll_end {
             let leaf_index = self.next_leaf_index;
-            let opposite_index = leaf_index
-                .checked_add(self.leaf_count)
+            let stripe_leaf_index = leaf_index - self.current_stripe_start;
+            let stripe_leaf_count = self.current_stripe_end - self.current_stripe_start;
+            let opposite_stripe_leaf_index = stripe_leaf_count
+                .checked_add(stripe_leaf_index)
                 .ok_or(CommonProofProverError::CountOverflow)?;
             let first_point_values = self
-                .evaluated_columns
+                .evaluated_column_stripes
                 .iter()
-                .map(|evaluations| evaluations[leaf_index])
+                .map(|evaluations| evaluations[stripe_leaf_index])
                 .collect::<Vec<_>>();
             let opposite_point_values = self
-                .evaluated_columns
+                .evaluated_column_stripes
                 .iter()
-                .map(|evaluations| evaluations[opposite_index])
+                .map(|evaluations| evaluations[opposite_stripe_leaf_index])
                 .collect::<Vec<_>>();
             let leaf_index_u64 =
                 u64::try_from(leaf_index).map_err(|_| CommonProofProverError::CountOverflow)?;
@@ -875,11 +1007,24 @@ impl ActiveExactBoundTreeAuthenticationBuilder {
                 .checked_add(1)
                 .ok_or(CommonProofProverError::CountOverflow)?;
         }
+        if self.next_leaf_index == self.current_stripe_end {
+            self.evaluated_column_stripes.clear();
+            if self.next_leaf_index < self.leaf_count {
+                self.current_stripe_start = self.current_stripe_end;
+                self.current_stripe_end = self
+                    .current_stripe_start
+                    .saturating_add(self.maximum_stripe_leaf_count)
+                    .min(self.leaf_count);
+            }
+        }
         Ok(self.next_leaf_index == self.leaf_count)
     }
 
     fn finish(self) -> Result<ExactBoundTreeAuthentication, CommonProofProverError> {
         if self.next_leaf_index != self.leaf_count
+            || self.current_stripe_end != self.leaf_count
+            || self.active_column_dft.is_some()
+            || !self.evaluated_column_stripes.is_empty()
             || self.next_query_position != self.query_indices.len()
             || self.opened_leaves.len() != self.query_indices.len()
             || self.pending_left_digests.iter().any(Option::is_some)
@@ -2096,6 +2241,393 @@ fn exact_external_memory_liveness(
     ))
 }
 
+fn resident_vector_allocation_byte_length<T>(
+    capacity: usize,
+) -> Result<u64, CommonProofProverError> {
+    u64::try_from(capacity)
+        .ok()
+        .and_then(|count| {
+            u64::try_from(size_of::<T>())
+                .ok()
+                .and_then(|element_byte_length| count.checked_mul(element_byte_length))
+        })
+        .ok_or(CommonProofProverError::CountOverflow)
+}
+
+fn resident_btree_allocation_upper_bound<Key, Value>(
+    entry_count: usize,
+) -> Result<u64, CommonProofProverError> {
+    const BTREE_ENTRY_LINK_WORD_COUNT: u64 = 6;
+    let entry_byte_length = u64::try_from(size_of::<(Key, Value)>())
+        .map_err(|_| CommonProofProverError::CountOverflow)?
+        .checked_add(
+            BTREE_ENTRY_LINK_WORD_COUNT
+                .checked_mul(
+                    u64::try_from(size_of::<usize>())
+                        .map_err(|_| CommonProofProverError::CountOverflow)?,
+                )
+                .ok_or(CommonProofProverError::CountOverflow)?,
+        )
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    u64::try_from(entry_count)
+        .ok()
+        .and_then(|count| count.checked_mul(entry_byte_length))
+        .ok_or(CommonProofProverError::CountOverflow)
+}
+
+fn add_resident_byte_length(
+    total: &mut u64,
+    byte_length: u64,
+) -> Result<(), CommonProofProverError> {
+    *total = total
+        .checked_add(byte_length)
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn derive_generation_liveness(
+    construction_plan: &RowCodeWhirConstructionPlan,
+    relation_variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
+    relation_trees: &Vec<RelationProofTreeInput>,
+    bound_tree_entries: &Vec<ProofTreeCatalogEntry>,
+    canonical_header_bytes: &Vec<u8>,
+    source_cursor: &CommonProofPreChallengeSourceCursor,
+    same_secret_source_manifest: &SameSecretAuthenticatedSourceManifest,
+    reversed_column_bindings: &Vec<(u32, u32)>,
+    storage_plan: &RowCodeWhirGenerationStoragePlan,
+    source_provider: CommonProofSourceProviderMemoryAccounting,
+    proof_transport_bridge_byte_length: usize,
+) -> Result<CompleteGenerationLiveness, CommonProofProverError> {
+    let mut engine_control_byte_length =
+        u64::try_from(size_of::<RowCodeWhirGenerationStateMachine>())
+            .map_err(|_| CommonProofProverError::CountOverflow)?;
+    add_resident_byte_length(
+        &mut engine_control_byte_length,
+        construction_plan
+            .resident_owned_payload_byte_length()
+            .map_err(|_| CommonProofProverError::CountOverflow)?,
+    )?;
+    add_resident_byte_length(
+        &mut engine_control_byte_length,
+        relation_variant
+            .resident_owned_payload_byte_length()
+            .map_err(|_| CommonProofProverError::CountOverflow)?,
+    )?;
+    add_resident_byte_length(
+        &mut engine_control_byte_length,
+        relation_context
+            .resident_owned_payload_byte_length()
+            .map_err(|_| CommonProofProverError::CountOverflow)?,
+    )?;
+    add_resident_byte_length(
+        &mut engine_control_byte_length,
+        resident_vector_allocation_byte_length::<u8>(canonical_header_bytes.capacity())?,
+    )?;
+    add_resident_byte_length(
+        &mut engine_control_byte_length,
+        resident_vector_allocation_byte_length::<RelationProofTreeInput>(
+            relation_trees.capacity(),
+        )?,
+    )?;
+    add_resident_byte_length(
+        &mut engine_control_byte_length,
+        resident_vector_allocation_byte_length::<ProofTreeCatalogEntry>(
+            bound_tree_entries.capacity(),
+        )?,
+    )?;
+    add_resident_byte_length(
+        &mut engine_control_byte_length,
+        source_cursor.resident_owned_payload_byte_length()?.max(
+            source_cursor.completed_replay_identity_catalog_resident_owned_payload_byte_length()?,
+        ),
+    )?;
+    add_resident_byte_length(
+        &mut engine_control_byte_length,
+        same_secret_source_manifest
+            .resident_owned_payload_byte_length()
+            .map_err(|_| CommonProofProverError::CountOverflow)?,
+    )?;
+    add_resident_byte_length(
+        &mut engine_control_byte_length,
+        resident_vector_allocation_byte_length::<(u32, u32)>(reversed_column_bindings.capacity())?,
+    )?;
+    if construction_plan.requires_verified_vss_bound_prerequisite() {
+        add_resident_byte_length(
+            &mut engine_control_byte_length,
+            u64::try_from(size_of::<ExactSameSecretTranscriptPrefixAuthorityBinding>())
+                .map_err(|_| CommonProofProverError::CountOverflow)?,
+        )?;
+    }
+    add_resident_byte_length(
+        &mut engine_control_byte_length,
+        resident_btree_allocation_upper_bound::<u32, (RelationColumnValueType, usize)>(
+            storage_plan.relation_polynomial_shapes.len(),
+        )?,
+    )?;
+    add_resident_byte_length(
+        &mut engine_control_byte_length,
+        storage_plan
+            .auxiliary_reconstruction_catalog
+            .resident_owned_payload_byte_length()?,
+    )?;
+    add_resident_byte_length(
+        &mut engine_control_byte_length,
+        resident_btree_allocation_upper_bound::<
+            RowCodeWhirOpenedPolynomialSource,
+            CommonProofReplayPolynomialPlan,
+        >(storage_plan.opened_polynomial_plans.len())?,
+    )?;
+    add_resident_byte_length(
+        &mut engine_control_byte_length,
+        resident_btree_allocation_upper_bound::<
+            CommonProofQuotientConstraintTransformKey,
+            RowCodeWhirQuotientColumnTransformPlan,
+        >(storage_plan.quotient_transform_plans.len())?,
+    )?;
+    add_resident_byte_length(
+        &mut engine_control_byte_length,
+        storage_plan
+            .aggregate_source_table
+            .resident_owned_payload_byte_length()
+            .map_err(|_| CommonProofProverError::CountOverflow)?,
+    )?;
+    add_resident_byte_length(
+        &mut engine_control_byte_length,
+        resident_vector_allocation_byte_length::<ExternalPolynomialVector>(
+            storage_plan.aggregate_residuals.capacity(),
+        )?,
+    )?;
+    add_resident_byte_length(
+        &mut engine_control_byte_length,
+        storage_plan
+            .external_memory_plan
+            .executor_resident_owned_payload_byte_length()
+            .map_err(|_| CommonProofProverError::CountOverflow)?,
+    )?;
+
+    let auxiliary_liveness = common_proof_auxiliary_materialization_liveness(relation_variant)?;
+    let base_field_element_byte_length = u64::try_from(size_of::<ProofBaseFieldElement>())
+        .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let extension_element_byte_length = u64::try_from(size_of::<ProofChallengeExtensionElement>())
+        .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let trace_domain_byte_length = relation_variant
+        .trace_domain_size()
+        .checked_mul(base_field_element_byte_length)
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    let maximum_private_mask_byte_length =
+        u64::try_from(auxiliary_liveness.maximum_private_mask_coefficient_count())
+            .ok()
+            .and_then(|count| count.checked_mul(base_field_element_byte_length))
+            .ok_or(CommonProofProverError::CountOverflow)?;
+    let auxiliary_materialization_byte_length =
+        u64::try_from(auxiliary_liveness.maximum_synthesis_live_trace_row_count())
+            .ok()
+            .and_then(|count| count.checked_mul(trace_domain_byte_length))
+            .and_then(|byte_length| byte_length.checked_add(maximum_private_mask_byte_length))
+            .ok_or(CommonProofProverError::CountOverflow)?;
+    let recomputed_auxiliary_reader_byte_length =
+        u64::try_from(auxiliary_liveness.maximum_recomputation_live_trace_row_count())
+            .ok()
+            .and_then(|count| count.checked_mul(trace_domain_byte_length))
+            .and_then(|byte_length| byte_length.checked_add(maximum_private_mask_byte_length))
+            .ok_or(CommonProofProverError::CountOverflow)?;
+    let recomputed_source_reader_byte_length = source_provider
+        .maximum_returned_source_polynomial_byte_length()
+        .checked_add(trace_domain_byte_length)
+        .and_then(|byte_length| byte_length.checked_add(maximum_private_mask_byte_length))
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    let maximum_replay_reader_byte_length =
+        storage_plan.opened_polynomial_plans.values().try_fold(
+            recomputed_auxiliary_reader_byte_length.max(recomputed_source_reader_byte_length),
+            |maximum_byte_length, plan| {
+                Ok::<_, CommonProofProverError>(
+                    maximum_byte_length
+                        .max(plan.maximum_reader_live_byte_length()?)
+                        .max(plan.maximum_writer_live_byte_length()?),
+                )
+            },
+        )?;
+
+    let quotient_evaluation_domain = construction_plan
+        .quotient_computation_evaluation_domain(relation_context)
+        .map_err(|_| CommonProofProverError::InvalidQuotient)?;
+    let quotient_liveness = common_proof_quotient_materialization_liveness(
+        relation_variant,
+        relation_context,
+        quotient_evaluation_domain,
+    )?;
+    let maximum_transform_byte_length = storage_plan.quotient_transform_plans.values().try_fold(
+        0_u64,
+        |maximum_byte_length, plan| {
+            let source_element_byte_length = match plan.source().value_type() {
+                RelationColumnValueType::BaseField => base_field_element_byte_length,
+                RelationColumnValueType::ChallengeExtension => extension_element_byte_length,
+            };
+            let source_byte_length = u64::try_from(plan.source().coefficient_count())
+                .ok()
+                .and_then(|count| count.checked_mul(source_element_byte_length))
+                .ok_or(CommonProofProverError::CountOverflow)?;
+            let transformed_byte_length = u64::try_from(plan.evaluation_domain().size())
+                .ok()
+                .and_then(|count| count.checked_mul(source_element_byte_length))
+                .ok_or(CommonProofProverError::CountOverflow)?;
+            let reallocation_peak = source_byte_length
+                .checked_add(transformed_byte_length)
+                .ok_or(CommonProofProverError::CountOverflow)?;
+            Ok::<_, CommonProofProverError>(
+                maximum_byte_length
+                    .max(reallocation_peak)
+                    .max(plan.output().maximum_writer_live_byte_length()?),
+            )
+        },
+    )?;
+    let quotient_preparation_byte_length = quotient_liveness
+        .maximum_materialization_byte_length()
+        .checked_add(maximum_transform_byte_length)
+        .and_then(|byte_length| {
+            byte_length.checked_add(u64::from(
+                MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+            ))
+        })
+        .ok_or(CommonProofProverError::CountOverflow)?;
+
+    let parameters = construction_plan.selected_parameters();
+    let aggregate_column_element_count = 1_usize
+        .checked_shl(
+            u32::try_from(parameters.table_variable_count)
+                .map_err(|_| CommonProofProverError::CountOverflow)?,
+        )
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    let aggregate_table_width = construction_plan.aggregate_table_width();
+    if aggregate_table_width < 2 || !aggregate_table_width.is_power_of_two() {
+        return Err(CommonProofProverError::InvalidColumn);
+    }
+    let aggregate_column_byte_length = u64::try_from(aggregate_column_element_count)
+        .ok()
+        .and_then(|count| count.checked_mul(extension_element_byte_length))
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    let aggregate_batch_column_count = aggregate_table_width / 2;
+    let aggregate_source_batch_byte_length = u64::try_from(aggregate_batch_column_count)
+        .ok()
+        .and_then(|count| count.checked_mul(aggregate_column_byte_length))
+        .and_then(|byte_length| {
+            resident_vector_allocation_byte_length::<Vec<ChallengeField>>(
+                aggregate_batch_column_count,
+            )
+            .ok()
+            .and_then(|catalog_byte_length| byte_length.checked_add(catalog_byte_length))
+        })
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    let physical_row_witness_value_count = 1_usize
+        .checked_shl(
+            u32::try_from(parameters.physical_row_witness_variable_count)
+                .map_err(|_| CommonProofProverError::CountOverflow)?,
+        )
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    let aggregate_source_row_byte_length = u64::try_from(physical_row_witness_value_count)
+        .ok()
+        .and_then(|count| count.checked_mul(base_field_element_byte_length))
+        .and_then(|byte_length| {
+            u64::try_from(parameters.logical_polynomial_coefficient_count)
+                .ok()
+                .and_then(|count| count.checked_mul(extension_element_byte_length))
+                .and_then(|row_byte_length| byte_length.checked_add(row_byte_length))
+        })
+        .ok_or(CommonProofProverError::CountOverflow)?;
+
+    let canonical_family_body_byte_length =
+        canonical_row_code_whir_family_body_byte_length_ceiling(
+            construction_plan,
+            relation_variant,
+            bound_tree_entries,
+        )
+        .map_err(|_| CommonProofProverError::InvalidInput)?;
+    let proof_accumulator_byte_length = u64::try_from(
+        canonical_header_bytes
+            .len()
+            .checked_add(canonical_family_body_byte_length)
+            .ok_or(CommonProofProverError::CountOverflow)?,
+    )
+    .map_err(|_| CommonProofProverError::CountOverflow)?
+    .checked_add(
+        noncompact_aggregate_opening_path_byte_length(construction_plan)
+            .map_err(|_| CommonProofProverError::CountOverflow)?,
+    )
+    .ok_or(CommonProofProverError::CountOverflow)?;
+
+    let transcript_operation_byte_length = construction_plan
+        .transcript_operations_resident_owned_payload_byte_length()
+        .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let transcript_role_byte_length =
+        u64::try_from(construction_plan.transcript_operations().len())
+            .ok()
+            .and_then(|count| {
+                u64::try_from(
+                    size_of::<super::construction_plan::RowCodeWhirObservationRole>()
+                        + size_of::<super::construction_plan::RowCodeWhirExtensionRole>(),
+                )
+                .ok()
+                .and_then(|width| count.checked_mul(width))
+            })
+            .ok_or(CommonProofProverError::CountOverflow)?;
+    let accepted_out_of_domain_point_byte_length = u64::from(
+        construction_plan
+            .relation_prefix_schedule()
+            .out_of_domain_point_count(),
+    )
+    .checked_mul(extension_element_byte_length)
+    .ok_or(CommonProofProverError::CountOverflow)?;
+    let transcript_byte_length = u64::try_from(size_of::<
+        crate::bgv::proof_suite::CommonProofTranscript,
+    >())
+    .map_err(|_| CommonProofProverError::CountOverflow)?
+    .checked_add(transcript_operation_byte_length)
+    .and_then(|total| total.checked_add(transcript_role_byte_length))
+    .and_then(|total| total.checked_add(accepted_out_of_domain_point_byte_length))
+    .and_then(|total| {
+        total.checked_add(
+            u64::try_from(MAXIMUM_ROW_CODE_WHIR_TRANSCRIPT_CHECKPOINT_CURSOR_BYTE_LENGTH).ok()?,
+        )
+    })
+    .ok_or(CommonProofProverError::CountOverflow)?;
+
+    let hiding_configuration = super::hiding_whir::selected_hiding_whir_config(parameters)
+        .map_err(|_| CommonProofProverError::InvalidMask)?;
+    let private_material_byte_length = u64::try_from(
+        AggregateWideHidingMaterialShape::derive(&hiding_configuration)
+            .map_err(|_| CommonProofProverError::InvalidMask)?
+            .total_extension_element_count(),
+    )
+    .ok()
+    .and_then(|count| count.checked_mul(extension_element_byte_length))
+    .and_then(|byte_length| byte_length.checked_add(u64::try_from(ROW_PAD_SEED_BYTE_LENGTH).ok()?))
+    .ok_or(CommonProofProverError::CountOverflow)?;
+
+    derive_complete_generation_liveness(
+        construction_plan,
+        CompleteGenerationLivenessInput {
+            engine_control_byte_length,
+            source_provider,
+            maximum_replay_reader_byte_length,
+            auxiliary_materialization_byte_length,
+            quotient_preparation_byte_length,
+            aggregate_source_batch_byte_length,
+            aggregate_source_row_byte_length,
+            aggregate_opening_preparation_byte_length: aggregate_column_byte_length,
+            proof_accumulator_byte_length,
+            transcript_byte_length,
+            private_material_byte_length,
+            proof_transport_bridge_byte_length: u64::try_from(proof_transport_bridge_byte_length)
+                .map_err(|_| {
+                CommonProofProverError::CountOverflow
+            })?,
+        },
+    )
+    .map_err(|_| CommonProofProverError::ResidentMemoryLimitExceeded)
+}
+
 /// The checked relation-plan state shared by every family as it migrates to
 /// the sole row-code/WHIR construction. Same-secret is merely the first
 /// production caller; the state itself contains no family selector.
@@ -2140,7 +2672,8 @@ pub(in crate::bgv::proof_suite) struct RowCodeWhirGenerationStateMachine {
     active_phase_authenticated_columns: Option<Vec<AuthenticatedColumn>>,
     active_phase_polynomial_reader: Option<RowCodeWhirRelationPolynomialReader>,
     active_phase_polynomial_binding: Option<RowCodeWhirPhasePolynomialBinding>,
-    phase_row_witness: Vec<Goldilocks>,
+    phase_row_witness: Zeroizing<Vec<ProofBaseFieldElement>>,
+    active_phase_row_dft: Option<BoundedBaseCosetDft>,
     next_phase_row_index: usize,
     next_phase_logical_chunk_index: usize,
     phase_roots: [Option<ColumnDigest>; 3],
@@ -2165,7 +2698,6 @@ pub(in crate::bgv::proof_suite) struct RowCodeWhirGenerationStateMachine {
     exact_same_secret_aggregate_witness: Option<ExactSameSecretAggregateWitness>,
     exact_same_secret_opening_schedule: Option<RowCodeWhirOpeningSchedule>,
     next_bound_tree_ordinal: usize,
-    bound_tree_evaluated_columns: Vec<Zeroizing<Vec<ProofBaseFieldElement>>>,
     active_bound_tree_authentication_builder: Option<ActiveExactBoundTreeAuthenticationBuilder>,
     bound_tree_authentications: Vec<ExactBoundTreeAuthentication>,
     aggregate_challenger: Option<ExtensionFieldChallenger>,
@@ -2221,19 +2753,7 @@ impl RowCodeWhirGenerationStateMachine {
                     CommonProofProverError::InvalidInput,
                 )
             })?;
-        let aggregate_commitment_liveness = derive_aggregate_commitment_liveness(construction_plan)
-            .map_err(|_| {
-                CommonProofGenerationInitializationError::Prover(
-                    CommonProofProverError::InvalidInput,
-                )
-            })?;
-        if aggregate_commitment_liveness.maximum_algorithm_live_set_byte_length()
-            > MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
-        {
-            return Err(CommonProofGenerationInitializationError::Prover(
-                CommonProofProverError::InvalidInput,
-            ));
-        }
+        let retained_construction_plan = construction_plan.clone();
         let verified_vss_binding = transcript_prefix_authority.verified_vss_binding();
         if construction_plan.application_statement_schema_identifier
             != validated_relation_plan.application_statement_schema_identifier()
@@ -2303,7 +2823,8 @@ impl RowCodeWhirGenerationStateMachine {
             input.schedule_position,
             input.top_count,
         );
-        require_bounded_source_provider(input.source_polynomial_provider.as_ref())?;
+        let source_provider_accounting =
+            require_bounded_source_provider(input.source_polynomial_provider.as_ref())?;
         let source_cursor = CommonProofPreChallengeSourceCursor::new(
             &relation_plan_variant,
             source_request_context,
@@ -2327,10 +2848,33 @@ impl RowCodeWhirGenerationStateMachine {
                 &generation_storage_plan.external_memory_plan,
             )
             .map_err(CommonProofGenerationInitializationError::StoragePlan)?;
+        let complete_generation_liveness = derive_generation_liveness(
+            &retained_construction_plan,
+            &relation_plan_variant,
+            input.relation_context,
+            &input.relation_trees,
+            &bound_tree_entries,
+            &canonical_header_bytes,
+            &source_cursor,
+            &same_secret_source_manifest,
+            &reversed_column_bindings,
+            &generation_storage_plan,
+            source_provider_accounting,
+            input.maximum_proof_transport_chunk_byte_length,
+        )
+        .map_err(CommonProofGenerationInitializationError::Prover)?;
+        if complete_generation_liveness.phase_count() == 0
+            || complete_generation_liveness.maximum_live_set_byte_length()
+                > MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
+        {
+            return Err(CommonProofGenerationInitializationError::Prover(
+                CommonProofProverError::ResidentMemoryLimitExceeded,
+            ));
+        }
         let external_memory_executor =
             ProofExternalMemoryExecutor::new(generation_storage_plan.external_memory_plan);
         Ok(Self {
-            construction_plan: construction_plan.clone(),
+            construction_plan: retained_construction_plan,
             construction_plan_identity_hash,
             transcript_prefix_authority,
             authenticated_transcript_prefix: None,
@@ -2369,7 +2913,8 @@ impl RowCodeWhirGenerationStateMachine {
             active_phase_authenticated_columns: None,
             active_phase_polynomial_reader: None,
             active_phase_polynomial_binding: None,
-            phase_row_witness: Vec::new(),
+            phase_row_witness: Zeroizing::new(Vec::new()),
+            active_phase_row_dft: None,
             next_phase_row_index: 0,
             next_phase_logical_chunk_index: 0,
             phase_roots: [None; 3],
@@ -2394,7 +2939,6 @@ impl RowCodeWhirGenerationStateMachine {
             exact_same_secret_aggregate_witness: None,
             exact_same_secret_opening_schedule: None,
             next_bound_tree_ordinal: 0,
-            bound_tree_evaluated_columns: Vec::new(),
             active_bound_tree_authentication_builder: None,
             bound_tree_authentications: Vec::new(),
             aggregate_challenger: None,
@@ -2485,6 +3029,7 @@ impl RowCodeWhirGenerationStateMachine {
             || self.active_phase_authenticated_columns.is_some()
             || self.active_phase_polynomial_reader.is_some()
             || self.active_phase_polynomial_binding.is_some()
+            || self.active_phase_row_dft.is_some()
         {
             return Err(CommonProofProverError::InvalidInput);
         }
@@ -2648,6 +3193,7 @@ impl RowCodeWhirGenerationStateMachine {
             || self.active_aggregate_source_read.is_some()
             || self.active_phase_polynomial_reader.is_some()
             || self.active_phase_polynomial_binding.is_some()
+            || self.active_phase_row_dft.is_some()
             || self.phase_commitment_builder.is_some()
             || self.active_phase_commitment.is_some()
             || self.active_phase_materialization_purpose.is_some()
@@ -3153,9 +3699,13 @@ impl RowCodeWhirGenerationStateMachine {
                     column_position,
                     column_ordinal,
                 } => {
+                    let expected_column_request = self
+                        .active_bound_tree_authentication_builder
+                        .as_ref()
+                        .and_then(ActiveExactBoundTreeAuthenticationBuilder::next_column_request);
                     if self.phase != RowCodeWhirGenerationPhase::MaterializingBoundAuthentications
                         || bound_tree_ordinal != self.next_bound_tree_ordinal
-                        || column_position != self.bound_tree_evaluated_columns.len()
+                        || expected_column_request != Some((column_position, column_ordinal))
                     {
                         return Err(CommonProofGenerationError::Prover(
                             CommonProofProverError::InvalidTree,
@@ -3166,28 +3716,6 @@ impl RowCodeWhirGenerationStateMachine {
                             CommonProofProverError::InvalidColumn,
                         ));
                     };
-                    let evaluation_domain_size = self
-                        .construction_plan
-                        .bound_trees
-                        .get(bound_tree_ordinal)
-                        .and_then(|tree| usize::try_from(tree.evaluation_domain_size).ok())
-                        .ok_or(CommonProofGenerationError::Prover(
-                            CommonProofProverError::CountOverflow,
-                        ))?;
-                    let evaluation_domain = ProofEvaluationDomain::new(
-                        evaluation_domain_size,
-                        self.relation_context.evaluation_coset_offset,
-                    )
-                    .map_err(|_| {
-                        CommonProofGenerationError::Prover(CommonProofProverError::InvalidTree)
-                    })?;
-                    let evaluations = evaluation_domain
-                        .evaluate_base_polynomial(&coefficients)
-                        .map_err(|_| {
-                            CommonProofGenerationError::Prover(
-                                CommonProofProverError::InvalidColumn,
-                            )
-                        })?;
                     let is_bound_public_column = self
                         .relation_plan_variant
                         .ordered_columns()
@@ -3199,18 +3727,22 @@ impl RowCodeWhirGenerationStateMachine {
                         .is_some_and(|column| {
                             matches!(column.origin(), RelationColumnOrigin::BoundTree { .. })
                         });
-                    if evaluations.len() != evaluation_domain_size
-                        || !self
-                            .relation_polynomial_shapes
-                            .contains_key(&column_ordinal)
+                    if !self
+                        .relation_polynomial_shapes
+                        .contains_key(&column_ordinal)
                         || !is_bound_public_column
                     {
                         return Err(CommonProofGenerationError::Prover(
                             CommonProofProverError::InvalidColumn,
                         ));
                     }
-                    self.bound_tree_evaluated_columns
-                        .push(Zeroizing::new(evaluations));
+                    self.active_bound_tree_authentication_builder
+                        .as_mut()
+                        .ok_or(CommonProofGenerationError::Prover(
+                            CommonProofProverError::InvalidTree,
+                        ))?
+                        .begin_column(column_position, column_ordinal, coefficients)
+                        .map_err(CommonProofGenerationError::Prover)?;
                 }
             }
             return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
@@ -3697,6 +4229,7 @@ impl RowCodeWhirGenerationStateMachine {
                     || self.active_phase_commitment.is_some()
                     || self.active_phase_polynomial_reader.is_some()
                     || self.active_phase_polynomial_binding.is_some()
+                    || self.active_phase_row_dft.is_some()
                 {
                     return Err(CommonProofGenerationError::Prover(
                         CommonProofProverError::InvalidInput,
@@ -4036,7 +4569,9 @@ impl RowCodeWhirGenerationStateMachine {
                 Ok(CommonProofGenerationPoll::ArithmeticStepCompleted)
             }
             RowCodeWhirGenerationPhase::CommittingQuotientPhase => {
-                if self.phase_commitment_builder.is_none() && self.active_phase_commitment.is_none()
+                if self.phase_commitment_builder.is_none()
+                    && self.active_phase_commitment.is_none()
+                    && self.active_phase_row_dft.is_none()
                 {
                     self.prepare_quotient_phase_materialization(
                         RowCodeWhirPhaseMaterializationPurpose::InitialCommitment,
@@ -4207,7 +4742,6 @@ impl RowCodeWhirGenerationStateMachine {
                     || self.aggregate_wide_pad_commitment.is_some()
                     || self.exact_same_secret_opening_schedule.is_some()
                     || self.next_bound_tree_ordinal != 0
-                    || !self.bound_tree_evaluated_columns.is_empty()
                     || self.active_bound_tree_authentication_builder.is_some()
                     || !self.bound_tree_authentications.is_empty()
                     || self.aggregate_proof_generation.is_some()
@@ -4545,6 +5079,25 @@ impl RowCodeWhirGenerationStateMachine {
             }
             RowCodeWhirGenerationPhase::MaterializingBoundAuthentications => {
                 if let Some(builder) = self.active_bound_tree_authentication_builder.as_mut() {
+                    if let Some((column_position, column_ordinal)) = builder.next_column_request() {
+                        if self.active_replay_polynomial_reader.is_some() {
+                            return Err(CommonProofGenerationError::Prover(
+                                CommonProofProverError::InvalidInput,
+                            ));
+                        }
+                        self.active_replay_polynomial_reader =
+                            Some(ActiveRowCodeWhirReplayPolynomialReader {
+                                reader: self
+                                    .relation_polynomial_reader(column_ordinal, coins)
+                                    .map_err(map_private_coin_error)?,
+                                continuation: RowCodeWhirReplayReadContinuation::BoundTreeColumn {
+                                    bound_tree_ordinal: self.next_bound_tree_ordinal,
+                                    column_position,
+                                    column_ordinal,
+                                },
+                            });
+                        return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
+                    }
                     let complete = builder
                         .poll(
                             self.source_polynomial_provider.as_deref_mut().ok_or(
@@ -4576,9 +5129,7 @@ impl RowCodeWhirGenerationStateMachine {
                 }
 
                 if self.next_bound_tree_ordinal == self.bound_tree_entries.len() {
-                    if !self.bound_tree_evaluated_columns.is_empty()
-                        || self.bound_tree_authentications.len() != self.bound_tree_entries.len()
-                    {
+                    if self.bound_tree_authentications.len() != self.bound_tree_entries.len() {
                         return Err(CommonProofGenerationError::Prover(
                             CommonProofProverError::InvalidTree,
                         ));
@@ -4626,29 +5177,10 @@ impl RowCodeWhirGenerationStateMachine {
                 })?;
                 if bound_tree_row_width == 0
                     || ordered_column_ordinals.len() != bound_tree_row_width
-                    || self.bound_tree_evaluated_columns.len() > bound_tree_row_width
                 {
                     return Err(CommonProofGenerationError::Prover(
                         CommonProofProverError::InvalidTree,
                     ));
-                }
-                if self.bound_tree_evaluated_columns.len() < bound_tree_row_width {
-                    let column_position = self.bound_tree_evaluated_columns.len();
-                    let column_ordinal = *ordered_column_ordinals.get(column_position).ok_or(
-                        CommonProofGenerationError::Prover(CommonProofProverError::InvalidColumn),
-                    )?;
-                    self.active_replay_polynomial_reader =
-                        Some(ActiveRowCodeWhirReplayPolynomialReader {
-                            reader: self
-                                .relation_polynomial_reader(column_ordinal, coins)
-                                .map_err(map_private_coin_error)?,
-                            continuation: RowCodeWhirReplayReadContinuation::BoundTreeColumn {
-                                bound_tree_ordinal: self.next_bound_tree_ordinal,
-                                column_position,
-                                column_ordinal,
-                            },
-                        });
-                    return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
                 }
                 let query_indices = self
                     .exact_same_secret_opening_schedule
@@ -4681,12 +5213,20 @@ impl RowCodeWhirGenerationStateMachine {
                     ));
                 }
                 let bound_leaf_count = planned_bound_tree.leaf_count;
+                let evaluation_domain = ProofEvaluationDomain::new(
+                    evaluation_domain_size,
+                    self.relation_context.evaluation_coset_offset,
+                )
+                .map_err(|_| {
+                    CommonProofGenerationError::Prover(CommonProofProverError::InvalidTree)
+                })?;
                 self.active_bound_tree_authentication_builder = Some(
                     ActiveExactBoundTreeAuthenticationBuilder::new(
                         entry,
                         bound_leaf_count,
                         &query_indices,
-                        core::mem::take(&mut self.bound_tree_evaluated_columns),
+                        evaluation_domain,
+                        ordered_column_ordinals,
                     )
                     .map_err(CommonProofGenerationError::Prover)?,
                 );
@@ -5032,7 +5572,6 @@ impl RowCodeWhirGenerationStateMachine {
         self.aggregate_source_writer = None;
         self.aggregate_source_batch_column_offset = 0;
         self.active_bound_tree_authentication_builder = None;
-        self.bound_tree_evaluated_columns.clear();
         self.bound_tree_authentications.clear();
         self.row_pad_seeds = None;
         self.phase_commitment_builder = None;
@@ -5041,6 +5580,7 @@ impl RowCodeWhirGenerationStateMachine {
         self.active_phase_authenticated_columns = None;
         self.active_phase_polynomial_reader = None;
         self.active_phase_polynomial_binding = None;
+        self.active_phase_row_dft = None;
         self.authenticated_transcript_prefix = None;
         self.row_code_whir_transcript = None;
         self.opening_points.clear();
@@ -5063,8 +5603,8 @@ impl RowCodeWhirGenerationStateMachine {
         self.aggregate_wide_opening_proof = None;
         self.exact_proof_encoder = None;
         self.canonical_output_byte_length = None;
-        self.phase_row_witness.fill(Goldilocks::ZERO);
-        self.phase_row_witness = Vec::new();
+        self.phase_row_witness.fill(ProofBaseFieldElement::ZERO);
+        self.phase_row_witness = Zeroizing::new(Vec::new());
         self.phase_roots = [None; 3];
         self.phase_authenticated_columns = std::array::from_fn(|_| None);
         self.phase_opening_frontiers = std::array::from_fn(|_| None);
@@ -5725,6 +6265,7 @@ impl RowCodeWhirGenerationStateMachine {
             || self.active_phase_authenticated_columns.is_some()
             || self.active_phase_polynomial_reader.is_some()
             || self.active_phase_polynomial_binding.is_some()
+            || self.active_phase_row_dft.is_some()
             || !self.phase_row_witness.is_empty()
             || self.next_phase_row_index != 0
             || self.next_phase_logical_chunk_index != 0
@@ -5802,15 +6343,8 @@ impl RowCodeWhirGenerationStateMachine {
             .and_then(|byte_length| {
                 phase
                     .geometry
-                    .witness_values_per_row
-                    .checked_mul(size_of::<Goldilocks>())
-                    .and_then(|witness_byte_length| byte_length.checked_add(witness_byte_length))
-            })
-            .and_then(|byte_length| {
-                phase
-                    .geometry
                     .encoded_column_count
-                    .checked_mul(size_of::<Goldilocks>())
+                    .checked_mul(size_of::<ProofBaseFieldElement>())
                     .and_then(|encoded_row_byte_length| {
                         byte_length.checked_add(encoded_row_byte_length)
                     })
@@ -5831,7 +6365,10 @@ impl RowCodeWhirGenerationStateMachine {
                 )?)
             }
         };
-        self.phase_row_witness = vec![Goldilocks::ZERO; phase.geometry.witness_values_per_row];
+        self.phase_row_witness = allocate_phase_row_witness(
+            phase.geometry.witness_values_per_row,
+            phase.geometry.encoded_column_count,
+        )?;
         self.phase_commitment_builder = Some(builder);
         self.active_phase_commitment = Some(phase_role);
         self.active_phase_materialization_purpose = Some(purpose);
@@ -5897,7 +6434,7 @@ impl RowCodeWhirGenerationStateMachine {
             .iter_mut()
             .zip(coefficients[source_start..source_end].iter())
         {
-            *destination_value = Goldilocks::new(coefficient.canonical());
+            *destination_value = *coefficient;
         }
         Ok(())
     }
@@ -5977,7 +6514,7 @@ impl RowCodeWhirGenerationStateMachine {
             } else {
                 self.next_phase_row_index = 0;
                 self.next_phase_logical_chunk_index = 0;
-                self.phase_row_witness.fill(Goldilocks::ZERO);
+                self.phase_row_witness.fill(ProofBaseFieldElement::ZERO);
             }
             return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
         }
@@ -6011,9 +6548,10 @@ impl RowCodeWhirGenerationStateMachine {
             return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
         }
 
-        let row_high_half_source = match self.construction_plan.proof_privacy_mode {
-            ProofPrivacyMode::SecretBearing => RowCodeHighHalfSource::PrivateMaskSeed(
-                self.row_pad_seeds
+        let private_row_pad_seed = match self.construction_plan.proof_privacy_mode {
+            ProofPrivacyMode::SecretBearing => Some(
+                *self
+                    .row_pad_seeds
                     .as_ref()
                     .and_then(|seeds| seeds.get(row_code_whir_phase_index(phase_role)))
                     .ok_or(CommonProofProverError::InvalidInput)?,
@@ -6022,44 +6560,15 @@ impl RowCodeWhirGenerationStateMachine {
                 if self.row_pad_seeds.is_some() {
                     return Err(CommonProofProverError::InvalidInput.into());
                 }
-                RowCodeHighHalfSource::CanonicalPublicZeros
+                None
             }
         };
-        let mut encoded_row = encode_row(
-            phase.geometry,
-            self.next_phase_row_index,
-            &self.phase_row_witness,
-            row_high_half_source,
-        )
-        .map_err(|_| CommonProofProverError::InvalidColumn)?;
-        let active_column_range = self
-            .phase_commitment_builder
-            .as_ref()
-            .and_then(StripedColumnCommitmentBuilder::active_column_range)
-            .ok_or(CommonProofProverError::InvalidInput)?;
-        self.capture_active_phase_authenticated_row(
-            self.next_phase_row_index,
-            active_column_range.clone(),
-            &encoded_row,
-        )?;
-        self.phase_commitment_builder
-            .as_mut()
-            .ok_or(CommonProofProverError::InvalidInput)?
-            .absorb_active_stripe_row(
-                self.next_phase_row_index,
-                encoded_row
-                    .get(active_column_range)
-                    .ok_or(CommonProofProverError::InvalidColumn)?,
-            )
-            .map_err(|_| CommonProofProverError::InvalidTree)?;
-        encoded_row.fill(Goldilocks::ZERO);
-        self.phase_row_witness.fill(Goldilocks::ZERO);
-        self.next_phase_row_index = self
-            .next_phase_row_index
-            .checked_add(1)
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        self.next_phase_logical_chunk_index = 0;
-        Ok(CommonProofGenerationPoll::ArithmeticStepCompleted)
+        let row_high_half_source = private_row_pad_seed.as_ref().map_or(
+            RowCodeHighHalfSource::CanonicalPublicZeros,
+            RowCodeHighHalfSource::PrivateMaskSeed,
+        );
+        self.poll_active_phase_row_dft(phase_role, phase.geometry, row_high_half_source)
+            .map_err(Into::into)
     }
 
     fn prepare_quotient_phase_materialization(
@@ -6072,6 +6581,7 @@ impl RowCodeWhirGenerationStateMachine {
             || self.active_phase_authenticated_columns.is_some()
             || self.active_phase_polynomial_reader.is_some()
             || self.active_phase_polynomial_binding.is_some()
+            || self.active_phase_row_dft.is_some()
             || !self.phase_row_witness.is_empty()
             || self.next_phase_row_index != 0
             || self.next_phase_logical_chunk_index != 0
@@ -6146,15 +6656,8 @@ impl RowCodeWhirGenerationStateMachine {
             .and_then(|byte_length| {
                 phase
                     .geometry
-                    .witness_values_per_row
-                    .checked_mul(size_of::<Goldilocks>())
-                    .and_then(|witness_byte_length| byte_length.checked_add(witness_byte_length))
-            })
-            .and_then(|byte_length| {
-                phase
-                    .geometry
                     .encoded_column_count
-                    .checked_mul(size_of::<Goldilocks>())
+                    .checked_mul(size_of::<ProofBaseFieldElement>())
                     .and_then(|encoded_row_byte_length| {
                         byte_length.checked_add(encoded_row_byte_length)
                     })
@@ -6175,7 +6678,10 @@ impl RowCodeWhirGenerationStateMachine {
                 )?)
             }
         };
-        self.phase_row_witness = vec![Goldilocks::ZERO; phase.geometry.witness_values_per_row];
+        self.phase_row_witness = allocate_phase_row_witness(
+            phase.geometry.witness_values_per_row,
+            phase.geometry.encoded_column_count,
+        )?;
         self.phase_commitment_builder = Some(builder);
         self.active_phase_commitment = Some(RowCodeWhirPhase::Quotient);
         self.active_phase_materialization_purpose = Some(purpose);
@@ -6245,7 +6751,7 @@ impl RowCodeWhirGenerationStateMachine {
                 .get(extension_coordinate_index)
                 .copied()
                 .ok_or(CommonProofProverError::InvalidColumn)?;
-            *destination_value = Goldilocks::new(coordinate);
+            *destination_value = ProofBaseFieldElement::from_reduced(u128::from(coordinate));
         }
         Ok(())
     }
@@ -6285,7 +6791,7 @@ impl RowCodeWhirGenerationStateMachine {
             } else {
                 self.next_phase_row_index = 0;
                 self.next_phase_logical_chunk_index = 0;
-                self.phase_row_witness.fill(Goldilocks::ZERO);
+                self.phase_row_witness.fill(ProofBaseFieldElement::ZERO);
             }
             return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
         }
@@ -6326,9 +6832,10 @@ impl RowCodeWhirGenerationStateMachine {
             return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
         }
 
-        let row_high_half_source = match self.construction_plan.proof_privacy_mode {
-            ProofPrivacyMode::SecretBearing => RowCodeHighHalfSource::PrivateMaskSeed(
-                self.row_pad_seeds
+        let private_row_pad_seed = match self.construction_plan.proof_privacy_mode {
+            ProofPrivacyMode::SecretBearing => Some(
+                *self
+                    .row_pad_seeds
                     .as_ref()
                     .and_then(|seeds| {
                         seeds.get(row_code_whir_phase_index(RowCodeWhirPhase::Quotient))
@@ -6339,16 +6846,82 @@ impl RowCodeWhirGenerationStateMachine {
                 if self.row_pad_seeds.is_some() {
                     return Err(CommonProofProverError::InvalidInput);
                 }
-                RowCodeHighHalfSource::CanonicalPublicZeros
+                None
             }
         };
-        let mut encoded_row = encode_row(
+        let row_high_half_source = private_row_pad_seed.as_ref().map_or(
+            RowCodeHighHalfSource::CanonicalPublicZeros,
+            RowCodeHighHalfSource::PrivateMaskSeed,
+        );
+        self.poll_active_phase_row_dft(
+            RowCodeWhirPhase::Quotient,
             phase.geometry,
-            self.next_phase_row_index,
-            &self.phase_row_witness,
             row_high_half_source,
         )
-        .map_err(|_| CommonProofProverError::InvalidColumn)?;
+    }
+
+    /// Advances one phase row through the allocation-stable coset DFT and
+    /// streams only the active encoded-column stripe into the commitment.
+    ///
+    /// The witness, padded coefficients, and evaluations reuse one owned
+    /// domain-capacity allocation. No cached twiddle table or second encoded
+    /// row overlaps the stripe hasher.
+    fn poll_active_phase_row_dft(
+        &mut self,
+        phase_role: RowCodeWhirPhase,
+        geometry: RowEncodingGeometry,
+        row_high_half_source: RowCodeHighHalfSource<'_>,
+    ) -> Result<CommonProofGenerationPoll, CommonProofProverError> {
+        if self.active_phase_commitment != Some(phase_role)
+            || self.next_phase_logical_chunk_index
+                != self
+                    .construction_plan
+                    .parameters
+                    .logical_polynomials_per_physical_row
+        {
+            return Err(CommonProofProverError::InvalidInput);
+        }
+        if self.active_phase_row_dft.is_none() {
+            if self.phase_row_witness.len() != geometry.witness_values_per_row
+                || self.phase_row_witness.capacity() < geometry.encoded_column_count
+            {
+                return Err(CommonProofProverError::InvalidColumn);
+            }
+            let witness =
+                core::mem::replace(&mut self.phase_row_witness, Zeroizing::new(Vec::new()));
+            let coefficients = padded_base_row_coefficients(
+                geometry,
+                self.next_phase_row_index,
+                witness,
+                row_high_half_source,
+            )
+            .map_err(|_| CommonProofProverError::InvalidColumn)?;
+            let evaluation_domain = ProofEvaluationDomain::new(
+                geometry.encoded_column_count,
+                self.relation_context.evaluation_coset_offset,
+            )
+            .map_err(|_| CommonProofProverError::InvalidColumn)?;
+            self.active_phase_row_dft = Some(
+                BoundedBaseCosetDft::new(coefficients, evaluation_domain)
+                    .map_err(|_| CommonProofProverError::InvalidColumn)?,
+            );
+            return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
+        }
+        if !self
+            .active_phase_row_dft
+            .as_mut()
+            .ok_or(CommonProofProverError::InvalidInput)?
+            .poll()
+            .map_err(|_| CommonProofProverError::InvalidColumn)?
+        {
+            return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
+        }
+        let mut encoded_row = self
+            .active_phase_row_dft
+            .take()
+            .ok_or(CommonProofProverError::InvalidInput)?
+            .into_values()
+            .map_err(|_| CommonProofProverError::InvalidColumn)?;
         let active_column_range = self
             .phase_commitment_builder
             .as_ref()
@@ -6362,15 +6935,16 @@ impl RowCodeWhirGenerationStateMachine {
         self.phase_commitment_builder
             .as_mut()
             .ok_or(CommonProofProverError::InvalidInput)?
-            .absorb_active_stripe_row(
+            .absorb_active_stripe_base_row(
                 self.next_phase_row_index,
                 encoded_row
                     .get(active_column_range)
                     .ok_or(CommonProofProverError::InvalidColumn)?,
             )
             .map_err(|_| CommonProofProverError::InvalidTree)?;
-        encoded_row.fill(Goldilocks::ZERO);
-        self.phase_row_witness.fill(Goldilocks::ZERO);
+        encoded_row.fill(ProofBaseFieldElement::ZERO);
+        encoded_row.truncate(geometry.witness_values_per_row);
+        self.phase_row_witness = encoded_row;
         self.next_phase_row_index = self
             .next_phase_row_index
             .checked_add(1)
@@ -6423,7 +6997,7 @@ impl RowCodeWhirGenerationStateMachine {
         &mut self,
         row_index: usize,
         active_column_range: core::ops::Range<usize>,
-        encoded_row: &[Goldilocks],
+        encoded_row: &[ProofBaseFieldElement],
     ) -> Result<(), CommonProofProverError> {
         let Some(authenticated_columns) = self.active_phase_authenticated_columns.as_mut() else {
             if self.active_phase_materialization_purpose
@@ -6455,6 +7029,7 @@ impl RowCodeWhirGenerationStateMachine {
             let value = encoded_row
                 .get(column_index)
                 .copied()
+                .map(|value| Goldilocks::new(value.canonical()))
                 .ok_or(CommonProofProverError::InvalidColumn)?;
             let authenticated_column = authenticated_columns
                 .get_mut(active_position)
@@ -6479,6 +7054,7 @@ impl RowCodeWhirGenerationStateMachine {
         if self.active_phase_commitment != Some(phase_role)
             || self.active_phase_polynomial_reader.is_some()
             || self.active_phase_polynomial_binding.is_some()
+            || self.active_phase_row_dft.is_some()
             || self.next_phase_row_index != expected_row_count
             || expected_row_count == 0
         {
@@ -6533,7 +7109,7 @@ impl RowCodeWhirGenerationStateMachine {
             }
         }
         self.active_phase_commitment = None;
-        self.phase_row_witness = Vec::new();
+        self.phase_row_witness = Zeroizing::new(Vec::new());
         self.next_phase_row_index = 0;
         self.next_phase_logical_chunk_index = 0;
         Ok((purpose, root))
@@ -6547,6 +7123,7 @@ impl RowCodeWhirGenerationStateMachine {
             || self.active_phase_commitment.is_some()
             || self.active_phase_materialization_purpose.is_some()
             || self.active_phase_authenticated_columns.is_some()
+            || self.active_phase_row_dft.is_some()
         {
             return Err(CommonProofProverError::InvalidInput);
         }
@@ -6612,6 +7189,24 @@ fn allocate_authenticated_phase_columns(
         authenticated_columns.push(AuthenticatedColumn { values });
     }
     Ok(authenticated_columns)
+}
+
+fn allocate_phase_row_witness(
+    witness_value_count: usize,
+    encoded_column_count: usize,
+) -> Result<Zeroizing<Vec<ProofBaseFieldElement>>, CommonProofProverError> {
+    if witness_value_count == 0
+        || encoded_column_count < witness_value_count
+        || !encoded_column_count.is_power_of_two()
+    {
+        return Err(CommonProofProverError::InvalidColumn);
+    }
+    let mut witness = Vec::new();
+    witness
+        .try_reserve_exact(encoded_column_count)
+        .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
+    witness.resize(witness_value_count, ProofBaseFieldElement::ZERO);
+    Ok(Zeroizing::new(witness))
 }
 
 fn replay_polynomial_target_for_opening_claim(
@@ -6749,7 +7344,7 @@ fn absorb_extension_values_checkpoint_part(
 
 fn require_bounded_source_provider(
     source_polynomial_provider: &dyn CommonProofSourcePolynomialProvider,
-) -> Result<(), CommonProofGenerationInitializationError> {
+) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofGenerationInitializationError> {
     let accounting = source_polynomial_provider
         .memory_accounting()
         .map_err(CommonProofGenerationInitializationError::Prover)?;
@@ -6770,7 +7365,7 @@ fn require_bounded_source_provider(
             CommonProofProverError::ResidentMemoryLimitExceeded,
         ));
     }
-    Ok(())
+    Ok(accounting)
 }
 
 fn map_private_coin_error<StorageError, CoinError, SinkError>(
@@ -6888,6 +7483,7 @@ fn aggregate_commitment_digest_bytes(
 
 #[cfg(test)]
 mod tests {
+    use super::super::commitment_liveness::GenerationPhaseLivenessKind;
     use super::*;
     use crate::{
         bgv::proof_suite::{
@@ -6902,6 +7498,7 @@ mod tests {
                 NOMINAL_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
             },
             relation_plan::same_secret_source_provider_memory_accounting,
+            selected_accounting::resource_accounting::selected_relation_tree_inputs,
             selected_committed_material_relation_plan_input, selected_relation_plan_check_context,
             selected_same_secret_relation_plan_input,
         },
@@ -6911,6 +7508,208 @@ mod tests {
             ProofApplicationSlotCeilings,
         },
     };
+
+    struct BoundTreeTestSourceProvider;
+
+    impl CommonProofSourcePolynomialProvider for BoundTreeTestSourceProvider {
+        fn memory_accounting(
+            &self,
+        ) -> Result<
+            crate::bgv::proof_suite::prover::CommonProofSourceProviderMemoryAccounting,
+            CommonProofProverError,
+        > {
+            Ok(
+                crate::bgv::proof_suite::prover::CommonProofSourceProviderMemoryAccounting::new(
+                    1, 1, 1, 1,
+                ),
+            )
+        }
+
+        fn poll_source_polynomial(
+            &mut self,
+            _request: crate::bgv::proof_suite::prover::CommonProofSourcePolynomialRequest<'_>,
+        ) -> Result<CommonProofSourcePolynomialProviderPoll, CommonProofProverError> {
+            Err(CommonProofProverError::InvalidColumn)
+        }
+
+        fn poll_replayed_source_polynomial(
+            &mut self,
+            _request: crate::bgv::proof_suite::prover::CommonProofSourcePolynomialRequest<'_>,
+        ) -> Result<CommonProofSourcePolynomialProviderPoll, CommonProofProverError> {
+            Err(CommonProofProverError::InvalidColumn)
+        }
+
+        fn finish(&mut self) -> Result<(), CommonProofProverError> {
+            Ok(())
+        }
+    }
+
+    fn selected_setup_bound_tree_entry() -> ProofTreeCatalogEntry {
+        let schema_identifier =
+            ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER;
+        let relation_context = selected_relation_plan_check_context(schema_identifier)
+            .expect("the selected same-secret context exists");
+        let compiled_plan = compile_same_secret_relation_plan(
+            &selected_same_secret_relation_plan_input()
+                .expect("the selected same-secret input derives"),
+            &relation_context,
+        )
+        .expect("the selected same-secret relation compiles");
+        let variant = compiled_plan
+            .variants()
+            .first()
+            .expect("the selected same-secret relation has one variant");
+        let relation_trees =
+            selected_relation_tree_inputs(variant).expect("the selected relation trees derive");
+        build_relation_bound_public_tree_catalog_entries(&relation_trees)
+            .expect("the selected bound-tree catalog derives")
+            .into_iter()
+            .find(ProofTreeCatalogEntry::uses_setup_polynomial_construction)
+            .expect("the selected same-secret relation has setup-polynomial bound trees")
+    }
+
+    fn drive_test_bound_tree_builder(
+        builder: &mut ActiveExactBoundTreeAuthenticationBuilder,
+        coefficient_columns: &[Vec<ProofBaseFieldElement>],
+    ) -> usize {
+        let request_context = CommonProofSourcePolynomialRequestContext::new(
+            FOUNDATION_PROFILE.protocol_version,
+            [0x11; HASH_BYTE_LENGTH],
+            ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+            [0x22; HASH_BYTE_LENGTH],
+            [0x33; HASH_BYTE_LENGTH],
+            [0x44; HASH_BYTE_LENGTH],
+            None,
+            None,
+        );
+        let mut source_provider = BoundTreeTestSourceProvider;
+        let mut column_request_count = 0_usize;
+        loop {
+            if let Some((column_position, column_ordinal)) = builder.next_column_request() {
+                builder
+                    .begin_column(
+                        column_position,
+                        column_ordinal,
+                        Zeroizing::new(coefficient_columns[column_position].clone()),
+                    )
+                    .expect("the bounded test column starts");
+                column_request_count += 1;
+                continue;
+            }
+            if builder
+                .poll(&mut source_provider, request_context)
+                .expect("the bounded test tree advances")
+            {
+                return column_request_count;
+            }
+        }
+    }
+
+    #[test]
+    fn bound_tree_stripes_match_one_stripe_and_recompute_each_column() {
+        let entry = selected_setup_bound_tree_entry();
+        let row_width = entry
+            .materialized_row_width()
+            .expect("the selected setup row width derives");
+        let leaf_count = 16;
+        let evaluation_domain =
+            ProofEvaluationDomain::new(leaf_count * 2, 7).expect("the test coset derives");
+        let ordered_column_ordinals = (0..row_width)
+            .map(|column_position| {
+                u32::try_from(column_position).expect("the test column position fits u32")
+            })
+            .collect::<Vec<_>>();
+        let coefficient_columns = (0..row_width)
+            .map(|column_position| {
+                (0..9)
+                    .map(|coefficient_index| {
+                        ProofBaseFieldElement::from_canonical(
+                            u64::try_from(
+                                (column_position + 1) * 1_003 + coefficient_index * 37 + 5,
+                            )
+                            .expect("the test coefficient fits u64"),
+                        )
+                        .expect("the test coefficient is canonical")
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let query_indices = [0, 5, 15];
+        let mut one_stripe =
+            ActiveExactBoundTreeAuthenticationBuilder::new_with_maximum_stripe_leaf_count(
+                entry.clone(),
+                leaf_count,
+                &query_indices,
+                evaluation_domain,
+                &ordered_column_ordinals,
+                leaf_count,
+            )
+            .expect("the one-stripe reference initializes");
+        let mut four_stripes =
+            ActiveExactBoundTreeAuthenticationBuilder::new_with_maximum_stripe_leaf_count(
+                entry,
+                leaf_count,
+                &query_indices,
+                evaluation_domain,
+                &ordered_column_ordinals,
+                4,
+            )
+            .expect("the four-stripe builder initializes");
+
+        assert_eq!(
+            drive_test_bound_tree_builder(&mut one_stripe, &coefficient_columns),
+            row_width,
+        );
+        assert_eq!(
+            drive_test_bound_tree_builder(&mut four_stripes, &coefficient_columns),
+            row_width * 4,
+        );
+        assert_eq!(four_stripes.recomputed_root, one_stripe.recomputed_root);
+        assert_eq!(four_stripes.opened_leaves, one_stripe.opened_leaves);
+        assert_eq!(four_stripes.frontier_digests, one_stripe.frontier_digests);
+        assert_eq!(four_stripes.next_query_position, query_indices.len());
+        assert!(four_stripes.evaluated_column_stripes.is_empty());
+        assert!(four_stripes.active_column_dft.is_none());
+    }
+
+    #[test]
+    fn bound_tree_stripes_refuse_noncanonical_geometry_and_query_order() {
+        let entry = selected_setup_bound_tree_entry();
+        let row_width = entry
+            .materialized_row_width()
+            .expect("the selected setup row width derives");
+        let ordered_column_ordinals = (0..row_width)
+            .map(|column_position| {
+                u32::try_from(column_position).expect("the test column position fits u32")
+            })
+            .collect::<Vec<_>>();
+        let evaluation_domain = ProofEvaluationDomain::new(32, 7).expect("the test coset derives");
+
+        for maximum_stripe_leaf_count in [0, 3] {
+            assert!(
+                ActiveExactBoundTreeAuthenticationBuilder::new_with_maximum_stripe_leaf_count(
+                    entry.clone(),
+                    16,
+                    &[1, 7],
+                    evaluation_domain,
+                    &ordered_column_ordinals,
+                    maximum_stripe_leaf_count,
+                )
+                .is_err(),
+            );
+        }
+        assert!(
+            ActiveExactBoundTreeAuthenticationBuilder::new_with_maximum_stripe_leaf_count(
+                entry,
+                16,
+                &[7, 7],
+                evaluation_domain,
+                &ordered_column_ordinals,
+                4,
+            )
+            .is_err(),
+        );
+    }
 
     #[test]
     fn selected_vss_generation_manifest_and_compact_row_geometry_are_compatible() {
@@ -7122,7 +7921,7 @@ mod tests {
     }
 
     #[test]
-    fn selected_same_secret_source_provider_memory_is_derived_from_the_production_layout() {
+    fn selected_same_secret_complete_generation_liveness_is_derived_from_the_production_layout() {
         let schema_identifier =
             ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER;
         let relation_context = selected_relation_plan_check_context(schema_identifier)
@@ -7177,8 +7976,10 @@ mod tests {
         assert_eq!(canonical_statement.len(), 884);
         assert_eq!(relation_variant_payload_byte_length, 4_986_144);
         assert_eq!(relation_context_payload_byte_length, 736);
-        assert_eq!(construction_identity_byte_length, 1_046_061);
-        assert_eq!(size_of::<RowCodeWhirGenerationStateMachine>(), 19_456);
+        // Two explicit u16 streaming-leaf widths are now part of the
+        // construction identity.
+        assert_eq!(construction_identity_byte_length, 1_046_065);
+        assert_eq!(size_of::<RowCodeWhirGenerationStateMachine>(), 19_872);
         assert_eq!(size_of::<super::super::RowCodeWhirChallenger>(), 528);
         assert_eq!(
             accounting.loading_persistent_resident_byte_length(),
@@ -7204,6 +8005,263 @@ mod tests {
                     bytes.checked_add(accounting.maximum_returned_source_polynomial_byte_length())
                 }),
             Some(14_885_134),
+        );
+
+        let validated_variant = validated
+            .compiled_plan()
+            .variants()
+            .first()
+            .expect("the validated same-secret relation has one variant");
+        let relation_trees = selected_relation_tree_inputs(validated_variant)
+            .expect("the selected relation trees derive");
+        let bound_tree_entries = build_relation_bound_public_tree_catalog_entries(&relation_trees)
+            .expect("the selected bound-tree entries derive");
+        let canonical_header_bytes = canonical_proof_object_header_bytes(&canonical_statement)
+            .expect("the canonical proof header derives");
+        let relation_plan_hash = validated
+            .compiled_plan()
+            .canonical_hash()
+            .expect("the selected relation plan hashes");
+        let relation_plan_variant_hash = validated_variant
+            .canonical_hash()
+            .expect("the selected relation variant hashes");
+        let source_request_context = CommonProofSourcePolynomialRequestContext::new(
+            FOUNDATION_PROFILE.protocol_version,
+            [0x11; HASH_BYTE_LENGTH],
+            schema_identifier,
+            [0x22; HASH_BYTE_LENGTH],
+            relation_plan_hash,
+            relation_plan_variant_hash,
+            validated_variant.schedule_position(),
+            validated_variant.top_count(),
+        );
+        let source_cursor =
+            CommonProofPreChallengeSourceCursor::new(validated_variant, source_request_context)
+                .expect("the selected source cursor derives");
+        let reversed_column_bindings = source_cursor.reversed_column_bindings().to_vec();
+        let source_manifest = checked_same_secret_source_manifest(
+            &construction_plan,
+            validated_variant,
+            &relation_context,
+            &reversed_column_bindings,
+        )
+        .expect("the selected source manifest derives");
+        let storage_plan = RowCodeWhirGenerationStoragePlan::new(
+            &construction_plan,
+            validated_variant,
+            &relation_context,
+            &reversed_column_bindings,
+        )
+        .expect("the selected storage plan derives");
+        let quotient_evaluation_domain = construction_plan
+            .quotient_computation_evaluation_domain(&relation_context)
+            .expect("the quotient evaluation domain derives");
+        let quotient_liveness = common_proof_quotient_materialization_liveness(
+            validated_variant,
+            &relation_context,
+            quotient_evaluation_domain,
+        )
+        .expect("the quotient liveness derives");
+        let quotient_builder_byte_length = quotient_liveness
+            .quotient_evaluation_byte_length()
+            .checked_add(quotient_liveness.maximum_block_value_byte_length())
+            .and_then(|total| total.checked_add(quotient_liveness.catalog_resident_byte_length()))
+            .and_then(|total| {
+                u64::try_from(validated_variant.constraint_count())
+                    .ok()
+                    .and_then(|count| {
+                        count.checked_mul(
+                            u64::try_from(size_of::<ProofChallengeExtensionElement>()).ok()?,
+                        )
+                    })
+                    .and_then(|byte_length| total.checked_add(byte_length))
+            })
+            .expect("the quotient builder accounting adds");
+        assert_eq!(
+            quotient_liveness.maximum_materialization_byte_length(),
+            quotient_builder_byte_length
+                .max(quotient_liveness.maximum_component_transition_byte_length()),
+        );
+        let complete_liveness = derive_generation_liveness(
+            &construction_plan,
+            validated_variant,
+            &relation_context,
+            &relation_trees,
+            &bound_tree_entries,
+            &canonical_header_bytes,
+            &source_cursor,
+            &source_manifest,
+            &reversed_column_bindings,
+            &storage_plan,
+            accounting,
+            MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
+        )
+        .expect("the complete selected live set derives");
+        let expected_rows = [
+            (
+                GenerationPhaseLivenessKind::LoadingAuthenticatedSources,
+                131_072,
+                0,
+                0,
+                0,
+                65_179_680,
+            ),
+            (
+                GenerationPhaseLivenessKind::SourceReplay,
+                84_934_656,
+                0,
+                0,
+                0,
+                158_172_387,
+            ),
+            (
+                GenerationPhaseLivenessKind::RelationMaterialization,
+                84_934_656,
+                0,
+                0,
+                1_185_104,
+                159_505_629,
+            ),
+            (
+                GenerationPhaseLivenessKind::PhaseCommitment,
+                0,
+                134_217_728,
+                210_195_392,
+                0,
+                450_085_659,
+            ),
+            (
+                GenerationPhaseLivenessKind::QuotientPreparation,
+                84_934_656,
+                0,
+                0,
+                7_280_808,
+                166_363_296,
+            ),
+            (
+                GenerationPhaseLivenessKind::AggregateSource,
+                84_934_656,
+                0,
+                0,
+                353_632_304,
+                556_008_729,
+            ),
+            (
+                GenerationPhaseLivenessKind::AggregateOpeningPreparation,
+                0,
+                0,
+                0,
+                167_772_160,
+                251_364_579,
+            ),
+            (
+                GenerationPhaseLivenessKind::AggregateCommitment,
+                0,
+                335_544_320,
+                67_108_864,
+                0,
+                515_605_731,
+            ),
+            (
+                GenerationPhaseLivenessKind::BoundTreeAuthentication,
+                0,
+                134_217_728,
+                67_108_864,
+                0,
+                289_113_315,
+            ),
+            (
+                GenerationPhaseLivenessKind::WhirOpening,
+                0,
+                335_544_320,
+                67_108_864,
+                0,
+                515_605_731,
+            ),
+            (
+                GenerationPhaseLivenessKind::CanonicalEncoding,
+                0,
+                0,
+                0,
+                0,
+                62_620_899,
+            ),
+        ];
+        assert_eq!(complete_liveness.rows().len(), expected_rows.len());
+        for (row, (phase, replay, dft, merkle, specialized, total)) in
+            complete_liveness.rows().iter().zip(expected_rows)
+        {
+            assert_eq!(row.phase(), phase);
+            assert_eq!(row.wasm_runtime_baseline_byte_length(), 33_554_432);
+            assert_eq!(row.engine_control_byte_length(), 10_200_193);
+            assert_eq!(
+                row.source_provider_byte_length(),
+                if phase == GenerationPhaseLivenessKind::LoadingAuthenticatedSources {
+                    14_754_062
+                } else {
+                    5_004_748
+                },
+            );
+            assert_eq!(row.replay_reader_byte_length(), replay);
+            assert_eq!(row.dft_buffer_byte_length(), dft);
+            assert_eq!(row.merkle_and_frontier_byte_length(), merkle);
+            assert_eq!(
+                row.proof_accumulator_byte_length(),
+                if phase == GenerationPhaseLivenessKind::LoadingAuthenticatedSources {
+                    0
+                } else {
+                    7_605_914
+                },
+            );
+            assert_eq!(row.transcript_byte_length(), 207_400);
+            assert_eq!(row.private_material_byte_length(), 721_096);
+            assert_eq!(row.bridge_copy_byte_length(), 2_097_508);
+            assert_eq!(row.specialized_workspace_byte_length(), specialized);
+            let owned_byte_length = row
+                .engine_control_byte_length()
+                .checked_add(row.source_provider_byte_length())
+                .and_then(|owned| owned.checked_add(row.replay_reader_byte_length()))
+                .and_then(|owned| owned.checked_add(row.dft_buffer_byte_length()))
+                .and_then(|owned| owned.checked_add(row.merkle_and_frontier_byte_length()))
+                .and_then(|owned| owned.checked_add(row.proof_accumulator_byte_length()))
+                .and_then(|owned| owned.checked_add(row.transcript_byte_length()))
+                .and_then(|owned| owned.checked_add(row.private_material_byte_length()))
+                .and_then(|owned| owned.checked_add(row.bridge_copy_byte_length()))
+                .and_then(|owned| owned.checked_add(row.specialized_workspace_byte_length()))
+                .expect("the independently reconciled phase total adds");
+            assert_eq!(
+                row.allocator_overhead_byte_length(),
+                owned_byte_length.div_ceil(8),
+            );
+            assert_eq!(
+                row.total_byte_length(),
+                row.wasm_runtime_baseline_byte_length()
+                    + owned_byte_length
+                    + owned_byte_length.div_ceil(8),
+            );
+            assert_eq!(row.total_byte_length(), total);
+        }
+        assert_eq!(
+            complete_liveness.maximum_live_set_byte_length(),
+            556_008_729,
+        );
+        assert_eq!(
+            complete_liveness
+                .maximum_live_set_byte_length()
+                .saturating_sub(
+                    crate::bgv::proof_suite::prover::NOMINAL_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
+                ),
+            153_355_545,
+        );
+        assert_eq!(
+            crate::bgv::proof_suite::prover::AUTOMATIC_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
+                .checked_sub(complete_liveness.maximum_live_set_byte_length()),
+            Some(47_971_047),
+        );
+        assert_eq!(
+            MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
+                .checked_sub(complete_liveness.maximum_live_set_byte_length()),
+            Some(115_079_911),
         );
     }
 

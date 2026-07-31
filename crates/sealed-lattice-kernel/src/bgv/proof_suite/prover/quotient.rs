@@ -309,6 +309,183 @@ pub(crate) fn common_proof_quotient_constraint_catalog(
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CommonProofQuotientMaterializationLiveness {
+    catalog_resident_byte_length: u64,
+    quotient_evaluation_byte_length: u64,
+    maximum_block_value_byte_length: u64,
+    maximum_component_transition_byte_length: u64,
+    maximum_materialization_byte_length: u64,
+}
+
+impl CommonProofQuotientMaterializationLiveness {
+    #[cfg(test)]
+    pub(crate) const fn catalog_resident_byte_length(self) -> u64 {
+        self.catalog_resident_byte_length
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn quotient_evaluation_byte_length(self) -> u64 {
+        self.quotient_evaluation_byte_length
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn maximum_block_value_byte_length(self) -> u64 {
+        self.maximum_block_value_byte_length
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn maximum_component_transition_byte_length(self) -> u64 {
+        self.maximum_component_transition_byte_length
+    }
+
+    pub(crate) const fn maximum_materialization_byte_length(self) -> u64 {
+        self.maximum_materialization_byte_length
+    }
+}
+
+/// Derives the complete heap owned by the streamed quotient builder or its
+/// successor component cursor. External polynomial contents remain in
+/// authenticated storage; their small descriptors are included in the
+/// catalog bound.
+pub(crate) fn common_proof_quotient_materialization_liveness(
+    variant: &RelationPlanVariant,
+    context: &RelationPlanCheckContext,
+    evaluation_domain: ProofEvaluationDomain,
+) -> Result<CommonProofQuotientMaterializationLiveness, CommonProofProverError> {
+    fn vector_byte_length<T>(count: usize) -> Result<u64, CommonProofProverError> {
+        u64::try_from(count)
+            .ok()
+            .and_then(|count| {
+                u64::try_from(core::mem::size_of::<T>())
+                    .ok()
+                    .and_then(|element_byte_length| count.checked_mul(element_byte_length))
+            })
+            .ok_or(CommonProofProverError::CountOverflow)
+    }
+
+    const BTREE_ENTRY_LINK_WORD_COUNT: u64 = 6;
+    let catalog = common_proof_quotient_constraint_catalog(variant)?;
+    let mut catalog_resident_byte_length =
+        vector_byte_length::<RelationColumnValueType>(variant.ordered_columns().len())?;
+    catalog_resident_byte_length = catalog_resident_byte_length
+        .checked_add(vector_byte_length::<Vec<RelationConstraintColumnQuery>>(
+            catalog.constraint_queries.len(),
+        )?)
+        .and_then(|total| {
+            vector_byte_length::<Vec<u32>>(catalog.constraint_columns.len())
+                .ok()
+                .and_then(|byte_length| total.checked_add(byte_length))
+        })
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    let mut maximum_query_count = 0_usize;
+    let mut maximum_column_count = 0_usize;
+    for queries in &catalog.constraint_queries {
+        maximum_query_count = maximum_query_count.max(queries.len());
+        catalog_resident_byte_length = catalog_resident_byte_length
+            .checked_add(vector_byte_length::<RelationConstraintColumnQuery>(
+                queries.len(),
+            )?)
+            .ok_or(CommonProofProverError::CountOverflow)?;
+    }
+    for columns in &catalog.constraint_columns {
+        maximum_column_count = maximum_column_count.max(columns.len());
+        catalog_resident_byte_length = catalog_resident_byte_length
+            .checked_add(vector_byte_length::<u32>(columns.len())?)
+            .ok_or(CommonProofProverError::CountOverflow)?;
+    }
+    let btree_entry_overhead_byte_length = BTREE_ENTRY_LINK_WORD_COUNT
+        .checked_mul(
+            u64::try_from(core::mem::size_of::<usize>())
+                .map_err(|_| CommonProofProverError::CountOverflow)?,
+        )
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    let column_usage_entry_byte_length =
+        u64::try_from(core::mem::size_of::<(u32, CommonProofQuotientColumnUsage)>())
+            .map_err(|_| CommonProofProverError::CountOverflow)?
+            .checked_add(btree_entry_overhead_byte_length)
+            .ok_or(CommonProofProverError::CountOverflow)?;
+    catalog_resident_byte_length = u64::try_from(catalog.column_usages.len())
+        .ok()
+        .and_then(|count| count.checked_mul(column_usage_entry_byte_length))
+        .and_then(|byte_length| catalog_resident_byte_length.checked_add(byte_length))
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    let transformed_column_entry_byte_length =
+        u64::try_from(core::mem::size_of::<(u32, ExternalPolynomialVector)>())
+            .map_err(|_| CommonProofProverError::CountOverflow)?
+            .checked_add(btree_entry_overhead_byte_length)
+            .ok_or(CommonProofProverError::CountOverflow)?;
+    catalog_resident_byte_length = u64::try_from(maximum_column_count)
+        .ok()
+        .and_then(|count| count.checked_mul(transformed_column_entry_byte_length))
+        .and_then(|byte_length| catalog_resident_byte_length.checked_add(byte_length))
+        .ok_or(CommonProofProverError::CountOverflow)?;
+
+    let extension_element_byte_length =
+        u64::try_from(core::mem::size_of::<ProofChallengeExtensionElement>())
+            .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let quotient_evaluation_byte_length = u64::try_from(evaluation_domain.size())
+        .ok()
+        .and_then(|count| count.checked_mul(extension_element_byte_length))
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    let maximum_block_value_byte_length = u64::try_from(maximum_query_count)
+        .ok()
+        .and_then(|count| {
+            count.checked_mul(u64::try_from(COMMON_PROOF_RELATION_EVALUATION_BLOCK_LENGTH).ok()?)
+        })
+        .and_then(|count| count.checked_mul(extension_element_byte_length))
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    let composition_challenge_byte_length = u64::try_from(variant.constraint_count())
+        .ok()
+        .and_then(|count| count.checked_mul(extension_element_byte_length))
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    let builder_byte_length = quotient_evaluation_byte_length
+        .checked_add(maximum_block_value_byte_length)
+        .and_then(|total| total.checked_add(catalog_resident_byte_length))
+        .and_then(|total| total.checked_add(composition_challenge_byte_length))
+        .ok_or(CommonProofProverError::CountOverflow)?;
+
+    let component_stride = usize::try_from(variant.quotient_decomposition_stride(context)?)
+        .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let component_byte_length = u64::try_from(
+        component_stride.min(
+            usize::try_from(context.quotient_component_degree_bound_exclusive)
+                .map_err(|_| CommonProofProverError::CountOverflow)?,
+        ),
+    )
+    .ok()
+    .and_then(|count| count.checked_mul(extension_element_byte_length))
+    .ok_or(CommonProofProverError::CountOverflow)?;
+    let maximum_randomizer_coefficient_count = variant
+        .ordered_masks()
+        .iter()
+        .filter(|mask| {
+            mask.mask_kind() == RelationMaskKind::Telescoping
+                && mask.target_class() == RelationMaskTargetClass::QuotientComponent
+        })
+        .map(|mask| mask.mask_degree_bound_exclusive())
+        .max()
+        .unwrap_or(0);
+    let two_randomizer_byte_length = maximum_randomizer_coefficient_count
+        .checked_mul(2)
+        .and_then(|count| count.checked_mul(extension_element_byte_length))
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    let maximum_component_transition_byte_length = quotient_evaluation_byte_length
+        .checked_add(component_byte_length)
+        .and_then(|total| total.checked_add(two_randomizer_byte_length))
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    let maximum_materialization_byte_length =
+        builder_byte_length.max(maximum_component_transition_byte_length);
+
+    Ok(CommonProofQuotientMaterializationLiveness {
+        catalog_resident_byte_length,
+        quotient_evaluation_byte_length,
+        maximum_block_value_byte_length,
+        maximum_component_transition_byte_length,
+        maximum_materialization_byte_length,
+    })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CommonProofQuotientEvaluationReadRequest {
     transform_key: CommonProofQuotientConstraintTransformKey,
     query_ordinal: usize,

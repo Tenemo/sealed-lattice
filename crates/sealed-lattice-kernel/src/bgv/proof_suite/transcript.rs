@@ -938,6 +938,34 @@ pub(crate) struct CommonProofRelationPrefixSchedule {
 }
 
 impl CommonProofRelationPrefixSchedule {
+    pub(crate) fn resident_owned_payload_byte_length(&self) -> Result<u64, TranscriptError> {
+        fn vector_allocation_byte_length<T>(capacity: usize) -> Result<u64, TranscriptError> {
+            u64::try_from(capacity)
+                .ok()
+                .and_then(|count| {
+                    count.checked_mul(
+                        u64::try_from(core::mem::size_of::<T>()).expect("type size fits u64"),
+                    )
+                })
+                .ok_or(TranscriptError::ChallengeCounterOverflow)
+        }
+
+        vector_allocation_byte_length::<u16>(self.ordered_base_tree_ordinals.capacity())?
+            .checked_add(vector_allocation_byte_length::<
+                CommonProofApplicationChallengeGroup,
+            >(
+                self.ordered_application_challenge_groups.capacity()
+            )?)
+            .and_then(|total| {
+                vector_allocation_byte_length::<u16>(
+                    self.ordered_auxiliary_tree_ordinals.capacity(),
+                )
+                .ok()
+                .and_then(|byte_length| total.checked_add(byte_length))
+            })
+            .ok_or(TranscriptError::ChallengeCounterOverflow)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         ordered_base_tree_ordinals: Vec<u16>,

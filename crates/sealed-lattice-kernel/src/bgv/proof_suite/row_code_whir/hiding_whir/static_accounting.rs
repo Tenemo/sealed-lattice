@@ -13,8 +13,13 @@
 
 use crate::bgv::proof_suite::field::PROOF_CHALLENGE_EXTENSION_DEGREE;
 
-use super::super::MERKLE_DIGEST_BYTE_LENGTH;
-use super::{HidingMaskGroupOwner, SelectedHidingMaskCensus, SelectedHidingWhirConfig};
+use super::super::{
+    MERKLE_DIGEST_BYTE_LENGTH,
+    aggregate_wide_hiding::{AGGREGATE_WIDE_PAD_LOG_INVERSE_RATE, AggregateWidePadLayout},
+};
+use super::SelectedHidingWhirConfig;
+#[cfg(test)]
+use super::{HidingMaskGroupOwner, SelectedHidingMaskCensus};
 
 /// Canonical wire length of one challenge-field element.
 const CHALLENGE_FIELD_WIRE_BYTE_LENGTH: usize = PROOF_CHALLENGE_EXTENSION_DEGREE * size_of::<u64>();
@@ -80,12 +85,16 @@ pub(in crate::bgv::proof_suite::row_code_whir) enum AggregateOpeningSection {
     /// Folding sumcheck wires.
     SumcheckWires,
     /// The plain terminal polynomial the verifier folds directly.
+    #[cfg(test)]
     PlainFinalPolynomial,
     /// Authenticated plain terminal query openings.
+    #[cfg(test)]
     PlainFinalQueryOpenings,
     /// Commitments to the interleaved sumcheck masks, one per fold batch.
+    #[cfg(test)]
     SumcheckMaskCommitments,
     /// Commitments to the code-switch masks, one per round.
+    #[cfg(test)]
     CodeSwitchMaskCommitments,
     /// Scalar source-minus-pad images consumed by the switch relations.
     CodeSwitchMaskDeltas,
@@ -96,12 +105,14 @@ pub(in crate::bgv::proof_suite::row_code_whir) enum AggregateOpeningSection {
     /// One-time-pad reveals of the source message and its encoding randomness.
     BaseCaseBlindedSourceReveals,
     /// One-time-pad reveals of every carried mask and its encoding randomness.
+    #[cfg(test)]
     BaseCaseBlindedMaskReveals,
     /// Authenticated base-case openings of the folded source oracle.
     BaseCaseSourceOpenings,
     /// Authenticated base-case openings of the fresh main mask.
     BaseCaseFreshMainOpenings,
     /// Authenticated paired openings of every carried mask group and its mirror.
+    #[cfg(test)]
     BaseCaseMaskGroupOpenings,
     /// One-time-pad reveal of the aggregate-wide pad and its code randomness.
     BaseCaseBlindedAggregateWidePadReveal,
@@ -119,17 +130,23 @@ impl AggregateOpeningSection {
             Self::RoundOutOfDomainAnswers => "round-out-of-domain-answers",
             Self::RoundQueryOpenings => "round-query-openings",
             Self::SumcheckWires => "sumcheck-wires",
+            #[cfg(test)]
             Self::PlainFinalPolynomial => "plain-final-polynomial",
+            #[cfg(test)]
             Self::PlainFinalQueryOpenings => "plain-final-query-openings",
+            #[cfg(test)]
             Self::SumcheckMaskCommitments => "sumcheck-mask-commitments",
+            #[cfg(test)]
             Self::CodeSwitchMaskCommitments => "code-switch-mask-commitments",
             Self::CodeSwitchMaskDeltas => "code-switch-mask-deltas",
             Self::BaseCaseFreshCommitments => "base-case-fresh-commitments",
             Self::BaseCaseMaskedClaim => "base-case-masked-claim",
             Self::BaseCaseBlindedSourceReveals => "base-case-blinded-source-reveals",
+            #[cfg(test)]
             Self::BaseCaseBlindedMaskReveals => "base-case-blinded-mask-reveals",
             Self::BaseCaseSourceOpenings => "base-case-source-openings",
             Self::BaseCaseFreshMainOpenings => "base-case-fresh-main-openings",
+            #[cfg(test)]
             Self::BaseCaseMaskGroupOpenings => "base-case-mask-group-openings",
             Self::BaseCaseBlindedAggregateWidePadReveal => {
                 "base-case-blinded-aggregate-wide-pad-reveal"
@@ -147,10 +164,12 @@ pub(in crate::bgv::proof_suite::row_code_whir) struct AggregateOpeningByteLedger
 }
 
 impl AggregateOpeningByteLedger {
+    #[cfg(test)]
     pub(in crate::bgv::proof_suite::row_code_whir) fn byte_length(&self) -> usize {
         self.sections.iter().map(|(_, bytes)| *bytes).sum()
     }
 
+    #[cfg(test)]
     fn section_byte_length(&self, section: AggregateOpeningSection) -> usize {
         self.sections
             .iter()
@@ -171,8 +190,10 @@ struct AggregateOpeningRoundGeometry {
     round_query_batches: Vec<AuthenticatedOpeningBatch>,
     /// Sumcheck rounds per fold batch, in batch order.
     fold_batch_round_counts: Vec<usize>,
+    #[cfg(test)]
     terminal_polynomial_evaluation_count: usize,
     terminal_query_batch: AuthenticatedOpeningBatch,
+    #[cfg(test)]
     plain_terminal_sumcheck_round_count: usize,
 }
 
@@ -213,6 +234,7 @@ impl AggregateOpeningRoundGeometry {
             fold_batch_round_counts: (0..=round_count)
                 .map(|batch_ordinal| inner.round_folding_factor(batch_ordinal))
                 .collect(),
+            #[cfg(test)]
             terminal_polynomial_evaluation_count: 1 << final_round.num_variables,
             terminal_query_batch: AuthenticatedOpeningBatch {
                 leaf_count: final_round.domain_size >> terminal_folding_factor,
@@ -220,6 +242,7 @@ impl AggregateOpeningRoundGeometry {
                 challenge_values_per_opening: 1 << terminal_folding_factor,
                 base_values_per_opening: 0,
             },
+            #[cfg(test)]
             plain_terminal_sumcheck_round_count: inner.final_sumcheck_rounds,
         }
     }
@@ -237,6 +260,7 @@ impl AggregateOpeningRoundGeometry {
 /// This is the section-by-section length of the argument production currently
 /// emits, expressed with the same encoding rules the hiding ledger uses so the
 /// two are directly comparable.
+#[cfg(test)]
 pub(in crate::bgv::proof_suite::row_code_whir) fn unmasked_aggregate_opening_byte_ledger(
     configuration: &SelectedHidingWhirConfig,
     opening_evaluation_count: usize,
@@ -294,6 +318,7 @@ pub(in crate::bgv::proof_suite::row_code_whir) fn unmasked_aggregate_opening_byt
 /// send with the masked base case. It adds one committed mask group per fold
 /// batch and per code switch, one fresh mirror for each of them, one fresh main
 /// mask, the one-time-pad reveals, and the mask spot checks.
+#[cfg(test)]
 pub(in crate::bgv::proof_suite::row_code_whir) fn hiding_aggregate_opening_byte_ledger(
     configuration: &SelectedHidingWhirConfig,
     census: &SelectedHidingMaskCensus,
@@ -416,6 +441,53 @@ pub(in crate::bgv::proof_suite::row_code_whir) fn hiding_aggregate_opening_byte_
     }
 }
 
+/// Geometry of the folded source code authenticated by the base case.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct AggregateWideSourceCensus {
+    message_length: usize,
+    randomness_length: usize,
+    codeword_domain_size: usize,
+    spot_check_count: usize,
+}
+
+impl AggregateWideSourceCensus {
+    fn derive(configuration: &SelectedHidingWhirConfig) -> Result<Self, String> {
+        let round_count = configuration.inner.n_rounds();
+        let final_round = configuration.inner.final_round_config();
+        let message_length = 1_usize
+            .checked_shl(
+                u32::try_from(final_round.num_variables)
+                    .map_err(|_| "aggregate source variable count exceeds u32".to_owned())?,
+            )
+            .ok_or_else(|| "aggregate source message length overflowed".to_owned())?;
+        let randomness_length = *configuration
+            .oracle_randomness
+            .get(round_count)
+            .ok_or_else(|| "aggregate source randomness is absent".to_owned())?;
+        let folding_factor = configuration.inner.round_folding_factor(round_count);
+        let codeword_domain_size = final_round
+            .domain_size
+            .checked_shr(
+                u32::try_from(folding_factor)
+                    .map_err(|_| "aggregate source folding factor exceeds u32".to_owned())?,
+            )
+            .ok_or_else(|| "aggregate source codeword domain underflowed".to_owned())?;
+        if message_length == 0
+            || randomness_length == 0
+            || codeword_domain_size == 0
+            || configuration.inner.final_queries == 0
+        {
+            return Err("aggregate source base-case geometry is empty".to_owned());
+        }
+        Ok(Self {
+            message_length,
+            randomness_length,
+            codeword_domain_size,
+            spot_check_count: configuration.inner.final_queries,
+        })
+    }
+}
+
 /// Geometry of one aggregate-wide masking pad that replaces all carried groups.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct AggregateWidePadCensus {
@@ -430,44 +502,29 @@ struct AggregateWidePadCensus {
 }
 
 impl AggregateWidePadCensus {
-    fn derive(
-        configuration: &SelectedHidingWhirConfig,
-        hiding_census: &SelectedHidingMaskCensus,
-    ) -> Self {
-        let message_length: usize = hiding_census
-            .carried_groups
-            .iter()
-            .map(|group| group.width * group.message_length)
-            .sum();
-        let code_switch_delta_count: usize = hiding_census
-            .carried_groups
-            .iter()
-            .filter(|group| matches!(group.owner, HidingMaskGroupOwner::CodeSwitch { .. }))
-            .map(|group| group.width * group.message_length)
-            .sum();
-        let randomness_length = hiding_census.mask_spot_check_count;
-
-        // Keep exactly the selected mask code's inverse-rate expansion. The
-        // aggregate pad changes the message dimension, not the code family.
-        let sumcheck_unexpanded_length = (configuration.sumcheck_mask.message_len
-            + configuration.sumcheck_mask.randomness_len)
-            .next_power_of_two();
-        assert_eq!(
-            configuration.sumcheck_mask.domain_size % sumcheck_unexpanded_length,
-            0,
-        );
-        let inverse_rate_expansion =
-            configuration.sumcheck_mask.domain_size / sumcheck_unexpanded_length;
-        assert!(inverse_rate_expansion.is_power_of_two());
-        let codeword_domain_size =
-            (message_length + randomness_length).next_power_of_two() * inverse_rate_expansion;
-
-        Self {
+    fn derive(configuration: &SelectedHidingWhirConfig) -> Result<Self, String> {
+        let pad_layout = AggregateWidePadLayout::derive(configuration)?;
+        let message_length = pad_layout.message_length();
+        let randomness_length = configuration.sumcheck_mask.randomness_len;
+        if randomness_length != configuration.mask_queries {
+            return Err(
+                "aggregate pad prover and verifier randomness dimensions diverge".to_owned(),
+            );
+        }
+        let pad_shape = p3_whir::MaskCodeShape::new(
             message_length,
             randomness_length,
-            codeword_domain_size,
-            code_switch_delta_count,
+            AGGREGATE_WIDE_PAD_LOG_INVERSE_RATE,
+        );
+        if pad_shape.domain_size == 0 || !pad_shape.domain_size.is_power_of_two() {
+            return Err("aggregate pad codeword domain is invalid".to_owned());
         }
+        Ok(Self {
+            message_length,
+            randomness_length,
+            codeword_domain_size: pad_shape.domain_size,
+            code_switch_delta_count: pad_layout.switch_delta_count(),
+        })
     }
 }
 
@@ -480,21 +537,21 @@ impl AggregateWidePadCensus {
 /// oracle and one fresh mirror rather than one pair per logical mask group.
 pub(in crate::bgv::proof_suite::row_code_whir) fn aggregate_wide_pad_opening_byte_ledger(
     configuration: &SelectedHidingWhirConfig,
-    hiding_census: &SelectedHidingMaskCensus,
     opening_evaluation_count: usize,
-) -> AggregateOpeningByteLedger {
+) -> Result<AggregateOpeningByteLedger, String> {
     let geometry = AggregateOpeningRoundGeometry::derive(configuration);
-    let pad_census = AggregateWidePadCensus::derive(configuration, hiding_census);
-    masking_pad_opening_byte_ledger(
-        hiding_census,
+    let source_census = AggregateWideSourceCensus::derive(configuration)?;
+    let pad_census = AggregateWidePadCensus::derive(configuration)?;
+    Ok(masking_pad_opening_byte_ledger(
+        source_census,
         opening_evaluation_count,
         &geometry,
         pad_census,
-    )
+    ))
 }
 
 fn masking_pad_opening_byte_ledger(
-    hiding_census: &SelectedHidingMaskCensus,
+    source_census: AggregateWideSourceCensus,
     opening_evaluation_count: usize,
     geometry: &AggregateOpeningRoundGeometry,
     pad_census: AggregateWidePadCensus,
@@ -504,20 +561,20 @@ fn masking_pad_opening_byte_ledger(
         fold_batch_count + 2 * geometry.fold_batch_round_counts.iter().sum::<usize>();
 
     let source_openings = AuthenticatedOpeningBatch {
-        leaf_count: hiding_census.source_code.codeword_domain_size,
-        opening_count: hiding_census.source_spot_check_count,
+        leaf_count: source_census.codeword_domain_size,
+        opening_count: source_census.spot_check_count,
         challenge_values_per_opening: geometry.terminal_query_batch.challenge_values_per_opening,
         base_values_per_opening: 0,
     };
     let fresh_main_openings = AuthenticatedOpeningBatch {
-        leaf_count: hiding_census.source_code.codeword_domain_size,
-        opening_count: hiding_census.source_spot_check_count,
+        leaf_count: source_census.codeword_domain_size,
+        opening_count: source_census.spot_check_count,
         challenge_values_per_opening: 1,
         base_values_per_opening: 0,
     };
     let pad_openings = AuthenticatedOpeningBatch {
         leaf_count: pad_census.codeword_domain_size,
-        opening_count: hiding_census.mask_spot_check_count,
+        opening_count: pad_census.randomness_length,
         challenge_values_per_opening: 1,
         base_values_per_opening: 0,
     };
@@ -566,8 +623,7 @@ fn masking_pad_opening_byte_ledger(
             ),
             (
                 AggregateOpeningSection::BaseCaseBlindedSourceReveals,
-                (hiding_census.source_code.message_length
-                    + hiding_census.source_code.randomness_length)
+                (source_census.message_length + source_census.randomness_length)
                     * CHALLENGE_FIELD_WIRE_BYTE_LENGTH,
             ),
             (
@@ -739,8 +795,9 @@ mod tests {
     /// its nominal variance classification.
     #[test]
     fn aggregate_wide_pad_candidate_fits_the_automatic_acceptance_band() {
-        let (configuration, hiding_census) = selected_configuration_and_census();
-        let pad_census = AggregateWidePadCensus::derive(&configuration, &hiding_census);
+        let (configuration, _) = selected_configuration_and_census();
+        let pad_census =
+            AggregateWidePadCensus::derive(&configuration).expect("the pad census derives");
 
         // Eighteen three-coordinate sumcheck masks and the five switch masks
         // occupy disjoint slices. Only switch slices need public deltas because
@@ -756,9 +813,9 @@ mod tests {
         );
         let aggregate_wide = aggregate_wide_pad_opening_byte_ledger(
             &configuration,
-            &hiding_census,
             SELECTED_OPENING_EVALUATION_COUNT,
-        );
+        )
+        .expect("the aggregate-wide ledger derives");
 
         for shared in [
             AggregateOpeningSection::Framing,
