@@ -66,6 +66,14 @@ Works today:
   predecessor closure derives `1,232,362` verifier hash queries and `1,229,573`
   accepting equations, and the construction and hash-profile identities bind
   the 512-bit state, digest width, and three canonical frame tags.
+- Checked construction-geometry certificates derive for all 31 production
+  identities: 27 width-64, log-inverse-rate-two (inverse-rate-four)
+  identities, including evaluator top counts 1 through 20, and four width-8,
+  log-inverse-rate-five (inverse-rate-32) identities.
+  Each record binds its relation variant, masking status, WHIR schedule,
+  plan-derived prefix and opening counts, typed state chain, deployed leaf
+  ledger, and coordinate-derived compact subtree extraction. Families with no
+  bound tree or verifier-sequence source do not acquire an invented ledger row.
 - Production-derived phase-liveness accounting now covers the complete
   same-secret prover live set, including source ownership, replay readers,
   DFTs, Merkle frontiers, proof material, transcript state, private material,
@@ -81,9 +89,10 @@ Not yet:
   malicious-verifier zero knowledge, or quantum-random-oracle zero knowledge.
 - Exact construction-wide classical and quantum-random-oracle soundness is not
   established. The selected same-secret aggregate-leaf predecessor
-  correspondence and collision arithmetic now derive, but certificates for
-  every distinct production geometry, the complete production-to-affine-view
-  correspondence, and soundness for an emitted transported proof remain open.
+  correspondence, collision arithmetic, and all production geometry
+  certificates now derive, but the complete production-to-affine-view
+  correspondence, ceremony-level failure partition, and soundness for an
+  emitted transported proof remain open.
 - The static liveness model has not yet been confirmed by a completed native
   proof or release-WebAssembly browser measurement. Complete participant
   transport accounting is also open, and the proof corpus has not been

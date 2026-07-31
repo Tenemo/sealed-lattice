@@ -7,6 +7,8 @@
 
 use core::mem::size_of;
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Mutex;
+use std::time::Instant;
 
 use num_bigint::BigUint;
 use num_traits::{One, Zero};
@@ -32,13 +34,14 @@ use crate::bgv::proof_suite::row_code_whir::{
 use crate::bgv::proof_suite::{
     ConstructionMaskingCertificate, PROOF_CHALLENGE_EXTENSION_DEGREE,
     ValidatedRelationPlanArtifact, checked_zero_knowledge_mask_image,
-    compile_same_secret_relation_plan, selected_same_secret_relation_plan_input,
+    compile_same_secret_relation_plan, selected_relation_plans,
+    selected_same_secret_relation_plan_input,
 };
 
 const WHIR_SUMCHECK_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE: u64 = 3;
-const SELECTED_AGGREGATE_TABLE_WIDTH: usize = 4;
-const SELECTED_OPENING_BATCH_COUNT: usize = 1_008;
-const SELECTED_SCALAR_OPENING_COUNT: u64 = 1_782;
+const SAME_SECRET_AGGREGATE_TABLE_WIDTH: usize = 4;
+const SAME_SECRET_OPENING_BATCH_COUNT: usize = 1_008;
+const SAME_SECRET_SCALAR_OPENING_COUNT: u64 = 1_782;
 /// The independently pinned transcript hash-query ceiling for the selected
 /// same-secret plan. It reconciles exactly against the plan-derived
 /// oracle-equation census:
@@ -67,6 +70,7 @@ const SELECTED_TRANSCRIPT_HASH_QUERY_COUNT: u64 = 1_141_598;
 const SELECTED_LOGICAL_VERIFIER_MESSAGE_COUNT: u64 = 4_272;
 const CMS19_ADVERSARIAL_QUERY_EXPONENT: usize = 80;
 const CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH: usize = 512;
+static PRODUCTION_GEOMETRY_CERTIFICATE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::bgv::proof_suite) enum WhirTheoremCertificateError {
@@ -78,6 +82,85 @@ pub(in crate::bgv::proof_suite) enum WhirTheoremCertificateError {
     IncompleteRelationSemanticCorrespondence,
     IncompletePolynomialExtractorCorrespondence,
     IncompleteFailureMagnitudeCorrespondence,
+    SelectedProductionGeometry {
+        application_statement_schema_identifier: u16,
+        schedule_position: Option<u32>,
+        top_count: Option<u16>,
+        stage: ProductionGeometryCertificateStage,
+        failure: ProductionGeometryCertificateFailure,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::bgv::proof_suite) enum ProductionGeometryCertificateStage {
+    ConstructionPlan,
+    HidingConfiguration,
+    RelationSemantics,
+    MaskingCorrespondence,
+    WhirGeometry,
+    PrefixStacking,
+    OracleEquationCatalog,
+    StateEquationRows,
+    TranscriptCounts,
+    SelectedStatePredicate,
+    StrongStateHashChain,
+    VerifierLedger,
+    DeployedLeafOracle,
+    CommitmentSubtree,
+    ConstructionIdentity,
+    Completeness,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::bgv::proof_suite) enum ProductionGeometryCertificateFailure {
+    ArithmeticOverflow,
+    InvalidSelectedGeometry,
+    IncompleteTranscriptMapping,
+    IncompleteOracleEquationMapping,
+    IncompleteMaskingCorrespondence,
+    IncompleteRelationSemanticCorrespondence,
+    IncompletePolynomialExtractorCorrespondence,
+    IncompleteFailureMagnitudeCorrespondence,
+    InvalidCoordinateOrIdentity,
+    InvalidWitnessGeometry,
+    IncompleteRelationOrMaskingCertificate,
+    IncompleteWhirGeometry,
+    InvalidPrefixStacking,
+    IncompleteOracleStateRows,
+    IncompleteSelectedStatePredecessorClosure,
+    IncompleteStrongStateHashChain,
+    IncompleteVerifierLedger,
+    IneligibleDeployedLeafOracle,
+    IncompleteCommitmentSubtreeExtraction,
+    InconsistentQromArithmetic,
+}
+
+impl From<WhirTheoremCertificateError> for ProductionGeometryCertificateFailure {
+    fn from(error: WhirTheoremCertificateError) -> Self {
+        match error {
+            WhirTheoremCertificateError::ArithmeticOverflow => Self::ArithmeticOverflow,
+            WhirTheoremCertificateError::InvalidSelectedGeometry => Self::InvalidSelectedGeometry,
+            WhirTheoremCertificateError::IncompleteTranscriptMapping => {
+                Self::IncompleteTranscriptMapping
+            }
+            WhirTheoremCertificateError::IncompleteOracleEquationMapping => {
+                Self::IncompleteOracleEquationMapping
+            }
+            WhirTheoremCertificateError::IncompleteMaskingCorrespondence => {
+                Self::IncompleteMaskingCorrespondence
+            }
+            WhirTheoremCertificateError::IncompleteRelationSemanticCorrespondence => {
+                Self::IncompleteRelationSemanticCorrespondence
+            }
+            WhirTheoremCertificateError::IncompletePolynomialExtractorCorrespondence => {
+                Self::IncompletePolynomialExtractorCorrespondence
+            }
+            WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence => {
+                Self::IncompleteFailureMagnitudeCorrespondence
+            }
+            WhirTheoremCertificateError::SelectedProductionGeometry { failure, .. } => failure,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1293,7 +1376,6 @@ impl CommitmentSubtreeExtractionCertificate {
         !self.rows.is_empty()
             && self.distinct_protocol_tree_role_count == self.rows.len()
             && self.supplied_commitment_root_count > 0
-            && self.bound_tree_root_count > 0
             && self
                 .supplied_commitment_root_count
                 .checked_add(self.bound_tree_root_count)
@@ -1603,6 +1685,843 @@ impl RowCodeWhirFailurePartitionCertificate {
                 .is_eligible_for_uniform_required_output()
             && self.exact_failure_magnitude.is_complete()
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ProductionWhirGeometryCertificate {
+    code_state_rows: Vec<WhirCodeStateRow>,
+    interleaved_unique_decoding_rows: Vec<InterleavedUniqueDecodingRow>,
+    fold_rows: Vec<WhirFoldFailureRow>,
+    shift_rows: Vec<WhirShiftFailureRow>,
+    final_query_row: WhirFinalQueryRow,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RowCodeWhirProductionGeometryCertificate {
+    application_statement_schema_identifier: u16,
+    schedule_position: Option<u32>,
+    top_count: Option<u16>,
+    construction_plan_identity_hash: [u8; 64],
+    relation_plan_hash: [u8; 64],
+    relation_plan_variant_hash: [u8; 64],
+    parameters: RowCodeWhirSelectedParameters,
+    trace_domain_size: u64,
+    evaluation_domain_size: u64,
+    opening_degree_bound_exclusive: u64,
+    proof_privacy_mode: ProofPrivacyMode,
+    relation_compiler_interpreter_semantics: RelationCompilerInterpreterSemanticCertificate,
+    construction_masking: ConstructionMaskingCertificate,
+    aggregate_wide_masking: AggregateWideMaskingCertificate,
+    whir_geometry: ProductionWhirGeometryCertificate,
+    prefix_stacking: PrefixStackingCertificate,
+    state_epoch_rows: Vec<StateEpochRow>,
+    oracle_equation_rows: Vec<OracleEquationCoverageRow>,
+    selected_plan_state_predicate: SelectedPlanStatePredicateCertificate,
+    cms19_strong_state_hash_chain: Cms19StrongStateHashChainCertificate,
+    complete_verifier_oracle_ledger: CompleteVerifierOracleLedger,
+    deployed_aggregate_leaf_oracle: DeployedAggregateLeafOracleCertificate,
+    commitment_subtree_extraction: CommitmentSubtreeExtractionCertificate,
+    maximum_transcript_hash_query_count: u64,
+    logical_verifier_message_count: u64,
+    cms19_arithmetic: Cms19ArithmeticCertificate,
+}
+
+impl RowCodeWhirProductionGeometryCertificate {
+    fn is_complete(&self) -> bool {
+        self.completeness_failure().is_none()
+    }
+
+    fn completeness_failure(&self) -> Option<ProductionGeometryCertificateFailure> {
+        let parameters = self.parameters;
+        let Some(witness_value_count) = parameters
+            .logical_polynomial_coefficient_count
+            .checked_mul(parameters.logical_polynomials_per_physical_row)
+        else {
+            return Some(ProductionGeometryCertificateFailure::InvalidWitnessGeometry);
+        };
+        let Some(expected_witness_value_count) =
+            1_usize.checked_shl(parameters.physical_row_witness_variable_count as u32)
+        else {
+            return Some(ProductionGeometryCertificateFailure::InvalidWitnessGeometry);
+        };
+        let Some(expected_evaluation_domain_size) =
+            1_u64.checked_shl(parameters.polynomial_commitment_variable_count as u32)
+        else {
+            return Some(ProductionGeometryCertificateFailure::InvalidWitnessGeometry);
+        };
+        let Some(expected_opening_degree_bound) = u64::try_from(witness_value_count).ok() else {
+            return Some(ProductionGeometryCertificateFailure::InvalidWitnessGeometry);
+        };
+        let expected_code_state_count = self
+            .whir_geometry
+            .final_query_row
+            .epoch_ordinal
+            .checked_add(1)
+            .and_then(|epoch_count| usize::try_from(epoch_count).ok())
+            .and_then(|epoch_count| {
+                epoch_count.checked_mul(parameters.folding_factor.checked_add(1)?)
+            });
+        let expected_fold_count = self
+            .whir_geometry
+            .final_query_row
+            .epoch_ordinal
+            .checked_add(1)
+            .and_then(|epoch_count| usize::try_from(epoch_count).ok())
+            .and_then(|epoch_count| epoch_count.checked_mul(parameters.folding_factor));
+        if self.application_statement_schema_identifier == 0
+            || self.construction_plan_identity_hash == [0_u8; 64]
+            || self.relation_plan_hash == [0_u8; 64]
+            || self.relation_plan_variant_hash == [0_u8; 64]
+        {
+            return Some(ProductionGeometryCertificateFailure::InvalidCoordinateOrIdentity);
+        }
+        if !parameters
+            .logical_polynomial_coefficient_count
+            .is_power_of_two()
+            || !parameters
+                .logical_polynomials_per_physical_row
+                .is_power_of_two()
+            || witness_value_count != expected_witness_value_count
+            || parameters.table_variable_count != parameters.physical_row_witness_variable_count + 1
+            || parameters.polynomial_commitment_variable_count
+                != parameters.table_variable_count + parameters.row_code_log_inverse_rate
+            || self.evaluation_domain_size != expected_evaluation_domain_size
+            || self.opening_degree_bound_exclusive != expected_opening_degree_bound
+        {
+            return Some(ProductionGeometryCertificateFailure::InvalidWitnessGeometry);
+        }
+        if !self.relation_compiler_interpreter_semantics.is_complete()
+            || !self.construction_masking.is_complete()
+            || !self.aggregate_wide_masking.is_complete()
+        {
+            return Some(
+                ProductionGeometryCertificateFailure::IncompleteRelationOrMaskingCertificate,
+            );
+        }
+        if expected_code_state_count != Some(self.whir_geometry.code_state_rows.len())
+            || self.whir_geometry.interleaved_unique_decoding_rows.len()
+                != self.whir_geometry.code_state_rows.len()
+            || expected_fold_count != Some(self.whir_geometry.fold_rows.len())
+            || self.whir_geometry.final_query_row.query_count == 0
+        {
+            return Some(ProductionGeometryCertificateFailure::IncompleteWhirGeometry);
+        }
+        if self.prefix_stacking.table_variable_count != parameters.table_variable_count
+            || self.prefix_stacking.stacked_variable_count
+                != parameters.polynomial_commitment_variable_count
+        {
+            return Some(ProductionGeometryCertificateFailure::InvalidPrefixStacking);
+        }
+        if self.state_epoch_rows.is_empty() || self.oracle_equation_rows.is_empty() {
+            return Some(ProductionGeometryCertificateFailure::IncompleteOracleStateRows);
+        }
+        if self.selected_plan_state_predicate.transition_rows.len()
+            != usize::try_from(self.logical_verifier_message_count).unwrap_or(usize::MAX)
+                + self
+                    .selected_plan_state_predicate
+                    .transition_rows
+                    .iter()
+                    .filter(|row| row.failure_event_owner.is_none())
+                    .count()
+        {
+            return Some(
+                ProductionGeometryCertificateFailure::IncompleteSelectedStatePredecessorClosure,
+            );
+        }
+        if !self.cms19_strong_state_hash_chain.is_complete() {
+            return Some(ProductionGeometryCertificateFailure::IncompleteStrongStateHashChain);
+        }
+        if self
+            .complete_verifier_oracle_ledger
+            .complete_hash_query_count
+            == 0
+        {
+            return Some(ProductionGeometryCertificateFailure::IncompleteVerifierLedger);
+        }
+        if !self
+            .deployed_aggregate_leaf_oracle
+            .is_eligible_for_uniform_required_output()
+        {
+            return Some(ProductionGeometryCertificateFailure::IneligibleDeployedLeafOracle);
+        }
+        if !self.commitment_subtree_extraction.is_complete() {
+            return Some(
+                ProductionGeometryCertificateFailure::IncompleteCommitmentSubtreeExtraction,
+            );
+        }
+        if self.cms19_arithmetic.verifier_hash_query_count
+            != self
+                .deployed_aggregate_leaf_oracle
+                .deployed_verifier_hash_query_count
+            || self.cms19_arithmetic.accepting_database_equation_count
+                != self
+                    .deployed_aggregate_leaf_oracle
+                    .deployed_accepting_database_equation_count
+        {
+            return Some(ProductionGeometryCertificateFailure::InconsistentQromArithmetic);
+        }
+        None
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CheckedProductionGeometryCertificateRecord {
+    application_statement_schema_identifier: u16,
+    schedule_position: Option<u32>,
+    top_count: Option<u16>,
+    construction_plan_identity_hash: [u8; 64],
+    parameters: RowCodeWhirSelectedParameters,
+    maximum_transcript_hash_query_count: u64,
+    logical_verifier_message_count: u64,
+    deployed_verifier_hash_query_count: u64,
+    deployed_accepting_database_equation_count: u64,
+}
+
+impl CheckedProductionGeometryCertificateRecord {
+    fn from_complete(certificate: &RowCodeWhirProductionGeometryCertificate) -> Self {
+        debug_assert!(certificate.is_complete());
+        Self {
+            application_statement_schema_identifier: certificate
+                .application_statement_schema_identifier,
+            schedule_position: certificate.schedule_position,
+            top_count: certificate.top_count,
+            construction_plan_identity_hash: certificate.construction_plan_identity_hash,
+            parameters: certificate.parameters,
+            maximum_transcript_hash_query_count: certificate.maximum_transcript_hash_query_count,
+            logical_verifier_message_count: certificate.logical_verifier_message_count,
+            deployed_verifier_hash_query_count: certificate
+                .deployed_aggregate_leaf_oracle
+                .deployed_verifier_hash_query_count,
+            deployed_accepting_database_equation_count: certificate
+                .deployed_aggregate_leaf_oracle
+                .deployed_accepting_database_equation_count,
+        }
+    }
+
+    fn is_complete(&self) -> bool {
+        self.application_statement_schema_identifier != 0
+            && self.construction_plan_identity_hash != [0_u8; 64]
+            && self
+                .parameters
+                .logical_polynomial_coefficient_count
+                .is_power_of_two()
+            && self
+                .parameters
+                .logical_polynomials_per_physical_row
+                .is_power_of_two()
+            && self.maximum_transcript_hash_query_count > 0
+            && self.logical_verifier_message_count > 0
+            && self.deployed_verifier_hash_query_count > 0
+            && self.deployed_accepting_database_equation_count > 0
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CheckedProductionGeometryCertificateInventory {
+    records: Vec<CheckedProductionGeometryCertificateRecord>,
+    masking_certificates: Vec<(
+        RowCodeWhirSelectedParameters,
+        AggregateWideMaskingCertificate,
+    )>,
+}
+
+fn derive_production_whir_geometry_certificate(
+    plan: &RowCodeWhirConstructionPlan,
+    aggregate_wide_masking: &AggregateWideMaskingCertificate,
+) -> Result<ProductionWhirGeometryCertificate, WhirTheoremCertificateError> {
+    let parameters = plan.selected_parameters();
+    let encoded_oracles = plan
+        .whir
+        .rounds
+        .iter()
+        .map(|round| round.encoded_oracle)
+        .chain(std::iter::once(plan.whir.final_round.encoded_oracle))
+        .collect::<Vec<_>>();
+    let supplied_commitment_openings = checked_supplied_commitment_opening_rows(plan)?;
+    let whir_epoch_openings = &supplied_commitment_openings.whir_epochs;
+    let source_epoch_count = plan
+        .whir
+        .rounds
+        .len()
+        .checked_add(1)
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    if encoded_oracles.len() != source_epoch_count
+        || whir_epoch_openings.len() != source_epoch_count
+    {
+        return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
+    }
+
+    let initial_evaluation_domain_size = 1_usize
+        .checked_shl(
+            u32::try_from(
+                parameters
+                    .polynomial_commitment_variable_count
+                    .checked_add(parameters.starting_log_inverse_rate)
+                    .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+            )
+            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+        )
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    if whir_epoch_openings[0].query_count != parameters.outer_query_count {
+        return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
+    }
+    let encoded_oracle_leaf_width = 1_usize
+        .checked_shl(
+            u32::try_from(parameters.folding_factor)
+                .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+        )
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let code_state_count = source_epoch_count
+        .checked_mul(
+            parameters
+                .folding_factor
+                .checked_add(1)
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+        )
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let mut code_state_rows = Vec::with_capacity(code_state_count);
+    let mut interleaved_unique_decoding_rows = Vec::with_capacity(code_state_count);
+    for epoch_index in 0..encoded_oracles.len() {
+        let epoch_ordinal = u32::try_from(epoch_index)
+            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+        let encoded_oracle = encoded_oracles[epoch_index];
+        let opening = whir_epoch_openings[epoch_index];
+        let expected_evaluation_count = initial_evaluation_domain_size
+            .checked_shr(epoch_ordinal)
+            .filter(|count| *count > 0)
+            .ok_or(WhirTheoremCertificateError::InvalidSelectedGeometry)?;
+        let preceding_query_count = epoch_index
+            .checked_sub(1)
+            .map_or(usize::MAX, |preceding_index| {
+                whir_epoch_openings[preceding_index].query_count
+            });
+        if encoded_oracle.evaluation_count != expected_evaluation_count
+            || encoded_oracle.leaf_width != encoded_oracle_leaf_width
+            || encoded_oracle
+                .leaf_count
+                .checked_mul(encoded_oracle.leaf_width)
+                != Some(encoded_oracle.evaluation_count)
+            || opening.epoch_ordinal != epoch_ordinal
+            || opening.leaf_count != encoded_oracle.leaf_count
+            || opening.query_count == 0
+            || opening.query_count > preceding_query_count
+        {
+            return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
+        }
+        let (
+            source_message_dimension,
+            source_randomness_dimension,
+            source_domain_size,
+            source_query_count,
+            source_interleaving_width,
+        ) = aggregate_wide_masking
+            .folded_source_code_geometry(epoch_index)
+            .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+        if source_domain_size != encoded_oracle.leaf_count
+            || source_query_count != opening.query_count
+            || source_interleaving_width != encoded_oracle.leaf_width
+        {
+            return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+        }
+        let parent_dimension = u64::try_from(
+            source_message_dimension
+                .checked_add(source_randomness_dimension)
+                .and_then(|dimension| dimension.checked_mul(source_interleaving_width))
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+        )
+        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+        let parent_domain_size = u64::try_from(encoded_oracle.evaluation_count)
+            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+        let terminal_fold_ordinal = u32::try_from(parameters.folding_factor)
+            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+        let terminal_domain_size = parent_domain_size
+            .checked_shr(terminal_fold_ordinal)
+            .filter(|size| *size > 0)
+            .ok_or(WhirTheoremCertificateError::InvalidSelectedGeometry)?;
+        let terminal_dimension = parent_dimension
+            .checked_shr(terminal_fold_ordinal)
+            .filter(|size| *size > 0)
+            .ok_or(WhirTheoremCertificateError::InvalidSelectedGeometry)?;
+        let terminal_unique_decoding_radius = terminal_domain_size
+            .checked_sub(terminal_dimension)
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?
+            / 2;
+        let selected_error_count_at_terminal = terminal_unique_decoding_radius
+            .checked_sub(1)
+            .ok_or(WhirTheoremCertificateError::InvalidSelectedGeometry)?;
+        let selected_state_relative_distance =
+            ExactFraction::new(selected_error_count_at_terminal, terminal_domain_size)?;
+        for fold_ordinal in 0..=parameters.folding_factor {
+            let code_state = WhirCodeStateRow::derive(
+                epoch_ordinal,
+                u32::try_from(fold_ordinal)
+                    .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+                parent_domain_size,
+                parent_dimension,
+                selected_state_relative_distance,
+            )?;
+            interleaved_unique_decoding_rows.push(InterleavedUniqueDecodingRow::derive(
+                code_state,
+                source_interleaving_width,
+            )?);
+            code_state_rows.push(code_state);
+        }
+    }
+
+    let mut fold_rows = Vec::with_capacity(
+        source_epoch_count
+            .checked_mul(parameters.folding_factor)
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+    );
+    for epoch_index in 0..encoded_oracles.len() {
+        let epoch_ordinal = u32::try_from(epoch_index)
+            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+        for fold_index in 0..parameters.folding_factor {
+            let fold_ordinal = u32::try_from(fold_index + 1)
+                .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+            let transcript_operation_ordinal = find_fold_transcript_operation(
+                plan.transcript_operations(),
+                epoch_ordinal,
+                u32::try_from(fold_index)
+                    .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+            )?;
+            let target_state = code_state_rows
+                .iter()
+                .find(|row| row.epoch_ordinal == epoch_ordinal && row.fold_ordinal == fold_ordinal)
+                .ok_or(WhirTheoremCertificateError::IncompleteTranscriptMapping)?;
+            fold_rows.push(WhirFoldFailureRow {
+                epoch_ordinal,
+                fold_ordinal,
+                transcript_operation_ordinal,
+                target_domain_size: target_state.domain_size,
+                sumcheck_numerator: WHIR_SUMCHECK_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE,
+                mutual_correlated_agreement_numerator: target_state.domain_size,
+            });
+        }
+    }
+
+    let mut shift_rows = Vec::with_capacity(plan.whir.rounds.len());
+    for round in &plan.whir.rounds {
+        let transcript_operation_ordinal =
+            find_unique_transcript_operation(plan.transcript_operations(), |operation| {
+                matches!(
+                    operation,
+                    RowCodeWhirTranscriptOperation::SampleExtension {
+                        role: RowCodeWhirExtensionRole::RoundCombination { round_ordinal },
+                        ..
+                    } if *round_ordinal == round.round_ordinal
+                )
+            })?;
+        let query_count = u64::try_from(
+            whir_epoch_openings
+                .get(
+                    usize::try_from(round.round_ordinal)
+                        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+                )
+                .ok_or(WhirTheoremCertificateError::IncompleteTranscriptMapping)?
+                .query_count,
+        )
+        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+        let list_size = 1_u64;
+        shift_rows.push(WhirShiftFailureRow {
+            round_ordinal: round.round_ordinal,
+            transcript_operation_ordinal,
+            query_count,
+            list_size,
+            algebraic_numerator: list_size
+                .checked_mul(
+                    query_count
+                        .checked_add(1)
+                        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+                )
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+        });
+    }
+
+    let final_source_epoch_ordinal = u32::try_from(source_epoch_count - 1)
+        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let final_code_state = code_state_rows
+        .iter()
+        .find(|row| {
+            row.epoch_ordinal == final_source_epoch_ordinal
+                && usize::try_from(row.fold_ordinal).ok() == Some(parameters.folding_factor)
+        })
+        .ok_or(WhirTheoremCertificateError::InvalidSelectedGeometry)?;
+    let final_query_row = WhirFinalQueryRow {
+        epoch_ordinal: final_source_epoch_ordinal,
+        query_count: u64::try_from(
+            whir_epoch_openings
+                .last()
+                .ok_or(WhirTheoremCertificateError::IncompleteTranscriptMapping)?
+                .query_count,
+        )
+        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+        bad_agreement: final_code_state.false_state_agreement_ceiling,
+    };
+    Ok(ProductionWhirGeometryCertificate {
+        code_state_rows,
+        interleaved_unique_decoding_rows,
+        fold_rows,
+        shift_rows,
+        final_query_row,
+    })
+}
+
+fn checked_row_code_whir_production_geometry_certificate_with_masking(
+    plan: &RowCodeWhirConstructionPlan,
+    artifact: &ValidatedRelationPlanArtifact,
+    relation_variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
+    aggregate_wide_masking: &AggregateWideMaskingCertificate,
+) -> Result<RowCodeWhirProductionGeometryCertificate, WhirTheoremCertificateError> {
+    let contextualize = |stage: ProductionGeometryCertificateStage,
+                         error: WhirTheoremCertificateError| {
+        WhirTheoremCertificateError::SelectedProductionGeometry {
+            application_statement_schema_identifier: plan.application_statement_schema_identifier,
+            schedule_position: plan.schedule_position,
+            top_count: plan.top_count,
+            stage,
+            failure: error.into(),
+        }
+    };
+    let expected_plan = RowCodeWhirConstructionPlan::for_selected_variant(
+        artifact,
+        relation_variant.schedule_position(),
+        relation_variant.top_count(),
+    )
+    .map_err(|_| {
+        contextualize(
+            ProductionGeometryCertificateStage::ConstructionPlan,
+            WhirTheoremCertificateError::InvalidSelectedGeometry,
+        )
+    })?;
+    let relation_plan_variant_hash = relation_variant.canonical_hash().map_err(|_| {
+        contextualize(
+            ProductionGeometryCertificateStage::ConstructionPlan,
+            WhirTheoremCertificateError::InvalidSelectedGeometry,
+        )
+    })?;
+    if artifact.application_statement_schema_identifier()
+        != plan.application_statement_schema_identifier
+        || artifact.checked_context() != relation_context
+        || &expected_plan != plan
+        || plan.relation_plan_variant_hash != relation_plan_variant_hash
+    {
+        return Err(contextualize(
+            ProductionGeometryCertificateStage::ConstructionPlan,
+            WhirTheoremCertificateError::InvalidSelectedGeometry,
+        ));
+    }
+    let parameters = plan.selected_parameters();
+    let hiding_configuration = super::super::hiding_whir::selected_hiding_whir_config(parameters)
+        .map_err(|_| {
+        contextualize(
+            ProductionGeometryCertificateStage::HidingConfiguration,
+            WhirTheoremCertificateError::IncompleteMaskingCorrespondence,
+        )
+    })?;
+    if parameters.soundness_assumption != RowCodeWhirSoundnessAssumption::UniqueDecoding
+        || parameters.folding_factor != 3
+        || plan.whir.rounds.len() != hiding_configuration.n_rounds()
+        || plan.whir.initial_sumcheck_round_count != hiding_configuration.round_folding_factor(0)
+        || plan.whir.final_round.sumcheck_round_count
+            != hiding_configuration.inner.final_sumcheck_rounds
+    {
+        return Err(contextualize(
+            ProductionGeometryCertificateStage::HidingConfiguration,
+            WhirTheoremCertificateError::InvalidSelectedGeometry,
+        ));
+    }
+    let relation_compiler_interpreter_semantics =
+        checked_relation_compiler_interpreter_semantics(relation_variant, relation_context)
+            .map_err(|_| {
+                contextualize(
+                    ProductionGeometryCertificateStage::RelationSemantics,
+                    WhirTheoremCertificateError::IncompleteRelationSemanticCorrespondence,
+                )
+            })?;
+    if !relation_compiler_interpreter_semantics.is_complete()
+        || relation_compiler_interpreter_semantics.canonical_variant_hash()
+            != relation_plan_variant_hash
+        || relation_compiler_interpreter_semantics.constraint_count()
+            != relation_variant.constraint_count()
+    {
+        return Err(contextualize(
+            ProductionGeometryCertificateStage::RelationSemantics,
+            WhirTheoremCertificateError::IncompleteRelationSemanticCorrespondence,
+        ));
+    }
+    let construction_masking =
+        checked_zero_knowledge_mask_image(relation_variant, relation_context).map_err(|_| {
+            contextualize(
+                ProductionGeometryCertificateStage::MaskingCorrespondence,
+                WhirTheoremCertificateError::IncompleteMaskingCorrespondence,
+            )
+        })?;
+    if !construction_masking.is_complete()
+        || !aggregate_wide_masking.is_complete()
+        || !construction_masking.aggregate_claims_factor_through_masked_openings()
+        || !construction_masking.aggregate_wide_views_delegate_to_precommitted_pad()
+    {
+        return Err(contextualize(
+            ProductionGeometryCertificateStage::MaskingCorrespondence,
+            WhirTheoremCertificateError::IncompleteMaskingCorrespondence,
+        ));
+    }
+    let whir_geometry = derive_production_whir_geometry_certificate(plan, aggregate_wide_masking)
+        .map_err(|error| {
+        contextualize(ProductionGeometryCertificateStage::WhirGeometry, error)
+    })?;
+    let prefix_stacking = derive_prefix_stacking_certificate(plan).map_err(|error| {
+        contextualize(ProductionGeometryCertificateStage::PrefixStacking, error)
+    })?;
+    let catalog = plan.oracle_equation_catalog().map_err(|_| {
+        contextualize(
+            ProductionGeometryCertificateStage::OracleEquationCatalog,
+            WhirTheoremCertificateError::InvalidSelectedGeometry,
+        )
+    })?;
+    let (state_epoch_rows, oracle_equation_rows) = derive_state_and_equation_rows(&catalog)
+        .map_err(|error| {
+            contextualize(ProductionGeometryCertificateStage::StateEquationRows, error)
+        })?;
+    validate_state_and_equation_rows(&catalog, &state_epoch_rows, &oracle_equation_rows).map_err(
+        |error| contextualize(ProductionGeometryCertificateStage::StateEquationRows, error),
+    )?;
+    let maximum_transcript_hash_query_count =
+        catalog.maximum_transcript_hash_query_count().map_err(|_| {
+            contextualize(
+                ProductionGeometryCertificateStage::TranscriptCounts,
+                WhirTheoremCertificateError::InvalidSelectedGeometry,
+            )
+        })?;
+    let logical_verifier_message_count =
+        catalog.logical_verifier_message_count().map_err(|_| {
+            contextualize(
+                ProductionGeometryCertificateStage::TranscriptCounts,
+                WhirTheoremCertificateError::InvalidSelectedGeometry,
+            )
+        })?;
+    let selected_plan_state_predicate = derive_selected_plan_state_predicate_certificate(
+        plan,
+        &catalog,
+        &state_epoch_rows,
+        &whir_geometry.code_state_rows,
+    )
+    .map_err(|error| {
+        contextualize(
+            ProductionGeometryCertificateStage::SelectedStatePredicate,
+            error,
+        )
+    })?;
+    let cms19_strong_state_hash_chain = derive_cms19_strong_state_hash_chain_certificate(
+        plan,
+        &catalog,
+        &state_epoch_rows,
+        &oracle_equation_rows,
+        &selected_plan_state_predicate,
+        logical_verifier_message_count,
+    )
+    .map_err(|error| {
+        contextualize(
+            ProductionGeometryCertificateStage::StrongStateHashChain,
+            error,
+        )
+    })?;
+    let transcript_equation_count = catalog.maximum_equation_count().map_err(|_| {
+        contextualize(
+            ProductionGeometryCertificateStage::VerifierLedger,
+            WhirTheoremCertificateError::ArithmeticOverflow,
+        )
+    })?;
+    let complete_verifier_oracle_ledger = derive_complete_verifier_oracle_ledger(
+        plan,
+        relation_variant,
+        transcript_equation_count,
+        maximum_transcript_hash_query_count,
+    )
+    .map_err(|error| contextualize(ProductionGeometryCertificateStage::VerifierLedger, error))?;
+    let deployed_aggregate_leaf_oracle = derive_deployed_aggregate_leaf_oracle_certificate(
+        plan,
+        aggregate_wide_masking,
+        &complete_verifier_oracle_ledger,
+    )
+    .map_err(|error| {
+        contextualize(
+            ProductionGeometryCertificateStage::DeployedLeafOracle,
+            error,
+        )
+    })?;
+    let commitment_subtree_extraction = derive_commitment_subtree_extraction_certificate(
+        plan,
+        &complete_verifier_oracle_ledger.merkle_rows,
+    )
+    .map_err(|error| contextualize(ProductionGeometryCertificateStage::CommitmentSubtree, error))?;
+    let cms19_arithmetic = derive_cms19_arithmetic_certificate(
+        deployed_aggregate_leaf_oracle.deployed_verifier_hash_query_count,
+        deployed_aggregate_leaf_oracle.deployed_accepting_database_equation_count,
+    );
+    let certificate = RowCodeWhirProductionGeometryCertificate {
+        application_statement_schema_identifier: plan.application_statement_schema_identifier,
+        schedule_position: plan.schedule_position,
+        top_count: plan.top_count,
+        construction_plan_identity_hash: plan.canonical_identity_hash().map_err(|_| {
+            contextualize(
+                ProductionGeometryCertificateStage::ConstructionIdentity,
+                WhirTheoremCertificateError::InvalidSelectedGeometry,
+            )
+        })?,
+        relation_plan_hash: plan.relation_plan_hash,
+        relation_plan_variant_hash,
+        parameters,
+        trace_domain_size: plan.trace_domain_size,
+        evaluation_domain_size: plan.evaluation_domain_size,
+        opening_degree_bound_exclusive: plan.opening_degree_bound_exclusive,
+        proof_privacy_mode: plan.proof_privacy_mode,
+        relation_compiler_interpreter_semantics,
+        construction_masking,
+        aggregate_wide_masking: aggregate_wide_masking.clone(),
+        whir_geometry,
+        prefix_stacking,
+        state_epoch_rows,
+        oracle_equation_rows,
+        selected_plan_state_predicate,
+        cms19_strong_state_hash_chain,
+        complete_verifier_oracle_ledger,
+        deployed_aggregate_leaf_oracle,
+        commitment_subtree_extraction,
+        maximum_transcript_hash_query_count,
+        logical_verifier_message_count,
+        cms19_arithmetic,
+    };
+    if let Some(failure) = certificate.completeness_failure() {
+        return Err(WhirTheoremCertificateError::SelectedProductionGeometry {
+            application_statement_schema_identifier: plan.application_statement_schema_identifier,
+            schedule_position: plan.schedule_position,
+            top_count: plan.top_count,
+            stage: ProductionGeometryCertificateStage::Completeness,
+            failure,
+        });
+    }
+    Ok(certificate)
+}
+
+fn checked_selected_row_code_whir_production_geometry_certificates(
+    artifacts: &[ValidatedRelationPlanArtifact],
+    mut include_plan: impl FnMut(&RowCodeWhirConstructionPlan) -> bool,
+) -> Result<CheckedProductionGeometryCertificateInventory, WhirTheoremCertificateError> {
+    let mut masking_certificates = Vec::<(
+        RowCodeWhirSelectedParameters,
+        AggregateWideMaskingCertificate,
+    )>::new();
+    let mut records = Vec::new();
+    for artifact in artifacts {
+        let relation_context = selected_relation_plan_check_context(
+            artifact.application_statement_schema_identifier(),
+        )
+        .ok_or(WhirTheoremCertificateError::InvalidSelectedGeometry)?;
+        for relation_variant in artifact.compiled_plan().variants() {
+            let application_statement_schema_identifier =
+                artifact.application_statement_schema_identifier();
+            let schedule_position = relation_variant.schedule_position();
+            let top_count = relation_variant.top_count();
+            let contextualize =
+                |stage: ProductionGeometryCertificateStage, error: WhirTheoremCertificateError| {
+                    match error {
+                        contextual @ WhirTheoremCertificateError::SelectedProductionGeometry {
+                            ..
+                        } => contextual,
+                        other => WhirTheoremCertificateError::SelectedProductionGeometry {
+                            application_statement_schema_identifier,
+                            schedule_position,
+                            top_count,
+                            stage,
+                            failure: other.into(),
+                        },
+                    }
+                };
+            let plan = RowCodeWhirConstructionPlan::for_selected_variant(
+                artifact,
+                schedule_position,
+                top_count,
+            )
+            .map_err(|_| {
+                contextualize(
+                    ProductionGeometryCertificateStage::ConstructionPlan,
+                    WhirTheoremCertificateError::InvalidSelectedGeometry,
+                )
+            })?;
+            if !include_plan(&plan) {
+                continue;
+            }
+            let certificate_started_at = Instant::now();
+            eprintln!(
+                "checking production geometry schema {application_statement_schema_identifier:#06x}, schedule {schedule_position:?}, top count {top_count:?}",
+            );
+            let parameters = plan.selected_parameters();
+            let masking_certificate_index = if let Some(index) = masking_certificates
+                .iter()
+                .position(|(cached_parameters, _)| *cached_parameters == parameters)
+            {
+                index
+            } else {
+                let hiding_configuration = super::super::hiding_whir::selected_hiding_whir_config(
+                    parameters,
+                )
+                .map_err(|_| {
+                    contextualize(
+                        ProductionGeometryCertificateStage::HidingConfiguration,
+                        WhirTheoremCertificateError::IncompleteMaskingCorrespondence,
+                    )
+                })?;
+                let masking_certificate = AggregateWideMaskingCertificate::derive(
+                    &hiding_configuration,
+                )
+                .map_err(|_| {
+                    contextualize(
+                        ProductionGeometryCertificateStage::MaskingCorrespondence,
+                        WhirTheoremCertificateError::IncompleteMaskingCorrespondence,
+                    )
+                })?;
+                masking_certificates.push((parameters, masking_certificate));
+                masking_certificates.len() - 1
+            };
+            let certificate = checked_row_code_whir_production_geometry_certificate_with_masking(
+                &plan,
+                artifact,
+                relation_variant,
+                &relation_context,
+                &masking_certificates[masking_certificate_index].1,
+            )
+            .map_err(|error| {
+                contextualize(ProductionGeometryCertificateStage::Completeness, error)
+            })?;
+            records.push(CheckedProductionGeometryCertificateRecord::from_complete(
+                &certificate,
+            ));
+            eprintln!(
+                "checked production geometry schema {application_statement_schema_identifier:#06x}, schedule {schedule_position:?}, top count {top_count:?} in {:?}",
+                certificate_started_at.elapsed(),
+            );
+        }
+    }
+    let mut coordinates = BTreeSet::new();
+    let mut construction_identities = BTreeSet::new();
+    if records.is_empty()
+        || records.iter().any(|certificate| {
+            !coordinates.insert((
+                certificate.application_statement_schema_identifier,
+                certificate.schedule_position,
+                certificate.top_count,
+            )) || !construction_identities.insert(certificate.construction_plan_identity_hash)
+        })
+    {
+        return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
+    }
+    Ok(CheckedProductionGeometryCertificateInventory {
+        records,
+        masking_certificates,
+    })
 }
 
 pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
@@ -1973,6 +2892,7 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
         .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
     let complete_verifier_oracle_ledger = derive_complete_verifier_oracle_ledger(
         plan,
+        relation_variant,
         transcript_equation_count,
         maximum_transcript_hash_query_count,
     )?;
@@ -2121,6 +3041,12 @@ fn derive_prefix_stacking_certificate(
         .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
     let selector_variable_count = usize::try_from(padded_width.ilog2())
         .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let expected_table_width = 1_usize
+        .checked_shl(
+            u32::try_from(parameters.row_code_log_inverse_rate)
+                .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+        )
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
     let scalar_opening_count = plan.opening_batches.iter().try_fold(
         0_u64,
         |total, batch| -> Result<u64, WhirTheoremCertificateError> {
@@ -2143,13 +3069,21 @@ fn derive_prefix_stacking_certificate(
                 .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
         },
     )?;
-    if table_width != SELECTED_AGGREGATE_TABLE_WIDTH
-        || plan.opening_batches.len() != SELECTED_OPENING_BATCH_COUNT
-        || scalar_opening_count != SELECTED_SCALAR_OPENING_COUNT
+    let is_same_secret_geometry = plan.application_statement_schema_identifier
+        == ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER;
+    if table_width == 0
+        || table_width != expected_table_width
+        || padded_width != table_width
+        || plan.opening_batches.is_empty()
+        || scalar_opening_count == 0
         || parameters
             .table_variable_count
             .checked_add(selector_variable_count)
             != Some(parameters.polynomial_commitment_variable_count)
+        || (is_same_secret_geometry
+            && (table_width != SAME_SECRET_AGGREGATE_TABLE_WIDTH
+                || plan.opening_batches.len() != SAME_SECRET_OPENING_BATCH_COUNT
+                || scalar_opening_count != SAME_SECRET_SCALAR_OPENING_COUNT))
     {
         return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
     }
@@ -3042,30 +3976,21 @@ fn derive_merkle_oracle_equation_rows(
 
 fn derive_fixed_verifier_hash_rows(
     plan: &RowCodeWhirConstructionPlan,
+    relation_variant: &RelationPlanVariant,
 ) -> Result<Vec<FixedVerifierHashCoverageRow>, WhirTheoremCertificateError> {
-    let context = selected_relation_plan_check_context(
-        ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
-    )
-    .ok_or(WhirTheoremCertificateError::InvalidSelectedGeometry)?;
-    let compiled_plan = compile_same_secret_relation_plan(
-        &selected_same_secret_relation_plan_input()
-            .map_err(|_| WhirTheoremCertificateError::InvalidSelectedGeometry)?,
-        &context,
-    )
-    .map_err(|_| WhirTheoremCertificateError::InvalidSelectedGeometry)?;
-    let artifact = ValidatedRelationPlanArtifact::from_owned_compiled_plan(compiled_plan, &context)
-        .map_err(|_| WhirTheoremCertificateError::InvalidSelectedGeometry)?;
-    let variant = artifact
-        .compiled_plan()
-        .select_variant(None, None)
-        .map_err(|_| WhirTheoremCertificateError::InvalidSelectedGeometry)?;
-    let expected_plan = RowCodeWhirConstructionPlan::for_selected_variant(&artifact, None, None)
-        .map_err(|_| WhirTheoremCertificateError::InvalidSelectedGeometry)?;
-    if &expected_plan != plan {
+    if relation_variant
+        .canonical_hash()
+        .map_err(|_| WhirTheoremCertificateError::InvalidSelectedGeometry)?
+        != plan.relation_plan_variant_hash
+        || relation_variant.schedule_position() != plan.schedule_position
+        || relation_variant.top_count() != plan.top_count
+        || relation_variant.trace_domain_size() != plan.trace_domain_size
+        || relation_variant.proof_privacy_mode() != plan.proof_privacy_mode
+    {
         return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
     }
 
-    let verifier_source_ordinals = variant
+    let verifier_source_ordinals = relation_variant
         .ordered_columns()
         .iter()
         .filter_map(|column| match column.origin() {
@@ -3080,16 +4005,13 @@ fn derive_fixed_verifier_hash_rows(
         .iter()
         .copied()
         .collect::<BTreeSet<_>>();
-    if verifier_source_ordinals.is_empty() || distinct_verifier_source_ordinals.is_empty() {
-        return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
-    }
     let public_setup_hash_query_count = u64::try_from(verifier_source_ordinals.len())
         .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
     let public_setup_distinct_equation_count =
         u64::try_from(distinct_verifier_source_ordinals.len())
             .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
 
-    Ok(vec![
+    let mut rows = vec![
         FixedVerifierHashCoverageRow {
             role: FixedVerifierHashRole::RelationPlanIdentity,
             hash_query_count: 1,
@@ -3114,22 +4036,26 @@ fn derive_fixed_verifier_hash_rows(
             distinct_equation_count: 1,
             transcript_catalog_equation_overlap_count: 0,
         },
-        FixedVerifierHashCoverageRow {
+    ];
+    if public_setup_hash_query_count > 0 {
+        rows.push(FixedVerifierHashCoverageRow {
             role: FixedVerifierHashRole::PublicSetupVerifierSequence,
             hash_query_count: public_setup_hash_query_count,
             distinct_equation_count: public_setup_distinct_equation_count,
             transcript_catalog_equation_overlap_count: 0,
-        },
-    ])
+        });
+    }
+    Ok(rows)
 }
 
 fn derive_complete_verifier_oracle_ledger(
     plan: &RowCodeWhirConstructionPlan,
+    relation_variant: &RelationPlanVariant,
     transcript_equation_count: u64,
     transcript_hash_query_count: u64,
 ) -> Result<CompleteVerifierOracleLedger, WhirTheoremCertificateError> {
     let merkle_rows = derive_merkle_oracle_equation_rows(plan)?;
-    let fixed_hash_rows = derive_fixed_verifier_hash_rows(plan)?;
+    let fixed_hash_rows = derive_fixed_verifier_hash_rows(plan, relation_variant)?;
     let provisional = CompleteVerifierOracleLedger {
         transcript_equation_count,
         transcript_hash_query_count,
@@ -4584,7 +5510,7 @@ fn derive_exact_algebraic_failure_rows(
     let phase_batch_numerator = u64::try_from(opening_point_count)
         .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?
         .checked_mul(
-            u64::try_from(SELECTED_AGGREGATE_TABLE_WIDTH)
+            u64::try_from(SAME_SECRET_AGGREGATE_TABLE_WIDTH)
                 .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
         )
         .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
@@ -5022,6 +5948,384 @@ fn selected_same_secret_construction_plan() -> RowCodeWhirConstructionPlan {
         .expect("the selected same-secret relation validates");
     RowCodeWhirConstructionPlan::for_selected_variant(&artifact, None, None)
         .expect("the selected same-secret construction plan derives")
+}
+
+fn assert_public_key_share_prefix_stacking_is_derived_from_its_production_plan(
+    artifacts: &[ValidatedRelationPlanArtifact],
+) {
+    let artifact = artifacts
+        .iter()
+        .find(|artifact| {
+            artifact.application_statement_schema_identifier()
+                == ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+        })
+        .expect("the selected public-key-share relation artifact exists");
+    let relation_variant = artifact
+        .compiled_plan()
+        .variants()
+        .first()
+        .expect("the public-key-share relation has one variant");
+    let plan = RowCodeWhirConstructionPlan::for_selected_variant(
+        artifact,
+        relation_variant.schedule_position(),
+        relation_variant.top_count(),
+    )
+    .expect("the selected public-key-share construction derives");
+    let certificate =
+        derive_prefix_stacking_certificate(&plan).expect("prefix stacking derives from the plan");
+    let expected_scalar_opening_count = plan
+        .opening_batches
+        .iter()
+        .map(|batch| batch.requested_aggregate_column_ordinals.len() as u64)
+        .sum::<u64>();
+
+    assert_eq!(certificate.source_table_count, 1);
+    assert_eq!(certificate.committed_polynomial_count, 1);
+    assert_eq!(certificate.table_width, plan.aggregate_table_width());
+    assert_eq!(
+        certificate.selector_variable_count,
+        plan.parameters.polynomial_commitment_variable_count - plan.parameters.table_variable_count,
+    );
+    assert_eq!(certificate.opening_batch_count, plan.opening_batches.len());
+    assert_eq!(
+        certificate.scalar_opening_count,
+        expected_scalar_opening_count
+    );
+    assert!(
+        certificate.opening_batch_count != SAME_SECRET_OPENING_BATCH_COUNT
+            || certificate.scalar_opening_count != SAME_SECRET_SCALAR_OPENING_COUNT,
+        "the public-key-share geometry must not inherit same-secret opening constants",
+    );
+
+    let mut duplicate_column = plan.clone();
+    let duplicated_ordinal =
+        duplicate_column.opening_batches[0].requested_aggregate_column_ordinals[0];
+    duplicate_column.opening_batches[0]
+        .requested_aggregate_column_ordinals
+        .push(duplicated_ordinal);
+    assert_eq!(
+        derive_prefix_stacking_certificate(&duplicate_column),
+        Err(WhirTheoremCertificateError::InvalidSelectedGeometry),
+    );
+
+    let mut changed_point_order = plan;
+    changed_point_order.opening_batches[0].point_ordinal += 1;
+    assert_eq!(
+        derive_prefix_stacking_certificate(&changed_point_order),
+        Err(WhirTheoremCertificateError::InvalidSelectedGeometry),
+    );
+}
+
+fn assert_fixed_verifier_hash_rows_follow_each_relation_variant(
+    artifacts: &[ValidatedRelationPlanArtifact],
+) {
+    let public_key_share_artifact = artifacts
+        .iter()
+        .find(|artifact| {
+            artifact.application_statement_schema_identifier()
+                == ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+        })
+        .expect("the selected public-key-share relation artifact exists");
+    let public_key_share_variant = public_key_share_artifact
+        .compiled_plan()
+        .variants()
+        .first()
+        .expect("the public-key-share relation has one variant");
+    let public_key_share_plan = RowCodeWhirConstructionPlan::for_selected_variant(
+        public_key_share_artifact,
+        public_key_share_variant.schedule_position(),
+        public_key_share_variant.top_count(),
+    )
+    .expect("the selected public-key-share construction derives");
+    let rows = derive_fixed_verifier_hash_rows(&public_key_share_plan, public_key_share_variant)
+        .expect("fixed verifier hashes derive from the matching relation variant");
+    let verifier_source_ordinals = public_key_share_variant
+        .ordered_columns()
+        .iter()
+        .filter_map(|column| match column.origin() {
+            RelationColumnOrigin::VerifierSequence {
+                verifier_source_ordinal,
+                ..
+            } => Some(*verifier_source_ordinal),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let distinct_verifier_source_ordinals = verifier_source_ordinals
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
+    let public_setup_row = rows
+        .iter()
+        .find(|row| row.role == FixedVerifierHashRole::PublicSetupVerifierSequence)
+        .expect("the public setup verifier sequence has one ledger row");
+
+    assert_eq!(rows.len(), 5);
+    assert_eq!(
+        public_setup_row.hash_query_count,
+        verifier_source_ordinals.len() as u64
+    );
+    assert_eq!(
+        public_setup_row.distinct_equation_count,
+        distinct_verifier_source_ordinals.len() as u64
+    );
+
+    let collective_public_key_artifact = artifacts
+        .iter()
+        .find(|artifact| {
+            artifact.application_statement_schema_identifier()
+                == ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+        })
+        .expect("the selected collective-public-key relation artifact exists");
+    let collective_public_key_variant = collective_public_key_artifact
+        .compiled_plan()
+        .variants()
+        .first()
+        .expect("the collective-public-key relation has one variant");
+    let collective_public_key_plan = RowCodeWhirConstructionPlan::for_selected_variant(
+        collective_public_key_artifact,
+        collective_public_key_variant.schedule_position(),
+        collective_public_key_variant.top_count(),
+    )
+    .expect("the selected collective-public-key construction derives");
+    let collective_public_key_rows =
+        derive_fixed_verifier_hash_rows(&collective_public_key_plan, collective_public_key_variant)
+            .expect("the aggregate fixed-hash rows derive without an imaginary verifier sequence");
+    assert_eq!(collective_public_key_rows.len(), 4);
+    assert!(collective_public_key_rows.iter().all(|row| {
+        row.role != FixedVerifierHashRole::PublicSetupVerifierSequence
+            && row.hash_query_count == 1
+            && row.distinct_equation_count == 1
+    }));
+
+    let same_secret_variant = artifacts
+        .iter()
+        .find(|artifact| {
+            artifact.application_statement_schema_identifier()
+                == ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER
+        })
+        .and_then(|artifact| artifact.compiled_plan().variants().first())
+        .expect("the selected same-secret relation variant exists");
+    assert_eq!(
+        derive_fixed_verifier_hash_rows(&public_key_share_plan, same_secret_variant),
+        Err(WhirTheoremCertificateError::InvalidSelectedGeometry),
+        "a fixed-hash ledger from another construction identity must refuse",
+    );
+}
+
+fn assert_ballot_commitment_subtree_certificate_accepts_its_zero_bound_tree_geometry(
+    artifacts: &[ValidatedRelationPlanArtifact],
+) {
+    let artifact = artifacts
+        .iter()
+        .find(|artifact| {
+            artifact.application_statement_schema_identifier()
+                == ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER
+        })
+        .expect("the selected ballot relation artifact exists");
+    let relation_variant = artifact
+        .compiled_plan()
+        .variants()
+        .first()
+        .expect("the ballot relation has one variant");
+    let plan = RowCodeWhirConstructionPlan::for_selected_variant(
+        artifact,
+        relation_variant.schedule_position(),
+        relation_variant.top_count(),
+    )
+    .expect("the selected ballot construction derives");
+    let merkle_rows =
+        derive_merkle_oracle_equation_rows(&plan).expect("the ballot Merkle rows derive");
+    let certificate = derive_commitment_subtree_extraction_certificate(&plan, &merkle_rows)
+        .expect("the ballot subtree certificate derives");
+
+    assert!(plan.bound_trees.is_empty());
+    assert_eq!(certificate.bound_tree_root_count, 0);
+    assert_eq!(
+        certificate.supplied_commitment_root_count,
+        certificate.rows.len(),
+    );
+    assert!(certificate.rows.iter().all(|row| {
+        row.implementation != CoordinateDerivedOpeningImplementation::ExactBoundTree
+    }));
+    assert!(certificate.is_complete());
+}
+
+#[test]
+fn every_width_64_construction_identity_has_a_complete_geometry_certificate() {
+    let _certificate_test_guard = PRODUCTION_GEOMETRY_CERTIFICATE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let artifacts = selected_relation_plans().expect("selected relation plans derive");
+    assert_public_key_share_prefix_stacking_is_derived_from_its_production_plan(&artifacts);
+    assert_fixed_verifier_hash_rows_follow_each_relation_variant(&artifacts);
+    let inventory =
+        checked_selected_row_code_whir_production_geometry_certificates(&artifacts, |plan| {
+            plan.parameters.logical_polynomials_per_physical_row == 64
+        })
+        .expect("every width-64 production geometry certificate derives");
+    let certificates = &inventory.records;
+    assert_eq!(certificates.len(), 27);
+    assert!(
+        certificates
+            .iter()
+            .all(CheckedProductionGeometryCertificateRecord::is_complete)
+    );
+
+    let mut evaluator_top_counts = BTreeSet::new();
+    for certificate in certificates {
+        assert_eq!(
+            certificate.parameters.logical_polynomials_per_physical_row,
+            64
+        );
+        assert_eq!(certificate.parameters.row_code_log_inverse_rate, 2);
+        if certificate.application_statement_schema_identifier
+            == ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+        {
+            evaluator_top_counts.insert(
+                certificate
+                    .top_count
+                    .expect("every evaluator geometry carries its top count"),
+            );
+        }
+    }
+    assert_eq!(evaluator_top_counts, (1_u16..=20).collect::<BTreeSet<_>>());
+
+    let same_secret = certificates
+        .iter()
+        .find(|certificate| {
+            certificate.application_statement_schema_identifier
+                == ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER
+        })
+        .expect("the same-secret geometry certificate exists");
+    assert_eq!(same_secret.maximum_transcript_hash_query_count, 1_141_598);
+    assert_eq!(same_secret.logical_verifier_message_count, 4_272);
+    assert_eq!(same_secret.deployed_verifier_hash_query_count, 1_232_362,);
+    assert_eq!(
+        same_secret.deployed_accepting_database_equation_count,
+        1_229_573,
+    );
+}
+
+#[test]
+fn every_width_8_construction_identity_has_a_complete_geometry_certificate() {
+    let _certificate_test_guard = PRODUCTION_GEOMETRY_CERTIFICATE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let artifacts = selected_relation_plans().expect("selected relation plans derive");
+    assert_ballot_commitment_subtree_certificate_accepts_its_zero_bound_tree_geometry(&artifacts);
+    let inventory =
+        checked_selected_row_code_whir_production_geometry_certificates(&artifacts, |plan| {
+            plan.parameters.logical_polynomials_per_physical_row == 8
+        })
+        .expect("every width-8 production geometry certificate derives");
+    let certificates = &inventory.records;
+    assert_eq!(certificates.len(), 4);
+    assert!(
+        certificates
+            .iter()
+            .all(CheckedProductionGeometryCertificateRecord::is_complete)
+    );
+    assert!(certificates.iter().all(|certificate| {
+        certificate.parameters.logical_polynomials_per_physical_row == 8
+            && certificate.parameters.row_code_log_inverse_rate == 5
+    }));
+    assert_eq!(
+        certificates
+            .iter()
+            .map(|certificate| certificate.application_statement_schema_identifier)
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([
+            ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofApplicationSlotCeilings::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofApplicationSlotCeilings::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+        ]),
+    );
+
+    let vss_artifact = artifacts
+        .iter()
+        .find(|artifact| {
+            artifact.application_statement_schema_identifier()
+                == ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+        })
+        .expect("the selected VSS relation artifact exists");
+    let vss_variant = vss_artifact
+        .compiled_plan()
+        .variants()
+        .first()
+        .expect("the selected VSS relation has one variant");
+    let vss_context = selected_relation_plan_check_context(
+        ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+    )
+    .expect("the selected VSS context exists");
+    let vss_certificate = certificates
+        .iter()
+        .find(|certificate| {
+            certificate.application_statement_schema_identifier
+                == ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+        })
+        .expect("the selected VSS geometry certificate exists");
+    let vss_masking_certificate = inventory
+        .masking_certificates
+        .iter()
+        .find(|(parameters, _)| *parameters == vss_certificate.parameters)
+        .map(|(_, certificate)| certificate)
+        .expect("the VSS parameter class retains one masking certificate");
+    let vss_plan = RowCodeWhirConstructionPlan::for_selected_variant(
+        vss_artifact,
+        vss_variant.schedule_position(),
+        vss_variant.top_count(),
+    )
+    .expect("the selected VSS construction derives");
+    let changed_vss_plan_error = WhirTheoremCertificateError::SelectedProductionGeometry {
+        application_statement_schema_identifier:
+            ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+        schedule_position: vss_plan.schedule_position,
+        top_count: vss_plan.top_count,
+        stage: ProductionGeometryCertificateStage::ConstructionPlan,
+        failure: ProductionGeometryCertificateFailure::InvalidSelectedGeometry,
+    };
+
+    let mut changed_coefficient_count = vss_plan.clone();
+    changed_coefficient_count
+        .parameters
+        .logical_polynomial_coefficient_count /= 2;
+    assert_eq!(
+        checked_row_code_whir_production_geometry_certificate_with_masking(
+            &changed_coefficient_count,
+            vss_artifact,
+            vss_variant,
+            &vss_context,
+            vss_masking_certificate,
+        ),
+        Err(changed_vss_plan_error),
+    );
+
+    let mut changed_transcript = vss_plan.clone();
+    changed_transcript.transcript_operations.pop();
+    assert_eq!(
+        checked_row_code_whir_production_geometry_certificate_with_masking(
+            &changed_transcript,
+            vss_artifact,
+            vss_variant,
+            &vss_context,
+            vss_masking_certificate,
+        ),
+        Err(changed_vss_plan_error),
+    );
+
+    let mut omitted_bound_tree = vss_plan;
+    omitted_bound_tree.bound_trees.pop();
+    assert_eq!(
+        checked_row_code_whir_production_geometry_certificate_with_masking(
+            &omitted_bound_tree,
+            vss_artifact,
+            vss_variant,
+            &vss_context,
+            vss_masking_certificate,
+        ),
+        Err(changed_vss_plan_error),
+    );
 }
 
 #[test]
