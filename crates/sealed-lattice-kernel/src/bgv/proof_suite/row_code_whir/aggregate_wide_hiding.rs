@@ -1068,14 +1068,22 @@ impl AggregateWideMaskingCertificate {
             });
         }
 
-        let fresh_source_code = *folded_source_codes
+        let final_folded_source_code = *folded_source_codes
             .last()
             .ok_or_else(|| "aggregate-wide source-code schedule is empty".to_owned())?;
-        if fresh_source_code.message_length != material_shape.fresh_source_message_length
-            || fresh_source_code.randomness_length != material_shape.fresh_source_randomness_length
+        if final_folded_source_code.message_length != material_shape.fresh_source_message_length
+            || final_folded_source_code.randomness_length
+                != material_shape.fresh_source_randomness_length
         {
             return Err("aggregate-wide fresh source material has the wrong shape".to_owned());
         }
+        // The final carried source remains an eight-value folded row, but the
+        // base-case fresh source is encoded and committed as one codeword
+        // column over the same domain.
+        let fresh_source_code = AggregateWideQueryPrivateCodeRow {
+            interleaving_width: 1,
+            ..final_folded_source_code
+        };
         let fresh_pad_code = pad_code;
 
         let mut private_material_partition = Vec::with_capacity(
@@ -1232,6 +1240,26 @@ impl AggregateWideMaskingCertificate {
         )
     }
 
+    pub(super) const fn fresh_source_code_geometry(&self) -> (usize, usize, usize, usize, usize) {
+        (
+            self.fresh_source_code.message_length,
+            self.fresh_source_code.randomness_length,
+            self.fresh_source_code.domain_size,
+            self.fresh_source_code.maximum_distinct_query_count,
+            self.fresh_source_code.interleaving_width,
+        )
+    }
+
+    pub(super) const fn fresh_pad_code_geometry(&self) -> (usize, usize, usize, usize, usize) {
+        (
+            self.fresh_pad_code.message_length,
+            self.fresh_pad_code.randomness_length,
+            self.fresh_pad_code.domain_size,
+            self.fresh_pad_code.maximum_distinct_query_count,
+            self.fresh_pad_code.interleaving_width,
+        )
+    }
+
     fn validate(
         &self,
         configuration: &SelectedHidingWhirConfig,
@@ -1244,6 +1272,15 @@ impl AggregateWideMaskingCertificate {
         for code in &self.folded_source_codes {
             code.validate()?;
         }
+        let final_folded_source_code = self
+            .folded_source_codes
+            .last()
+            .copied()
+            .ok_or_else(|| "aggregate-wide source-code schedule is empty".to_owned())?;
+        let expected_fresh_source_code = AggregateWideQueryPrivateCodeRow {
+            interleaving_width: 1,
+            ..final_folded_source_code
+        };
 
         let expected_sumcheck_mask_count =
             (0..=configuration.n_rounds()).try_fold(0_usize, |count, batch_ordinal| {
@@ -1287,6 +1324,7 @@ impl AggregateWideMaskingCertificate {
             || self.pad_code.domain_size != material_shape.pad_shape().domain_size
             || self.fresh_pad_code != self.pad_code
             || self.folded_source_codes.len() != configuration.n_rounds() + 1
+            || self.fresh_source_code != expected_fresh_source_code
             || self.base_case_mask_group_count != 1
             || self.switch_delta_logical_coefficient != 1
             || self.switch_delta_pad_coefficient != -1
@@ -2480,7 +2518,14 @@ mod tests {
         );
         assert_eq!(
             certificate.fresh_source_code,
-            certificate.folded_source_codes[5]
+            AggregateWideQueryPrivateCodeRow {
+                interleaving_width: 1,
+                ..certificate.folded_source_codes[5]
+            }
+        );
+        assert_ne!(
+            certificate.fresh_source_code, certificate.folded_source_codes[5],
+            "the fresh-source commitment is a width-one column, not a folded source row",
         );
         assert_eq!(certificate.fresh_pad_code, certificate.pad_code);
     }

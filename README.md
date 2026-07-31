@@ -63,9 +63,15 @@ Not yet:
 - The generic construction certificate does not establish family simulation,
   malicious-verifier zero knowledge, or quantum-random-oracle zero knowledge.
 - Exact classical and quantum-random-oracle soundness is not established for
-  the deployed aggregate commitment: its streaming leaf chain contains
-  256-bit intermediate outputs that the current 512-bit-oracle ledger does not
-  model.
+  the deployed aggregate commitment. Focused certificate code inventories its
+  verifier-side SHAKE256 calls and refuses eligibility because the streaming
+  leaf chain has 256-bit intermediate outputs while the selected transform
+  requires a uniform 512-bit oracle-output boundary.
+- Complete proof-generation liveness and participant transport accounting are
+  also open. Current full-width bound-tree materialization consumes most of the
+  hard WebAssembly memory allowance before the remaining prover, encoder,
+  bridge, and allocator state is counted, and the complete proof corpus has not
+  been reconciled into per-participant traffic.
 - No full-width exact proof has completed on the current implementation, and no
   release WebAssembly proof has been generated and freshly verified across the
   desktop browsers. Recent guarded native attempts ended before proof emission,

@@ -132,6 +132,8 @@ type CommitmentScheme =
     MerkleTreeMmcs<ChallengeField, u64, LeafHasher, NodeCompressor, 2, MERKLE_DIGEST_WORD_LENGTH>;
 type DiscreteFourierTransform = Radix2DFTSmallBatch<ChallengeField>;
 
+const COLUMN_STREAMING_LEAF_STATE_WORD_LENGTH: usize = 4;
+
 #[derive(Clone)]
 struct AuthenticatedColumn {
     values: Vec<Goldilocks>,
@@ -147,16 +149,17 @@ struct DomainSeparatedShake256 {
 /// The aggregate codeword is produced one complete DFT column at a time. A
 /// conventional row hasher would retain one 200-byte Keccak state per encoded
 /// row, which exceeds the browser memory ceiling at the selected domain. This
-/// domain-separated chain retains one 32-byte value per row instead. The final
-/// Merkle leaf remains a 64-byte digest; the chain therefore provides 128-bit
-/// collision security while preserving the existing Merkle-node security.
+/// deployed chain retains one 32-byte value per row. Its 256-bit transition
+/// outputs are an ineligible commitment boundary even though the final Merkle
+/// leaf and every parent are 64-byte digests; the construction theorem models
+/// the transition calls separately and refuses this implementation.
 #[derive(Clone, Copy, Debug)]
 struct ColumnStreamableLeafHasher {
     domain: &'static [u8],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct ColumnStreamableLeafState([u64; 4]);
+struct ColumnStreamableLeafState([u64; COLUMN_STREAMING_LEAF_STATE_WORD_LENGTH]);
 
 impl ColumnStreamableLeafHasher {
     const INITIAL_FRAME: u8 = 0;
@@ -167,6 +170,16 @@ impl ColumnStreamableLeafHasher {
         Self {
             domain: hasher.domain,
         }
+    }
+
+    #[cfg(test)]
+    const fn intermediate_output_bit_length() -> usize {
+        COLUMN_STREAMING_LEAF_STATE_WORD_LENGTH * u64::BITS as usize
+    }
+
+    #[cfg(test)]
+    const fn final_output_bit_length() -> usize {
+        MERKLE_DIGEST_WORD_LENGTH * u64::BITS as usize
     }
 
     fn framed_state(&self, frame: u8) -> Shake256 {
