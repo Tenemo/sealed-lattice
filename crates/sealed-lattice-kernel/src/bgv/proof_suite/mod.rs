@@ -340,7 +340,14 @@ pub(in crate::bgv) use vss_share_linkage_runtime::{
 pub(crate) use zero_knowledge::validate_zero_knowledge_mask_image;
 #[cfg(test)]
 pub(in crate::bgv::proof_suite) use zero_knowledge::{
-    ConstructionMaskingCertificate, checked_zero_knowledge_mask_image_for_parameters,
+    ConstructionMaskDependency, ConstructionMaskResumeRule, ConstructionMaskSourceAuthority,
+    ConstructionMaskSourceDescriptor, ConstructionMaskSourceIdentifier,
+    ConstructionMaskSourceLifetime, ConstructionMaskingCertificate,
+    ConstructionMaskingCorrespondence, ConstructionMaskingPhase, ConstructionMaskingRankKind,
+    ConstructionMaskingRankRequirement, ConstructionMaskingRankVerification,
+    ConstructionSecretViewAlgebra, ConstructionSecretViewDescriptor,
+    ConstructionSecretViewIdentifier, checked_construction_masking_correspondence_for_parameters,
+    checked_zero_knowledge_mask_image_for_parameters,
 };
 
 #[cfg(test)]

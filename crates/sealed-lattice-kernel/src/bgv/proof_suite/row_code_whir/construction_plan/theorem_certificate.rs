@@ -17,7 +17,8 @@ use p3_whir::{FoldedRsCode, MaskCodeShape};
 use super::shared_query_partition::{SharedQueryEventClass, selected_shared_query_partition};
 use super::*;
 use crate::bgv::proof_suite::relation_plan::{
-    RelationCompilerInterpreterSemanticCertificate, checked_relation_compiler_interpreter_semantics,
+    RelationCompilerInterpreterSemanticCertificate, RelationMaskDescriptor,
+    checked_relation_compiler_interpreter_semantics,
 };
 use crate::bgv::proof_suite::row_code_whir::{
     ChallengeField, ColumnStreamableLeafHasher, ColumnStreamableLeafOracleFrame,
@@ -48,9 +49,18 @@ use crate::bgv::proof_suite::row_code_whir::{
     },
 };
 use crate::bgv::proof_suite::{
-    ConstructionMaskingCertificate, PROOF_CHALLENGE_EXTENSION_DEGREE,
-    ValidatedRelationPlanArtifact, checked_zero_knowledge_mask_image_for_parameters,
-    compile_same_secret_relation_plan, selected_relation_plans,
+    CollectivePublicKeyAggregatePlanInput, ConstructionMaskDependency, ConstructionMaskResumeRule,
+    ConstructionMaskSourceAuthority, ConstructionMaskSourceDescriptor,
+    ConstructionMaskSourceIdentifier, ConstructionMaskSourceLifetime,
+    ConstructionMaskingCertificate, ConstructionMaskingCorrespondence, ConstructionMaskingPhase,
+    ConstructionMaskingRankKind, ConstructionMaskingRankRequirement,
+    ConstructionMaskingRankVerification, ConstructionSecretViewAlgebra,
+    ConstructionSecretViewDescriptor, ConstructionSecretViewIdentifier,
+    PROOF_CHALLENGE_EXTENSION_DEGREE, PublicAggregateRelationGeometry, SuiteModulusReference,
+    ValidatedRelationPlanArtifact, checked_construction_masking_correspondence_for_parameters,
+    checked_zero_knowledge_mask_image_for_parameters,
+    compile_collective_public_key_aggregate_relation_plan, compile_same_secret_relation_plan,
+    selected_ballot_validity_relation_compilation, selected_relation_plans,
     selected_same_secret_relation_plan_input,
 };
 use crate::foundation::{
@@ -2025,6 +2035,1275 @@ impl Cms19ApplicabilityCertificate {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct ProductionTraceChunkKey {
+    phase: ConstructionMaskingPhase,
+    column_ordinal: u32,
+    coefficient_chunk_ordinal: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ProductionTraceChunkPlacement {
+    key: ProductionTraceChunkKey,
+    relation_tree_ordinal: u32,
+    physical_row_ordinal: u32,
+    column_group_ordinal: u32,
+    lane_ordinal: u16,
+    opening_point_ordinals: Vec<u32>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct ProductionOpenedPolynomialChunkKey {
+    source: RowCodeWhirOpenedPolynomialSource,
+    extension_coordinate_ordinal: u16,
+    coefficient_chunk_ordinal: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ProductionOpenedPolynomialChunkPlacement {
+    key: ProductionOpenedPolynomialChunkKey,
+    physical_row_ordinal: u32,
+    source_group_ordinal: u32,
+    coefficient_chunk_group_start_ordinal: u32,
+    lane_ordinal: u16,
+    opening_point_ordinals: Vec<u32>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct ProductionBoundColumnCoordinate {
+    relation_tree_ordinal: u32,
+    column_ordinal: u32,
+    root_use: u16,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct ProductionOpeningCoordinate {
+    source_class: u16,
+    source_ordinal: u32,
+    column_ordinal: Option<u32>,
+    opening_point_ordinal: u32,
+}
+
+impl ProductionOpeningCoordinate {
+    const fn source_key(self) -> (u16, u32, Option<u32>) {
+        (self.source_class, self.source_ordinal, self.column_ordinal)
+    }
+
+    const fn secret_view_identifier(self) -> ConstructionSecretViewIdentifier {
+        ConstructionSecretViewIdentifier::Opening {
+            source_class: self.source_class,
+            source_ordinal: self.source_ordinal,
+            column_ordinal: self.column_ordinal,
+            opening_point_ordinal: self.opening_point_ordinal,
+        }
+    }
+}
+
+/// Independent production-side correspondence for every secret-bearing view
+/// before the aggregate-wide opening argument.
+///
+/// The relation checker supplies the abstract source/view graph. This
+/// certificate separately walks the physical construction rows, opened
+/// polynomial chunks, bound columns, aggregate roles, and transcript query
+/// schedules. It then requires the two derivations to agree after canonical
+/// ordering. Public-only relations retain the complete physical census but
+/// intentionally have no private source/view graph.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ProductionConstructionMaskingCorrespondenceCertificate {
+    proof_privacy_mode: ProofPrivacyMode,
+    construction_plan_identity_hash: [u8; 64],
+    relation_plan_variant_hash: [u8; 64],
+    logical_polynomials_per_physical_row: usize,
+    relation_phase_order: Vec<ConstructionMaskingPhase>,
+    production_phase_order: Vec<ConstructionMaskingPhase>,
+    expected_trace_chunks: Vec<ProductionTraceChunkKey>,
+    trace_chunk_placements: Vec<ProductionTraceChunkPlacement>,
+    expected_opened_polynomial_chunks: Vec<ProductionOpenedPolynomialChunkKey>,
+    opened_polynomial_chunk_placements: Vec<ProductionOpenedPolynomialChunkPlacement>,
+    relation_bound_columns: Vec<ProductionBoundColumnCoordinate>,
+    production_bound_columns: Vec<ProductionBoundColumnCoordinate>,
+    relation_openings: Vec<ProductionOpeningCoordinate>,
+    production_openings: Vec<ProductionOpeningCoordinate>,
+    relation_all_opening_points: Vec<u32>,
+    relation_aggregate_opening_points: Vec<u32>,
+    production_aggregate_opening_points: Vec<u32>,
+    relation_graph: Option<ConstructionMaskingCorrespondence>,
+    production_sources: Vec<ConstructionMaskSourceDescriptor>,
+    production_views: Vec<ConstructionSecretViewDescriptor>,
+    production_rank_requirements: Vec<ConstructionMaskingRankRequirement>,
+    production_opening_batch_mask_source: Option<ConstructionMaskSourceIdentifier>,
+    production_aggregate_wide_pad_source: Option<ConstructionMaskSourceIdentifier>,
+}
+
+fn canonical_construction_secret_views(
+    mut views: Vec<ConstructionSecretViewDescriptor>,
+) -> Vec<ConstructionSecretViewDescriptor> {
+    for view in &mut views {
+        view.direct_mask_dependencies
+            .sort_by_key(|dependency| (dependency.source, dependency.coefficient));
+    }
+    views.sort_by_key(|view| view.identifier);
+    views
+}
+
+fn construction_phase_for_row_code_phase(phase: RowCodeWhirPhase) -> ConstructionMaskingPhase {
+    match phase {
+        RowCodeWhirPhase::Base => ConstructionMaskingPhase::Base,
+        RowCodeWhirPhase::Auxiliary => ConstructionMaskingPhase::Auxiliary,
+        RowCodeWhirPhase::Quotient => ConstructionMaskingPhase::Quotient,
+    }
+}
+
+fn construction_phase_for_tree_role(tree_role: ProofTreeRole) -> ConstructionMaskingPhase {
+    match tree_role {
+        ProofTreeRole::BaseOracle => ConstructionMaskingPhase::Base,
+        ProofTreeRole::AuxiliaryOracle => ConstructionMaskingPhase::Auxiliary,
+    }
+}
+
+fn relation_mask_source_identifier(
+    mask: RelationMaskDescriptor,
+) -> ConstructionMaskSourceIdentifier {
+    ConstructionMaskSourceIdentifier::RelationMask {
+        purpose_class: mask.mask_coordinate().purpose_class(),
+        mask_ordinal: mask.mask_coordinate().mask_ordinal(),
+        target_class: mask.target_class() as u16,
+        target_ordinal: mask.target_ordinal(),
+    }
+}
+
+fn checked_sorted_unique<T: Ord + Clone>(
+    values: impl IntoIterator<Item = T>,
+) -> Result<Vec<T>, WhirTheoremCertificateError> {
+    let values = values.into_iter().collect::<Vec<_>>();
+    let unique = values.iter().cloned().collect::<BTreeSet<_>>();
+    if unique.len() != values.len() {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    Ok(unique.into_iter().collect())
+}
+
+fn opening_points_for_source(
+    openings: &[ProductionOpeningCoordinate],
+    source_key: (u16, u32, Option<u32>),
+) -> Vec<u32> {
+    openings
+        .iter()
+        .filter_map(|opening| {
+            (opening.source_key() == source_key).then_some(opening.opening_point_ordinal)
+        })
+        .collect()
+}
+
+fn production_trace_chunk_key_set(
+    placements: &[ProductionTraceChunkPlacement],
+) -> Option<BTreeSet<ProductionTraceChunkKey>> {
+    let keys = placements
+        .iter()
+        .map(|placement| placement.key)
+        .collect::<BTreeSet<_>>();
+    (keys.len() == placements.len()).then_some(keys)
+}
+
+fn production_opened_polynomial_chunk_key_set(
+    placements: &[ProductionOpenedPolynomialChunkPlacement],
+) -> Option<BTreeSet<ProductionOpenedPolynomialChunkKey>> {
+    let keys = placements
+        .iter()
+        .map(|placement| placement.key)
+        .collect::<BTreeSet<_>>();
+    (keys.len() == placements.len()).then_some(keys)
+}
+
+impl ProductionConstructionMaskingCorrespondenceCertificate {
+    fn is_complete(&self) -> bool {
+        let expected_trace_chunks = self
+            .expected_trace_chunks
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        let expected_opened_polynomial_chunks = self
+            .expected_opened_polynomial_chunks
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        let trace_placements_are_injective = self
+            .trace_chunk_placements
+            .iter()
+            .map(|placement| {
+                (
+                    placement.key.phase,
+                    placement.physical_row_ordinal,
+                    placement.lane_ordinal,
+                )
+            })
+            .collect::<BTreeSet<_>>()
+            .len()
+            == self.trace_chunk_placements.len();
+        let opened_polynomial_placements_are_injective = self
+            .opened_polynomial_chunk_placements
+            .iter()
+            .map(|placement| (placement.physical_row_ordinal, placement.lane_ordinal))
+            .collect::<BTreeSet<_>>()
+            .len()
+            == self.opened_polynomial_chunk_placements.len();
+        let physical_rows_use_declared_width =
+            self.trace_chunk_placements.iter().all(|placement| {
+                usize::from(placement.lane_ordinal) < self.logical_polynomials_per_physical_row
+                    && !placement.opening_point_ordinals.is_empty()
+            }) && self
+                .opened_polynomial_chunk_placements
+                .iter()
+                .all(|placement| {
+                    usize::from(placement.lane_ordinal) < self.logical_polynomials_per_physical_row
+                        && !placement.opening_point_ordinals.is_empty()
+                });
+        let trace_chunks_are_complete = if expected_trace_chunks.is_empty() {
+            self.proof_privacy_mode == ProofPrivacyMode::PublicOnly
+                && self.trace_chunk_placements.is_empty()
+                && self.production_phase_order == [ConstructionMaskingPhase::Quotient]
+        } else {
+            production_trace_chunk_key_set(&self.trace_chunk_placements)
+                == Some(expected_trace_chunks)
+        };
+        let phase_and_physical_catalogs_are_complete = self.relation_phase_order
+            == self.production_phase_order
+            && self.production_phase_order.last() == Some(&ConstructionMaskingPhase::Quotient)
+            && trace_chunks_are_complete
+            && !expected_opened_polynomial_chunks.is_empty()
+            && production_opened_polynomial_chunk_key_set(&self.opened_polynomial_chunk_placements)
+                == Some(expected_opened_polynomial_chunks)
+            && trace_placements_are_injective
+            && opened_polynomial_placements_are_injective
+            && physical_rows_use_declared_width
+            && self.relation_bound_columns == self.production_bound_columns
+            && self.relation_openings == self.production_openings
+            && self.relation_all_opening_points == self.production_aggregate_opening_points
+            && self.relation_aggregate_opening_points.iter().all(|point| {
+                self.relation_all_opening_points
+                    .binary_search(point)
+                    .is_ok()
+            })
+            && !self.relation_openings.is_empty()
+            && !self.relation_all_opening_points.is_empty()
+            && !self.relation_aggregate_opening_points.is_empty();
+
+        let graph_is_complete = match (self.proof_privacy_mode, self.relation_graph.as_ref()) {
+            (ProofPrivacyMode::PublicOnly, None) => {
+                self.production_sources.is_empty()
+                    && self.production_views.is_empty()
+                    && self.production_rank_requirements.is_empty()
+                    && self.production_opening_batch_mask_source.is_none()
+                    && self.production_aggregate_wide_pad_source.is_none()
+            }
+            (ProofPrivacyMode::SecretBearing, Some(relation_graph)) => {
+                self.production_sources == relation_graph.sources
+                    && canonical_construction_secret_views(self.production_views.clone())
+                        == canonical_construction_secret_views(relation_graph.views.clone())
+                    && self.production_rank_requirements
+                        == relation_graph.rank_requirements.to_vec()
+                    && self.production_opening_batch_mask_source
+                        == Some(relation_graph.opening_batch_mask_source)
+                    && self.production_aggregate_wide_pad_source
+                        == Some(relation_graph.aggregate_wide_pad_source)
+                    && !self.production_sources.is_empty()
+                    && !self.production_views.is_empty()
+                    && self.production_rank_requirements.as_slice()
+                        == [ConstructionMaskingRankRequirement {
+                            kind: ConstructionMaskingRankKind::RowPadEvaluation,
+                            source_dimension: self.production_rank_requirements[0].source_dimension,
+                            required_rank: self.production_rank_requirements[0].required_rank,
+                            verification:
+                                ConstructionMaskingRankVerification::DistinctPointVandermonde,
+                        }]
+                    && self.production_rank_requirements[0].source_dimension
+                        >= self.production_rank_requirements[0].required_rank
+            }
+            _ => false,
+        };
+
+        self.construction_plan_identity_hash != [0_u8; 64]
+            && self.relation_plan_variant_hash != [0_u8; 64]
+            && self.logical_polynomials_per_physical_row > 0
+            && phase_and_physical_catalogs_are_complete
+            && graph_is_complete
+    }
+
+    fn is_complete_for(
+        &self,
+        plan: &RowCodeWhirConstructionPlan,
+        relation_variant: &RelationPlanVariant,
+        relation_context: &RelationPlanCheckContext,
+    ) -> bool {
+        self.is_complete()
+            && derive_production_construction_masking_correspondence(
+                plan,
+                relation_variant,
+                relation_context,
+            )
+            .is_ok_and(|expected| expected == *self)
+    }
+}
+
+fn derive_production_construction_masking_correspondence(
+    plan: &RowCodeWhirConstructionPlan,
+    relation_variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
+) -> Result<ProductionConstructionMaskingCorrespondenceCertificate, WhirTheoremCertificateError> {
+    let parameters = plan.selected_parameters();
+    let relation_plan_variant_hash = relation_variant
+        .canonical_hash()
+        .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+    if plan.proof_privacy_mode != relation_variant.proof_privacy_mode()
+        || plan.relation_plan_variant_hash != relation_plan_variant_hash
+        || plan.trace_domain_size != relation_variant.trace_domain_size()
+        || plan.evaluation_domain_size != relation_variant.evaluation_domain_size()
+        || plan.opening_degree_bound_exclusive != relation_variant.opening_degree_bound_exclusive()
+        || parameters.logical_polynomials_per_physical_row == 0
+    {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+
+    let relation_graph = checked_construction_masking_correspondence_for_parameters(
+        relation_variant,
+        relation_context,
+        parameters,
+    )
+    .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+    if relation_graph.is_some() != (plan.proof_privacy_mode == ProofPrivacyMode::SecretBearing) {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+
+    let relation_openings = checked_sorted_unique(
+        relation_variant
+            .ordered_opening_claims()
+            .iter()
+            .map(|claim| ProductionOpeningCoordinate {
+                source_class: claim.source_class() as u16,
+                source_ordinal: claim.source_ordinal(),
+                column_ordinal: claim.column_ordinal(),
+                opening_point_ordinal: claim.opening_point_ordinal(),
+            }),
+    )?;
+    for opening in &relation_openings {
+        let opening_point_index = usize::try_from(opening.opening_point_ordinal)
+            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+        let source_class_is_known = matches!(
+            opening.source_class,
+            value if value == RelationOpeningSourceClass::TreeColumn as u16
+                || value == RelationOpeningSourceClass::Quotient as u16
+                || value == RelationOpeningSourceClass::BatchMask as u16
+        );
+        if opening_point_index >= relation_variant.ordered_opening_points().len()
+            || !source_class_is_known
+            || (opening.source_class == RelationOpeningSourceClass::TreeColumn as u16)
+                != opening.column_ordinal.is_some()
+        {
+            return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+        }
+    }
+
+    let mut proof_tree_by_phase = BTreeMap::<ConstructionMaskingPhase, (u32, BTreeSet<u32>)>::new();
+    let mut relation_bound_tree_ordinals = BTreeSet::new();
+    for (tree_index, tree) in relation_variant.ordered_trees().iter().enumerate() {
+        let relation_tree_ordinal = u32::try_from(tree_index)
+            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+        match tree {
+            RelationTreeDescriptor::ProofCreated {
+                proof_tree_role,
+                ordered_column_ordinals,
+            } => {
+                let phase = match *proof_tree_role {
+                    value if value == ProofTreeRole::BaseOracle as u16 => {
+                        ConstructionMaskingPhase::Base
+                    }
+                    value if value == ProofTreeRole::AuxiliaryOracle as u16 => {
+                        ConstructionMaskingPhase::Auxiliary
+                    }
+                    _ => {
+                        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+                    }
+                };
+                let columns = ordered_column_ordinals
+                    .iter()
+                    .copied()
+                    .collect::<BTreeSet<_>>();
+                if columns.len() != ordered_column_ordinals.len()
+                    || columns.is_empty()
+                    || proof_tree_by_phase
+                        .insert(phase, (relation_tree_ordinal, columns))
+                        .is_some()
+                {
+                    return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+                }
+            }
+            RelationTreeDescriptor::BoundPublic { .. } => {
+                relation_bound_tree_ordinals.insert(relation_tree_ordinal);
+            }
+        }
+    }
+
+    let mut relation_phase_order = Vec::new();
+    for phase in [
+        ConstructionMaskingPhase::Base,
+        ConstructionMaskingPhase::Auxiliary,
+    ] {
+        if proof_tree_by_phase.contains_key(&phase) {
+            relation_phase_order.push(phase);
+        }
+    }
+    relation_phase_order.push(ConstructionMaskingPhase::Quotient);
+    let production_phase_order = plan
+        .phase_order
+        .iter()
+        .copied()
+        .map(construction_phase_for_row_code_phase)
+        .collect::<Vec<_>>();
+    if production_phase_order != relation_phase_order {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+
+    let phase_plans = [
+        (ConstructionMaskingPhase::Base, plan.base_phase.as_ref()),
+        (
+            ConstructionMaskingPhase::Auxiliary,
+            plan.auxiliary_phase.as_ref(),
+        ),
+    ];
+    let mut expected_trace_chunks = BTreeSet::new();
+    let mut trace_chunk_placements = Vec::new();
+    let mut production_openings = BTreeSet::new();
+    let mut phase_by_column = BTreeMap::new();
+    let mut proof_tree_ordinal_by_column = BTreeMap::new();
+    for (phase, phase_plan) in phase_plans {
+        let relation_tree = proof_tree_by_phase.get(&phase);
+        let (Some(phase_plan), Some((relation_tree_ordinal, relation_columns))) =
+            (phase_plan, relation_tree)
+        else {
+            if phase_plan.is_some() || relation_tree.is_some() {
+                return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+            }
+            continue;
+        };
+        if construction_phase_for_tree_role(phase_plan.tree_role) != phase
+            || phase_plan.geometry.row_count != phase_plan.rows.len()
+        {
+            return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+        }
+        let mut expected_opening_points_by_column = BTreeMap::new();
+        for column_ordinal in relation_columns {
+            let column_index = usize::try_from(*column_ordinal)
+                .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+            let column = relation_variant
+                .ordered_columns()
+                .get(column_index)
+                .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+            if !matches!(column.origin(), RelationColumnOrigin::Prover)
+                || phase_by_column.insert(*column_ordinal, phase).is_some()
+                || proof_tree_ordinal_by_column
+                    .insert(*column_ordinal, *relation_tree_ordinal)
+                    .is_some()
+            {
+                return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+            }
+            let opening_points = opening_points_for_source(
+                &relation_openings,
+                (
+                    RelationOpeningSourceClass::TreeColumn as u16,
+                    *relation_tree_ordinal,
+                    Some(*column_ordinal),
+                ),
+            );
+            if opening_points.is_empty() {
+                return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+            }
+            expected_opening_points_by_column.insert(*column_ordinal, opening_points.clone());
+            for opening_point_ordinal in opening_points {
+                production_openings.insert(ProductionOpeningCoordinate {
+                    source_class: RelationOpeningSourceClass::TreeColumn as u16,
+                    source_ordinal: *relation_tree_ordinal,
+                    column_ordinal: Some(*column_ordinal),
+                    opening_point_ordinal,
+                });
+            }
+            let chunk_count = super::coefficient_chunk_count(
+                column.source_degree_bound_exclusive(),
+                parameters.logical_polynomial_coefficient_count,
+            )
+            .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+            for chunk_index in 0..chunk_count {
+                expected_trace_chunks.insert(ProductionTraceChunkKey {
+                    phase,
+                    column_ordinal: *column_ordinal,
+                    coefficient_chunk_ordinal: u32::try_from(chunk_index)
+                        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+                });
+            }
+        }
+        for (row_index, row) in phase_plan.rows.iter().enumerate() {
+            if row.opening_point_ordinals.is_empty() {
+                return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+            }
+            let mut row_has_chunk = false;
+            let mut saw_padding_lane = false;
+            for (lane_index, chunk) in row.logical_polynomial_chunks.iter().enumerate() {
+                if lane_index >= parameters.logical_polynomials_per_physical_row {
+                    if chunk.is_some() {
+                        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+                    }
+                    continue;
+                }
+                let Some(chunk) = chunk else {
+                    saw_padding_lane = true;
+                    continue;
+                };
+                if saw_padding_lane
+                    || chunk.coefficient_chunk_ordinal != row.coefficient_chunk_ordinal
+                    || !relation_columns.contains(&chunk.column_ordinal)
+                    || expected_opening_points_by_column.get(&chunk.column_ordinal)
+                        != Some(&row.opening_point_ordinals)
+                {
+                    return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+                }
+                row_has_chunk = true;
+                trace_chunk_placements.push(ProductionTraceChunkPlacement {
+                    key: ProductionTraceChunkKey {
+                        phase,
+                        column_ordinal: chunk.column_ordinal,
+                        coefficient_chunk_ordinal: chunk.coefficient_chunk_ordinal,
+                    },
+                    relation_tree_ordinal: *relation_tree_ordinal,
+                    physical_row_ordinal: u32::try_from(row_index)
+                        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+                    column_group_ordinal: row.column_group_ordinal,
+                    lane_ordinal: u16::try_from(lane_index)
+                        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+                    opening_point_ordinals: row.opening_point_ordinals.clone(),
+                });
+            }
+            if !row_has_chunk {
+                return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+            }
+        }
+    }
+    if production_trace_chunk_key_set(&trace_chunk_placements)
+        != Some(expected_trace_chunks.clone())
+    {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+
+    let quotient_plan = &plan.quotient_phase;
+    if quotient_plan.quotient_component_count != relation_context.quotient_component_count
+        || quotient_plan.quotient_component_degree_bound_exclusive
+            != relation_context.quotient_component_degree_bound_exclusive
+        || quotient_plan.geometry.row_count != quotient_plan.rows.len()
+    {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    let opening_batch_mask = relation_variant
+        .ordered_masks()
+        .iter()
+        .copied()
+        .filter(|mask| {
+            mask.mask_kind() == RelationMaskKind::OpeningBatch
+                && mask.target_class() == RelationMaskTargetClass::Batch
+        })
+        .collect::<Vec<_>>();
+    let opening_batch_mask = match (plan.proof_privacy_mode, opening_batch_mask.as_slice()) {
+        (ProofPrivacyMode::PublicOnly, []) => {
+            if quotient_plan
+                .opening_batch_mask_degree_bound_exclusive
+                .is_some()
+            {
+                return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+            }
+            None
+        }
+        (ProofPrivacyMode::SecretBearing, [mask])
+            if quotient_plan.opening_batch_mask_degree_bound_exclusive
+                == Some(mask.mask_degree_bound_exclusive()) =>
+        {
+            Some(*mask)
+        }
+        _ => return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence),
+    };
+
+    let quotient_chunk_count = super::coefficient_chunk_count(
+        quotient_plan.quotient_component_degree_bound_exclusive,
+        parameters.logical_polynomial_coefficient_count,
+    )
+    .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+    let mut expected_opened_polynomial_chunks = BTreeSet::new();
+    let mut opening_points_by_opened_source = BTreeMap::new();
+    for component_ordinal in 0..quotient_plan.quotient_component_count {
+        let source = RowCodeWhirOpenedPolynomialSource::QuotientComponent { component_ordinal };
+        let opening_points = opening_points_for_source(
+            &relation_openings,
+            (
+                RelationOpeningSourceClass::Quotient as u16,
+                component_ordinal,
+                None,
+            ),
+        );
+        if opening_points.is_empty() {
+            return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+        }
+        opening_points_by_opened_source.insert(source, opening_points.clone());
+        for opening_point_ordinal in opening_points {
+            production_openings.insert(ProductionOpeningCoordinate {
+                source_class: RelationOpeningSourceClass::Quotient as u16,
+                source_ordinal: component_ordinal,
+                column_ordinal: None,
+                opening_point_ordinal,
+            });
+        }
+        for extension_coordinate_ordinal in 0..relation_context.challenge_extension_degree {
+            for chunk_index in 0..quotient_chunk_count {
+                expected_opened_polynomial_chunks.insert(ProductionOpenedPolynomialChunkKey {
+                    source,
+                    extension_coordinate_ordinal,
+                    coefficient_chunk_ordinal: u32::try_from(chunk_index)
+                        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+                });
+            }
+        }
+    }
+    if let Some(mask) = opening_batch_mask {
+        let source = RowCodeWhirOpenedPolynomialSource::OpeningBatchMask {
+            mask_ordinal: mask.mask_coordinate().mask_ordinal(),
+        };
+        let opening_points = opening_points_for_source(
+            &relation_openings,
+            (RelationOpeningSourceClass::BatchMask as u16, 0, None),
+        );
+        if opening_points.is_empty() {
+            return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+        }
+        opening_points_by_opened_source.insert(source, opening_points.clone());
+        for opening_point_ordinal in opening_points {
+            production_openings.insert(ProductionOpeningCoordinate {
+                source_class: RelationOpeningSourceClass::BatchMask as u16,
+                source_ordinal: 0,
+                column_ordinal: None,
+                opening_point_ordinal,
+            });
+        }
+        let mask_chunk_count = super::coefficient_chunk_count(
+            mask.mask_degree_bound_exclusive(),
+            parameters.logical_polynomial_coefficient_count,
+        )
+        .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+        for extension_coordinate_ordinal in 0..relation_context.challenge_extension_degree {
+            for chunk_index in 0..mask_chunk_count {
+                expected_opened_polynomial_chunks.insert(ProductionOpenedPolynomialChunkKey {
+                    source,
+                    extension_coordinate_ordinal,
+                    coefficient_chunk_ordinal: u32::try_from(chunk_index)
+                        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+                });
+            }
+        }
+    }
+
+    let mut opened_polynomial_chunk_placements = Vec::new();
+    for (row_index, row) in quotient_plan.rows.iter().enumerate() {
+        if row.opening_point_ordinals.is_empty()
+            || row.extension_coordinate_ordinal >= relation_context.challenge_extension_degree
+        {
+            return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+        }
+        let mut row_has_chunk = false;
+        let mut saw_padding_lane = false;
+        let mut minimum_chunk_ordinal = None;
+        for (lane_index, chunk) in row.logical_polynomial_chunks.iter().enumerate() {
+            if lane_index >= parameters.logical_polynomials_per_physical_row {
+                if chunk.is_some() {
+                    return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+                }
+                continue;
+            }
+            let Some(chunk) = chunk else {
+                saw_padding_lane = true;
+                continue;
+            };
+            if saw_padding_lane
+                || opening_points_by_opened_source.get(&chunk.source)
+                    != Some(&row.opening_point_ordinals)
+            {
+                return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+            }
+            let expected_source_class = match chunk.source {
+                RowCodeWhirOpenedPolynomialSource::QuotientComponent { .. } => {
+                    RelationOpeningSourceClass::Quotient
+                }
+                RowCodeWhirOpenedPolynomialSource::OpeningBatchMask { .. } => {
+                    RelationOpeningSourceClass::BatchMask
+                }
+            };
+            if row.source_class != expected_source_class {
+                return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+            }
+            minimum_chunk_ordinal = Some(
+                minimum_chunk_ordinal.map_or(chunk.coefficient_chunk_ordinal, |current: u32| {
+                    current.min(chunk.coefficient_chunk_ordinal)
+                }),
+            );
+            row_has_chunk = true;
+            opened_polynomial_chunk_placements.push(ProductionOpenedPolynomialChunkPlacement {
+                key: ProductionOpenedPolynomialChunkKey {
+                    source: chunk.source,
+                    extension_coordinate_ordinal: row.extension_coordinate_ordinal,
+                    coefficient_chunk_ordinal: chunk.coefficient_chunk_ordinal,
+                },
+                physical_row_ordinal: u32::try_from(row_index)
+                    .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+                source_group_ordinal: row.source_group_ordinal,
+                coefficient_chunk_group_start_ordinal: row.coefficient_chunk_group_start_ordinal,
+                lane_ordinal: u16::try_from(lane_index)
+                    .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+                opening_point_ordinals: row.opening_point_ordinals.clone(),
+            });
+        }
+        if !row_has_chunk
+            || minimum_chunk_ordinal != Some(row.coefficient_chunk_group_start_ordinal)
+        {
+            return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+        }
+    }
+    if production_opened_polynomial_chunk_key_set(&opened_polynomial_chunk_placements)
+        != Some(expected_opened_polynomial_chunks.clone())
+    {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+
+    let mut relation_bound_columns = Vec::new();
+    let mut production_bound_columns = Vec::new();
+    let mut bound_source_by_tree_and_column = BTreeMap::new();
+    let mut seen_relation_bound_tree_ordinals = BTreeSet::new();
+    for (bound_tree_index, bound_tree) in plan.bound_trees.iter().enumerate() {
+        if usize::try_from(bound_tree.bound_tree_ordinal).ok() != Some(bound_tree_index)
+            || !seen_relation_bound_tree_ordinals.insert(bound_tree.relation_tree_ordinal)
+        {
+            return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+        }
+        let relation_tree = relation_variant
+            .ordered_trees()
+            .get(
+                usize::try_from(bound_tree.relation_tree_ordinal)
+                    .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+            )
+            .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+        let RelationTreeDescriptor::BoundPublic {
+            construction_kind,
+            expected_root_source_ordinal,
+            root_use,
+            ordered_column_ordinals,
+        } = relation_tree
+        else {
+            return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+        };
+        if bound_tree.construction_kind != *construction_kind
+            || bound_tree.expected_root_source_ordinal != *expected_root_source_ordinal
+            || bound_tree.root_use != *root_use
+            || bound_tree.ordered_columns.len() != ordered_column_ordinals.len()
+        {
+            return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+        }
+        for (column_plan, relation_column_ordinal) in bound_tree
+            .ordered_columns
+            .iter()
+            .zip(ordered_column_ordinals)
+        {
+            let relation_column = relation_variant
+                .ordered_columns()
+                .get(
+                    usize::try_from(*relation_column_ordinal)
+                        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+                )
+                .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+            let opening_points = opening_points_for_source(
+                &relation_openings,
+                (
+                    RelationOpeningSourceClass::TreeColumn as u16,
+                    bound_tree.relation_tree_ordinal,
+                    Some(*relation_column_ordinal),
+                ),
+            );
+            if column_plan.column_ordinal != *relation_column_ordinal
+                || column_plan.value_type != relation_column.value_type()
+                || column_plan.source_degree_bound_exclusive
+                    != relation_column.source_degree_bound_exclusive()
+                || column_plan.opening_point_ordinals != opening_points
+                || opening_points.is_empty()
+            {
+                return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+            }
+            let coordinate = ProductionBoundColumnCoordinate {
+                relation_tree_ordinal: bound_tree.relation_tree_ordinal,
+                column_ordinal: *relation_column_ordinal,
+                root_use: *root_use as u16,
+            };
+            relation_bound_columns.push(coordinate);
+            production_bound_columns.push(coordinate);
+            bound_source_by_tree_and_column.insert(
+                (bound_tree.relation_tree_ordinal, *relation_column_ordinal),
+                ConstructionMaskSourceIdentifier::BoundColumn {
+                    relation_tree_ordinal: bound_tree.relation_tree_ordinal,
+                    column_ordinal: *relation_column_ordinal,
+                    root_use: *root_use as u16,
+                },
+            );
+            for opening_point_ordinal in opening_points {
+                production_openings.insert(ProductionOpeningCoordinate {
+                    source_class: RelationOpeningSourceClass::TreeColumn as u16,
+                    source_ordinal: bound_tree.relation_tree_ordinal,
+                    column_ordinal: Some(*relation_column_ordinal),
+                    opening_point_ordinal,
+                });
+            }
+        }
+    }
+    if seen_relation_bound_tree_ordinals != relation_bound_tree_ordinals {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    relation_bound_columns.sort_unstable();
+    production_bound_columns.sort_unstable();
+    let production_openings = production_openings.into_iter().collect::<Vec<_>>();
+    if production_openings != relation_openings {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+
+    let relation_aggregate_opening_points = relation_openings
+        .iter()
+        .map(|opening| opening.opening_point_ordinal)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let production_aggregate_opening_points = plan
+        .aggregate_column_roles
+        .iter()
+        .filter_map(|role| match role {
+            RowCodeWhirAggregateColumnRole::OpeningPoint {
+                opening_point_ordinal,
+            } => Some(*opening_point_ordinal),
+            RowCodeWhirAggregateColumnRole::BoundReduction => None,
+        })
+        .collect::<Vec<_>>();
+    let expected_all_opening_points = (0..relation_variant.ordered_opening_points().len())
+        .map(u32::try_from)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let bound_reduction_role_count = plan
+        .aggregate_column_roles
+        .iter()
+        .filter(|role| matches!(role, RowCodeWhirAggregateColumnRole::BoundReduction))
+        .count();
+    if production_aggregate_opening_points != expected_all_opening_points
+        || relation_aggregate_opening_points
+            .iter()
+            .any(|point| expected_all_opening_points.binary_search(point).is_err())
+        || bound_reduction_role_count != usize::from(!plan.bound_reduction_blocks.is_empty())
+    {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+
+    let mut production_sources = BTreeMap::new();
+    let mut production_views = Vec::new();
+    let mut production_rank_requirements = Vec::new();
+    let mut production_opening_batch_mask_source = None;
+    let mut production_aggregate_wide_pad_source = None;
+    if plan.proof_privacy_mode == ProofPrivacyMode::SecretBearing {
+        let mut trace_source_by_column = BTreeMap::new();
+        let mut telescoping_source_by_component = BTreeMap::new();
+        for mask in relation_variant.ordered_masks().iter().copied() {
+            let source = relation_mask_source_identifier(mask);
+            if production_sources
+                .insert(
+                    source,
+                    ConstructionMaskSourceDescriptor::current_attempt(source),
+                )
+                .is_some()
+            {
+                return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+            }
+            match (mask.mask_kind(), mask.target_class()) {
+                (RelationMaskKind::Trace, RelationMaskTargetClass::Column) => {
+                    if trace_source_by_column
+                        .insert(mask.target_ordinal(), source)
+                        .is_some()
+                    {
+                        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+                    }
+                }
+                (RelationMaskKind::Telescoping, RelationMaskTargetClass::QuotientComponent) => {
+                    if telescoping_source_by_component
+                        .insert(mask.target_ordinal(), source)
+                        .is_some()
+                    {
+                        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+                    }
+                }
+                (RelationMaskKind::OpeningBatch, RelationMaskTargetClass::Batch) => {
+                    if production_opening_batch_mask_source
+                        .replace(source)
+                        .is_some()
+                    {
+                        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+                    }
+                }
+                _ => return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence),
+            }
+        }
+        let opening_batch_mask_source = production_opening_batch_mask_source
+            .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+        if trace_source_by_column
+            .keys()
+            .copied()
+            .collect::<BTreeSet<_>>()
+            != phase_by_column.keys().copied().collect::<BTreeSet<_>>()
+            || telescoping_source_by_component.len()
+                != usize::try_from(
+                    relation_context
+                        .quotient_component_count
+                        .checked_sub(1)
+                        .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?,
+                )
+                .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?
+        {
+            return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+        }
+
+        let mut row_pad_source_by_phase = BTreeMap::new();
+        for phase in &production_phase_order {
+            let source = ConstructionMaskSourceIdentifier::RowPad { phase: *phase };
+            if production_sources
+                .insert(
+                    source,
+                    ConstructionMaskSourceDescriptor::current_attempt(source),
+                )
+                .is_some()
+                || row_pad_source_by_phase.insert(*phase, source).is_some()
+            {
+                return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+            }
+        }
+        let aggregate_wide_pad_source = ConstructionMaskSourceIdentifier::AggregateWidePad;
+        if production_sources
+            .insert(
+                aggregate_wide_pad_source,
+                ConstructionMaskSourceDescriptor::current_attempt(aggregate_wide_pad_source),
+            )
+            .is_some()
+        {
+            return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+        }
+        production_aggregate_wide_pad_source = Some(aggregate_wide_pad_source);
+        for source in bound_source_by_tree_and_column.values().copied() {
+            if production_sources
+                .insert(
+                    source,
+                    ConstructionMaskSourceDescriptor::authenticated_persistent_object(source),
+                )
+                .is_some()
+            {
+                return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+            }
+        }
+
+        let mut source_view_by_opening_source = BTreeMap::<
+            (u16, u32, Option<u32>),
+            (
+                Vec<ConstructionMaskDependency>,
+                BTreeSet<ConstructionMaskSourceIdentifier>,
+            ),
+        >::new();
+        for (column_ordinal, phase) in &phase_by_column {
+            let trace_source = trace_source_by_column
+                .get(column_ordinal)
+                .copied()
+                .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+            let row_pad_source = row_pad_source_by_phase
+                .get(phase)
+                .copied()
+                .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+            let direct_mask_dependencies = vec![
+                ConstructionMaskDependency {
+                    source: trace_source,
+                    coefficient: 1,
+                },
+                ConstructionMaskDependency {
+                    source: row_pad_source,
+                    coefficient: 1,
+                },
+            ];
+            let identifier = match phase {
+                ConstructionMaskingPhase::Base => ConstructionSecretViewIdentifier::Phase {
+                    column_ordinal: *column_ordinal,
+                },
+                ConstructionMaskingPhase::Auxiliary => {
+                    ConstructionSecretViewIdentifier::Auxiliary {
+                        column_ordinal: *column_ordinal,
+                    }
+                }
+                ConstructionMaskingPhase::Quotient => {
+                    return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+                }
+            };
+            production_views.push(ConstructionSecretViewDescriptor {
+                identifier,
+                algebra: match phase {
+                    ConstructionMaskingPhase::Base => ConstructionSecretViewAlgebra::Affine,
+                    ConstructionMaskingPhase::Auxiliary => ConstructionSecretViewAlgebra::Nonlinear,
+                    ConstructionMaskingPhase::Quotient => {
+                        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+                    }
+                },
+                direct_mask_dependencies: direct_mask_dependencies.clone(),
+                inherited_mask_sources: BTreeSet::new(),
+            });
+            let relation_tree_ordinal =
+                proof_tree_ordinal_by_column
+                    .get(column_ordinal)
+                    .copied()
+                    .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+            source_view_by_opening_source.insert(
+                (
+                    RelationOpeningSourceClass::TreeColumn as u16,
+                    relation_tree_ordinal,
+                    Some(*column_ordinal),
+                ),
+                (direct_mask_dependencies, BTreeSet::new()),
+            );
+        }
+
+        let trace_sources = trace_source_by_column
+            .values()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        let quotient_row_pad_source = row_pad_source_by_phase
+            .get(&ConstructionMaskingPhase::Quotient)
+            .copied()
+            .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+        for component_ordinal in 0..relation_context.quotient_component_count {
+            let mut direct_mask_dependencies = vec![ConstructionMaskDependency {
+                source: quotient_row_pad_source,
+                coefficient: 1,
+            }];
+            if component_ordinal + 1 < relation_context.quotient_component_count {
+                direct_mask_dependencies.push(ConstructionMaskDependency {
+                    source: telescoping_source_by_component
+                        .get(&component_ordinal)
+                        .copied()
+                        .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?,
+                    coefficient: 1,
+                });
+            } else {
+                for source in telescoping_source_by_component.values().copied() {
+                    direct_mask_dependencies.push(ConstructionMaskDependency {
+                        source,
+                        coefficient: relation_context.base_field_modulus - 1,
+                    });
+                }
+            }
+            production_views.push(ConstructionSecretViewDescriptor {
+                identifier: ConstructionSecretViewIdentifier::Quotient { component_ordinal },
+                algebra: ConstructionSecretViewAlgebra::Nonlinear,
+                direct_mask_dependencies: direct_mask_dependencies.clone(),
+                inherited_mask_sources: trace_sources.clone(),
+            });
+            source_view_by_opening_source.insert(
+                (
+                    RelationOpeningSourceClass::Quotient as u16,
+                    component_ordinal,
+                    None,
+                ),
+                (direct_mask_dependencies, trace_sources.clone()),
+            );
+        }
+
+        for coordinate in &production_bound_columns {
+            let source = bound_source_by_tree_and_column
+                .get(&(coordinate.relation_tree_ordinal, coordinate.column_ordinal))
+                .copied()
+                .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+            let direct_mask_dependencies = vec![ConstructionMaskDependency {
+                source,
+                coefficient: 1,
+            }];
+            production_views.push(ConstructionSecretViewDescriptor {
+                identifier: ConstructionSecretViewIdentifier::Bound {
+                    relation_tree_ordinal: coordinate.relation_tree_ordinal,
+                    column_ordinal: coordinate.column_ordinal,
+                },
+                algebra: ConstructionSecretViewAlgebra::Affine,
+                direct_mask_dependencies: direct_mask_dependencies.clone(),
+                inherited_mask_sources: BTreeSet::new(),
+            });
+            source_view_by_opening_source.insert(
+                (
+                    RelationOpeningSourceClass::TreeColumn as u16,
+                    coordinate.relation_tree_ordinal,
+                    Some(coordinate.column_ordinal),
+                ),
+                (direct_mask_dependencies, BTreeSet::new()),
+            );
+        }
+
+        let opening_batch_mask_ordinal = match opening_batch_mask_source {
+            ConstructionMaskSourceIdentifier::RelationMask { mask_ordinal, .. } => mask_ordinal,
+            _ => return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence),
+        };
+        let opening_batch_dependencies = vec![ConstructionMaskDependency {
+            source: opening_batch_mask_source,
+            coefficient: 1,
+        }];
+        production_views.push(ConstructionSecretViewDescriptor {
+            identifier: ConstructionSecretViewIdentifier::Mask {
+                mask_ordinal: opening_batch_mask_ordinal,
+            },
+            algebra: ConstructionSecretViewAlgebra::IndependentMask,
+            direct_mask_dependencies: opening_batch_dependencies.clone(),
+            inherited_mask_sources: BTreeSet::new(),
+        });
+        source_view_by_opening_source.insert(
+            (RelationOpeningSourceClass::BatchMask as u16, 0, None),
+            (opening_batch_dependencies, BTreeSet::new()),
+        );
+
+        let mut opening_views = Vec::with_capacity(production_openings.len());
+        for opening in &production_openings {
+            let (direct_mask_dependencies, inherited_mask_sources) = source_view_by_opening_source
+                .get(&opening.source_key())
+                .cloned()
+                .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+            opening_views.push(ConstructionSecretViewDescriptor {
+                identifier: opening.secret_view_identifier(),
+                algebra: ConstructionSecretViewAlgebra::DerivedLinear,
+                direct_mask_dependencies,
+                inherited_mask_sources,
+            });
+        }
+        production_views.extend(opening_views.iter().cloned());
+        for opening_point_ordinal in &relation_aggregate_opening_points {
+            let inherited_mask_sources = opening_views
+                .iter()
+                .filter(|view| {
+                    matches!(
+                        view.identifier,
+                        ConstructionSecretViewIdentifier::Opening {
+                            opening_point_ordinal: candidate,
+                            ..
+                        } if candidate == *opening_point_ordinal
+                    )
+                })
+                .flat_map(ConstructionSecretViewDescriptor::all_mask_sources)
+                .collect::<BTreeSet<_>>();
+            if inherited_mask_sources.is_empty() {
+                return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+            }
+            production_views.push(ConstructionSecretViewDescriptor {
+                identifier: ConstructionSecretViewIdentifier::Aggregate {
+                    opening_point_ordinal: *opening_point_ordinal,
+                },
+                algebra: ConstructionSecretViewAlgebra::DerivedLinear,
+                direct_mask_dependencies: Vec::new(),
+                inherited_mask_sources,
+            });
+        }
+        let aggregate_wide_dependency = ConstructionMaskDependency {
+            source: aggregate_wide_pad_source,
+            coefficient: 1,
+        };
+        for identifier in [
+            ConstructionSecretViewIdentifier::FoldClosure,
+            ConstructionSecretViewIdentifier::ExplicitPoint,
+        ] {
+            production_views.push(ConstructionSecretViewDescriptor {
+                identifier,
+                algebra: ConstructionSecretViewAlgebra::DerivedLinear,
+                direct_mask_dependencies: vec![aggregate_wide_dependency.clone()],
+                inherited_mask_sources: BTreeSet::new(),
+            });
+        }
+
+        let (_, outer_query_domain_size, outer_query_count) =
+            unique_transcript_query_vector(plan, RowCodeWhirQueryRole::Outer)?;
+        let (_, first_whir_query_domain_size, first_whir_query_count) =
+            unique_transcript_query_vector(
+                plan,
+                RowCodeWhirQueryRole::WhirEpoch { epoch_ordinal: 0 },
+            )?;
+        let first_whir_oracle = plan
+            .whir
+            .rounds
+            .first()
+            .map(|round| round.encoded_oracle)
+            .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+        let required_rank = u64::try_from(outer_query_count)
+            .ok()
+            .and_then(|outer| {
+                u64::try_from(first_whir_query_count)
+                    .ok()
+                    .and_then(|query_count| {
+                        u64::try_from(first_whir_oracle.leaf_width)
+                            .ok()
+                            .and_then(|width| query_count.checked_mul(width))
+                    })
+                    .and_then(|first_fold| outer.checked_add(first_fold))
+            })
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+        if outer_query_domain_size != quotient_plan.geometry.encoded_column_count
+            || first_whir_query_domain_size != first_whir_oracle.leaf_count
+            || outer_query_count != parameters.outer_query_count
+            || first_whir_query_count != outer_query_count
+            || u32::try_from(outer_query_count).ok()
+                != Some(relation_context.phase_column_query_coordinate_count)
+        {
+            return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+        }
+        production_rank_requirements.push(ConstructionMaskingRankRequirement {
+            kind: ConstructionMaskingRankKind::RowPadEvaluation,
+            source_dimension: plan.opening_degree_bound_exclusive,
+            required_rank,
+            verification: ConstructionMaskingRankVerification::DistinctPointVandermonde,
+        });
+    } else if !relation_variant.ordered_masks().is_empty() {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+
+    let certificate = ProductionConstructionMaskingCorrespondenceCertificate {
+        proof_privacy_mode: plan.proof_privacy_mode,
+        construction_plan_identity_hash: plan
+            .canonical_identity_hash()
+            .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?,
+        relation_plan_variant_hash,
+        logical_polynomials_per_physical_row: parameters.logical_polynomials_per_physical_row,
+        relation_phase_order,
+        production_phase_order,
+        expected_trace_chunks: expected_trace_chunks.into_iter().collect(),
+        trace_chunk_placements,
+        expected_opened_polynomial_chunks: expected_opened_polynomial_chunks.into_iter().collect(),
+        opened_polynomial_chunk_placements,
+        relation_bound_columns,
+        production_bound_columns,
+        relation_openings,
+        production_openings,
+        relation_all_opening_points: expected_all_opening_points,
+        relation_aggregate_opening_points,
+        production_aggregate_opening_points,
+        relation_graph,
+        production_sources: production_sources.into_values().collect(),
+        production_views,
+        production_rank_requirements,
+        production_opening_batch_mask_source,
+        production_aggregate_wide_pad_source,
+    };
+    if !certificate.is_complete() {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    Ok(certificate)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ProductionAggregateWideCodeRole {
     SourceOracle { epoch_ordinal: u32 },
@@ -3369,6 +4648,7 @@ pub(in crate::bgv::proof_suite) struct RowCodeWhirFailurePartitionCertificate {
     cms19_applicability: Cms19ApplicabilityCertificate,
     exact_failure_magnitude: ExactFailureMagnitudeCertificate,
     construction_masking: ConstructionMaskingCertificate,
+    production_construction_masking: ProductionConstructionMaskingCorrespondenceCertificate,
     aggregate_wide_masking: AggregateWideMaskingCertificate,
     production_aggregate_wide_views: ProductionAggregateWideViewCorrespondenceCertificate,
     private_row_pad_generator_hybrid: PrivateRowPadGeneratorHybridCertificate,
@@ -3409,10 +4689,17 @@ impl RowCodeWhirFailurePartitionCertificate {
     pub(in crate::bgv::proof_suite) fn is_complete_construction_theorem(&self) -> bool {
         self.commitment_subtree_extraction.is_complete()
             && self.construction_masking.is_complete()
+            && self.production_construction_masking.is_complete()
             && self.aggregate_wide_masking.is_complete()
             && self
                 .production_aggregate_wide_views
                 .is_complete(&self.aggregate_wide_masking)
+            && self
+                .production_construction_masking
+                .construction_plan_identity_hash
+                == self
+                    .production_aggregate_wide_views
+                    .construction_plan_identity_hash
             && self
                 .production_aggregate_wide_views
                 .construction_plan_identity_hash
@@ -3465,6 +4752,7 @@ struct RowCodeWhirProductionGeometryCertificate {
     proof_privacy_mode: ProofPrivacyMode,
     relation_compiler_interpreter_semantics: RelationCompilerInterpreterSemanticCertificate,
     construction_masking: ConstructionMaskingCertificate,
+    production_construction_masking: ProductionConstructionMaskingCorrespondenceCertificate,
     aggregate_wide_masking: AggregateWideMaskingCertificate,
     production_aggregate_wide_views: ProductionAggregateWideViewCorrespondenceCertificate,
     private_row_pad_generator_hybrid: PrivateRowPadGeneratorHybridCertificate,
@@ -3548,7 +4836,16 @@ impl RowCodeWhirProductionGeometryCertificate {
         }
         if !self.relation_compiler_interpreter_semantics.is_complete()
             || !self.construction_masking.is_complete()
+            || !self.production_construction_masking.is_complete()
             || !self.aggregate_wide_masking.is_complete()
+            || self
+                .production_construction_masking
+                .construction_plan_identity_hash
+                != self.construction_plan_identity_hash
+            || self
+                .production_construction_masking
+                .relation_plan_variant_hash
+                != self.relation_plan_variant_hash
             || !self
                 .production_aggregate_wide_views
                 .is_complete(&self.aggregate_wide_masking)
@@ -4036,6 +5333,17 @@ fn checked_row_code_whir_production_geometry_certificate_with_masking(
             WhirTheoremCertificateError::IncompleteMaskingCorrespondence,
         ));
     }
+    let production_construction_masking = derive_production_construction_masking_correspondence(
+        plan,
+        relation_variant,
+        relation_context,
+    )
+    .map_err(|error| {
+        contextualize(
+            ProductionGeometryCertificateStage::MaskingCorrespondence,
+            error,
+        )
+    })?;
     let production_aggregate_wide_views =
         derive_production_aggregate_wide_view_correspondence(plan, aggregate_wide_masking)
             .map_err(|error| {
@@ -4169,6 +5477,7 @@ fn checked_row_code_whir_production_geometry_certificate_with_masking(
         proof_privacy_mode: plan.proof_privacy_mode,
         relation_compiler_interpreter_semantics,
         construction_masking,
+        production_construction_masking,
         aggregate_wide_masking: aggregate_wide_masking.clone(),
         production_aggregate_wide_views,
         private_row_pad_generator_hybrid,
@@ -4409,6 +5718,11 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
     {
         return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
     }
+    let production_construction_masking = derive_production_construction_masking_correspondence(
+        plan,
+        relation_variant,
+        &relation_context,
+    )?;
     let production_aggregate_wide_views =
         derive_production_aggregate_wide_view_correspondence(plan, &aggregate_wide_masking)?;
     let private_row_pad_generator_hybrid = PrivateRowPadGeneratorHybridCertificate::derive(plan)
@@ -4790,6 +6104,7 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
         cms19_applicability,
         exact_failure_magnitude,
         construction_masking,
+        production_construction_masking,
         aggregate_wide_masking,
         production_aggregate_wide_views,
         private_row_pad_generator_hybrid,
@@ -7751,6 +9066,313 @@ fn selected_same_secret_construction_plan() -> RowCodeWhirConstructionPlan {
         .expect("the selected same-secret relation validates");
     RowCodeWhirConstructionPlan::for_selected_variant(&artifact, None, None)
         .expect("the selected same-secret construction plan derives")
+}
+
+#[test]
+fn production_construction_views_bind_every_physical_masking_map() {
+    let context = selected_relation_plan_check_context(
+        ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+    )
+    .expect("the selected same-secret context exists");
+    let compiled_plan = compile_same_secret_relation_plan(
+        &selected_same_secret_relation_plan_input()
+            .expect("the selected same-secret relation input derives"),
+        &context,
+    )
+    .expect("the selected same-secret relation compiles");
+    let artifact = ValidatedRelationPlanArtifact::from_owned_compiled_plan(compiled_plan, &context)
+        .expect("the selected same-secret relation validates");
+    let relation_variant = artifact
+        .compiled_plan()
+        .select_variant(None, None)
+        .expect("the selected same-secret relation variant exists");
+    let plan = RowCodeWhirConstructionPlan::for_selected_variant(&artifact, None, None)
+        .expect("the selected same-secret construction derives");
+    let certificate =
+        derive_production_construction_masking_correspondence(&plan, relation_variant, &context)
+            .expect("the production construction masking correspondence derives");
+
+    assert!(certificate.is_complete_for(&plan, relation_variant, &context));
+    assert_eq!(
+        certificate.production_phase_order,
+        [
+            ConstructionMaskingPhase::Base,
+            ConstructionMaskingPhase::Auxiliary,
+            ConstructionMaskingPhase::Quotient,
+        ]
+    );
+    assert_eq!(
+        certificate.production_rank_requirements,
+        [ConstructionMaskingRankRequirement {
+            kind: ConstructionMaskingRankKind::RowPadEvaluation,
+            source_dimension: 2_097_152,
+            required_rank: 3_483,
+            verification: ConstructionMaskingRankVerification::DistinctPointVandermonde,
+        }]
+    );
+    assert_eq!(
+        certificate.trace_chunk_placements.len(),
+        certificate.expected_trace_chunks.len(),
+    );
+    assert_eq!(
+        certificate.opened_polynomial_chunk_placements.len(),
+        certificate.expected_opened_polynomial_chunks.len(),
+    );
+    assert_eq!(
+        certificate.production_openings,
+        certificate.relation_openings
+    );
+    assert_eq!(
+        certificate.production_aggregate_opening_points,
+        certificate.relation_aggregate_opening_points,
+    );
+    assert!(
+        certificate
+            .relation_graph
+            .as_ref()
+            .is_some_and(|graph| !graph.sources.is_empty() && !graph.views.is_empty())
+    );
+
+    let mut omitted_phase_chunk = certificate.clone();
+    omitted_phase_chunk.trace_chunk_placements.remove(0);
+    assert!(!omitted_phase_chunk.is_complete());
+
+    let mut altered_quotient_coordinate = certificate.clone();
+    altered_quotient_coordinate.opened_polynomial_chunk_placements[0]
+        .key
+        .extension_coordinate_ordinal += 1;
+    assert!(!altered_quotient_coordinate.is_complete());
+
+    let mut altered_telescoping_map = certificate.clone();
+    let telescoping_dependency = altered_telescoping_map
+        .production_views
+        .iter_mut()
+        .filter(|view| {
+            matches!(
+                view.identifier,
+                ConstructionSecretViewIdentifier::Quotient { .. }
+            )
+        })
+        .flat_map(|view| &mut view.direct_mask_dependencies)
+        .find(|dependency| {
+            matches!(
+                dependency.source,
+                ConstructionMaskSourceIdentifier::RelationMask {
+                    purpose_class,
+                    target_class,
+                    ..
+                } if purpose_class == RelationMaskKind::Telescoping as u16
+                    && target_class
+                        == RelationMaskTargetClass::QuotientComponent as u16
+            )
+        })
+        .expect("the production quotient graph has a telescoping dependency");
+    telescoping_dependency.coefficient = context.base_field_modulus - 2;
+    assert!(!altered_telescoping_map.is_complete());
+
+    let mut omitted_bound_opening = certificate.clone();
+    let bound_opening_index = omitted_bound_opening
+        .production_openings
+        .iter()
+        .position(|opening| {
+            opening.source_class == RelationOpeningSourceClass::TreeColumn as u16
+                && omitted_bound_opening
+                    .production_bound_columns
+                    .iter()
+                    .any(|bound| {
+                        bound.relation_tree_ordinal == opening.source_ordinal
+                            && Some(bound.column_ordinal) == opening.column_ordinal
+                    })
+        })
+        .expect("the selected same-secret construction has a bound opening");
+    omitted_bound_opening
+        .production_openings
+        .remove(bound_opening_index);
+    assert!(!omitted_bound_opening.is_complete());
+
+    let mut altered_aggregate_batch = certificate.clone();
+    altered_aggregate_batch
+        .production_aggregate_opening_points
+        .pop();
+    assert!(!altered_aggregate_batch.is_complete());
+
+    let mut deficient_row_pad_rank = certificate.clone();
+    deficient_row_pad_rank.production_rank_requirements[0].required_rank += 1;
+    assert!(!deficient_row_pad_rank.is_complete());
+
+    let mut reused_row_pad = certificate.clone();
+    let row_pad_source = reused_row_pad
+        .production_sources
+        .iter_mut()
+        .find(|source| {
+            matches!(
+                source.identifier,
+                ConstructionMaskSourceIdentifier::RowPad {
+                    phase: ConstructionMaskingPhase::Base,
+                }
+            )
+        })
+        .expect("the selected same-secret construction has a base row pad");
+    row_pad_source.authority = ConstructionMaskSourceAuthority::AuthenticatedPersistentObject;
+    row_pad_source.lifetime = ConstructionMaskSourceLifetime::PersistentObject;
+    row_pad_source.resume_rule = ConstructionMaskResumeRule::ImmutableAuthenticatedObject;
+    assert!(!reused_row_pad.is_complete());
+
+    let mut changed_query_schedule = plan.clone();
+    let first_whir_query = changed_query_schedule
+        .transcript_operations
+        .iter_mut()
+        .find(|operation| {
+            matches!(
+                operation,
+                RowCodeWhirTranscriptOperation::SampleDistinctIndices {
+                    role: RowCodeWhirQueryRole::WhirEpoch { epoch_ordinal: 0 },
+                    ..
+                }
+            )
+        })
+        .expect("the first WHIR query schedule exists");
+    let RowCodeWhirTranscriptOperation::SampleDistinctIndices { output_count, .. } =
+        first_whir_query
+    else {
+        unreachable!("the matching operation has the checked shape");
+    };
+    *output_count -= 1;
+    assert_eq!(
+        derive_production_construction_masking_correspondence(
+            &changed_query_schedule,
+            relation_variant,
+            &context,
+        ),
+        Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence),
+    );
+
+    let mut omitted_production_chunk = plan;
+    let first_chunk = omitted_production_chunk
+        .base_phase
+        .as_mut()
+        .and_then(|phase| phase.rows.first_mut())
+        .and_then(|row| row.logical_polynomial_chunks.first_mut())
+        .expect("the selected base phase has a first physical chunk");
+    *first_chunk = None;
+    assert_eq!(
+        derive_production_construction_masking_correspondence(
+            &omitted_production_chunk,
+            relation_variant,
+            &context,
+        ),
+        Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence),
+    );
+}
+
+#[test]
+fn public_only_construction_has_physical_coverage_without_dummy_mask_sources() {
+    let context = selected_relation_plan_check_context(
+        ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+    )
+    .expect("the collective-public-key context exists");
+    let ring_degree = u64::try_from(crate::bgv::parameters::POLYNOMIAL_DEGREE)
+        .expect("the selected ring degree fits u64");
+    let ordered_component_moduli = (0..crate::bgv::parameters::DATA_PRIMES.len())
+        .flat_map(|modulus_index| {
+            let modulus_index =
+                u16::try_from(modulus_index).expect("the selected data basis fits u16");
+            [SuiteModulusReference::data(modulus_index); 2]
+        })
+        .collect();
+    let compiled_plan = compile_collective_public_key_aggregate_relation_plan(
+        &CollectivePublicKeyAggregatePlanInput {
+            geometry: PublicAggregateRelationGeometry {
+                ring_degree,
+                evaluation_domain_size: ROW_CODE_WHIR_EVALUATION_DOMAIN_SIZE,
+                opening_degree_bound_exclusive: ROW_CODE_WHIR_OPENING_DEGREE_BOUND_EXCLUSIVE,
+                public_polynomial_column_degree_bound_exclusive: ring_degree / 2,
+                participant_count: crate::foundation::FOUNDATION_PROFILE.participant_count,
+            },
+            ordered_component_moduli,
+        },
+        &context,
+    )
+    .expect("the production collective-public-key relation compiles");
+    let artifact = ValidatedRelationPlanArtifact::from_owned_compiled_plan(compiled_plan, &context)
+        .expect("the production collective-public-key relation validates");
+    let relation_variant = artifact
+        .compiled_plan()
+        .select_variant(None, None)
+        .expect("the collective-public-key variant exists");
+    let plan = RowCodeWhirConstructionPlan::for_selected_variant(
+        &artifact,
+        relation_variant.schedule_position(),
+        relation_variant.top_count(),
+    )
+    .expect("the public-only production construction derives");
+    let certificate =
+        derive_production_construction_masking_correspondence(&plan, relation_variant, &context)
+            .expect("the public-only physical correspondence derives");
+
+    assert!(certificate.is_complete_for(&plan, relation_variant, &context));
+    assert_eq!(certificate.proof_privacy_mode, ProofPrivacyMode::PublicOnly);
+    assert!(certificate.relation_graph.is_none());
+    assert!(certificate.production_sources.is_empty());
+    assert!(certificate.production_views.is_empty());
+    assert!(certificate.production_rank_requirements.is_empty());
+    assert!(certificate.production_opening_batch_mask_source.is_none());
+    assert!(certificate.production_aggregate_wide_pad_source.is_none());
+    assert!(certificate.trace_chunk_placements.is_empty());
+    assert!(!certificate.opened_polynomial_chunk_placements.is_empty());
+
+    let mut dummy_public_mask = certificate;
+    dummy_public_mask.production_aggregate_wide_pad_source =
+        Some(ConstructionMaskSourceIdentifier::AggregateWidePad);
+    assert!(!dummy_public_mask.is_complete());
+}
+
+#[test]
+fn ballot_construction_views_bind_the_compact_physical_masking_map() {
+    let context = selected_relation_plan_check_context(
+        ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
+    )
+    .expect("the selected ballot context exists");
+    let compiled_plan = selected_ballot_validity_relation_compilation()
+        .expect("the selected ballot relation compiles")
+        .into_relation_plan();
+    let artifact = ValidatedRelationPlanArtifact::from_owned_compiled_plan(compiled_plan, &context)
+        .expect("the selected ballot relation validates");
+    let relation_variant = artifact
+        .compiled_plan()
+        .select_variant(None, None)
+        .expect("the selected ballot variant exists");
+    let plan = RowCodeWhirConstructionPlan::for_selected_variant(&artifact, None, None)
+        .expect("the selected ballot construction derives");
+    let certificate =
+        derive_production_construction_masking_correspondence(&plan, relation_variant, &context)
+            .expect("the selected ballot construction correspondence derives");
+
+    assert!(certificate.is_complete_for(&plan, relation_variant, &context));
+    assert_eq!(certificate.logical_polynomials_per_physical_row, 8);
+    assert_eq!(certificate.relation_aggregate_opening_points, [0, 1, 11]);
+    assert_eq!(certificate.relation_all_opening_points.len(), 22);
+    assert_eq!(
+        certificate.production_aggregate_opening_points,
+        certificate.relation_all_opening_points,
+    );
+    assert_eq!(
+        certificate
+            .production_views
+            .iter()
+            .filter(|view| matches!(
+                view.identifier,
+                ConstructionSecretViewIdentifier::Aggregate { .. }
+            ))
+            .count(),
+        3,
+    );
+
+    let mut omitted_public_only_aggregate_coordinate = certificate;
+    omitted_public_only_aggregate_coordinate
+        .production_aggregate_opening_points
+        .remove(2);
+    assert!(!omitted_public_only_aggregate_coordinate.is_complete());
 }
 
 #[test]

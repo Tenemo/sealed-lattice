@@ -308,14 +308,14 @@ impl TraceMaskSurjectivityCertificate {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum ConstructionMaskingPhase {
+pub(in crate::bgv::proof_suite) enum ConstructionMaskingPhase {
     Base,
     Auxiliary,
     Quotient,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum ConstructionSecretViewIdentifier {
+pub(in crate::bgv::proof_suite) enum ConstructionSecretViewIdentifier {
     Phase {
         column_ordinal: u32,
     },
@@ -346,7 +346,7 @@ enum ConstructionSecretViewIdentifier {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ConstructionSecretViewAlgebra {
+pub(in crate::bgv::proof_suite) enum ConstructionSecretViewAlgebra {
     Affine,
     Nonlinear,
     IndependentMask,
@@ -354,7 +354,7 @@ enum ConstructionSecretViewAlgebra {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum ConstructionMaskSourceIdentifier {
+pub(in crate::bgv::proof_suite) enum ConstructionMaskSourceIdentifier {
     RelationMask {
         purpose_class: u16,
         mask_ordinal: u32,
@@ -415,35 +415,37 @@ impl ConstructionMaskSourceIdentifier {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ConstructionMaskSourceAuthority {
+pub(in crate::bgv::proof_suite) enum ConstructionMaskSourceAuthority {
     FreshAttemptCoins,
     AuthenticatedPersistentObject,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ConstructionMaskSourceLifetime {
+pub(in crate::bgv::proof_suite) enum ConstructionMaskSourceLifetime {
     Attempt,
     PersistentObject,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ConstructionMaskResumeRule {
+pub(in crate::bgv::proof_suite) enum ConstructionMaskResumeRule {
     PreserveAttemptIdentity,
     ImmutableAuthenticatedObject,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct ConstructionMaskSourceDescriptor {
-    identifier: ConstructionMaskSourceIdentifier,
-    authority: ConstructionMaskSourceAuthority,
-    lifetime: ConstructionMaskSourceLifetime,
-    resume_rule: ConstructionMaskResumeRule,
-    checkpoint_excludes_secret: bool,
-    telemetry_excludes_secret: bool,
+pub(in crate::bgv::proof_suite) struct ConstructionMaskSourceDescriptor {
+    pub(in crate::bgv::proof_suite) identifier: ConstructionMaskSourceIdentifier,
+    pub(in crate::bgv::proof_suite) authority: ConstructionMaskSourceAuthority,
+    pub(in crate::bgv::proof_suite) lifetime: ConstructionMaskSourceLifetime,
+    pub(in crate::bgv::proof_suite) resume_rule: ConstructionMaskResumeRule,
+    pub(in crate::bgv::proof_suite) checkpoint_excludes_secret: bool,
+    pub(in crate::bgv::proof_suite) telemetry_excludes_secret: bool,
 }
 
 impl ConstructionMaskSourceDescriptor {
-    const fn current_attempt(identifier: ConstructionMaskSourceIdentifier) -> Self {
+    pub(in crate::bgv::proof_suite) const fn current_attempt(
+        identifier: ConstructionMaskSourceIdentifier,
+    ) -> Self {
         Self {
             identifier,
             authority: ConstructionMaskSourceAuthority::FreshAttemptCoins,
@@ -454,7 +456,9 @@ impl ConstructionMaskSourceDescriptor {
         }
     }
 
-    const fn authenticated_persistent_object(identifier: ConstructionMaskSourceIdentifier) -> Self {
+    pub(in crate::bgv::proof_suite) const fn authenticated_persistent_object(
+        identifier: ConstructionMaskSourceIdentifier,
+    ) -> Self {
         Self {
             identifier,
             authority: ConstructionMaskSourceAuthority::AuthenticatedPersistentObject,
@@ -492,21 +496,24 @@ impl ConstructionMaskSourceDescriptor {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct ConstructionMaskDependency {
-    source: ConstructionMaskSourceIdentifier,
-    coefficient: u64,
+pub(in crate::bgv::proof_suite) struct ConstructionMaskDependency {
+    pub(in crate::bgv::proof_suite) source: ConstructionMaskSourceIdentifier,
+    pub(in crate::bgv::proof_suite) coefficient: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct ConstructionSecretViewDescriptor {
-    identifier: ConstructionSecretViewIdentifier,
-    algebra: ConstructionSecretViewAlgebra,
-    direct_mask_dependencies: Vec<ConstructionMaskDependency>,
-    inherited_mask_sources: BTreeSet<ConstructionMaskSourceIdentifier>,
+pub(in crate::bgv::proof_suite) struct ConstructionSecretViewDescriptor {
+    pub(in crate::bgv::proof_suite) identifier: ConstructionSecretViewIdentifier,
+    pub(in crate::bgv::proof_suite) algebra: ConstructionSecretViewAlgebra,
+    pub(in crate::bgv::proof_suite) direct_mask_dependencies: Vec<ConstructionMaskDependency>,
+    pub(in crate::bgv::proof_suite) inherited_mask_sources:
+        BTreeSet<ConstructionMaskSourceIdentifier>,
 }
 
 impl ConstructionSecretViewDescriptor {
-    fn all_mask_sources(&self) -> BTreeSet<ConstructionMaskSourceIdentifier> {
+    pub(in crate::bgv::proof_suite) fn all_mask_sources(
+        &self,
+    ) -> BTreeSet<ConstructionMaskSourceIdentifier> {
         self.direct_mask_dependencies
             .iter()
             .map(|dependency| dependency.source)
@@ -516,21 +523,21 @@ impl ConstructionSecretViewDescriptor {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ConstructionMaskingRankKind {
+pub(in crate::bgv::proof_suite) enum ConstructionMaskingRankKind {
     RowPadEvaluation,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ConstructionMaskingRankVerification {
+pub(in crate::bgv::proof_suite) enum ConstructionMaskingRankVerification {
     DistinctPointVandermonde,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct ConstructionMaskingRankRequirement {
-    kind: ConstructionMaskingRankKind,
-    source_dimension: u64,
-    required_rank: u64,
-    verification: ConstructionMaskingRankVerification,
+pub(in crate::bgv::proof_suite) struct ConstructionMaskingRankRequirement {
+    pub(in crate::bgv::proof_suite) kind: ConstructionMaskingRankKind,
+    pub(in crate::bgv::proof_suite) source_dimension: u64,
+    pub(in crate::bgv::proof_suite) required_rank: u64,
+    pub(in crate::bgv::proof_suite) verification: ConstructionMaskingRankVerification,
 }
 
 impl ConstructionMaskingRankRequirement {
@@ -553,12 +560,12 @@ impl ConstructionMaskingRankRequirement {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct ConstructionMaskingCorrespondence {
-    sources: Vec<ConstructionMaskSourceDescriptor>,
-    views: Vec<ConstructionSecretViewDescriptor>,
-    rank_requirements: [ConstructionMaskingRankRequirement; 1],
-    opening_batch_mask_source: ConstructionMaskSourceIdentifier,
-    aggregate_wide_pad_source: ConstructionMaskSourceIdentifier,
+pub(in crate::bgv::proof_suite) struct ConstructionMaskingCorrespondence {
+    pub(in crate::bgv::proof_suite) sources: Vec<ConstructionMaskSourceDescriptor>,
+    pub(in crate::bgv::proof_suite) views: Vec<ConstructionSecretViewDescriptor>,
+    pub(in crate::bgv::proof_suite) rank_requirements: [ConstructionMaskingRankRequirement; 1],
+    pub(in crate::bgv::proof_suite) opening_batch_mask_source: ConstructionMaskSourceIdentifier,
+    pub(in crate::bgv::proof_suite) aggregate_wide_pad_source: ConstructionMaskSourceIdentifier,
 }
 
 fn checked_modular_product(left: u64, right: u64, modulus: u64) -> u64 {
@@ -1769,6 +1776,31 @@ pub(in crate::bgv::proof_suite) fn checked_zero_knowledge_mask_image_for_paramet
         return Err(RelationPlanError::InvalidMaskGrammar);
     }
     checked_zero_knowledge_mask_image_with_validated_parameters(variant, context, parameters)
+}
+
+#[cfg(test)]
+pub(in crate::bgv::proof_suite) fn checked_construction_masking_correspondence_for_parameters(
+    variant: &RelationPlanVariant,
+    context: &RelationPlanCheckContext,
+    parameters: RowCodeWhirSelectedParameters,
+) -> Result<Option<ConstructionMaskingCorrespondence>, RelationPlanError> {
+    let expected_parameters = RowCodeWhirSelectedParameters::for_selected_variant_geometry(variant)
+        .map_err(|_| RelationPlanError::InvalidMaskGrammar)?;
+    if parameters != expected_parameters {
+        return Err(RelationPlanError::InvalidMaskGrammar);
+    }
+    if variant.proof_privacy_mode() == ProofPrivacyMode::PublicOnly {
+        return Ok(None);
+    }
+    let correspondence = ConstructionMaskingCorrespondence::derive(variant, context, parameters)?;
+    let expected_view_identifiers =
+        expected_construction_secret_view_identifiers(variant, context)?;
+    correspondence.validate_graph(
+        &expected_view_identifiers,
+        context.quotient_component_count,
+        context.base_field_modulus,
+    )?;
+    Ok(Some(correspondence))
 }
 
 pub(crate) fn validate_zero_knowledge_mask_image(

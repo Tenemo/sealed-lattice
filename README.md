@@ -82,6 +82,18 @@ Works today:
   private extension coordinates, rank 18,013, and residual conditional entropy
   12. This is component correspondence; it does not establish construction-wide
   Fiat-Shamir privacy or soundness.
+- The pre-aggregate construction masking certificate independently rebuilds the
+  private-view graph from the physical production layout. It covers every phase
+  row, quotient extension coordinate, bound-tree opening, opening-point role,
+  source authority and lifetime, resume rule, telescoping dependency, and
+  aggregate delegation. For the same-secret construction it derives a
+  `2,097,152`-coefficient row-pad source dimension and a required distinct-point
+  rank of `3,483`. Public-only layouts keep their quotient and bound-tree
+  coverage without invented private masks; the ballot layout binds all 22
+  physical aggregate coordinates while assigning private aggregate views only
+  to relation-owned points 0, 1, and 11. Focused mutation tests refuse omitted
+  or altered coordinates, dependencies, authorities, ranks, and query
+  schedules.
 - Checked construction-geometry certificates derive for all 31 production
   identities: 27 width-64, log-inverse-rate-two (inverse-rate-four)
   identities, including evaluator top counts 1 through 20, and four width-8,
@@ -106,9 +118,10 @@ Not yet:
 - Exact construction-wide classical and quantum-random-oracle soundness is not
   established. The selected same-secret aggregate-leaf predecessor
   correspondence, collision arithmetic, aggregate-wide production affine
-  correspondence, and all production geometry certificates now derive. The
-  remaining construction views, ceremony-level failure partition, and
-  soundness correspondence for an emitted transported proof remain open.
+  correspondence, pre-aggregate physical masking correspondence, and all
+  production geometry certificates now derive. A complete reduction from these
+  component certificates to the ceremony-level failure allocation and to
+  soundness of an emitted transported proof remains open.
 - The static liveness model has not yet been confirmed by a completed native
   proof or release-WebAssembly browser measurement. Complete participant
   transport accounting is also open, and the proof corpus has not been
