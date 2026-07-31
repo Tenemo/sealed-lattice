@@ -20,9 +20,8 @@ use super::aggregate_wide_pcs::AggregateWideCommitment;
 use super::bounded_dft::BoundedRadix2Dft;
 use super::oracle_geometry::logical_column_selector_index;
 use super::{
-    ChallengeField, ColumnStreamableLeafHasher, ColumnStreamableLeafState, DomainSeparatedShake256,
-    MERKLE_DIGEST_WORD_LENGTH, NodeCompressor, ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN,
-    ROW_CODE_WHIR_AGGREGATE_NODE_DOMAIN,
+    ChallengeField, ColumnStreamableLeafHasher, ColumnStreamableLeafState,
+    MERKLE_DIGEST_WORD_LENGTH, NodeCompressor, aggregate_leaf_hasher, aggregate_node_compressor,
 };
 use crate::bgv::proof_suite::external_polynomial::ExternalPolynomialVector;
 use crate::bgv::proof_suite::{
@@ -189,9 +188,7 @@ impl RecomputableOraclePass {
             RecomputableOracleSource::ResidentPolynomial => {}
         }
 
-        let leaf_hasher = ColumnStreamableLeafHasher::new(DomainSeparatedShake256 {
-            domain: ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN,
-        });
+        let leaf_hasher = aggregate_leaf_hasher();
         let initial_leaf_state = leaf_hasher.initial_state(ENCODED_ORACLE_WIDTH);
         let capture_targets = if query_indices.is_empty() {
             None
@@ -711,9 +708,7 @@ impl StreamingMerkleBuilder {
                 .map(|_| vec![vec![false; tree_depth]; query_count]),
             capture_targets,
             frontier: vec![None::<MerkleDigest>; tree_depth + 1],
-            compressor: NodeCompressor::new(DomainSeparatedShake256 {
-                domain: ROW_CODE_WHIR_AGGREGATE_NODE_DOMAIN,
-            }),
+            compressor: aggregate_node_compressor(),
         })
     }
 
@@ -819,8 +814,7 @@ mod tests {
         ProofExternalMemoryProtection, tests::TestStorage,
     };
     use crate::bgv::proof_suite::relation_plan::RelationColumnValueType;
-    use crate::bgv::proof_suite::row_code_whir::{CommitmentScheme, LeafHasher};
-
+    use crate::bgv::proof_suite::row_code_whir::CommitmentScheme;
     #[test]
     fn resident_striped_recomputation_matches_the_configured_mmcs_root_and_paths() {
         let source_variable_count = 7;
@@ -851,15 +845,7 @@ mod tests {
                 matrix_values[row_index * ENCODED_ORACLE_WIDTH + column_index] = value;
             }
         }
-        let mmcs = CommitmentScheme::new(
-            LeafHasher::new(DomainSeparatedShake256 {
-                domain: ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN,
-            }),
-            NodeCompressor::new(DomainSeparatedShake256 {
-                domain: ROW_CODE_WHIR_AGGREGATE_NODE_DOMAIN,
-            }),
-            0,
-        );
+        let mmcs = CommitmentScheme::new(aggregate_leaf_hasher(), aggregate_node_compressor(), 0);
         let matrix = RowMajorMatrix::new(matrix_values, ENCODED_ORACLE_WIDTH);
         let (expected_root, prover_data) = mmcs.commit(vec![matrix]);
         let expected_openings = query_indices

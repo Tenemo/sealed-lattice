@@ -3,8 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use p3_symmetric::{CryptographicHasher, PseudoCompressionFunction};
 
 use super::{
-    ChallengeField, DomainSeparatedShake256, LeafHasher, MERKLE_DIGEST_WORD_LENGTH, NodeCompressor,
-    ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN, ROW_CODE_WHIR_AGGREGATE_NODE_DOMAIN,
+    ChallengeField, MERKLE_DIGEST_WORD_LENGTH, aggregate_leaf_hasher, aggregate_node_compressor,
 };
 
 pub(super) type CompactMerkleDigest = [u64; MERKLE_DIGEST_WORD_LENGTH];
@@ -109,18 +108,6 @@ pub(super) fn compact_frontier_from_query_paths(
             })
         })
         .collect()
-}
-
-fn aggregate_leaf_hasher() -> LeafHasher {
-    LeafHasher::new(DomainSeparatedShake256 {
-        domain: ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN,
-    })
-}
-
-fn aggregate_node_compressor() -> NodeCompressor {
-    NodeCompressor::new(DomainSeparatedShake256 {
-        domain: ROW_CODE_WHIR_AGGREGATE_NODE_DOMAIN,
-    })
 }
 
 pub(super) fn reconstruct_query_paths_from_compact_frontier(

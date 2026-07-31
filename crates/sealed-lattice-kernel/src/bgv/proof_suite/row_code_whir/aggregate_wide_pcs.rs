@@ -20,7 +20,7 @@ use super::construction_plan::{
 };
 use super::{
     ChallengeField, CommitmentScheme, DiscreteFourierTransform, ExtensionFieldChallenger,
-    LeafHasher, NodeCompressor,
+    aggregate_leaf_hasher, aggregate_node_compressor,
 };
 
 pub(super) type AggregateLayout = PrefixProver<ChallengeField, ChallengeField>;
@@ -102,15 +102,8 @@ fn aggregate_wide_pcs_from_selected_parameters(
             },
         )
         .map_err(|error| format!("construct aggregate-wide WHIR configuration: {error}"))?;
-    let commitment_scheme = CommitmentScheme::new(
-        LeafHasher::new(super::DomainSeparatedShake256 {
-            domain: super::ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN,
-        }),
-        NodeCompressor::new(super::DomainSeparatedShake256 {
-            domain: super::ROW_CODE_WHIR_AGGREGATE_NODE_DOMAIN,
-        }),
-        0,
-    );
+    let commitment_scheme =
+        CommitmentScheme::new(aggregate_leaf_hasher(), aggregate_node_compressor(), 0);
     Ok(WhirProver::new(
         configuration,
         DiscreteFourierTransform::default(),

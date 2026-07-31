@@ -61,6 +61,11 @@ Works today:
   in aligned `2^20`-row stripes. The selected construction derives a
   `402,653,184`-byte DFT-plus-leaf-state core and preserves the canonical roots
   and proof-size ledger.
+- The selected same-secret theorem certificate expands every aggregate leaf
+  into its exact initial, ordered-column, and final SHAKE calls. Its semantic
+  predecessor closure derives `1,232,362` verifier hash queries and `1,229,573`
+  accepting equations, and the construction and hash-profile identities bind
+  the 512-bit state, digest width, and three canonical frame tags.
 - Production-derived phase-liveness accounting now covers the complete
   same-secret prover live set, including source ownership, replay readers,
   DFTs, Merkle frontiers, proof material, transcript state, private material,
@@ -74,11 +79,11 @@ Not yet:
 
 - The generic construction certificate does not establish family simulation,
   malicious-verifier zero knowledge, or quantum-random-oracle zero knowledge.
-- Exact classical and quantum-random-oracle soundness is not established.
-  Focused certificate code inventories the deployed uniform 512-bit aggregate
-  leaf calls and meets their collision allocation, but semantic
-  state-transition correspondence and the complete construction-level
-  composition theorem remain open.
+- Exact construction-wide classical and quantum-random-oracle soundness is not
+  established. The selected same-secret aggregate-leaf predecessor
+  correspondence and collision arithmetic now derive, but certificates for
+  every distinct production geometry, the complete production-to-affine-view
+  correspondence, and soundness for an emitted transported proof remain open.
 - The static liveness model has not yet been confirmed by a completed native
   proof or release-WebAssembly browser measurement. Complete participant
   transport accounting is also open, and the proof corpus has not been

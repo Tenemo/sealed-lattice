@@ -29,8 +29,8 @@ use super::relation_plan::{
 #[cfg(test)]
 use super::row_code_whir::RowCodeWhirConstructionPlan;
 use super::row_code_whir::{
-    ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN, ROW_CODE_WHIR_AGGREGATE_LEAF_STATE_BYTE_LENGTH,
-    ROW_CODE_WHIR_AGGREGATE_NODE_DOMAIN,
+    ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN, ROW_CODE_WHIR_AGGREGATE_LEAF_FRAME_TAGS,
+    ROW_CODE_WHIR_AGGREGATE_LEAF_STATE_BYTE_LENGTH, ROW_CODE_WHIR_AGGREGATE_NODE_DOMAIN,
     ROW_CODE_WHIR_COMPACT_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW,
     ROW_CODE_WHIR_MERKLE_DIGEST_BYTE_LENGTH, ROW_CODE_WHIR_PHASE_COLUMN_LEAF_DOMAIN,
     ROW_CODE_WHIR_PHASE_COLUMN_NODE_DOMAIN, ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN,
@@ -75,7 +75,7 @@ const SCHEMA_VERSION: u16 = 1;
 const PROOF_FAMILY_PROFILE_SCHEMA_VERSION: u16 = 2;
 const ROW_CODE_WHIR_CONSTRUCTION_PROFILE_SCHEMA_VERSION: u16 = 3;
 const ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_SCHEMA_VERSION: u16 = 2;
-const ROW_CODE_WHIR_HASH_PROFILE_SCHEMA_VERSION: u16 = 2;
+const ROW_CODE_WHIR_HASH_PROFILE_SCHEMA_VERSION: u16 = 3;
 const PROOF_PROFILE_SET_VERSION: u16 = 7;
 const SELECTED_ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_COUNT: usize = 31;
 const ROW_CODE_WHIR_HASH_ALGORITHM_IDENTIFIER: &str = "SHAKE256";
@@ -159,6 +159,8 @@ mod construction_profile_decoder_tests {
                     .expect("the selected hash identifier is ASCII"),
                 CanonicalItem::unsigned16(ROW_CODE_WHIR_DIGEST_BYTE_LENGTH),
                 CanonicalItem::unsigned16(ROW_CODE_WHIR_AGGREGATE_LEAF_STATE_BYTE_LENGTH),
+                CanonicalItem::fixed_bytes(ROW_CODE_WHIR_AGGREGATE_LEAF_FRAME_TAGS)
+                    .expect("the aggregate-leaf frame tags encode"),
                 CanonicalItem::fixed_bytes(ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN)
                     .expect("the protocol domain encodes"),
                 CanonicalItem::fixed_bytes(ROW_CODE_WHIR_PHASE_COLUMN_LEAF_DOMAIN)
@@ -346,6 +348,18 @@ mod construction_profile_decoder_tests {
     fn hash_profile_decoder_refuses_a_different_aggregate_leaf_state_width() {
         let mut hash_profile = hash_profile_tuple();
         hash_profile.items[2] = CanonicalItem::unsigned16(32);
+
+        assert_eq!(
+            verify_row_code_whir_hash_profile(&hash_profile),
+            Err(ProofProfileError::InvalidSchedule),
+        );
+    }
+
+    #[test]
+    fn hash_profile_decoder_refuses_different_aggregate_leaf_frames() {
+        let mut hash_profile = hash_profile_tuple();
+        hash_profile.items[3] =
+            CanonicalItem::fixed_bytes([0, 2, 1]).expect("the mutated frame tags encode");
 
         assert_eq!(
             verify_row_code_whir_hash_profile(&hash_profile),
@@ -1092,7 +1106,7 @@ fn verify_row_code_whir_hash_profile(tuple: &CanonicalTuple) -> Result<(), Proof
         tuple,
         ROW_CODE_WHIR_HASH_PROFILE_SCHEMA_IDENTIFIER,
         ROW_CODE_WHIR_HASH_PROFILE_SCHEMA_VERSION,
-        15,
+        16,
     )?;
     let algorithm = tuple.items[0]
         .variable_value_bytes()
@@ -1115,7 +1129,9 @@ fn verify_row_code_whir_hash_profile(tuple: &CanonicalTuple) -> Result<(), Proof
         || algorithm != ROW_CODE_WHIR_HASH_ALGORITHM_IDENTIFIER.as_bytes()
         || profile_u16(&tuple.items[1])? != ROW_CODE_WHIR_DIGEST_BYTE_LENGTH
         || profile_u16(&tuple.items[2])? != ROW_CODE_WHIR_AGGREGATE_LEAF_STATE_BYTE_LENGTH
-        || tuple.items[3..]
+        || tuple.items[3].item_type() != CanonicalItemType::RawBytes
+        || tuple.items[3].canonical_bytes() != ROW_CODE_WHIR_AGGREGATE_LEAF_FRAME_TAGS
+        || tuple.items[4..]
             .iter()
             .zip(domains)
             .any(|(item, expected)| {
@@ -1668,6 +1684,7 @@ mod canonical_profile_artifact {
         hash_algorithm_identifier: String,
         digest_byte_length: u16,
         aggregate_leaf_state_byte_length: u16,
+        aggregate_leaf_frame_tags: Vec<u8>,
         protocol_hash_domain: Vec<u8>,
         phase_column_leaf_domain: Vec<u8>,
         phase_column_node_domain: Vec<u8>,
@@ -1688,6 +1705,7 @@ mod canonical_profile_artifact {
                 hash_algorithm_identifier: ROW_CODE_WHIR_HASH_ALGORITHM_IDENTIFIER.to_owned(),
                 digest_byte_length: ROW_CODE_WHIR_DIGEST_BYTE_LENGTH,
                 aggregate_leaf_state_byte_length: ROW_CODE_WHIR_AGGREGATE_LEAF_STATE_BYTE_LENGTH,
+                aggregate_leaf_frame_tags: ROW_CODE_WHIR_AGGREGATE_LEAF_FRAME_TAGS.to_vec(),
                 protocol_hash_domain: ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN.to_vec(),
                 phase_column_leaf_domain: ROW_CODE_WHIR_PHASE_COLUMN_LEAF_DOMAIN.to_vec(),
                 phase_column_node_domain: ROW_CODE_WHIR_PHASE_COLUMN_NODE_DOMAIN.to_vec(),
@@ -1724,6 +1742,8 @@ mod canonical_profile_artifact {
                         .map_err(canonical_encoding_error)?,
                     CanonicalItem::unsigned16(self.digest_byte_length),
                     CanonicalItem::unsigned16(self.aggregate_leaf_state_byte_length),
+                    CanonicalItem::fixed_bytes(&self.aggregate_leaf_frame_tags)
+                        .map_err(canonical_encoding_error)?,
                     CanonicalItem::fixed_bytes(&self.protocol_hash_domain)
                         .map_err(canonical_encoding_error)?,
                     CanonicalItem::fixed_bytes(&self.phase_column_leaf_domain)
@@ -3996,6 +4016,8 @@ mod canonical_profile_artifact {
                             .expect("selected hash algorithm identifier is canonical ASCII"),
                         CanonicalItem::unsigned16(ROW_CODE_WHIR_DIGEST_BYTE_LENGTH),
                         CanonicalItem::unsigned16(ROW_CODE_WHIR_AGGREGATE_LEAF_STATE_BYTE_LENGTH,),
+                        CanonicalItem::fixed_bytes(ROW_CODE_WHIR_AGGREGATE_LEAF_FRAME_TAGS)
+                            .expect("aggregate leaf frame tags fit the canonical byte limit"),
                         CanonicalItem::fixed_bytes(ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN)
                             .expect("row-code protocol domain fits the canonical byte limit"),
                         CanonicalItem::fixed_bytes(ROW_CODE_WHIR_PHASE_COLUMN_LEAF_DOMAIN)

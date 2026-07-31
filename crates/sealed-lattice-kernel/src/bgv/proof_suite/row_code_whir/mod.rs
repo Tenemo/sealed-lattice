@@ -123,6 +123,7 @@ pub(in crate::bgv::proof_suite) const ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN: &[u8]
     b"aggregate-wide-pcs/merkle-leaf/v2";
 pub(in crate::bgv::proof_suite) const ROW_CODE_WHIR_AGGREGATE_NODE_DOMAIN: &[u8] =
     b"aggregate-wide-pcs/merkle-node/v1";
+pub(in crate::bgv::proof_suite) const ROW_CODE_WHIR_AGGREGATE_LEAF_FRAME_TAGS: [u8; 3] = [0, 1, 2];
 
 type ChallengeField = BinomialExtensionField<Goldilocks, 5>;
 type ExtensionFieldChallenger = RowCodeWhirChallenger;
@@ -167,10 +168,99 @@ impl ColumnStreamableLeafState {
     const ZERO: Self = Self([0_u64; COLUMN_STREAMING_LEAF_STATE_WORD_LENGTH]);
 }
 
+#[derive(Clone, Copy, Debug)]
+enum ColumnStreamableLeafOracleInput {
+    Initial {
+        column_count: u64,
+    },
+    Column {
+        column_index: u64,
+        predecessor: ColumnStreamableLeafState,
+        value: ChallengeField,
+    },
+    Final {
+        column_count: u64,
+        predecessor: ColumnStreamableLeafState,
+    },
+}
+
+impl ColumnStreamableLeafOracleInput {
+    const fn frame(self) -> u8 {
+        match self {
+            Self::Initial { .. } => ColumnStreamableLeafHasher::INITIAL_FRAME,
+            Self::Column { .. } => ColumnStreamableLeafHasher::COLUMN_FRAME,
+            Self::Final { .. } => ColumnStreamableLeafHasher::FINAL_FRAME,
+        }
+    }
+
+    fn visit_payload(self, mut visit: impl FnMut(&[u8])) {
+        match self {
+            Self::Initial { column_count } => visit(&column_count.to_le_bytes()),
+            Self::Column {
+                column_index,
+                predecessor,
+                value,
+            } => {
+                visit(&column_index.to_le_bytes());
+                for word in predecessor.0 {
+                    visit(&word.to_le_bytes());
+                }
+                for coefficient in
+                    <ChallengeField as BasedVectorSpace<Goldilocks>>::as_basis_coefficients_slice(
+                        &value,
+                    )
+                {
+                    visit(&coefficient.as_canonical_u64().to_le_bytes());
+                }
+            }
+            Self::Final {
+                column_count,
+                predecessor,
+            } => {
+                visit(&column_count.to_le_bytes());
+                for word in predecessor.0 {
+                    visit(&word.to_le_bytes());
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ColumnStreamableLeafOracleFrame {
+    Initial,
+    Column,
+    Final,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ColumnStreamableLeafOracleFrameDescriptor {
+    frame: ColumnStreamableLeafOracleFrame,
+    frame_tag: u8,
+    canonical_input_byte_length: usize,
+    predecessor_digest_count: usize,
+    extension_value_count: usize,
+    output_bit_length: usize,
+}
+
+fn aggregate_leaf_hasher() -> LeafHasher {
+    LeafHasher::new(DomainSeparatedShake256 {
+        domain: ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN,
+    })
+}
+
+fn aggregate_node_compressor() -> NodeCompressor {
+    NodeCompressor::new(DomainSeparatedShake256 {
+        domain: ROW_CODE_WHIR_AGGREGATE_NODE_DOMAIN,
+    })
+}
+
 impl ColumnStreamableLeafHasher {
-    const INITIAL_FRAME: u8 = 0;
-    const COLUMN_FRAME: u8 = 1;
-    const FINAL_FRAME: u8 = 2;
+    const INITIAL_FRAME: u8 = ROW_CODE_WHIR_AGGREGATE_LEAF_FRAME_TAGS[0];
+    const COLUMN_FRAME: u8 = ROW_CODE_WHIR_AGGREGATE_LEAF_FRAME_TAGS[1];
+    const FINAL_FRAME: u8 = ROW_CODE_WHIR_AGGREGATE_LEAF_FRAME_TAGS[2];
 
     const fn new(hasher: DomainSeparatedShake256) -> Self {
         Self {
@@ -188,13 +278,17 @@ impl ColumnStreamableLeafHasher {
         MERKLE_DIGEST_WORD_LENGTH * u64::BITS as usize
     }
 
-    fn framed_state(&self, frame: u8) -> Shake256 {
+    fn hash_oracle_input(
+        &self,
+        input: ColumnStreamableLeafOracleInput,
+    ) -> [u64; MERKLE_DIGEST_WORD_LENGTH] {
         let mut state = Shake256::default();
         state.update(ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN);
         state.update(&(self.domain.len() as u64).to_le_bytes());
         state.update(self.domain);
-        state.update(&[frame]);
-        state
+        state.update(&[input.frame()]);
+        input.visit_payload(|bytes| state.update(bytes));
+        Self::finish_digest_words(state)
     }
 
     fn finish_digest_words(state: Shake256) -> [u64; MERKLE_DIGEST_WORD_LENGTH] {
@@ -211,9 +305,11 @@ impl ColumnStreamableLeafHasher {
     }
 
     fn initial_state(&self, column_count: usize) -> ColumnStreamableLeafState {
-        let mut state = self.framed_state(Self::INITIAL_FRAME);
-        state.update(&(column_count as u64).to_le_bytes());
-        ColumnStreamableLeafState(Self::finish_digest_words(state))
+        ColumnStreamableLeafState(self.hash_oracle_input(
+            ColumnStreamableLeafOracleInput::Initial {
+                column_count: column_count as u64,
+            },
+        ))
     }
 
     fn absorb_column(
@@ -222,17 +318,13 @@ impl ColumnStreamableLeafHasher {
         column_index: usize,
         value: ChallengeField,
     ) -> ColumnStreamableLeafState {
-        let mut hasher = self.framed_state(Self::COLUMN_FRAME);
-        hasher.update(&(column_index as u64).to_le_bytes());
-        for word in state.0 {
-            hasher.update(&word.to_le_bytes());
-        }
-        for coefficient in
-            <ChallengeField as BasedVectorSpace<Goldilocks>>::as_basis_coefficients_slice(&value)
-        {
-            hasher.update(&coefficient.as_canonical_u64().to_le_bytes());
-        }
-        ColumnStreamableLeafState(Self::finish_digest_words(hasher))
+        ColumnStreamableLeafState(
+            self.hash_oracle_input(ColumnStreamableLeafOracleInput::Column {
+                column_index: column_index as u64,
+                predecessor: state,
+                value,
+            }),
+        )
     }
 
     fn finish_leaf(
@@ -240,12 +332,56 @@ impl ColumnStreamableLeafHasher {
         column_count: usize,
         state: ColumnStreamableLeafState,
     ) -> [u64; MERKLE_DIGEST_WORD_LENGTH] {
-        let mut hasher = self.framed_state(Self::FINAL_FRAME);
-        hasher.update(&(column_count as u64).to_le_bytes());
-        for word in state.0 {
-            hasher.update(&word.to_le_bytes());
+        self.hash_oracle_input(ColumnStreamableLeafOracleInput::Final {
+            column_count: column_count as u64,
+            predecessor: state,
+        })
+    }
+
+    #[cfg(test)]
+    fn canonical_oracle_input_bytes(&self, input: ColumnStreamableLeafOracleInput) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN);
+        bytes.extend_from_slice(&(self.domain.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(self.domain);
+        bytes.push(input.frame());
+        input.visit_payload(|payload| bytes.extend_from_slice(payload));
+        bytes
+    }
+
+    #[cfg(test)]
+    fn frame_descriptor(
+        &self,
+        frame: ColumnStreamableLeafOracleFrame,
+    ) -> ColumnStreamableLeafOracleFrameDescriptor {
+        let input = match frame {
+            ColumnStreamableLeafOracleFrame::Initial => {
+                ColumnStreamableLeafOracleInput::Initial { column_count: 1 }
+            }
+            ColumnStreamableLeafOracleFrame::Column => ColumnStreamableLeafOracleInput::Column {
+                column_index: 0,
+                predecessor: ColumnStreamableLeafState::ZERO,
+                value: ChallengeField::ZERO,
+            },
+            ColumnStreamableLeafOracleFrame::Final => ColumnStreamableLeafOracleInput::Final {
+                column_count: 1,
+                predecessor: ColumnStreamableLeafState::ZERO,
+            },
+        };
+        ColumnStreamableLeafOracleFrameDescriptor {
+            frame,
+            frame_tag: input.frame(),
+            canonical_input_byte_length: self.canonical_oracle_input_bytes(input).len(),
+            predecessor_digest_count: usize::from(!matches!(
+                frame,
+                ColumnStreamableLeafOracleFrame::Initial
+            )),
+            extension_value_count: usize::from(matches!(
+                frame,
+                ColumnStreamableLeafOracleFrame::Column
+            )),
+            output_bit_length: Self::intermediate_output_bit_length(),
         }
-        Self::finish_digest_words(hasher)
     }
 }
 
@@ -814,9 +950,7 @@ mod tests {
 
     #[test]
     fn aggregate_leaf_hash_matches_column_streaming_and_binds_order() {
-        let hasher = ColumnStreamableLeafHasher::new(DomainSeparatedShake256 {
-            domain: ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN,
-        });
+        let hasher = aggregate_leaf_hasher();
         let values = (1_u64..=8)
             .map(ChallengeField::from_u64)
             .collect::<Vec<_>>();
@@ -830,6 +964,290 @@ mod tests {
         let mut reversed = values;
         reversed.reverse();
         assert_ne!(direct, hasher.hash_iter(reversed));
+    }
+
+    #[test]
+    fn aggregate_leaf_oracle_frames_bind_every_canonical_input_coordinate() {
+        let hasher = aggregate_leaf_hasher();
+        let column_index = 0x0102_0304_0506_0708_u64;
+        let predecessor = ColumnStreamableLeafState([
+            0x1112_1314_1516_1718,
+            0x2122_2324_2526_2728,
+            0x3132_3334_3536_3738,
+            0x4142_4344_4546_4748,
+            0x5152_5354_5556_5758,
+            0x6162_6364_6566_6768,
+            0x7172_7374_7576_7778,
+            0x8182_8384_8586_8788,
+        ]);
+        let coefficient_words = [
+            0_u64,
+            1,
+            0x0102_0304_0506_0708,
+            GOLDILOCKS_MODULUS - 2,
+            GOLDILOCKS_MODULUS - 1,
+        ];
+        let value = ChallengeField::new(coefficient_words.map(Goldilocks::from_u64));
+        let input = ColumnStreamableLeafOracleInput::Column {
+            column_index,
+            predecessor,
+            value,
+        };
+
+        let mut expected_input = Vec::new();
+        expected_input.extend_from_slice(ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN);
+        expected_input.extend_from_slice(
+            &u64::try_from(ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN.len())
+                .expect("the aggregate leaf domain length fits u64")
+                .to_le_bytes(),
+        );
+        expected_input.extend_from_slice(ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN);
+        expected_input.push(ROW_CODE_WHIR_AGGREGATE_LEAF_FRAME_TAGS[1]);
+        expected_input.extend_from_slice(&column_index.to_le_bytes());
+        for predecessor_word in predecessor.0 {
+            expected_input.extend_from_slice(&predecessor_word.to_le_bytes());
+        }
+        for coefficient_word in coefficient_words {
+            expected_input.extend_from_slice(&coefficient_word.to_le_bytes());
+        }
+        assert_eq!(expected_input.len(), 194);
+        assert_eq!(hasher.canonical_oracle_input_bytes(input), expected_input);
+
+        let mut independently_framed_state = Shake256::default();
+        independently_framed_state.update(&expected_input);
+        assert_eq!(
+            hasher.hash_oracle_input(input),
+            ColumnStreamableLeafHasher::finish_digest_words(independently_framed_state),
+        );
+
+        let mut changed_predecessor = predecessor;
+        changed_predecessor.0[3] ^= 1;
+        assert_ne!(
+            hasher.hash_oracle_input(input),
+            hasher.hash_oracle_input(ColumnStreamableLeafOracleInput::Column {
+                column_index,
+                predecessor: changed_predecessor,
+                value,
+            }),
+        );
+        assert_ne!(
+            hasher.hash_oracle_input(input),
+            hasher.hash_oracle_input(ColumnStreamableLeafOracleInput::Column {
+                column_index: column_index + 1,
+                predecessor,
+                value,
+            }),
+        );
+        assert_ne!(
+            hasher.hash_oracle_input(input),
+            hasher.hash_oracle_input(ColumnStreamableLeafOracleInput::Column {
+                column_index,
+                predecessor,
+                value: value + ChallengeField::ONE,
+            }),
+        );
+
+        let initial_input = ColumnStreamableLeafOracleInput::Initial { column_count: 8 };
+        let final_input = ColumnStreamableLeafOracleInput::Final {
+            column_count: 8,
+            predecessor,
+        };
+        assert_eq!(hasher.canonical_oracle_input_bytes(initial_input).len(), 90,);
+        assert_eq!(hasher.canonical_oracle_input_bytes(final_input).len(), 154);
+        assert_ne!(
+            hasher.hash_oracle_input(initial_input),
+            hasher.hash_oracle_input(ColumnStreamableLeafOracleInput::Initial { column_count: 7 }),
+        );
+        assert_ne!(
+            hasher.hash_oracle_input(final_input),
+            hasher.hash_oracle_input(ColumnStreamableLeafOracleInput::Final {
+                column_count: 7,
+                predecessor,
+            }),
+        );
+    }
+
+    #[test]
+    fn collision_free_aggregate_leaf_database_recovers_the_exact_ordered_trace() {
+        fn read_word(bytes: &[u8], offset: usize) -> Option<u64> {
+            Some(u64::from_le_bytes(
+                bytes
+                    .get(offset..offset.checked_add(size_of::<u64>())?)?
+                    .try_into()
+                    .ok()?,
+            ))
+        }
+
+        fn read_predecessor(
+            bytes: &[u8],
+            offset: usize,
+        ) -> Option<[u64; MERKLE_DIGEST_WORD_LENGTH]> {
+            let mut predecessor = [0_u64; MERKLE_DIGEST_WORD_LENGTH];
+            for (word_index, word) in predecessor.iter_mut().enumerate() {
+                *word = read_word(
+                    bytes,
+                    offset.checked_add(word_index.checked_mul(size_of::<u64>())?)?,
+                )?;
+            }
+            Some(predecessor)
+        }
+
+        fn has_canonical_prefix(bytes: &[u8]) -> bool {
+            let domain_length_offset = ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN.len();
+            let domain_offset = domain_length_offset + size_of::<u64>();
+            bytes.get(..domain_length_offset) == Some(ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN)
+                && read_word(bytes, domain_length_offset)
+                    == u64::try_from(ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN.len()).ok()
+                && bytes
+                    .get(domain_offset..domain_offset + ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN.len())
+                    == Some(ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN)
+        }
+
+        fn recover_trace(
+            database: &std::collections::BTreeMap<[u64; MERKLE_DIGEST_WORD_LENGTH], Vec<u8>>,
+            final_digest: [u64; MERKLE_DIGEST_WORD_LENGTH],
+        ) -> Option<Vec<[u64; 5]>> {
+            let frame_offset = ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN
+                .len()
+                .checked_add(size_of::<u64>())?
+                .checked_add(ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN.len())?;
+            let payload_offset = frame_offset.checked_add(size_of::<u8>())?;
+            let final_input = database.get(&final_digest)?;
+            if final_input.len() != 154
+                || !has_canonical_prefix(final_input)
+                || final_input.get(frame_offset)
+                    != Some(&ROW_CODE_WHIR_AGGREGATE_LEAF_FRAME_TAGS[2])
+            {
+                return None;
+            }
+            let column_count = usize::try_from(read_word(final_input, payload_offset)?).ok()?;
+            let mut predecessor =
+                read_predecessor(final_input, payload_offset.checked_add(size_of::<u64>())?)?;
+            let mut reversed_coefficients = Vec::with_capacity(column_count);
+            for expected_column_index in (0..column_count).rev() {
+                let column_input = database.get(&predecessor)?;
+                if column_input.len() != 194
+                    || !has_canonical_prefix(column_input)
+                    || column_input.get(frame_offset)
+                        != Some(&ROW_CODE_WHIR_AGGREGATE_LEAF_FRAME_TAGS[1])
+                    || usize::try_from(read_word(column_input, payload_offset)?).ok()?
+                        != expected_column_index
+                {
+                    return None;
+                }
+                predecessor =
+                    read_predecessor(column_input, payload_offset.checked_add(size_of::<u64>())?)?;
+                let coefficient_offset = payload_offset
+                    .checked_add(size_of::<u64>())?
+                    .checked_add(MERKLE_DIGEST_BYTE_LENGTH)?;
+                let mut coefficients = [0_u64; 5];
+                for (coefficient_index, coefficient) in coefficients.iter_mut().enumerate() {
+                    *coefficient = read_word(
+                        column_input,
+                        coefficient_offset
+                            .checked_add(coefficient_index.checked_mul(size_of::<u64>())?)?,
+                    )?;
+                    if *coefficient >= GOLDILOCKS_MODULUS {
+                        return None;
+                    }
+                }
+                reversed_coefficients.push(coefficients);
+            }
+            let initial_input = database.get(&predecessor)?;
+            if initial_input.len() != 90
+                || !has_canonical_prefix(initial_input)
+                || initial_input.get(frame_offset)
+                    != Some(&ROW_CODE_WHIR_AGGREGATE_LEAF_FRAME_TAGS[0])
+                || usize::try_from(read_word(initial_input, payload_offset)?).ok()? != column_count
+            {
+                return None;
+            }
+            reversed_coefficients.reverse();
+            Some(reversed_coefficients)
+        }
+
+        let coefficient_rows = [
+            [1, 2, 3, 4, 5],
+            [11, 12, 13, 14, 15],
+            [21, 22, 23, 24, 25],
+            [
+                GOLDILOCKS_MODULUS - 5,
+                GOLDILOCKS_MODULUS - 4,
+                GOLDILOCKS_MODULUS - 3,
+                GOLDILOCKS_MODULUS - 2,
+                GOLDILOCKS_MODULUS - 1,
+            ],
+        ];
+        let values = coefficient_rows
+            .map(|coefficients| ChallengeField::new(coefficients.map(Goldilocks::from_u64)));
+        let hasher = aggregate_leaf_hasher();
+        let initial_input = ColumnStreamableLeafOracleInput::Initial {
+            column_count: values.len() as u64,
+        };
+        let mut database = std::collections::BTreeMap::new();
+        let mut state = ColumnStreamableLeafState(hasher.hash_oracle_input(initial_input));
+        assert!(
+            database
+                .insert(state.0, hasher.canonical_oracle_input_bytes(initial_input),)
+                .is_none(),
+        );
+        let mut transition_digests = Vec::new();
+        for (column_index, value) in values.into_iter().enumerate() {
+            let input = ColumnStreamableLeafOracleInput::Column {
+                column_index: column_index as u64,
+                predecessor: state,
+                value,
+            };
+            state = ColumnStreamableLeafState(hasher.hash_oracle_input(input));
+            transition_digests.push(state.0);
+            assert!(
+                database
+                    .insert(state.0, hasher.canonical_oracle_input_bytes(input))
+                    .is_none(),
+                "the representative production trace is collision-free",
+            );
+        }
+        let final_input = ColumnStreamableLeafOracleInput::Final {
+            column_count: values.len() as u64,
+            predecessor: state,
+        };
+        let final_digest = hasher.hash_oracle_input(final_input);
+        assert!(
+            database
+                .insert(
+                    final_digest,
+                    hasher.canonical_oracle_input_bytes(final_input),
+                )
+                .is_none(),
+        );
+        assert_eq!(
+            recover_trace(&database, final_digest),
+            Some(coefficient_rows.to_vec()),
+        );
+
+        let mut missing_predecessor = database.clone();
+        missing_predecessor.remove(&transition_digests[1]);
+        assert_eq!(recover_trace(&missing_predecessor, final_digest), None);
+
+        let mut reordered_transition = database.clone();
+        let reordered_bytes = reordered_transition
+            .get_mut(&transition_digests[2])
+            .expect("the third transition is present");
+        let frame_offset = ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN.len()
+            + size_of::<u64>()
+            + ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN.len();
+        reordered_bytes[frame_offset + size_of::<u8>()] ^= 1;
+        assert_eq!(recover_trace(&reordered_transition, final_digest), None);
+
+        let mut noncanonical_coefficient = database;
+        let transition_bytes = noncanonical_coefficient
+            .get_mut(&transition_digests[2])
+            .expect("the third transition is present");
+        let coefficient_offset =
+            frame_offset + size_of::<u8>() + size_of::<u64>() + MERKLE_DIGEST_BYTE_LENGTH;
+        transition_bytes[coefficient_offset..coefficient_offset + size_of::<u64>()]
+            .copy_from_slice(&GOLDILOCKS_MODULUS.to_le_bytes());
+        assert_eq!(recover_trace(&noncanonical_coefficient, final_digest), None,);
     }
 
     #[test]

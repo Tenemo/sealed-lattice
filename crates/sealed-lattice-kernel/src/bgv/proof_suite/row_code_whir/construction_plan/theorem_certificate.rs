@@ -5,6 +5,7 @@
 //! deliberately keeps arithmetic discharge separate from cryptographic
 //! assumptions while binding every finite theorem row to the live plan.
 
+use core::mem::size_of;
 use std::collections::{BTreeMap, BTreeSet};
 
 use num_bigint::BigUint;
@@ -16,7 +17,10 @@ use crate::bgv::proof_suite::relation_plan::{
     RelationCompilerInterpreterSemanticCertificate, checked_relation_compiler_interpreter_semantics,
 };
 use crate::bgv::proof_suite::row_code_whir::{
-    ColumnStreamableLeafHasher,
+    ColumnStreamableLeafHasher, ColumnStreamableLeafOracleFrame,
+    ColumnStreamableLeafOracleFrameDescriptor, MERKLE_DIGEST_WORD_LENGTH,
+    ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN, ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN,
+    aggregate_leaf_hasher,
     aggregate_wide_hiding::AggregateWideMaskingCertificate,
     exact_same_secret::{
         ExactExtractorCorrespondenceFault, ExactPointConstraintExtractorCertificate,
@@ -1064,6 +1068,97 @@ struct AggregateLeafOracleCallInventoryRow {
     parent_hash_query_count: u64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AggregateLeafSemanticTransition {
+    SharedInitial {
+        interleaving_width: usize,
+    },
+    Column {
+        role: MerkleOracleEquationRole,
+        column_index: usize,
+    },
+    Final {
+        role: MerkleOracleEquationRole,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AggregateLeafSemanticPredecessor {
+    None,
+    SharedInitial {
+        interleaving_width: usize,
+    },
+    Column {
+        role: MerkleOracleEquationRole,
+        column_index: usize,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct AggregateLeafSemanticTransitionRow {
+    transition: AggregateLeafSemanticTransition,
+    predecessor: AggregateLeafSemanticPredecessor,
+    frame: ColumnStreamableLeafOracleFrameDescriptor,
+    hash_query_count: u64,
+    accepting_database_equation_count_ceiling: u64,
+}
+
+/// Finite predecessor-closure proof for the deployed streaming leaf oracle.
+///
+/// One row represents each semantic equation class, not merely each call
+/// count. In a collision-free accepting database the terminal leaf reverses
+/// through the final frame, every ordered column transition, and the
+/// width-specific shared initial frame. The recovered transition inputs carry
+/// the canonical field coefficients that the verifier hashed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AggregateLeafSemanticTransitionCertificate {
+    frame_descriptors: [ColumnStreamableLeafOracleFrameDescriptor; 3],
+    rows: Vec<AggregateLeafSemanticTransitionRow>,
+    hash_query_count: u64,
+    accepting_database_equation_count_ceiling: u64,
+    maximum_predecessor_support_count: u8,
+}
+
+impl AggregateLeafSemanticTransitionCertificate {
+    fn is_complete_for_inventory(&self, inventory: &[AggregateLeafOracleCallInventoryRow]) -> bool {
+        let Ok(production_frame_descriptors) = aggregate_leaf_frame_descriptors() else {
+            return false;
+        };
+        let Ok(expected_rows) =
+            aggregate_leaf_semantic_transition_rows(inventory, &production_frame_descriptors)
+        else {
+            return false;
+        };
+        let Some(expected_hash_query_count) = expected_rows
+            .iter()
+            .try_fold(0_u64, |count, row| count.checked_add(row.hash_query_count))
+        else {
+            return false;
+        };
+        let Some(expected_equation_count) = expected_rows.iter().try_fold(0_u64, |count, row| {
+            count.checked_add(row.accepting_database_equation_count_ceiling)
+        }) else {
+            return false;
+        };
+        let expected_predecessor_support = expected_rows
+            .iter()
+            .map(|row| {
+                u8::from(!matches!(
+                    row.predecessor,
+                    AggregateLeafSemanticPredecessor::None
+                ))
+            })
+            .max()
+            .unwrap_or(0);
+        self.frame_descriptors == production_frame_descriptors
+            && self.rows == expected_rows
+            && self.hash_query_count == expected_hash_query_count
+            && self.accepting_database_equation_count_ceiling == expected_equation_count
+            && self.maximum_predecessor_support_count == expected_predecessor_support
+            && self.maximum_predecessor_support_count == 1
+    }
+}
+
 /// Exact SHAKE call inventory for the deployed aggregate leaf chain.
 ///
 /// The abstract Merkle ledger treats a leaf hash as one oracle call. Production
@@ -1086,6 +1181,7 @@ struct DeployedAggregateLeafOracleCertificate {
     collision_penalty_denominator_bit_length: usize,
     transition_collision_propagates_to_final_leaf: bool,
     uniform_required_output_geometry_established: bool,
+    semantic_state_transitions: Option<AggregateLeafSemanticTransitionCertificate>,
 }
 
 impl DeployedAggregateLeafOracleCertificate {
@@ -1133,8 +1229,16 @@ impl DeployedAggregateLeafOracleCertificate {
                         == CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH)
     }
 
+    fn semantic_state_transition_correspondence_established(&self) -> bool {
+        self.semantic_state_transitions
+            .as_ref()
+            .is_some_and(|certificate| certificate.is_complete_for_inventory(&self.rows))
+    }
+
     fn is_eligible_for_uniform_required_output(&self) -> bool {
-        self.has_complete_call_inventory() && self.uniform_required_output_geometry_established
+        self.has_complete_call_inventory()
+            && self.uniform_required_output_geometry_established
+            && self.semantic_state_transition_correspondence_established()
     }
 }
 
@@ -1882,8 +1986,8 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
         &complete_verifier_oracle_ledger.merkle_rows,
     )?;
     let cms19_arithmetic = derive_cms19_arithmetic_certificate(
-        complete_verifier_oracle_ledger.complete_hash_query_count,
-        complete_verifier_oracle_ledger.complete_equation_count_ceiling,
+        deployed_aggregate_leaf_oracle.deployed_verifier_hash_query_count,
+        deployed_aggregate_leaf_oracle.deployed_accepting_database_equation_count,
     );
     let exact_failure_magnitude =
         derive_exact_failure_magnitude_certificate(ExactFailureMagnitudeDerivationInput {
@@ -1923,10 +2027,10 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
         transform: Cms19Transform::OriginalBcsStrongStateHashChainSectionEightSix,
         transcript_equation_count,
         transcript_hash_query_count: maximum_transcript_hash_query_count,
-        claimed_complete_equation_count: complete_verifier_oracle_ledger
-            .complete_equation_count_ceiling,
-        claimed_complete_hash_query_count: complete_verifier_oracle_ledger
-            .complete_hash_query_count,
+        claimed_complete_equation_count: deployed_aggregate_leaf_oracle
+            .deployed_accepting_database_equation_count,
+        claimed_complete_hash_query_count: deployed_aggregate_leaf_oracle
+            .deployed_verifier_hash_query_count,
         equation_count_without_catalog_correspondence: 0,
         hash_query_count_without_catalog_correspondence: 0,
         transcript_predecessor_support_ceiling: 2,
@@ -1937,7 +2041,8 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
             && exact_failure_magnitude.is_complete(),
         complete_query_ledger_correspondence_established: true,
         strong_state_typed_hash_chain_established: cms19_strong_state_hash_chain.is_complete(),
-        semantic_state_transition_correspondence_established: false,
+        semantic_state_transition_correspondence_established: deployed_aggregate_leaf_oracle
+            .semantic_state_transition_correspondence_established(),
         deployed_oracle_output_geometry_established: deployed_aggregate_leaf_oracle
             .is_eligible_for_uniform_required_output(),
     };
@@ -3108,6 +3213,203 @@ fn aggregate_leaf_interleaving_width(
     Ok(Some(expected_geometry.2))
 }
 
+fn aggregate_leaf_frame_descriptors()
+-> Result<[ColumnStreamableLeafOracleFrameDescriptor; 3], WhirTheoremCertificateError> {
+    let hasher = aggregate_leaf_hasher();
+    let descriptors = [
+        hasher.frame_descriptor(ColumnStreamableLeafOracleFrame::Initial),
+        hasher.frame_descriptor(ColumnStreamableLeafOracleFrame::Column),
+        hasher.frame_descriptor(ColumnStreamableLeafOracleFrame::Final),
+    ];
+    let framed_prefix_byte_length = ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN
+        .len()
+        .checked_add(size_of::<u64>())
+        .and_then(|length| length.checked_add(ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN.len()))
+        .and_then(|length| length.checked_add(size_of::<u8>()))
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let expected_input_byte_lengths = [
+        framed_prefix_byte_length
+            .checked_add(size_of::<u64>())
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+        framed_prefix_byte_length
+            .checked_add(size_of::<u64>())
+            .and_then(|length| length.checked_add(MERKLE_DIGEST_WORD_LENGTH * size_of::<u64>()))
+            .and_then(|length| {
+                length.checked_add(PROOF_CHALLENGE_EXTENSION_DEGREE * size_of::<u64>())
+            })
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+        framed_prefix_byte_length
+            .checked_add(size_of::<u64>())
+            .and_then(|length| length.checked_add(MERKLE_DIGEST_WORD_LENGTH * size_of::<u64>()))
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+    ];
+    let expected_predecessor_counts = [0, 1, 1];
+    let expected_extension_value_counts = [0, 1, 0];
+    let frame_tags = descriptors
+        .iter()
+        .map(|descriptor| descriptor.frame_tag)
+        .collect::<BTreeSet<_>>();
+    if descriptors
+        .iter()
+        .zip(expected_input_byte_lengths)
+        .zip(expected_predecessor_counts)
+        .zip(expected_extension_value_counts)
+        .any(
+            |(((descriptor, input_byte_length), predecessor_count), extension_value_count)| {
+                descriptor.canonical_input_byte_length != input_byte_length
+                    || descriptor.predecessor_digest_count != predecessor_count
+                    || descriptor.extension_value_count != extension_value_count
+                    || descriptor.output_bit_length != CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH
+            },
+        )
+        || frame_tags.len() != descriptors.len()
+    {
+        return Err(WhirTheoremCertificateError::IncompleteOracleEquationMapping);
+    }
+    Ok(descriptors)
+}
+
+fn aggregate_leaf_frame_descriptor(
+    descriptors: &[ColumnStreamableLeafOracleFrameDescriptor; 3],
+    frame: ColumnStreamableLeafOracleFrame,
+) -> Result<ColumnStreamableLeafOracleFrameDescriptor, WhirTheoremCertificateError> {
+    descriptors
+        .iter()
+        .copied()
+        .find(|descriptor| descriptor.frame == frame)
+        .ok_or(WhirTheoremCertificateError::IncompleteOracleEquationMapping)
+}
+
+fn aggregate_leaf_semantic_transition_rows(
+    inventory: &[AggregateLeafOracleCallInventoryRow],
+    descriptors: &[ColumnStreamableLeafOracleFrameDescriptor; 3],
+) -> Result<Vec<AggregateLeafSemanticTransitionRow>, WhirTheoremCertificateError> {
+    if inventory.is_empty()
+        || inventory
+            .iter()
+            .any(|row| row.interleaving_width == 0 || row.opened_leaf_count == 0)
+    {
+        return Err(WhirTheoremCertificateError::IncompleteOracleEquationMapping);
+    }
+    let initial_frame =
+        aggregate_leaf_frame_descriptor(descriptors, ColumnStreamableLeafOracleFrame::Initial)?;
+    let column_frame =
+        aggregate_leaf_frame_descriptor(descriptors, ColumnStreamableLeafOracleFrame::Column)?;
+    let final_frame =
+        aggregate_leaf_frame_descriptor(descriptors, ColumnStreamableLeafOracleFrame::Final)?;
+    let interleaving_widths = inventory
+        .iter()
+        .map(|row| row.interleaving_width)
+        .collect::<BTreeSet<_>>();
+    let capacity = interleaving_widths
+        .len()
+        .checked_add(inventory.iter().try_fold(0_usize, |count, row| {
+            count
+                .checked_add(row.interleaving_width)
+                .and_then(|value| value.checked_add(1))
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+        })?)
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let mut rows = Vec::new();
+    rows.try_reserve_exact(capacity)
+        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+    for interleaving_width in interleaving_widths {
+        let hash_query_count = inventory
+            .iter()
+            .filter(|row| row.interleaving_width == interleaving_width)
+            .try_fold(0_u64, |count, row| {
+                count
+                    .checked_add(row.initial_hash_query_count)
+                    .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+            })?;
+        rows.push(AggregateLeafSemanticTransitionRow {
+            transition: AggregateLeafSemanticTransition::SharedInitial { interleaving_width },
+            predecessor: AggregateLeafSemanticPredecessor::None,
+            frame: initial_frame,
+            hash_query_count,
+            accepting_database_equation_count_ceiling: 1,
+        });
+    }
+    for inventory_row in inventory {
+        for column_index in 0..inventory_row.interleaving_width {
+            let predecessor = if column_index == 0 {
+                AggregateLeafSemanticPredecessor::SharedInitial {
+                    interleaving_width: inventory_row.interleaving_width,
+                }
+            } else {
+                AggregateLeafSemanticPredecessor::Column {
+                    role: inventory_row.role,
+                    column_index: column_index - 1,
+                }
+            };
+            rows.push(AggregateLeafSemanticTransitionRow {
+                transition: AggregateLeafSemanticTransition::Column {
+                    role: inventory_row.role,
+                    column_index,
+                },
+                predecessor,
+                frame: column_frame,
+                hash_query_count: inventory_row.opened_leaf_count,
+                accepting_database_equation_count_ceiling: inventory_row.opened_leaf_count,
+            });
+        }
+        rows.push(AggregateLeafSemanticTransitionRow {
+            transition: AggregateLeafSemanticTransition::Final {
+                role: inventory_row.role,
+            },
+            predecessor: AggregateLeafSemanticPredecessor::Column {
+                role: inventory_row.role,
+                column_index: inventory_row.interleaving_width - 1,
+            },
+            frame: final_frame,
+            hash_query_count: inventory_row.opened_leaf_count,
+            accepting_database_equation_count_ceiling: inventory_row.opened_leaf_count,
+        });
+    }
+    if rows.len() != capacity {
+        return Err(WhirTheoremCertificateError::IncompleteOracleEquationMapping);
+    }
+    Ok(rows)
+}
+
+fn derive_aggregate_leaf_semantic_transition_certificate(
+    inventory: &[AggregateLeafOracleCallInventoryRow],
+) -> Result<AggregateLeafSemanticTransitionCertificate, WhirTheoremCertificateError> {
+    let frame_descriptors = aggregate_leaf_frame_descriptors()?;
+    let rows = aggregate_leaf_semantic_transition_rows(inventory, &frame_descriptors)?;
+    let hash_query_count = rows.iter().try_fold(0_u64, |count, row| {
+        count
+            .checked_add(row.hash_query_count)
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+    })?;
+    let accepting_database_equation_count_ceiling = rows.iter().try_fold(0_u64, |count, row| {
+        count
+            .checked_add(row.accepting_database_equation_count_ceiling)
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+    })?;
+    let maximum_predecessor_support_count = rows
+        .iter()
+        .map(|row| {
+            u8::from(!matches!(
+                row.predecessor,
+                AggregateLeafSemanticPredecessor::None
+            ))
+        })
+        .max()
+        .ok_or(WhirTheoremCertificateError::IncompleteOracleEquationMapping)?;
+    let certificate = AggregateLeafSemanticTransitionCertificate {
+        frame_descriptors,
+        rows,
+        hash_query_count,
+        accepting_database_equation_count_ceiling,
+        maximum_predecessor_support_count,
+    };
+    if !certificate.is_complete_for_inventory(inventory) {
+        return Err(WhirTheoremCertificateError::IncompleteOracleEquationMapping);
+    }
+    Ok(certificate)
+}
+
 fn derive_deployed_aggregate_leaf_oracle_certificate(
     plan: &RowCodeWhirConstructionPlan,
     aggregate_wide_masking: &AggregateWideMaskingCertificate,
@@ -3213,6 +3515,29 @@ fn derive_deployed_aggregate_leaf_oracle_certificate_with_output_widths(
         + BigUint::from(2_u8) * BigUint::from(deployed_accepting_database_equation_count);
     let minimum_oracle_output_bit_length =
         intermediate_oracle_output_bit_length.min(final_oracle_output_bit_length);
+    let semantic_state_transitions = if intermediate_oracle_output_bit_length
+        == ColumnStreamableLeafHasher::intermediate_output_bit_length()
+        && final_oracle_output_bit_length == ColumnStreamableLeafHasher::final_output_bit_length()
+    {
+        Some(derive_aggregate_leaf_semantic_transition_certificate(
+            &rows,
+        )?)
+    } else {
+        None
+    };
+    let semantic_leaf_equation_count = distinct_initial_equation_count
+        .checked_add(deployed_noninitial_equation_count)
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    if semantic_state_transitions
+        .as_ref()
+        .is_some_and(|certificate| {
+            certificate.hash_query_count != deployed_leaf_hash_query_count
+                || certificate.accepting_database_equation_count_ceiling
+                    != semantic_leaf_equation_count
+        })
+    {
+        return Err(WhirTheoremCertificateError::IncompleteOracleEquationMapping);
+    }
     Ok(DeployedAggregateLeafOracleCertificate {
         rows,
         distinct_initial_equation_count,
@@ -3229,6 +3554,7 @@ fn derive_deployed_aggregate_leaf_oracle_certificate_with_output_widths(
         uniform_required_output_geometry_established: intermediate_oracle_output_bit_length
             == CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH
             && final_oracle_output_bit_length == CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH,
+        semantic_state_transitions,
     })
 }
 
@@ -4718,6 +5044,8 @@ fn a_256_bit_transition_chain_refuses_a_uniform_512_bit_oracle_denominator() {
     assert_eq!(rejected.minimum_oracle_output_bit_length, 256);
     assert_eq!(rejected.collision_penalty_denominator_bit_length, 256);
     assert!(!rejected.uniform_required_output_geometry_established);
+    assert!(rejected.semantic_state_transitions.is_none());
+    assert!(!rejected.semantic_state_transition_correspondence_established());
     assert!(!rejected.is_eligible_for_uniform_required_output());
     assert!(!rejected.classical_collision_penalty_is_below_inverse_power_of_two(128));
     assert!(!rejected.qrom_ideal_oracle_penalty_is_below_inverse_power_of_two(128));
@@ -4752,12 +5080,74 @@ fn deployed_streaming_leaf_chain_uses_uniform_512_bit_oracle_outputs() {
     assert!(deployed.classical_collision_penalty_is_below_inverse_power_of_two(128));
     assert!(deployed.qrom_ideal_oracle_penalty_is_below_inverse_power_of_two(128));
     assert!(
-        !certificate
+        certificate
             .cms19_applicability
             .semantic_state_transition_correspondence_established
     );
-    assert!(!certificate.cms19_applicability.is_complete());
-    assert!(!certificate.is_complete_construction_theorem());
+    let semantic = deployed
+        .semantic_state_transitions
+        .as_ref()
+        .expect("the production semantic predecessor graph derives");
+    assert!(semantic.is_complete_for_inventory(&deployed.rows));
+    assert_eq!(
+        semantic.frame_descriptors.map(|row| row.frame_tag),
+        [0, 1, 2]
+    );
+    assert_eq!(
+        semantic
+            .frame_descriptors
+            .map(|row| row.canonical_input_byte_length),
+        [90, 194, 154],
+    );
+    assert_eq!(semantic.rows.len(), 62);
+    assert_eq!(semantic.hash_query_count, 20_477);
+    assert_eq!(semantic.accepting_database_equation_count_ceiling, 17_697);
+    assert_eq!(semantic.maximum_predecessor_support_count, 1);
+
+    let mut missing_transition = deployed.clone();
+    missing_transition
+        .semantic_state_transitions
+        .as_mut()
+        .expect("the semantic graph exists")
+        .rows
+        .pop();
+    assert!(!missing_transition.semantic_state_transition_correspondence_established());
+
+    let mut wrong_predecessor = deployed.clone();
+    let transition = wrong_predecessor
+        .semantic_state_transitions
+        .as_mut()
+        .expect("the semantic graph exists")
+        .rows
+        .iter_mut()
+        .find(|row| {
+            matches!(
+                row.transition,
+                AggregateLeafSemanticTransition::Column {
+                    column_index: 0,
+                    ..
+                }
+            )
+        })
+        .expect("the first transition exists");
+    transition.predecessor = AggregateLeafSemanticPredecessor::None;
+    assert!(!wrong_predecessor.semantic_state_transition_correspondence_established());
+
+    let mut changed_frame = deployed.clone();
+    changed_frame
+        .semantic_state_transitions
+        .as_mut()
+        .expect("the semantic graph exists")
+        .frame_descriptors[1]
+        .frame_tag = 3;
+    assert!(!changed_frame.semantic_state_transition_correspondence_established());
+
+    let mut changed_schedule = deployed.clone();
+    changed_schedule.rows[0].interleaving_width -= 1;
+    assert!(!changed_schedule.semantic_state_transition_correspondence_established());
+
+    assert!(certificate.cms19_applicability.is_complete());
+    assert!(certificate.is_complete_construction_theorem());
 }
 
 #[test]
@@ -5192,12 +5582,16 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
             > 0,
     );
     // The compiler query ceiling is the full adversarial budget plus every
-    // verifier hash query on an accepting path, so it moves with the transcript
-    // ceiling rather than being pinned independently.
+    // deployed verifier hash query on an accepting path, including the initial,
+    // transition, and final calls hidden by the abstract one-call leaf row.
     assert_eq!(
         certificate.cms19_arithmetic.compiler_query_bound,
         ((BigUint::from(1_u8) << 80_usize) - BigUint::from(1_u8))
-            + BigUint::from(verifier_ledger.complete_hash_query_count),
+            + BigUint::from(
+                certificate
+                    .deployed_aggregate_leaf_oracle
+                    .deployed_verifier_hash_query_count,
+            ),
     );
     assert_eq!(
         certificate.cms19_arithmetic.adversarial_query_bound,
@@ -5205,13 +5599,13 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
     );
     assert_eq!(
         certificate.cms19_arithmetic.verifier_hash_query_count,
-        1_214_667
+        1_232_362
     );
     assert_eq!(
         certificate
             .cms19_arithmetic
             .accepting_database_equation_count,
-        verifier_ledger.complete_equation_count_ceiling,
+        1_229_573,
     );
     assert_eq!(
         certificate.cms19_arithmetic.classical_soundness_multiplier,
@@ -5225,7 +5619,7 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
             * &certificate.cms19_arithmetic.compiler_query_bound
             * &certificate.cms19_arithmetic.compiler_query_bound
             * &certificate.cms19_arithmetic.compiler_query_bound
-            + BigUint::from(2_u8) * BigUint::from(verifier_ledger.complete_equation_count_ceiling),
+            + BigUint::from(2_u8) * BigUint::from(1_229_573_u64),
     );
     assert_eq!(
         certificate
@@ -5249,13 +5643,13 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
         certificate
             .cms19_applicability
             .claimed_complete_equation_count,
-        verifier_ledger.complete_equation_count_ceiling,
+        1_229_573,
     );
     assert_eq!(
         certificate
             .cms19_applicability
             .claimed_complete_hash_query_count,
-        verifier_ledger.complete_hash_query_count,
+        1_232_362,
     );
     assert_eq!(
         certificate
@@ -5306,7 +5700,7 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
             .deployed_oracle_output_geometry_established
     );
     assert!(
-        !certificate
+        certificate
             .cms19_applicability
             .semantic_state_transition_correspondence_established
     );
@@ -5477,8 +5871,8 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
             })
     );
     assert!(certificate.exact_failure_magnitude.is_complete());
-    assert!(!certificate.cms19_applicability.is_complete());
-    assert!(!certificate.is_complete_construction_theorem());
+    assert!(certificate.cms19_applicability.is_complete());
+    assert!(certificate.is_complete_construction_theorem());
     assert!(
         certificate
             .cms19_state_predicate
