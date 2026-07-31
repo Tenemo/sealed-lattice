@@ -57,21 +57,26 @@ Works today:
   places the same-secret proof at `5,309,850` bytes. The complete evaluator-key
   proof is `28,749,492` bytes: it requires engineering review against the
   nominal target but remains below the absolute proof bound.
+- Aggregate-wide oracle commitments now use uniform 512-bit leaf transitions
+  in aligned `2^20`-row stripes. The selected construction derives a
+  `402,653,184`-byte DFT-plus-leaf-state core and preserves the canonical roots
+  and proof-size ledger.
 
 Not yet:
 
 - The generic construction certificate does not establish family simulation,
   malicious-verifier zero knowledge, or quantum-random-oracle zero knowledge.
-- Exact classical and quantum-random-oracle soundness is not established for
-  the deployed aggregate commitment. Focused certificate code inventories its
-  verifier-side SHAKE256 calls and refuses eligibility because the streaming
-  leaf chain has 256-bit intermediate outputs while the selected transform
-  requires a uniform 512-bit oracle-output boundary.
+- Exact classical and quantum-random-oracle soundness is not established.
+  Focused certificate code inventories the deployed uniform 512-bit aggregate
+  leaf calls and meets their collision allocation, but semantic
+  state-transition correspondence and the complete construction-level
+  composition theorem remain open.
 - Complete proof-generation liveness and participant transport accounting are
-  also open. Current full-width bound-tree materialization consumes most of the
-  hard WebAssembly memory allowance before the remaining prover, encoder,
-  bridge, and allocator state is counted, and the complete proof corpus has not
-  been reconciled into per-participant traffic.
+  also open. Aggregate commitment recomputation has a bounded algorithm core,
+  but current full-width bound-tree materialization consumes most of the hard
+  WebAssembly memory allowance before the remaining prover, encoder, bridge,
+  and allocator state is counted. The complete proof corpus has not been
+  reconciled into per-participant traffic.
 - No full-width exact proof has completed on the current implementation, and no
   release WebAssembly proof has been generated and freshly verified across the
   desktop browsers. Recent guarded native attempts ended before proof emission,

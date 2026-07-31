@@ -1043,7 +1043,7 @@ pub(crate) mod resource_accounting {
         })
     }
 
-    fn selected_relation_tree_inputs(
+    pub(crate) fn selected_relation_tree_inputs(
         variant: &RelationPlanVariant,
     ) -> Result<Vec<RelationProofTreeInput>, SelectedProofAccountingError> {
         variant

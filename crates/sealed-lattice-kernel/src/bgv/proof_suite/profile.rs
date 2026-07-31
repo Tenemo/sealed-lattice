@@ -29,11 +29,12 @@ use super::relation_plan::{
 #[cfg(test)]
 use super::row_code_whir::RowCodeWhirConstructionPlan;
 use super::row_code_whir::{
-    ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN, ROW_CODE_WHIR_AGGREGATE_NODE_DOMAIN,
+    ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN, ROW_CODE_WHIR_AGGREGATE_LEAF_STATE_BYTE_LENGTH,
+    ROW_CODE_WHIR_AGGREGATE_NODE_DOMAIN,
     ROW_CODE_WHIR_COMPACT_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW,
-    ROW_CODE_WHIR_PHASE_COLUMN_LEAF_DOMAIN, ROW_CODE_WHIR_PHASE_COLUMN_NODE_DOMAIN,
-    ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN, RowCodeWhirSelectedParameters,
-    RowCodeWhirSoundnessAssumption,
+    ROW_CODE_WHIR_MERKLE_DIGEST_BYTE_LENGTH, ROW_CODE_WHIR_PHASE_COLUMN_LEAF_DOMAIN,
+    ROW_CODE_WHIR_PHASE_COLUMN_NODE_DOMAIN, ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN,
+    RowCodeWhirSelectedParameters, RowCodeWhirSoundnessAssumption,
 };
 #[cfg(test)]
 use super::selected_accounting::resource_accounting::{
@@ -74,10 +75,11 @@ const SCHEMA_VERSION: u16 = 1;
 const PROOF_FAMILY_PROFILE_SCHEMA_VERSION: u16 = 2;
 const ROW_CODE_WHIR_CONSTRUCTION_PROFILE_SCHEMA_VERSION: u16 = 3;
 const ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_SCHEMA_VERSION: u16 = 2;
-const PROOF_PROFILE_SET_VERSION: u16 = 6;
+const ROW_CODE_WHIR_HASH_PROFILE_SCHEMA_VERSION: u16 = 2;
+const PROOF_PROFILE_SET_VERSION: u16 = 7;
 const SELECTED_ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_COUNT: usize = 31;
 const ROW_CODE_WHIR_HASH_ALGORITHM_IDENTIFIER: &str = "SHAKE256";
-const ROW_CODE_WHIR_DIGEST_BYTE_LENGTH: u16 = 64;
+const ROW_CODE_WHIR_DIGEST_BYTE_LENGTH: u16 = ROW_CODE_WHIR_MERKLE_DIGEST_BYTE_LENGTH;
 
 pub(crate) const FIRST_PROFILE_APPLICATION_FAMILIES: [u16; 12] = [
     ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
@@ -151,11 +153,12 @@ mod construction_profile_decoder_tests {
     fn hash_profile_tuple() -> CanonicalTuple {
         CanonicalTuple::new(
             ROW_CODE_WHIR_HASH_PROFILE_SCHEMA_IDENTIFIER,
-            SCHEMA_VERSION,
+            ROW_CODE_WHIR_HASH_PROFILE_SCHEMA_VERSION,
             vec![
                 CanonicalItem::ascii(ROW_CODE_WHIR_HASH_ALGORITHM_IDENTIFIER)
                     .expect("the selected hash identifier is ASCII"),
                 CanonicalItem::unsigned16(ROW_CODE_WHIR_DIGEST_BYTE_LENGTH),
+                CanonicalItem::unsigned16(ROW_CODE_WHIR_AGGREGATE_LEAF_STATE_BYTE_LENGTH),
                 CanonicalItem::fixed_bytes(ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN)
                     .expect("the protocol domain encodes"),
                 CanonicalItem::fixed_bytes(ROW_CODE_WHIR_PHASE_COLUMN_LEAF_DOMAIN)
@@ -335,6 +338,17 @@ mod construction_profile_decoder_tests {
                 ))),
                 &limits,
             ),
+            Err(ProofProfileError::InvalidSchedule),
+        );
+    }
+
+    #[test]
+    fn hash_profile_decoder_refuses_a_different_aggregate_leaf_state_width() {
+        let mut hash_profile = hash_profile_tuple();
+        hash_profile.items[2] = CanonicalItem::unsigned16(32);
+
+        assert_eq!(
+            verify_row_code_whir_hash_profile(&hash_profile),
             Err(ProofProfileError::InvalidSchedule),
         );
     }
@@ -1077,8 +1091,8 @@ fn verify_row_code_whir_hash_profile(tuple: &CanonicalTuple) -> Result<(), Proof
     require_profile_tuple(
         tuple,
         ROW_CODE_WHIR_HASH_PROFILE_SCHEMA_IDENTIFIER,
-        SCHEMA_VERSION,
-        14,
+        ROW_CODE_WHIR_HASH_PROFILE_SCHEMA_VERSION,
+        15,
     )?;
     let algorithm = tuple.items[0]
         .variable_value_bytes()
@@ -1100,7 +1114,8 @@ fn verify_row_code_whir_hash_profile(tuple: &CanonicalTuple) -> Result<(), Proof
     if tuple.items[0].item_type() != CanonicalItemType::Ascii
         || algorithm != ROW_CODE_WHIR_HASH_ALGORITHM_IDENTIFIER.as_bytes()
         || profile_u16(&tuple.items[1])? != ROW_CODE_WHIR_DIGEST_BYTE_LENGTH
-        || tuple.items[2..]
+        || profile_u16(&tuple.items[2])? != ROW_CODE_WHIR_AGGREGATE_LEAF_STATE_BYTE_LENGTH
+        || tuple.items[3..]
             .iter()
             .zip(domains)
             .any(|(item, expected)| {
@@ -1652,6 +1667,7 @@ mod canonical_profile_artifact {
     struct RowCodeWhirHashProfile {
         hash_algorithm_identifier: String,
         digest_byte_length: u16,
+        aggregate_leaf_state_byte_length: u16,
         protocol_hash_domain: Vec<u8>,
         phase_column_leaf_domain: Vec<u8>,
         phase_column_node_domain: Vec<u8>,
@@ -1671,6 +1687,7 @@ mod canonical_profile_artifact {
             Self {
                 hash_algorithm_identifier: ROW_CODE_WHIR_HASH_ALGORITHM_IDENTIFIER.to_owned(),
                 digest_byte_length: ROW_CODE_WHIR_DIGEST_BYTE_LENGTH,
+                aggregate_leaf_state_byte_length: ROW_CODE_WHIR_AGGREGATE_LEAF_STATE_BYTE_LENGTH,
                 protocol_hash_domain: ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN.to_vec(),
                 phase_column_leaf_domain: ROW_CODE_WHIR_PHASE_COLUMN_LEAF_DOMAIN.to_vec(),
                 phase_column_node_domain: ROW_CODE_WHIR_PHASE_COLUMN_NODE_DOMAIN.to_vec(),
@@ -1701,11 +1718,12 @@ mod canonical_profile_artifact {
             self.validate()?;
             Ok(CanonicalTuple::new(
                 ROW_CODE_WHIR_HASH_PROFILE_SCHEMA_IDENTIFIER,
-                SCHEMA_VERSION,
+                ROW_CODE_WHIR_HASH_PROFILE_SCHEMA_VERSION,
                 vec![
                     CanonicalItem::ascii(&self.hash_algorithm_identifier)
                         .map_err(canonical_encoding_error)?,
                     CanonicalItem::unsigned16(self.digest_byte_length),
+                    CanonicalItem::unsigned16(self.aggregate_leaf_state_byte_length),
                     CanonicalItem::fixed_bytes(&self.protocol_hash_domain)
                         .map_err(canonical_encoding_error)?,
                     CanonicalItem::fixed_bytes(&self.phase_column_leaf_domain)
@@ -3972,11 +3990,12 @@ mod canonical_profile_artifact {
                     .expect("selected hash profile encodes"),
                 CanonicalTuple::new(
                     ROW_CODE_WHIR_HASH_PROFILE_SCHEMA_IDENTIFIER,
-                    SCHEMA_VERSION,
+                    ROW_CODE_WHIR_HASH_PROFILE_SCHEMA_VERSION,
                     vec![
                         CanonicalItem::ascii(ROW_CODE_WHIR_HASH_ALGORITHM_IDENTIFIER)
                             .expect("selected hash algorithm identifier is canonical ASCII"),
                         CanonicalItem::unsigned16(ROW_CODE_WHIR_DIGEST_BYTE_LENGTH),
+                        CanonicalItem::unsigned16(ROW_CODE_WHIR_AGGREGATE_LEAF_STATE_BYTE_LENGTH,),
                         CanonicalItem::fixed_bytes(ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN)
                             .expect("row-code protocol domain fits the canonical byte limit"),
                         CanonicalItem::fixed_bytes(ROW_CODE_WHIR_PHASE_COLUMN_LEAF_DOMAIN)

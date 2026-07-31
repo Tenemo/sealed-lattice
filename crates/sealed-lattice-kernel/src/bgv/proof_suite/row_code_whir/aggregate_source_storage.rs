@@ -9,7 +9,8 @@ use p3_goldilocks::Goldilocks;
 use p3_sumcheck::product_polynomial::PolyView;
 use zeroize::Zeroizing;
 
-use super::aggregate_wide_pcs::AggregateWidePcs;
+use super::aggregate_wide_pcs::{AggregateWidePcs, aggregate_wide_encoded_oracle_geometries};
+use super::recomputable_oracle::aggregate_oracle_leaf_state_stripe_count;
 use super::{ChallengeField, challenge_from_production};
 use crate::bgv::proof_suite::external_memory::{
     ProofExternalMemoryObjectPlan, ProofExternalMemoryPlan,
@@ -49,6 +50,20 @@ impl AggregateSourceStoragePlan {
         {
             return Err("aggregate source storage geometry is invalid".to_owned());
         }
+        let encoded_oracle_geometries = aggregate_wide_encoded_oracle_geometries(pcs)?;
+        if encoded_oracle_geometries.len() != pcs.n_rounds() + 1
+            || encoded_oracle_geometries
+                .iter()
+                .any(|geometry| geometry.width != 1_usize << folding_factor)
+        {
+            return Err("aggregate source storage oracle geometry is invalid".to_owned());
+        }
+        let stripe_counts = encoded_oracle_geometries
+            .iter()
+            .map(|geometry| aggregate_oracle_leaf_state_stripe_count(geometry.height))
+            .collect::<Result<Vec<_>, _>>()?;
+        let initial_stripe_count = u64::try_from(stripe_counts[0])
+            .map_err(|_| "aggregate initial stripe count exceeds u64".to_owned())?;
         let local_element_count = 1_usize
             .checked_shl(
                 u32::try_from(table_variable_count)
@@ -105,7 +120,9 @@ impl AggregateSourceStoragePlan {
         let mut residual_byte_lengths = Vec::with_capacity(pcs.n_rounds());
         let mut residual_read_transaction_count = 0_u64;
         let mut residual_variable_count = pcs.num_variables;
-        for residual_ordinal in 1..=pcs.n_rounds() {
+        for (residual_ordinal, residual_stripe_count) in
+            stripe_counts.iter().copied().enumerate().skip(1)
+        {
             residual_variable_count = residual_variable_count
                 .checked_sub(pcs.round_folding_factor(residual_ordinal - 1))
                 .ok_or_else(|| "aggregate residual variable count underflowed".to_owned())?;
@@ -143,12 +160,20 @@ impl AggregateSourceStoragePlan {
             );
             residuals.push(source_vector(object, element_count)?);
             residual_byte_lengths.push(exact_byte_length);
+            let stripe_count = u64::try_from(residual_stripe_count)
+                .map_err(|_| "aggregate residual stripe count exceeds u64".to_owned())?;
             residual_read_transaction_count = residual_read_transaction_count
-                .checked_add(recomputable_vector_read_transaction_count(
-                    element_count,
-                    pcs.round_folding_factor(residual_ordinal),
-                    maximum_chunk_element_count,
-                )?)
+                .checked_add(
+                    recomputable_vector_read_transaction_count(
+                        element_count,
+                        pcs.round_folding_factor(residual_ordinal),
+                        maximum_chunk_element_count,
+                    )?
+                    .checked_mul(stripe_count)
+                    .ok_or_else(|| {
+                        "aggregate residual stripe transaction count overflowed".to_owned()
+                    })?,
+                )
                 .ok_or_else(|| "aggregate residual read transaction count overflowed".to_owned())?;
         }
 
@@ -167,16 +192,31 @@ impl AggregateSourceStoragePlan {
                     .map_err(|_| "opened column count exceeds u64")?,
             )
             .ok_or_else(|| "aggregate opened-column accounting overflowed".to_owned())?;
+        let initial_recomputation_count = initial_stripe_count
+            .checked_mul(2)
+            .ok_or_else(|| "aggregate initial recomputation count overflowed".to_owned())?;
         let total_read_byte_length = residual_byte_lengths
             .iter()
+            .zip(stripe_counts.iter().skip(1))
             .try_fold(
                 table_byte_length
-                    .checked_mul(3)
+                    .checked_mul(
+                        initial_recomputation_count
+                            .checked_add(1)
+                            .ok_or_else(|| "aggregate initial read count overflowed".to_owned())?,
+                    )
                     .and_then(|bytes| bytes.checked_add(opened_column_byte_length))
                     .ok_or_else(|| "aggregate initial read accounting overflowed".to_owned())?,
-                |total, length| total.checked_add(*length),
+                |total, (length, stripe_count)| {
+                    length
+                        .checked_mul(u64::try_from(*stripe_count).map_err(|_| {
+                            "aggregate residual stripe count exceeds u64".to_owned()
+                        })?)
+                        .and_then(|bytes| total.checked_add(bytes))
+                        .ok_or_else(|| "aggregate residual read accounting overflowed".to_owned())
+                },
             )
-            .ok_or_else(|| "aggregate source read accounting overflowed".to_owned())?;
+            .map_err(|error: String| error)?;
         let maximum_stored_byte_length = residual_byte_lengths
             .first()
             .copied()
@@ -197,7 +237,7 @@ impl AggregateSourceStoragePlan {
             folding_factor,
             maximum_chunk_element_count,
         )?
-        .checked_mul(2)
+        .checked_mul(initial_recomputation_count)
         .ok_or_else(|| "aggregate table recomputation count overflowed".to_owned())?;
         let sequential_table_read_count = u64::try_from(
             table_width
@@ -610,5 +650,31 @@ mod tests {
                 .is_err(),
             "an uneven encoded-column split is rejected",
         );
+
+        let initial_table_byte_length =
+            4_u64 * (1_u64 << 22) * AGGREGATE_SOURCE_ELEMENT_BYTE_LENGTH as u64;
+        let first_residual_byte_length =
+            (1_u64 << 21) * AGGREGATE_SOURCE_ELEMENT_BYTE_LENGTH as u64;
+        let second_residual_byte_length =
+            (1_u64 << 18) * AGGREGATE_SOURCE_ELEMENT_BYTE_LENGTH as u64;
+        let stripe_recomputation_read_byte_delta = initial_table_byte_length * 14
+            + first_residual_byte_length * 3
+            + second_residual_byte_length;
+        let initial_table_pass_transaction_count =
+            recomputable_table_read_transaction_count(1 << 22, 4, 3, maximum_chunk_element_count)
+                .expect("the selected table pass derives");
+        let first_residual_pass_transaction_count =
+            recomputable_vector_read_transaction_count(1 << 21, 3, maximum_chunk_element_count)
+                .expect("the first selected residual pass derives");
+        let second_residual_pass_transaction_count =
+            recomputable_vector_read_transaction_count(1 << 18, 3, maximum_chunk_element_count)
+                .expect("the second selected residual pass derives");
+        let stripe_recomputation_transaction_delta = 14 * initial_table_pass_transaction_count
+            + 3 * first_residual_pass_transaction_count
+            + second_residual_pass_transaction_count;
+        assert_eq!(first_residual_pass_transaction_count, 88);
+        assert_eq!(second_residual_pass_transaction_count, 16);
+        assert_eq!(stripe_recomputation_read_byte_delta, 9_657_384_960);
+        assert_eq!(stripe_recomputation_transaction_delta, 9_688);
     }
 }

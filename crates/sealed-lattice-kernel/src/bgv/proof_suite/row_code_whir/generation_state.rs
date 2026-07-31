@@ -48,6 +48,7 @@ use super::{
     RowCodeWhirQuotientColumnSourcePlan, RowCodeWhirQuotientColumnTransformPlan,
     aggregate_wide_pcs::{AggregateWideCommitment, aggregate_wide_pcs_for_construction_plan},
     column_commitment::{ColumnDigest, StripedColumnCommitmentBuilder},
+    commitment_liveness::derive_aggregate_commitment_liveness,
     construction_plan::{
         ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT, RowCodeWhirCheckpointBoundary,
         RowCodeWhirOpenedPolynomialSource, RowCodeWhirPhase, RowCodeWhirProofSectionRole,
@@ -2220,6 +2221,19 @@ impl RowCodeWhirGenerationStateMachine {
                     CommonProofProverError::InvalidInput,
                 )
             })?;
+        let aggregate_commitment_liveness = derive_aggregate_commitment_liveness(construction_plan)
+            .map_err(|_| {
+                CommonProofGenerationInitializationError::Prover(
+                    CommonProofProverError::InvalidInput,
+                )
+            })?;
+        if aggregate_commitment_liveness.maximum_algorithm_live_set_byte_length()
+            > MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
+        {
+            return Err(CommonProofGenerationInitializationError::Prover(
+                CommonProofProverError::InvalidInput,
+            ));
+        }
         let verified_vss_binding = transcript_prefix_authority.verified_vss_binding();
         if construction_plan.application_statement_schema_identifier
             != validated_relation_plan.application_statement_schema_identifier()
@@ -7034,8 +7048,8 @@ mod tests {
         assert_eq!(requirement.object_lifecycle_count(), 10_231);
         assert_eq!(requirement.peak_stored_byte_length(), 849_756_760);
         assert_eq!(requirement.total_written_byte_length(), 6_219_960_920);
-        assert_eq!(requirement.total_read_byte_length(), 20_840_270_280);
-        assert_eq!(requirement.transaction_count(), 57_468);
+        assert_eq!(requirement.total_read_byte_length(), 30_497_655_240);
+        assert_eq!(requirement.transaction_count(), 67_156);
         assert_eq!(requirement.local_record_seal_invocation_count(), 31_518);
         assert_eq!(
             requirement.local_record_sealed_plaintext_byte_length(),

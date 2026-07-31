@@ -15,6 +15,7 @@ mod aggregate_wide_wire;
 mod algebra;
 mod bounded_dft;
 mod column_commitment;
+mod commitment_liveness;
 mod compact_merkle_frontier;
 pub(super) mod construction_plan;
 mod exact_same_secret;
@@ -111,6 +112,8 @@ use super::{
 
 const MERKLE_DIGEST_WORD_LENGTH: usize = 8;
 const MERKLE_DIGEST_BYTE_LENGTH: usize = MERKLE_DIGEST_WORD_LENGTH * size_of::<u64>();
+pub(in crate::bgv::proof_suite) const ROW_CODE_WHIR_MERKLE_DIGEST_BYTE_LENGTH: u16 =
+    MERKLE_DIGEST_BYTE_LENGTH as u16;
 const GOLDILOCKS_MODULUS: u64 = 0xffff_ffff_0000_0001;
 pub(in crate::bgv::proof_suite) const ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN: &[u8] =
     b"sealed-lattice/row-code-whir/shake256/v1";
@@ -132,7 +135,9 @@ type CommitmentScheme =
     MerkleTreeMmcs<ChallengeField, u64, LeafHasher, NodeCompressor, 2, MERKLE_DIGEST_WORD_LENGTH>;
 type DiscreteFourierTransform = Radix2DFTSmallBatch<ChallengeField>;
 
-const COLUMN_STREAMING_LEAF_STATE_WORD_LENGTH: usize = 4;
+const COLUMN_STREAMING_LEAF_STATE_WORD_LENGTH: usize = MERKLE_DIGEST_WORD_LENGTH;
+pub(in crate::bgv::proof_suite) const ROW_CODE_WHIR_AGGREGATE_LEAF_STATE_BYTE_LENGTH: u16 =
+    (COLUMN_STREAMING_LEAF_STATE_WORD_LENGTH * size_of::<u64>()) as u16;
 
 #[derive(Clone)]
 struct AuthenticatedColumn {
@@ -144,15 +149,14 @@ struct DomainSeparatedShake256 {
     domain: &'static [u8],
 }
 
-/// SHAKE256 leaf hashing with a 256-bit column-streaming chaining value.
+/// SHAKE256 leaf hashing with a 512-bit column-streaming chaining value.
 ///
 /// The aggregate codeword is produced one complete DFT column at a time. A
 /// conventional row hasher would retain one 200-byte Keccak state per encoded
-/// row, which exceeds the browser memory ceiling at the selected domain. This
-/// deployed chain retains one 32-byte value per row. Its 256-bit transition
-/// outputs are an ineligible commitment boundary even though the final Merkle
-/// leaf and every parent are 64-byte digests; the construction theorem models
-/// the transition calls separately and refuses this implementation.
+/// row, which exceeds the browser memory ceiling at the selected domain. The
+/// deployed chain instead retains one 64-byte value per row inside one bounded
+/// row stripe. Every transition, final leaf, and Merkle parent therefore has
+/// the uniform 512-bit output required by the construction theorem.
 #[derive(Clone, Copy, Debug)]
 struct ColumnStreamableLeafHasher {
     domain: &'static [u8],
@@ -160,6 +164,10 @@ struct ColumnStreamableLeafHasher {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ColumnStreamableLeafState([u64; COLUMN_STREAMING_LEAF_STATE_WORD_LENGTH]);
+
+impl ColumnStreamableLeafState {
+    const ZERO: Self = Self([0_u64; COLUMN_STREAMING_LEAF_STATE_WORD_LENGTH]);
+}
 
 impl ColumnStreamableLeafHasher {
     const INITIAL_FRAME: u8 = 0;
@@ -191,8 +199,8 @@ impl ColumnStreamableLeafHasher {
         state
     }
 
-    fn finish_words<const WORD_COUNT: usize>(state: Shake256) -> [u64; WORD_COUNT] {
-        let mut bytes = vec![0_u8; WORD_COUNT * size_of::<u64>()];
+    fn finish_digest_words(state: Shake256) -> [u64; MERKLE_DIGEST_WORD_LENGTH] {
+        let mut bytes = [0_u8; MERKLE_DIGEST_BYTE_LENGTH];
         state.finalize_xof().read(&mut bytes);
         core::array::from_fn(|word_index| {
             let start = word_index * size_of::<u64>();
@@ -207,7 +215,7 @@ impl ColumnStreamableLeafHasher {
     fn initial_state(&self, column_count: usize) -> ColumnStreamableLeafState {
         let mut state = self.framed_state(Self::INITIAL_FRAME);
         state.update(&(column_count as u64).to_le_bytes());
-        ColumnStreamableLeafState(Self::finish_words(state))
+        ColumnStreamableLeafState(Self::finish_digest_words(state))
     }
 
     fn absorb_column(
@@ -226,7 +234,7 @@ impl ColumnStreamableLeafHasher {
         {
             hasher.update(&coefficient.as_canonical_u64().to_le_bytes());
         }
-        ColumnStreamableLeafState(Self::finish_words(hasher))
+        ColumnStreamableLeafState(Self::finish_digest_words(hasher))
     }
 
     fn finish_leaf(
@@ -239,7 +247,7 @@ impl ColumnStreamableLeafHasher {
         for word in state.0 {
             hasher.update(&word.to_le_bytes());
         }
-        Self::finish_words(hasher)
+        Self::finish_digest_words(hasher)
     }
 }
 

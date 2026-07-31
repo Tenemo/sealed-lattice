@@ -1,10 +1,11 @@
 //! Recomputable aggregate-wide WHIR oracle commitments and openings.
 //!
 //! Only unencoded source coefficients are retained. Each commitment or query
-//! pass regenerates the eight encoded columns once, updates a 32-byte leaf
-//! chaining value per row, and keeps only the logarithmic Merkle frontier and
-//! explicitly requested rows. No complete encoded codeword or Merkle tree is
-//! stored in WebAssembly or browser external memory.
+//! pass regenerates the eight encoded columns once per bounded row stripe,
+//! updates a 64-byte leaf chaining value per stripe row, and keeps only the
+//! logarithmic Merkle frontier and explicitly requested rows. No complete
+//! encoded codeword or Merkle tree is stored in WebAssembly or browser
+//! external memory.
 
 use std::collections::BTreeMap;
 
@@ -32,6 +33,7 @@ type MerkleDigest = [u64; MERKLE_DIGEST_WORD_LENGTH];
 
 const ENCODED_ORACLE_WIDTH: usize = 8;
 const MAXIMUM_ARITHMETIC_ROWS_PER_POLL: usize = 1 << 15;
+pub(super) const AGGREGATE_ORACLE_LEAF_STATE_STRIPE_ROW_COUNT: usize = 1 << 20;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum RecomputableOracleSource {
@@ -42,6 +44,7 @@ pub(super) enum RecomputableOracleSource {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RecomputableOracleStage {
+    PrepareStripe,
     PrepareColumn,
     LoadSource,
     AppendRandomness,
@@ -89,9 +92,13 @@ pub(super) struct RecomputableOraclePass {
     query_indices: Vec<usize>,
     opened_rows: Vec<Vec<ChallengeField>>,
     leaf_hasher: ColumnStreamableLeafHasher,
+    initial_leaf_state: ColumnStreamableLeafState,
     leaf_states: Vec<ColumnStreamableLeafState>,
     merkle_builder: Option<StreamingMerkleBuilder>,
     current_column_index: usize,
+    current_stripe_start: usize,
+    current_stripe_end: usize,
+    maximum_stripe_row_count: usize,
     current_table_column_index: usize,
     current_source_offset: usize,
     current_absorb_offset: usize,
@@ -112,10 +119,33 @@ impl RecomputableOraclePass {
         randomness: Vec<ChallengeField>,
         query_indices: &[usize],
     ) -> Result<Self, String> {
+        Self::new_with_maximum_stripe_row_count(
+            source,
+            source_variable_count,
+            folding_factor,
+            inverse_rate,
+            randomness,
+            query_indices,
+            AGGREGATE_ORACLE_LEAF_STATE_STRIPE_ROW_COUNT,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn new_with_maximum_stripe_row_count(
+        source: RecomputableOracleSource,
+        source_variable_count: usize,
+        folding_factor: usize,
+        inverse_rate: usize,
+        randomness: Vec<ChallengeField>,
+        query_indices: &[usize],
+        maximum_stripe_row_count: usize,
+    ) -> Result<Self, String> {
         if folding_factor != ENCODED_ORACLE_WIDTH.ilog2() as usize
             || folding_factor > source_variable_count
             || inverse_rate == 0
             || !inverse_rate.is_power_of_two()
+            || maximum_stripe_row_count == 0
+            || !maximum_stripe_row_count.is_power_of_two()
         {
             return Err("recomputable oracle has an unsupported encoding geometry".to_owned());
         }
@@ -181,12 +211,16 @@ impl RecomputableOraclePass {
                 query_indices.len()
             ],
             leaf_hasher,
-            leaf_states: vec![initial_leaf_state; encoded_height],
+            initial_leaf_state,
+            leaf_states: Vec::with_capacity(maximum_stripe_row_count.min(encoded_height)),
             merkle_builder: Some(StreamingMerkleBuilder::new(
                 encoded_height,
                 capture_targets,
             )?),
             current_column_index: 0,
+            current_stripe_start: 0,
+            current_stripe_end: maximum_stripe_row_count.min(encoded_height),
+            maximum_stripe_row_count,
             current_table_column_index: 0,
             current_source_offset: 0,
             current_absorb_offset: 0,
@@ -194,7 +228,7 @@ impl RecomputableOraclePass {
             dft: None,
             encoded_storage_chunk: Vec::new(),
             decoded_storage_chunk: Vec::new(),
-            stage: RecomputableOracleStage::PrepareColumn,
+            stage: RecomputableOracleStage::PrepareStripe,
         })
     }
 
@@ -278,6 +312,26 @@ impl RecomputableOraclePass {
         &mut self,
     ) -> Result<RecomputableOraclePoll, RecomputableOracleError<StorageError>> {
         match self.stage {
+            RecomputableOracleStage::PrepareStripe => {
+                if self.current_stripe_start >= self.encoded_height
+                    || self.current_stripe_end <= self.current_stripe_start
+                    || self.current_stripe_end > self.encoded_height
+                    || !self.leaf_states.is_empty()
+                    || self.encoded_values.is_some()
+                    || self.dft.is_some()
+                {
+                    return Err(Self::geometry(
+                        "recomputable oracle stripe state is invalid",
+                    ));
+                }
+                self.leaf_states.resize(
+                    self.current_stripe_end - self.current_stripe_start,
+                    self.initial_leaf_state,
+                );
+                self.current_column_index = 0;
+                self.stage = RecomputableOracleStage::PrepareColumn;
+                Ok(RecomputableOraclePoll::ArithmeticStepCompleted)
+            }
             RecomputableOracleStage::PrepareColumn => {
                 if self.current_column_index >= ENCODED_ORACLE_WIDTH
                     || self.encoded_values.is_some()
@@ -290,7 +344,7 @@ impl RecomputableOraclePass {
                 self.encoded_values = Some(ChallengeField::zero_vec(self.encoded_height));
                 self.current_table_column_index = 0;
                 self.current_source_offset = 0;
-                self.current_absorb_offset = 0;
+                self.current_absorb_offset = self.current_stripe_start;
                 self.stage = RecomputableOracleStage::LoadSource;
                 Ok(RecomputableOraclePoll::ArithmeticStepCompleted)
             }
@@ -347,7 +401,7 @@ impl RecomputableOraclePass {
                 let end = self
                     .current_absorb_offset
                     .saturating_add(MAXIMUM_ARITHMETIC_ROWS_PER_POLL)
-                    .min(self.encoded_height);
+                    .min(self.current_stripe_end);
                 let encoded_values = self
                     .encoded_values
                     .as_ref()
@@ -359,8 +413,9 @@ impl RecomputableOraclePass {
                     .take(end)
                     .skip(self.current_absorb_offset)
                 {
-                    self.leaf_states[row_index] = self.leaf_hasher.absorb_column(
-                        self.leaf_states[row_index],
+                    let stripe_row_index = row_index - self.current_stripe_start;
+                    self.leaf_states[stripe_row_index] = self.leaf_hasher.absorb_column(
+                        self.leaf_states[stripe_row_index],
                         self.current_column_index,
                         encoded_value,
                     );
@@ -372,7 +427,7 @@ impl RecomputableOraclePass {
                     }
                 }
                 self.current_absorb_offset = end;
-                if end == self.encoded_height {
+                if end == self.current_stripe_end {
                     let mut values = self
                         .encoded_values
                         .take()
@@ -392,7 +447,7 @@ impl RecomputableOraclePass {
                 let end = self
                     .current_source_offset
                     .saturating_add(MAXIMUM_ARITHMETIC_ROWS_PER_POLL)
-                    .min(self.encoded_height);
+                    .min(self.leaf_states.len());
                 let merkle_builder = self
                     .merkle_builder
                     .as_mut()
@@ -402,12 +457,21 @@ impl RecomputableOraclePass {
                         .leaf_hasher
                         .finish_leaf(ENCODED_ORACLE_WIDTH, self.leaf_states[row_index]);
                     merkle_builder.push(digest).map_err(Self::geometry)?;
-                    self.leaf_states[row_index] = ColumnStreamableLeafState([0_u64; 4]);
+                    self.leaf_states[row_index] = ColumnStreamableLeafState::ZERO;
                 }
                 self.current_source_offset = end;
-                if end == self.encoded_height {
+                if end == self.leaf_states.len() {
                     self.leaf_states.clear();
-                    self.stage = RecomputableOracleStage::Finish;
+                    self.current_stripe_start = self.current_stripe_end;
+                    if self.current_stripe_start == self.encoded_height {
+                        self.stage = RecomputableOracleStage::Finish;
+                    } else {
+                        self.current_stripe_end = self
+                            .current_stripe_start
+                            .saturating_add(self.maximum_stripe_row_count)
+                            .min(self.encoded_height);
+                        self.stage = RecomputableOracleStage::PrepareStripe;
+                    }
                 }
                 Ok(RecomputableOraclePoll::ArithmeticStepCompleted)
             }
@@ -560,7 +624,7 @@ impl RecomputableOraclePass {
 impl Drop for RecomputableOraclePass {
     fn drop(&mut self) {
         self.randomness.fill(ChallengeField::ZERO);
-        self.leaf_states.fill(ColumnStreamableLeafState([0_u64; 4]));
+        self.leaf_states.fill(ColumnStreamableLeafState::ZERO);
         if let Some(values) = self.encoded_values.as_mut() {
             values.fill(ChallengeField::ZERO);
         }
@@ -574,6 +638,15 @@ impl Drop for RecomputableOraclePass {
 
 fn maximum_source_elements_per_poll() -> usize {
     (1 << 20) / AGGREGATE_SOURCE_ELEMENT_BYTE_LENGTH
+}
+
+pub(super) fn aggregate_oracle_leaf_state_stripe_count(
+    encoded_height: usize,
+) -> Result<usize, String> {
+    if encoded_height == 0 || !encoded_height.is_power_of_two() {
+        return Err("aggregate oracle encoded height is invalid".to_owned());
+    }
+    Ok(encoded_height.div_ceil(AGGREGATE_ORACLE_LEAF_STATE_STRIPE_ROW_COUNT))
 }
 
 type CaptureTargets = Vec<BTreeMap<usize, Vec<(usize, usize)>>>;
@@ -749,7 +822,7 @@ mod tests {
     use crate::bgv::proof_suite::row_code_whir::{CommitmentScheme, LeafHasher};
 
     #[test]
-    fn resident_recomputation_matches_the_configured_mmcs_root_and_paths() {
+    fn resident_striped_recomputation_matches_the_configured_mmcs_root_and_paths() {
         let source_variable_count = 7;
         let folding_factor = 3;
         let inverse_rate = 2;
@@ -794,13 +867,14 @@ mod tests {
             .map(|index| mmcs.open_batch(*index, &prover_data))
             .collect::<Vec<_>>();
 
-        let mut pass = RecomputableOraclePass::new(
+        let mut pass = RecomputableOraclePass::new_with_maximum_stripe_row_count(
             RecomputableOracleSource::ResidentPolynomial,
             source_variable_count,
             folding_factor,
             inverse_rate,
             randomness,
             &query_indices,
+            8,
         )
         .expect("the recomputable pass is valid");
         let source_poly = p3_multilinear_util::poly::Poly::new(source);
@@ -821,6 +895,31 @@ mod tests {
             assert_eq!(output.rows[query_ordinal], opening.opened_values[0]);
             assert_eq!(output.paths[query_ordinal], opening.opening_proof);
         }
+    }
+
+    #[test]
+    fn stripe_geometry_rejects_ambiguous_or_unbounded_sizes() {
+        let source = RecomputableOracleSource::ResidentPolynomial;
+        for maximum_stripe_row_count in [0, 3] {
+            assert!(
+                RecomputableOraclePass::new_with_maximum_stripe_row_count(
+                    source.clone(),
+                    7,
+                    3,
+                    2,
+                    Vec::new(),
+                    &[],
+                    maximum_stripe_row_count,
+                )
+                .is_err(),
+            );
+        }
+        assert_eq!(aggregate_oracle_leaf_state_stripe_count(1 << 23), Ok(8));
+        assert_eq!(aggregate_oracle_leaf_state_stripe_count(1 << 22), Ok(4));
+        assert_eq!(aggregate_oracle_leaf_state_stripe_count(1 << 21), Ok(2));
+        assert_eq!(aggregate_oracle_leaf_state_stripe_count(1 << 20), Ok(1));
+        assert!(aggregate_oracle_leaf_state_stripe_count(0).is_err());
+        assert!(aggregate_oracle_leaf_state_stripe_count(3).is_err());
     }
 
     #[test]

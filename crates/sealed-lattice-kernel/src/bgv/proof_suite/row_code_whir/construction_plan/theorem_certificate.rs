@@ -1078,6 +1078,8 @@ struct DeployedAggregateLeafOracleCertificate {
     repeated_initial_hash_query_count: u64,
     deployed_verifier_hash_query_count: u64,
     deployed_accepting_database_equation_count: u64,
+    intermediate_oracle_output_bit_length: usize,
+    final_oracle_output_bit_length: usize,
     minimum_oracle_output_bit_length: usize,
     classical_collision_penalty_numerator: BigUint,
     qrom_ideal_oracle_penalty_numerator: BigUint,
@@ -1115,15 +1117,19 @@ impl DeployedAggregateLeafOracleCertificate {
             && self.repeated_initial_hash_query_count > 0
             && self.deployed_verifier_hash_query_count > 0
             && self.deployed_accepting_database_equation_count > 0
+            && self.intermediate_oracle_output_bit_length > 0
+            && self.final_oracle_output_bit_length > 0
             && self.minimum_oracle_output_bit_length
-                == ColumnStreamableLeafHasher::intermediate_output_bit_length()
+                == self
+                    .intermediate_oracle_output_bit_length
+                    .min(self.final_oracle_output_bit_length)
             && self.collision_penalty_denominator_bit_length
                 == self.minimum_oracle_output_bit_length
             && self.transition_collision_propagates_to_final_leaf
             && self.uniform_required_output_geometry_established
-                == (self.minimum_oracle_output_bit_length
+                == (self.intermediate_oracle_output_bit_length
                     == CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH
-                    && ColumnStreamableLeafHasher::final_output_bit_length()
+                    && self.final_oracle_output_bit_length
                         == CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH)
     }
 
@@ -1392,6 +1398,7 @@ struct Cms19ApplicabilityCertificate {
     proposition_eight_twelve_case_split_established: bool,
     complete_query_ledger_correspondence_established: bool,
     strong_state_typed_hash_chain_established: bool,
+    semantic_state_transition_correspondence_established: bool,
     deployed_oracle_output_geometry_established: bool,
 }
 
@@ -1405,6 +1412,7 @@ impl Cms19ApplicabilityCertificate {
             && self.proposition_eight_twelve_case_split_established
             && self.complete_query_ledger_correspondence_established
             && self.strong_state_typed_hash_chain_established
+            && self.semantic_state_transition_correspondence_established
             && self.deployed_oracle_output_geometry_established
     }
 }
@@ -1929,6 +1937,7 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
             && exact_failure_magnitude.is_complete(),
         complete_query_ledger_correspondence_established: true,
         strong_state_typed_hash_chain_established: cms19_strong_state_hash_chain.is_complete(),
+        semantic_state_transition_correspondence_established: false,
         deployed_oracle_output_geometry_established: deployed_aggregate_leaf_oracle
             .is_eligible_for_uniform_required_output(),
     };
@@ -3104,6 +3113,25 @@ fn derive_deployed_aggregate_leaf_oracle_certificate(
     aggregate_wide_masking: &AggregateWideMaskingCertificate,
     abstract_ledger: &CompleteVerifierOracleLedger,
 ) -> Result<DeployedAggregateLeafOracleCertificate, WhirTheoremCertificateError> {
+    derive_deployed_aggregate_leaf_oracle_certificate_with_output_widths(
+        plan,
+        aggregate_wide_masking,
+        abstract_ledger,
+        ColumnStreamableLeafHasher::intermediate_output_bit_length(),
+        ColumnStreamableLeafHasher::final_output_bit_length(),
+    )
+}
+
+fn derive_deployed_aggregate_leaf_oracle_certificate_with_output_widths(
+    plan: &RowCodeWhirConstructionPlan,
+    aggregate_wide_masking: &AggregateWideMaskingCertificate,
+    abstract_ledger: &CompleteVerifierOracleLedger,
+    intermediate_oracle_output_bit_length: usize,
+    final_oracle_output_bit_length: usize,
+) -> Result<DeployedAggregateLeafOracleCertificate, WhirTheoremCertificateError> {
+    if intermediate_oracle_output_bit_length == 0 || final_oracle_output_bit_length == 0 {
+        return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
+    }
     let mut rows = Vec::new();
     let mut initial_input_widths = BTreeSet::new();
     let mut abstract_leaf_hash_query_count = 0_u64;
@@ -3184,23 +3212,23 @@ fn derive_deployed_aggregate_leaf_oracle_certificate(
         * &compiler_query_bound
         + BigUint::from(2_u8) * BigUint::from(deployed_accepting_database_equation_count);
     let minimum_oracle_output_bit_length =
-        ColumnStreamableLeafHasher::intermediate_output_bit_length()
-            .min(ColumnStreamableLeafHasher::final_output_bit_length());
+        intermediate_oracle_output_bit_length.min(final_oracle_output_bit_length);
     Ok(DeployedAggregateLeafOracleCertificate {
         rows,
         distinct_initial_equation_count,
         repeated_initial_hash_query_count,
         deployed_verifier_hash_query_count,
         deployed_accepting_database_equation_count,
+        intermediate_oracle_output_bit_length,
+        final_oracle_output_bit_length,
         minimum_oracle_output_bit_length,
         classical_collision_penalty_numerator,
         qrom_ideal_oracle_penalty_numerator,
         collision_penalty_denominator_bit_length: minimum_oracle_output_bit_length,
         transition_collision_propagates_to_final_leaf: true,
-        uniform_required_output_geometry_established: minimum_oracle_output_bit_length
+        uniform_required_output_geometry_established: intermediate_oracle_output_bit_length
             == CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH
-            && ColumnStreamableLeafHasher::final_output_bit_length()
-                == CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH,
+            && final_oracle_output_bit_length == CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH,
     })
 }
 
@@ -4671,31 +4699,62 @@ fn selected_same_secret_construction_plan() -> RowCodeWhirConstructionPlan {
 }
 
 #[test]
-fn deployed_streaming_leaf_chain_refuses_a_uniform_512_bit_oracle_denominator() {
+fn a_256_bit_transition_chain_refuses_a_uniform_512_bit_oracle_denominator() {
     let plan = selected_same_secret_construction_plan();
     let certificate = checked_row_code_whir_failure_partition(&plan)
-        .expect("the construction accounting derives even though deployment is refused");
+        .expect("the selected construction accounting derives");
+    let rejected = derive_deployed_aggregate_leaf_oracle_certificate_with_output_widths(
+        &plan,
+        &certificate.aggregate_wide_masking,
+        &certificate.complete_verifier_oracle_ledger,
+        256,
+        512,
+    )
+    .expect("the rejected predecessor call inventory derives");
+
+    assert!(rejected.has_complete_call_inventory());
+    assert_eq!(rejected.intermediate_oracle_output_bit_length, 256);
+    assert_eq!(rejected.final_oracle_output_bit_length, 512);
+    assert_eq!(rejected.minimum_oracle_output_bit_length, 256);
+    assert_eq!(rejected.collision_penalty_denominator_bit_length, 256);
+    assert!(!rejected.uniform_required_output_geometry_established);
+    assert!(!rejected.is_eligible_for_uniform_required_output());
+    assert!(!rejected.classical_collision_penalty_is_below_inverse_power_of_two(128));
+    assert!(!rejected.qrom_ideal_oracle_penalty_is_below_inverse_power_of_two(128));
+    assert!(
+        (&rejected.classical_collision_penalty_numerator << 128_usize)
+            < (BigUint::one() << CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH)
+    );
+    assert!(
+        (&rejected.qrom_ideal_oracle_penalty_numerator << 128_usize)
+            < (BigUint::one() << CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH)
+    );
+}
+
+#[test]
+fn deployed_streaming_leaf_chain_uses_uniform_512_bit_oracle_outputs() {
+    let plan = selected_same_secret_construction_plan();
+    let certificate = checked_row_code_whir_failure_partition(&plan)
+        .expect("the selected construction accounting derives");
     let deployed = &certificate.deployed_aggregate_leaf_oracle;
 
-    assert!(deployed.has_complete_call_inventory());
     assert_eq!(
         ColumnStreamableLeafHasher::intermediate_output_bit_length(),
-        256
+        512
     );
     assert_eq!(ColumnStreamableLeafHasher::final_output_bit_length(), 512);
-    assert_eq!(deployed.minimum_oracle_output_bit_length, 256);
-    assert_eq!(deployed.collision_penalty_denominator_bit_length, 256);
-    assert!(!deployed.uniform_required_output_geometry_established);
-    assert!(!deployed.is_eligible_for_uniform_required_output());
-    assert!(!deployed.classical_collision_penalty_is_below_inverse_power_of_two(128));
-    assert!(!deployed.qrom_ideal_oracle_penalty_is_below_inverse_power_of_two(128));
+    assert_eq!(deployed.intermediate_oracle_output_bit_length, 512);
+    assert_eq!(deployed.final_oracle_output_bit_length, 512);
+    assert_eq!(deployed.minimum_oracle_output_bit_length, 512);
+    assert_eq!(deployed.collision_penalty_denominator_bit_length, 512);
+    assert!(deployed.uniform_required_output_geometry_established);
+    assert!(deployed.is_eligible_for_uniform_required_output());
+    assert!(deployed.classical_collision_penalty_is_below_inverse_power_of_two(128));
+    assert!(deployed.qrom_ideal_oracle_penalty_is_below_inverse_power_of_two(128));
     assert!(
-        (&deployed.classical_collision_penalty_numerator << 128_usize)
-            < (BigUint::one() << CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH)
-    );
-    assert!(
-        (&deployed.qrom_ideal_oracle_penalty_numerator << 128_usize)
-            < (BigUint::one() << CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH)
+        !certificate
+            .cms19_applicability
+            .semantic_state_transition_correspondence_established
     );
     assert!(!certificate.cms19_applicability.is_complete());
     assert!(!certificate.is_complete_construction_theorem());
@@ -5242,9 +5301,14 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
             .strong_state_typed_hash_chain_established
     );
     assert!(
-        !certificate
+        certificate
             .cms19_applicability
             .deployed_oracle_output_geometry_established
+    );
+    assert!(
+        !certificate
+            .cms19_applicability
+            .semantic_state_transition_correspondence_established
     );
     let deployed_leaf_oracle = &certificate.deployed_aggregate_leaf_oracle;
     assert!(deployed_leaf_oracle.has_complete_call_inventory());
@@ -5278,22 +5342,27 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
         deployed_leaf_oracle.deployed_accepting_database_equation_count,
         1_229_573
     );
-    assert_eq!(deployed_leaf_oracle.minimum_oracle_output_bit_length, 256);
+    assert_eq!(
+        deployed_leaf_oracle.intermediate_oracle_output_bit_length,
+        512
+    );
+    assert_eq!(deployed_leaf_oracle.final_oracle_output_bit_length, 512);
+    assert_eq!(deployed_leaf_oracle.minimum_oracle_output_bit_length, 512);
     assert_eq!(
         deployed_leaf_oracle.collision_penalty_denominator_bit_length,
-        256
+        512
     );
     assert!(deployed_leaf_oracle.transition_collision_propagates_to_final_leaf);
-    assert!(!deployed_leaf_oracle.uniform_required_output_geometry_established);
+    assert!(deployed_leaf_oracle.uniform_required_output_geometry_established);
     assert!(
-        !deployed_leaf_oracle.classical_collision_penalty_is_below_inverse_power_of_two(128),
-        "the 256-bit transition chain misses the classical 128-bit collision allocation",
+        deployed_leaf_oracle.classical_collision_penalty_is_below_inverse_power_of_two(128),
+        "the 512-bit transition chain meets the classical collision allocation",
     );
     assert!(
-        !deployed_leaf_oracle.qrom_ideal_oracle_penalty_is_below_inverse_power_of_two(128),
-        "the 256-bit transition chain misses the QROM 128-bit collision allocation",
+        deployed_leaf_oracle.qrom_ideal_oracle_penalty_is_below_inverse_power_of_two(128),
+        "the 512-bit transition chain meets the QROM ideal-oracle collision allocation",
     );
-    assert!(!deployed_leaf_oracle.is_eligible_for_uniform_required_output());
+    assert!(deployed_leaf_oracle.is_eligible_for_uniform_required_output());
     assert!(certificate.cms19_strong_state_hash_chain.is_complete());
     assert_eq!(
         certificate
