@@ -56,8 +56,8 @@ use super::{
         noncompact_aggregate_opening_path_byte_length,
     },
     construction_plan::{
-        ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT, RowCodeWhirCheckpointBoundary,
-        RowCodeWhirOpenedPolynomialSource, RowCodeWhirPhase, RowCodeWhirProofSectionRole,
+        RowCodeWhirCheckpointBoundary, RowCodeWhirOpenedPolynomialSource, RowCodeWhirPhase,
+        RowCodeWhirProofSectionRole,
     },
     plan_row_code_whir_quotient_transform_storage,
     row_encoding::{RowCodeHighHalfSource, RowEncodingGeometry, padded_base_row_coefficients},
@@ -3680,6 +3680,9 @@ impl RowCodeWhirGenerationStateMachine {
                             evaluate_opening_batch_mask_chunks(
                                 &source,
                                 opening_point,
+                                self.construction_plan
+                                    .parameters
+                                    .logical_polynomial_coefficient_count,
                                 self.opening_batch_mask_chunk_evaluation_count()
                                     .map_err(CommonProofGenerationError::Prover)?,
                             )
@@ -6237,8 +6240,15 @@ impl RowCodeWhirGenerationStateMachine {
                 .ok_or(CommonProofProverError::InvalidMask)?,
         )
         .map_err(|_| CommonProofProverError::CountOverflow)?;
+        let logical_polynomial_coefficient_count = self
+            .construction_plan
+            .parameters
+            .logical_polynomial_coefficient_count;
+        if logical_polynomial_coefficient_count == 0 {
+            return Err(CommonProofProverError::InvalidMask);
+        }
         let coefficient_chunk_count =
-            degree_bound_exclusive.div_ceil(ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT);
+            degree_bound_exclusive.div_ceil(logical_polynomial_coefficient_count);
         let matching_claim_count = self
             .relation_plan_variant
             .ordered_opening_claims()
@@ -6293,7 +6303,11 @@ impl RowCodeWhirGenerationStateMachine {
             RowCodeWhirPhase::Quotient => None,
         }
         .ok_or(CommonProofProverError::InvalidColumn)?;
-        let expected_witness_value_count = ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT
+        let logical_polynomial_coefficient_count = self
+            .construction_plan
+            .parameters
+            .logical_polynomial_coefficient_count;
+        let expected_witness_value_count = logical_polynomial_coefficient_count
             .checked_mul(
                 self.construction_plan
                     .parameters
@@ -6408,19 +6422,23 @@ impl RowCodeWhirGenerationStateMachine {
         let CommonProofSourcePolynomial::Base(coefficients) = polynomial else {
             return Err(CommonProofProverError::InvalidColumn);
         };
+        let logical_polynomial_coefficient_count = self
+            .construction_plan
+            .parameters
+            .logical_polynomial_coefficient_count;
         let source_start = usize::try_from(coefficient_chunk_ordinal)
             .map_err(|_| CommonProofProverError::CountOverflow)?
-            .checked_mul(ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT)
+            .checked_mul(logical_polynomial_coefficient_count)
             .ok_or(CommonProofProverError::CountOverflow)?;
         if source_start >= coefficients.len() {
             return Err(CommonProofProverError::InvalidColumn);
         }
         let source_end = source_start
-            .checked_add(ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT)
+            .checked_add(logical_polynomial_coefficient_count)
             .map(|end| end.min(coefficients.len()))
             .ok_or(CommonProofProverError::CountOverflow)?;
         let destination_start = logical_block_index
-            .checked_mul(ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT)
+            .checked_mul(logical_polynomial_coefficient_count)
             .ok_or(CommonProofProverError::CountOverflow)?;
         let copied_value_count = source_end - source_start;
         let destination_end = destination_start
@@ -6606,7 +6624,11 @@ impl RowCodeWhirGenerationStateMachine {
             return Err(CommonProofProverError::InvalidInput);
         }
         let phase = &self.construction_plan.quotient_phase;
-        let expected_witness_value_count = ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT
+        let logical_polynomial_coefficient_count = self
+            .construction_plan
+            .parameters
+            .logical_polynomial_coefficient_count;
+        let expected_witness_value_count = logical_polynomial_coefficient_count
             .checked_mul(
                 self.construction_plan
                     .parameters
@@ -6721,19 +6743,23 @@ impl RowCodeWhirGenerationStateMachine {
             return Err(CommonProofProverError::InvalidColumn);
         };
         let extension_coordinate_index = usize::from(row.extension_coordinate_ordinal);
+        let logical_polynomial_coefficient_count = self
+            .construction_plan
+            .parameters
+            .logical_polynomial_coefficient_count;
         let source_start = usize::try_from(coefficient_chunk_ordinal)
             .map_err(|_| CommonProofProverError::CountOverflow)?
-            .checked_mul(ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT)
+            .checked_mul(logical_polynomial_coefficient_count)
             .ok_or(CommonProofProverError::CountOverflow)?;
         if source_start >= coefficients.len() {
             return Err(CommonProofProverError::InvalidColumn);
         }
         let source_end = source_start
-            .checked_add(ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT)
+            .checked_add(logical_polynomial_coefficient_count)
             .map(|end| end.min(coefficients.len()))
             .ok_or(CommonProofProverError::CountOverflow)?;
         let destination_start = logical_block_index
-            .checked_mul(ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT)
+            .checked_mul(logical_polynomial_coefficient_count)
             .ok_or(CommonProofProverError::CountOverflow)?;
         let destination_end = destination_start
             .checked_add(source_end - source_start)
@@ -7289,15 +7315,19 @@ fn evaluate_quotient_transform_in_place(
 fn evaluate_opening_batch_mask_chunks(
     polynomial: &CommonProofSourcePolynomial,
     opening_point: ProofChallengeExtensionElement,
+    logical_polynomial_coefficient_count: usize,
     chunk_count: usize,
 ) -> Result<Vec<ProofChallengeExtensionElement>, CommonProofProverError> {
     let CommonProofSourcePolynomial::Extension(coefficients) = polynomial else {
         return Err(CommonProofProverError::InvalidMask);
     };
-    let maximum_coefficient_count = ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT
+    let maximum_coefficient_count = logical_polynomial_coefficient_count
         .checked_mul(chunk_count)
         .ok_or(CommonProofProverError::CountOverflow)?;
-    if chunk_count == 0 || coefficients.is_empty() || coefficients.len() > maximum_coefficient_count
+    if logical_polynomial_coefficient_count == 0
+        || chunk_count == 0
+        || coefficients.is_empty()
+        || coefficients.len() > maximum_coefficient_count
     {
         return Err(CommonProofProverError::InvalidMask);
     }
@@ -7307,14 +7337,14 @@ fn evaluate_opening_batch_mask_chunks(
         .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
     for chunk_ordinal in 0..chunk_count {
         let chunk_start = chunk_ordinal
-            .checked_mul(ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT)
+            .checked_mul(logical_polynomial_coefficient_count)
             .ok_or(CommonProofProverError::CountOverflow)?;
         if chunk_start >= coefficients.len() {
             evaluations.push(ProofChallengeExtensionElement::ZERO);
             continue;
         }
         let chunk_end = chunk_start
-            .checked_add(ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT)
+            .checked_add(logical_polynomial_coefficient_count)
             .ok_or(CommonProofProverError::CountOverflow)?
             .min(coefficients.len());
         evaluations.push(evaluate_extension_at(
@@ -7758,8 +7788,10 @@ mod tests {
         let selected_row_width = construction_plan
             .parameters
             .logical_polynomials_per_physical_row;
-        let expected_witness_value_count =
-            ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT * selected_row_width;
+        let expected_witness_value_count = construction_plan
+            .parameters
+            .logical_polynomial_coefficient_count
+            * selected_row_width;
 
         assert_eq!(selected_row_width, 8);
         assert_eq!(base_phase.rows.len(), base_phase.geometry.row_count);
@@ -8349,10 +8381,11 @@ mod tests {
 
     #[test]
     fn opening_batch_mask_chunks_preserve_polynomial_evaluation_and_exact_boundaries() {
+        const TEST_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT: usize = 64;
         let opening_point =
             ProofChallengeExtensionElement::from_canonical_coordinates([17, 11, 5, 3, 2])
                 .expect("the test opening point is canonical");
-        let coefficient_count = ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT + 3;
+        let coefficient_count = TEST_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT + 3;
         let coefficients = (0..coefficient_count)
             .map(|coefficient_index| {
                 ProofChallengeExtensionElement::from_canonical_coordinates([
@@ -8367,13 +8400,18 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let polynomial = CommonProofSourcePolynomial::from_extension_coefficients(coefficients);
-        let chunk_evaluations = evaluate_opening_batch_mask_chunks(&polynomial, opening_point, 3)
-            .expect("the partial final mask chunk evaluates");
+        let chunk_evaluations = evaluate_opening_batch_mask_chunks(
+            &polynomial,
+            opening_point,
+            TEST_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT,
+            3,
+        )
+        .expect("the partial final mask chunk evaluates");
         assert_eq!(chunk_evaluations.len(), 3);
         assert_eq!(chunk_evaluations[2], ProofChallengeExtensionElement::ZERO);
 
         let chunk_power = opening_point.power(
-            u64::try_from(ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT)
+            u64::try_from(TEST_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT)
                 .expect("the logical chunk width fits u64"),
         );
         let mut current_chunk_power = ProofChallengeExtensionElement::ONE;
@@ -8387,11 +8425,15 @@ mod tests {
 
         let exact_boundary = CommonProofSourcePolynomial::from_extension_coefficients(vec![
             ProofChallengeExtensionElement::ONE;
-            ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT
+            TEST_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT
         ]);
-        let exact_boundary_evaluations =
-            evaluate_opening_batch_mask_chunks(&exact_boundary, opening_point, 2)
-                .expect("an exact first-chunk boundary evaluates");
+        let exact_boundary_evaluations = evaluate_opening_batch_mask_chunks(
+            &exact_boundary,
+            opening_point,
+            TEST_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT,
+            2,
+        )
+        .expect("an exact first-chunk boundary evaluates");
         assert_eq!(
             exact_boundary_evaluations[1],
             ProofChallengeExtensionElement::ZERO,
@@ -8400,19 +8442,37 @@ mod tests {
 
     #[test]
     fn opening_batch_mask_chunks_refuse_empty_and_overlong_polynomials() {
+        const TEST_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT: usize = 64;
         let opening_point = ProofChallengeExtensionElement::ONE;
         let empty = CommonProofSourcePolynomial::from_extension_coefficients(Vec::new());
         assert_eq!(
-            evaluate_opening_batch_mask_chunks(&empty, opening_point, 2),
+            evaluate_opening_batch_mask_chunks(
+                &empty,
+                opening_point,
+                TEST_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT,
+                2,
+            ),
+            Err(CommonProofProverError::InvalidMask),
+        );
+        let nonempty = CommonProofSourcePolynomial::from_extension_coefficients(vec![
+            ProofChallengeExtensionElement::ONE,
+        ]);
+        assert_eq!(
+            evaluate_opening_batch_mask_chunks(&nonempty, opening_point, 0, 2),
             Err(CommonProofProverError::InvalidMask),
         );
 
         let overlong = CommonProofSourcePolynomial::from_extension_coefficients(vec![
             ProofChallengeExtensionElement::ZERO;
-            ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT * 2 + 1
+            TEST_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT * 2 + 1
         ]);
         assert_eq!(
-            evaluate_opening_batch_mask_chunks(&overlong, opening_point, 2),
+            evaluate_opening_batch_mask_chunks(
+                &overlong,
+                opening_point,
+                TEST_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT,
+                2,
+            ),
             Err(CommonProofProverError::InvalidMask),
         );
     }
