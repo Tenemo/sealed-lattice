@@ -1285,14 +1285,6 @@ impl RowCodeWhirConstructionPlan {
         self.linear_bcs_transcript_plan()?.canonical_hash()
     }
 
-    #[cfg(test)]
-    fn linear_bcs_hash_query_accounting(
-        &self,
-    ) -> Result<linear_bcs_transcript::LinearBcsHashQueryAccounting, RowCodeWhirConstructionPlanError>
-    {
-        self.linear_bcs_transcript_plan()?.hash_query_accounting()
-    }
-
     pub(in crate::bgv::proof_suite) fn quotient_computation_evaluation_domain(
         &self,
         context: &RelationPlanCheckContext,
@@ -7517,27 +7509,108 @@ mod tests {
         let plan = selected_same_secret_construction_plan();
         let catalog = plan
             .linear_bcs_transcript_plan()
-            .expect("the literal BCS transcript plan derives");
+            .expect("the original-BCS transcript plan derives");
         let round_count = catalog
             .round_count()
-            .expect("the literal BCS round count derives");
-        let selected_accounting = plan
-            .linear_bcs_hash_query_accounting()
-            .expect("the selected literal BCS hash-query accounting derives");
+            .expect("the original-BCS round count derives");
         let selected_catalog_hash = plan
             .linear_bcs_transcript_plan_hash()
-            .expect("the selected literal BCS catalog hash derives");
-        assert_eq!(round_count, 690_142);
+            .expect("the selected original-BCS catalog hash derives");
+        let production_oracle_catalog = plan
+            .oracle_equation_catalog()
+            .expect("the production oracle-equation catalog derives");
+        let independently_derived_sampler_block_count =
+            |operation: &RowCodeWhirOracleEquationOperationPlan| -> u64 {
+                let expansion_counts = operation
+                    .ranges
+                    .iter()
+                    .filter_map(|range| match range.kind {
+                        RowCodeWhirOracleEquationRangeKind::ExtensionRejectionChain {
+                            maximum_rejection_count,
+                        } => Some(u64::from(maximum_rejection_count) + 1),
+                        RowCodeWhirOracleEquationRangeKind::ProductExpansion {
+                            maximum_candidate_count,
+                            block_count_per_candidate,
+                        } => Some(
+                            u64::from(maximum_candidate_count)
+                                .checked_mul(block_count_per_candidate)
+                                .expect("the product sampler block count fits u64"),
+                        ),
+                        RowCodeWhirOracleEquationRangeKind::DistinctExpansion {
+                            output_count,
+                            maximum_block_count_per_output,
+                        } => Some(
+                            u64::from(output_count)
+                                .checked_mul(maximum_block_count_per_output)
+                                .expect("the distinct sampler block count fits u64"),
+                        ),
+                        RowCodeWhirOracleEquationRangeKind::InitialHeaderRoot
+                        | RowCodeWhirOracleEquationRangeKind::InitialAbsorption
+                        | RowCodeWhirOracleEquationRangeKind::ResponseRoot
+                        | RowCodeWhirOracleEquationRangeKind::ResponseBinding
+                        | RowCodeWhirOracleEquationRangeKind::ResponseAbsorption
+                        | RowCodeWhirOracleEquationRangeKind::AcceptedChallenge
+                        | RowCodeWhirOracleEquationRangeKind::ChallengeHandle => None,
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    expansion_counts.len(),
+                    1,
+                    "one sampler operation has one expansion range",
+                );
+                expansion_counts[0]
+            };
+        let mut independently_derived_prover_round_count = 0_u64;
+        let mut independently_derived_sampler_round_count = 0_u64;
+        for operation in production_oracle_catalog.operations.iter().skip(1) {
+            match &operation.kind {
+                RowCodeWhirOracleEquationOperationKind::InitialTranscript => {
+                    panic!("only operation zero is the initial transcript")
+                }
+                RowCodeWhirOracleEquationOperationKind::CommonRound(_) => {
+                    independently_derived_prover_round_count += 1;
+                }
+                RowCodeWhirOracleEquationOperationKind::CommonProductChallenge(_)
+                | RowCodeWhirOracleEquationOperationKind::CommonExtensionChallenge(_) => {
+                    independently_derived_sampler_round_count +=
+                        independently_derived_sampler_block_count(operation);
+                }
+                RowCodeWhirOracleEquationOperationKind::RowCodeWhir {
+                    operation: transcript_operation,
+                    ..
+                } => match transcript_operation {
+                    RowCodeWhirTranscriptOperation::ObserveMaskEvaluations { .. }
+                    | RowCodeWhirTranscriptOperation::ObserveCommitment { .. } => {
+                        independently_derived_prover_round_count += 1;
+                    }
+                    RowCodeWhirTranscriptOperation::ObserveExtensionValues {
+                        role: RowCodeWhirObservationRole::OpeningPoint { .. },
+                        ..
+                    }
+                    | RowCodeWhirTranscriptOperation::ObserveProtocolSchedule { .. }
+                    | RowCodeWhirTranscriptOperation::FinishProofStream => {}
+                    RowCodeWhirTranscriptOperation::ObserveExtensionValues { .. } => {
+                        independently_derived_prover_round_count += 1;
+                    }
+                    RowCodeWhirTranscriptOperation::SampleExtension { .. }
+                    | RowCodeWhirTranscriptOperation::SampleDistinctIndices { .. } => {
+                        independently_derived_sampler_round_count +=
+                            independently_derived_sampler_block_count(operation);
+                    }
+                },
+            }
+        }
+        let independently_derived_round_count = independently_derived_prover_round_count
+            .checked_add(independently_derived_sampler_round_count)
+            .expect("the independent BCS round count fits u64");
+        assert_eq!(round_count, independently_derived_round_count);
+        assert_eq!(round_count, 591_189);
         assert_ne!(selected_catalog_hash, [0_u8; 64]);
-        assert_eq!(selected_accounting.round_count, round_count);
         assert_eq!(
-            selected_accounting.maximum_single_opening_hash_query_count,
-            64
-        );
-        assert_eq!(selected_accounting.supplied_commitment_opening_count, 3_680);
-        assert_eq!(
-            selected_accounting.supplied_commitment_independent_opening_hash_query_count_ceiling,
-            200_297,
+            catalog
+                .supplied_commitment_opening_count()
+                .expect("the supplied commitment opening count derives"),
+            3_943,
         );
         let opening_query_order =
             linear_bcs_transcript::LinearBcsOpeningQueryOrder::AcceptedTranscriptOrder;
@@ -7552,7 +7625,7 @@ mod tests {
                             phase: RowCodeWhirPhase::Base,
                         },
                     owner: linear_bcs_transcript::LinearBcsSuppliedCommitmentOpeningOwner::OuterQueryVector,
-                    payload_leaf_count: 2_097_152,
+                    payload_leaf_count: 16_777_216,
                     query_count: 387,
                     query_order: opening_query_order,
                     merkle_traversal_order,
@@ -7563,7 +7636,7 @@ mod tests {
                             phase: RowCodeWhirPhase::Auxiliary,
                         },
                     owner: linear_bcs_transcript::LinearBcsSuppliedCommitmentOpeningOwner::OuterQueryVector,
-                    payload_leaf_count: 2_097_152,
+                    payload_leaf_count: 16_777_216,
                     query_count: 387,
                     query_order: opening_query_order,
                     merkle_traversal_order,
@@ -7574,7 +7647,7 @@ mod tests {
                             phase: RowCodeWhirPhase::Quotient,
                         },
                     owner: linear_bcs_transcript::LinearBcsSuppliedCommitmentOpeningOwner::OuterQueryVector,
-                    payload_leaf_count: 2_097_152,
+                    payload_leaf_count: 16_777_216,
                     query_count: 387,
                     query_order: opening_query_order,
                     merkle_traversal_order,
@@ -7586,7 +7659,7 @@ mod tests {
                         linear_bcs_transcript::LinearBcsSuppliedCommitmentOpeningOwner::WhirEpoch {
                             epoch_ordinal: 0,
                         },
-                    payload_leaf_count: 1_048_576,
+                    payload_leaf_count: 8_388_608,
                     query_count: 387,
                     query_order: opening_query_order,
                     merkle_traversal_order,
@@ -7596,7 +7669,7 @@ mod tests {
                         linear_bcs_transcript::LinearBcsCommittedOracleRole::AggregateWidePad,
                     owner:
                         linear_bcs_transcript::LinearBcsSuppliedCommitmentOpeningOwner::WhirEpoch {
-                            epoch_ordinal: 5,
+                            epoch_ordinal: 6,
                         },
                     payload_leaf_count: 8_192,
                     query_count: 393,
@@ -7612,7 +7685,7 @@ mod tests {
                         linear_bcs_transcript::LinearBcsSuppliedCommitmentOpeningOwner::WhirEpoch {
                             epoch_ordinal: 1,
                         },
-                    payload_leaf_count: 524_288,
+                    payload_leaf_count: 4_194_304,
                     query_count: 288,
                     query_order: opening_query_order,
                     merkle_traversal_order,
@@ -7626,7 +7699,7 @@ mod tests {
                         linear_bcs_transcript::LinearBcsSuppliedCommitmentOpeningOwner::WhirEpoch {
                             epoch_ordinal: 2,
                         },
-                    payload_leaf_count: 262_144,
+                    payload_leaf_count: 2_097_152,
                     query_count: 268,
                     query_order: opening_query_order,
                     merkle_traversal_order,
@@ -7640,7 +7713,7 @@ mod tests {
                         linear_bcs_transcript::LinearBcsSuppliedCommitmentOpeningOwner::WhirEpoch {
                             epoch_ordinal: 3,
                         },
-                    payload_leaf_count: 131_072,
+                    payload_leaf_count: 1_048_576,
                     query_count: 264,
                     query_order: opening_query_order,
                     merkle_traversal_order,
@@ -7654,7 +7727,21 @@ mod tests {
                         linear_bcs_transcript::LinearBcsSuppliedCommitmentOpeningOwner::WhirEpoch {
                             epoch_ordinal: 4,
                         },
-                    payload_leaf_count: 65_536,
+                    payload_leaf_count: 524_288,
+                    query_count: 263,
+                    query_order: opening_query_order,
+                    merkle_traversal_order,
+                },
+                linear_bcs_transcript::LinearBcsSuppliedCommitmentOpeningPlan {
+                    commitment_role:
+                        linear_bcs_transcript::LinearBcsCommittedOracleRole::WhirRound {
+                            round_ordinal: 4,
+                        },
+                    owner:
+                        linear_bcs_transcript::LinearBcsSuppliedCommitmentOpeningOwner::WhirEpoch {
+                            epoch_ordinal: 5,
+                        },
+                    payload_leaf_count: 262_144,
                     query_count: 263,
                     query_order: opening_query_order,
                     merkle_traversal_order,
@@ -7664,9 +7751,9 @@ mod tests {
                         linear_bcs_transcript::LinearBcsCommittedOracleRole::BaseFreshSource,
                     owner:
                         linear_bcs_transcript::LinearBcsSuppliedCommitmentOpeningOwner::WhirEpoch {
-                            epoch_ordinal: 4,
+                            epoch_ordinal: 5,
                         },
-                    payload_leaf_count: 65_536,
+                    payload_leaf_count: 262_144,
                     query_count: 263,
                     query_order: opening_query_order,
                     merkle_traversal_order,
@@ -7676,7 +7763,7 @@ mod tests {
                         linear_bcs_transcript::LinearBcsCommittedOracleRole::BaseFreshPad,
                     owner:
                         linear_bcs_transcript::LinearBcsSuppliedCommitmentOpeningOwner::WhirEpoch {
-                            epoch_ordinal: 5,
+                            epoch_ordinal: 6,
                         },
                     payload_leaf_count: 8_192,
                     query_count: 393,
@@ -7720,11 +7807,56 @@ mod tests {
                 .expect("the one-edge sampler count derives")
                 > 0,
         );
-        assert!(
-            catalog
-                .canonical_message_root_hash_query_count()
-                .expect("the canonical message-root query count derives")
-                > 0,
+        let complete_message_digest_count = catalog
+            .complete_message_digest_hash_query_count()
+            .expect("the canonical complete-message digest count derives");
+        let deterministic_response_digest_count = production_oracle_catalog
+            .operations
+            .iter()
+            .filter(|operation| {
+                matches!(
+                    &operation.kind,
+                    RowCodeWhirOracleEquationOperationKind::RowCodeWhir {
+                        operation: RowCodeWhirTranscriptOperation::ObserveProtocolSchedule { .. }
+                            | RowCodeWhirTranscriptOperation::ObserveExtensionValues {
+                                role: RowCodeWhirObservationRole::OpeningPoint { .. },
+                                ..
+                            },
+                        ..
+                    }
+                )
+            })
+            .count();
+        let terminal_response_digest_count = production_oracle_catalog
+            .operations
+            .iter()
+            .filter(|operation| {
+                matches!(
+                    &operation.kind,
+                    RowCodeWhirOracleEquationOperationKind::RowCodeWhir {
+                        operation: RowCodeWhirTranscriptOperation::FinishProofStream,
+                        ..
+                    }
+                )
+            })
+            .count();
+        let response_root_equation_count = production_oracle_catalog
+            .operations
+            .iter()
+            .flat_map(|operation| &operation.ranges)
+            .filter(|range| range.kind == RowCodeWhirOracleEquationRangeKind::ResponseRoot)
+            .map(|range| range.equation_count)
+            .sum::<u64>();
+        assert_eq!(complete_message_digest_count, 1_049);
+        assert_eq!(deterministic_response_digest_count, 1_009);
+        assert_eq!(terminal_response_digest_count, 1);
+        assert_eq!(
+            complete_message_digest_count
+                + u64::try_from(deterministic_response_digest_count)
+                    .expect("the deterministic response-digest count fits u64")
+                + u64::try_from(terminal_response_digest_count)
+                    .expect("the terminal response-digest count fits u64"),
+            response_root_equation_count,
         );
         assert_eq!(
             linear_bcs_transcript::linear_bcs_round_ordinal_encoding(0),
@@ -7869,12 +8001,12 @@ mod tests {
 
         let canonical_bytes = catalog
             .canonical_bytes()
-            .expect("the literal BCS transcript plan encodes canonically");
+            .expect("the original-BCS transcript plan encodes canonically");
         assert_eq!(
             plan.linear_bcs_transcript_plan()
-                .expect("the repeated literal BCS transcript plan derives")
+                .expect("the repeated original-BCS transcript plan derives")
                 .canonical_bytes()
-                .expect("the repeated literal BCS transcript plan encodes"),
+                .expect("the repeated original-BCS transcript plan encodes"),
             canonical_bytes,
         );
 
@@ -7883,9 +8015,9 @@ mod tests {
         assert_eq!(
             checkpoint_rescheduled_plan
                 .linear_bcs_transcript_plan()
-                .expect("checkpoint rescheduling preserves the literal BCS plan")
+                .expect("checkpoint rescheduling preserves the original-BCS plan")
                 .canonical_bytes()
-                .expect("checkpoint rescheduling preserves the literal BCS encoding"),
+                .expect("checkpoint rescheduling preserves the original-BCS encoding"),
             canonical_bytes,
         );
 

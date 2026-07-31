@@ -1,27 +1,22 @@
-//! Candidate modified-BCS correspondence geometry derived from the checked
+//! Original-BCS strong-state correspondence derived from the checked
 //! construction plan.
 //!
 //! The live sampler uses one typed hash edge per expansion block; that answer
 //! is both the sampled block and the next predecessor. Sampler blocks therefore
-//! do not acquire a synthetic second prover-root absorption edge here. This
-//! catalog owns commitment-opening geometry and exact live-edge accounting,
-//! but does not by itself prove that the one-edge typed chain satisfies the
-//! two-edge modified-BCS extractor hypotheses from CMS19 Sections 8.2--8.5.
+//! do not acquire a synthetic second prover-root absorption edge. Fully
+//! transported messages use their deployed framed 512-bit response digest;
+//! this plan never invents a parallel Merkle tree for those bytes. Supplied
+//! polynomial-oracle roots remain bound to their production commitment and
+//! compact-opening geometry.
 
 use super::*;
 use crate::bgv::proof_suite::PROOF_CHALLENGE_EXTENSION_DEGREE;
-use crate::bgv::proof_suite::row_code_whir::literal_bcs_merkle::{
-    LiteralBcsMerkleError, literal_bcs_commitment_hash_query_count,
-    literal_bcs_committed_tree_leaf_count, literal_bcs_opening_hash_query_count,
-    literal_bcs_standard_tree_internal_node_count, literal_bcs_subtree_leaf_count,
-};
 use crate::hashing::hash_framed_parts_512;
 
-const LINEAR_BCS_TRANSCRIPT_PLAN_ENCODING_VERSION: u16 = 4;
+const LINEAR_BCS_TRANSCRIPT_PLAN_ENCODING_VERSION: u16 = 5;
 const LINEAR_BCS_ORACLE_VALUE_BYTE_LENGTH: usize = 64;
-const LINEAR_BCS_PROOF_STRING_SYMBOL_BYTE_LENGTH: usize = 64;
 const LINEAR_BCS_TRANSCRIPT_PLAN_HASH_DOMAIN: &str =
-    "sealed-lattice/proof/row-code-whir/linear-bcs-transcript-plan/v4";
+    "sealed-lattice/proof/row-code-whir/linear-bcs-transcript-plan/v5";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::bgv::proof_suite) enum LinearBcsChallengeSelectionRule {
@@ -75,13 +70,11 @@ pub(in crate::bgv::proof_suite) struct LinearBcsSuppliedCommitmentOpeningPlan {
 pub(in crate::bgv::proof_suite) enum LinearBcsProverOracleRoot {
     SuppliedCommitment {
         role: LinearBcsCommittedOracleRole,
-        canonical_message_byte_length: usize,
         payload_leaf_count: usize,
     },
-    CanonicalCompleteMessage {
+    CanonicalCompleteMessageDigest {
         value_count: usize,
         canonical_message_byte_length: usize,
-        payload_leaf_count: usize,
     },
     OneEdgeSamplerBlock {
         source_operation_ordinal: u32,
@@ -89,77 +82,19 @@ pub(in crate::bgv::proof_suite) enum LinearBcsProverOracleRoot {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::bgv::proof_suite) struct LinearBcsMerkleGeometry {
-    pub(in crate::bgv::proof_suite) canonical_message_byte_length: usize,
-    pub(in crate::bgv::proof_suite) payload_leaf_count: usize,
-    pub(in crate::bgv::proof_suite) subtree_leaf_count: usize,
-    pub(in crate::bgv::proof_suite) committed_tree_leaf_count: usize,
-    pub(in crate::bgv::proof_suite) commitment_hash_query_count: u64,
-    pub(in crate::bgv::proof_suite) single_opening_hash_query_count: u64,
-    pub(in crate::bgv::proof_suite) standard_tree_internal_node_count: u64,
-}
-
 impl LinearBcsProverOracleRoot {
-    fn merkle_geometry(
-        self,
-    ) -> Result<Option<LinearBcsMerkleGeometry>, RowCodeWhirConstructionPlanError> {
-        self.validate_geometry()?;
-        let (canonical_message_byte_length, payload_leaf_count) = match self {
-            Self::SuppliedCommitment {
-                canonical_message_byte_length,
-                payload_leaf_count,
-                ..
-            }
-            | Self::CanonicalCompleteMessage {
-                canonical_message_byte_length,
-                payload_leaf_count,
-                ..
-            } => (canonical_message_byte_length, payload_leaf_count),
-            Self::OneEdgeSamplerBlock { .. } => return Ok(None),
-        };
-        Ok(Some(LinearBcsMerkleGeometry {
-            canonical_message_byte_length,
-            payload_leaf_count,
-            subtree_leaf_count: literal_bcs_subtree_leaf_count(payload_leaf_count)
-                .map_err(map_literal_bcs_merkle_error)?,
-            committed_tree_leaf_count: literal_bcs_committed_tree_leaf_count(payload_leaf_count)
-                .map_err(map_literal_bcs_merkle_error)?,
-            commitment_hash_query_count: literal_bcs_commitment_hash_query_count(
-                payload_leaf_count,
-            )
-            .map_err(map_literal_bcs_merkle_error)?,
-            single_opening_hash_query_count: literal_bcs_opening_hash_query_count(
-                payload_leaf_count,
-            )
-            .map_err(map_literal_bcs_merkle_error)?,
-            standard_tree_internal_node_count: literal_bcs_standard_tree_internal_node_count(
-                payload_leaf_count,
-            )
-            .map_err(map_literal_bcs_merkle_error)?,
-        }))
-    }
-
     fn validate_geometry(self) -> Result<(), RowCodeWhirConstructionPlanError> {
         match self {
             Self::SuppliedCommitment {
-                canonical_message_byte_length,
-                payload_leaf_count,
-                ..
+                payload_leaf_count, ..
             } => {
-                let expected_message_byte_length = payload_leaf_count
-                    .checked_mul(LINEAR_BCS_PROOF_STRING_SYMBOL_BYTE_LENGTH)
-                    .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?;
-                if payload_leaf_count == 0
-                    || canonical_message_byte_length != expected_message_byte_length
-                {
+                if payload_leaf_count == 0 || !payload_leaf_count.is_power_of_two() {
                     return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
                 }
             }
-            Self::CanonicalCompleteMessage {
+            Self::CanonicalCompleteMessageDigest {
                 value_count,
                 canonical_message_byte_length,
-                payload_leaf_count,
             } => {
                 let value_byte_length = PROOF_CHALLENGE_EXTENSION_DEGREE
                     .checked_mul(std::mem::size_of::<u64>())
@@ -168,11 +103,7 @@ impl LinearBcsProverOracleRoot {
                     .checked_mul(value_byte_length)
                     .and_then(|length| length.checked_add(6))
                     .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?;
-                if value_count == 0
-                    || canonical_message_byte_length != expected_message_byte_length
-                    || payload_leaf_count
-                        != canonical_message_byte_length
-                            .div_ceil(LINEAR_BCS_PROOF_STRING_SYMBOL_BYTE_LENGTH)
+                if value_count == 0 || canonical_message_byte_length != expected_message_byte_length
                 {
                     return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
                 }
@@ -180,16 +111,6 @@ impl LinearBcsProverOracleRoot {
             Self::OneEdgeSamplerBlock { .. } => {}
         }
         Ok(())
-    }
-
-    fn root_recomputation_hash_query_count(self) -> Result<u64, RowCodeWhirConstructionPlanError> {
-        match self {
-            Self::CanonicalCompleteMessage { .. } => self
-                .merkle_geometry()?
-                .map(|geometry| geometry.commitment_hash_query_count)
-                .ok_or(RowCodeWhirConstructionPlanError::InvalidVariantGeometry),
-            Self::SuppliedCommitment { .. } | Self::OneEdgeSamplerBlock { .. } => Ok(0),
-        }
     }
 }
 
@@ -216,30 +137,9 @@ pub(in crate::bgv::proof_suite) struct LinearBcsRoundRangePlan {
     pub(in crate::bgv::proof_suite) prover_oracle_root: LinearBcsProverOracleRoot,
 }
 
-impl LinearBcsRoundRangePlan {
-    pub(in crate::bgv::proof_suite) fn merkle_geometry(
-        self,
-    ) -> Result<Option<LinearBcsMerkleGeometry>, RowCodeWhirConstructionPlanError> {
-        self.prover_oracle_root.merkle_geometry()
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::bgv::proof_suite) struct LinearBcsFinalQueryPlan {
     pub(in crate::bgv::proof_suite) verifier_message_ordinal: u64,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::bgv::proof_suite) struct LinearBcsHashQueryAccounting {
-    pub(in crate::bgv::proof_suite) round_count: u64,
-    pub(in crate::bgv::proof_suite) chain_hash_query_count: u64,
-    pub(in crate::bgv::proof_suite) prover_commitment_hash_query_count: u64,
-    pub(in crate::bgv::proof_suite) canonical_message_recomputation_hash_query_count: u64,
-    pub(in crate::bgv::proof_suite) standard_tree_internal_node_count: u64,
-    pub(in crate::bgv::proof_suite) maximum_single_opening_hash_query_count: u64,
-    pub(in crate::bgv::proof_suite) supplied_commitment_opening_count: u64,
-    pub(in crate::bgv::proof_suite) supplied_commitment_independent_opening_hash_query_count_ceiling:
-        u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -292,7 +192,7 @@ impl LinearBcsTranscriptPlan {
             let hashes_per_entry = match range.prover_oracle_root {
                 LinearBcsProverOracleRoot::OneEdgeSamplerBlock { .. } => 1_u64,
                 LinearBcsProverOracleRoot::SuppliedCommitment { .. }
-                | LinearBcsProverOracleRoot::CanonicalCompleteMessage { .. } => 2_u64,
+                | LinearBcsProverOracleRoot::CanonicalCompleteMessageDigest { .. } => 2_u64,
             };
             let range_hashes = hashes_per_entry
                 .checked_mul(range.round_count)
@@ -303,63 +203,20 @@ impl LinearBcsTranscriptPlan {
         })
     }
 
-    pub(in crate::bgv::proof_suite) fn canonical_message_root_hash_query_count(
+    pub(in crate::bgv::proof_suite) fn complete_message_digest_hash_query_count(
         &self,
     ) -> Result<u64, RowCodeWhirConstructionPlanError> {
         self.round_ranges.iter().try_fold(0_u64, |total, range| {
-            let per_round = range
-                .prover_oracle_root
-                .root_recomputation_hash_query_count()?;
-            let range_total = per_round
-                .checked_mul(range.round_count)
-                .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?;
-            total
-                .checked_add(range_total)
-                .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)
-        })
-    }
-
-    pub(in crate::bgv::proof_suite) fn prover_commitment_hash_query_count(
-        &self,
-    ) -> Result<u64, RowCodeWhirConstructionPlanError> {
-        self.round_ranges.iter().try_fold(0_u64, |total, range| {
-            let per_round = range
-                .merkle_geometry()?
-                .map_or(0, |geometry| geometry.commitment_hash_query_count);
-            let range_total = per_round
-                .checked_mul(range.round_count)
-                .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?;
-            total
-                .checked_add(range_total)
-                .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)
-        })
-    }
-
-    pub(in crate::bgv::proof_suite) fn standard_tree_internal_node_count(
-        &self,
-    ) -> Result<u64, RowCodeWhirConstructionPlanError> {
-        self.round_ranges.iter().try_fold(0_u64, |total, range| {
-            let per_round = range
-                .merkle_geometry()?
-                .map_or(0, |geometry| geometry.standard_tree_internal_node_count);
-            let range_total = per_round
-                .checked_mul(range.round_count)
-                .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?;
-            total
-                .checked_add(range_total)
-                .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)
-        })
-    }
-
-    pub(in crate::bgv::proof_suite) fn maximum_single_opening_hash_query_count(
-        &self,
-    ) -> Result<u64, RowCodeWhirConstructionPlanError> {
-        self.round_ranges.iter().try_fold(0_u64, |maximum, range| {
-            Ok(maximum.max(
-                range
-                    .merkle_geometry()?
-                    .map_or(0, |geometry| geometry.single_opening_hash_query_count),
-            ))
+            if matches!(
+                range.prover_oracle_root,
+                LinearBcsProverOracleRoot::CanonicalCompleteMessageDigest { .. }
+            ) {
+                total
+                    .checked_add(range.round_count)
+                    .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)
+            } else {
+                Ok(total)
+            }
         })
     }
 
@@ -376,47 +233,6 @@ impl LinearBcsTranscriptPlan {
                     )
                     .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)
             })
-    }
-
-    /// Ceiling for verifying every selected symbol with an independent path.
-    /// A canonical compact multiproof may share nodes and reduce this number;
-    /// it may never exceed it or alter accepted query order.
-    pub(in crate::bgv::proof_suite) fn supplied_commitment_independent_opening_hash_query_count_ceiling(
-        &self,
-    ) -> Result<u64, RowCodeWhirConstructionPlanError> {
-        self.supplied_commitment_openings
-            .iter()
-            .try_fold(0_u64, |total, opening| {
-                let per_opening = literal_bcs_opening_hash_query_count(opening.payload_leaf_count)
-                    .map_err(map_literal_bcs_merkle_error)?;
-                let opening_total = per_opening
-                    .checked_mul(
-                        u64::try_from(opening.query_count)
-                            .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?,
-                    )
-                    .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?;
-                total
-                    .checked_add(opening_total)
-                    .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)
-            })
-    }
-
-    pub(in crate::bgv::proof_suite) fn hash_query_accounting(
-        &self,
-    ) -> Result<LinearBcsHashQueryAccounting, RowCodeWhirConstructionPlanError> {
-        Ok(LinearBcsHashQueryAccounting {
-            round_count: self.round_count()?,
-            chain_hash_query_count: self.chain_hash_query_count()?,
-            prover_commitment_hash_query_count: self.prover_commitment_hash_query_count()?,
-            canonical_message_recomputation_hash_query_count: self
-                .canonical_message_root_hash_query_count()?,
-            standard_tree_internal_node_count: self.standard_tree_internal_node_count()?,
-            maximum_single_opening_hash_query_count: self
-                .maximum_single_opening_hash_query_count()?,
-            supplied_commitment_opening_count: self.supplied_commitment_opening_count()?,
-            supplied_commitment_independent_opening_hash_query_count_ceiling: self
-                .supplied_commitment_independent_opening_hash_query_count_ceiling()?,
-        })
     }
 
     pub(in crate::bgv::proof_suite) fn one_edge_sampler_block_count(
@@ -443,7 +259,6 @@ impl LinearBcsTranscriptPlan {
         let mut encoder = RowCodeWhirConstructionPlanIdentityEncoder::default();
         encoder.push_u16(LINEAR_BCS_TRANSCRIPT_PLAN_ENCODING_VERSION);
         encoder.push_usize(LINEAR_BCS_ORACLE_VALUE_BYTE_LENGTH)?;
-        encoder.push_usize(LINEAR_BCS_PROOF_STRING_SYMBOL_BYTE_LENGTH)?;
         encoder.push_u16(match self.challenge_selection_rule {
             LinearBcsChallengeSelectionRule::FirstAcceptedInCompleteFixedBlockRange => 1,
         });
@@ -1039,9 +854,8 @@ fn validate_supplied_commitment_root_owner_bijection(
             LinearBcsProverOracleRoot::SuppliedCommitment {
                 role,
                 payload_leaf_count,
-                ..
             } => Some((range.round_count, role, payload_leaf_count)),
-            LinearBcsProverOracleRoot::CanonicalCompleteMessage { .. }
+            LinearBcsProverOracleRoot::CanonicalCompleteMessageDigest { .. }
             | LinearBcsProverOracleRoot::OneEdgeSamplerBlock { .. } => None,
         })
         .collect::<Vec<_>>();
@@ -1110,13 +924,8 @@ fn checked_supplied_commitment_root(
     if payload_leaf_count == 0 || !payload_leaf_count.is_power_of_two() {
         return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
     }
-    let canonical_message_byte_length = payload_leaf_count
-        .checked_mul(LINEAR_BCS_PROOF_STRING_SYMBOL_BYTE_LENGTH)
-        .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?;
-    literal_bcs_subtree_leaf_count(payload_leaf_count).map_err(map_literal_bcs_merkle_error)?;
     Ok(LinearBcsProverOracleRoot::SuppliedCommitment {
         role,
-        canonical_message_byte_length,
         payload_leaf_count,
     })
 }
@@ -1134,13 +943,9 @@ fn canonical_extension_message_root(
         .checked_mul(value_byte_length)
         .and_then(|length| length.checked_add(6))
         .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?;
-    let payload_leaf_count =
-        canonical_message_byte_length.div_ceil(LINEAR_BCS_PROOF_STRING_SYMBOL_BYTE_LENGTH);
-    literal_bcs_subtree_leaf_count(payload_leaf_count).map_err(map_literal_bcs_merkle_error)?;
-    Ok(LinearBcsProverOracleRoot::CanonicalCompleteMessage {
+    Ok(LinearBcsProverOracleRoot::CanonicalCompleteMessageDigest {
         value_count,
         canonical_message_byte_length,
-        payload_leaf_count,
     })
 }
 
@@ -1216,23 +1021,9 @@ fn validate_linear_bcs_transcript_plan(
                 && block_ordinal == root_first_block_ordinal => {}
             (
                 LinearBcsVerifierMessageRole::UnusedRoundMessageBeforeProverOracle { .. },
-                LinearBcsProverOracleRoot::SuppliedCommitment { .. }
-                | LinearBcsProverOracleRoot::CanonicalCompleteMessage { .. },
-            ) if range.round_count == 1 => {
-                let geometry = range
-                    .merkle_geometry()?
-                    .ok_or(RowCodeWhirConstructionPlanError::InvalidVariantGeometry)?;
-                if geometry.canonical_message_byte_length == 0
-                    || geometry.payload_leaf_count == 0
-                    || geometry.committed_tree_leaf_count
-                        != geometry
-                            .subtree_leaf_count
-                            .checked_mul(2)
-                            .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?
-                {
-                    return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
-                }
-            }
+                root @ (LinearBcsProverOracleRoot::SuppliedCommitment { .. }
+                | LinearBcsProverOracleRoot::CanonicalCompleteMessageDigest { .. }),
+            ) if range.round_count == 1 => root.validate_geometry()?,
             _ => return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry),
         }
         next_round_ordinal = next_round_ordinal
@@ -1287,23 +1078,19 @@ fn encode_prover_oracle_root(
     match root {
         LinearBcsProverOracleRoot::SuppliedCommitment {
             role,
-            canonical_message_byte_length,
             payload_leaf_count,
         } => {
             encoder.push_u16(1);
             encode_committed_oracle_role(encoder, role);
-            encoder.push_usize(canonical_message_byte_length)?;
             encoder.push_usize(payload_leaf_count)?;
         }
-        LinearBcsProverOracleRoot::CanonicalCompleteMessage {
+        LinearBcsProverOracleRoot::CanonicalCompleteMessageDigest {
             value_count,
             canonical_message_byte_length,
-            payload_leaf_count,
         } => {
             encoder.push_u16(2);
             encoder.push_usize(value_count)?;
             encoder.push_usize(canonical_message_byte_length)?;
-            encoder.push_usize(payload_leaf_count)?;
         }
         LinearBcsProverOracleRoot::OneEdgeSamplerBlock {
             source_operation_ordinal,
@@ -1334,21 +1121,5 @@ fn encode_committed_oracle_role(
         }
         LinearBcsCommittedOracleRole::BaseFreshSource => encoder.push_u16(5),
         LinearBcsCommittedOracleRole::BaseFreshPad => encoder.push_u16(6),
-    }
-}
-
-fn map_literal_bcs_merkle_error(error: LiteralBcsMerkleError) -> RowCodeWhirConstructionPlanError {
-    match error {
-        LiteralBcsMerkleError::CountOverflow => RowCodeWhirConstructionPlanError::CountOverflow,
-        LiteralBcsMerkleError::EmptyPayload
-        | LiteralBcsMerkleError::InvalidMessageByteLength
-        | LiteralBcsMerkleError::InvalidLeafCount
-        | LiteralBcsMerkleError::NonCanonicalPayloadPadding
-        | LiteralBcsMerkleError::InvalidPayloadLeafOrdinal
-        | LiteralBcsMerkleError::InvalidAuthenticationPathLength
-        | LiteralBcsMerkleError::WrongContextSubtree
-        | LiteralBcsMerkleError::WrongRoot => {
-            RowCodeWhirConstructionPlanError::InvalidVariantGeometry
-        }
     }
 }

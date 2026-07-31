@@ -65,7 +65,12 @@ Works today:
   into its exact initial, ordered-column, and final SHAKE calls. Its semantic
   predecessor closure derives `1,232,362` verifier hash queries and `1,229,573`
   accepting equations, and the construction and hash-profile identities bind
-  the 512-bit state, digest width, and three canonical frame tags.
+  the 512-bit state, digest width, and three canonical frame tags. Its
+  original-BCS whole-state table also binds every production transcript
+  operation and every response-root equation. The exact `2,059` response
+  digests comprise `1,049` complete prover messages, `1,009` deterministic
+  schedule or opening-point observations, and one terminal canonical proof
+  stream; hostile width, domain, slot, and message-shape mutations refuse.
 - Secret-bearing phase-row padding now uses three KMAC-derived 512-bit seeds.
   The selected same-secret certificate inventories 62 framed SHAKE streams,
   130,023,424 accepted field outputs, seed collision, bounded rejection

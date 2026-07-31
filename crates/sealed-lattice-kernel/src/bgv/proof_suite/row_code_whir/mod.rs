@@ -21,8 +21,6 @@ pub(super) mod construction_plan;
 mod exact_same_secret;
 mod generation_state;
 mod hiding_whir;
-#[cfg(test)]
-mod literal_bcs_merkle;
 mod opening_schedule;
 mod oracle_geometry;
 mod quotient_transform_storage;
