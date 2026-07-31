@@ -339,8 +339,8 @@ pub(in crate::bgv) use vss_share_linkage_runtime::{
 };
 pub(crate) use zero_knowledge::validate_zero_knowledge_mask_image;
 #[cfg(test)]
-pub(crate) use zero_knowledge::{
-    ConstructionMaskingCertificate, checked_zero_knowledge_mask_image,
+pub(in crate::bgv::proof_suite) use zero_knowledge::{
+    ConstructionMaskingCertificate, checked_zero_knowledge_mask_image_for_parameters,
 };
 
 #[cfg(test)]

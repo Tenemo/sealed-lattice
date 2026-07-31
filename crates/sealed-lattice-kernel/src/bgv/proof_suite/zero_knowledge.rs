@@ -684,33 +684,45 @@ fn row_pad_coefficient_count(
     variant: &RelationPlanVariant,
     parameters: RowCodeWhirSelectedParameters,
 ) -> Result<u64, RelationPlanError> {
-    let inverse_rate_factor = 1_usize
+    let witness_value_count = parameters
+        .logical_polynomial_coefficient_count
+        .checked_mul(parameters.logical_polynomials_per_physical_row)
+        .ok_or(RelationPlanError::CountOverflow)?;
+    let expected_evaluation_domain_size = 1_u64
         .checked_shl(
-            u32::try_from(parameters.row_code_log_inverse_rate)
+            u32::try_from(parameters.polynomial_commitment_variable_count)
                 .map_err(|_| RelationPlanError::CountOverflow)?,
         )
         .ok_or(RelationPlanError::CountOverflow)?;
-    let row_encoding_expansion_factor = parameters
-        .logical_polynomials_per_physical_row
-        .checked_mul(2)
-        .and_then(|factor| factor.checked_mul(inverse_rate_factor))
-        .ok_or(RelationPlanError::CountOverflow)?;
-    let evaluation_domain_size = usize::try_from(variant.evaluation_domain_size())
-        .map_err(|_| RelationPlanError::CountOverflow)?;
-    let logical_polynomial_coefficient_count = evaluation_domain_size
-        .checked_div(row_encoding_expansion_factor)
-        .filter(|coefficient_count| {
-            *coefficient_count > 0
-                && coefficient_count.is_power_of_two()
-                && coefficient_count
-                    .checked_mul(row_encoding_expansion_factor)
-                    .is_some_and(|encoded_count| encoded_count == evaluation_domain_size)
-        })
-        .ok_or(RelationPlanError::InvalidMaskGrammar)?;
-    let row_pad_coefficient_count = logical_polynomial_coefficient_count
-        .checked_mul(parameters.logical_polynomials_per_physical_row)
-        .ok_or(RelationPlanError::CountOverflow)?;
-    u64::try_from(row_pad_coefficient_count).map_err(|_| RelationPlanError::CountOverflow)
+    let expected_opening_degree_bound =
+        u64::try_from(witness_value_count).map_err(|_| RelationPlanError::CountOverflow)?;
+    if parameters.logical_polynomial_coefficient_count == 0
+        || !parameters
+            .logical_polynomial_coefficient_count
+            .is_power_of_two()
+        || parameters.logical_polynomials_per_physical_row == 0
+        || !parameters
+            .logical_polynomials_per_physical_row
+            .is_power_of_two()
+        || parameters.physical_row_witness_variable_count
+            != usize::try_from(witness_value_count.ilog2())
+                .map_err(|_| RelationPlanError::CountOverflow)?
+        || parameters.table_variable_count
+            != parameters
+                .physical_row_witness_variable_count
+                .checked_add(1)
+                .ok_or(RelationPlanError::CountOverflow)?
+        || parameters.polynomial_commitment_variable_count
+            != parameters
+                .table_variable_count
+                .checked_add(parameters.row_code_log_inverse_rate)
+                .ok_or(RelationPlanError::CountOverflow)?
+        || variant.evaluation_domain_size() != expected_evaluation_domain_size
+        || variant.opening_degree_bound_exclusive() != expected_opening_degree_bound
+    {
+        return Err(RelationPlanError::InvalidMaskGrammar);
+    }
+    Ok(expected_opening_degree_bound)
 }
 
 fn quotient_mask_dependency_matrix(
@@ -785,9 +797,9 @@ impl ConstructionMaskingCorrespondence {
     fn derive(
         variant: &RelationPlanVariant,
         context: &RelationPlanCheckContext,
+        parameters: RowCodeWhirSelectedParameters,
     ) -> Result<Self, RelationPlanError> {
         let phase_by_column = construction_phase_by_prover_column(variant)?;
-        let parameters = RowCodeWhirSelectedParameters::selected();
         let mut source_descriptors = BTreeMap::new();
         let mut trace_source_by_column = BTreeMap::new();
         let mut telescoping_source_by_component = BTreeMap::new();
@@ -1515,15 +1527,36 @@ impl ConstructionMaskingCertificate {
 /// derived from the already masked openings; the linked aggregate-wide
 /// certificate owns every later fold, query, and terminal view. This does not
 /// claim family zero knowledge or cross-proof composition.
-pub(crate) fn checked_zero_knowledge_mask_image(
+fn masking_parameters_for_relation_validation(
     variant: &RelationPlanVariant,
     context: &RelationPlanCheckContext,
+) -> Result<RowCodeWhirSelectedParameters, RelationPlanError> {
+    if let Ok(parameters) = RowCodeWhirSelectedParameters::for_selected_variant_geometry(variant) {
+        return Ok(parameters);
+    }
+    #[cfg(test)]
+    {
+        RowCodeWhirSelectedParameters::for_checked_fixture(variant, context)
+            .map_err(|_| RelationPlanError::InvalidMaskGrammar)
+    }
+    #[cfg(not(test))]
+    {
+        let _ = context;
+        Err(RelationPlanError::InvalidMaskGrammar)
+    }
+}
+
+fn checked_zero_knowledge_mask_image_with_validated_parameters(
+    variant: &RelationPlanVariant,
+    context: &RelationPlanCheckContext,
+    parameters: RowCodeWhirSelectedParameters,
 ) -> Result<ConstructionMaskingCertificate, RelationPlanError> {
     if variant.proof_privacy_mode() == ProofPrivacyMode::PublicOnly {
         return Ok(ConstructionMaskingCertificate::public_only());
     }
 
-    let construction_correspondence = ConstructionMaskingCorrespondence::derive(variant, context)?;
+    let construction_correspondence =
+        ConstructionMaskingCorrespondence::derive(variant, context, parameters)?;
 
     let phase_column_query_coordinate_count =
         u64::from(context.phase_column_query_coordinate_count);
@@ -1716,6 +1749,28 @@ pub(crate) fn checked_zero_knowledge_mask_image(
     Ok(certificate)
 }
 
+fn checked_zero_knowledge_mask_image(
+    variant: &RelationPlanVariant,
+    context: &RelationPlanCheckContext,
+) -> Result<ConstructionMaskingCertificate, RelationPlanError> {
+    let parameters = masking_parameters_for_relation_validation(variant, context)?;
+    checked_zero_knowledge_mask_image_with_validated_parameters(variant, context, parameters)
+}
+
+#[cfg(test)]
+pub(in crate::bgv::proof_suite) fn checked_zero_knowledge_mask_image_for_parameters(
+    variant: &RelationPlanVariant,
+    context: &RelationPlanCheckContext,
+    parameters: RowCodeWhirSelectedParameters,
+) -> Result<ConstructionMaskingCertificate, RelationPlanError> {
+    let expected_parameters = RowCodeWhirSelectedParameters::for_selected_variant_geometry(variant)
+        .map_err(|_| RelationPlanError::InvalidMaskGrammar)?;
+    if parameters != expected_parameters {
+        return Err(RelationPlanError::InvalidMaskGrammar);
+    }
+    checked_zero_knowledge_mask_image_with_validated_parameters(variant, context, parameters)
+}
+
 pub(crate) fn validate_zero_knowledge_mask_image(
     variant: &RelationPlanVariant,
     context: &RelationPlanCheckContext,
@@ -1727,7 +1782,8 @@ pub(crate) fn validate_zero_knowledge_mask_image(
 mod tests {
     use super::super::relation_plan::BoundTreeRootUse;
     use super::super::{
-        compile_same_secret_relation_plan, selected_relation_plan_check_context,
+        ValidatedRelationPlanArtifact, compile_same_secret_relation_plan,
+        selected_ballot_validity_relation_compilation, selected_relation_plan_check_context,
         selected_same_secret_relation_plan_input,
     };
     use super::*;
@@ -1888,8 +1944,11 @@ mod tests {
         assert!(certificate.aggregate_claims_factor_through_masked_openings());
         assert!(certificate.aggregate_wide_views_delegate_to_precommitted_pad());
 
-        let correspondence = ConstructionMaskingCorrespondence::derive(variant, &context)
-            .expect("selected construction masking correspondence");
+        let parameters = RowCodeWhirSelectedParameters::for_selected_variant_geometry(variant)
+            .expect("selected row-code parameters derive");
+        let correspondence =
+            ConstructionMaskingCorrespondence::derive(variant, &context, parameters)
+                .expect("selected construction masking correspondence");
         let expected = expected_construction_secret_view_identifiers(variant, &context)
             .expect("independent selected view census");
         assert_eq!(correspondence.views.len(), expected.len());
@@ -1903,6 +1962,44 @@ mod tests {
                 context.base_field_modulus,
             ),
             Err(RelationPlanError::InvalidMaskGrammar),
+        );
+    }
+
+    #[test]
+    fn compact_masking_correspondence_uses_the_variant_owned_row_capacity() {
+        let compilation = selected_ballot_validity_relation_compilation()
+            .expect("the selected ballot relation compiles");
+        let compiled_plan = compilation.relation_plan().clone();
+        let context = selected_relation_plan_check_context(
+            compiled_plan.application_statement_schema_identifier(),
+        )
+        .expect("the selected ballot context exists");
+        let artifact =
+            ValidatedRelationPlanArtifact::from_owned_compiled_plan(compiled_plan, &context)
+                .expect("the selected ballot relation validates");
+        let variant = artifact
+            .compiled_plan()
+            .select_variant(None, None)
+            .expect("the selected ballot variant exists");
+        let parameters = RowCodeWhirSelectedParameters::for_selected_variant_geometry(variant)
+            .expect("the selected ballot row geometry derives");
+        let certificate =
+            checked_zero_knowledge_mask_image_for_parameters(variant, &context, parameters)
+                .expect("the compact masking correspondence derives");
+
+        assert_eq!(parameters.logical_polynomials_per_physical_row, 8);
+        assert_eq!(parameters.row_code_log_inverse_rate, 5);
+        assert_eq!(
+            certificate.row_pad_source_dimension,
+            variant.opening_degree_bound_exclusive(),
+        );
+
+        let mut wrong_width = parameters;
+        wrong_width.logical_polynomials_per_physical_row = 64;
+        assert_eq!(
+            checked_zero_knowledge_mask_image_for_parameters(variant, &context, wrong_width),
+            Err(RelationPlanError::InvalidMaskGrammar),
+            "a width-64 global default cannot certify the compact construction",
         );
     }
 

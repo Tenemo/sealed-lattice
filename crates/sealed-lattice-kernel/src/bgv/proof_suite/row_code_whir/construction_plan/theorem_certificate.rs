@@ -33,7 +33,7 @@ use crate::bgv::proof_suite::row_code_whir::{
 };
 use crate::bgv::proof_suite::{
     ConstructionMaskingCertificate, PROOF_CHALLENGE_EXTENSION_DEGREE,
-    ValidatedRelationPlanArtifact, checked_zero_knowledge_mask_image,
+    ValidatedRelationPlanArtifact, checked_zero_knowledge_mask_image_for_parameters,
     compile_same_secret_relation_plan, selected_relation_plans,
     selected_same_secret_relation_plan_input,
 };
@@ -2251,13 +2251,17 @@ fn checked_row_code_whir_production_geometry_certificate_with_masking(
             WhirTheoremCertificateError::IncompleteRelationSemanticCorrespondence,
         ));
     }
-    let construction_masking =
-        checked_zero_knowledge_mask_image(relation_variant, relation_context).map_err(|_| {
-            contextualize(
-                ProductionGeometryCertificateStage::MaskingCorrespondence,
-                WhirTheoremCertificateError::IncompleteMaskingCorrespondence,
-            )
-        })?;
+    let construction_masking = checked_zero_knowledge_mask_image_for_parameters(
+        relation_variant,
+        relation_context,
+        parameters,
+    )
+    .map_err(|_| {
+        contextualize(
+            ProductionGeometryCertificateStage::MaskingCorrespondence,
+            WhirTheoremCertificateError::IncompleteMaskingCorrespondence,
+        )
+    })?;
     if !construction_masking.is_complete()
         || !aggregate_wide_masking.is_complete()
         || !construction_masking.aggregate_claims_factor_through_masked_openings()
@@ -2603,9 +2607,12 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
     {
         return Err(WhirTheoremCertificateError::IncompletePolynomialExtractorCorrespondence);
     }
-    let construction_masking =
-        checked_zero_knowledge_mask_image(relation_variant, &relation_context)
-            .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+    let construction_masking = checked_zero_knowledge_mask_image_for_parameters(
+        relation_variant,
+        &relation_context,
+        parameters,
+    )
+    .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
     let aggregate_wide_masking = AggregateWideMaskingCertificate::derive(&hiding_configuration)
         .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
     if !construction_masking.is_complete()

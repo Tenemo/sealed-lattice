@@ -230,7 +230,7 @@ impl RowCodeWhirSelectedParameters {
         }
     }
 
-    fn for_selected_variant_geometry(
+    pub(in crate::bgv::proof_suite) fn for_selected_variant_geometry(
         variant: &RelationPlanVariant,
     ) -> Result<Self, RowCodeWhirConstructionPlanError> {
         let logical_polynomial_coefficient_count =
@@ -298,7 +298,7 @@ impl RowCodeWhirSelectedParameters {
     }
 
     #[cfg(test)]
-    fn for_checked_fixture(
+    pub(in crate::bgv::proof_suite) fn for_checked_fixture(
         variant: &RelationPlanVariant,
         context: &RelationPlanCheckContext,
     ) -> Result<Self, RowCodeWhirConstructionPlanError> {
