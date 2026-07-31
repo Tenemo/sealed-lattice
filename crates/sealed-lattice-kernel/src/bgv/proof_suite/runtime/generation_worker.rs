@@ -46,7 +46,7 @@ const COMMON_PROOF_GENERATION_CURSOR_MANIFEST_VERSION: u16 = 1;
 const COMMON_PROOF_GENERATION_CURSOR_MANIFEST_TRANSCRIPT_PRESENT_FLAG: u16 = 1;
 const COMMON_PROOF_GENERATION_CURSOR_MANIFEST_PREFIX_BYTE_LENGTH: usize =
     8 + 2 + 2 + 4 + 4 + 4 + HASH_BYTE_LENGTH;
-const MAXIMUM_COMMON_PROOF_GENERATION_CURSOR_MANIFEST_BYTE_LENGTH: usize = 1_048_576;
+pub(crate) const MAXIMUM_COMMON_PROOF_GENERATION_CURSOR_MANIFEST_BYTE_LENGTH: usize = 1_048_576;
 const MAXIMUM_ROW_CODE_WHIR_TRANSCRIPT_CHECKPOINT_CURSOR_BYTE_LENGTH: usize = 16 * 1_024;
 
 struct DecodedCommonProofGenerationCursorManifest<'bytes> {
@@ -1230,6 +1230,11 @@ impl AuthenticatedCommonProofGenerationCheckpoint {
 
     pub(crate) const fn checkpoint_schedule_digest(&self) -> Hash512 {
         Hash512::from_bytes(self.state.checkpoint_schedule_digest)
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn safe_boundary_ordinal(&self) -> u32 {
+        self.state.safe_boundary_ordinal
     }
 
     pub(crate) const fn continuation_source(&self) -> AuthenticatedCheckpointContinuationSource {

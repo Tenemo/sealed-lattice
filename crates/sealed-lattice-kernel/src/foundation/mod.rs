@@ -169,8 +169,6 @@ pub use private_randomness::{
     SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_SCHEMA_IDENTIFIER,
     SetupStructuredCommitmentOpeningContext,
 };
-#[cfg(all(test, not(target_arch = "wasm32")))]
-pub(crate) use private_randomness_runtime::prepare_exact_same_secret_evidence_attempt;
 pub(crate) use private_randomness_runtime::{
     ACTION_RANDOMNESS_RUNTIME_RESOURCE_LIMIT, ACTION_RANDOMNESS_RUNTIME_STALE_HANDLE,
     AuthenticatedCheckpointContinuationSource, PreparedActionProofAttemptSource,
@@ -180,6 +178,11 @@ pub(crate) use private_randomness_runtime::{
     resolve_prepared_public_only_proof_attempt_source,
     resolve_setup_action_randomness_reservation_source,
     retain_action_private_randomness_for_exact_family, run_action_randomness_command,
+};
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) use private_randomness_runtime::{
+    prepare_exact_same_secret_evidence_attempt,
+    prepare_exact_same_secret_evidence_attempt_from_authenticated_checkpoint,
 };
 pub use proof_application::{
     PROOF_APPLICATION_BINDING_SCHEMA_IDENTIFIER, PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER,

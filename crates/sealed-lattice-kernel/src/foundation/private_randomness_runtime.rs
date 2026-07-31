@@ -173,9 +173,57 @@ pub(crate) fn prepare_exact_same_secret_evidence_attempt(
     checkpoint_lineage_identifier: [u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
     checkpoint_schedule_digest: Hash512,
 ) -> Result<PreparedActionProofAttemptSource, super::FoundationSchemaError> {
+    prepare_exact_same_secret_evidence_attempt_with_continuation(
+        action_private_randomness,
+        application_slot,
+        application_statement_hash,
+        AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
+            checkpoint_lineage_identifier,
+            checkpoint_schedule_digest,
+        ),
+    )
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) fn prepare_exact_same_secret_evidence_attempt_from_authenticated_checkpoint(
+    action_private_randomness: &ActionPrivateRandomness,
+    application_slot: ProofApplicationSlot,
+    application_statement_hash: Hash512,
+    checkpoint_continuation: AuthenticatedCheckpointContinuationSource,
+) -> Result<PreparedActionProofAttemptSource, super::FoundationSchemaError> {
+    if checkpoint_continuation.next_event_index() == 0
+        || checkpoint_continuation
+            .cumulative_event_digest()
+            .into_bytes()
+            == [0_u8; HASH_BYTE_LENGTH]
+    {
+        return Err(super::FoundationSchemaError::new(
+            RefusalReason::OutsideSupportedProfile,
+            "the exact same-secret evidence checkpoint is not a resumed boundary",
+        ));
+    }
+    prepare_exact_same_secret_evidence_attempt_with_continuation(
+        action_private_randomness,
+        application_slot,
+        application_statement_hash,
+        checkpoint_continuation,
+    )
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+fn prepare_exact_same_secret_evidence_attempt_with_continuation(
+    action_private_randomness: &ActionPrivateRandomness,
+    application_slot: ProofApplicationSlot,
+    application_statement_hash: Hash512,
+    checkpoint_continuation: AuthenticatedCheckpointContinuationSource,
+) -> Result<PreparedActionProofAttemptSource, super::FoundationSchemaError> {
     if application_statement_hash.into_bytes() == [0_u8; HASH_BYTE_LENGTH]
-        || checkpoint_lineage_identifier == [0_u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH]
-        || checkpoint_schedule_digest.into_bytes() == [0_u8; HASH_BYTE_LENGTH]
+        || checkpoint_continuation.checkpoint_lineage_identifier()
+            == [0_u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH]
+        || checkpoint_continuation
+            .checkpoint_schedule_digest()
+            .into_bytes()
+            == [0_u8; HASH_BYTE_LENGTH]
     {
         return Err(super::FoundationSchemaError::new(
             RefusalReason::OutsideSupportedProfile,
@@ -206,11 +254,7 @@ pub(crate) fn prepare_exact_same_secret_evidence_attempt(
         application_statement_schema_identifier: application_slot
             .application_statement_schema_identifier(),
         application_statement_hash,
-        checkpoint_continuation:
-            AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
-                checkpoint_lineage_identifier,
-                checkpoint_schedule_digest,
-            ),
+        checkpoint_continuation,
     })
 }
 
@@ -1274,6 +1318,80 @@ mod tests {
             ParticipantIdentity::from_bytes([0x44; HASH_BYTE_LENGTH]),
         ))
         .expect("fixed action randomness derives")
+    }
+
+    #[test]
+    fn exact_evidence_resume_requires_a_bound_non_genesis_checkpoint() {
+        let action_randomness = fixed_action_randomness();
+        let application_slot = ProofApplicationSlot::new(
+            Hash512::from_bytes([0x11; HASH_BYTE_LENGTH]),
+            Hash512::from_bytes([0x22; HASH_BYTE_LENGTH]),
+            Hash512::from_bytes([0x33; HASH_BYTE_LENGTH]),
+            0x1211,
+            Some(2),
+            None,
+            None,
+        )
+        .expect("persistent proof slot is valid");
+        let application_statement_hash = Hash512::from_bytes([0x66; HASH_BYTE_LENGTH]);
+        let checkpoint_lineage_identifier = [0x77; ATTEMPT_IDENTIFIER_BYTE_LENGTH];
+        let checkpoint_schedule_digest = Hash512::from_bytes([0x88; HASH_BYTE_LENGTH]);
+        let resumed_checkpoint =
+            AuthenticatedCheckpointContinuationSource::from_authenticated_common_proof_checkpoint(
+                checkpoint_lineage_identifier,
+                checkpoint_schedule_digest,
+                3,
+                Hash512::from_bytes([0x99; HASH_BYTE_LENGTH]),
+            );
+
+        let resumed = prepare_exact_same_secret_evidence_attempt_from_authenticated_checkpoint(
+            &action_randomness,
+            application_slot,
+            application_statement_hash,
+            resumed_checkpoint,
+        )
+        .expect("authenticated non-genesis checkpoint prepares");
+        assert_eq!(
+            resumed
+                .checkpoint_continuation()
+                .checkpoint_lineage_identifier(),
+            checkpoint_lineage_identifier,
+        );
+        assert_eq!(
+            resumed
+                .checkpoint_continuation()
+                .checkpoint_schedule_digest(),
+            checkpoint_schedule_digest,
+        );
+        assert_eq!(resumed.checkpoint_continuation().next_event_index(), 3);
+        assert_eq!(
+            resumed.checkpoint_continuation().cumulative_event_digest(),
+            Hash512::from_bytes([0x99; HASH_BYTE_LENGTH]),
+        );
+
+        for invalid_checkpoint in [
+            AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
+                checkpoint_lineage_identifier,
+                checkpoint_schedule_digest,
+            ),
+            AuthenticatedCheckpointContinuationSource::from_authenticated_common_proof_checkpoint(
+                checkpoint_lineage_identifier,
+                checkpoint_schedule_digest,
+                3,
+                Hash512::from_bytes([0_u8; HASH_BYTE_LENGTH]),
+            ),
+        ] {
+            assert!(
+                prepare_exact_same_secret_evidence_attempt_from_authenticated_checkpoint(
+                    &action_randomness,
+                    application_slot,
+                    application_statement_hash,
+                    invalid_checkpoint,
+                )
+                .is_err(),
+                "a genesis or zero-digest checkpoint must refuse",
+            );
+        }
     }
 
     #[test]

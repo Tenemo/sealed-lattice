@@ -61,8 +61,10 @@ use crate::{
         },
     },
     foundation::{
-        PrivateRandomCursor, SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+        AuthenticatedCheckpointContinuationSource, PrivateRandomCursor,
+        SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
         prepare_exact_same_secret_evidence_attempt,
+        prepare_exact_same_secret_evidence_attempt_from_authenticated_checkpoint,
     },
 };
 
@@ -1444,11 +1446,16 @@ fn test_same_secret_prerequisite_from_production_sources(
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
-struct ProductionSameSecretEvidenceSources {
-    sources: PreparedExactSameSecretGenerationSources,
+struct ProductionVssPrerequisiteEvidenceSources {
     authority_handle: SetupGenerationAuthorityHandle,
     action_private_randomness: std::rc::Rc<crate::foundation::ActionPrivateRandomness>,
     verified_public_randomness: VerifiedPublicRandomness,
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+struct ProductionSameSecretEvidenceSources {
+    sources: PreparedExactSameSecretGenerationSources,
+    vss_prerequisite: ProductionVssPrerequisiteEvidenceSources,
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -1457,6 +1464,25 @@ fn release_production_same_secret_authority(
 ) -> Result<(), String> {
     release_setup_generation_authority(authority_handle)
         .map_err(|error| format!("release production setup authority: {error:?}"))
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+fn production_vss_prerequisite_sources() -> Result<ProductionVssPrerequisiteEvidenceSources, String>
+{
+    let authority_population_started_at = std::time::Instant::now();
+    println!("VSS prerequisite phase: populate browser-owned setup authority");
+    let authority =
+        populate_exact_same_secret_evidence_authority(EXACT_SAME_SECRET_EVIDENCE_REVISION)
+            .map_err(|error| format!("populate production setup authority: {error:?}"))?;
+    println!(
+        "VSS prerequisite phase complete: browser-owned setup authority ({:?})",
+        authority_population_started_at.elapsed(),
+    );
+    Ok(ProductionVssPrerequisiteEvidenceSources {
+        authority_handle: authority.authority_handle,
+        action_private_randomness: authority.action_private_randomness,
+        verified_public_randomness: authority.verified_public_randomness,
+    })
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -1533,9 +1559,11 @@ fn production_same_secret_sources() -> Result<ProductionSameSecretEvidenceSource
     match sources {
         Ok(sources) => Ok(ProductionSameSecretEvidenceSources {
             sources,
-            authority_handle: authority.authority_handle,
-            action_private_randomness: authority.action_private_randomness,
-            verified_public_randomness: authority.verified_public_randomness,
+            vss_prerequisite: ProductionVssPrerequisiteEvidenceSources {
+                authority_handle: authority.authority_handle,
+                action_private_randomness: authority.action_private_randomness,
+                verified_public_randomness: authority.verified_public_randomness,
+            },
         }),
         Err(error) => {
             release_production_same_secret_authority(authority.authority_handle)?;
@@ -1546,7 +1574,26 @@ fn production_same_secret_sources() -> Result<ProductionSameSecretEvidenceSource
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 fn prepare_production_vss_prerequisite_generation(
-    evidence_sources: &ProductionSameSecretEvidenceSources,
+    evidence_sources: &ProductionVssPrerequisiteEvidenceSources,
+) -> Result<(PreparedCommonProofGeneration, Vec<u8>), String> {
+    prepare_production_vss_prerequisite_generation_with_continuation(evidence_sources, None)
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+fn prepare_resumed_production_vss_prerequisite_generation(
+    evidence_sources: &ProductionVssPrerequisiteEvidenceSources,
+    checkpoint_continuation: AuthenticatedCheckpointContinuationSource,
+) -> Result<(PreparedCommonProofGeneration, Vec<u8>), String> {
+    prepare_production_vss_prerequisite_generation_with_continuation(
+        evidence_sources,
+        Some(checkpoint_continuation),
+    )
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+fn prepare_production_vss_prerequisite_generation_with_continuation(
+    evidence_sources: &ProductionVssPrerequisiteEvidenceSources,
+    checkpoint_continuation: Option<AuthenticatedCheckpointContinuationSource>,
 ) -> Result<(PreparedCommonProofGeneration, Vec<u8>), String> {
     let preparation_source =
         resolve_setup_generation_vss_preparation_source(&evidence_sources.authority_handle)
@@ -1576,13 +1623,30 @@ fn prepare_production_vss_prerequisite_generation(
         ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
         &canonical_application_statement_bytes,
     ));
-    let prepared_attempt = prepare_exact_same_secret_evidence_attempt(
-        &evidence_sources.action_private_randomness,
-        application_slot,
-        application_statement_hash,
-        VSS_PREREQUISITE_CHECKPOINT_LINEAGE_IDENTIFIER,
-        checkpoint_schedule_digest,
-    )
+    let prepared_attempt = match checkpoint_continuation {
+        None => prepare_exact_same_secret_evidence_attempt(
+            &evidence_sources.action_private_randomness,
+            application_slot,
+            application_statement_hash,
+            VSS_PREREQUISITE_CHECKPOINT_LINEAGE_IDENTIFIER,
+            checkpoint_schedule_digest,
+        ),
+        Some(checkpoint_continuation) => {
+            if checkpoint_continuation.checkpoint_lineage_identifier()
+                != VSS_PREREQUISITE_CHECKPOINT_LINEAGE_IDENTIFIER
+                || checkpoint_continuation.checkpoint_schedule_digest()
+                    != checkpoint_schedule_digest
+            {
+                return Err("the retained VSS checkpoint lineage or schedule is stale".to_owned());
+            }
+            prepare_exact_same_secret_evidence_attempt_from_authenticated_checkpoint(
+                &evidence_sources.action_private_randomness,
+                application_slot,
+                application_statement_hash,
+                checkpoint_continuation,
+            )
+        }
+    }
     .map_err(|error| format!("bind production VSS proof attempt: {error:?}"))?;
     let decoded_statement = crate::bgv::proof_suite::decode_selected_vss_share_linkage_statement(
         &canonical_application_statement_bytes,
@@ -3760,9 +3824,9 @@ mod tests {
     fn heavy_rust_kernel_production_authenticated_same_secret_source() {
         let ProductionSameSecretEvidenceSources {
             mut sources,
-            authority_handle,
-            ..
+            vss_prerequisite,
         } = production_same_secret_sources().expect("production source fixture");
+        let authority_handle = vss_prerequisite.authority_handle;
         let store = ExactPolynomialStore::open().expect("open exact polynomial checkpoint");
         assert_eq!(sources.relation_plan_variant.ordered_columns().len(), 2_930);
         assert_eq!(sources.relation_plan_variant.constraint_count(), 4_046);
@@ -3941,9 +4005,9 @@ mod tests {
     fn heavy_rust_kernel_exact_base_and_auxiliary_phase_commitments() {
         let ProductionSameSecretEvidenceSources {
             mut sources,
-            authority_handle,
-            ..
+            vss_prerequisite,
         } = production_same_secret_sources().expect("production source fixture");
+        let authority_handle = vss_prerequisite.authority_handle;
         let store = ExactPolynomialStore::open().expect("open exact polynomial checkpoint");
         let source_manifest = store
             .read_manifest()
@@ -4161,9 +4225,9 @@ mod tests {
         let started_at = Instant::now();
         let ProductionSameSecretEvidenceSources {
             mut sources,
-            authority_handle,
-            ..
+            vss_prerequisite,
         } = production_same_secret_sources().expect("production source fixture");
+        let authority_handle = vss_prerequisite.authority_handle;
         let store = ExactPolynomialStore::open().expect("open exact polynomial checkpoint");
         let source_manifest = store
             .read_manifest()

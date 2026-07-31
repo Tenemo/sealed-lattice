@@ -2,6 +2,7 @@ use std::{
     collections::BTreeMap,
     fs::{self, File, OpenOptions},
     io::{Read, Seek, SeekFrom, Write},
+    mem::size_of,
     path::{Path, PathBuf},
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
@@ -15,11 +16,13 @@ use super::*;
 use crate::{
     bgv::{
         proof_suite::{
-            CommonProofGenerationSources, CommonProofGenerationWorkerPoll,
-            CommonProofRuntimeLimits, CommonProofRuntimeRegistry,
+            AuthenticatedCommonProofGenerationCheckpoint,
+            COMMON_PROOF_CHECKPOINT_STATE_BYTE_LENGTH, CommonProofGenerationSources,
+            CommonProofGenerationWorkerPoll, CommonProofRuntimeLimits, CommonProofRuntimeRegistry,
             CommonProofVerificationWorkerPoll, ConsumedVerifiedCommonProofCapability,
             MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
-            MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH, ProofExternalMemoryObject,
+            MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+            MAXIMUM_COMMON_PROOF_GENERATION_CURSOR_MANIFEST_BYTE_LENGTH, ProofExternalMemoryObject,
             ProofExternalMemoryProtection, ProofExternalMemoryTransactionOperation,
             ProofExternalMemoryTransactionRequest, RelationProofTreeInput, RelationTreeDescriptor,
             VerifiedCommonProofStatementSource, VerifiedStatementOwnedTree,
@@ -27,7 +30,30 @@ use crate::{
         setup::{SetupKeyRelationProofFamily, VerifiedPublicRandomness},
     },
     foundation::{Hash512, ProofApplicationSlot, StreamDescriptor},
+    hashing::hash_framed_parts_512,
 };
+
+const VSS_PREREQUISITE_CHECKPOINT_DIRECTORY_NAME: &str =
+    "selected-vss-prerequisite-proof-generation-v1";
+const VSS_PREREQUISITE_CHECKPOINT_SEAL_MAGIC: [u8; 8] = *b"SLVSSCP1";
+const VSS_PREREQUISITE_CHECKPOINT_SEAL_VERSION: u16 = 1;
+const VSS_PREREQUISITE_CHECKPOINT_FILE_PREFIX: &str = "checkpoint-";
+const VSS_PREREQUISITE_CHECKPOINT_STATE_SUFFIX: &str = ".state";
+const VSS_PREREQUISITE_CHECKPOINT_CURSOR_SUFFIX: &str = ".cursor";
+const VSS_PREREQUISITE_CHECKPOINT_SEAL_SUFFIX: &str = ".seal";
+const VSS_PREREQUISITE_CHECKPOINT_SEAL_BYTE_LENGTH: usize = VSS_PREREQUISITE_CHECKPOINT_SEAL_MAGIC
+    .len()
+    + size_of::<u16>()
+    + size_of::<u32>()
+    + Hash512::BYTE_LENGTH
+    + 32
+    + Hash512::BYTE_LENGTH
+    + Hash512::BYTE_LENGTH
+    + Hash512::BYTE_LENGTH;
+const VSS_PREREQUISITE_CHECKPOINT_STATE_HASH_DOMAIN: &str =
+    "sealed-lattice/test-evidence/vss-prerequisite-checkpoint-state/v1";
+const VSS_PREREQUISITE_CHECKPOINT_CURSOR_HASH_DOMAIN: &str =
+    "sealed-lattice/test-evidence/vss-prerequisite-checkpoint-cursor/v1";
 
 #[derive(Debug)]
 struct FileBackedObject {
@@ -43,6 +69,259 @@ struct FileBackedExternalMemory {
     next_file_identifier: u64,
     current_declared_byte_length: u64,
     maximum_declared_byte_length: u64,
+}
+
+struct DurableVssPrerequisiteCheckpoint {
+    authenticated: AuthenticatedCommonProofGenerationCheckpoint,
+    boundary_ordinal: u32,
+    state: Vec<u8>,
+    cursor_manifest: Vec<u8>,
+}
+
+struct DurableVssPrerequisiteCheckpointStore {
+    directory: PathBuf,
+    stable_attempt_binding_hash: [u8; Hash512::BYTE_LENGTH],
+    checkpoint_lineage_identifier: [u8; 32],
+}
+
+impl DurableVssPrerequisiteCheckpointStore {
+    fn open(prepared: &PreparedCommonProofGeneration) -> Result<Self, String> {
+        let repository_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .ok_or_else(|| "resolve repository root for VSS checkpoint custody".to_owned())?;
+        let stable_attempt_binding_hash = prepared.runtime_binding_hash();
+        let binding_directory_name = stable_attempt_binding_hash
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let directory = repository_root
+            .join("temp")
+            .join("test-checkpoints")
+            .join(VSS_PREREQUISITE_CHECKPOINT_DIRECTORY_NAME)
+            .join(binding_directory_name);
+        fs::create_dir_all(&directory)
+            .map_err(|error| format!("create VSS checkpoint custody directory: {error}"))?;
+        Ok(Self {
+            directory,
+            stable_attempt_binding_hash,
+            checkpoint_lineage_identifier: prepared.checkpoint_lineage_identifier(),
+        })
+    }
+
+    fn load_latest(&self) -> Result<Option<DurableVssPrerequisiteCheckpoint>, String> {
+        let mut latest_boundary_ordinal = None;
+        for entry in fs::read_dir(&self.directory)
+            .map_err(|error| format!("enumerate retained VSS checkpoints: {error}"))?
+        {
+            let entry =
+                entry.map_err(|error| format!("read retained VSS checkpoint entry: {error}"))?;
+            if !entry
+                .file_type()
+                .map_err(|error| format!("classify retained VSS checkpoint entry: {error}"))?
+                .is_file()
+            {
+                return Err("VSS checkpoint custody contains a non-file entry".to_owned());
+            }
+            let file_name = entry
+                .file_name()
+                .into_string()
+                .map_err(|_| "VSS checkpoint custody contains a non-Unicode filename".to_owned())?;
+            if !file_name.ends_with(VSS_PREREQUISITE_CHECKPOINT_SEAL_SUFFIX) {
+                continue;
+            }
+            let boundary_ordinal = parse_vss_prerequisite_checkpoint_boundary(&file_name)
+                .ok_or_else(|| {
+                    format!("VSS checkpoint custody contains malformed seal {file_name}")
+                })?;
+            latest_boundary_ordinal = Some(
+                latest_boundary_ordinal.map_or(boundary_ordinal, |current: u32| {
+                    current.max(boundary_ordinal)
+                }),
+            );
+        }
+        latest_boundary_ordinal
+            .map(|boundary_ordinal| self.load(boundary_ordinal))
+            .transpose()
+    }
+
+    fn load(&self, boundary_ordinal: u32) -> Result<DurableVssPrerequisiteCheckpoint, String> {
+        let state = read_exact_bounded_file(
+            &self.checkpoint_path(boundary_ordinal, VSS_PREREQUISITE_CHECKPOINT_STATE_SUFFIX),
+            COMMON_PROOF_CHECKPOINT_STATE_BYTE_LENGTH,
+            COMMON_PROOF_CHECKPOINT_STATE_BYTE_LENGTH,
+            "VSS checkpoint state",
+        )?;
+        let cursor_manifest = read_exact_bounded_file(
+            &self.checkpoint_path(boundary_ordinal, VSS_PREREQUISITE_CHECKPOINT_CURSOR_SUFFIX),
+            1,
+            MAXIMUM_COMMON_PROOF_GENERATION_CURSOR_MANIFEST_BYTE_LENGTH,
+            "VSS checkpoint cursor manifest",
+        )?;
+        let seal = read_exact_bounded_file(
+            &self.checkpoint_path(boundary_ordinal, VSS_PREREQUISITE_CHECKPOINT_SEAL_SUFFIX),
+            VSS_PREREQUISITE_CHECKPOINT_SEAL_BYTE_LENGTH,
+            VSS_PREREQUISITE_CHECKPOINT_SEAL_BYTE_LENGTH,
+            "VSS checkpoint seal",
+        )?;
+        let authenticated =
+            AuthenticatedCommonProofGenerationCheckpoint::decode(&state, &cursor_manifest)
+                .map_err(|error| format!("decode retained VSS checkpoint: {error:?}"))?;
+        self.require_checkpoint_binding(&authenticated, boundary_ordinal)?;
+        let expected_seal =
+            encode_vss_prerequisite_checkpoint_seal(&authenticated, &state, &cursor_manifest);
+        if seal != expected_seal {
+            return Err("retained VSS checkpoint seal is stale or malformed".to_owned());
+        }
+        Ok(DurableVssPrerequisiteCheckpoint {
+            authenticated,
+            boundary_ordinal,
+            state,
+            cursor_manifest,
+        })
+    }
+
+    fn persist(
+        &self,
+        boundary_ordinal: u32,
+        state: &[u8],
+        cursor_manifest: &[u8],
+    ) -> Result<(), String> {
+        if state.len() != COMMON_PROOF_CHECKPOINT_STATE_BYTE_LENGTH
+            || cursor_manifest.is_empty()
+            || cursor_manifest.len() > MAXIMUM_COMMON_PROOF_GENERATION_CURSOR_MANIFEST_BYTE_LENGTH
+        {
+            return Err("pending VSS checkpoint exceeds its canonical custody bounds".to_owned());
+        }
+        let authenticated =
+            AuthenticatedCommonProofGenerationCheckpoint::decode(state, cursor_manifest)
+                .map_err(|error| format!("decode pending VSS checkpoint: {error:?}"))?;
+        self.require_checkpoint_binding(&authenticated, boundary_ordinal)?;
+        persist_exact_file_once(
+            &self.checkpoint_path(boundary_ordinal, VSS_PREREQUISITE_CHECKPOINT_STATE_SUFFIX),
+            state,
+            "VSS checkpoint state",
+        )?;
+        persist_exact_file_once(
+            &self.checkpoint_path(boundary_ordinal, VSS_PREREQUISITE_CHECKPOINT_CURSOR_SUFFIX),
+            cursor_manifest,
+            "VSS checkpoint cursor manifest",
+        )?;
+        let seal = encode_vss_prerequisite_checkpoint_seal(&authenticated, state, cursor_manifest);
+        persist_exact_file_once(
+            &self.checkpoint_path(boundary_ordinal, VSS_PREREQUISITE_CHECKPOINT_SEAL_SUFFIX),
+            &seal,
+            "VSS checkpoint seal",
+        )
+    }
+
+    fn require_checkpoint_binding(
+        &self,
+        checkpoint: &AuthenticatedCommonProofGenerationCheckpoint,
+        boundary_ordinal: u32,
+    ) -> Result<(), String> {
+        if checkpoint.stable_attempt_binding_hash() != self.stable_attempt_binding_hash
+            || checkpoint.checkpoint_lineage_identifier() != self.checkpoint_lineage_identifier
+            || checkpoint.safe_boundary_ordinal() != boundary_ordinal
+        {
+            return Err(
+                "retained VSS checkpoint differs from the exact proof attempt or boundary"
+                    .to_owned(),
+            );
+        }
+        Ok(())
+    }
+
+    fn checkpoint_path(&self, boundary_ordinal: u32, suffix: &str) -> PathBuf {
+        self.directory.join(format!(
+            "{VSS_PREREQUISITE_CHECKPOINT_FILE_PREFIX}{boundary_ordinal:08}{suffix}"
+        ))
+    }
+}
+
+fn parse_vss_prerequisite_checkpoint_boundary(file_name: &str) -> Option<u32> {
+    let digits = file_name
+        .strip_prefix(VSS_PREREQUISITE_CHECKPOINT_FILE_PREFIX)?
+        .strip_suffix(VSS_PREREQUISITE_CHECKPOINT_SEAL_SUFFIX)?;
+    if digits.len() != 8 || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    digits.parse().ok()
+}
+
+fn read_exact_bounded_file(
+    path: &Path,
+    minimum_byte_length: usize,
+    maximum_byte_length: usize,
+    label: &str,
+) -> Result<Vec<u8>, String> {
+    let mut file = File::open(path).map_err(|error| format!("open retained {label}: {error}"))?;
+    let declared_byte_length = usize::try_from(
+        file.metadata()
+            .map_err(|error| format!("inspect retained {label}: {error}"))?
+            .len(),
+    )
+    .map_err(|_| format!("retained {label} byte length exceeds usize"))?;
+    if declared_byte_length < minimum_byte_length || declared_byte_length > maximum_byte_length {
+        return Err(format!("retained {label} has a noncanonical byte length"));
+    }
+    let mut bytes = vec![0_u8; declared_byte_length];
+    file.read_exact(&mut bytes)
+        .map_err(|error| format!("read retained {label}: {error}"))?;
+    let mut trailing = [0_u8; 1];
+    if file
+        .read(&mut trailing)
+        .map_err(|error| format!("check retained {label} extent: {error}"))?
+        != 0
+    {
+        return Err(format!("retained {label} changed while it was read"));
+    }
+    Ok(bytes)
+}
+
+fn persist_exact_file_once(path: &Path, bytes: &[u8], label: &str) -> Result<(), String> {
+    match OpenOptions::new().write(true).create_new(true).open(path) {
+        Ok(mut file) => {
+            file.write_all(bytes)
+                .map_err(|error| format!("write {label}: {error}"))?;
+            file.sync_all()
+                .map_err(|error| format!("durably seal {label}: {error}"))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            let existing = read_exact_bounded_file(path, bytes.len(), bytes.len(), label)?;
+            if existing != bytes {
+                return Err(format!(
+                    "existing {label} differs from deterministic replay"
+                ));
+            }
+            Ok(())
+        }
+        Err(error) => Err(format!("create {label}: {error}")),
+    }
+}
+
+fn encode_vss_prerequisite_checkpoint_seal(
+    checkpoint: &AuthenticatedCommonProofGenerationCheckpoint,
+    state: &[u8],
+    cursor_manifest: &[u8],
+) -> Vec<u8> {
+    let mut seal = Vec::with_capacity(VSS_PREREQUISITE_CHECKPOINT_SEAL_BYTE_LENGTH);
+    seal.extend_from_slice(&VSS_PREREQUISITE_CHECKPOINT_SEAL_MAGIC);
+    seal.extend_from_slice(&VSS_PREREQUISITE_CHECKPOINT_SEAL_VERSION.to_le_bytes());
+    seal.extend_from_slice(&checkpoint.safe_boundary_ordinal().to_le_bytes());
+    seal.extend_from_slice(&checkpoint.stable_attempt_binding_hash());
+    seal.extend_from_slice(&checkpoint.checkpoint_lineage_identifier());
+    seal.extend_from_slice(&checkpoint.checkpoint_schedule_digest().into_bytes());
+    seal.extend_from_slice(&hash_framed_parts_512(
+        VSS_PREREQUISITE_CHECKPOINT_STATE_HASH_DOMAIN,
+        &[state],
+    ));
+    seal.extend_from_slice(&hash_framed_parts_512(
+        VSS_PREREQUISITE_CHECKPOINT_CURSOR_HASH_DOMAIN,
+        &[cursor_manifest],
+    ));
+    debug_assert_eq!(seal.len(), VSS_PREREQUISITE_CHECKPOINT_SEAL_BYTE_LENGTH);
+    seal
 }
 
 struct ExactVerificationPrerequisiteFactory {
@@ -393,6 +672,7 @@ struct GeneratedCommonProofEvidence {
     stream_descriptor: StreamDescriptor,
     maximum_external_memory_byte_length: u64,
     checkpoint_count: usize,
+    resumed_from_checkpoint_boundary: Option<u32>,
 }
 
 struct ExactTranscriptPrefixEvidence<'evidence> {
@@ -409,14 +689,40 @@ fn generate_prepared_common_proof(
     schedule_position: Option<u32>,
     transcript_prefix: Option<ExactTranscriptPrefixEvidence<'_>>,
     family_label: &str,
+    durable_checkpoint_store: Option<&DurableVssPrerequisiteCheckpointStore>,
+    resume_checkpoint: Option<&DurableVssPrerequisiteCheckpoint>,
 ) -> Result<GeneratedCommonProofEvidence, String> {
     let mut registry = CommonProofRuntimeRegistry::default();
-    let operation = registry
-        .begin_owned_generation(prepared)
-        .map_err(|error| format!("begin {family_label} runtime generation: {error:?}"))?;
+    let operation = match resume_checkpoint {
+        Some(checkpoint) => {
+            let operation = registry
+                .preissue_generation_operation_handle()
+                .map_err(|error| {
+                    format!("reserve {family_label} generation operation: {error:?}")
+                })?;
+            registry
+                .resume_owned_generation_with_handle(
+                    prepared,
+                    &checkpoint.state,
+                    &checkpoint.cursor_manifest,
+                    operation,
+                )
+                .map_err(|error| format!("resume {family_label} runtime generation: {error:?}"))?;
+            operation
+        }
+        None => registry
+            .begin_owned_generation(prepared)
+            .map_err(|error| format!("begin {family_label} runtime generation: {error:?}"))?,
+    };
     let mut storage = FileBackedExternalMemory::new()?;
     let mut output_chunks = BTreeMap::<usize, Vec<u8>>::new();
-    let mut checkpoint_count = 0_usize;
+    let resumed_from_checkpoint_boundary =
+        resume_checkpoint.map(|checkpoint| checkpoint.boundary_ordinal);
+    let mut checkpoint_count = resumed_from_checkpoint_boundary
+        .and_then(|boundary_ordinal| usize::try_from(boundary_ordinal).ok())
+        .and_then(|boundary_ordinal| boundary_ordinal.checked_add(1))
+        .unwrap_or(0);
+    let mut resume_completion_observed = resume_checkpoint.is_none();
     let mut last_stage = None;
     let started_at = Instant::now();
 
@@ -439,10 +745,12 @@ fn generate_prepared_common_proof(
                 if checkpoint_ready {
                     let checkpoint_state = registry
                         .generation_checkpoint_state(operation)
-                        .map_err(|error| format!("read exact checkpoint state: {error:?}"))?;
+                        .map_err(|error| format!("read exact checkpoint state: {error:?}"))?
+                        .to_vec();
                     let cursor_manifest = registry
                         .generation_checkpoint_cursor_manifest(operation)
-                        .map_err(|error| format!("read exact checkpoint cursor: {error:?}"))?;
+                        .map_err(|error| format!("read exact checkpoint cursor: {error:?}"))?
+                        .to_vec();
                     let boundary_ordinal = registry
                         .generation_checkpoint_safe_boundary_ordinal(operation)
                         .map_err(|error| format!("read exact checkpoint boundary: {error:?}"))?;
@@ -454,16 +762,29 @@ fn generate_prepared_common_proof(
                             "exact checkpoint boundary is incomplete or out of order".to_owned()
                         );
                     }
+                    if let Some(store) = durable_checkpoint_store {
+                        store.persist(boundary_ordinal, &checkpoint_state, &cursor_manifest)?;
+                    }
                     checkpoint_count += 1;
                     registry
-                        .discard_generation_checkpoint(operation)
+                        .acknowledge_generation_checkpoint(operation)
                         .map_err(|error| format!("advance exact checkpoint: {error:?}"))?;
                 }
             }
-            CommonProofGenerationWorkerPoll::ResumeComplete { .. } => {
-                return Err(
-                    "fresh exact generation unexpectedly reported resume completion".to_owned(),
+            CommonProofGenerationWorkerPoll::ResumeComplete { stage } => {
+                if resume_completion_observed {
+                    return Err(
+                        "exact generation reported an unexpected or duplicate resume boundary"
+                            .to_owned(),
+                    );
+                }
+                eprintln!(
+                    "{family_label} resumed after authenticated boundary {} at stage {stage:?}: {:?}",
+                    resumed_from_checkpoint_boundary
+                        .ok_or_else(|| "resumed generation has no retained boundary".to_owned())?,
+                    started_at.elapsed(),
                 );
+                resume_completion_observed = true;
             }
             CommonProofGenerationWorkerPoll::StorageRequestReady { .. } => {
                 let response = {
@@ -539,6 +860,11 @@ fn generate_prepared_common_proof(
         }
     }
 
+    if !resume_completion_observed {
+        return Err(
+            "exact generation completed without reaching its retained checkpoint".to_owned(),
+        );
+    }
     let generated_proof = registry
         .finish_owned_generation(operation)
         .map_err(|error| format!("finish {family_label} runtime generation: {error:?}"))?;
@@ -564,6 +890,7 @@ fn generate_prepared_common_proof(
         stream_descriptor,
         maximum_external_memory_byte_length: storage.maximum_declared_byte_length(),
         checkpoint_count,
+        resumed_from_checkpoint_boundary,
     })
 }
 
@@ -622,14 +949,38 @@ fn generate_exact_same_secret_proof(
             relation_plan: &prefix_relation_plan,
         }),
         "exact aggregate-wide same-secret proof",
+        None,
+        None,
     )
 }
 
 fn generate_vss_prerequisite_proof(
-    evidence_sources: &ProductionSameSecretEvidenceSources,
+    evidence_sources: &ProductionVssPrerequisiteEvidenceSources,
 ) -> Result<(GeneratedCommonProofEvidence, Vec<u8>), String> {
-    let (prepared, canonical_application_statement_bytes) =
+    let (fresh_prepared, canonical_application_statement_bytes) =
         prepare_production_vss_prerequisite_generation(evidence_sources)?;
+    let checkpoint_store = DurableVssPrerequisiteCheckpointStore::open(&fresh_prepared)?;
+    let retained_checkpoint = checkpoint_store.load_latest()?;
+    let prepared = match retained_checkpoint.as_ref() {
+        Some(checkpoint) => {
+            let checkpoint_continuation = checkpoint.authenticated.continuation_source();
+            drop(fresh_prepared);
+            let (resumed_prepared, resumed_statement_bytes) =
+                prepare_resumed_production_vss_prerequisite_generation(
+                    evidence_sources,
+                    checkpoint_continuation,
+                )?;
+            if resumed_statement_bytes != canonical_application_statement_bytes
+                || !resumed_prepared.matches_authenticated_checkpoint(&checkpoint.authenticated)
+            {
+                return Err(
+                    "resumed VSS preparation differs from its authenticated checkpoint".to_owned(),
+                );
+            }
+            resumed_prepared
+        }
+        None => fresh_prepared,
+    };
     let verified_context = evidence_sources.verified_public_randomness.context();
     let statement = crate::bgv::proof_suite::decode_selected_vss_share_linkage_statement(
         &canonical_application_statement_bytes,
@@ -649,6 +1000,8 @@ fn generate_vss_prerequisite_proof(
         None,
         None,
         "selected VSS prerequisite proof",
+        Some(&checkpoint_store),
+        retained_checkpoint.as_ref(),
     )?;
     Ok((generated, canonical_application_statement_bytes))
 }
@@ -1112,13 +1465,56 @@ fn run_exact_context_hostile_cases(
 }
 
 #[test]
+#[ignore = "manual focused production VSS prerequisite proof round trip"]
+fn heavy_rust_kernel_exact_vss_prerequisite_proof_round_trip() {
+    let started_at = Instant::now();
+    let evidence_sources =
+        production_vss_prerequisite_sources().expect("production VSS prerequisite runtime source");
+    let (generated_proof, canonical_application_statement_bytes) =
+        generate_vss_prerequisite_proof(&evidence_sources)
+            .expect("generate production VSS prerequisite proof");
+    eprintln!(
+        "selected VSS prerequisite proof generated: {} bytes, {} peak declared external bytes, {} checkpoints, resumed from {:?}, {:?}",
+        generated_proof.canonical_proof_bytes.len(),
+        generated_proof.maximum_external_memory_byte_length,
+        generated_proof.checkpoint_count,
+        generated_proof.resumed_from_checkpoint_boundary,
+        started_at.elapsed(),
+    );
+    assert!(generated_proof.checkpoint_count > 0);
+
+    let verified_vss_proof = verify_vss_prerequisite_proof(
+        &generated_proof.canonical_proof_bytes,
+        generated_proof.stream_descriptor.clone(),
+        canonical_application_statement_bytes,
+        &evidence_sources.verified_public_randomness,
+    )
+    .expect("production verifier accepts the transported VSS prerequisite proof");
+    assert_eq!(
+        verified_vss_proof.application_statement_schema_identifier(),
+        ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+    );
+    assert_eq!(
+        verified_vss_proof.proof_stream_descriptor(),
+        &generated_proof.stream_descriptor,
+    );
+    eprintln!(
+        "selected VSS prerequisite proof verified from transported bytes: {:?}",
+        started_at.elapsed(),
+    );
+    drop(verified_vss_proof);
+    release_production_same_secret_authority(evidence_sources.authority_handle)
+        .expect("release production VSS prerequisite runtime authority");
+}
+
+#[test]
 #[ignore = "manual exact aggregate-wide production proof round trip"]
 fn heavy_rust_kernel_exact_aggregate_wide_same_secret_proof_round_trip() {
     let started_at = Instant::now();
     let evidence_sources =
         production_same_secret_sources().expect("production exact runtime source");
     let (vss_proof, vss_canonical_application_statement_bytes) =
-        generate_vss_prerequisite_proof(&evidence_sources)
+        generate_vss_prerequisite_proof(&evidence_sources.vss_prerequisite)
             .expect("generate production VSS prerequisite proof");
     eprintln!(
         "selected VSS prerequisite proof generated: {} bytes, {} peak declared external bytes, {} checkpoints, {:?}",
@@ -1131,14 +1527,17 @@ fn heavy_rust_kernel_exact_aggregate_wide_same_secret_proof_round_trip() {
         &vss_proof.canonical_proof_bytes,
         vss_proof.stream_descriptor,
         vss_canonical_application_statement_bytes,
-        &evidence_sources.verified_public_randomness,
+        &evidence_sources.vss_prerequisite.verified_public_randomness,
     )
     .expect("production verifier accepts the VSS prerequisite proof");
     let ProductionSameSecretEvidenceSources {
         sources,
-        authority_handle,
-        action_private_randomness: _,
-        verified_public_randomness,
+        vss_prerequisite:
+            ProductionVssPrerequisiteEvidenceSources {
+                authority_handle,
+                action_private_randomness: _,
+                verified_public_randomness,
+            },
     } = evidence_sources;
     let prerequisite_factory =
         ExactVerificationPrerequisiteFactory::new(verified_public_randomness, verified_vss_proof);

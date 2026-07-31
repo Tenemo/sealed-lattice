@@ -248,6 +248,8 @@ pub(in crate::bgv) use row_code_whir::exact_same_secret_verification_runtime_lim
 pub(in crate::bgv::proof_suite) use row_code_whir::{
     ExactSameSecretAuthenticatedTranscriptPrefixRequest, PreparedExactSameSecretTranscriptPrefix,
 };
+#[cfg(test)]
+pub(crate) use runtime::MAXIMUM_COMMON_PROOF_GENERATION_CURSOR_MANIFEST_BYTE_LENGTH;
 pub(crate) use runtime::{
     AuthenticatedCommonProofGenerationCheckpoint, BorrowedVerifiedCommonProofCapability,
     COMMON_PROOF_CHECKPOINT_STATE_BYTE_LENGTH, CommonProofGenerationAuthorization,

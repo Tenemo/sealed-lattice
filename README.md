@@ -115,6 +115,11 @@ Works today:
   `115,079,983` bytes below the hard WebAssembly bound. Bound-tree
   authentication uses one in-place DFT and one evaluated stripe instead of
   retaining complete evaluated columns.
+- The production VSS prerequisite now has a dedicated guarded generation and
+  transported-verification test. It durably seals each canonical safe boundary,
+  rejects stale or malformed retained state, and resumes by deterministic
+  replay through the kernel's authenticated checkpoint decoder. This runner has
+  not yet completed a production proof.
 
 Not yet:
 
