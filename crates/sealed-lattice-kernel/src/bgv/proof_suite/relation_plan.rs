@@ -176,6 +176,8 @@ pub(crate) use same_secret_anchor::{
     SameSecretSourceLayout, compile_same_secret_relation_plan,
     compile_same_secret_relation_with_source_layout,
 };
+#[cfg(test)]
+pub(crate) use setup_key_relation_adapter::same_secret_source_provider_memory_accounting;
 pub(crate) use setup_key_relation_adapter::{
     SetupKeyRelationSourcePolynomialAdapter, public_key_share_relation_tree_inputs,
     same_secret_relation_tree_inputs,

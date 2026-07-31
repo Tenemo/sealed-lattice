@@ -6877,7 +6877,9 @@ mod tests {
     use super::*;
     use crate::{
         bgv::proof_suite::{
-            ValidatedRelationPlanArtifact, compile_same_secret_relation_plan,
+            SelectedApplicationStatementContext, ValidatedRelationPlanArtifact,
+            canonical_selected_application_statement_for_ceiling,
+            compile_same_secret_relation_plan, compile_same_secret_relation_with_source_layout,
             compile_vss_share_linkage_relation_plan,
             external_memory::{
                 AUTOMATIC_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
@@ -6885,11 +6887,12 @@ mod tests {
                 MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
                 NOMINAL_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
             },
+            relation_plan::same_secret_source_provider_memory_accounting,
             selected_committed_material_relation_plan_input, selected_relation_plan_check_context,
             selected_same_secret_relation_plan_input,
         },
         foundation::{
-            MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT,
+            FOUNDATION_PROFILE, Hash512, MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT,
             MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT,
             ProofApplicationSlotCeilings,
         },
@@ -7101,6 +7104,92 @@ mod tests {
                     .expect("the reversed-column catalog derives")
                     .len(),
             2_030,
+        );
+    }
+
+    #[test]
+    fn selected_same_secret_source_provider_memory_is_derived_from_the_production_layout() {
+        let schema_identifier =
+            ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER;
+        let relation_context = selected_relation_plan_check_context(schema_identifier)
+            .expect("the selected same-secret relation context exists");
+        let relation_input = selected_same_secret_relation_plan_input()
+            .expect("the selected same-secret relation input derives");
+        let compiled =
+            compile_same_secret_relation_with_source_layout(&relation_input, &relation_context)
+                .expect("the selected same-secret relation and source layout compile");
+        let relation_variant = compiled
+            .relation_plan
+            .variants()
+            .first()
+            .expect("the selected same-secret relation has one variant");
+        let canonical_statement = canonical_selected_application_statement_for_ceiling(
+            schema_identifier,
+            SelectedApplicationStatementContext::new(
+                FOUNDATION_PROFILE.protocol_version,
+                [0_u8; Hash512::BYTE_LENGTH],
+                relation_variant.schedule_position(),
+                relation_variant.top_count(),
+            ),
+        )
+        .expect("the selected same-secret statement encodes");
+        let accounting = same_secret_source_provider_memory_accounting(
+            relation_variant,
+            &relation_context,
+            relation_input.ring_degree,
+            &compiled.source_layout,
+            canonical_statement.len(),
+        )
+        .expect("the production source-provider memory accounting derives");
+        let relation_variant_payload_byte_length = relation_variant
+            .resident_owned_payload_byte_length()
+            .expect("the selected relation payload derives");
+        let relation_context_payload_byte_length = relation_context
+            .resident_owned_payload_byte_length()
+            .expect("the selected relation context payload derives");
+        let validated = ValidatedRelationPlanArtifact::from_owned_compiled_plan(
+            compiled.relation_plan,
+            &relation_context,
+        )
+        .expect("the selected same-secret relation validates");
+        let construction_plan =
+            RowCodeWhirConstructionPlan::for_selected_variant(&validated, None, None)
+                .expect("the selected same-secret construction plan derives");
+        let construction_identity_byte_length = construction_plan
+            .canonical_identity_bytes()
+            .expect("the selected construction identity encodes")
+            .len();
+
+        assert_eq!(canonical_statement.len(), 884);
+        assert_eq!(relation_variant_payload_byte_length, 4_986_144);
+        assert_eq!(relation_context_payload_byte_length, 736);
+        assert_eq!(construction_identity_byte_length, 1_046_061);
+        assert_eq!(size_of::<RowCodeWhirGenerationStateMachine>(), 19_456);
+        assert_eq!(size_of::<super::super::RowCodeWhirChallenger>(), 528);
+        assert_eq!(
+            accounting.loading_persistent_resident_byte_length(),
+            5_529_036
+        );
+        assert_eq!(
+            accounting.post_source_polynomial_finish_persistent_resident_byte_length(),
+            5_004_748
+        );
+        assert_eq!(
+            accounting.additional_loading_transient_byte_length(),
+            9_225_026
+        );
+        assert_eq!(
+            accounting.maximum_returned_source_polynomial_byte_length(),
+            131_072
+        );
+        assert_eq!(
+            accounting
+                .loading_persistent_resident_byte_length()
+                .checked_add(accounting.additional_loading_transient_byte_length())
+                .and_then(|bytes| {
+                    bytes.checked_add(accounting.maximum_returned_source_polynomial_byte_length())
+                }),
+            Some(14_885_134),
         );
     }
 
