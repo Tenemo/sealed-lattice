@@ -147,9 +147,15 @@ Not yet:
   established. The selected same-secret aggregate-leaf predecessor
   correspondence, collision arithmetic, aggregate-wide production affine
   correspondence, pre-aggregate physical masking correspondence, and all
-  production geometry certificates now derive. A complete reduction from these
-  component certificates to the ceremony-level failure allocation and to
-  soundness of an emitted transported proof remains open.
+  production geometry certificates now derive. The strong-state eligibility
+  check additionally derives the live aggregate-wide agreement event with
+  population `8,192`, agreement ceiling `5,055`, and `393` queries. It refuses
+  the deployed block-chained sampler: if all but one query coordinate are fixed,
+  the remaining fill has probability `5,055 / 8,192`, not the complete
+  without-replacement probability. The predecessor census therefore cannot be
+  promoted into the CMS19 Section 8.6 hypothesis. An atomic verifier-message
+  sampler, its independent state evaluator and extractor, and the complete
+  reduction to emitted transported bytes remain open.
 - The static liveness model has not yet been confirmed by a completed native
   proof or release-WebAssembly browser measurement. Complete participant
   transport accounting is also open. Production-derived sizes for 73 of the
@@ -161,16 +167,11 @@ Not yet:
   release WebAssembly proof has been generated and freshly verified across the
   desktop browsers. Recent guarded native attempts ended before proof emission,
   so their observed memory is diagnostic rather than completion evidence.
-- The current pull-request checks do not pass. Static, Node, and browser work
-  reaches unused-export analysis and reports six unused exports and seven
-  unused exported types. The fast Rust lane records 19 failures by test 434 of
-  962 and then times out; three production-geometry theorem tests alone take
-  roughly 85 to 101 minutes in that routine lane. The heavy Rust lane completes
-  only one of six tests before its timeout. Focused failures include a stale
-  domain-profile refusal, a source-derived stride of `17,152` still compared
-  with `17,266`, and reduced fixtures that no longer satisfy the selected mask
-  grammar. These are integration defects, not evidence against the selected
-  masking arithmetic.
+- The routine workspace graph currently passes build, type checking, lint,
+  unused-code analysis, package smoke, Node tests, and all 952 ordinary Rust
+  inventory entries. Long theorem, heavy-kernel, full-width, and manual browser
+  proof lanes remain separately guarded and are not implied by that routine
+  result.
 - No exact `n = 10` suite is frozen, no complete accepted vote runs end to end,
   and ballot, evaluator, and target-release operations are not public APIs.
 - No physical-phone profile is qualified. Desktop-browser, Node.js, native, and

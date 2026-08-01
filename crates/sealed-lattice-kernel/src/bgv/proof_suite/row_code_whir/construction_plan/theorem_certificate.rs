@@ -2011,6 +2011,50 @@ impl Cms19StrongStateHashChainCertificate {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Cms19VerifierMessageSamplingShape {
+    SequentialFixed512BitOracleOutputs,
+    AtomicFixedWidthXofOutput,
+}
+
+/// Construction-level eligibility for the stronger round-by-round hypothesis
+/// required by the original BCS hash chain in CMS19 Section 8.6.
+///
+/// A typed predecessor census is not enough: every verifier message that owns
+/// one soundness event must be filled atomically. In the deployed sampler, a
+/// distinct-query vector is assembled from multiple separately fillable
+/// 512-bit outputs. If all but one query coordinate are fixed adversarially,
+/// the remaining fill succeeds with the one-coordinate agreement fraction,
+/// not the complete without-replacement probability. This certificate keeps
+/// that contradiction separate from the otherwise complete structural graph.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Cms19StrongRoundByRoundSemanticCertificate {
+    sampling_shape: Cms19VerifierMessageSamplingShape,
+    multi_output_verifier_message_count: u64,
+    maximum_output_count_per_verifier_message: u64,
+    aggregate_wide_population: u64,
+    aggregate_wide_agreement_ceiling: u64,
+    aggregate_wide_query_count: u64,
+    aggregate_wide_single_coordinate_probability: ExactBigFraction,
+    aggregate_wide_complete_vector_probability: ExactBigFraction,
+    single_coordinate_probability_exceeds_complete_vector_probability: bool,
+    independent_state_evaluator_established: bool,
+    accepting_database_extractor_includes_next_verifier_message: bool,
+}
+
+impl Cms19StrongRoundByRoundSemanticCertificate {
+    fn is_complete(&self) -> bool {
+        self.sampling_shape == Cms19VerifierMessageSamplingShape::AtomicFixedWidthXofOutput
+            && self.multi_output_verifier_message_count == 0
+            && self.maximum_output_count_per_verifier_message == 1
+            && self.aggregate_wide_population > self.aggregate_wide_agreement_ceiling
+            && self.aggregate_wide_query_count > 1
+            && !self.single_coordinate_probability_exceeds_complete_vector_probability
+            && self.independent_state_evaluator_established
+            && self.accepting_database_extractor_includes_next_verifier_message
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Cms19DeterministicObservationOwner {
     ProtocolSchedule,
     OpeningPoint { batch_ordinal: u32 },
@@ -5185,6 +5229,7 @@ pub(in crate::bgv::proof_suite) struct RowCodeWhirFailurePartitionCertificate {
     cms19_whole_database_support: Cms19WholeDatabaseSupportCertificate,
     cms19_state_predicate: Cms19StatePredicateCertificate,
     cms19_strong_state_hash_chain: Cms19StrongStateHashChainCertificate,
+    cms19_strong_round_by_round_semantics: Cms19StrongRoundByRoundSemanticCertificate,
     maximum_transcript_hash_query_count: u64,
     logical_verifier_message_count: u64,
     cms19_arithmetic: Cms19ArithmeticCertificate,
@@ -5297,6 +5342,11 @@ impl RowCodeWhirFailurePartitionCertificate {
                 .deployed_aggregate_leaf_oracle
                 .is_eligible_for_uniform_required_output()
             && self.exact_failure_magnitude.is_complete()
+    }
+
+    pub(in crate::bgv::proof_suite) fn has_complete_construction_theorem(&self) -> bool {
+        self.has_complete_structural_certificate()
+            && self.cms19_strong_round_by_round_semantics.is_complete()
     }
 }
 
@@ -6717,6 +6767,12 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
         &cms19_whole_state_transitions,
         logical_verifier_message_count,
     )?;
+    let cms19_strong_round_by_round_semantics =
+        derive_cms19_strong_round_by_round_semantic_certificate(
+            &catalog,
+            &selected_plan_state_predicate,
+            &exact_failure_magnitude,
+        )?;
     let cms19_state_predicate =
         derive_cms19_state_predicate_certificate(Cms19StatePredicateCertificateInput {
             selected_plan_state_predicate: &selected_plan_state_predicate,
@@ -6763,6 +6819,7 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
         cms19_whole_database_support,
         cms19_state_predicate,
         cms19_strong_state_hash_chain,
+        cms19_strong_round_by_round_semantics,
         maximum_transcript_hash_query_count,
         logical_verifier_message_count,
         cms19_arithmetic,
@@ -9732,9 +9789,9 @@ fn derive_cms19_strong_state_hash_chain_certificate(
         sampler_expansion_edge_count,
         prover_response_edge_count,
         transcript_predecessor_support_ceiling,
-        // This is the Section 8.6 state extension: an incomplete verifier
-        // message is `None`, and the predicate is defined to equal its
-        // predecessor until the complete typed sampler output is filled.
+        // This records the proposed Section 8.6 extension used by the
+        // structural table. The separate semantic certificate decides
+        // whether the deployed sampler actually permits that atomic fill.
         undefined_message_inherits_predecessor_state: true,
         sampler_messages_are_outside_prover_response_absorption,
         typed_oracle_domains_are_pairwise_distinct,
@@ -9751,6 +9808,73 @@ fn derive_cms19_strong_state_hash_chain_certificate(
         return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
     }
     Ok(certificate)
+}
+
+fn derive_cms19_strong_round_by_round_semantic_certificate(
+    catalog: &RowCodeWhirOracleEquationCatalog,
+    selected_plan_state_predicate: &SelectedPlanStatePredicateCertificate,
+    exact_failure_magnitude: &ExactFailureMagnitudeCertificate,
+) -> Result<Cms19StrongRoundByRoundSemanticCertificate, WhirTheoremCertificateError> {
+    if catalog.operations.len() != selected_plan_state_predicate.transition_rows.len() {
+        return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
+    }
+
+    let mut multi_output_verifier_message_count = 0_u64;
+    let mut maximum_output_count_per_verifier_message = 0_u64;
+    for (operation, state_row) in catalog
+        .operations
+        .iter()
+        .zip(&selected_plan_state_predicate.transition_rows)
+    {
+        if state_row.failure_event_owner.is_none() {
+            continue;
+        }
+        let output_count = cms19_fixed_sampler_block_count(operation)?;
+        maximum_output_count_per_verifier_message =
+            maximum_output_count_per_verifier_message.max(output_count);
+        if output_count > 1 {
+            multi_output_verifier_message_count = multi_output_verifier_message_count
+                .checked_add(1)
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+        }
+    }
+
+    let aggregate_wide_row = exact_failure_magnitude
+        .query_rows
+        .iter()
+        .find(|row| row.event == ExactQueryFailureEvent::AggregateWidePad)
+        .ok_or(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence)?;
+    let aggregate_wide_single_coordinate_probability = ExactBigFraction::from_u64(
+        aggregate_wide_row.agreement_ceiling,
+        aggregate_wide_row.population,
+    )?;
+    let aggregate_wide_complete_vector_probability = aggregate_wide_row
+        .exact_without_replacement_probability
+        .clone();
+    let single_coordinate_probability_exceeds_complete_vector_probability =
+        aggregate_wide_complete_vector_probability
+            .less_than(&aggregate_wide_single_coordinate_probability);
+    if aggregate_wide_row.query_count <= 1
+        || !single_coordinate_probability_exceeds_complete_vector_probability
+        || multi_output_verifier_message_count == 0
+        || maximum_output_count_per_verifier_message <= 1
+    {
+        return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
+    }
+
+    Ok(Cms19StrongRoundByRoundSemanticCertificate {
+        sampling_shape: Cms19VerifierMessageSamplingShape::SequentialFixed512BitOracleOutputs,
+        multi_output_verifier_message_count,
+        maximum_output_count_per_verifier_message,
+        aggregate_wide_population: aggregate_wide_row.population,
+        aggregate_wide_agreement_ceiling: aggregate_wide_row.agreement_ceiling,
+        aggregate_wide_query_count: aggregate_wide_row.query_count,
+        aggregate_wide_single_coordinate_probability,
+        aggregate_wide_complete_vector_probability,
+        single_coordinate_probability_exceeds_complete_vector_probability,
+        independent_state_evaluator_established: false,
+        accepting_database_extractor_includes_next_verifier_message: false,
+    })
 }
 
 struct Cms19StatePredicateCertificateInput<'a> {
@@ -12143,6 +12267,35 @@ fn cms19_whole_state_and_database_support_are_exact_and_mutation_sensitive() {
         .expect("the selected structural certificate derives");
     let whole_state = &certificate.cms19_whole_state_transitions;
     let database_support = &certificate.cms19_whole_database_support;
+    let strong_semantics = &certificate.cms19_strong_round_by_round_semantics;
+
+    assert_eq!(
+        strong_semantics.sampling_shape,
+        Cms19VerifierMessageSamplingShape::SequentialFixed512BitOracleOutputs,
+    );
+    assert!(strong_semantics.multi_output_verifier_message_count > 0);
+    assert!(strong_semantics.maximum_output_count_per_verifier_message > 1);
+    assert_eq!(strong_semantics.aggregate_wide_population, 8_192);
+    assert_eq!(strong_semantics.aggregate_wide_agreement_ceiling, 5_055);
+    assert_eq!(strong_semantics.aggregate_wide_query_count, 393);
+    assert_eq!(
+        strong_semantics.aggregate_wide_single_coordinate_probability,
+        ExactBigFraction::from_u64(5_055, 8_192).expect("the single-coordinate fraction derives"),
+    );
+    assert!(
+        strong_semantics
+            .aggregate_wide_complete_vector_probability
+            .less_than(&strong_semantics.aggregate_wide_single_coordinate_probability)
+    );
+    assert!(strong_semantics.single_coordinate_probability_exceeds_complete_vector_probability);
+    assert!(!strong_semantics.independent_state_evaluator_established);
+    assert!(!strong_semantics.accepting_database_extractor_includes_next_verifier_message);
+    assert!(!strong_semantics.is_complete());
+    assert!(!certificate.has_complete_construction_theorem());
+    let mut producer_claimed_semantics = strong_semantics.clone();
+    producer_claimed_semantics.independent_state_evaluator_established = true;
+    producer_claimed_semantics.accepting_database_extractor_includes_next_verifier_message = true;
+    assert!(!producer_claimed_semantics.is_complete());
 
     assert!(whole_state.is_complete_for(
         &plan,
