@@ -126,16 +126,18 @@ Works today:
   degrees, statement-family multiplicity, and classical and
   quantum-random-oracle loss from the selected plan. Focused current evidence
   passes this stronger constructor and full-false terminal rejection for the
-  selected same-secret and width-8 ballot plans. The width-8 VSS plan also
-  derives its exact failure ledger: eight application-modulus alpha vectors
-  use seven coordinates each, retain their distinct sample-space
-  denominators, and enter the classical and quantum-random-oracle bounds as an
-  exact rational sum. Hostile tests refuse omitted phase polynomials, changed
+  selected same-secret plan and all four width-8 production identities. The
+  VSS plan derives eight application-modulus alpha vectors with seven
+  coordinates each, retains their distinct sample-space denominators, and
+  enters their failure terms as an exact rational sum. The aggregate-threshold
+  plan independently proves that its deterministic residual schedule has no
+  product sampler. Hostile tests refuse omitted phase polynomials, changed
   aggregate opening columns or scalar counts, proof-supplied points, changed
-  basis identities, wrong family or multiplicity bindings, and altered VSS
-  product or algebraic denominators. The remaining identities have not yet
-  been regenerated under the stronger gate. Families with no bound tree or
-  verifier-sequence source do not acquire an invented ledger row.
+  basis identities, wrong family or multiplicity bindings, altered VSS
+  product or algebraic denominators, and an invented aggregate-threshold
+  product row. The remaining width-64 identities have not yet been regenerated
+  under the stronger gate. Families with no bound tree or verifier-sequence
+  source do not acquire an invented ledger row.
 - Production-derived phase-liveness accounting now covers the complete
   same-secret prover live set, including source ownership, replay readers,
   DFTs, Merkle frontiers, proof material, transcript state, private material,
@@ -182,9 +184,10 @@ Not yet:
   plan-derived polynomial and point extraction, and full-false terminal
   rejection now derive for the focused same-secret and ballot geometries. The
   VSS geometry additionally derives its heterogeneous application-modulus
-  product-challenge ledger; the remaining geometries still need independent
-  regeneration under the complete gate. The final
-  theorem-to-transported-bytes correspondence and ceremony-level failure
+  product-challenge ledger, and all four width-8 identities now pass the
+  serialized complete-constructor inventory. The remaining width-64
+  geometries still need independent regeneration under the complete gate. The
+  final theorem-to-transported-bytes correspondence and ceremony-level failure
   composition also remain open.
 - The static liveness model has not yet been confirmed by a completed native
   proof or release-WebAssembly browser measurement. Complete participant

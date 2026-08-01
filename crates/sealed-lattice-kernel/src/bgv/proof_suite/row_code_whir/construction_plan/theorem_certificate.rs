@@ -1118,13 +1118,20 @@ struct ExactFailureMagnitudeCertificate {
 
 impl ExactFailureMagnitudeCertificate {
     fn is_complete(&self) -> bool {
+        let has_product_challenge_owner = self.owner_rows.iter().any(|row| {
+            matches!(
+                row.kind,
+                ExactFailureOwnerKind::NonNativeThetaProduct
+                    | ExactFailureOwnerKind::NonNativeAlphaProduct
+            ) && row.transition_count > 0
+        });
         self.application_statement_schema_identifier != 0
             && self
                 .owner_rows
                 .iter()
                 .all(|row| row.transition_count == row.expected_transition_count)
             && !self.query_rows.is_empty()
-            && !self.product_challenge_rows.is_empty()
+            && has_product_challenge_owner != self.product_challenge_rows.is_empty()
             && !self.algebraic_rows.is_empty()
             && self.family_application_multiplicity > 0
             && self.all_failure_owners_mapped_once
@@ -1142,6 +1149,7 @@ enum ExactFailureMagnitudeFault {
     ReduceFirstQueryAgreementCeiling,
     ChangeFirstProductSampleSpaceDenominator,
     ChangeFirstAlgebraicDenominator,
+    InsertUnexpectedProductChallengeRow,
     DropRelationCompositionOwner,
     ReduceAggregateWideBaseNumerator,
     ChangeVerifierHashQueryCount,
@@ -11792,7 +11800,7 @@ fn derive_exact_product_challenge_failure_rows(
         });
     }
     rows.sort_by_key(|row| row.challenge);
-    if !degrees_by_challenge.is_empty() || !modulus_by_challenge.is_empty() || rows.is_empty() {
+    if !degrees_by_challenge.is_empty() || !modulus_by_challenge.is_empty() {
         return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
     }
     Ok(rows)
@@ -12831,6 +12839,19 @@ fn checked_exact_failure_magnitude_with_fault(
         }
         ExactFailureMagnitudeFault::ChangeFirstAlgebraicDenominator => {
             certificate.algebraic_rows[0].denominator += BigUint::one();
+        }
+        ExactFailureMagnitudeFault::InsertUnexpectedProductChallengeRow => {
+            let coordinate_count = u16::try_from(PROOF_CHALLENGE_EXTENSION_DEGREE)
+                .expect("the challenge extension degree fits u16");
+            certificate
+                .product_challenge_rows
+                .push(ExactProductChallengeFailureRow {
+                    challenge: CommonProofChallenge::Theta { modulus_ordinal: 0 },
+                    ordered_bad_polynomial_degrees: vec![1; usize::from(coordinate_count)],
+                    bad_set_numerator: BigUint::one(),
+                    sample_space_denominator: BigUint::from(PROOF_BASE_FIELD_MODULUS)
+                        .pow(u32::from(coordinate_count)),
+                });
         }
         ExactFailureMagnitudeFault::DropRelationCompositionOwner => {
             certificate.algebraic_rows[1].owner_kinds.clear();
@@ -14071,6 +14092,113 @@ fn vss_share_linkage_has_a_complete_geometry_certificate() {
             "the hostile VSS failure-ledger mutation {fault:?} must be rejected",
         );
     }
+}
+
+#[test]
+#[ignore = "owned by test:rust:kernel:theorem-evidence"]
+fn aggregate_threshold_share_has_a_complete_deterministic_geometry_certificate() {
+    let _certificate_test_guard = PRODUCTION_GEOMETRY_CERTIFICATE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let artifacts = selected_relation_plans().expect("selected relation plans derive");
+    let artifact = artifacts
+        .iter()
+        .find(|artifact| {
+            artifact.application_statement_schema_identifier()
+                == ProofApplicationSlotCeilings::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+        })
+        .expect("the selected aggregate-threshold relation artifact exists");
+    let relation_variant = artifact
+        .compiled_plan()
+        .variants()
+        .first()
+        .expect("the selected aggregate-threshold relation has one variant");
+    let relation_context = selected_relation_plan_check_context(
+        ProofApplicationSlotCeilings::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+    )
+    .expect("the selected aggregate-threshold context exists");
+    let plan = RowCodeWhirConstructionPlan::for_selected_variant(
+        artifact,
+        relation_variant.schedule_position(),
+        relation_variant.top_count(),
+    )
+    .expect("the selected aggregate-threshold construction derives");
+    let hiding_configuration =
+        super::super::hiding_whir::selected_hiding_whir_config(plan.selected_parameters())
+            .expect("the selected aggregate-threshold hiding configuration derives");
+    let aggregate_wide_masking = AggregateWideMaskingCertificate::derive(&hiding_configuration)
+        .expect("the selected aggregate-threshold masking certificate derives");
+    let certificate = checked_row_code_whir_production_geometry_certificate_with_masking(
+        &plan,
+        artifact,
+        relation_variant,
+        &relation_context,
+        &aggregate_wide_masking,
+    )
+    .expect("the aggregate-threshold production geometry certificate derives");
+    assert!(certificate.is_complete());
+    assert_eq!(
+        certificate.application_statement_schema_identifier,
+        ProofApplicationSlotCeilings::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+    );
+    assert_eq!(
+        certificate.parameters.logical_polynomials_per_physical_row,
+        8,
+    );
+
+    assert!(relation_variant.ordered_integer_lift_batches().is_empty());
+    assert!(
+        relation_variant
+            .ordered_coefficient_local_identity_batches()
+            .is_empty(),
+    );
+    let catalog = plan
+        .oracle_equation_catalog()
+        .expect("the aggregate-threshold oracle-equation catalog derives");
+    assert!(catalog.operations.iter().all(|operation| !matches!(
+        operation.kind,
+        RowCodeWhirOracleEquationOperationKind::CommonProductChallenge(_),
+    )));
+    let exact_failure = &certificate.exact_failure_magnitude;
+    assert!(exact_failure.product_challenge_rows.is_empty());
+    assert!(exact_failure.owner_rows.iter().all(|row| {
+        !matches!(
+            row.kind,
+            ExactFailureOwnerKind::NonNativeThetaProduct
+                | ExactFailureOwnerKind::NonNativeAlphaProduct
+        ) || row.transition_count == 0
+    }));
+    assert!(exact_failure.algebraic_rows.iter().all(|row| !matches!(
+        row.event,
+        ExactAlgebraicFailureEvent::NonNativeThetaExtraction
+            | ExactAlgebraicFailureEvent::NonNativeAlphaExtraction,
+    )));
+    assert!(exact_failure.ordinary_family_mass_gate_holds);
+    assert!(exact_failure.transformed_initial_mass_gate_holds);
+    assert!(exact_failure.complete_qrom_mass_gate_holds);
+
+    let failure_input = ExactFailureMagnitudeDerivationInput {
+        plan: &plan,
+        relation_variant,
+        relation_context: &relation_context,
+        catalog: &catalog,
+        selected_plan_state_predicate: &certificate.selected_plan_state_predicate,
+        code_state_rows: &certificate.whir_geometry.code_state_rows,
+        fold_rows: &certificate.whir_geometry.fold_rows,
+        shift_rows: &certificate.whir_geometry.shift_rows,
+        aggregate_wide_masking: &certificate.aggregate_wide_masking,
+        initial_constraint_batch_numerator: certificate.prefix_stacking.scalar_opening_count - 1,
+        logical_verifier_message_count: certificate.logical_verifier_message_count,
+        cms19_arithmetic: &certificate.cms19_arithmetic,
+    };
+    assert_eq!(
+        checked_exact_failure_magnitude_with_fault(
+            failure_input,
+            ExactFailureMagnitudeFault::InsertUnexpectedProductChallengeRow,
+        ),
+        Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence),
+        "an invented aggregate-threshold product sampler must be rejected",
+    );
 }
 
 #[test]

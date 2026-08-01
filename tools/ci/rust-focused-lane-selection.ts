@@ -49,6 +49,7 @@ export const theoremEvidenceRustTests = [
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::every_width_64_construction_identity_has_a_complete_geometry_certificate',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::every_width_8_construction_identity_has_a_complete_geometry_certificate',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::vss_share_linkage_has_a_complete_geometry_certificate',
+    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::aggregate_threshold_share_has_a_complete_deterministic_geometry_certificate',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::a_256_bit_transition_chain_refuses_a_uniform_512_bit_oracle_denominator',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::deployed_streaming_leaf_chain_uses_uniform_512_bit_oracle_outputs',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::cms19_whole_state_and_database_support_are_exact_and_mutation_sensitive',
