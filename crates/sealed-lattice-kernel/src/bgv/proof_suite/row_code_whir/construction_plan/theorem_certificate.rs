@@ -1147,6 +1147,7 @@ impl ExactFailureMagnitudeCertificate {
 enum ExactFailureMagnitudeFault {
     DropFirstQueryRow,
     ReduceFirstQueryAgreementCeiling,
+    ReduceStatementRootAgreementCeiling,
     ChangeFirstProductSampleSpaceDenominator,
     ChangeFirstAlgebraicDenominator,
     InsertUnexpectedProductChallengeRow,
@@ -11806,6 +11807,40 @@ fn derive_exact_product_challenge_failure_rows(
     Ok(rows)
 }
 
+fn checked_bound_reduction_block_leaf_geometry(
+    plan: &RowCodeWhirConstructionPlan,
+    block: &RowCodeWhirBoundReductionBlockPlan,
+) -> Result<(u64, u64), WhirTheoremCertificateError> {
+    let first_tree = block
+        .ordered_bound_tree_ordinals
+        .first()
+        .and_then(|ordinal| usize::try_from(*ordinal).ok())
+        .and_then(|ordinal| plan.bound_trees.get(ordinal))
+        .ok_or(WhirTheoremCertificateError::InvalidSelectedGeometry)?;
+    let population = u64::try_from(first_tree.leaf_count)
+        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let encoded_values_per_leaf = first_tree
+        .evaluation_domain_size
+        .checked_div(population)
+        .filter(|value_count| {
+            *value_count > 0
+                && population.checked_mul(*value_count) == Some(first_tree.evaluation_domain_size)
+        })
+        .ok_or(WhirTheoremCertificateError::InvalidSelectedGeometry)?;
+    if block.ordered_bound_tree_ordinals.iter().any(|ordinal| {
+        usize::try_from(*ordinal)
+            .ok()
+            .and_then(|ordinal| plan.bound_trees.get(ordinal))
+            .is_none_or(|tree| {
+                u64::try_from(tree.leaf_count).ok() != Some(population)
+                    || tree.evaluation_domain_size != first_tree.evaluation_domain_size
+            })
+    }) {
+        return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
+    }
+    Ok((population, encoded_values_per_leaf))
+}
+
 fn derive_plan_shared_query_partition(
     plan: &RowCodeWhirConstructionPlan,
 ) -> Result<Vec<SharedQueryPartitionRow>, WhirTheoremCertificateError> {
@@ -11856,14 +11891,14 @@ fn derive_plan_shared_query_partition(
         })
         .collect::<Vec<_>>();
     let prior_bound_word_count = plan
-        .bound_trees
+        .bound_reduction_blocks
         .iter()
-        .filter(|tree| tree.low_degree_mode == RowCodeWhirBoundLowDegreeMode::PriorVssProofRequired)
+        .filter(|block| block.low_degree_mode != RowCodeWhirBoundLowDegreeMode::Direct)
         .count();
     let direct_bound_word_count = plan
-        .bound_trees
+        .bound_reduction_blocks
         .iter()
-        .filter(|tree| tree.low_degree_mode == RowCodeWhirBoundLowDegreeMode::Direct)
+        .filter(|block| block.low_degree_mode == RowCodeWhirBoundLowDegreeMode::Direct)
         .count();
     if prior_bound_word_count + direct_bound_word_count == 0 {
         if !bound_queries.is_empty() {
@@ -12026,96 +12061,76 @@ fn derive_exact_query_failure_rows(
                 outer_agreement_ceiling,
             ),
             SharedQueryEventClass::BoundTreeWords => {
-                let trees = plan
-                    .bound_trees
-                    .iter()
-                    .filter(|tree| {
-                        tree.low_degree_mode == RowCodeWhirBoundLowDegreeMode::PriorVssProofRequired
-                    })
-                    .collect::<Vec<_>>();
-                let first = trees
-                    .first()
-                    .ok_or(WhirTheoremCertificateError::InvalidSelectedGeometry)?;
-                if trees.iter().any(|tree| {
-                    tree.leaf_count != first.leaf_count
-                        || tree.source_trace_domain_size != first.source_trace_domain_size
-                }) {
-                    return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
-                }
-                let source_degree_bound_exclusive = plan
+                let blocks = plan
                     .bound_reduction_blocks
                     .iter()
-                    .filter(|block| {
-                        block.low_degree_mode
-                            == RowCodeWhirBoundLowDegreeMode::PriorVssProofRequired
-                    })
-                    .map(|block| block.maximum_source_degree_bound_exclusive)
-                    .max()
+                    .filter(|block| block.low_degree_mode != RowCodeWhirBoundLowDegreeMode::Direct)
+                    .collect::<Vec<_>>();
+                let first = blocks
+                    .first()
                     .ok_or(WhirTheoremCertificateError::InvalidSelectedGeometry)?;
-                let population = u64::try_from(first.leaf_count)
-                    .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
-                let encoded_values_per_leaf = first
-                    .evaluation_domain_size
-                    .checked_div(population)
-                    .filter(|value_count| {
-                        *value_count > 0
-                            && population.checked_mul(*value_count)
-                                == Some(first.evaluation_domain_size)
-                    })
-                    .ok_or(WhirTheoremCertificateError::InvalidSelectedGeometry)?;
+                let (population, _) = checked_bound_reduction_block_leaf_geometry(plan, first)?;
+                let agreement_ceiling =
+                    blocks
+                        .iter()
+                        .try_fold(0_u64, |maximum_agreement_ceiling, block| {
+                            let (block_population, encoded_values_per_leaf) =
+                                checked_bound_reduction_block_leaf_geometry(plan, block)?;
+                            if block_population != population
+                                || block.query_count != partition_row.sampled_coordinate_count
+                            {
+                                return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
+                            }
+                            let block_agreement_ceiling = block
+                                .maximum_source_degree_bound_exclusive
+                                .checked_div(encoded_values_per_leaf)
+                                .and_then(|ceiling| ceiling.checked_add(1))
+                                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+                            Ok(maximum_agreement_ceiling.max(block_agreement_ceiling))
+                        })?;
                 (
                     ExactQueryFailureEvent::BoundTreeWords,
                     ExactFailureOwnerKind::BoundQueryVector,
                     population,
-                    source_degree_bound_exclusive
-                        .checked_div(encoded_values_per_leaf)
-                        .and_then(|ceiling| ceiling.checked_add(1))
-                        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+                    agreement_ceiling,
                 )
             }
             SharedQueryEventClass::StatementRootWords => {
-                let trees = plan
-                    .bound_trees
+                let blocks = plan
+                    .bound_reduction_blocks
                     .iter()
-                    .filter(|tree| tree.low_degree_mode == RowCodeWhirBoundLowDegreeMode::Direct)
+                    .filter(|block| block.low_degree_mode == RowCodeWhirBoundLowDegreeMode::Direct)
                     .collect::<Vec<_>>();
-                let first = trees
+                let first = blocks
                     .first()
                     .ok_or(WhirTheoremCertificateError::InvalidSelectedGeometry)?;
-                let table_padding_factor = 1_u64
-                    .checked_shl(
-                        u32::try_from(
-                            plan.parameters
-                                .table_variable_count
-                                .checked_sub(plan.parameters.physical_row_witness_variable_count)
-                                .ok_or(WhirTheoremCertificateError::InvalidSelectedGeometry)?,
-                        )
-                        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
-                    )
-                    .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
-                let padded_message_dimension = first
-                    .source_trace_domain_size
-                    .checked_mul(
-                        u64::try_from(first.ordered_columns.len())
-                            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
-                    )
-                    .and_then(|dimension| dimension.checked_mul(table_padding_factor))
-                    .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
-                if trees.iter().any(|tree| {
-                    tree.leaf_count != first.leaf_count
-                        || tree.source_trace_domain_size != first.source_trace_domain_size
-                        || tree.ordered_columns.len() != first.ordered_columns.len()
-                }) {
+                let (population, _) = checked_bound_reduction_block_leaf_geometry(plan, first)?;
+                let maximum_leaf_message_dimension =
+                    blocks.iter().try_fold(0_u64, |maximum_dimension, block| {
+                        let (block_population, encoded_values_per_leaf) =
+                            checked_bound_reduction_block_leaf_geometry(plan, block)?;
+                        if block_population != population
+                            || block.query_count != partition_row.sampled_coordinate_count
+                        {
+                            return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
+                        }
+                        Ok(maximum_dimension.max(
+                            block
+                                .quotient_degree_bound_exclusive
+                                .div_ceil(encoded_values_per_leaf),
+                        ))
+                    })?;
+                if maximum_leaf_message_dimension == 0
+                    || maximum_leaf_message_dimension >= population
+                {
                     return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
                 }
-                let population = u64::try_from(first.leaf_count)
-                    .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
                 (
                     ExactQueryFailureEvent::StatementRootWords,
                     ExactFailureOwnerKind::BoundQueryVector,
                     population,
                     population
-                        .checked_add(padded_message_dimension)
+                        .checked_add(maximum_leaf_message_dimension)
                         .and_then(|numerator| numerator.checked_div(2))
                         .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
                 )
@@ -12834,6 +12849,14 @@ fn checked_exact_failure_magnitude_with_fault(
         ExactFailureMagnitudeFault::ReduceFirstQueryAgreementCeiling => {
             certificate.query_rows[0].agreement_ceiling -= 1;
         }
+        ExactFailureMagnitudeFault::ReduceStatementRootAgreementCeiling => {
+            certificate
+                .query_rows
+                .iter_mut()
+                .find(|row| row.event == ExactQueryFailureEvent::StatementRootWords)
+                .expect("the faulted geometry has a statement-root query row")
+                .agreement_ceiling -= 1;
+        }
         ExactFailureMagnitudeFault::ChangeFirstProductSampleSpaceDenominator => {
             certificate.product_challenge_rows[0].sample_space_denominator += BigUint::one();
         }
@@ -13142,6 +13165,36 @@ fn public_only_construction_has_physical_coverage_without_dummy_mask_sources() {
     assert!(certificate.production_aggregate_wide_pad_source.is_none());
     assert!(certificate.trace_chunk_placements.is_empty());
     assert!(!certificate.opened_polynomial_chunk_placements.is_empty());
+
+    let relation_plan_variant_hash = relation_variant
+        .canonical_hash()
+        .expect("the public-only relation variant identity derives");
+    let (polynomial_extractor, point_extractor) = checked_production_extractor_correspondence(
+        &plan,
+        relation_variant,
+        &context,
+        artifact.canonical_plan_hash(),
+        relation_plan_variant_hash,
+    )
+    .expect("the public-only polynomial extractor derives");
+    assert!(polynomial_extractor.is_complete());
+    assert!(point_extractor.is_complete());
+    assert_eq!(point_extractor.proof_created_tree_opening_claim_count(), 0);
+    assert!(point_extractor.bound_tree_opening_claim_count() > 0);
+    assert!(point_extractor.quotient_opening_claim_count() > 0);
+    assert_eq!(point_extractor.opening_batch_mask_claim_count(), 0);
+    assert!(
+        checked_production_extractor_correspondence_with_fault(
+            &plan,
+            relation_variant,
+            &context,
+            artifact.canonical_plan_hash(),
+            relation_plan_variant_hash,
+            ProductionExtractorCorrespondenceFault::DropFirstBoundTreeOpeningClaim,
+        )
+        .is_err(),
+        "omitting a public bound-tree opening claim must refuse",
+    );
 
     let mut dummy_public_mask = certificate;
     dummy_public_mask.production_aggregate_wide_pad_source =
@@ -13769,44 +13822,43 @@ fn assert_ballot_commitment_subtree_certificate_accepts_its_zero_bound_tree_geom
 
 #[test]
 #[ignore = "owned by test:rust:kernel:theorem-evidence"]
-fn every_width_64_construction_identity_has_a_complete_geometry_certificate() {
+fn width_64_same_secret_through_rkg_round_one_aggregate_have_complete_geometry_certificates() {
     let _certificate_test_guard = PRODUCTION_GEOMETRY_CERTIFICATE_TEST_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let artifacts = selected_relation_plans().expect("selected relation plans derive");
     assert_public_key_share_prefix_stacking_is_derived_from_its_production_plan(&artifacts);
     assert_fixed_verifier_hash_rows_follow_each_relation_variant(&artifacts);
+    let expected_schema_identifiers = BTreeSet::from([
+        ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+        ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+        ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+        ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER,
+        ProofApplicationSlotCeilings::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+    ]);
     let inventory =
         checked_selected_row_code_whir_production_geometry_certificates(&artifacts, |plan| {
-            plan.parameters.logical_polynomials_per_physical_row == 64
+            expected_schema_identifiers.contains(&plan.application_statement_schema_identifier)
         })
-        .expect("every width-64 production geometry certificate derives");
+        .expect("the first width-64 production geometry group derives");
     let certificates = &inventory.records;
-    assert_eq!(certificates.len(), 27);
+    assert_eq!(certificates.len(), expected_schema_identifiers.len());
     assert!(
         certificates
             .iter()
             .all(CheckedProductionGeometryCertificateRecord::is_complete)
     );
-
-    let mut evaluator_top_counts = BTreeSet::new();
-    for certificate in certificates {
-        assert_eq!(
-            certificate.parameters.logical_polynomials_per_physical_row,
-            64
-        );
-        assert_eq!(certificate.parameters.row_code_log_inverse_rate, 2);
-        if certificate.application_statement_schema_identifier
-            == ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
-        {
-            evaluator_top_counts.insert(
-                certificate
-                    .top_count
-                    .expect("every evaluator geometry carries its top count"),
-            );
-        }
-    }
-    assert_eq!(evaluator_top_counts, (1_u16..=20).collect::<BTreeSet<_>>());
+    assert_eq!(
+        certificates
+            .iter()
+            .map(|certificate| certificate.application_statement_schema_identifier)
+            .collect::<BTreeSet<_>>(),
+        expected_schema_identifiers,
+    );
+    assert!(certificates.iter().all(|certificate| {
+        certificate.parameters.logical_polynomials_per_physical_row == 64
+            && certificate.parameters.row_code_log_inverse_rate == 2
+    }));
 
     let same_secret = certificates
         .iter()
@@ -13822,6 +13874,115 @@ fn every_width_64_construction_identity_has_a_complete_geometry_certificate() {
         same_secret.deployed_accepting_database_equation_count,
         102_648,
     );
+}
+
+#[test]
+#[ignore = "owned by test:rust:kernel:theorem-evidence"]
+fn width_64_relinearization_round_two_and_galois_share_have_complete_geometry_certificates() {
+    let _certificate_test_guard = PRODUCTION_GEOMETRY_CERTIFICATE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let artifacts = selected_relation_plans().expect("selected relation plans derive");
+    let expected_schema_identifiers = BTreeSet::from([
+        ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER,
+        ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+    ]);
+    let inventory =
+        checked_selected_row_code_whir_production_geometry_certificates(&artifacts, |plan| {
+            expected_schema_identifiers.contains(&plan.application_statement_schema_identifier)
+        })
+        .expect("the second width-64 production geometry group derives");
+    assert_eq!(inventory.records.len(), expected_schema_identifiers.len());
+    assert_eq!(
+        inventory
+            .records
+            .iter()
+            .map(|certificate| {
+                assert!(certificate.is_complete());
+                assert_eq!(
+                    certificate.parameters.logical_polynomials_per_physical_row,
+                    64,
+                );
+                assert_eq!(certificate.parameters.row_code_log_inverse_rate, 2);
+                certificate.application_statement_schema_identifier
+            })
+            .collect::<BTreeSet<_>>(),
+        expected_schema_identifiers,
+    );
+}
+
+fn assert_evaluator_width_64_geometry_range_is_complete(first_top_count: u16, last_top_count: u16) {
+    assert!(first_top_count > 0 && first_top_count <= last_top_count);
+    let artifacts = selected_relation_plans().expect("selected relation plans derive");
+    let inventory =
+        checked_selected_row_code_whir_production_geometry_certificates(&artifacts, |plan| {
+            plan.application_statement_schema_identifier
+                == ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+                && plan.top_count.is_some_and(|top_count| {
+                    (first_top_count..=last_top_count).contains(&top_count)
+                })
+        })
+        .expect("the focused evaluator width-64 production geometries derive");
+    let expected_top_counts = (first_top_count..=last_top_count).collect::<BTreeSet<_>>();
+    let actual_top_counts = inventory
+        .records
+        .iter()
+        .map(|certificate| {
+            assert!(certificate.is_complete());
+            assert_eq!(
+                certificate.application_statement_schema_identifier,
+                ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+            );
+            assert_eq!(
+                certificate.parameters.logical_polynomials_per_physical_row,
+                64,
+            );
+            certificate
+                .top_count
+                .expect("every focused evaluator geometry carries its top count")
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(actual_top_counts, expected_top_counts);
+    assert_eq!(
+        inventory.records.len(),
+        usize::from(last_top_count - first_top_count + 1),
+    );
+}
+
+#[test]
+#[ignore = "owned by test:rust:kernel:theorem-evidence"]
+fn evaluator_width_64_top_count_one_has_a_complete_geometry_certificate() {
+    let _certificate_test_guard = PRODUCTION_GEOMETRY_CERTIFICATE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    assert_evaluator_width_64_geometry_range_is_complete(1, 1);
+}
+
+#[test]
+#[ignore = "owned by test:rust:kernel:theorem-evidence"]
+fn evaluator_width_64_top_counts_two_through_seven_have_complete_geometry_certificates() {
+    let _certificate_test_guard = PRODUCTION_GEOMETRY_CERTIFICATE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    assert_evaluator_width_64_geometry_range_is_complete(2, 7);
+}
+
+#[test]
+#[ignore = "owned by test:rust:kernel:theorem-evidence"]
+fn evaluator_width_64_top_counts_eight_through_thirteen_have_complete_geometry_certificates() {
+    let _certificate_test_guard = PRODUCTION_GEOMETRY_CERTIFICATE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    assert_evaluator_width_64_geometry_range_is_complete(8, 13);
+}
+
+#[test]
+#[ignore = "owned by test:rust:kernel:theorem-evidence"]
+fn evaluator_width_64_top_counts_fourteen_through_twenty_have_complete_geometry_certificates() {
+    let _certificate_test_guard = PRODUCTION_GEOMETRY_CERTIFICATE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    assert_evaluator_width_64_geometry_range_is_complete(14, 20);
 }
 
 #[test]
@@ -14198,6 +14359,171 @@ fn aggregate_threshold_share_has_a_complete_deterministic_geometry_certificate()
         ),
         Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence),
         "an invented aggregate-threshold product sampler must be rejected",
+    );
+}
+
+#[test]
+#[ignore = "owned by test:rust:kernel:theorem-evidence"]
+fn relinearization_round_one_uses_the_maximum_shared_bound_agreement() {
+    let _certificate_test_guard = PRODUCTION_GEOMETRY_CERTIFICATE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let artifacts = selected_relation_plans().expect("selected relation plans derive");
+    let artifact = artifacts
+        .iter()
+        .find(|artifact| {
+            artifact.application_statement_schema_identifier()
+                == ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER
+        })
+        .expect("the selected relinearization-round-one relation artifact exists");
+    let relation_variant = artifact
+        .compiled_plan()
+        .variants()
+        .iter()
+        .find(|variant| variant.schedule_position() == Some(0))
+        .expect("the selected relinearization-round-one schedule exists");
+    let relation_context = selected_relation_plan_check_context(
+        ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER,
+    )
+    .expect("the selected relinearization-round-one context exists");
+    let plan = RowCodeWhirConstructionPlan::for_selected_variant(
+        artifact,
+        relation_variant.schedule_position(),
+        relation_variant.top_count(),
+    )
+    .expect("the selected relinearization-round-one construction derives");
+    let hiding_configuration =
+        super::super::hiding_whir::selected_hiding_whir_config(plan.selected_parameters())
+            .expect("the selected relinearization-round-one hiding configuration derives");
+    let aggregate_wide_masking = AggregateWideMaskingCertificate::derive(&hiding_configuration)
+        .expect("the selected relinearization-round-one masking certificate derives");
+    let direct_bound_trees = plan
+        .bound_trees
+        .iter()
+        .filter(|tree| tree.low_degree_mode == RowCodeWhirBoundLowDegreeMode::Direct)
+        .collect::<Vec<_>>();
+    assert_eq!(direct_bound_trees.len(), 5);
+    let population = u64::try_from(direct_bound_trees[0].leaf_count)
+        .expect("the selected bound-tree population fits u64");
+    assert!(
+        direct_bound_trees
+            .iter()
+            .all(|tree| u64::try_from(tree.leaf_count).ok() == Some(population))
+    );
+    let table_padding_factor = 1_u64
+        << (plan.parameters.table_variable_count
+            - plan.parameters.physical_row_witness_variable_count);
+    let raw_tree_leaf_dimensions = direct_bound_trees
+        .iter()
+        .map(|tree| {
+            let padded_dimension = tree.source_trace_domain_size
+                * u64::try_from(tree.ordered_columns.len())
+                    .expect("the selected bound-tree width fits u64")
+                * table_padding_factor;
+            let encoded_values_per_leaf = tree.evaluation_domain_size / population;
+            assert_eq!(
+                population * encoded_values_per_leaf,
+                tree.evaluation_domain_size,
+            );
+            padded_dimension.div_ceil(encoded_values_per_leaf)
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        raw_tree_leaf_dimensions,
+        BTreeSet::from([65_536, 6_815_744]),
+        "the focused geometry must retain both exact raw-tree leaf dimensions",
+    );
+    let direct_bound_blocks = plan
+        .bound_reduction_blocks
+        .iter()
+        .filter(|block| block.low_degree_mode == RowCodeWhirBoundLowDegreeMode::Direct)
+        .collect::<Vec<_>>();
+    assert_eq!(direct_bound_blocks.len(), 1);
+    assert_eq!(direct_bound_blocks[0].ordered_bound_tree_ordinals.len(), 5);
+    let reduction_block_leaf_dimensions = direct_bound_blocks
+        .iter()
+        .map(|block| {
+            let (block_population, encoded_values_per_leaf) =
+                checked_bound_reduction_block_leaf_geometry(&plan, block)
+                    .expect("the direct reduction-block leaf geometry derives");
+            assert_eq!(block_population, population);
+            block
+                .quotient_degree_bound_exclusive
+                .div_ceil(encoded_values_per_leaf)
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        reduction_block_leaf_dimensions,
+        BTreeSet::from([8_192]),
+        "the query theorem must use the deployed reduction polynomial instead of raw tree widths",
+    );
+    let maximum_reduction_block_leaf_dimension = reduction_block_leaf_dimensions
+        .iter()
+        .copied()
+        .max()
+        .expect("the selected direct-bound reduction geometry is nonempty");
+    let whir_geometry = derive_production_whir_geometry_certificate(&plan, &aggregate_wide_masking)
+        .expect("the relinearization-round-one WHIR geometry derives");
+    let query_rows = derive_exact_query_failure_rows(
+        &plan,
+        &whir_geometry.code_state_rows,
+        &aggregate_wide_masking,
+    )
+    .expect("the relinearization-round-one query failure ledger derives");
+    let statement_root_row = query_rows
+        .iter()
+        .find(|row| row.event == ExactQueryFailureEvent::StatementRootWords)
+        .expect("the shared statement-root query row derives");
+    assert_eq!(
+        statement_root_row.logical_word_count,
+        direct_bound_blocks.len()
+    );
+    assert_eq!(statement_root_row.population, population);
+    assert_eq!(
+        statement_root_row.agreement_ceiling,
+        (population + maximum_reduction_block_leaf_dimension) / 2,
+    );
+    assert_eq!(
+        statement_root_row.query_count,
+        u64::try_from(plan.parameters.direct_bound_query_count)
+            .expect("the selected direct-bound query count fits u64"),
+    );
+    assert_eq!(statement_root_row.charged_term_count, 1);
+
+    let certificate = checked_row_code_whir_production_geometry_certificate_with_masking(
+        &plan,
+        artifact,
+        relation_variant,
+        &relation_context,
+        &aggregate_wide_masking,
+    )
+    .expect("the relinearization-round-one production geometry certificate derives");
+    assert!(certificate.is_complete());
+
+    let catalog = plan
+        .oracle_equation_catalog()
+        .expect("the relinearization-round-one oracle-equation catalog derives");
+    let failure_input = ExactFailureMagnitudeDerivationInput {
+        plan: &plan,
+        relation_variant,
+        relation_context: &relation_context,
+        catalog: &catalog,
+        selected_plan_state_predicate: &certificate.selected_plan_state_predicate,
+        code_state_rows: &certificate.whir_geometry.code_state_rows,
+        fold_rows: &certificate.whir_geometry.fold_rows,
+        shift_rows: &certificate.whir_geometry.shift_rows,
+        aggregate_wide_masking: &certificate.aggregate_wide_masking,
+        initial_constraint_batch_numerator: certificate.prefix_stacking.scalar_opening_count - 1,
+        logical_verifier_message_count: certificate.logical_verifier_message_count,
+        cms19_arithmetic: &certificate.cms19_arithmetic,
+    };
+    assert_eq!(
+        checked_exact_failure_magnitude_with_fault(
+            failure_input,
+            ExactFailureMagnitudeFault::ReduceStatementRootAgreementCeiling,
+        ),
+        Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence),
+        "a reduced statement-root reduction-block agreement ceiling must refuse",
     );
 }
 
@@ -15539,6 +15865,30 @@ fn one_transition_collision_propagates_through_the_shared_suffix_and_final_diges
 #[ignore = "owned by test:rust:kernel:theorem-evidence"]
 fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
     let plan = selected_same_secret_construction_plan();
+    let direct_bound_blocks = plan
+        .bound_reduction_blocks
+        .iter()
+        .filter(|block| block.low_degree_mode == RowCodeWhirBoundLowDegreeMode::Direct)
+        .collect::<Vec<_>>();
+    assert_eq!(direct_bound_blocks.len(), 1);
+    let direct_bound_block = direct_bound_blocks[0];
+    assert_eq!(direct_bound_block.ordered_bound_tree_ordinals.len(), 3);
+    assert_eq!(
+        direct_bound_block.maximum_source_degree_bound_exclusive,
+        16_384,
+    );
+    assert_eq!(direct_bound_block.quotient_degree_bound_exclusive, 16_383);
+    let (direct_bound_population, direct_bound_encoded_values_per_leaf) =
+        checked_bound_reduction_block_leaf_geometry(&plan, direct_bound_block)
+            .expect("the selected direct reduction-block leaf geometry derives");
+    assert_eq!(direct_bound_population, 8_388_608);
+    assert_eq!(direct_bound_encoded_values_per_leaf, 2);
+    assert_eq!(
+        direct_bound_block
+            .quotient_degree_bound_exclusive
+            .div_ceil(direct_bound_encoded_values_per_leaf),
+        8_192,
+    );
     let production_catalog = plan
         .oracle_equation_catalog()
         .expect("the production oracle-equation catalog derives");
@@ -16365,7 +16715,7 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
             ),
             (
                 ExactQueryFailureEvent::BoundTreeWords,
-                8,
+                1,
                 8_388_608,
                 9_217,
                 40,
@@ -16373,9 +16723,9 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
             ),
             (
                 ExactQueryFailureEvent::StatementRootWords,
-                3,
+                1,
                 8_388_608,
-                4_259_840,
+                4_198_400,
                 266,
                 1,
             ),

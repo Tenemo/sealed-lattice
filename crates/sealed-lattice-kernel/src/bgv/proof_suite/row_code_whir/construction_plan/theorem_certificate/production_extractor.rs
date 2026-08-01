@@ -28,6 +28,7 @@ const SYNTHETIC_DIVISION_IDENTITY_COUNT: usize = 16;
 pub(super) enum ProductionExtractorCorrespondenceFault {
     None,
     DropFirstRelationPhasePolynomial,
+    DropFirstBoundTreeOpeningClaim,
     ChangeFirstAggregateOpeningColumn,
     ChangeScalarOpeningCount,
     PermitProofSuppliedPoint,
@@ -233,6 +234,9 @@ impl ProductionPointConstraintExtractorCertificate {
             .checked_add(self.bound_tree_opening_claim_count)
             .and_then(|count| count.checked_add(self.quotient_opening_claim_count))
             .and_then(|count| count.checked_add(self.opening_batch_mask_claim_count));
+        let authenticated_tree_opening_claim_count = self
+            .proof_created_tree_opening_claim_count
+            .checked_add(self.bound_tree_opening_claim_count);
         let expected_mask_claim_count = match self.proof_privacy_mode {
             ProofPrivacyMode::PublicOnly => 0,
             ProofPrivacyMode::SecretBearing => 1,
@@ -265,7 +269,7 @@ impl ProductionPointConstraintExtractorCertificate {
             && expected_opening_point_columns == Some(self.opening_point_aggregate_columns.clone())
             && self.quotient_active_point_count > 0
             && self.quotient_active_point_count <= self.explicit_point_count
-            && self.proof_created_tree_opening_claim_count > 0
+            && authenticated_tree_opening_claim_count.is_some_and(|count| count > 0)
             && self.quotient_opening_claim_count > 0
             && self.opening_batch_mask_claim_count == expected_mask_claim_count
             && expected_claim_count == Some(self.relation_opening_claim_count)
@@ -293,6 +297,22 @@ impl ProductionPointConstraintExtractorCertificate {
 
     pub(super) const fn proof_supplied_point_coordinate_count(&self) -> usize {
         self.proof_supplied_point_coordinate_count
+    }
+
+    pub(super) const fn proof_created_tree_opening_claim_count(&self) -> usize {
+        self.proof_created_tree_opening_claim_count
+    }
+
+    pub(super) const fn bound_tree_opening_claim_count(&self) -> usize {
+        self.bound_tree_opening_claim_count
+    }
+
+    pub(super) const fn quotient_opening_claim_count(&self) -> usize {
+        self.quotient_opening_claim_count
+    }
+
+    pub(super) const fn opening_batch_mask_claim_count(&self) -> usize {
+        self.opening_batch_mask_claim_count
     }
 }
 
@@ -1269,7 +1289,7 @@ pub(super) fn checked_production_extractor_correspondence_with_fault(
         quotient_opening_claim_count,
         opening_batch_mask_claim_count,
     ) = opening_claim_partition(relation_variant)?;
-    let point_constraints = ProductionPointConstraintExtractorCertificate {
+    let mut point_constraints = ProductionPointConstraintExtractorCertificate {
         construction_plan_identity_hash,
         relation_plan_variant_hash,
         proof_privacy_mode: relation_variant.proof_privacy_mode(),
@@ -1303,8 +1323,23 @@ pub(super) fn checked_production_extractor_correspondence_with_fault(
         relation_opening_claim_count: relation_variant.ordered_opening_claims().len(),
         selector_equality_identity_count,
     };
-    if !polynomial_protocol.is_complete() || !point_constraints.is_complete() {
-        return Err("production polynomial extractor correspondence is incomplete".to_owned());
+    if fault == ProductionExtractorCorrespondenceFault::DropFirstBoundTreeOpeningClaim {
+        point_constraints.bound_tree_opening_claim_count = point_constraints
+            .bound_tree_opening_claim_count
+            .checked_sub(1)
+            .ok_or_else(|| {
+                "production extractor has no bound-tree opening claim to remove".to_owned()
+            })?;
+    }
+    if !polynomial_protocol.is_complete() {
+        return Err(
+            "production polynomial-protocol extractor correspondence is incomplete".to_owned(),
+        );
+    }
+    if !point_constraints.is_complete() {
+        return Err(
+            "production point-constraint extractor correspondence is incomplete".to_owned(),
+        );
     }
     Ok((polynomial_protocol, point_constraints))
 }

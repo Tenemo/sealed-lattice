@@ -90,9 +90,10 @@ impl SharedQueryPartitionRow {
 ///
 /// Every row is one independently bounded event class, and the words inside a
 /// row share that class's vector. The outer opening words and relation-phase
-/// columns reuse the outer vector. The bound-tree checks reuse the first forty
-/// coordinates of the direct-bound vector, while the three statement roots use
-/// all 266 coordinates of that same vector. The different agreement geometries
+/// columns reuse the outer vector. Eight prior-proof roots reduce into one
+/// prior-certified block that uses the first forty coordinates of the bound
+/// vector. Three direct statement roots reduce into one direct block that uses
+/// all 266 coordinates of the same vector. The different agreement geometries
 /// remain separate terms, and each row earns one deterministic selected-word
 /// charge within its own geometry.
 pub(in crate::bgv::proof_suite) fn selected_shared_query_partition() -> [SharedQueryPartitionRow; 4]
@@ -118,7 +119,7 @@ pub(in crate::bgv::proof_suite) fn selected_shared_query_partition() -> [SharedQ
         },
         SharedQueryPartitionRow {
             class: SharedQueryEventClass::BoundTreeWords,
-            word_count: 8,
+            word_count: 1,
             sampled_coordinate_count: 40,
             words_fixed_before_sampling: true,
             shares_one_query_vector: true,
@@ -127,7 +128,7 @@ pub(in crate::bgv::proof_suite) fn selected_shared_query_partition() -> [SharedQ
         },
         SharedQueryPartitionRow {
             class: SharedQueryEventClass::StatementRootWords,
-            word_count: 3,
+            word_count: 1,
             sampled_coordinate_count: 266,
             words_fixed_before_sampling: true,
             shares_one_query_vector: true,
@@ -170,8 +171,12 @@ mod tests {
         let partition = selected_shared_query_partition();
         for row in partition {
             assert_eq!(row.charged_term_count, 1);
-            assert!(row.word_count > row.charged_term_count);
+            assert!(row.word_count >= row.charged_term_count);
         }
+        assert!(partition[0].word_count > partition[0].charged_term_count);
+        assert!(partition[1].word_count > partition[1].charged_term_count);
+        assert_eq!(partition[2].word_count, 1);
+        assert_eq!(partition[3].word_count, 1);
         assert_eq!(partition[2].sampled_coordinate_count, 40);
         assert_eq!(partition[3].sampled_coordinate_count, 266);
 

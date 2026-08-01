@@ -111,7 +111,7 @@ Works today:
   to relation-owned points 0, 1, and 11. Focused mutation tests refuse omitted
   or altered coordinates, dependencies, authorities, ranks, and query
   schedules.
-- Checked structural construction-geometry certificates have derived for all 31
+- Checked construction-geometry certificates have derived for all 31
   production identities: 27 width-64, log-inverse-rate-two
   (inverse-rate-four) identities, including evaluator top counts 1 through 20,
   and four width-8, log-inverse-rate-five (inverse-rate-32) identities. The
@@ -124,20 +124,23 @@ Works today:
   polynomial and selector basis identity. The failure ledger derives
   query-event presence, row-code rate, agreement ceilings, product-challenge
   degrees, statement-family multiplicity, and classical and
-  quantum-random-oracle loss from the selected plan. Focused current evidence
-  passes this stronger constructor and full-false terminal rejection for the
-  selected same-secret plan and all four width-8 production identities. The
-  VSS plan derives eight application-modulus alpha vectors with seven
-  coordinates each, retains their distinct sample-space denominators, and
-  enters their failure terms as an exact rational sum. The aggregate-threshold
-  plan independently proves that its deterministic residual schedule has no
-  product sampler. Hostile tests refuse omitted phase polynomials, changed
-  aggregate opening columns or scalar counts, proof-supplied points, changed
-  basis identities, wrong family or multiplicity bindings, altered VSS
-  product or algebraic denominators, and an invented aggregate-threshold
-  product row. The remaining width-64 identities have not yet been regenerated
-  under the stronger gate. Families with no bound tree or verifier-sequence
-  source do not acquire an invented ledger row.
+  quantum-random-oracle loss from the selected plan. All 27 width-64 and all
+  four width-8 production identities now pass this stronger constructor and
+  full-false terminal rejection. Bound query accounting follows the deployed
+  reduction polynomials rather than counting each underlying tree as a
+  separate logical word. In the same-secret plan, eight prior-proof roots form
+  one prior-certified block with agreement ceiling `9,217`, while three direct
+  roots form one direct block whose exact leaf-level quotient dimension is
+  `8,192` and whose agreement ceiling is `4,198,400`. The VSS plan derives eight
+  application-modulus alpha vectors with seven coordinates each, retains their
+  distinct sample-space denominators, and enters their failure terms as an
+  exact rational sum. The aggregate-threshold plan independently proves that
+  its deterministic residual schedule has no product sampler. Hostile tests
+  refuse omitted phase polynomials, changed aggregate opening columns or scalar
+  counts, proof-supplied points, changed basis identities, wrong family or
+  multiplicity bindings, altered VSS product or algebraic denominators, and an
+  invented aggregate-threshold product row. Families with no bound tree or
+  verifier-sequence source do not acquire an invented ledger row.
 - Production-derived phase-liveness accounting now covers the complete
   same-secret prover live set, including source ownership, replay readers,
   DFTs, Merkle frontiers, proof material, transcript state, private material,
@@ -182,13 +185,11 @@ Not yet:
   The reusable atomic predecessor and database-extraction layer is now enforced
   by the production-geometry constructor. Exact family failure ledgers,
   plan-derived polynomial and point extraction, and full-false terminal
-  rejection now derive for the focused same-secret and ballot geometries. The
-  VSS geometry additionally derives its heterogeneous application-modulus
-  product-challenge ledger, and all four width-8 identities now pass the
-  serialized complete-constructor inventory. The remaining width-64
-  geometries still need independent regeneration under the complete gate. The
-  final theorem-to-transported-bytes correspondence and ceremony-level failure
-  composition also remain open.
+  rejection now derive for every production geometry. The VSS geometry
+  additionally derives its heterogeneous application-modulus
+  product-challenge ledger. All 27 width-64 and four width-8 identities pass
+  the complete constructor. The final theorem-to-transported-bytes
+  correspondence and ceremony-level failure composition remain open.
 - The static liveness model has not yet been confirmed by a completed native
   proof or release-WebAssembly browser measurement. Complete participant
   transport accounting is also open. Production-derived sizes for 73 of the
