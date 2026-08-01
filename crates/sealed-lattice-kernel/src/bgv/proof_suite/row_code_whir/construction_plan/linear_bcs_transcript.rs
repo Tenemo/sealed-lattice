@@ -758,17 +758,26 @@ fn push_epoch_owned_opening(
 fn aggregate_wide_pad_domain_size(
     plan: &RowCodeWhirConstructionPlan,
 ) -> Result<usize, RowCodeWhirConstructionPlanError> {
+    aggregate_wide_pad_query_geometry(plan).map(|geometry| geometry.0)
+}
+
+pub(super) fn aggregate_wide_pad_query_geometry(
+    plan: &RowCodeWhirConstructionPlan,
+) -> Result<(usize, usize), RowCodeWhirConstructionPlanError> {
     let configuration = super::super::hiding_whir::selected_hiding_whir_config(plan.parameters)
         .map_err(|_| RowCodeWhirConstructionPlanError::InvalidVariantGeometry)?;
     let pad_layout =
         super::super::aggregate_wide_hiding::AggregateWidePadLayout::derive(&configuration)
             .map_err(|_| RowCodeWhirConstructionPlanError::InvalidVariantGeometry)?;
-    Ok(p3_whir::MaskCodeShape::new(
-        pad_layout.message_length(),
-        configuration.sumcheck_mask.randomness_len,
-        super::super::aggregate_wide_hiding::AGGREGATE_WIDE_PAD_LOG_INVERSE_RATE,
-    )
-    .domain_size)
+    Ok((
+        p3_whir::MaskCodeShape::new(
+            pad_layout.message_length(),
+            configuration.sumcheck_mask.randomness_len,
+            super::super::aggregate_wide_hiding::AGGREGATE_WIDE_PAD_LOG_INVERSE_RATE,
+        )
+        .domain_size,
+        configuration.mask_queries,
+    ))
 }
 
 fn push_whir_owned_opening(

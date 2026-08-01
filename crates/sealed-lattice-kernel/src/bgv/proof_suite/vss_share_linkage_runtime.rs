@@ -478,18 +478,14 @@ pub(in crate::bgv::proof_suite) fn selected_vss_proof_runtime_plan(
     let input = selected_committed_material_relation_plan_input()?;
     let compiled_relation_plan =
         compile_vss_share_linkage_relation_plan(&input, &relation_context)?;
-    let variant = compiled_relation_plan.select_variant(None, None)?;
-    let limits = selected_proof_runtime_limits(
-        statement_schema_identifier,
-        canonical_application_statement_bytes,
-        variant,
-    )?;
     let relation_plan = CommonProofRelationPlanCapability::from_compiled_plan(
         &compiled_relation_plan,
         &relation_context,
         None,
         None,
     )?;
+    let limits =
+        selected_proof_runtime_limits(canonical_application_statement_bytes, &relation_plan)?;
     Ok(SelectedVssProofRuntimePlan {
         relation_plan,
         limits,

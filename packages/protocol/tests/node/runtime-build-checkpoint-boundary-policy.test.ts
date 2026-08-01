@@ -35,12 +35,32 @@ const cursorManifestMagic = Uint8Array.of(
     0x33,
 );
 const stableAttemptBindingHash = new Uint8Array(64).fill(0x52);
+const generationCursorManifestPrefixByteLength = 88;
+
+const generationCursorManifest = (
+    privateCoinCursorManifest: Uint8Array,
+): Uint8Array<ArrayBuffer> => {
+    const bytes = new Uint8Array(
+        generationCursorManifestPrefixByteLength +
+            privateCoinCursorManifest.byteLength,
+    );
+    bytes.set(Uint8Array.of(0x53, 0x4c, 0x43, 0x47, 0x43, 0x4d, 0x30, 0x31));
+    const view = new DataView(bytes.buffer);
+    view.setUint16(8, 1, true);
+    view.setUint32(12, bytes.byteLength, true);
+    view.setUint32(16, privateCoinCursorManifest.byteLength, true);
+    bytes.set(
+        privateCoinCursorManifest,
+        generationCursorManifestPrefixByteLength,
+    );
+    return bytes;
+};
 
 const deterministicCursorManifest = (): Uint8Array<ArrayBuffer> => {
-    const bytes = new Uint8Array(19);
-    bytes.set(cursorManifestMagic);
-    new DataView(bytes.buffer).setUint16(8, 3, true);
-    return bytes;
+    const privateCoinCursorManifest = new Uint8Array(19);
+    privateCoinCursorManifest.set(cursorManifestMagic);
+    new DataView(privateCoinCursorManifest.buffer).setUint16(8, 3, true);
+    return generationCursorManifest(privateCoinCursorManifest);
 };
 
 const privateCursorManifest = (input: {
@@ -88,7 +108,7 @@ const privateCursorManifest = (input: {
         view.setUint32(offset + 20, 0, true);
         offset += runByteLength;
     }
-    return bytes;
+    return generationCursorManifest(bytes);
 };
 
 const boundaryProfile = (
@@ -755,13 +775,24 @@ describe('runtime build checkpoint boundary policy', () => {
             orderedPurposes: [1, 3],
             streamAttemptIdentifier,
         });
-        new DataView(wrongCount.buffer).setUint32(15, 9, true);
+        new DataView(wrongCount.buffer).setUint32(
+            generationCursorManifestPrefixByteLength + 15,
+            9,
+            true,
+        );
         const trailing = new Uint8Array(wrongCount.byteLength + 1);
         trailing.set(
             privateCursorManifest({
                 orderedPurposes: [1, 3],
                 streamAttemptIdentifier,
             }),
+        );
+        const trailingView = new DataView(trailing.buffer);
+        trailingView.setUint32(12, trailing.byteLength, true);
+        trailingView.setUint32(
+            16,
+            trailing.byteLength - generationCursorManifestPrefixByteLength,
+            true,
         );
 
         for (const cursorManifestBytes of [unsorted, wrongCount, trailing]) {

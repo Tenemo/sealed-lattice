@@ -162,7 +162,7 @@ fn generated_capability_attempt_preflight_refusals_are_retryable() {
         ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
         Some(0),
         None,
-        None,
+        Some(0),
     )
     .expect("the live generated-capability test slot is canonical");
     let authorization = CommonProofGenerationAuthorization::from_genuine_test_application(

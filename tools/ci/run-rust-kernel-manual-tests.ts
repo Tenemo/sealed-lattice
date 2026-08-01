@@ -3,14 +3,18 @@ import path from 'node:path';
 import {
     buildGuardedRustKernelCommand,
     buildGuardedRustEnvironment,
+    guardRustKernelCommand,
     runGuardedRustKernelCommands,
+    verifyGuardedRustProcessMemoryGuardCommand,
 } from './guarded-rust-kernel-runner.js';
 import { runWithLocalRunLog, type ActiveLocalRunLog } from './local-run-log.js';
+import { runCommandsInSeries, type CommandInvocation } from './run-command.js';
 import {
     focusedRustLaneScripts,
     fullProfileEvidenceRustTests,
     measurementRustTests,
     phaseLivenessEvidenceRustTests,
+    theoremEvidenceRustTests,
     verifyFocusedRustLaneSelection,
 } from './rust-focused-lane-selection.js';
 import { normalizeRustTestFilter } from './rust-kernel-test-arguments.js';
@@ -19,6 +23,7 @@ const manualRustKernelTests = {
     'rust-full-profile-evidence': fullProfileEvidenceRustTests,
     'rust-measurements': measurementRustTests,
     'rust-phase-liveness-evidence': phaseLivenessEvidenceRustTests,
+    'rust-theorem-evidence': theoremEvidenceRustTests,
 } as const;
 
 type ManualRustKernelLane = keyof typeof manualRustKernelTests;
@@ -27,10 +32,22 @@ const laneLabels = {
     'rust-full-profile-evidence': 'Rust full-profile evidence',
     'rust-measurements': 'Rust measurements',
     'rust-phase-liveness-evidence': 'Rust phase-liveness evidence',
+    'rust-theorem-evidence': 'Rust theorem evidence',
 } as const satisfies Record<ManualRustKernelLane, string>;
 
+const laneCargoFeatures = {
+    'rust-full-profile-evidence': [],
+    'rust-measurements': [],
+    'rust-phase-liveness-evidence': [],
+    'rust-theorem-evidence': ['theorem-evidence'],
+} as const satisfies Record<ManualRustKernelLane, readonly string[]>;
+
 type ManualRustLaneSelectionVerifier = (input: {
+    readonly cargoFeatures?: readonly string[];
     readonly environment?: NodeJS.ProcessEnv;
+    readonly inventoryCommandTransform?: (
+        command: CommandInvocation,
+    ) => CommandInvocation;
     readonly lane: ManualRustKernelLane;
     readonly runLog?: ActiveLocalRunLog;
     readonly testFilter: string;
@@ -66,9 +83,13 @@ const resolveManualRustKernelTestFilters = (input: {
 };
 
 export const preflightAndRunManualRustKernelLane = async (input: {
+    readonly cargoFeatures?: readonly string[];
     readonly configuredTestNames: readonly string[];
     readonly environment?: NodeJS.ProcessEnv;
     readonly focusedFilter?: string;
+    readonly inventoryCommandTransform?: (
+        command: CommandInvocation,
+    ) => CommandInvocation;
     readonly lane: ManualRustKernelLane;
     readonly runGuardedCommands: (
         testFilters: readonly string[],
@@ -88,9 +109,18 @@ export const preflightAndRunManualRustKernelLane = async (input: {
         input.verifyLaneSelection ?? verifyFocusedRustLaneSelection;
     for (const testFilter of testFilters) {
         await verifyLaneSelection({
+            ...(input.cargoFeatures === undefined
+                ? {}
+                : { cargoFeatures: input.cargoFeatures }),
             ...(input.environment === undefined
                 ? {}
                 : { environment: input.environment }),
+            ...(input.inventoryCommandTransform === undefined
+                ? {}
+                : {
+                      inventoryCommandTransform:
+                          input.inventoryCommandTransform,
+                  }),
             lane: input.lane,
             ...(input.runLog === undefined ? {} : { runLog: input.runLog }),
             testFilter,
@@ -111,7 +141,7 @@ const parseArguments = (
     );
     if (!(rawLane !== undefined && rawLane in manualRustKernelTests)) {
         throw new Error(
-            'The guarded manual Rust runner requires lane rust-full-profile-evidence, rust-measurements, or rust-phase-liveness-evidence.',
+            'The guarded manual Rust runner requires lane rust-full-profile-evidence, rust-measurements, rust-phase-liveness-evidence, or rust-theorem-evidence.',
         );
     }
     const lane = rawLane as ManualRustKernelLane;
@@ -171,12 +201,38 @@ export const runRustKernelManualTests = async (): Promise<void> => {
             const environment = buildGuardedRustEnvironment({
                 targetDirectoryPath,
             });
+            const processMemoryGuardVerificationExitCode =
+                await runCommandsInSeries(
+                    [verifyGuardedRustProcessMemoryGuardCommand()],
+                    { outputMode: 'inherit', runLog },
+                );
+            if (processMemoryGuardVerificationExitCode !== 0) {
+                process.exitCode = processMemoryGuardVerificationExitCode;
+                return;
+            }
+            let inventoryCommandOrdinal = 0;
+            const inventoryCommandTransform = (
+                command: CommandInvocation,
+            ): CommandInvocation => {
+                inventoryCommandOrdinal += 1;
+                return guardRustKernelCommand(
+                    command,
+                    undefined,
+                    path.join(
+                        runLog.runDirectoryPath,
+                        'resources',
+                        `process-memory-guard-rust-inventory-${String(inventoryCommandOrdinal).padStart(2, '0')}.jsonl`,
+                    ),
+                );
+            };
             await preflightAndRunManualRustKernelLane({
+                cargoFeatures: laneCargoFeatures[parsed.lane],
                 configuredTestNames: manualRustKernelTests[parsed.lane],
                 environment,
                 ...(parsed.focusedFilter === undefined
                     ? {}
                     : { focusedFilter: parsed.focusedFilter }),
+                inventoryCommandTransform,
                 lane: parsed.lane,
                 runGuardedCommands: async (testFilters) => {
                     const commands = testFilters.map((testFilter) => ({
@@ -187,6 +243,7 @@ export const runRustKernelManualTests = async (): Promise<void> => {
                                 progressLabel: parsed.lane,
                                 runName: label,
                                 targetDirectoryPath,
+                                cargoFeatures: laneCargoFeatures[parsed.lane],
                             },
                         ),
                         expectedTestFilter: testFilter,
@@ -196,6 +253,7 @@ export const runRustKernelManualTests = async (): Promise<void> => {
                         laneLabel: `${label}${
                             parsed.focusedFilter === undefined ? '' : ' focused'
                         }`,
+                        processMemoryGuardAlreadyVerified: true,
                         runLog,
                     });
                 },

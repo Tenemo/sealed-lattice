@@ -1087,6 +1087,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "guarded complete selected-family source-manifest evidence"]
     fn selected_family_manifests_bind_each_candidate_specific_material_catalog() {
         let artifacts = selected_relation_plans().expect("the selected relation plans derive");
         let mut observed_vss_manifest = false;

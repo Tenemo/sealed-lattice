@@ -1712,15 +1712,6 @@ pub(crate) fn accepted_package_statement_source(
         .find(|artifact| artifact.application_statement_schema_identifier() == schema_identifier)
         .ok_or(CommonProofRuntimeError::InvalidPlanCapability)?;
     let relation_plan = relation_plan_artifact.compiled_plan();
-    let relation_variant = relation_plan
-        .select_variant(schedule_position, top_count)
-        .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?;
-    let runtime_limits = selected_proof_runtime_limits(
-        schema_identifier,
-        canonical_application_statement_bytes,
-        relation_variant,
-    )
-    .map_err(|_| CommonProofRuntimeError::InvalidLimits)?;
     let relation_context = selected_relation_plan_check_context(schema_identifier)
         .ok_or(CommonProofRuntimeError::InvalidPlanCapability)?;
     let relation_plan_capability = CommonProofRelationPlanCapability::from_compiled_plan(
@@ -1730,6 +1721,11 @@ pub(crate) fn accepted_package_statement_source(
         top_count,
     )
     .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?;
+    let runtime_limits = selected_proof_runtime_limits(
+        canonical_application_statement_bytes,
+        &relation_plan_capability,
+    )
+    .map_err(|_| CommonProofRuntimeError::InvalidLimits)?;
     VerifiedCommonProofStatementSource::from_exact_family_verified_accepted_setup_package(
         package,
         verified_public_randomness,

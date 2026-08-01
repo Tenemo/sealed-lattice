@@ -3900,6 +3900,7 @@ mod requested_pre_challenge_source_column_tests {
     }
 
     #[test]
+    #[ignore = "guarded complete selected-family source-column evidence"]
     fn selected_pre_challenge_source_column_catalog_matches_exact_family_geometry() {
         let selected_plans = selected_relation_plans().expect("selected relation plans compile");
         let mut variant_count = 0_usize;

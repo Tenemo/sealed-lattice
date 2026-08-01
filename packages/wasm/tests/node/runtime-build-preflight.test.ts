@@ -23,6 +23,7 @@ import {
     createSuiteIdentifierAccumulator,
     decodeRuntimeBuildManifest,
     decodeSuiteArtifactReferences,
+    hidingArgumentRandomnessPurpose,
     proofMaskRandomnessPurposeClasses,
     proofRandomnessFamilyAssignments,
     runtimeBuildBytesToHex,
@@ -56,10 +57,12 @@ const textEncoder = new TextEncoder();
 type PrivateRandomnessFamilyAssignmentVector = Readonly<{
     familyName: string;
     familySchemaIdentifier: number;
+    relationWitnessIsPrivate: boolean;
 }>;
 
 type PrivateRandomnessProofCoordinatesVector = Readonly<{
     privateProofSaltPurpose: number;
+    hidingArgumentPurpose: number;
     maskPurposeClasses: Readonly<{
         trace: number;
         telescoping: number;
@@ -732,30 +735,40 @@ describe('runtime build preflight', () => {
         expect(vector.families.map((family) => family.familyName)).toEqual([
             'sameSecret',
             'publicKeyShare',
+            'collectivePublicKeyAggregate',
             'relinearizationRoundOne',
+            'relinearizationRoundOneAggregate',
             'relinearizationRoundTwo',
             'galoisKeyShare',
+            'evaluatorKeyAggregate',
             'ballotValidity',
             'targetShareProof',
             'vssShareLinkage',
             'aggregateThresholdShare',
         ]);
         expect(proofRandomnessFamilyAssignments).toEqual(
-            vector.families.map(({ familySchemaIdentifier }) => ({
-                familySchemaIdentifier,
-            })),
+            vector.families.map(
+                ({ familySchemaIdentifier, relationWitnessIsPrivate }) => ({
+                    familySchemaIdentifier,
+                    relationWitnessIsPrivate,
+                }),
+            ),
         );
         expect(proofMaskRandomnessPurposeClasses).toEqual(
             vector.maskPurposeClasses,
         );
+        expect(hidingArgumentRandomnessPurpose).toBe(
+            vector.hidingArgumentPurpose,
+        );
 
+        const privateWitnessPurposes = [
+            vector.maskPurposeClasses.trace,
+            vector.maskPurposeClasses.telescoping,
+            vector.maskPurposeClasses.opening,
+            vector.privateProofSaltPurpose,
+        ];
         for (const family of vector.families) {
-            for (const purpose of [
-                vector.maskPurposeClasses.trace,
-                vector.maskPurposeClasses.telescoping,
-                vector.maskPurposeClasses.opening,
-                vector.privateProofSaltPurpose,
-            ]) {
+            for (const purpose of [vector.hidingArgumentPurpose]) {
                 const fixture = createFixture({
                     operationProfiles: [
                         operationProfileForRandomUse(
@@ -769,7 +782,7 @@ describe('runtime build preflight', () => {
                 ).not.toThrow();
             }
 
-            for (const purpose of [0, 4]) {
+            for (const purpose of [0, 5, 0xffff]) {
                 const fixture = createFixture({
                     operationProfiles: [
                         operationProfileForRandomUse(
@@ -784,10 +797,43 @@ describe('runtime build preflight', () => {
             }
         }
 
-        for (const [family, purpose] of [
-            [0x1213, 0xfffe],
-            [0xffff, 1],
-        ] as const) {
+        for (const family of vector.families.filter(
+            (assignment) => assignment.relationWitnessIsPrivate,
+        )) {
+            for (const purpose of privateWitnessPurposes) {
+                const fixture = createFixture({
+                    operationProfiles: [
+                        operationProfileForRandomUse(
+                            family.familySchemaIdentifier,
+                            purpose,
+                        ),
+                    ],
+                });
+                expect(() =>
+                    decodeRuntimeBuildManifest(fixture.manifestBytes),
+                ).not.toThrow();
+            }
+        }
+
+        for (const family of vector.families.filter(
+            (assignment) => !assignment.relationWitnessIsPrivate,
+        )) {
+            for (const purpose of privateWitnessPurposes) {
+                const fixture = createFixture({
+                    operationProfiles: [
+                        operationProfileForRandomUse(
+                            family.familySchemaIdentifier,
+                            purpose,
+                        ),
+                    ],
+                });
+                expect(() =>
+                    decodeRuntimeBuildManifest(fixture.manifestBytes),
+                ).toThrow('A checkpoint random-use profile is unassigned.');
+            }
+        }
+
+        for (const [family, purpose] of [[0xffff, 1]] as const) {
             const fixture = createFixture({
                 operationProfiles: [
                     operationProfileForRandomUse(family, purpose),

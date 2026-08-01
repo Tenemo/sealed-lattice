@@ -90,17 +90,18 @@ pub(in crate::bgv::proof_suite::row_code_whir) use aggregate_source::{
     ExactSameSecretAggregateSourceAction, ExactSameSecretAggregateSourceBatch,
     ExactSameSecretAggregateSourceTarget, ExactSameSecretAggregateWitness,
 };
+#[cfg(test)]
+pub(in crate::bgv::proof_suite) use exact_proof::canonical_row_code_whir_aggregate_opening_section_byte_ledger;
 pub(in crate::bgv::proof_suite) use exact_proof::canonical_row_code_whir_family_body_byte_length_ceiling;
 pub(in crate::bgv::proof_suite::row_code_whir) use exact_proof::{
     ExactBoundLeafOpening, ExactBoundTreeAuthentication, ExactSameSecretPhaseOpenings,
     ExactSameSecretProof, ExactSameSecretProofEncodingProgress, ExactSameSecretProofSinkEncoder,
     ExactSameSecretProofSinkEncodingError,
 };
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 pub(in crate::bgv::proof_suite) use exact_proof::{
     ExactExtractorCorrespondenceFault, ExactPointConstraintExtractorCertificate,
     ExactPolynomialProtocolExtractorCertificate,
-    canonical_row_code_whir_aggregate_opening_section_byte_ledger,
     checked_exact_same_secret_extractor_correspondence,
     checked_exact_same_secret_extractor_correspondence_with_fault,
 };
@@ -2642,7 +2643,9 @@ mod tests {
         CommonProofQuotientComponentCursor, PROOF_CHALLENGE_EXTENSION_DEGREE,
         ProofBaseFieldElement, ProofChallengeExtensionElement, ProofEvaluationDomain,
         RelationPlanError, common_proof_checkpoint_cursor_manifest_requirement_for_variant,
-        construct_opening_batch_mask, selected_relation_plans,
+        compile_public_key_share_relation_plan, compile_same_secret_relation_plan,
+        construct_opening_batch_mask, selected_public_key_share_relation_plan_input,
+        selected_same_secret_relation_plan_input,
     };
     use crate::transcript_core::encode_hex;
 
@@ -2652,15 +2655,21 @@ mod tests {
         let statement_schema_identifier = family.statement_schema_identifier();
         let relation_context = selected_relation_plan_check_context(statement_schema_identifier)
             .expect("the selected family has a relation context");
-        let relation_plan_artifact = selected_relation_plans()
-            .expect("selected relation plans compile")
-            .into_iter()
-            .find(|artifact| {
-                artifact.application_statement_schema_identifier() == statement_schema_identifier
-            })
-            .expect("the selected family has a relation plan");
+        let compiled_relation_plan = match family {
+            SetupKeyRelationProofFamily::SameSecret => compile_same_secret_relation_plan(
+                &selected_same_secret_relation_plan_input()
+                    .expect("the selected same-secret input derives"),
+                &relation_context,
+            ),
+            SetupKeyRelationProofFamily::PublicKeyShare => compile_public_key_share_relation_plan(
+                &selected_public_key_share_relation_plan_input()
+                    .expect("the selected public-key-share input derives"),
+                &relation_context,
+            ),
+        }
+        .expect("the selected family relation plan compiles");
         CommonProofRelationPlanCapability::from_compiled_plan(
-            relation_plan_artifact.compiled_plan(),
+            &compiled_relation_plan,
             &relation_context,
             None,
             None,

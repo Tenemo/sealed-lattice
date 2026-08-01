@@ -421,11 +421,15 @@ export const requireCanonicalRuntimePath = (path: string): string => {
 };
 
 const privateProofSaltPurpose = 0xfffe;
+export const hidingArgumentRandomnessPurpose = 4;
 const sameSecretProofFamilySchemaIdentifier = 0x1211;
 const publicKeyShareProofFamilySchemaIdentifier = 0x1212;
+const collectivePublicKeyAggregateProofFamilySchemaIdentifier = 0x1213;
 const relinearizationRoundOneProofFamilySchemaIdentifier = 0x1214;
+const relinearizationRoundOneAggregateProofFamilySchemaIdentifier = 0x1215;
 const relinearizationRoundTwoProofFamilySchemaIdentifier = 0x1216;
 const galoisKeyShareProofFamilySchemaIdentifier = 0x1217;
+const evaluatorKeyAggregateProofFamilySchemaIdentifier = 0x1218;
 const ballotValidityProofFamilySchemaIdentifier = 0x1302;
 const targetShareProofFamilySchemaIdentifier = 0x1621;
 const vssShareLinkageProofFamilySchemaIdentifier = 0x2110;
@@ -441,33 +445,57 @@ const proofMaskRandomnessPurposeClassSet = new Set<number>(
 export const proofRandomnessFamilyAssignments = Object.freeze([
     Object.freeze({
         familySchemaIdentifier: sameSecretProofFamilySchemaIdentifier,
+        relationWitnessIsPrivate: true,
     }),
     Object.freeze({
         familySchemaIdentifier: publicKeyShareProofFamilySchemaIdentifier,
+        relationWitnessIsPrivate: true,
+    }),
+    Object.freeze({
+        familySchemaIdentifier:
+            collectivePublicKeyAggregateProofFamilySchemaIdentifier,
+        relationWitnessIsPrivate: false,
     }),
     Object.freeze({
         familySchemaIdentifier:
             relinearizationRoundOneProofFamilySchemaIdentifier,
+        relationWitnessIsPrivate: true,
+    }),
+    Object.freeze({
+        familySchemaIdentifier:
+            relinearizationRoundOneAggregateProofFamilySchemaIdentifier,
+        relationWitnessIsPrivate: false,
     }),
     Object.freeze({
         familySchemaIdentifier:
             relinearizationRoundTwoProofFamilySchemaIdentifier,
+        relationWitnessIsPrivate: true,
     }),
     Object.freeze({
         familySchemaIdentifier: galoisKeyShareProofFamilySchemaIdentifier,
+        relationWitnessIsPrivate: true,
+    }),
+    Object.freeze({
+        familySchemaIdentifier:
+            evaluatorKeyAggregateProofFamilySchemaIdentifier,
+        relationWitnessIsPrivate: false,
     }),
     Object.freeze({
         familySchemaIdentifier: ballotValidityProofFamilySchemaIdentifier,
+        relationWitnessIsPrivate: true,
     }),
     Object.freeze({
         familySchemaIdentifier: targetShareProofFamilySchemaIdentifier,
+        relationWitnessIsPrivate: true,
     }),
     Object.freeze({
         familySchemaIdentifier: vssShareLinkageProofFamilySchemaIdentifier,
+        relationWitnessIsPrivate: true,
     }),
     Object.freeze({
         familySchemaIdentifier:
             aggregateThresholdShareProofFamilySchemaIdentifier,
+        relationWitnessIsPrivate: true,
     }),
 ]);
 
@@ -482,9 +510,11 @@ const assignedRuntimeCheckpointRandomUseFamilySet = new Set<number>([
     ),
 ]);
 
-const publicOnlyCommonProofCheckpointFamilySet = new Set<number>([
-    0x1213, 0x1215, 0x1218,
-]);
+const publicOnlyCommonProofCheckpointFamilySet = new Set<number>(
+    proofRandomnessFamilyAssignments
+        .filter((assignment) => !assignment.relationWitnessIsPrivate)
+        .map((assignment) => assignment.familySchemaIdentifier),
+);
 
 export const isPublicOnlyCommonProofCheckpointFamily = (
     family: number,
@@ -533,8 +563,14 @@ export const isAssignedRuntimeCheckpointRandomUse = (
     const proofFamilyAssignment = proofRandomnessFamilyAssignments.find(
         (assignment) => assignment.familySchemaIdentifier === family,
     );
+    if (proofFamilyAssignment === undefined) {
+        return false;
+    }
+    if (purpose === hidingArgumentRandomnessPurpose) {
+        return true;
+    }
     return (
-        proofFamilyAssignment !== undefined &&
+        proofFamilyAssignment.relationWitnessIsPrivate &&
         (purpose === privateProofSaltPurpose ||
             proofMaskRandomnessPurposeClassSet.has(purpose))
     );

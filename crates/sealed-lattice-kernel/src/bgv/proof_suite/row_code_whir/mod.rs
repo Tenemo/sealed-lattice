@@ -30,6 +30,8 @@ mod row_encoding;
 mod same_secret_source_manifest;
 mod source_compression;
 mod verification;
+#[cfg(test)]
+mod verifier_oracle_accounting;
 
 pub(in crate::bgv::proof_suite) use construction_plan::RowCodeWhirConstructionPlan;
 pub(in crate::bgv::proof_suite) use construction_plan::RowCodeWhirSelectedParameters;
@@ -153,7 +155,7 @@ struct DomainSeparatedShake256 {
 /// row, which exceeds the browser memory ceiling at the selected domain. The
 /// deployed chain instead retains one 64-byte value per row inside one bounded
 /// row stripe. Every transition, final leaf, and Merkle parent therefore has
-/// the uniform 512-bit output required by the construction theorem.
+/// the uniform 512-bit output required by the selected collision ledger.
 #[derive(Clone, Copy, Debug)]
 struct ColumnStreamableLeafHasher {
     domain: &'static [u8],
@@ -224,7 +226,7 @@ impl ColumnStreamableLeafOracleInput {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ColumnStreamableLeafOracleFrame {
     Initial,
@@ -232,7 +234,7 @@ enum ColumnStreamableLeafOracleFrame {
     Final,
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ColumnStreamableLeafOracleFrameDescriptor {
     frame: ColumnStreamableLeafOracleFrame,
@@ -347,7 +349,7 @@ impl ColumnStreamableLeafHasher {
         bytes
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "theorem-evidence"))]
     fn frame_descriptor(
         &self,
         frame: ColumnStreamableLeafOracleFrame,
@@ -1376,6 +1378,11 @@ mod tests {
                 [0_u64; MERKLE_DIGEST_WORD_LENGTH],
             ]),
         );
+        challenger.observe(
+            MerkleCap::<ChallengeField, [u64; MERKLE_DIGEST_WORD_LENGTH]>::new(vec![
+                [1_u64; MERKLE_DIGEST_WORD_LENGTH],
+            ]),
+        );
         <RowCodeWhirChallenger as FieldChallenger<ChallengeField>>::observe_algebra_slice(
             &mut challenger,
             &[
@@ -1388,8 +1395,10 @@ mod tests {
         let summary = challenger
             .finish(&[1])
             .expect("each algebra slice is one valid typed observation round");
-        // Initial state plus four response rounds with virtual challenge
-        // binding: 1 + 4 * 2.
-        assert_eq!(summary.maximum_hash_query_count(), 9);
+        // The canonical header root and edge cost two queries. The protocol
+        // schedule, algebra observation, and final proof stream each cost a
+        // recomputed response root plus two chain edges; the two commitments
+        // each cost only their two chain edges.
+        assert_eq!(summary.maximum_hash_query_count(), 2 + 3 * 3 + 2 * 2);
     }
 }

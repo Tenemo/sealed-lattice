@@ -340,7 +340,7 @@ pub(in crate::bgv) use vss_share_linkage_runtime::{
     with_attached_verified_vss_low_degree_evidence,
 };
 pub(crate) use zero_knowledge::validate_zero_knowledge_mask_image;
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 pub(in crate::bgv::proof_suite) use zero_knowledge::{
     ConstructionMaskDependency, ConstructionMaskResumeRule, ConstructionMaskSourceAuthority,
     ConstructionMaskSourceDescriptor, ConstructionMaskSourceIdentifier,

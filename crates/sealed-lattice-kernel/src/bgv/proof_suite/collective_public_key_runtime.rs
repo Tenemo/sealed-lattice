@@ -1251,11 +1251,6 @@ fn selected_collective_runtime_plan(
     let schema_identifier =
         ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER;
     let compiled_relation_plan = selected_collective_relation_plan()?;
-    let variant = compiled_relation_plan
-        .select_variant(None, None)
-        .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?;
-    let limits = selected_proof_runtime_limits(schema_identifier, canonical_statement, variant)
-        .map_err(|_| CommonProofRuntimeError::InvalidLimits)?;
     let relation_context = selected_relation_plan_check_context(schema_identifier)
         .ok_or(CommonProofRuntimeError::InvalidPlanCapability)?;
     let relation_plan = CommonProofRelationPlanCapability::from_compiled_plan(
@@ -1265,6 +1260,8 @@ fn selected_collective_runtime_plan(
         None,
     )
     .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?;
+    let limits = selected_proof_runtime_limits(canonical_statement, &relation_plan)
+        .map_err(|_| CommonProofRuntimeError::InvalidLimits)?;
     Ok(CollectiveProofRuntimePlan {
         compiled_relation_plan,
         relation_plan,
@@ -2344,6 +2341,7 @@ mod tests {
     };
 
     #[test]
+    #[ignore = "guarded production-width collective resource-accounting evidence"]
     fn selected_collective_public_key_accounting_separates_live_memory_storage_and_traffic() {
         let relation_plan =
             selected_collective_relation_plan().expect("the selected collective plan exists");

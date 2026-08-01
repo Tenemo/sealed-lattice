@@ -1,7 +1,7 @@
 {
   "recordKind": "selected-lattice-security-estimator-evidence",
   "recordVersion": 1,
-  "inputPayloadSha256": "2d619a9172bb0e25120e26e259799937920addbc744fe27033d8f6899e00b3b2",
+  "inputPayloadSha256": "9139c80f5d53fec52712fcb78cdb1c0ebbad2e7de1e35042f2dff0117a65ff82",
   "input": {
     "sourceAuthority": [
       {
@@ -30,7 +30,7 @@
       },
       {
         "path": "crates/sealed-lattice-kernel/src/bgv/setup/accepted_setup/generation_population.rs",
-        "sha256": "8040543bb873230aa9d1bad35b3a08171e70c83344d6474faabddf4ffaa6e639"
+        "sha256": "76311ccf819557f3c14c025cc84c78bc47099c2d8eae68a745e0d6318467d1b5"
       },
       {
         "path": "crates/sealed-lattice-kernel/src/bgv/setup/accepted_setup/generation_relinearization.rs",
@@ -38,7 +38,7 @@
       },
       {
         "path": "crates/sealed-lattice-kernel/src/bgv/proof_suite/relation_plan/ballot_validity_adapter.rs",
-        "sha256": "123ba2b273e0cc7b1feb97a5bd2937aa08953dc886744692f64904e4c82e9f00"
+        "sha256": "3e2b4e399472bc63cc9c88b81fcbaa9ce09bc65ca4f4bfe03deed2fb9c401fba"
       },
       {
         "path": "crates/sealed-lattice-kernel/src/foundation/schemas.rs",
@@ -1081,5 +1081,5 @@
     "materialSuccessThreshold": "at least one half",
     "scope": "Known-attack scalar-LWE diagnostics under the explicitly named proxy model; reductions and joint structured or circular security remain separate assumptions."
   },
-  "outputPayloadSha256": "daa8c0166f36f23331d94b4366efc4f042594deda2d7b5d452c09ef7ff35dc68"
+  "outputPayloadSha256": "f7f00aafe0b70fc23469dbb2290ac87f00c42c764673c751ee312c70257364e1"
 }

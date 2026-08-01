@@ -221,6 +221,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "guarded complete selected-action phase-liveness evidence"]
     fn construction_driven_phase_liveness_closes_every_selected_variant() {
         let accounting = derive_selected_complete_action_phase_liveness_accounting()
             .expect("construction-driven phase liveness derives");

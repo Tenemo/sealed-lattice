@@ -2779,19 +2779,6 @@ mod tests {
         let compiled_relation_plan =
             compile_vss_share_linkage_relation_plan(&relation_input, &relation_context)
                 .expect("selected VSS relation plan");
-        let selected_variant = compiled_relation_plan
-            .select_variant(None, None)
-            .expect("selected VSS relation variant");
-        let limits = selected_proof_runtime_limits(
-            statement_schema_identifier,
-            &canonical_application_statement_bytes,
-            selected_variant,
-        )
-        .expect("selected VSS proof limits");
-        let proof_byte_length = limits
-            .maximum_proof_byte_length()
-            .checked_sub(1)
-            .expect("the test proof is smaller than the absolute proof bound");
         let relation_plan = CommonProofRelationPlanCapability::from_compiled_plan(
             &compiled_relation_plan,
             &relation_context,
@@ -2799,6 +2786,13 @@ mod tests {
             None,
         )
         .expect("selected VSS relation capability");
+        let limits =
+            selected_proof_runtime_limits(&canonical_application_statement_bytes, &relation_plan)
+                .expect("selected VSS proof limits");
+        let proof_byte_length = limits
+            .maximum_proof_byte_length()
+            .checked_sub(1)
+            .expect("the test proof is smaller than the absolute proof bound");
         let statement_source =
             VerifiedCommonProofStatementSource::from_test_verified_vss_statement_source(
                 &verified_public_randomness,

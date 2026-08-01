@@ -4755,6 +4755,9 @@ mod tests {
         PROOF_BASE_FIELD_MODULUS, construct_pre_challenge_relation_columns,
     };
 
+    const TEST_EVALUATION_DOMAIN_SIZE: u64 = 8_192;
+    const TEST_OPENING_DEGREE_BOUND_EXCLUSIVE: u64 = 1_024;
+
     struct DeterministicPrivateCoins {
         initial_sample: u64,
         next_sample_by_coordinate:
@@ -4902,7 +4905,7 @@ mod tests {
     }
 
     fn plan_context() -> RelationPlanCheckContext {
-        let evaluation_domain_size = 8_192_u64;
+        let evaluation_domain_size = TEST_EVALUATION_DOMAIN_SIZE;
         RelationPlanCheckContext {
             base_field_modulus: PROOF_BASE_FIELD_MODULUS,
             challenge_extension_degree: crate::bgv::proof_suite::PROOF_CHALLENGE_EXTENSION_DEGREE
@@ -5282,8 +5285,8 @@ mod tests {
         let plan = compile_target_release_relation(
             &TargetReleaseRelationPlanInput {
                 ring_degree: 256,
-                evaluation_domain_size: 8_192,
-                opening_degree_bound_exclusive: 4_096,
+                evaluation_domain_size: TEST_EVALUATION_DOMAIN_SIZE,
+                opening_degree_bound_exclusive: TEST_OPENING_DEGREE_BOUND_EXCLUSIVE,
                 material_column_degree_bound_exclusive: 128,
                 public_polynomial_column_degree_bound_exclusive: 256,
                 target_modulus_indices: vec![0],
@@ -5570,8 +5573,8 @@ mod tests {
         let compilation = compile_target_release_relation(
             &TargetReleaseRelationPlanInput {
                 ring_degree: 256,
-                evaluation_domain_size: 8_192,
-                opening_degree_bound_exclusive: 4_096,
+                evaluation_domain_size: TEST_EVALUATION_DOMAIN_SIZE,
+                opening_degree_bound_exclusive: TEST_OPENING_DEGREE_BOUND_EXCLUSIVE,
                 material_column_degree_bound_exclusive: 128,
                 public_polynomial_column_degree_bound_exclusive: 256,
                 target_modulus_indices: vec![0],
@@ -5697,8 +5700,8 @@ mod tests {
         let plan = compile_target_release_relation(
             &TargetReleaseRelationPlanInput {
                 ring_degree: 256,
-                evaluation_domain_size: 8_192,
-                opening_degree_bound_exclusive: 4_096,
+                evaluation_domain_size: TEST_EVALUATION_DOMAIN_SIZE,
+                opening_degree_bound_exclusive: TEST_OPENING_DEGREE_BOUND_EXCLUSIVE,
                 material_column_degree_bound_exclusive: 128,
                 public_polynomial_column_degree_bound_exclusive: 256,
                 target_modulus_indices: vec![0, 1, 2, 3, 4, 5],
@@ -5785,14 +5788,19 @@ mod tests {
     fn streaming_target_witness_populates_requested_columns_and_verifier_rejects_non_residues() {
         let context = plan_context();
         let ring_degree = 256_usize;
-        let material_profile =
-            CommittedMaterialProfile::for_common_proof_evaluation_domain(ring_degree, 8_192, 4_096)
-                .expect("material profile");
+        let material_profile = CommittedMaterialProfile::for_common_proof_evaluation_domain(
+            ring_degree,
+            usize::try_from(TEST_EVALUATION_DOMAIN_SIZE)
+                .expect("test evaluation domain fits usize"),
+            usize::try_from(TEST_OPENING_DEGREE_BOUND_EXCLUSIVE)
+                .expect("test opening degree fits usize"),
+        )
+        .expect("material profile");
         let compilation = compile_target_release_relation(
             &TargetReleaseRelationPlanInput {
                 ring_degree: ring_degree as u64,
-                evaluation_domain_size: 8_192,
-                opening_degree_bound_exclusive: 4_096,
+                evaluation_domain_size: TEST_EVALUATION_DOMAIN_SIZE,
+                opening_degree_bound_exclusive: TEST_OPENING_DEGREE_BOUND_EXCLUSIVE,
                 material_column_degree_bound_exclusive: material_profile
                     .material_column_degree_bound_exclusive()
                     as u64,

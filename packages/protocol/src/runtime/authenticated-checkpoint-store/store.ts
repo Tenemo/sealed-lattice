@@ -76,7 +76,6 @@ export type {
     AuthenticatedCheckpointStore,
     AuthenticatedCheckpointStoreLimits,
     AuthenticatedCheckpointPhysicalAccountingScope,
-    AuthenticatedCheckpointPhysicalAccountingSnapshot,
     CheckpointBoundary,
     CheckpointBoundaryPolicy,
     CheckpointLineageReservation,

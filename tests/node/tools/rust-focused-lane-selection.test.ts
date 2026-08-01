@@ -4,6 +4,7 @@ import {
     fullProfileEvidenceRustTests,
     measurementRustTests,
     phaseLivenessEvidenceRustTests,
+    theoremEvidenceRustTests,
     validateCompleteRustLaneOwnership,
     validateFocusedRustLaneSelection,
 } from '#tools/ci/rust-focused-lane-selection';
@@ -33,6 +34,10 @@ describe('focused Rust lane selection', () => {
                 {
                     ignored: true,
                     testName: phaseLivenessEvidenceRustTests[0],
+                },
+                {
+                    ignored: true,
+                    testName: theoremEvidenceRustTests[0],
                 },
             ]),
         ).not.toThrow();
@@ -79,11 +84,15 @@ describe('focused Rust lane selection', () => {
                 ],
         ),
         ['rust-measurements' as const, true, measurementRustTests[0]],
-        [
-            'rust-phase-liveness-evidence' as const,
-            true,
-            phaseLivenessEvidenceRustTests[0],
-        ],
+        ...phaseLivenessEvidenceRustTests.map(
+            (testName) =>
+                ['rust-phase-liveness-evidence', true, testName] as [
+                    'rust-phase-liveness-evidence',
+                    boolean,
+                    string,
+                ],
+        ),
+        ['rust-theorem-evidence' as const, true, theoremEvidenceRustTests[0]],
     ])(
         'accepts %s tests only in their owning lane',
         (lane, ignored, testName) => {
@@ -124,6 +133,30 @@ describe('focused Rust lane selection', () => {
                     tests: [inventoryEntry],
                 }),
             ).toThrow('test:rust:kernel:full-profile-evidence');
+        }
+    });
+
+    it('keeps construction theorem gates exclusively in the theorem-evidence lane', () => {
+        for (const theoremEvidenceTest of theoremEvidenceRustTests) {
+            const inventoryEntry = {
+                ignored: true,
+                testName: theoremEvidenceTest,
+            } as const;
+
+            expect(() =>
+                validateFocusedRustLaneSelection({
+                    lane: 'rust-theorem-evidence',
+                    testFilter: theoremEvidenceTest,
+                    tests: [inventoryEntry],
+                }),
+            ).not.toThrow();
+            expect(() =>
+                validateFocusedRustLaneSelection({
+                    lane: 'rust-kernel-fast',
+                    testFilter: theoremEvidenceTest,
+                    tests: [inventoryEntry],
+                }),
+            ).toThrow('test:rust:kernel:theorem-evidence');
         }
     });
 

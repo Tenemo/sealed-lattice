@@ -529,12 +529,6 @@ fn begin_relinearization_verification_ingress(
             let relation_plan_variant = relation_plan
                 .select_variant(Some(decoded.schedule_position), None)
                 .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?;
-            let runtime_limits = selected_proof_runtime_limits(
-                schema_identifier,
-                &canonical_application_statement_bytes,
-                relation_plan_variant,
-            )
-            .map_err(|_| CommonProofRuntimeError::InvalidLimits)?;
             let relation_context = selected_relation_plan_check_context(schema_identifier)
                 .ok_or(CommonProofRuntimeError::InvalidPlanCapability)?;
             let verified_column_evaluator = if family.uses_verifier_columns() {
@@ -556,6 +550,11 @@ fn begin_relinearization_verification_ingress(
                 None,
             )
             .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?;
+            let runtime_limits = selected_proof_runtime_limits(
+                &canonical_application_statement_bytes,
+                &relation_plan_capability,
+            )
+            .map_err(|_| CommonProofRuntimeError::InvalidLimits)?;
             let statement_source =
                 VerifiedCommonProofStatementSource::from_exact_family_verified_accepted_setup_package(
                     package,

@@ -632,18 +632,14 @@ fn selected_target_release_runtime_plan(
         TargetReleaseRuntimeError::Relation(RelationPlanError::InvalidDomain),
     )?;
     let compilation = selected_target_release_relation()?;
-    let relation_variant = compilation.relation_plan().select_variant(None, None)?;
-    let limits = selected_proof_runtime_limits(
-        schema_identifier,
-        canonical_application_statement_bytes,
-        relation_variant,
-    )?;
     let relation_plan = CommonProofRelationPlanCapability::from_compiled_plan(
         compilation.relation_plan(),
         &relation_context,
         None,
         None,
     )?;
+    let limits =
+        selected_proof_runtime_limits(canonical_application_statement_bytes, &relation_plan)?;
     Ok(SelectedTargetReleaseRuntimePlan {
         relation_plan,
         limits,

@@ -4388,7 +4388,10 @@ mod row_code_whir_transcript_tests {
         RowCodeWhirCommitmentRole, RowCodeWhirConstructionPlan, RowCodeWhirExtensionRole,
         RowCodeWhirObservationRole, RowCodeWhirQueryRole, RowCodeWhirTranscriptOperation,
     };
-    use crate::bgv::proof_suite::selected_relation_plans;
+    use crate::bgv::proof_suite::{
+        ValidatedRelationPlanArtifact, compile_same_secret_relation_plan,
+        selected_relation_plan_check_context, selected_same_secret_relation_plan_input,
+    };
     use crate::foundation::{Hash512, ProofApplicationSlotCeilings};
 
     use super::{
@@ -4407,11 +4410,14 @@ mod row_code_whir_transcript_tests {
         transcript
     }
 
-    fn transcript_after_aggregate_commitment(statement: &[u8]) -> RowCodeWhirTranscript {
+    fn transcript_after_aggregate_pad_commitment(statement: &[u8]) -> RowCodeWhirTranscript {
         let mut transcript = transcript_before_aggregate_commitment(statement);
         transcript
             .observe_commitment(&[0x5a; Hash512::BYTE_LENGTH])
-            .expect("the fixed-width aggregate commitment advances the transcript");
+            .expect("the fixed-width aggregate-source commitment advances the transcript");
+        transcript
+            .observe_commitment(&[0x6a; Hash512::BYTE_LENGTH])
+            .expect("the fixed-width aggregate-pad commitment advances the transcript");
         transcript
     }
 
@@ -4431,14 +4437,19 @@ mod row_code_whir_transcript_tests {
     }
 
     fn selected_same_secret_construction_plan() -> RowCodeWhirConstructionPlan {
-        let artifact = selected_relation_plans()
-            .expect("the selected relation plans compile")
-            .into_iter()
-            .find(|artifact| {
-                artifact.application_statement_schema_identifier()
-                    == ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER
-            })
-            .expect("the selected same-secret relation plan exists");
+        let context = selected_relation_plan_check_context(
+            ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        .expect("the selected same-secret relation context derives");
+        let compiled_plan = compile_same_secret_relation_plan(
+            &selected_same_secret_relation_plan_input()
+                .expect("the selected same-secret relation input derives"),
+            &context,
+        )
+        .expect("the selected same-secret relation plan compiles");
+        let artifact =
+            ValidatedRelationPlanArtifact::from_owned_compiled_plan(compiled_plan, &context)
+                .expect("the selected same-secret relation plan validates");
         RowCodeWhirConstructionPlan::for_selected_variant(&artifact, None, None)
             .expect("the selected same-secret construction plan derives")
     }
@@ -4579,6 +4590,19 @@ mod row_code_whir_transcript_tests {
         );
     }
 
+    fn catalog_operations_have_distinguishable_call_shapes(
+        expected: &RowCodeWhirTranscriptOperation,
+        probe: &RowCodeWhirTranscriptOperation,
+    ) -> bool {
+        !matches!(
+            (expected, probe),
+            (
+                RowCodeWhirTranscriptOperation::ObserveCommitment { .. },
+                RowCodeWhirTranscriptOperation::ObserveCommitment { .. }
+            )
+        )
+    }
+
     #[test]
     fn selected_construction_catalog_is_consumed_once_in_exact_order() {
         let construction_plan = selected_same_secret_construction_plan();
@@ -4598,13 +4622,23 @@ mod row_code_whir_transcript_tests {
         let mut transcript = plan_bound_test_transcript(&construction_plan);
 
         for (operation_index, operation) in operations.iter().enumerate() {
-            if operation_index > 0 {
+            if operation_index > 0
+                && catalog_operations_have_distinguishable_call_shapes(
+                    operation,
+                    &operations[operation_index - 1],
+                )
+            {
                 assert_catalog_operation_rejected(
                     transcript.clone(),
                     &operations[operation_index - 1],
                 );
             }
-            if operation_index + 1 < operations.len() {
+            if operation_index + 1 < operations.len()
+                && catalog_operations_have_distinguishable_call_shapes(
+                    operation,
+                    &operations[operation_index + 1],
+                )
+            {
                 assert_catalog_operation_rejected(
                     transcript.clone(),
                     &operations[operation_index + 1],
@@ -4637,13 +4671,18 @@ mod row_code_whir_transcript_tests {
                 operation_index + 1,
                 "one accepted catalog entry advances exactly one cursor position",
             );
-            assert!(
-                matches!(
-                    transcript.clone().begin_final_proof_stream(1),
-                    Err(TranscriptError::IncompleteRowCodeWhirTranscript)
-                ),
-                "the transcript cannot finish before the terminal catalog entry"
-            );
+            if !matches!(
+                operations.get(operation_index + 1),
+                Some(RowCodeWhirTranscriptOperation::FinishProofStream)
+            ) {
+                assert!(
+                    matches!(
+                        transcript.clone().begin_final_proof_stream(1),
+                        Err(TranscriptError::IncompleteRowCodeWhirTranscript)
+                    ),
+                    "the transcript cannot finish before the terminal catalog boundary"
+                );
+            }
         }
         panic!("the selected construction catalog has no terminal proof entry");
     }
@@ -4832,6 +4871,9 @@ mod row_code_whir_transcript_tests {
             RowCodeWhirTranscriptOperation::ObserveCommitment {
                 role: RowCodeWhirCommitmentRole::Aggregate,
             },
+            RowCodeWhirTranscriptOperation::ObserveCommitment {
+                role: RowCodeWhirCommitmentRole::AggregateWidePad,
+            },
             RowCodeWhirTranscriptOperation::ObserveExtensionValues {
                 observation_ordinal: 0,
                 role: RowCodeWhirObservationRole::BaseMaskedClaim,
@@ -4839,6 +4881,7 @@ mod row_code_whir_transcript_tests {
             },
             RowCodeWhirTranscriptOperation::FinishProofStream,
         ]);
+        transcript.catalog_counter_origin = Some(transcript.hash_query_counter.clone());
 
         assert_eq!(
             transcript.absorb_protocol_schedule(&[ProofChallengeExtensionElement::ZERO]),
@@ -4850,7 +4893,10 @@ mod row_code_whir_transcript_tests {
             .expect("the cataloged schedule is accepted");
         transcript
             .observe_commitment(&[0x31; Hash512::BYTE_LENGTH])
-            .expect("the cataloged aggregate commitment is accepted");
+            .expect("the cataloged aggregate-source commitment is accepted");
+        transcript
+            .observe_commitment(&[0x41; Hash512::BYTE_LENGTH])
+            .expect("the cataloged aggregate-pad commitment is accepted");
         assert_eq!(
             transcript.clone().finish(b"proof"),
             Err(TranscriptError::IncompleteRowCodeWhirTranscript),
@@ -4873,7 +4919,7 @@ mod row_code_whir_transcript_tests {
 
     #[test]
     fn construction_catalog_owns_direct_query_role_and_geometry() {
-        let mut transcript = transcript_after_aggregate_commitment(b"catalog-query-geometry");
+        let mut transcript = transcript_after_aggregate_pad_commitment(b"catalog-query-geometry");
         transcript.transcript_operations = Some(vec![
             RowCodeWhirTranscriptOperation::SampleDistinctIndices {
                 role: RowCodeWhirQueryRole::Bound,
@@ -4881,8 +4927,6 @@ mod row_code_whir_transcript_tests {
                 output_count: 2,
             },
         ]);
-        transcript.progress = RowCodeWhirProgress::AfterAggregatePadCommitment;
-
         assert_eq!(
             transcript
                 .sample_direct_distinct_indices(RowCodeWhirChallenge::OuterQueryVector, 8, 2,),
@@ -4901,12 +4945,44 @@ mod row_code_whir_transcript_tests {
     }
 
     #[test]
+    fn construction_catalog_rejects_swapped_aggregate_commitment_roles() {
+        let mut pad_at_source = transcript_before_aggregate_commitment(b"catalog-pad-at-source");
+        pad_at_source.transcript_operations =
+            Some(vec![RowCodeWhirTranscriptOperation::ObserveCommitment {
+                role: RowCodeWhirCommitmentRole::AggregateWidePad,
+            }]);
+        assert_eq!(
+            pad_at_source.observe_commitment(&[0x51; Hash512::BYTE_LENGTH]),
+            Err(TranscriptError::UnexpectedRowCodeWhirRound),
+        );
+        assert_eq!(pad_at_source.next_transcript_operation_index, 0);
+
+        let mut source_at_pad = transcript_before_aggregate_commitment(b"catalog-source-at-pad");
+        source_at_pad.transcript_operations = Some(vec![
+            RowCodeWhirTranscriptOperation::ObserveCommitment {
+                role: RowCodeWhirCommitmentRole::Aggregate,
+            },
+            RowCodeWhirTranscriptOperation::ObserveCommitment {
+                role: RowCodeWhirCommitmentRole::Aggregate,
+            },
+        ]);
+        source_at_pad
+            .observe_commitment(&[0x61; Hash512::BYTE_LENGTH])
+            .expect("the source commitment is accepted at its cataloged position");
+        assert_eq!(
+            source_at_pad.observe_commitment(&[0x71; Hash512::BYTE_LENGTH]),
+            Err(TranscriptError::UnexpectedRowCodeWhirRound),
+        );
+        assert_eq!(source_at_pad.next_transcript_operation_index, 1);
+    }
+
+    #[test]
     fn construction_catalog_rejects_same_shaped_whir_role_swaps() {
         let opening_point_role = RowCodeWhirObservationRole::OpeningPoint { batch_ordinal: 0 };
         let opening_evaluations_role =
             RowCodeWhirObservationRole::OpeningEvaluations { batch_ordinal: 0 };
         let mut observation_transcript =
-            transcript_after_aggregate_commitment(b"catalog-observation-role-swap");
+            transcript_after_aggregate_pad_commitment(b"catalog-observation-role-swap");
         observation_transcript.live_role_schedule = Some(RowCodeWhirLiveRoleSchedule {
             observation_roles: vec![opening_point_role],
             extension_roles: Vec::new(),
@@ -4939,7 +5015,7 @@ mod row_code_whir_transcript_tests {
         let checkpoint_role = RowCodeWhirExtensionRole::RoundCheckpoint { round_ordinal: 0 };
         let combination_role = RowCodeWhirExtensionRole::RoundCombination { round_ordinal: 0 };
         let mut challenge_transcript =
-            transcript_after_aggregate_commitment(b"catalog-challenge-role-swap");
+            transcript_after_aggregate_pad_commitment(b"catalog-challenge-role-swap");
         challenge_transcript.live_role_schedule = Some(RowCodeWhirLiveRoleSchedule {
             observation_roles: Vec::new(),
             extension_roles: vec![checkpoint_role],
@@ -5031,7 +5107,8 @@ mod row_code_whir_transcript_tests {
 
     #[test]
     fn row_code_whir_distinct_samplers_validate_geometry_and_preserve_acceptance_order() {
-        let mut challenged = transcript_after_aggregate_commitment(b"distinct-acceptance-order");
+        let mut challenged =
+            transcript_after_aggregate_pad_commitment(b"distinct-acceptance-order");
         for (upper_bound, output_count) in [(0, 1), (3, 1), (4, 0), (4, 5)] {
             assert_eq!(
                 challenged.sample_direct_distinct_indices(
@@ -5056,7 +5133,7 @@ mod row_code_whir_transcript_tests {
             .sample_whir_query_vector(4, 7, 8)
             .expect("the bounded WHIR query vector samples");
 
-        let mut replay = transcript_after_aggregate_commitment(b"distinct-acceptance-order");
+        let mut replay = transcript_after_aggregate_pad_commitment(b"distinct-acceptance-order");
         let replayed_direct_indices = replay
             .sample_direct_distinct_indices(RowCodeWhirChallenge::BoundQueryVector, 16, 8)
             .expect("the direct query vector replays deterministically");
@@ -5072,14 +5149,14 @@ mod row_code_whir_transcript_tests {
 
     #[test]
     fn row_code_whir_finish_requires_whir_activity_and_a_nonempty_final_response() {
-        let before_whir = transcript_after_aggregate_commitment(b"finish-before-whir");
+        let before_whir = transcript_after_aggregate_pad_commitment(b"finish-before-whir");
         assert_eq!(
             before_whir.finish(b"final proof openings"),
             Err(TranscriptError::IncompleteRowCodeWhirTranscript),
         );
 
         let mut missing_response =
-            transcript_after_aggregate_commitment(b"finish-without-response");
+            transcript_after_aggregate_pad_commitment(b"finish-without-response");
         missing_response
             .observe_whir_values(
                 RowCodeWhirObservationRole::BaseMaskedClaim,
@@ -5092,7 +5169,7 @@ mod row_code_whir_transcript_tests {
         );
 
         let mut pending_challenge =
-            transcript_after_aggregate_commitment(b"finish-pending-challenge");
+            transcript_after_aggregate_pad_commitment(b"finish-pending-challenge");
         pending_challenge
             .sample_whir_extension(RowCodeWhirExtensionRole::OpeningBatching)
             .expect("the fixed WHIR challenge samples within the bounded draw ceiling");

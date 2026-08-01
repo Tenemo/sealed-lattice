@@ -415,6 +415,7 @@ export {
     CommonProofCheckpointCursorManifestError,
     decodeCommonProofCheckpointCursorManifest,
 } from './common-proof-checkpoint-cursor-manifest.js';
+export { decodeCommonProofGenerationCursorManifest } from './common-proof-generation-cursor-manifest.js';
 export {
     isAssignedRuntimeCheckpointRandomUse,
     isPublicOnlyCommonProofCheckpointFamily,

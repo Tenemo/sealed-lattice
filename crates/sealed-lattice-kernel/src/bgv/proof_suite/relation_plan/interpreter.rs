@@ -1629,6 +1629,7 @@ impl RelationCompilerInterpreterSemanticCertificate {
         self.compared_program_evaluation_count
     }
 
+    #[cfg(feature = "theorem-evidence")]
     pub(crate) const fn canonical_variant_hash(&self) -> [u8; 64] {
         self.canonical_variant_hash
     }
@@ -2383,7 +2384,8 @@ mod tests {
     use super::*;
     use crate::bgv::proof_suite::relation_plan::{
         COMMITTED_MATERIAL_TRACE_PACKING_FACTOR, CommittedMaterialRelationPlanInput,
-        RelationOpeningSourceClass, RelationPlanCheckContext, RelationRadixConvolutionDescriptor,
+        RelationMaskKind, RelationMaskTargetClass, RelationOpeningSourceClass,
+        RelationPlanCheckContext, RelationRadixConvolutionDescriptor,
         RelationRadixProductTermDescriptor, RelationTreeDescriptor, ResolvedSuiteModulus,
         SuiteModulusReference, compile_vss_share_linkage_relation_plan,
     };
@@ -2427,7 +2429,9 @@ mod tests {
 
     fn vss_linkage_interpreter_fixture() -> (RelationPlanVariant, RelationPlanCheckContext) {
         let ring_degree = 64_u64;
-        let evaluation_domain_size = 1_024_u64;
+        let logical_polynomials_per_physical_row = 8_u64;
+        let prefix_stacking_factor = 2_u64;
+        let row_code_inverse_rate = 4_u64;
         let out_of_domain_point_count = 1_u64;
         let phase_column_query_coordinate_count = 1_u64;
         let quotient_component_count = 16_u64;
@@ -2440,10 +2444,51 @@ mod tests {
                 out_of_domain_coordinate_count.checked_add(phase_column_query_coordinate_count)
             })
             .expect("the exact trace-mask degree fits u64");
+        let message_trace_domain_size = ring_degree
+            .checked_div(2)
+            .filter(|trace_size| trace_size.checked_mul(2) == Some(ring_degree))
+            .expect("the reduced message-trace domain derives exactly");
+        let relation_trace_domain_size = message_trace_domain_size
+            .checked_mul(COMMITTED_MATERIAL_TRACE_PACKING_FACTOR)
+            .expect("the reduced relation-trace domain derives");
+        let maximum_prover_column_degree = relation_trace_domain_size
+            .checked_add(trace_mask_degree_bound_exclusive)
+            .and_then(|exclusive_bound| exclusive_bound.checked_sub(1))
+            .expect("the reduced prover-column degree derives");
+        let committed_material_range_constraint_arity = 3_u64;
+        let minimum_opening_degree_bound_exclusive = maximum_prover_column_degree
+            .checked_mul(committed_material_range_constraint_arity)
+            .and_then(|maximum_numerator_degree| maximum_numerator_degree.checked_add(1))
+            .and_then(u64::checked_next_power_of_two)
+            .expect("the reduced range-constraint opening capacity derives");
+        let evaluation_domain_size = minimum_opening_degree_bound_exclusive
+            .checked_mul(prefix_stacking_factor)
+            .and_then(|size| size.checked_mul(row_code_inverse_rate))
+            .expect("the minimal reduced rate-four evaluation domain derives");
+        let row_encoding_expansion_factor = logical_polynomials_per_physical_row
+            .checked_mul(prefix_stacking_factor)
+            .and_then(|factor| factor.checked_mul(row_code_inverse_rate))
+            .expect("the reduced row-encoding expansion factor derives");
+        let logical_polynomial_coefficient_count = evaluation_domain_size
+            .checked_div(row_encoding_expansion_factor)
+            .filter(|coefficient_count| {
+                coefficient_count.checked_mul(row_encoding_expansion_factor)
+                    == Some(evaluation_domain_size)
+            })
+            .expect("the reduced rate-four coefficient count derives exactly");
+        let opening_degree_bound_exclusive = logical_polynomial_coefficient_count
+            .checked_mul(logical_polynomials_per_physical_row)
+            .expect("the reduced physical-row capacity derives");
+        assert_eq!(evaluation_domain_size, 4_096);
+        assert_eq!(opening_degree_bound_exclusive, 512);
+        assert_eq!(
+            opening_degree_bound_exclusive,
+            minimum_opening_degree_bound_exclusive
+        );
         let input = CommittedMaterialRelationPlanInput {
             ring_degree,
             evaluation_domain_size,
-            opening_degree_bound_exclusive: 512,
+            opening_degree_bound_exclusive,
             material_column_degree_bound_exclusive: 10,
             participant_count: 3,
             threshold: 2,
@@ -2665,9 +2710,60 @@ mod tests {
         assert_eq!(variant.trace_domain_size(), 16_384);
         assert_eq!(context.quotient_component_count, 8);
         assert_eq!(context.quotient_component_degree_bound_exclusive, 34_050);
-        assert_eq!(variant.quotient_decomposition_stride(&context), Ok(17_266));
-        let maximum_reconstructed_quotient_degree = 7 * 17_266 + (34_050 - 1);
-        assert_eq!(maximum_reconstructed_quotient_degree, 154_911);
+        let trace_mask_degree_bounds = variant
+            .ordered_masks()
+            .iter()
+            .filter(|mask| {
+                mask.mask_kind() == RelationMaskKind::Trace
+                    && mask.target_class() == RelationMaskTargetClass::Column
+            })
+            .map(|mask| mask.mask_degree_bound_exclusive())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(trace_mask_degree_bounds.len(), 1);
+        let trace_mask_degree_bound_exclusive = trace_mask_degree_bounds
+            .first()
+            .copied()
+            .expect("the selected relation has trace masks");
+        let construction_owned_trace_mask_degree_bound_exclusive =
+            crate::bgv::proof_suite::row_code_whir::selected_row_code_whir_trace_mask_degree_bound_exclusive(
+                ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+                variant.trace_domain_size(),
+                &context,
+            )
+            .expect("the selected construction owns the same-secret trace-mask capacity");
+        assert_eq!(
+            trace_mask_degree_bound_exclusive,
+            construction_owned_trace_mask_degree_bound_exclusive,
+        );
+
+        let quotient_component_count = u64::from(context.quotient_component_count);
+        let scaled_mask_degree = quotient_component_count
+            .checked_add(1)
+            .and_then(|count| count.checked_mul(trace_mask_degree_bound_exclusive))
+            .expect("the selected mask-degree product fits u64");
+        let rounded_mask_degree = scaled_mask_degree
+            .checked_add(quotient_component_count - 1)
+            .expect("the selected ceiling numerator fits u64")
+            / quotient_component_count;
+        let independently_derived_decomposition_stride = variant
+            .trace_domain_size()
+            .checked_add(rounded_mask_degree)
+            .expect("the selected decomposition stride fits u64");
+        assert_eq!(trace_mask_degree_bound_exclusive, 682);
+        assert_eq!(rounded_mask_degree, 768);
+        assert_eq!(independently_derived_decomposition_stride, 17_152);
+        assert_eq!(
+            variant.quotient_decomposition_stride(&context),
+            Ok(independently_derived_decomposition_stride),
+        );
+        let maximum_reconstructed_quotient_degree = u64::from(
+            context
+                .quotient_component_count
+                .checked_sub(1)
+                .expect("the selected relation has quotient components"),
+        ) * independently_derived_decomposition_stride
+            + (context.quotient_component_degree_bound_exclusive - 1);
+        assert_eq!(maximum_reconstructed_quotient_degree, 154_113);
 
         assert_eq!(
             variant

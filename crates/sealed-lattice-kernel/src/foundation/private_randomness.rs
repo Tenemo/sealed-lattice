@@ -81,9 +81,10 @@ pub use proof_coins::{
 pub use stream::{PrivateRandomBlockInput, PrivateRandomCursor, PrivateRandomnessStream};
 
 /// Distinct proof-attempt identifier derivations for one application slot.
-/// Public-only proof families have no private attempt input. The target proof
-/// has the same two persistent proof derivations as the other reset-safe
-/// families; its separately keyed release attempt belongs to target flooding.
+/// Public-witness families derive only the independently keyed construction-
+/// hiding attempt. Secret-bearing reset-safe families additionally bind the
+/// canonical witness. The target proof's separately keyed release attempt
+/// belongs to target flooding.
 #[cfg(test)]
 pub(crate) fn proof_attempt_identifier_derivation_count(
     application_statement_schema_identifier: u16,
@@ -93,7 +94,7 @@ pub(crate) fn proof_attempt_identifier_derivation_count(
     } else if application_statement_schema_identifier == ORDINARY_BALLOT_PROOF_FAMILY {
         Some(1)
     } else if PUBLIC_ONLY_PROOF_FAMILIES.contains(&application_statement_schema_identifier) {
-        Some(0)
+        Some(1)
     } else {
         None
     }

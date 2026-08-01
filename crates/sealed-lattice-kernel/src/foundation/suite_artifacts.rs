@@ -30,7 +30,7 @@ use crate::bgv::{
     },
     proof_suite::{
         ProofProfileError, selected_committed_material_profile, selected_proof_profile_set,
-        selected_target_decryption_flooding_bound,
+        selected_same_secret_relation_plan_input, selected_target_decryption_flooding_bound,
     },
     setup::{SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES},
 };
@@ -900,10 +900,29 @@ mod tests {
     #[test]
     fn committed_material_profile_matches_the_selected_common_proof_domain() {
         let profile = CommittedMaterialFieldProfile::selected().expect("selected material profile");
+        let same_secret_plan =
+            selected_same_secret_relation_plan_input().expect("selected same-secret plan derives");
+        let plan_opening_degree_bound =
+            u32::try_from(same_secret_plan.opening_degree_bound_exclusive)
+                .expect("selected same-secret opening bound fits u32");
         assert_eq!(profile.proof_field_index, 0);
         assert_eq!(profile.evaluation_coset_offset, 7);
         assert_eq!(profile.masking_polynomial_maximum_degree, 2_047);
-        assert_eq!(profile.committed_polynomial_degree_bound_exclusive, 262_144);
+        assert_eq!(
+            profile.committed_polynomial_degree_bound_exclusive,
+            plan_opening_degree_bound,
+        );
+        assert_eq!(plan_opening_degree_bound, 2_097_152);
+        assert_eq!(
+            usize::try_from(plan_opening_degree_bound).expect("selected opening bound fits usize")
+                / crate::bgv::parameters::POLYNOMIAL_DEGREE,
+            64,
+        );
+        assert_eq!(
+            usize::try_from(plan_opening_degree_bound).expect("selected opening bound fits usize")
+                % crate::bgv::parameters::POLYNOMIAL_DEGREE,
+            0,
+        );
         assert_eq!(crate::bgv::parameters::POLYNOMIAL_DEGREE, 32_768);
     }
 }

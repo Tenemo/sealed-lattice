@@ -804,20 +804,14 @@ fn selected_galois_proof_runtime_plan(
     let input = selected_galois_key_share_relation_plan_input()?;
     let compiled_relation =
         compile_galois_key_share_relation_with_source_layout(&input, &relation_context)?;
-    let relation_plan_variant = compiled_relation
-        .relation_plan
-        .select_variant(Some(batch_schedule_position), None)?;
-    let limits = selected_proof_runtime_limits(
-        statement_schema_identifier,
-        canonical_application_statement_bytes,
-        relation_plan_variant,
-    )?;
     let relation_plan = CommonProofRelationPlanCapability::from_compiled_plan(
         &compiled_relation.relation_plan,
         &relation_context,
         Some(batch_schedule_position),
         None,
     )?;
+    let limits =
+        selected_proof_runtime_limits(canonical_application_statement_bytes, &relation_plan)?;
     Ok(SelectedGaloisProofRuntimePlan {
         relation_plan,
         limits,

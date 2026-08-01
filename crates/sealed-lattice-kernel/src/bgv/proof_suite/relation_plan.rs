@@ -143,14 +143,15 @@ pub(crate) use committed_material_adapter::CommittedMaterialSourcePolynomialAdap
 pub(crate) use galois_key_share_adapter::{
     GaloisKeyShareSourcePolynomialAdapter, galois_relation_tree_inputs,
 };
+#[cfg(test)]
+pub(crate) use interpreter::OutOfDomainPointSamplerCardinalityBound;
 pub(crate) use interpreter::{
     CheckedRelationApplicationChallenges, OutOfDomainCompositionVerificationInput,
     RelationApplicationChallengeAssignment,
 };
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 pub(crate) use interpreter::{
-    OutOfDomainPointSamplerCardinalityBound, RelationCompilerInterpreterSemanticCertificate,
-    checked_relation_compiler_interpreter_semantics,
+    RelationCompilerInterpreterSemanticCertificate, checked_relation_compiler_interpreter_semantics,
 };
 pub(crate) use key_relation::{PublicKeyShareRelationPlanInput, SameSecretRelationPlanInput};
 pub(crate) use public_aggregate::{

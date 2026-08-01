@@ -1028,12 +1028,6 @@ fn finish_ballot_validity_verification_preparation(
         CANONICAL_PROOF_APPLICATION_BINDING_HASH_DOMAIN,
         &[&proof_application_binding.encode()?],
     );
-    let variant = compilation.relation_plan().select_variant(None, None)?;
-    let limits = selected_proof_runtime_limits(
-        ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
-        &canonical_application_statement_bytes,
-        variant,
-    )?;
     let relation_context = selected_relation_plan_check_context(
         ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
     )
@@ -1046,6 +1040,8 @@ fn finish_ballot_validity_verification_preparation(
         None,
         None,
     )?;
+    let limits =
+        selected_proof_runtime_limits(&canonical_application_statement_bytes, &relation_plan)?;
     let relation_plan_hash = relation_plan.relation_plan_hash();
     let relation_plan_variant_hash = relation_plan.relation_plan_variant_hash();
     let evaluator = BallotValidityVerifiedColumnEvaluator::new(
@@ -1279,7 +1275,6 @@ fn prepare_ballot_validity_generation(
     .ok_or(BallotValidityRuntimeError::Relation(
         RelationPlanError::InvalidDomain,
     ))?;
-    let variant = compilation.relation_plan().select_variant(None, None)?;
     let action_private_randomness =
         retain_action_private_randomness_for_exact_family(action_randomness_handle)
             .map_err(BallotValidityRuntimeError::ActionRandomness)?;
@@ -1316,17 +1311,14 @@ fn prepare_ballot_validity_generation(
         application_statement_context,
     )
     .map_err(|_| BallotValidityRuntimeError::InvalidInput)?;
-    let limits = selected_proof_runtime_limits(
-        ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
-        &canonical_application_statement_bytes,
-        variant,
-    )?;
     let relation_plan = CommonProofRelationPlanCapability::from_compiled_plan(
         compilation.relation_plan(),
         &relation_context,
         None,
         None,
     )?;
+    let limits =
+        selected_proof_runtime_limits(&canonical_application_statement_bytes, &relation_plan)?;
     let descriptor = attempt.generated_ciphertext().descriptor().clone();
     let descriptor_total_byte_length = descriptor.total_byte_length;
     let descriptor_chunk_count = descriptor.ordered_chunk_digests.len();

@@ -1337,6 +1337,7 @@ impl AggregateWideMaskingCertificate {
     /// after its interleaved fold batch. Coefficients after the message and
     /// private encoding randomness are fixed to zero, so they are not part of
     /// the Reed--Solomon image dimension used by the soundness theorem.
+    #[cfg(feature = "theorem-evidence")]
     pub(super) fn folded_source_code_geometry(
         &self,
         epoch_ordinal: usize,
@@ -1354,6 +1355,7 @@ impl AggregateWideMaskingCertificate {
 
     /// Returns the exact occupied coefficient geometry of the one
     /// aggregate-wide pad code used by the CFW base check.
+    #[cfg(feature = "theorem-evidence")]
     pub(super) const fn pad_code_geometry(&self) -> (usize, usize, usize, usize, usize) {
         (
             self.pad_code.message_length,
@@ -1364,6 +1366,7 @@ impl AggregateWideMaskingCertificate {
         )
     }
 
+    #[cfg(feature = "theorem-evidence")]
     pub(super) const fn fresh_source_code_geometry(&self) -> (usize, usize, usize, usize, usize) {
         (
             self.fresh_source_code.message_length,
@@ -1374,6 +1377,7 @@ impl AggregateWideMaskingCertificate {
         )
     }
 
+    #[cfg(feature = "theorem-evidence")]
     pub(super) const fn fresh_pad_code_geometry(&self) -> (usize, usize, usize, usize, usize) {
         (
             self.fresh_pad_code.message_length,
@@ -1610,6 +1614,7 @@ impl AggregateWideMaskingCertificate {
         self.pad_code.domain_size
     }
 
+    #[cfg(feature = "theorem-evidence")]
     pub(super) const fn joint_affine_view_summary(&self) -> (usize, usize, usize) {
         (
             self.private_extension_element_count,
@@ -1618,6 +1623,7 @@ impl AggregateWideMaskingCertificate {
         )
     }
 
+    #[cfg(feature = "theorem-evidence")]
     pub(super) const fn nonlinear_view_summary(&self) -> (usize, usize, usize, usize) {
         (
             self.nonlinear_view_boundary.commitment_root_count,
@@ -1627,6 +1633,7 @@ impl AggregateWideMaskingCertificate {
         )
     }
 
+    #[cfg(feature = "theorem-evidence")]
     pub(super) const fn generator_sample_summary(&self) -> (usize, usize, u32, u32) {
         (
             self.generator_hybrid.extension_field_sample_count,
@@ -1636,18 +1643,22 @@ impl AggregateWideMaskingCertificate {
         )
     }
 
+    #[cfg(feature = "theorem-evidence")]
     pub(super) fn joint_affine_view_rows(&self) -> &[AggregateWideJointAffineViewRow] {
         &self.joint_affine_view_rows
     }
 
+    #[cfg(feature = "theorem-evidence")]
     pub(super) fn derived_affine_identities(&self) -> &[AggregateWideDerivedAffineIdentity] {
         &self.derived_affine_identities
     }
 
+    #[cfg(feature = "theorem-evidence")]
     pub(super) fn chronology(&self) -> &[AggregateWideChronologyRow] {
         &self.chronology
     }
 
+    #[cfg(feature = "theorem-evidence")]
     pub(super) const fn nonlinear_view_boundary(&self) -> AggregateWideNonlinearViewBoundary {
         self.nonlinear_view_boundary
     }
@@ -2621,6 +2632,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "guarded selected aggregate-wide masking theorem evidence"]
     fn selected_aggregate_wide_masking_certificate_closes_every_generic_obligation() {
         let configuration = selected_hiding_whir_config(RowCodeWhirSelectedParameters::selected())
             .expect("selected hiding configuration");
@@ -2728,6 +2740,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "guarded aggregate-wide masking theorem mutation evidence"]
     fn aggregate_wide_masking_certificate_refuses_every_load_bearing_mutation() {
         let configuration = selected_hiding_whir_config(RowCodeWhirSelectedParameters::selected())
             .expect("selected hiding configuration");

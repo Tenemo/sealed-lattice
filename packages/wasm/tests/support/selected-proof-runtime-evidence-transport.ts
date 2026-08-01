@@ -32,9 +32,9 @@ export type DesktopBrowserProofGenerationSessionIdentifier =
 export type DesktopBrowserProofVerificationSessionIdentifier =
     (typeof desktopBrowserProofVerificationSessionIdentifiers)[number];
 
-export type DesktopBrowserProofGenerationBrowserEngine = 'chromium' | 'firefox';
+type DesktopBrowserProofGenerationBrowserEngine = 'chromium' | 'firefox';
 
-export type DesktopBrowserProofDeterministicParityBinding = Readonly<{
+type DesktopBrowserProofDeterministicParityBinding = Readonly<{
     deterministicCoinBindingSha512Hex: string;
     nativeProofByteLength: number;
     nativeProofSha512Hex: string;
@@ -50,7 +50,7 @@ export type DesktopBrowserProofTransportArtifact = Readonly<{
     runOrdinal: number;
 }>;
 
-export type DesktopBrowserProofTransportManifest = Readonly<{
+type DesktopBrowserProofTransportManifest = Readonly<{
     artifacts: readonly DesktopBrowserProofTransportArtifact[];
     generationBrowserEngine: DesktopBrowserProofGenerationBrowserEngine;
     generationSessionIdentifier: DesktopBrowserProofGenerationSessionIdentifier;
@@ -59,8 +59,9 @@ export type DesktopBrowserProofTransportManifest = Readonly<{
     wasmSha256Hex: string;
 }>;
 
-export type DesktopBrowserProofTransportManifestAuthenticationBindings =
-    Readonly<Record<DesktopBrowserProofGenerationSessionIdentifier, string>>;
+type DesktopBrowserProofTransportManifestAuthenticationBindings = Readonly<
+    Record<DesktopBrowserProofGenerationSessionIdentifier, string>
+>;
 
 export type DesktopBrowserProofEvidenceGenerationWorkerStartMessage = Readonly<{
     caseIdentifiers: readonly DesktopBrowserProofEvidenceCaseIdentifier[];
@@ -222,7 +223,7 @@ export const requireDesktopBrowserProofVerificationSessionIdentifier = (
     return value;
 };
 
-export const resolveDesktopBrowserProofGenerationBrowserEngine = (
+const resolveDesktopBrowserProofGenerationBrowserEngine = (
     generationSessionIdentifier: DesktopBrowserProofGenerationSessionIdentifier,
 ): DesktopBrowserProofGenerationBrowserEngine =>
     generationSessionIdentifier === 'chromium-generation'
@@ -651,7 +652,7 @@ export const encodeDesktopBrowserProofTransportBytesAsBase64 = (
     return btoa(binaryChunks.join(''));
 };
 
-export const decodeDesktopBrowserProofTransportBytesFromBase64 = (
+const decodeDesktopBrowserProofTransportBytesFromBase64 = (
     encodedBytes: string,
 ): Uint8Array<ArrayBuffer> => {
     let binaryString: string;

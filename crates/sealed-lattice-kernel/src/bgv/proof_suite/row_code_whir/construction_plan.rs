@@ -42,7 +42,7 @@ use super::{
 };
 
 #[cfg(test)]
-mod linear_bcs_transcript;
+pub(super) mod linear_bcs_transcript;
 #[cfg(test)]
 mod shared_query_partition;
 
@@ -1271,11 +1271,18 @@ impl RowCodeWhirConstructionPlan {
     }
 
     #[cfg(test)]
-    fn linear_bcs_transcript_plan(
+    pub(super) fn linear_bcs_transcript_plan(
         &self,
     ) -> Result<linear_bcs_transcript::LinearBcsTranscriptPlan, RowCodeWhirConstructionPlanError>
     {
         linear_bcs_transcript::derive_linear_bcs_transcript_plan(self)
+    }
+
+    #[cfg(test)]
+    pub(super) fn aggregate_wide_pad_query_geometry(
+        &self,
+    ) -> Result<(usize, usize), RowCodeWhirConstructionPlanError> {
+        linear_bcs_transcript::aggregate_wide_pad_query_geometry(self)
     }
 
     #[cfg(test)]
@@ -5121,7 +5128,7 @@ fn row_geometry(
     .map_err(|_| RowCodeWhirConstructionPlanError::InvalidVariantGeometry)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 pub(in crate::bgv::proof_suite) mod theorem_certificate;
 
 #[cfg(test)]
@@ -5294,6 +5301,40 @@ mod tests {
                 "trace-mask degree bound {invalid_trace_mask_degree_bound} must fit the trace domain",
             );
         }
+    }
+
+    #[test]
+    fn checked_fixture_geometry_refuses_an_opening_above_the_rate_four_row_capacity() {
+        let mut checked_context = selected_relation_plan_check_context(
+            ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        .expect("same-secret has a selected relation context");
+        let fixture_evaluation_domain =
+            ProofEvaluationDomain::new(8_192, checked_context.evaluation_coset_offset)
+                .expect("the reduced fixture evaluation domain is valid");
+        checked_context.evaluation_domain_generator =
+            fixture_evaluation_domain.generator().canonical();
+        checked_context.phase_column_query_coordinate_count = 8;
+        let parameters = RowCodeWhirSelectedParameters::for_checked_fixture_geometry(8_192, 8, 18)
+            .expect("the reduced fixture geometry derives");
+        let physical_row_capacity = parameters
+            .logical_polynomial_coefficient_count
+            .checked_mul(parameters.logical_polynomials_per_physical_row)
+            .expect("the reduced physical-row capacity fits usize");
+
+        assert_eq!(parameters.logical_polynomial_coefficient_count, 128);
+        assert_eq!(parameters.logical_polynomials_per_physical_row, 8);
+        assert_eq!(physical_row_capacity, 1_024);
+        assert_eq!(parameters.row_code_log_inverse_rate, 2);
+        assert_eq!(
+            validate_domain_geometry_values(128, 8_192, 1_024, &checked_context, parameters),
+            Ok(()),
+        );
+        assert_eq!(
+            validate_domain_geometry_values(128, 8_192, 4_096, &checked_context, parameters),
+            Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry),
+            "a half-rate fixture cannot be relabeled as the rate-four construction",
+        );
     }
 
     #[test]
@@ -6504,6 +6545,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "guarded complete selected-family construction geometry evidence"]
     fn every_selected_variant_has_complete_descriptor_derived_geometry() {
         let artifacts = selected_relation_plans().expect("selected relation plans");
         assert_eq!(artifacts.len(), 12);

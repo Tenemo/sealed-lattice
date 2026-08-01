@@ -2227,7 +2227,7 @@ mod tests {
                 Some(object_type)
             );
         }
-        for unassigned_code in [0, 3, 0x000f, 0x0021, 0x0022, 0x0041, 0x0054, 0xffff] {
+        for unassigned_code in [0, 3, 0x000f, 0x0022, 0x0041, 0x0054, 0xffff] {
             assert_eq!(
                 FoundationObjectType::from_canonical_code(unassigned_code),
                 None

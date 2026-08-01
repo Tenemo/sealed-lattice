@@ -1,7 +1,10 @@
 import { fileURLToPath } from 'node:url';
 
 import type { ActiveLocalRunLog } from './local-run-log.js';
-import { runCommandAndCaptureOutput } from './run-command.js';
+import {
+    runCommandAndCaptureOutput,
+    type CommandInvocation,
+} from './run-command.js';
 
 const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -37,8 +40,12 @@ export const classifyRustTestInventory = (input: {
 };
 
 const listRustTests = async (input: {
+    readonly cargoFeatures?: readonly string[];
     readonly environment?: NodeJS.ProcessEnv;
     readonly ignoredOnly: boolean;
+    readonly inventoryCommandTransform?: (
+        command: CommandInvocation,
+    ) => CommandInvocation;
     readonly runLog?: ActiveLocalRunLog;
 }): Promise<readonly string[]> => {
     const arguments_ = [
@@ -46,21 +53,26 @@ const listRustTests = async (input: {
         '--locked',
         '-p',
         'sealed-lattice-kernel',
+        ...(input.cargoFeatures === undefined ||
+        input.cargoFeatures.length === 0
+            ? []
+            : ['--features', input.cargoFeatures.join(',')]),
         '--',
         ...(input.ignoredOnly ? ['--ignored'] : ['--include-ignored']),
         '--list',
         '--format',
         'terse',
     ];
+    const command: CommandInvocation = {
+        args: arguments_,
+        command: 'cargo',
+        description: 'list complete Rust test inventory',
+        env: input.environment,
+        logFileSlug: 'cargo-test-inventory',
+        workingDirectoryPath: repositoryRoot,
+    };
     const result = await runCommandAndCaptureOutput(
-        {
-            args: arguments_,
-            command: 'cargo',
-            description: 'list complete Rust test inventory',
-            env: input.environment,
-            logFileSlug: 'cargo-test-inventory',
-            workingDirectoryPath: repositoryRoot,
-        },
+        input.inventoryCommandTransform?.(command) ?? command,
         { runLog: input.runLog },
     );
     if (result.exitCode !== 0 || result.terminationSignal !== null) {
@@ -73,7 +85,11 @@ const listRustTests = async (input: {
 };
 
 export const collectRustKernelTestInventory = async (input: {
+    readonly cargoFeatures?: readonly string[];
     readonly environment?: NodeJS.ProcessEnv;
+    readonly inventoryCommandTransform?: (
+        command: CommandInvocation,
+    ) => CommandInvocation;
     readonly runLog?: ActiveLocalRunLog;
 }): Promise<readonly RustTestInventoryEntry[]> => {
     const allTests = await listRustTests({

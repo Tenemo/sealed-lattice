@@ -1,5 +1,6 @@
 import {
     decodeCommonProofCheckpointCursorManifest,
+    decodeCommonProofGenerationCursorManifest,
     isAssignedRuntimeCheckpointRandomUse,
     isPublicOnlyCommonProofCheckpointFamily,
     type DecodedCommonProofCheckpointCursorManifest,
@@ -412,8 +413,12 @@ const validateCursorProfile = (
 ): void => {
     let decoded;
     try {
+        const generationCursorManifest =
+            decodeCommonProofGenerationCursorManifest(
+                boundary.privateRandomCursorManifestBytes,
+            );
         decoded = decodeCommonProofCheckpointCursorManifest(
-            boundary.privateRandomCursorManifestBytes,
+            generationCursorManifest.privateCoinCursorManifestBytes,
         );
     } catch (error) {
         throw new RuntimeBuildCheckpointBoundaryPolicyError(

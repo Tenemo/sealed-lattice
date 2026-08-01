@@ -7,6 +7,55 @@ use super::*;
 
 const TEST_BASE_FIELD: u64 = 65_537;
 
+fn reduced_rate_four_opening_degree_bound_exclusive(evaluation_domain_size: u64) -> u64 {
+    let logical_polynomials_per_physical_row = 8_u64;
+    let prefix_stacking_factor = 2_u64;
+    let row_code_inverse_rate = 4_u64;
+    let row_encoding_expansion_factor = logical_polynomials_per_physical_row
+        .checked_mul(prefix_stacking_factor)
+        .and_then(|factor| factor.checked_mul(row_code_inverse_rate))
+        .expect("the reduced row-encoding expansion factor derives");
+    let logical_polynomial_coefficient_count = evaluation_domain_size
+        .checked_div(row_encoding_expansion_factor)
+        .filter(|coefficient_count| {
+            coefficient_count.checked_mul(row_encoding_expansion_factor)
+                == Some(evaluation_domain_size)
+        })
+        .expect("the reduced rate-four coefficient count derives exactly");
+    logical_polynomial_coefficient_count
+        .checked_mul(logical_polynomials_per_physical_row)
+        .expect("the reduced physical-row capacity derives")
+}
+
+fn reduced_rate_four_evaluation_domain_size(
+    ring_degree: u64,
+    trace_mask_degree_bound_exclusive: u64,
+) -> u64 {
+    let message_trace_domain_size = ring_degree
+        .checked_div(2)
+        .filter(|trace_size| trace_size.checked_mul(2) == Some(ring_degree))
+        .expect("the reduced message-trace domain derives exactly");
+    let relation_trace_domain_size = message_trace_domain_size
+        .checked_mul(COMMITTED_MATERIAL_TRACE_PACKING_FACTOR)
+        .expect("the reduced relation-trace domain derives");
+    let maximum_prover_column_degree = relation_trace_domain_size
+        .checked_add(trace_mask_degree_bound_exclusive)
+        .and_then(|exclusive_bound| exclusive_bound.checked_sub(1))
+        .expect("the reduced prover-column degree derives");
+    let committed_material_range_constraint_arity = 3_u64;
+    let minimum_opening_degree_bound_exclusive = maximum_prover_column_degree
+        .checked_mul(committed_material_range_constraint_arity)
+        .and_then(|maximum_numerator_degree| maximum_numerator_degree.checked_add(1))
+        .and_then(u64::checked_next_power_of_two)
+        .expect("the reduced range-constraint opening capacity derives");
+    let prefix_stacking_factor = 2_u64;
+    let row_code_inverse_rate = 4_u64;
+    minimum_opening_degree_bound_exclusive
+        .checked_mul(prefix_stacking_factor)
+        .and_then(|size| size.checked_mul(row_code_inverse_rate))
+        .expect("the minimal reduced rate-four evaluation domain derives")
+}
+
 fn check_context() -> RelationPlanCheckContext {
     RelationPlanCheckContext {
         base_field_modulus: TEST_BASE_FIELD,
@@ -30,12 +79,12 @@ fn check_context() -> RelationPlanCheckContext {
 }
 
 fn committed_material_check_context() -> RelationPlanCheckContext {
-    let evaluation_domain_size = 1_024_u64;
+    let relation_input = committed_material_input();
+    let evaluation_domain_size = relation_input.evaluation_domain_size;
     let maximum_two_adic_order = 1_u64 << 32;
     let quotient_component_count = 16_u64;
     let phase_column_query_coordinate_count = 1_u64;
     let out_of_domain_point_count = 1_u64;
-    let relation_input = committed_material_input();
     let rounded_mask_degree = quotient_component_count
         .checked_add(1)
         .and_then(|count| count.checked_mul(relation_input.trace_mask_degree_bound_exclusive))
@@ -91,15 +140,22 @@ fn trace_zeroifier_check_context() -> RelationPlanCheckContext {
 
 fn committed_material_input() -> CommittedMaterialRelationPlanInput {
     let ring_degree = 64_u64;
+    let trace_mask_degree_bound_exclusive = ring_degree / 2;
+    let evaluation_domain_size =
+        reduced_rate_four_evaluation_domain_size(ring_degree, trace_mask_degree_bound_exclusive);
+    let opening_degree_bound_exclusive =
+        reduced_rate_four_opening_degree_bound_exclusive(evaluation_domain_size);
+    assert_eq!(evaluation_domain_size, 4_096);
+    assert_eq!(opening_degree_bound_exclusive, 512);
     CommittedMaterialRelationPlanInput {
         ring_degree,
-        evaluation_domain_size: 1_024,
-        opening_degree_bound_exclusive: 512,
+        evaluation_domain_size,
+        opening_degree_bound_exclusive,
         material_column_degree_bound_exclusive: 10,
         participant_count: 3,
         threshold: 2,
         sharing_data_modulus_indices: vec![0],
-        trace_mask_degree_bound_exclusive: ring_degree / 2,
+        trace_mask_degree_bound_exclusive,
     }
 }
 

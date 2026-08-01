@@ -10,7 +10,7 @@ use num_bigint::BigUint;
 use crate::foundation::{
     ACTION_RANDOMNESS_ROOT_BYTE_LENGTH, ActionRandomnessDerivationInput, ActionRandomnessRoot,
     ParticipantIdentity, PersistentProofCoinInput, ProofApplicationSlot,
-    ProofApplicationSlotCeilings,
+    ProofApplicationSlotCeilings, RefusalReason,
 };
 #[cfg(test)]
 use zeroize::Zeroizing;
@@ -1072,20 +1072,48 @@ impl PrivateRandomnessCommonProofCoinSource {
         attempt_identifier: PrivateRandomnessAttemptIdentifier,
         coordinate_capacity: CommonProofPrivateCoinCoordinateCapacity,
     ) -> Result<Self, PrivateRandomnessCommonProofCoinError> {
-        let salt_domain = PrivateRandomnessDomain::from_assigned_pair(
-            family_schema_identifier,
-            PRIVATE_PROOF_SALT_PURPOSE,
-        )?;
-        let salt_derivation_context_hash =
-            common_proof_private_coin_coordinate_derivation_context_hash(
-                derivation_binding_hash,
-                CommonProofPrivateCoinCoordinate::proof_salt(),
-            );
-        drop(action_private_randomness.begin_stream(
-            salt_domain,
-            salt_derivation_context_hash,
-            attempt_identifier,
-        )?);
+        let validation_coordinates = [
+            (coordinate_capacity.trace_mask_count > 0).then_some(
+                CommonProofPrivateCoinCoordinate {
+                    purpose_class: 1,
+                    ordinal: 0,
+                },
+            ),
+            (coordinate_capacity.telescoping_mask_count > 0).then_some(
+                CommonProofPrivateCoinCoordinate {
+                    purpose_class: 2,
+                    ordinal: 0,
+                },
+            ),
+            (coordinate_capacity.opening_mask_count > 0).then_some(
+                CommonProofPrivateCoinCoordinate {
+                    purpose_class: 3,
+                    ordinal: 0,
+                },
+            ),
+            coordinate_capacity
+                .includes_proof_salt
+                .then_some(CommonProofPrivateCoinCoordinate::proof_salt()),
+            coordinate_capacity
+                .includes_hiding_argument
+                .then_some(CommonProofPrivateCoinCoordinate::hiding_argument()),
+        ];
+        for coordinate in validation_coordinates.into_iter().flatten() {
+            let domain = PrivateRandomnessDomain::from_assigned_pair(
+                family_schema_identifier,
+                coordinate.purpose_class(),
+            )?;
+            let derivation_context_hash =
+                common_proof_private_coin_coordinate_derivation_context_hash(
+                    derivation_binding_hash,
+                    coordinate,
+                );
+            drop(action_private_randomness.begin_stream(
+                domain,
+                derivation_context_hash,
+                attempt_identifier,
+            )?);
+        }
         Ok(Self {
             action_private_randomness,
             family_schema_identifier,
@@ -1115,6 +1143,10 @@ impl PrivateRandomnessCommonProofCoinSource {
         ),
         PrivateRandomnessCommonProofCoinError,
     > {
+        let retained_operation = *self
+            .retained_operations
+            .slot(coordinate)
+            .ok_or(PrivateRandomnessCommonProofCoinError::CoordinateOutsidePlan)?;
         let domain = PrivateRandomnessDomain::from_assigned_pair(
             self.family_schema_identifier,
             coordinate.purpose_class(),
@@ -1123,10 +1155,6 @@ impl PrivateRandomnessCommonProofCoinSource {
             self.derivation_binding_hash,
             coordinate,
         );
-        let retained_operation = *self
-            .retained_operations
-            .slot(coordinate)
-            .ok_or(PrivateRandomnessCommonProofCoinError::CoordinateOutsidePlan)?;
         Ok((domain, derivation_context_hash, retained_operation))
     }
 
@@ -1359,6 +1387,122 @@ mod tests {
             CommonProofPrivateCoinCoordinateCapacity::for_test(trace_mask_count, 0, 0, true, true),
         )
         .expect("the production private-coin source accepts the fixed test authority")
+    }
+
+    fn public_witness_construction_hiding_authority() -> (
+        Rc<ActionPrivateRandomness>,
+        u16,
+        Hash512,
+        PrivateRandomnessAttemptIdentifier,
+    ) {
+        let suite_identifier = Hash512::from_bytes([0x11; Hash512::BYTE_LENGTH]);
+        let ceremony_context_hash = Hash512::from_bytes([0x22; Hash512::BYTE_LENGTH]);
+        let action_context_hash = Hash512::from_bytes([0x33; Hash512::BYTE_LENGTH]);
+        let action_private_randomness = Rc::new(
+            ActionRandomnessRoot::from_injected_bytes(Zeroizing::new(
+                [0x5a; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH],
+            ))
+            .derive(ActionRandomnessDerivationInput::new(
+                suite_identifier,
+                ceremony_context_hash,
+                action_context_hash,
+                ParticipantIdentity::from_bytes([0x44; ParticipantIdentity::BYTE_LENGTH]),
+            ))
+            .expect("the fixed action randomness derives"),
+        );
+        let family_schema_identifier = ProofApplicationSlotCeilings::
+            COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER;
+        let application_slot = ProofApplicationSlot::new(
+            suite_identifier,
+            ceremony_context_hash,
+            action_context_hash,
+            family_schema_identifier,
+            None,
+            None,
+            None,
+        )
+        .expect("the collective public-key aggregate has a canonical proof slot");
+        let proof_coin_input = PersistentProofCoinInput::new(
+            application_slot,
+            Hash512::from_bytes([0x66; Hash512::BYTE_LENGTH]),
+        )
+        .expect("the public-witness construction-hiding input is canonical");
+        let attempt_identifier = action_private_randomness
+            .persistent_proof_preparation_identifier(&proof_coin_input)
+            .expect("the public-witness construction-hiding attempt derives");
+        (
+            action_private_randomness,
+            family_schema_identifier,
+            Hash512::from_bytes([0x71; Hash512::BYTE_LENGTH]),
+            attempt_identifier,
+        )
+    }
+
+    #[test]
+    fn public_witness_source_exposes_only_private_construction_hiding_coins() {
+        let (
+            action_private_randomness,
+            family_schema_identifier,
+            derivation_binding_hash,
+            attempt_identifier,
+        ) = public_witness_construction_hiding_authority();
+        let mut source = PrivateRandomnessCommonProofCoinSource::new(
+            Rc::clone(&action_private_randomness),
+            family_schema_identifier,
+            derivation_binding_hash,
+            attempt_identifier,
+            CommonProofPrivateCoinCoordinateCapacity::for_test(0, 0, 0, false, true),
+        )
+        .expect("the public-witness source accepts exactly one private hiding coordinate");
+        let hiding_coordinate = CommonProofPrivateCoinCoordinate::hiding_argument();
+        let draw_ceiling =
+            crate::foundation::SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT;
+        let sampled = source
+            .sample_modulo(hiding_coordinate, PROOF_BASE_FIELD_MODULUS, draw_ceiling)
+            .expect("the private construction-hiding stream samples");
+        let mut replayed = [0_u64; 1];
+        source
+            .replay_modulo_samples(
+                hiding_coordinate,
+                PROOF_BASE_FIELD_MODULUS,
+                draw_ceiling,
+                &mut replayed,
+            )
+            .expect("the private construction-hiding stream replays exactly");
+        assert_eq!(replayed, [sampled]);
+
+        for forbidden_coordinate in [
+            CommonProofPrivateCoinCoordinate::mask(1, 0).expect("trace-mask coordinate"),
+            CommonProofPrivateCoinCoordinate::proof_salt(),
+        ] {
+            assert_eq!(
+                source.sample_modulo(forbidden_coordinate, PROOF_BASE_FIELD_MODULUS, draw_ceiling,),
+                Err(PrivateRandomnessCommonProofCoinError::CoordinateOutsidePlan)
+            );
+        }
+
+        for forbidden_capacity in [
+            CommonProofPrivateCoinCoordinateCapacity::for_test(1, 0, 0, false, true),
+            CommonProofPrivateCoinCoordinateCapacity::for_test(0, 0, 0, true, true),
+        ] {
+            let error = match PrivateRandomnessCommonProofCoinSource::new(
+                Rc::clone(&action_private_randomness),
+                family_schema_identifier,
+                derivation_binding_hash,
+                attempt_identifier,
+                forbidden_capacity,
+            ) {
+                Ok(_) => panic!("a public witness must not acquire relation masks or proof salt"),
+                Err(error) => error,
+            };
+            let PrivateRandomnessCommonProofCoinError::Custody(schema_error) = error else {
+                panic!("forbidden public-witness coordinates must refuse at custody");
+            };
+            assert_eq!(
+                schema_error.refusal_reason,
+                RefusalReason::WrongTypeOrLength
+            );
+        }
     }
 
     struct SuccessfulRecordingDelegate {

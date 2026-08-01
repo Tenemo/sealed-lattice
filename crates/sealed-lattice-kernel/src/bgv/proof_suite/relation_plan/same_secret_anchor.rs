@@ -277,7 +277,7 @@ pub(super) mod tests {
 
     pub(in super::super) const TEST_RING_DEGREE: u64 = 256;
     pub(in super::super) const TEST_EVALUATION_DOMAIN_SIZE: u64 = 8_192;
-    pub(in super::super) const TEST_OPENING_DEGREE_BOUND_EXCLUSIVE: u64 = 4_096;
+    pub(in super::super) const TEST_OPENING_DEGREE_BOUND_EXCLUSIVE: u64 = 1_024;
 
     pub(in super::super) fn check_context(include_plaintext: bool) -> RelationPlanCheckContext {
         let maximum_two_adic_order = 1_u64 << 32;

@@ -347,9 +347,8 @@ fn prepare_verification(
                     )?
                 }
                 AcceptedSetupProofFamily::PublicKeyShare => selected_proof_runtime_limits(
-                    schema_identifier,
                     &canonical_application_statement_bytes,
-                    relation_plan_variant,
+                    &relation_plan_capability,
                 )
                 .map_err(|_| CommonProofRuntimeError::InvalidLimits)?,
             };

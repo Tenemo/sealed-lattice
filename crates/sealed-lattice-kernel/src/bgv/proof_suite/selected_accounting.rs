@@ -1,7 +1,7 @@
 //! Canonical proof ceilings and runtime limits for the selected suite.
 
 use crate::foundation::{
-    CanonicalDecodeLimits, MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT,
+    CanonicalDecodeLimits, CanonicalTuple, MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT,
     MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT, ProofObjectHeader,
 };
 
@@ -11,10 +11,12 @@ use super::external_memory::{
 };
 use super::relation_plan::{RelationPlanCheckContext, RelationPlanVariant};
 use super::row_code_whir::RowCodeWhirConstructionPlan;
+#[cfg(test)]
+use super::selected_relation_plans;
 use super::{
-    CommonProofRuntimeLimits, MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
+    CommonProofRelationPlanCapability, CommonProofRuntimeLimits, MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
     MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
-    selected_relation_plan_check_context, selected_relation_plans,
+    selected_relation_plan_check_context,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -283,10 +285,11 @@ fn external_memory_plan_failure_stage(
 }
 
 pub(crate) fn selected_proof_runtime_limits(
-    application_statement_schema_identifier: u16,
     canonical_application_statement_bytes: &[u8],
-    variant: &RelationPlanVariant,
+    relation_plan: &CommonProofRelationPlanCapability,
 ) -> Result<CommonProofRuntimeLimits, SelectedProofAccountingError> {
+    let application_statement_schema_identifier =
+        relation_plan.application_statement_schema_identifier();
     let relation_context =
         selected_relation_plan_check_context(application_statement_schema_identifier)
             .ok_or(SelectedProofAccountingError::InvalidProfile)?;
@@ -295,37 +298,33 @@ pub(crate) fn selected_proof_runtime_limits(
         &CanonicalDecodeLimits::default(),
     )
     .map_err(|_| SelectedProofAccountingError::CanonicalEncoding)?;
-
-    let relation_plans =
-        selected_relation_plans().map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
-    let mut matching_artifacts = relation_plans.iter().filter(|artifact| {
-        artifact.application_statement_schema_identifier()
-            == application_statement_schema_identifier
-    });
-    let artifact = matching_artifacts
-        .next()
-        .ok_or(SelectedProofAccountingError::InvalidProfile)?;
-    if matching_artifacts.next().is_some() || artifact.checked_context() != &relation_context {
-        return Err(SelectedProofAccountingError::InvalidProfile);
-    }
-    let checked_variant = artifact
-        .compiled_plan()
-        .select_variant(variant.schedule_position(), variant.top_count())
-        .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
-    if checked_variant != variant {
-        return Err(SelectedProofAccountingError::InvalidProfile);
-    }
-    let construction_plan = RowCodeWhirConstructionPlan::for_selected_variant(
-        artifact,
-        variant.schedule_position(),
-        variant.top_count(),
+    let statement = CanonicalTuple::decode(
+        canonical_application_statement_bytes,
+        &CanonicalDecodeLimits::default(),
     )
-    .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
-    construction_plan
-        .canonical_identity_hash()
+    .map_err(|_| SelectedProofAccountingError::CanonicalEncoding)?;
+    if statement.schema_identifier != application_statement_schema_identifier
+        || relation_plan.relation_context() != &relation_context
+    {
+        return Err(SelectedProofAccountingError::InvalidProfile);
+    }
+    let checked_variant = relation_plan
+        .compiled_plan()
+        .select_variant(relation_plan.schedule_position(), relation_plan.top_count())
         .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+    let construction_plan = relation_plan.row_code_whir_construction_plan();
+    if construction_plan
+        .canonical_identity_hash()
+        .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
+        != relation_plan.row_code_whir_construction_plan_identity_hash()
+        || construction_plan.relation_plan_hash() != relation_plan.relation_plan_hash()
+        || construction_plan.relation_plan_variant_hash()
+            != relation_plan.relation_plan_variant_hash()
+    {
+        return Err(SelectedProofAccountingError::InvalidProfile);
+    }
     require_selected_row_code_whir_runtime_geometry(
-        &construction_plan,
+        construction_plan,
         checked_variant,
         &relation_context,
     )?;
@@ -337,6 +336,63 @@ pub(crate) fn selected_proof_runtime_limits(
             .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
     )
     .map_err(|_| SelectedProofAccountingError::ResourcePlanning)
+}
+
+#[cfg(test)]
+mod runtime_limit_tests {
+    use super::*;
+    use crate::{
+        bgv::proof_suite::{
+            SelectedApplicationStatementContext,
+            canonical_selected_application_statement_for_ceiling,
+            compile_same_secret_relation_plan, selected_same_secret_relation_plan_input,
+        },
+        foundation::{FOUNDATION_PROFILE, Hash512, ProofApplicationSlotCeilings},
+    };
+
+    #[test]
+    fn runtime_limits_bind_the_canonical_statement_schema_to_the_exact_capability() {
+        let same_secret_schema_identifier =
+            ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER;
+        let relation_context = selected_relation_plan_check_context(same_secret_schema_identifier)
+            .expect("the selected same-secret context exists");
+        let compiled_relation_plan = compile_same_secret_relation_plan(
+            &selected_same_secret_relation_plan_input()
+                .expect("the selected same-secret input derives"),
+            &relation_context,
+        )
+        .expect("the selected same-secret relation compiles");
+        let relation_plan = CommonProofRelationPlanCapability::from_compiled_plan(
+            &compiled_relation_plan,
+            &relation_context,
+            None,
+            None,
+        )
+        .expect("the selected same-secret capability derives");
+        let statement_context = SelectedApplicationStatementContext::new(
+            FOUNDATION_PROFILE.protocol_version,
+            [0_u8; Hash512::BYTE_LENGTH],
+            None,
+            None,
+        );
+        let same_secret_statement = canonical_selected_application_statement_for_ceiling(
+            same_secret_schema_identifier,
+            statement_context,
+        )
+        .expect("the selected same-secret statement derives");
+        selected_proof_runtime_limits(&same_secret_statement, &relation_plan)
+            .expect("the exact statement and capability derive limits");
+
+        let public_key_statement = canonical_selected_application_statement_for_ceiling(
+            ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+            statement_context,
+        )
+        .expect("the selected public-key statement derives");
+        assert_eq!(
+            selected_proof_runtime_limits(&public_key_statement, &relation_plan),
+            Err(SelectedProofAccountingError::InvalidProfile),
+        );
+    }
 }
 
 #[cfg(test)]
@@ -2004,6 +2060,7 @@ pub(crate) mod resource_accounting {
         }
 
         #[test]
+        #[ignore = "guarded complete selected-family proof-accounting evidence"]
         fn selected_row_code_whir_accounting_records_every_soft_variance_and_absolute_headroom() {
             let rows = selected_proof_variant_resource_inventory()
                 .expect("selected row-code WHIR accounting derives");
@@ -2232,6 +2289,7 @@ pub(crate) mod resource_accounting {
         }
 
         #[test]
+        #[ignore = "guarded active evaluator proof-accounting evidence"]
         fn active_evaluator_proof_accounting_reconciles_every_wire_section() {
             let relation_plans = selected_relation_plans().expect("selected relation plans derive");
             let artifact = relation_plans
@@ -2384,6 +2442,7 @@ pub(crate) mod resource_accounting {
         }
 
         #[test]
+        #[ignore = "guarded relinearization runtime-geometry evidence"]
         fn first_relinearization_round_schedule_has_bounded_candidate_runtime_geometry() {
             let relation_plans = selected_relation_plans().expect("selected relation plans derive");
             let artifact = relation_plans
@@ -2490,6 +2549,7 @@ pub(crate) mod resource_accounting {
         }
 
         #[test]
+        #[ignore = "guarded complete evaluator proof-accounting evidence"]
         fn candidate_specific_evaluator_rows_account_for_the_complete_key_catalog() {
             let rows = selected_proof_variant_resource_inventory()
                 .expect("selected row-code WHIR accounting derives")
@@ -2517,6 +2577,7 @@ pub(crate) mod resource_accounting {
         }
 
         #[test]
+        #[ignore = "guarded complete compact-frontier accounting evidence"]
         fn coordinate_derived_compact_frontiers_cover_every_opening_section() {
             for row in selected_proof_variant_resource_inventory()
                 .expect("selected row-code WHIR accounting derives")
@@ -2547,6 +2608,7 @@ pub(crate) mod resource_accounting {
         }
 
         #[test]
+        #[ignore = "guarded complete selected-family runtime-limit evidence"]
         fn runtime_limits_match_the_common_authenticated_stream_bound() {
             let relation_plans = selected_relation_plans().expect("selected plans derive");
             for relation_plan in relation_plans {
@@ -2562,8 +2624,16 @@ pub(crate) mod resource_accounting {
                         ),
                     )
                     .expect("selected statement derives");
+                    let relation_plan_capability =
+                        CommonProofRelationPlanCapability::from_compiled_plan(
+                            relation_plan.compiled_plan(),
+                            relation_plan.checked_context(),
+                            variant.schedule_position(),
+                            variant.top_count(),
+                        )
+                        .expect("selected relation capability derives");
                     let limits =
-                        selected_proof_runtime_limits(schema_identifier, &statement, variant)
+                        selected_proof_runtime_limits(&statement, &relation_plan_capability)
                             .expect("runtime limits derive");
                     assert_eq!(
                         limits.maximum_proof_byte_length(),
@@ -2583,6 +2653,7 @@ pub(crate) mod resource_accounting {
         }
 
         #[test]
+        #[ignore = "guarded complete checkpoint and external-memory evidence"]
         fn checkpoint_and_external_memory_geometry_closes_for_every_variant() {
             for row in selected_proof_variant_resource_inventory()
                 .expect("selected row-code WHIR accounting derives")
@@ -2627,6 +2698,7 @@ pub(crate) mod resource_accounting {
         }
 
         #[test]
+        #[ignore = "guarded complete-action proof-accounting evidence"]
         fn complete_action_accounting_reconciles_all_exact_roster_slots() {
             let accounting = selected_complete_proof_resource_accounting()
                 .expect("complete selected accounting derives");

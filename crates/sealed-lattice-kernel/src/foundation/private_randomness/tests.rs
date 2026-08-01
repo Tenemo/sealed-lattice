@@ -740,7 +740,9 @@ fn proof_application_slots_enforce_closed_coordinate_shapes() {
 }
 
 #[test]
-fn every_public_only_family_refuses_private_attempts_and_randomness_domains() {
+fn every_public_witness_family_has_only_private_construction_hiding_coins() {
+    let action_randomness = action_randomness();
+    let mut construction_attempt_identifiers = std::collections::BTreeSet::new();
     for (public_family, schedule_position) in [
         (
             ProofFamilyIdentifiers::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
@@ -756,9 +758,9 @@ fn every_public_only_family_refuses_private_attempts_and_randomness_domains() {
         ),
     ] {
         let application_slot = ProofApplicationSlot::new(
-            hash(1),
-            hash(2),
-            hash(3),
+            hash(0x11),
+            hash(0x22),
+            hash(0x33),
             public_family,
             None,
             schedule_position,
@@ -766,11 +768,39 @@ fn every_public_only_family_refuses_private_attempts_and_randomness_domains() {
         )
         .expect("the public-only family has one canonical slot shape");
 
-        assert!(PrivateRandomnessDomain::reset_safe_proof(public_family, 1).is_err());
-        assert!(PersistentProofCoinInput::new(application_slot, hash(4)).is_err());
+        assert!(PrivateRandomnessDomain::reset_safe_proof(public_family, 4).is_ok());
+        for forbidden_purpose in [1, 2, 3, PRIVATE_PROOF_SALT_PURPOSE] {
+            assert!(
+                PrivateRandomnessDomain::reset_safe_proof(public_family, forbidden_purpose)
+                    .is_err()
+            );
+        }
+        let input = PersistentProofCoinInput::new(application_slot, hash(4))
+            .expect("the public-witness construction-hiding input is canonical");
+        let construction_attempt_identifier = action_randomness
+            .persistent_proof_preparation_identifier(&input)
+            .expect("the private construction-hiding attempt derives");
+        assert!(
+            construction_attempt_identifiers.insert(*construction_attempt_identifier.as_bytes()),
+            "each public-witness family must have a distinct construction-hiding attempt",
+        );
+        assert!(
+            action_randomness
+                .begin_persistent_proof_witness_coin_binding(&input)
+                .is_err(),
+            "a public relation must not acquire a private-witness binding",
+        );
+        let changed_statement_input = PersistentProofCoinInput::new(application_slot, hash(5))
+            .expect("a changed public statement remains canonical");
+        assert_ne!(
+            construction_attempt_identifier,
+            action_randomness
+                .persistent_proof_preparation_identifier(&changed_statement_input)
+                .expect("the changed construction-hiding attempt derives"),
+        );
         assert_eq!(
             proof_attempt_identifier_derivation_count(public_family),
-            Some(0)
+            Some(1)
         );
     }
     assert_eq!(

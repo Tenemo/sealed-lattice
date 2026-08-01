@@ -1771,7 +1771,7 @@ const validateReductionDag = (dagValue: JsonValue): readonly string[] => {
     return unresolved;
 };
 
-export type CollectiveSetupSecurityValidationSummary = {
+type CollectiveSetupSecurityValidationSummary = {
     readonly assumptionLeafCount: number;
     readonly corruptionSubsetCount: number;
     readonly logicalRelationInstanceCount: number;

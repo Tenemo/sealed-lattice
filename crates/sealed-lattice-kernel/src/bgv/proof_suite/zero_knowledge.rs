@@ -1778,7 +1778,7 @@ pub(in crate::bgv::proof_suite) fn checked_zero_knowledge_mask_image_for_paramet
     checked_zero_knowledge_mask_image_with_validated_parameters(variant, context, parameters)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 pub(in crate::bgv::proof_suite) fn checked_construction_masking_correspondence_for_parameters(
     variant: &RelationPlanVariant,
     context: &RelationPlanCheckContext,

@@ -153,8 +153,11 @@ pub(crate) use private_randomness::PersistentProofWitnessCoinBinding;
 pub(crate) use private_randomness::generator_hybrid::{
     DECLARED_ADVERSARIAL_QUERY_BUDGET, MaskGeneratorHonestAbortEvent,
     MaskGeneratorHybridAssumption, MaskGeneratorHybridHop, MaskGeneratorHybridLoss,
-    action_root_expansion_summary, deployed_mask_generator_hybrid, deployed_private_stream_hybrid,
-    quantum_mask_generator_hybrid, quantum_private_stream_hybrid,
+    action_root_expansion_summary, deployed_mask_generator_hybrid, quantum_mask_generator_hybrid,
+};
+#[cfg(all(test, feature = "theorem-evidence"))]
+pub(crate) use private_randomness::generator_hybrid::{
+    deployed_private_stream_hybrid, quantum_private_stream_hybrid,
 };
 pub use private_randomness::{
     ACTION_RANDOMNESS_DERIVATION_INPUT_SCHEMA_IDENTIFIER, ACTION_RANDOMNESS_ROOT_BYTE_LENGTH,

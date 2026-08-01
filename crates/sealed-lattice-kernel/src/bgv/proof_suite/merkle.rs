@@ -84,6 +84,30 @@ pub(in crate::bgv::proof_suite) fn maximum_minimal_frontier_node_count(
     Ok(frontier_node_count)
 }
 
+/// Exact worst-case parent-hash work for a coordinate-derived minimal
+/// frontier.
+///
+/// The queried leaves and derived frontier are the leaves of the verifier's
+/// reconstructed full binary subtree. A full binary tree with `k` leaves has
+/// exactly `k - 1` parent nodes, so this count stays tied to the same canonical
+/// coordinates as the wire-size bound.
+#[cfg(test)]
+pub(in crate::bgv::proof_suite) fn maximum_minimal_frontier_parent_hash_count(
+    leaf_count: usize,
+    opening_count: usize,
+) -> Result<usize, ProofMerkleError> {
+    if opening_count == 0 {
+        return Err(ProofMerkleError::InvalidOpening);
+    }
+    opening_count
+        .checked_add(maximum_minimal_frontier_node_count(
+            leaf_count,
+            opening_count,
+        )?)
+        .and_then(|leaf_and_frontier_count| leaf_and_frontier_count.checked_sub(1))
+        .ok_or(ProofMerkleError::CountOverflow)
+}
+
 /// Scans the canonical minimal frontier without constructing transient sets.
 /// The first pass obtains the exact output length and the second fills the
 /// caller's sole allocation in level-and-node order.
@@ -165,6 +189,35 @@ mod tests {
         assert_eq!(maximum_minimal_frontier_node_count(8, 3), Ok(4));
         assert_eq!(maximum_minimal_frontier_node_count(8, 8), Ok(0));
         assert_eq!(maximum_minimal_frontier_node_count(1, 1), Ok(0));
+        assert_eq!(maximum_minimal_frontier_parent_hash_count(8, 3), Ok(6));
+        assert_eq!(maximum_minimal_frontier_parent_hash_count(8, 8), Ok(7));
+        assert_eq!(maximum_minimal_frontier_parent_hash_count(1, 1), Ok(0));
+    }
+
+    #[test]
+    fn parent_hash_ceiling_matches_every_small_coordinate_set() {
+        let leaf_count = 8_usize;
+        for opening_count in 1..=leaf_count {
+            let maximum_coordinate_derived_count = (1_u16..(1_u16 << leaf_count))
+                .filter(|mask| mask.count_ones() as usize == opening_count)
+                .map(|mask| {
+                    let indexes = (0..leaf_count)
+                        .filter(|leaf_index| mask & (1_u16 << leaf_index) != 0)
+                        .map(|leaf_index| leaf_index as u64)
+                        .collect::<Vec<_>>();
+                    opening_count
+                        + minimal_frontier_coordinates(&indexes, leaf_count)
+                            .expect("the exhaustive coordinate set is canonical")
+                            .len()
+                        - 1
+                })
+                .max()
+                .expect("each opening count has at least one coordinate set");
+            assert_eq!(
+                maximum_minimal_frontier_parent_hash_count(leaf_count, opening_count),
+                Ok(maximum_coordinate_derived_count),
+            );
+        }
     }
 
     #[test]
@@ -181,6 +234,14 @@ mod tests {
         );
         assert_eq!(
             maximum_minimal_frontier_node_count(8, 9),
+            Err(ProofMerkleError::InvalidOpening),
+        );
+        assert_eq!(
+            maximum_minimal_frontier_parent_hash_count(8, 0),
+            Err(ProofMerkleError::InvalidOpening),
+        );
+        assert_eq!(
+            maximum_minimal_frontier_parent_hash_count(8, 9),
             Err(ProofMerkleError::InvalidOpening),
         );
     }

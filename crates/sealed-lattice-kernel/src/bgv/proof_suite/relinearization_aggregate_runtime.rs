@@ -437,14 +437,13 @@ fn selected_aggregate_runtime_plan(
         AggregateRuntimeError::Relation(RelationPlanError::InvalidDomain),
     )?;
     let compiled_relation_plan = selected_aggregate_compiled_relation_plan()?;
-    let variant = compiled_relation_plan.select_variant(Some(schedule_position), None)?;
-    let limits = selected_proof_runtime_limits(schema_identifier, canonical_statement, variant)?;
     let relation_plan = CommonProofRelationPlanCapability::from_compiled_plan(
         &compiled_relation_plan,
         &relation_context,
         Some(schedule_position),
         None,
     )?;
+    let limits = selected_proof_runtime_limits(canonical_statement, &relation_plan)?;
     Ok(AggregateProofRuntimePlan {
         compiled_relation_plan,
         relation_plan,

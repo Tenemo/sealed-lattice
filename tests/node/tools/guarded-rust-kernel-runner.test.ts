@@ -38,6 +38,19 @@ describe('Guarded Rust kernel runner', () => {
         });
         expect(command.command.args).toContain('--include-ignored');
         expect(command.command.args).not.toContain('--skip');
+
+        const featureGatedCommand = buildGuardedRustKernelCommand(
+            'theorem_test',
+            {
+                cargoFeatures: ['theorem-evidence'],
+                logFileSlug: 'theorem-test',
+                progressLabel: 'theorem-test',
+                runName: 'Theorem test',
+                targetDirectoryPath: 'guarded-target',
+            },
+        );
+        expect(featureGatedCommand.command.args).toContain('--features');
+        expect(featureGatedCommand.command.args).toContain('theorem-evidence');
     });
 
     it('derives a bounded memory ceiling and permits only lower overrides', () => {

@@ -735,8 +735,7 @@ fn validate_production_authority(
     Ok(())
 }
 
-#[test]
-fn collective_setup_security_authority_derives_exact_roster_inventory_and_samples() {
+fn assert_collective_setup_security_authority_derives_exact_roster_inventory_and_samples() {
     let authority = production_authority();
     assert_eq!(authority.profile.participant_count, 10);
     assert_eq!(authority.profile.active_fault_bound, 3);
@@ -864,8 +863,7 @@ fn collective_setup_security_authority_derives_exact_roster_inventory_and_sample
     );
 }
 
-#[test]
-fn collective_setup_security_authority_enumerates_every_static_corruption_subset() {
+fn assert_collective_setup_security_authority_enumerates_every_static_corruption_subset() {
     let authority = production_authority();
     let all_subsets = authority
         .corruption_classes
@@ -889,8 +887,7 @@ fn collective_setup_security_authority_enumerates_every_static_corruption_subset
     }
 }
 
-#[test]
-fn collective_setup_security_authority_binds_every_plan_and_variant() {
+fn assert_collective_setup_security_authority_binds_every_plan_and_variant() {
     let authority = production_authority();
     assert_eq!(
         authority
@@ -937,8 +934,7 @@ fn collective_setup_security_authority_binds_every_plan_and_variant() {
     );
 }
 
-#[test]
-fn collective_setup_security_authority_refuses_mutated_production_facts() {
+fn assert_collective_setup_security_authority_refuses_mutated_production_facts() {
     let authority = production_authority();
     validate_production_authority(authority).expect("fresh authority validates");
 
@@ -983,8 +979,7 @@ fn collective_setup_security_authority_refuses_mutated_production_facts() {
     assert!(validate_production_authority(&changed_correctness_margin).is_err());
 }
 
-#[test]
-fn checked_collective_setup_security_record_uses_the_live_production_authority() {
+fn assert_checked_collective_setup_security_record_uses_the_live_production_authority() {
     let checked_record: serde_json::Value = serde_json::from_str(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../test-vectors/selected-collective-setup-security-evidence.json"
@@ -999,8 +994,14 @@ fn checked_collective_setup_security_record_uses_the_live_production_authority()
 }
 
 #[test]
-#[ignore = "prints the production-derived authority for intentional evidence refresh"]
-fn print_collective_setup_security_production_authority() {
+#[ignore = "guarded complete collective-setup construction-authority evidence"]
+fn collective_setup_security_production_authority_closes_complete_evidence() {
+    assert_collective_setup_security_authority_derives_exact_roster_inventory_and_samples();
+    assert_collective_setup_security_authority_enumerates_every_static_corruption_subset();
+    assert_collective_setup_security_authority_binds_every_plan_and_variant();
+    assert_collective_setup_security_authority_refuses_mutated_production_facts();
+    assert_checked_collective_setup_security_record_uses_the_live_production_authority();
+
     println!(
         "{}",
         serde_json::to_string_pretty(production_authority())

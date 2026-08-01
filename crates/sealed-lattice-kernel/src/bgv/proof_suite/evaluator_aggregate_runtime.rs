@@ -652,19 +652,14 @@ fn selected_evaluator_proof_runtime_plan(
         EvaluatorAggregateRuntimeError::Relation(RelationPlanError::InvalidDomain),
     )?;
     let compiled_relation_plan = selected_evaluator_aggregate_relation_plan()?;
-    let variant =
-        compiled_relation_plan.select_variant(None, Some(FOUNDATION_PROFILE.option_count))?;
-    let limits = selected_proof_runtime_limits(
-        schema_identifier,
-        canonical_application_statement_bytes,
-        variant,
-    )?;
     let relation_plan = CommonProofRelationPlanCapability::from_compiled_plan(
         &compiled_relation_plan,
         &relation_context,
         None,
         Some(FOUNDATION_PROFILE.option_count),
     )?;
+    let limits =
+        selected_proof_runtime_limits(canonical_application_statement_bytes, &relation_plan)?;
     Ok(SelectedEvaluatorProofRuntimePlan {
         compiled_relation_plan,
         relation_plan,

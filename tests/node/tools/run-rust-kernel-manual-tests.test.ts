@@ -5,6 +5,7 @@ import {
     fullProfileEvidenceRustTests,
     measurementRustTests,
     phaseLivenessEvidenceRustTests,
+    theoremEvidenceRustTests,
     validateFocusedRustLaneSelection,
 } from '#tools/ci/rust-focused-lane-selection';
 
@@ -142,5 +143,32 @@ describe('manual Rust kernel preflight', () => {
 
         expect(verifiedTestFilters).toEqual(phaseLivenessEvidenceRustTests);
         expect(executedTestFilters).toEqual(phaseLivenessEvidenceRustTests);
+    });
+
+    it('preflights every theorem test under the theorem-only Cargo feature', async () => {
+        const verifiedTestFilters: string[] = [];
+        const verifiedCargoFeatures: string[][] = [];
+        let executedTestFilters: readonly string[] = [];
+
+        await preflightAndRunManualRustKernelLane({
+            cargoFeatures: ['theorem-evidence'],
+            configuredTestNames: theoremEvidenceRustTests,
+            lane: 'rust-theorem-evidence',
+            runGuardedCommands: (testFilters) => {
+                executedTestFilters = testFilters;
+                return Promise.resolve();
+            },
+            verifyLaneSelection: (input) => {
+                verifiedTestFilters.push(input.testFilter);
+                verifiedCargoFeatures.push([...(input.cargoFeatures ?? [])]);
+                return Promise.resolve();
+            },
+        });
+
+        expect(verifiedTestFilters).toEqual(theoremEvidenceRustTests);
+        expect(verifiedCargoFeatures).toEqual(
+            theoremEvidenceRustTests.map(() => ['theorem-evidence']),
+        );
+        expect(executedTestFilters).toEqual(theoremEvidenceRustTests);
     });
 });

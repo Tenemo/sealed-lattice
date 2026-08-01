@@ -9,39 +9,63 @@
     "families": [
         {
             "familyName": "sameSecret",
-            "familySchemaIdentifier": 4625
+            "familySchemaIdentifier": 4625,
+            "relationWitnessIsPrivate": true
         },
         {
             "familyName": "publicKeyShare",
-            "familySchemaIdentifier": 4626
+            "familySchemaIdentifier": 4626,
+            "relationWitnessIsPrivate": true
+        },
+        {
+            "familyName": "collectivePublicKeyAggregate",
+            "familySchemaIdentifier": 4627,
+            "relationWitnessIsPrivate": false
         },
         {
             "familyName": "relinearizationRoundOne",
-            "familySchemaIdentifier": 4628
+            "familySchemaIdentifier": 4628,
+            "relationWitnessIsPrivate": true
+        },
+        {
+            "familyName": "relinearizationRoundOneAggregate",
+            "familySchemaIdentifier": 4629,
+            "relationWitnessIsPrivate": false
         },
         {
             "familyName": "relinearizationRoundTwo",
-            "familySchemaIdentifier": 4630
+            "familySchemaIdentifier": 4630,
+            "relationWitnessIsPrivate": true
         },
         {
             "familyName": "galoisKeyShare",
-            "familySchemaIdentifier": 4631
+            "familySchemaIdentifier": 4631,
+            "relationWitnessIsPrivate": true
+        },
+        {
+            "familyName": "evaluatorKeyAggregate",
+            "familySchemaIdentifier": 4632,
+            "relationWitnessIsPrivate": false
         },
         {
             "familyName": "ballotValidity",
-            "familySchemaIdentifier": 4866
+            "familySchemaIdentifier": 4866,
+            "relationWitnessIsPrivate": true
         },
         {
             "familyName": "targetShareProof",
-            "familySchemaIdentifier": 5665
+            "familySchemaIdentifier": 5665,
+            "relationWitnessIsPrivate": true
         },
         {
             "familyName": "vssShareLinkage",
-            "familySchemaIdentifier": 8464
+            "familySchemaIdentifier": 8464,
+            "relationWitnessIsPrivate": true
         },
         {
             "familyName": "aggregateThresholdShare",
-            "familySchemaIdentifier": 8465
+            "familySchemaIdentifier": 8465,
+            "relationWitnessIsPrivate": true
         }
     ]
 }

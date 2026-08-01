@@ -395,6 +395,7 @@ mod tests {
     };
 
     const TEST_SAME_SECRET_EVALUATION_DOMAIN_SIZE: u64 = 8_192;
+    const TEST_SAME_SECRET_OPENING_DEGREE_BOUND_EXCLUSIVE: u64 = 1_024;
 
     fn modular_product(first: u64, second: u64, modulus: u64) -> u64 {
         ((u128::from(first) * u128::from(second)) % u128::from(modulus)) as u64
@@ -447,7 +448,7 @@ mod tests {
             TEST_SAME_SECRET_EVALUATION_DOMAIN_SIZE,
             1,
             4,
-            1_024,
+            TEST_SAME_SECRET_OPENING_DEGREE_BOUND_EXCLUSIVE,
             1,
             vec![
                 ResolvedSuiteModulus::new(SuiteModulusReference::data(0), DATA_PRIMES[0]),
@@ -459,9 +460,13 @@ mod tests {
 
     fn same_secret_input() -> SameSecretRelationPlanInput {
         SameSecretRelationPlanInput {
+            // Keep this compact geometry aligned with the relation compiler's
+            // checked fixture: widening the opening schedule increases the
+            // direct-view rank and is invalid without widening both the trace
+            // and quotient geometry from their owning formulas.
             ring_degree: 256,
             evaluation_domain_size: TEST_SAME_SECRET_EVALUATION_DOMAIN_SIZE,
-            opening_degree_bound_exclusive: 4_096,
+            opening_degree_bound_exclusive: TEST_SAME_SECRET_OPENING_DEGREE_BOUND_EXCLUSIVE,
             material_column_degree_bound_exclusive: 10,
             public_polynomial_column_degree_bound_exclusive: 256,
             sharing_data_modulus_indices: vec![0, 1],

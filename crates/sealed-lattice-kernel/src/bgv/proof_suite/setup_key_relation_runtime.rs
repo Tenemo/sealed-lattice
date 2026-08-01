@@ -744,18 +744,14 @@ fn selected_setup_key_relation_proof_runtime_plan(
             &relation_context,
         )?,
     };
-    let relation_plan_variant = compiled_relation_plan.select_variant(None, None)?;
-    let limits = selected_proof_runtime_limits(
-        statement_schema_identifier,
-        canonical_application_statement_bytes,
-        relation_plan_variant,
-    )?;
     let relation_plan = CommonProofRelationPlanCapability::from_compiled_plan(
         &compiled_relation_plan,
         &relation_context,
         None,
         None,
     )?;
+    let limits =
+        selected_proof_runtime_limits(canonical_application_statement_bytes, &relation_plan)?;
     Ok(SelectedSetupKeyRelationProofRuntimePlan {
         relation_plan,
         limits,

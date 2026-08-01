@@ -26,8 +26,8 @@ use super::{
     PERSISTENT_PROOF_WITNESS_ATTEMPT_CUSTOMIZATION,
     PRIVATE_RANDOMNESS_ATTEMPT_IDENTIFIER_BYTE_LENGTH, PRIVATE_RANDOMNESS_BLOCK_BYTE_LENGTH,
     PRIVATE_RANDOMNESS_STREAM_KEY_BYTE_LENGTH, PROOF_COIN_KEY_BYTE_LENGTH,
-    SETUP_ACTION_RANDOMNESS_AUTHORIZATION_DOMAIN, SETUP_ATTEMPT_CUSTOMIZATION,
-    SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_HASH_DOMAIN,
+    RESET_SAFE_PROOF_FAMILIES, SETUP_ACTION_RANDOMNESS_AUTHORIZATION_DOMAIN,
+    SETUP_ATTEMPT_CUSTOMIZATION, SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_HASH_DOMAIN,
     SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_SCHEMA_IDENTIFIER,
     SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_SCHEMA_VERSION,
     TARGET_DECRYPTION_SHARE_PROOF_FAMILY, TARGET_RELEASE_ATTEMPT_CUSTOMIZATION, schema_error,
@@ -456,7 +456,7 @@ impl ActionPrivateRandomness {
         if input.application_slot.attempt_class()? != AttemptClass::ResetSafeProof {
             return Err(schema_error(
                 RefusalReason::WrongTypeOrLength,
-                "persistent proof coins require a reset-safe private proof family",
+                "persistent proof coins require a reset-safe proof or construction-hiding family",
             ));
         }
         Ok(PrivateRandomnessAttemptIdentifier {
@@ -474,10 +474,14 @@ impl ActionPrivateRandomness {
         input: &PersistentProofCoinInput,
     ) -> SchemaResult<PersistentProofWitnessCoinBinding> {
         self.require_matching_slot(input.application_slot)?;
-        if input.application_slot.attempt_class()? != AttemptClass::ResetSafeProof {
+        if !RESET_SAFE_PROOF_FAMILIES.contains(
+            &input
+                .application_slot
+                .application_statement_schema_identifier(),
+        ) {
             return Err(schema_error(
                 RefusalReason::WrongTypeOrLength,
-                "persistent proof coins require a reset-safe private proof family",
+                "persistent witness coins require a secret-bearing reset-safe proof family",
             ));
         }
         let mut framed_input = Kmac256FramedInput::new(

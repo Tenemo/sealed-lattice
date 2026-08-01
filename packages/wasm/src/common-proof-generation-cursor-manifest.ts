@@ -34,7 +34,7 @@ export class CommonProofGenerationCursorManifestError extends Error {
     }
 }
 
-export type DecodedCommonProofGenerationCursorManifest = Readonly<{
+type DecodedCommonProofGenerationCursorManifest = Readonly<{
     privateCoinCursorManifestBytes: Uint8Array;
     transcriptCursorByteLength: number;
 }>;

@@ -69,6 +69,8 @@ use super::{
 
 #[cfg(test)]
 use super::ProofProfileSet;
+#[cfg(test)]
+use super::polynomial::ProofEvaluationDomain;
 use super::profile::FirstProfileRootTopology;
 #[cfg(test)]
 use super::row_code_whir::RowCodeWhirSelectedParameters;
@@ -1422,6 +1424,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "guarded complete selected-family non-native soundness evidence"]
     fn selected_non_native_identity_counts_are_independently_minimal() {
         let relation_artifacts = selected_relation_plans().expect("selected relation plans");
         let compiled_plans = relation_artifacts
@@ -1543,9 +1546,15 @@ mod tests {
         .expect("selected ordinary proof context");
         assert_eq!(context.out_of_domain_point_count, 1);
         assert_eq!(context.phase_column_query_coordinate_count, 387);
+        let selected_evaluation_domain = ProofEvaluationDomain::new(
+            usize::try_from(SELECTED_EVALUATION_DOMAIN_SIZE)
+                .expect("the selected evaluation domain fits usize"),
+            PROOF_EVALUATION_COSET_OFFSET,
+        )
+        .expect("the selected evaluation domain derives independently");
         assert_eq!(
             context.evaluation_domain_generator,
-            17_654_865_857_378_133_588
+            selected_evaluation_domain.generator().canonical()
         );
         assert_eq!(context.quotient_component_degree_bound_exclusive, 34_050);
         assert_eq!(
@@ -1716,6 +1725,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "guarded complete selected profile relation and root inventory"]
     fn selected_profile_has_the_complete_relation_and_root_inventory() {
         let mut profile = selected_proof_profile_set(3).expect("selected proof profile");
         assert_eq!(
@@ -1868,7 +1878,14 @@ mod tests {
         );
         assert_eq!(share_linkage.trace_domain_size(), 65_536);
         assert_eq!(share_linkage.opening_degree_bound_exclusive(), 262_144);
-        assert_eq!(share_linkage.evaluation_domain_size(), 2_097_152);
+        assert_eq!(
+            share_linkage.evaluation_domain_size(),
+            input.evaluation_domain_size
+        );
+        assert_eq!(
+            input.evaluation_domain_size,
+            1_u64 << RowCodeWhirSelectedParameters::selected().polynomial_commitment_variable_count
+        );
         assert_eq!(context.out_of_domain_point_count, 1);
         assert_eq!(context.phase_column_query_coordinate_count, 387);
         assert_eq!(share_linkage.ordered_columns().len(), 3_451);

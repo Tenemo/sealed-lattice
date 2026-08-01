@@ -324,7 +324,8 @@ mod tests {
     }
 
     #[test]
-    fn candidate_suite_semantically_preflights_all_six_artifacts() {
+    #[ignore = "guarded complete candidate-suite artifact semantic preflight evidence"]
+    fn candidate_suite_artifacts_pass_semantic_preflight_and_refuse_mutations() {
         let suite = derive_selected_suite_candidate_record().expect("candidate suite derives");
         let suite_bytes = suite.encode().expect("candidate suite encodes");
         let artifacts = candidate_artifacts(
@@ -332,11 +333,11 @@ mod tests {
                 .count_limits()
                 .maximum_ballot_attempts_per_participant(),
         );
-        for (artifact_kind, artifact_bytes) in artifacts {
+        for (artifact_kind, artifact_bytes) in &artifacts {
             verify_canonical_suite_artifact(
                 &suite_bytes,
                 artifact_kind.canonical_code(),
-                &artifact_bytes,
+                artifact_bytes,
             )
             .unwrap_or_else(|error| {
                 panic!(
@@ -345,19 +346,9 @@ mod tests {
                 )
             });
         }
-    }
-
-    #[test]
-    fn artifact_mutations_and_self_consistent_invalid_semantics_refuse() {
-        let suite = derive_selected_suite_candidate_record().expect("candidate suite derives");
-        let suite_bytes = suite.encode().expect("candidate suite encodes");
-        let artifacts = candidate_artifacts(
-            suite
-                .count_limits()
-                .maximum_ballot_attempts_per_participant(),
-        );
-        for (artifact_kind, mut artifact_bytes) in artifacts {
-            let final_byte = artifact_bytes
+        for (artifact_kind, artifact_bytes) in &artifacts {
+            let mut mutated_artifact_bytes = artifact_bytes.clone();
+            let final_byte = mutated_artifact_bytes
                 .last_mut()
                 .expect("candidate artifacts are nonempty");
             *final_byte ^= 1;
@@ -365,7 +356,7 @@ mod tests {
                 verify_canonical_suite_artifact(
                     &suite_bytes,
                     artifact_kind.canonical_code(),
-                    &artifact_bytes,
+                    &mutated_artifact_bytes,
                 )
                 .is_err(),
                 "mutated {:?} bytes must refuse",
@@ -373,8 +364,11 @@ mod tests {
             );
         }
 
-        let encoder_bytes =
-            selected_encoder_and_ballot_layout_artifact_bytes().expect("encoder artifact derives");
+        let encoder_bytes = artifacts
+            .first()
+            .expect("the encoder artifact is first")
+            .1
+            .clone();
         let limits = CanonicalDecodeLimits::default();
         let mut encoder_tuple =
             CanonicalTuple::decode(&encoder_bytes, &limits).expect("encoder artifact decodes");

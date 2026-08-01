@@ -9,10 +9,10 @@ export const selectedLatticeEstimatorSourceTreeSha256 =
     'c8489bdbf73ab6b0ccd7dd23fe007d8c83bf38adc4359d9709d896dc994c6b09';
 export const selectedLatticeEstimatorContainerImage =
     'docker.io/sagemath/sagemath@sha256:ec32d9752b3a11c628103ca6802db890b63cbe9bb480cfea02de09656ecc84a2';
-export const selectedLatticeEstimatorSageVersion = '9.5';
-export const selectedLatticeAssuranceTargetBits = 80;
+const selectedLatticeEstimatorSageVersion = '9.5';
+const selectedLatticeAssuranceTargetBits = 80;
 
-export const selectedLatticeAttackIdentifiers = [
+const selectedLatticeAttackIdentifiers = [
     'primalUsvp',
     'primalBdd',
     'dual',

@@ -790,19 +790,15 @@ fn selected_relinearization_proof_runtime_plan(
         .ok_or(RelinearizationRuntimeError::Relation(
             RelationPlanError::InvalidDomain,
         ))?;
-    let relation_plan_variant = selected_plan
-        .compiled_plan()
-        .select_variant(Some(preparation_source.schedule_position()), None)?;
-    let limits = selected_proof_runtime_limits(
-        statement_schema_identifier,
-        preparation_source.canonical_application_statement_bytes(),
-        relation_plan_variant,
-    )?;
     let relation_plan = CommonProofRelationPlanCapability::from_compiled_plan(
         selected_plan.compiled_plan(),
         &relation_context,
         Some(preparation_source.schedule_position()),
         None,
+    )?;
+    let limits = selected_proof_runtime_limits(
+        preparation_source.canonical_application_statement_bytes(),
+        &relation_plan,
     )?;
     Ok(SelectedRelinearizationProofRuntimePlan {
         relation_plan,

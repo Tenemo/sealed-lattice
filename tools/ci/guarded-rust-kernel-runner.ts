@@ -81,11 +81,15 @@ export const buildGuardedRustEnvironment = (input: {
 
 const cargoTestArgumentsForGuardedRustFilter = (
     testFilter: string,
+    cargoFeatures: readonly string[] = [],
 ): readonly string[] => [
     'test',
     '--locked',
     '-p',
     'sealed-lattice-kernel',
+    ...(cargoFeatures.length === 0
+        ? []
+        : ['--features', cargoFeatures.join(',')]),
     testFilter,
     '--',
     '--include-ignored',
@@ -101,13 +105,17 @@ export const buildGuardedRustKernelCommand = (
         readonly progressLabel: string;
         readonly runName: string;
         readonly targetDirectoryPath: string;
+        readonly cargoFeatures?: readonly string[];
     },
 ): BuiltGuardedRustKernelCommand => {
     const memoryLimitGigabytes =
         getGuardedRustProcessMemoryGuard().memoryLimitGigabytes;
     return {
         command: {
-            args: cargoTestArgumentsForGuardedRustFilter(testFilter),
+            args: cargoTestArgumentsForGuardedRustFilter(
+                testFilter,
+                input.cargoFeatures ?? [],
+            ),
             command: 'cargo',
             description: `cargo test ${testFilter} (guarded)`,
             env: buildGuardedRustEnvironment({
@@ -170,6 +178,7 @@ const writeRunnerSetupMessages = (
 export const runGuardedRustKernelCommands = async (input: {
     readonly commands: readonly GuardedRustKernelCommand[];
     readonly laneLabel: string;
+    readonly processMemoryGuardAlreadyVerified?: boolean;
     readonly runLog: ActiveLocalRunLog;
 }): Promise<void> => {
     const { runLog } = input;
@@ -178,11 +187,14 @@ export const runGuardedRustKernelCommands = async (input: {
     }
     process.exitCode = await withLocalHeavyLaneLease({
         action: async () => {
-            let exitCode = await runCommandsInSeries(
-                [verifyGuardedRustProcessMemoryGuardCommand()],
-                { outputMode: 'inherit', runLog },
-            );
-            if (exitCode !== 0) return exitCode;
+            let exitCode = 0;
+            if (input.processMemoryGuardAlreadyVerified !== true) {
+                exitCode = await runCommandsInSeries(
+                    [verifyGuardedRustProcessMemoryGuardCommand()],
+                    { outputMode: 'inherit', runLog },
+                );
+                if (exitCode !== 0) return exitCode;
+            }
 
             for (const [commandIndex, command] of input.commands.entries()) {
                 const diagnosticFileNames =

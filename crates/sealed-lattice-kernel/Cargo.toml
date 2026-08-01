@@ -9,6 +9,7 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 default = []
+theorem-evidence = []
 
 [dependencies]
 aes = { version = "=0.8.4", default-features = false, features = ["zeroize"] }

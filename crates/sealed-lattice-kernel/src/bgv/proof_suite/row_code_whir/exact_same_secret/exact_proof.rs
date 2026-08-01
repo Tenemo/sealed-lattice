@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 use std::collections::BTreeSet;
 #[cfg(test)]
 use std::ops::Range;
@@ -27,10 +27,12 @@ use super::super::construction_plan::{
     RowCodeWhirOpenedPolynomialSource, RowCodeWhirPhase, RowCodeWhirProofSectionPlan,
     RowCodeWhirProofSectionRole, RowCodeWhirSoundnessAssumption, RowCodeWhirTracePhasePlan,
 };
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 use super::super::opening_schedule::divide_polynomial_opening;
 use super::super::opening_schedule::phase_index;
 use super::super::row_encoding::RowEncodingGeometry;
+#[cfg(test)]
+use super::super::verifier_oracle_accounting::derive_deployed_verifier_oracle_accounting;
 use super::super::{
     AuthenticatedColumn, ChallengeField, ExtensionFieldChallenger,
     RowCodeWhirChallengerProofStreamAbsorber,
@@ -58,7 +60,7 @@ use crate::bgv::proof_suite::{
     VerifiedRelationColumnEvaluator, build_relation_bound_public_tree_catalog_entries,
 };
 
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 use super::super::same_secret_source_manifest::SameSecretAuthenticatedSourceManifest;
 
 const EXACT_PROOF_WIRE_MAGIC: &[u8; 8] = b"SLXPRF08";
@@ -80,13 +82,13 @@ const EXACT_BOUND_COLUMN_COUNT: usize = 44;
 const EXACT_INPUT_BOUND_COLUMN_COUNT: usize = 32;
 const EXACT_OUTPUT_BOUND_COLUMN_COUNT: usize = 12;
 pub(in crate::bgv::proof_suite::row_code_whir) const EXACT_BOUND_TREE_ROW_WIDTH: usize = 4;
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 const EXACT_INPUT_BOUND_QUERY_COUNT: usize = 40;
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 const EXACT_OUTPUT_BOUND_QUERY_COUNT: usize = 266;
 const EXACT_BOUND_LEAF_COUNT: usize = 1 << (EXACT_PCS_VARIABLE_COUNT - 1);
 const EXACT_BOUND_POLYNOMIAL_VARIABLE_COUNT: usize = 15;
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 const EXACT_BOUND_REDUCTION_COLUMN_INDEX: usize = 3;
 const EXACT_BOUND_REDUCTION_BLOCK_COUNT: usize = 2;
 const EXACT_BOUND_REDUCTION_BLOCK_SELECTOR_VARIABLE_COUNT: usize = 1;
@@ -126,31 +128,6 @@ const EXACT_BOUND_REDUCTION_BLOCK_SCHEDULES: [ExactBoundReductionBlockSchedule;
         degree_suffix_prefixes: EXACT_OUTPUT_BOUND_DEGREE_SUFFIX_PREFIXES,
     },
 ];
-const EXACT_RELATION_PLAN_HASH_QUERY_COUNT: u64 = 1;
-const EXACT_RELATION_PLAN_DISTINCT_EQUATION_COUNT: u64 = 1;
-const EXACT_VARIANT_HASH_QUERY_COUNT: u64 = 1;
-const EXACT_VARIANT_DISTINCT_EQUATION_COUNT: u64 = 1;
-const EXACT_CONSTRUCTION_PLAN_IDENTITY_HASH_QUERY_COUNT: u64 = 1;
-const EXACT_CONSTRUCTION_PLAN_IDENTITY_DISTINCT_EQUATION_COUNT: u64 = 1;
-const EXACT_TRANSCRIPT_HEADER_HASH_QUERY_COUNT: u64 = 1;
-const EXACT_TRANSCRIPT_HEADER_DISTINCT_EQUATION_COUNT: u64 = 1;
-const EXACT_APPLICATION_STATEMENT_HASH_QUERY_COUNT: u64 = 1;
-const EXACT_APPLICATION_STATEMENT_DISTINCT_EQUATION_COUNT: u64 = 1;
-const EXACT_PUBLIC_SETUP_SAMPLING_HASH_QUERY_COUNT: u64 = 18;
-const EXACT_PUBLIC_SETUP_SAMPLING_DISTINCT_EQUATION_COUNT: u64 = 9;
-const EXACT_VERIFIER_NON_MERKLE_HASH_QUERY_COUNT: u64 = EXACT_RELATION_PLAN_HASH_QUERY_COUNT
-    + EXACT_VARIANT_HASH_QUERY_COUNT
-    + EXACT_CONSTRUCTION_PLAN_IDENTITY_HASH_QUERY_COUNT
-    + EXACT_TRANSCRIPT_HEADER_HASH_QUERY_COUNT
-    + EXACT_APPLICATION_STATEMENT_HASH_QUERY_COUNT
-    + EXACT_PUBLIC_SETUP_SAMPLING_HASH_QUERY_COUNT;
-const EXACT_VERIFIER_NON_MERKLE_DISTINCT_EQUATION_COUNT: u64 =
-    EXACT_RELATION_PLAN_DISTINCT_EQUATION_COUNT
-        + EXACT_VARIANT_DISTINCT_EQUATION_COUNT
-        + EXACT_CONSTRUCTION_PLAN_IDENTITY_DISTINCT_EQUATION_COUNT
-        + EXACT_TRANSCRIPT_HEADER_DISTINCT_EQUATION_COUNT
-        + EXACT_APPLICATION_STATEMENT_DISTINCT_EQUATION_COUNT
-        + EXACT_PUBLIC_SETUP_SAMPLING_DISTINCT_EQUATION_COUNT;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::bgv::proof_suite::row_code_whir) struct ExactBoundLeafOpening {
     persistent_salt: Option<[u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH]>,
@@ -801,7 +778,7 @@ fn validate_exact_same_secret_construction_plan(
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::bgv::proof_suite) enum ExactExtractorCorrespondenceFault {
     None,
@@ -812,7 +789,7 @@ pub(in crate::bgv::proof_suite) enum ExactExtractorCorrespondenceFault {
     ChangeFirstPolynomialBasisIdentity,
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::bgv::proof_suite) struct ExactPolynomialProtocolExtractorCertificate {
     construction_plan_identity_hash: [u8; 64],
@@ -841,7 +818,7 @@ pub(in crate::bgv::proof_suite) struct ExactPolynomialProtocolExtractorCertifica
     actual_pole_rejection_count: usize,
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 impl ExactPolynomialProtocolExtractorCertificate {
     pub(in crate::bgv::proof_suite) fn is_complete(&self) -> bool {
         self.construction_plan_identity_hash != [0_u8; 64]
@@ -880,7 +857,7 @@ impl ExactPolynomialProtocolExtractorCertificate {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum ExactPointCoordinateAuthority {
     TranscriptOpeningPoint,
@@ -888,7 +865,7 @@ enum ExactPointCoordinateAuthority {
     PolynomialOpeningReduction,
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::bgv::proof_suite) struct ExactPointConstraintExtractorCertificate {
     construction_plan_identity_hash: [u8; 64],
@@ -910,7 +887,7 @@ pub(in crate::bgv::proof_suite) struct ExactPointConstraintExtractorCertificate 
     selector_equality_identity_count: usize,
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 impl ExactPointConstraintExtractorCertificate {
     pub(in crate::bgv::proof_suite) fn is_complete(&self) -> bool {
         self.construction_plan_identity_hash != [0_u8; 64]
@@ -946,7 +923,7 @@ impl ExactPointConstraintExtractorCertificate {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 fn checked_trace_phase_polynomial_mapping(
     phase: &RowCodeWhirTracePhasePlan,
     variant: &RelationPlanVariant,
@@ -1012,7 +989,7 @@ fn checked_trace_phase_polynomial_mapping(
         .count())
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 fn checked_quotient_phase_polynomial_mapping(
     plan: &RowCodeWhirConstructionPlan,
 ) -> Result<(usize, usize), String> {
@@ -1072,7 +1049,7 @@ fn checked_quotient_phase_polynomial_mapping(
     Ok((quotient_coordinates.len(), mask_coordinates.len()))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 fn checked_bound_polynomial_mapping(
     plan: &RowCodeWhirConstructionPlan,
     variant: &RelationPlanVariant,
@@ -1141,7 +1118,7 @@ fn checked_bound_polynomial_mapping(
     ))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 fn checked_opening_batch_mapping(
     plan: &RowCodeWhirConstructionPlan,
     shape: ExactProofShape,
@@ -1204,7 +1181,7 @@ fn checked_opening_batch_mapping(
     ))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 fn independent_multilinear_equality_weight(
     point: &[ChallengeField],
     table_index: usize,
@@ -1222,7 +1199,7 @@ fn independent_multilinear_equality_weight(
     )
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 fn checked_polynomial_basis_identities(change_first_identity: bool) -> Result<usize, String> {
     let points = [
         ChallengeField::from_u64(2),
@@ -1262,7 +1239,7 @@ fn checked_polynomial_basis_identities(change_first_identity: bool) -> Result<us
     Ok(identity_count)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 fn checked_selector_equality_identities() -> Result<usize, String> {
     let selector_cases = [
         core::array::from_fn(|selector_ordinal| {
@@ -1300,7 +1277,7 @@ fn checked_selector_equality_identities() -> Result<usize, String> {
     Ok(identity_count)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 fn evaluate_challenge_polynomial(
     coefficients: &[ChallengeField],
     point: ChallengeField,
@@ -1313,7 +1290,7 @@ fn evaluate_challenge_polynomial(
         })
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 fn checked_synthetic_division_identities() -> Result<usize, String> {
     let opening_points = [
         ChallengeField::from_u64(3),
@@ -1377,7 +1354,7 @@ fn checked_synthetic_division_identities() -> Result<usize, String> {
     Ok(identity_count)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 fn opening_claim_partition(
     variant: &RelationPlanVariant,
 ) -> Result<(usize, usize, usize, usize), String> {
@@ -1425,7 +1402,7 @@ fn opening_claim_partition(
     ))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 pub(in crate::bgv::proof_suite) fn checked_exact_same_secret_extractor_correspondence_with_fault(
     construction_plan: &RowCodeWhirConstructionPlan,
     relation_variant: &RelationPlanVariant,
@@ -1615,7 +1592,7 @@ pub(in crate::bgv::proof_suite) fn checked_exact_same_secret_extractor_correspon
     Ok((polynomial_protocol, point_constraints))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 pub(in crate::bgv::proof_suite) fn checked_exact_same_secret_extractor_correspondence(
     construction_plan: &RowCodeWhirConstructionPlan,
     relation_variant: &RelationPlanVariant,
@@ -1942,85 +1919,19 @@ fn expected_opening_widths(construction_plan: &RowCodeWhirConstructionPlan) -> V
         .collect()
 }
 
-fn maximum_parent_hash_count(tree_height: usize, query_count: usize) -> Result<usize, String> {
-    (0..tree_height).try_fold(0_usize, |count, depth| {
-        let node_count = 1_usize
-            .checked_shl(
-                u32::try_from(depth).map_err(|_| "Merkle-tree depth exceeds u32".to_owned())?,
-            )
-            .ok_or_else(|| "Merkle-tree width overflowed".to_owned())?;
-        count
-            .checked_add(query_count.min(node_count))
-            .ok_or_else(|| "Merkle parent hash-query count overflowed".to_owned())
-    })
-}
-
-fn maximum_verifier_merkle_hash_query_count(
-    shape: ExactProofShape,
-    construction_plan: &RowCodeWhirConstructionPlan,
-) -> Result<u64, String> {
-    let outer_parent_count = maximum_parent_hash_count(
-        shape.encoded_column_count.ilog2() as usize,
-        shape.outer_query_count,
-    )?;
-    let outer_hash_query_count = shape
-        .outer_query_count
-        .checked_add(outer_parent_count)
-        .and_then(|count| count.checked_mul(shape.phase_row_counts().len()))
-        .ok_or_else(|| "outer Merkle hash-query count overflowed".to_owned())?;
-    let bound_hash_query_count =
-        construction_plan
-            .bound_trees
-            .iter()
-            .try_fold(0_usize, |count, tree| {
-                let parent_count =
-                    maximum_parent_hash_count(tree.leaf_count.ilog2() as usize, tree.query_count)?;
-                count
-                    .checked_add(tree.query_count)
-                    .and_then(|count| count.checked_add(parent_count))
-                    .ok_or_else(|| "bound Merkle hash-query count overflowed".to_owned())
-            })?;
-    let whir_plan = construction_plan.whir_plan();
-    let whir_hash_query_count = whir_plan
-        .rounds
-        .iter()
-        .map(|round| (round.encoded_oracle, round.query_epoch.query_count))
-        .chain(core::iter::once((
-            whir_plan.final_round.encoded_oracle,
-            whir_plan.final_round.query_epoch.query_count,
-        )))
-        .try_fold(0_usize, |count, (oracle, query_count)| {
-            let hashes_per_query = (oracle.leaf_count.ilog2() as usize)
-                .checked_add(1)
-                .ok_or_else(|| "WHIR Merkle path length overflowed".to_owned())?;
-            count
-                .checked_add(
-                    query_count
-                        .checked_mul(hashes_per_query)
-                        .ok_or_else(|| "WHIR Merkle hash-query count overflowed".to_owned())?,
-                )
-                .ok_or_else(|| "WHIR Merkle hash-query count overflowed".to_owned())
-        })?;
-    u64::try_from(
-        outer_hash_query_count
-            .checked_add(bound_hash_query_count)
-            .and_then(|count| count.checked_add(whir_hash_query_count))
-            .ok_or_else(|| "verifier Merkle hash-query count overflowed".to_owned())?,
-    )
-    .map_err(|_| "verifier Merkle hash-query count exceeds u64".to_owned())
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ExactSameSecretVerifierAccounting {
     maximum_transcript_hash_query_count: u64,
     logical_verifier_message_count: u64,
+    #[cfg(test)]
     maximum_verifier_hash_query_count: u64,
+    #[cfg(test)]
     maximum_accepting_database_equation_count: u64,
 }
 
 fn exact_same_secret_verifier_accounting(
     construction_plan: &RowCodeWhirConstructionPlan,
-    shape: ExactProofShape,
+    relation_variant: &RelationPlanVariant,
 ) -> Result<ExactSameSecretVerifierAccounting, String> {
     let oracle_equation_catalog = construction_plan
         .oracle_equation_catalog()
@@ -2032,21 +1943,19 @@ fn exact_same_secret_verifier_accounting(
         oracle_equation_catalog
             .logical_verifier_message_count()
             .map_err(|error| format!("derive exact logical verifier-message count: {error:?}"))?;
-    let maximum_verifier_merkle_hash_query_count =
-        maximum_verifier_merkle_hash_query_count(shape, construction_plan)?;
-    let maximum_verifier_hash_query_count = maximum_transcript_hash_query_count
-        .checked_add(maximum_verifier_merkle_hash_query_count)
-        .and_then(|count| count.checked_add(EXACT_VERIFIER_NON_MERKLE_HASH_QUERY_COUNT))
-        .ok_or_else(|| "exact verifier hash-query accounting overflowed".to_owned())?;
-    let maximum_accepting_database_equation_count = maximum_transcript_hash_query_count
-        .checked_add(maximum_verifier_merkle_hash_query_count)
-        .and_then(|count| count.checked_add(EXACT_VERIFIER_NON_MERKLE_DISTINCT_EQUATION_COUNT))
-        .ok_or_else(|| "exact accepting-database accounting overflowed".to_owned())?;
+    #[cfg(test)]
+    let deployed_accounting =
+        derive_deployed_verifier_oracle_accounting(construction_plan, relation_variant)?;
+    #[cfg(not(test))]
+    let _ = relation_variant;
     Ok(ExactSameSecretVerifierAccounting {
         maximum_transcript_hash_query_count,
         logical_verifier_message_count,
-        maximum_verifier_hash_query_count,
-        maximum_accepting_database_equation_count,
+        #[cfg(test)]
+        maximum_verifier_hash_query_count: deployed_accounting.maximum_verifier_hash_query_count(),
+        #[cfg(test)]
+        maximum_accepting_database_equation_count: deployed_accounting
+            .maximum_accepting_database_equation_count(),
     })
 }
 
@@ -3168,7 +3077,7 @@ fn exact_whir_opening_points(
     Ok(points)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 fn requested_columns_by_point(shape: ExactProofShape) -> Vec<Vec<usize>> {
     let mut requested = vec![vec![0], vec![1], vec![2]];
     requested.extend(std::iter::repeat_with(|| vec![0, 1, 2]).take(shape.outer_query_count));
@@ -3484,7 +3393,7 @@ impl ExactSameSecretIncrementalSemanticVerifier {
             &prepared_relation
                 .verified_relation
                 .row_code_whir_construction_plan,
-            prepared_relation.verified_relation.proof_shape,
+            &prepared_relation.verified_relation.variant,
         )?;
         Ok(Self {
             prerequisite,
@@ -4254,15 +4163,22 @@ impl ExactSameSecretFinalProofVerification {
             != self.verifier_accounting.maximum_transcript_hash_query_count
             || transcript_summary.logical_verifier_message_count()
                 != self.verifier_accounting.logical_verifier_message_count
-            || self.verifier_accounting.maximum_verifier_hash_query_count
-                < self.verifier_accounting.maximum_transcript_hash_query_count
+        {
+            return Err(
+                "exact transcript execution diverges from the checked oracle-equation catalog"
+                    .to_owned(),
+            );
+        }
+        #[cfg(test)]
+        if self.verifier_accounting.maximum_verifier_hash_query_count
+            < self.verifier_accounting.maximum_transcript_hash_query_count
             || self
                 .verifier_accounting
                 .maximum_accepting_database_equation_count
                 > self.verifier_accounting.maximum_verifier_hash_query_count
         {
             return Err(
-                "exact transcript execution diverges from the checked oracle-equation catalog"
+                "exact verifier evidence diverges from the checked oracle-equation catalog"
                     .to_owned(),
             );
         }
