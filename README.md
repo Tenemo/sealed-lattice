@@ -111,14 +111,17 @@ Works today:
   to relation-owned points 0, 1, and 11. Focused mutation tests refuse omitted
   or altered coordinates, dependencies, authorities, ranks, and query
   schedules.
-- Checked construction-geometry certificates derive for all 31 production
-  identities: 27 width-64, log-inverse-rate-two (inverse-rate-four)
-  identities, including evaluator top counts 1 through 20, and four width-8,
-  log-inverse-rate-five (inverse-rate-32) identities.
-  Each record binds its relation variant, masking status, WHIR schedule,
-  plan-derived prefix and opening counts, typed state chain, deployed leaf
-  ledger, and coordinate-derived compact subtree extraction. Families with no
-  bound tree or verifier-sequence source do not acquire an invented ledger row.
+- Checked structural construction-geometry certificates have derived for all 31
+  production identities: 27 width-64, log-inverse-rate-two
+  (inverse-rate-four) identities, including evaluator top counts 1 through 20,
+  and four width-8, log-inverse-rate-five (inverse-rate-32) identities. The
+  constructor now additionally requires one executable atomic predecessor-state
+  evolution and one plan-addressed, collision-free prefix-plus-next-message
+  extractor before it emits a checked geometry record. Focused current evidence
+  passes this stronger constructor for the selected same-secret and width-8
+  ballot plans. The remaining identities have not yet been regenerated under
+  the stronger gate. Families with no bound tree or verifier-sequence source do
+  not acquire an invented ledger row.
 - Production-derived phase-liveness accounting now covers the complete
   same-secret prover live set, including source ownership, replay readers,
   DFTs, Merkle frontiers, proof material, transcript state, private material,
@@ -160,9 +163,12 @@ Not yet:
   now also derives the live `8,192`-coordinate, `5,055`-agreement, `393`-query
   event under one atomic fixed-width verifier message, an executable
   predecessor-state evaluator, and an exact next-message database extractor.
-  Independent regeneration for every distinct production geometry, the final
-  theorem-to-transported-bytes correspondence, and ceremony-level failure
-  composition remain open.
+  The reusable atomic predecessor and database-extraction layer is now enforced
+  by the production-geometry constructor, but family-specific terminal
+  rejection and failure-magnitude certificates still need independent
+  regeneration for the remaining geometries. The final
+  theorem-to-transported-bytes correspondence and ceremony-level failure
+  composition also remain open.
 - The static liveness model has not yet been confirmed by a completed native
   proof or release-WebAssembly browser measurement. Complete participant
   transport accounting is also open. Production-derived sizes for 73 of the

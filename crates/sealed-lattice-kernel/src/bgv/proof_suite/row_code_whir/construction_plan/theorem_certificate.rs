@@ -142,6 +142,7 @@ pub(in crate::bgv::proof_suite) enum ProductionGeometryCertificateStage {
     DeployedLeafOracle,
     WholeDatabaseSupport,
     CommitmentSubtree,
+    AtomicRoundSemantics,
     ConstructionIdentity,
     Completeness,
 }
@@ -170,6 +171,7 @@ pub(in crate::bgv::proof_suite) enum ProductionGeometryCertificateFailure {
     IneligibleDeployedLeafOracle,
     IncompleteWholeDatabaseSupport,
     IncompleteCommitmentSubtreeExtraction,
+    IncompleteAtomicRoundSemantics,
     InconsistentQromArithmetic,
 }
 
@@ -2021,31 +2023,9 @@ enum Cms19VerifierMessageAssignment {
     FailureEventOccurred,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Cms19StrongStateEvaluatorRule {
-    EmptyTranscriptIsFalse,
-    ProverMovePreservesFalseState,
-    DeterministicObservationPreservesState,
-    AtomicVerifierMessageFill {
-        round_ordinal: u64,
-        output_byte_length: u64,
-        failure_event_owner: SelectedPlanFailureEventOwner,
-    },
-    FullFalseTranscriptImpliesVerifierRejection,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Cms19StrongStateEvaluatorRow {
-    operation_ordinal: u32,
-    predecessor_operation_ordinal: Option<u32>,
-    rule: Cms19StrongStateEvaluatorRule,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Cms19StrongStateEvaluatorCertificate {
-    construction_plan_identity_hash: [u8; 64],
-    linear_bcs_transcript_plan_hash: [u8; 64],
-    rows: Vec<Cms19StrongStateEvaluatorRow>,
+    state_transitions: Cms19AtomicStateTransitionCertificate,
     full_false_rejection_authority: StatePredicateDischargeAuthority,
 }
 
@@ -2055,108 +2035,31 @@ impl Cms19StrongStateEvaluatorCertificate {
         verifier_message_assignments: &BTreeMap<u32, Cms19VerifierMessageAssignment>,
         terminal_verifier_accepts: bool,
     ) -> Result<bool, WhirTheoremCertificateError> {
-        let mut state = false;
-        for (row_index, row) in self.rows.iter().enumerate() {
-            let operation_ordinal = u32::try_from(row_index)
-                .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
-            if row.operation_ordinal != operation_ordinal
-                || row.predecessor_operation_ordinal != operation_ordinal.checked_sub(1)
-            {
-                return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
-            }
-            match row.rule {
-                Cms19StrongStateEvaluatorRule::EmptyTranscriptIsFalse => {
-                    if row_index != 0 {
-                        return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
-                    }
-                    state = false;
-                }
-                Cms19StrongStateEvaluatorRule::ProverMovePreservesFalseState
-                | Cms19StrongStateEvaluatorRule::DeterministicObservationPreservesState => {}
-                Cms19StrongStateEvaluatorRule::AtomicVerifierMessageFill { .. } => {
-                    match verifier_message_assignments
-                        .get(&operation_ordinal)
-                        .copied()
-                        .unwrap_or(Cms19VerifierMessageAssignment::Undefined)
-                    {
-                        Cms19VerifierMessageAssignment::Undefined
-                        | Cms19VerifierMessageAssignment::FailureEventDidNotOccur => {}
-                        Cms19VerifierMessageAssignment::FailureEventOccurred => state = true,
-                    }
-                }
-                Cms19StrongStateEvaluatorRule::FullFalseTranscriptImpliesVerifierRejection => {
-                    if row_index + 1 != self.rows.len() || terminal_verifier_accepts && !state {
-                        return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
-                    }
-                }
-            }
-        }
-        if verifier_message_assignments
-            .keys()
-            .any(|operation_ordinal| {
-                usize::try_from(*operation_ordinal)
-                    .ok()
-                    .and_then(|index| self.rows.get(index))
-                    .is_none_or(|row| {
-                        !matches!(
-                            row.rule,
-                            Cms19StrongStateEvaluatorRule::AtomicVerifierMessageFill { .. }
-                        )
-                    })
-            })
-        {
+        let state = self
+            .state_transitions
+            .evaluate(verifier_message_assignments)?;
+        if terminal_verifier_accepts && !state {
             return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
         }
         Ok(state)
     }
 
     fn is_complete(&self) -> bool {
-        if self.construction_plan_identity_hash == [0_u8; 64]
-            || self.linear_bcs_transcript_plan_hash == [0_u8; 64]
-            || self.rows.is_empty()
+        if !self.state_transitions.is_complete()
             || self.full_false_rejection_authority
                 != StatePredicateDischargeAuthority::CheckedFullVerifierEquationExtractorCorrespondence
-            || self.rows.first().map(|row| row.rule)
-                != Some(Cms19StrongStateEvaluatorRule::EmptyTranscriptIsFalse)
-            || self.rows.last().map(|row| row.rule)
-                != Some(
-                    Cms19StrongStateEvaluatorRule::FullFalseTranscriptImpliesVerifierRejection,
-                )
         {
             return false;
         }
-        let mut atomic_round_ordinals = BTreeSet::new();
-        for (row_index, row) in self.rows.iter().enumerate() {
-            let Ok(operation_ordinal) = u32::try_from(row_index) else {
-                return false;
-            };
-            if row.operation_ordinal != operation_ordinal
-                || row.predecessor_operation_ordinal != operation_ordinal.checked_sub(1)
-            {
-                return false;
-            }
-            if let Cms19StrongStateEvaluatorRule::AtomicVerifierMessageFill {
-                round_ordinal,
-                output_byte_length,
-                ..
-            } = row.rule
-                && (round_ordinal == 0
-                    || output_byte_length < 64
-                    || !atomic_round_ordinals.insert(round_ordinal))
-            {
-                return false;
-            }
-        }
-        if atomic_round_ordinals.is_empty()
-            || self.evaluate(&BTreeMap::new(), false) != Ok(false)
+        if self.evaluate(&BTreeMap::new(), false) != Ok(false)
             || self.evaluate(&BTreeMap::new(), true).is_ok()
         {
             return false;
         }
-        let first_atomic_operation = self.rows.iter().find_map(|row| {
+        let first_atomic_operation = self.state_transitions.rows.iter().find_map(|row| {
             matches!(
                 row.rule,
-                Cms19StrongStateEvaluatorRule::AtomicVerifierMessageFill { .. }
+                Cms19AtomicStateTransitionRule::AtomicVerifierMessageFill { .. }
             )
             .then_some(row.operation_ordinal)
         });
@@ -2186,49 +2089,13 @@ impl Cms19StrongStateEvaluatorCertificate {
             row.requirement == StatePredicateRequirement::FullFalseTranscriptIsRejected
         });
         self.is_complete()
-            && self.construction_plan_identity_hash
-                == whole_state_transitions.construction_plan_identity_hash
-            && self.linear_bcs_transcript_plan_hash
-                == whole_state_transitions.linear_bcs_transcript_plan_hash
+            && self
+                .state_transitions
+                .is_complete_for(whole_state_transitions)
             && full_false_requirement.is_some_and(|requirement| {
                 requirement.is_discharged
                     && requirement.discharge_authority == self.full_false_rejection_authority
             })
-            && self.rows.len() == whole_state_transitions.rows.len()
-            && self
-                .rows
-                .iter()
-                .zip(&whole_state_transitions.rows)
-                .all(|(evaluator_row, semantic_row)| {
-                    let expected_rule = match semantic_row.transition {
-                        Cms19SemanticStateTransition::InitialCanonicalPrefix => {
-                            Cms19StrongStateEvaluatorRule::EmptyTranscriptIsFalse
-                        }
-                        Cms19SemanticStateTransition::ProverOracle { .. } => {
-                            Cms19StrongStateEvaluatorRule::ProverMovePreservesFalseState
-                        }
-                        Cms19SemanticStateTransition::VerifierMessageFill {
-                            round_ordinal,
-                            output_byte_length,
-                            failure_event_owner,
-                            ..
-                        } => Cms19StrongStateEvaluatorRule::AtomicVerifierMessageFill {
-                            round_ordinal,
-                            output_byte_length,
-                            failure_event_owner,
-                        },
-                        Cms19SemanticStateTransition::DeterministicObservation { .. } => {
-                            Cms19StrongStateEvaluatorRule::DeterministicObservationPreservesState
-                        }
-                        Cms19SemanticStateTransition::TerminalDecision { .. } => {
-                            Cms19StrongStateEvaluatorRule::FullFalseTranscriptImpliesVerifierRejection
-                        }
-                    };
-                    evaluator_row.operation_ordinal == semantic_row.operation_ordinal
-                        && evaluator_row.predecessor_operation_ordinal
-                            == semantic_row.predecessor_operation_ordinal
-                        && evaluator_row.rule == expected_rule
-                })
     }
 }
 
@@ -2518,6 +2385,264 @@ impl Cms19AcceptingDatabaseExtractorCertificate {
                 == u64::try_from(atomic_challenge_message_count).unwrap_or(u64::MAX)
             && commitment_subtree_extraction.supplied_commitment_root_count
                 == self.supplied_commitment_openings.len()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Cms19AtomicStateTransitionRule {
+    EmptyTranscriptIsFalse,
+    ProverMovePreservesState,
+    DeterministicObservationPreservesState,
+    AtomicVerifierMessageFill {
+        round_ordinal: u64,
+        output_byte_length: u64,
+        failure_event_owner: SelectedPlanFailureEventOwner,
+    },
+    TerminalDecisionPreservesDerivedState,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Cms19AtomicStateTransitionRow {
+    operation_ordinal: u32,
+    predecessor_operation_ordinal: Option<u32>,
+    rule: Cms19AtomicStateTransitionRule,
+}
+
+/// Executable predecessor-state evolution for one exact production plan.
+///
+/// This certificate deliberately stops at the derived terminal state. It proves
+/// that undefined and non-failing messages inherit their predecessor state and
+/// that only one plan-owned atomic verifier fill can change false to true. The
+/// family-specific extractor and failure-magnitude certificate remain the
+/// separate authority for concluding that an accepting invalid transcript
+/// cannot finish in the false state.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Cms19AtomicStateTransitionCertificate {
+    construction_plan_identity_hash: [u8; 64],
+    linear_bcs_transcript_plan_hash: [u8; 64],
+    rows: Vec<Cms19AtomicStateTransitionRow>,
+}
+
+impl Cms19AtomicStateTransitionCertificate {
+    fn evaluate(
+        &self,
+        verifier_message_assignments: &BTreeMap<u32, Cms19VerifierMessageAssignment>,
+    ) -> Result<bool, WhirTheoremCertificateError> {
+        let mut state = false;
+        for (row_index, row) in self.rows.iter().enumerate() {
+            let operation_ordinal = u32::try_from(row_index)
+                .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+            if row.operation_ordinal != operation_ordinal
+                || row.predecessor_operation_ordinal != operation_ordinal.checked_sub(1)
+            {
+                return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
+            }
+            match row.rule {
+                Cms19AtomicStateTransitionRule::EmptyTranscriptIsFalse => {
+                    if row_index != 0 {
+                        return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
+                    }
+                    state = false;
+                }
+                Cms19AtomicStateTransitionRule::ProverMovePreservesState
+                | Cms19AtomicStateTransitionRule::DeterministicObservationPreservesState => {}
+                Cms19AtomicStateTransitionRule::AtomicVerifierMessageFill { .. } => {
+                    match verifier_message_assignments
+                        .get(&operation_ordinal)
+                        .copied()
+                        .unwrap_or(Cms19VerifierMessageAssignment::Undefined)
+                    {
+                        Cms19VerifierMessageAssignment::Undefined
+                        | Cms19VerifierMessageAssignment::FailureEventDidNotOccur => {}
+                        Cms19VerifierMessageAssignment::FailureEventOccurred => state = true,
+                    }
+                }
+                Cms19AtomicStateTransitionRule::TerminalDecisionPreservesDerivedState => {
+                    if row_index + 1 != self.rows.len() {
+                        return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
+                    }
+                }
+            }
+        }
+        if verifier_message_assignments
+            .keys()
+            .any(|operation_ordinal| {
+                usize::try_from(*operation_ordinal)
+                    .ok()
+                    .and_then(|index| self.rows.get(index))
+                    .is_none_or(|row| {
+                        !matches!(
+                            row.rule,
+                            Cms19AtomicStateTransitionRule::AtomicVerifierMessageFill { .. }
+                        )
+                    })
+            })
+        {
+            return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
+        }
+        Ok(state)
+    }
+
+    fn is_complete(&self) -> bool {
+        if self.construction_plan_identity_hash == [0_u8; 64]
+            || self.linear_bcs_transcript_plan_hash == [0_u8; 64]
+            || self.rows.is_empty()
+            || self.rows.first().map(|row| row.rule)
+                != Some(Cms19AtomicStateTransitionRule::EmptyTranscriptIsFalse)
+            || self.rows.last().map(|row| row.rule)
+                != Some(Cms19AtomicStateTransitionRule::TerminalDecisionPreservesDerivedState)
+        {
+            return false;
+        }
+        let mut atomic_round_ordinals = BTreeSet::new();
+        for (row_index, row) in self.rows.iter().enumerate() {
+            let Ok(operation_ordinal) = u32::try_from(row_index) else {
+                return false;
+            };
+            if row.operation_ordinal != operation_ordinal
+                || row.predecessor_operation_ordinal != operation_ordinal.checked_sub(1)
+            {
+                return false;
+            }
+            if let Cms19AtomicStateTransitionRule::AtomicVerifierMessageFill {
+                round_ordinal,
+                output_byte_length,
+                ..
+            } = row.rule
+                && (round_ordinal == 0
+                    || output_byte_length < 64
+                    || !atomic_round_ordinals.insert(round_ordinal))
+            {
+                return false;
+            }
+        }
+        let Some(first_atomic_operation) = self.rows.iter().find_map(|row| {
+            matches!(
+                row.rule,
+                Cms19AtomicStateTransitionRule::AtomicVerifierMessageFill { .. }
+            )
+            .then_some(row.operation_ordinal)
+        }) else {
+            return false;
+        };
+        let no_failure_assignments = BTreeMap::from([(
+            first_atomic_operation,
+            Cms19VerifierMessageAssignment::FailureEventDidNotOccur,
+        )]);
+        let failure_assignments = BTreeMap::from([(
+            first_atomic_operation,
+            Cms19VerifierMessageAssignment::FailureEventOccurred,
+        )]);
+        self.evaluate(&BTreeMap::new()) == Ok(false)
+            && self.evaluate(&no_failure_assignments) == Ok(false)
+            && self.evaluate(&failure_assignments) == Ok(true)
+    }
+
+    fn is_complete_for(
+        &self,
+        whole_state_transitions: &Cms19WholeStateTransitionCertificate,
+    ) -> bool {
+        self.is_complete()
+            && self.construction_plan_identity_hash
+                == whole_state_transitions.construction_plan_identity_hash
+            && self.linear_bcs_transcript_plan_hash
+                == whole_state_transitions.linear_bcs_transcript_plan_hash
+            && self.rows.len() == whole_state_transitions.rows.len()
+            && self.rows.iter().zip(&whole_state_transitions.rows).all(
+                |(evaluator_row, semantic_row)| {
+                    let expected_rule = match semantic_row.transition {
+                        Cms19SemanticStateTransition::InitialCanonicalPrefix => {
+                            Cms19AtomicStateTransitionRule::EmptyTranscriptIsFalse
+                        }
+                        Cms19SemanticStateTransition::ProverOracle { .. } => {
+                            Cms19AtomicStateTransitionRule::ProverMovePreservesState
+                        }
+                        Cms19SemanticStateTransition::VerifierMessageFill {
+                            round_ordinal,
+                            output_byte_length,
+                            failure_event_owner,
+                            ..
+                        } => Cms19AtomicStateTransitionRule::AtomicVerifierMessageFill {
+                            round_ordinal,
+                            output_byte_length,
+                            failure_event_owner,
+                        },
+                        Cms19SemanticStateTransition::DeterministicObservation { .. } => {
+                            Cms19AtomicStateTransitionRule::DeterministicObservationPreservesState
+                        }
+                        Cms19SemanticStateTransition::TerminalDecision { .. } => {
+                            Cms19AtomicStateTransitionRule::TerminalDecisionPreservesDerivedState
+                        }
+                    };
+                    evaluator_row.operation_ordinal == semantic_row.operation_ordinal
+                        && evaluator_row.predecessor_operation_ordinal
+                            == semantic_row.predecessor_operation_ordinal
+                        && evaluator_row.rule == expected_rule
+                },
+            )
+    }
+}
+
+/// Plan-bound atomic-message and collision-free database semantics shared by
+/// every production geometry. This is the reusable CMS19 predecessor and
+/// extraction layer; it does not substitute one family's degree, agreement, or
+/// multiplicity arithmetic for another family's theorem.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Cms19AtomicRoundSemanticCertificate {
+    sampling_shape: Cms19VerifierMessageSamplingShape,
+    logical_verifier_message_count: u64,
+    multi_output_verifier_message_count: u64,
+    maximum_output_count_per_verifier_message: u64,
+    state_transitions: Cms19AtomicStateTransitionCertificate,
+    accepting_database_extractor: Cms19AcceptingDatabaseExtractorCertificate,
+}
+
+impl Cms19AtomicRoundSemanticCertificate {
+    fn is_complete(&self) -> bool {
+        self.sampling_shape == Cms19VerifierMessageSamplingShape::AtomicFixedWidthXofOutput
+            && self.logical_verifier_message_count > 0
+            && self.multi_output_verifier_message_count == 0
+            && self.maximum_output_count_per_verifier_message == 1
+            && self.state_transitions.is_complete()
+            && self.accepting_database_extractor.is_complete()
+    }
+
+    fn is_complete_for(
+        &self,
+        plan: &RowCodeWhirConstructionPlan,
+        catalog: &RowCodeWhirOracleEquationCatalog,
+        selected_plan_state_predicate: &SelectedPlanStatePredicateCertificate,
+        whole_state_transitions: &Cms19WholeStateTransitionCertificate,
+        whole_database_support: &Cms19WholeDatabaseSupportCertificate,
+        commitment_subtree_extraction: &CommitmentSubtreeExtractionCertificate,
+    ) -> bool {
+        let atomic_message_count = catalog
+            .operations
+            .iter()
+            .zip(&selected_plan_state_predicate.transition_rows)
+            .filter(|(_, state_row)| state_row.failure_event_owner.is_some())
+            .count();
+        self.is_complete()
+            && catalog.operations.len() == selected_plan_state_predicate.transition_rows.len()
+            && u64::try_from(atomic_message_count).ok() == Some(self.logical_verifier_message_count)
+            && catalog.logical_verifier_message_count().ok()
+                == Some(self.logical_verifier_message_count)
+            && catalog
+                .operations
+                .iter()
+                .zip(&selected_plan_state_predicate.transition_rows)
+                .filter(|(_, state_row)| state_row.failure_event_owner.is_some())
+                .all(|(operation, _)| cms19_atomic_challenge_output_byte_length(operation).is_ok())
+            && whole_state_transitions.is_complete_for(plan, catalog, selected_plan_state_predicate)
+            && self
+                .state_transitions
+                .is_complete_for(whole_state_transitions)
+            && self.accepting_database_extractor.is_complete_for(
+                plan,
+                whole_state_transitions,
+                whole_database_support,
+                commitment_subtree_extraction,
+            )
     }
 }
 
@@ -5996,6 +6121,7 @@ struct RowCodeWhirProductionGeometryCertificate {
     deployed_aggregate_leaf_oracle: DeployedAggregateLeafOracleCertificate,
     cms19_whole_database_support: Cms19WholeDatabaseSupportCertificate,
     commitment_subtree_extraction: CommitmentSubtreeExtractionCertificate,
+    cms19_atomic_round_semantics: Cms19AtomicRoundSemanticCertificate,
     maximum_transcript_hash_query_count: u64,
     logical_verifier_message_count: u64,
     cms19_arithmetic: Cms19ArithmeticCertificate,
@@ -6195,6 +6321,37 @@ impl RowCodeWhirProductionGeometryCertificate {
             return Some(
                 ProductionGeometryCertificateFailure::IncompleteCommitmentSubtreeExtraction,
             );
+        }
+        if !self.cms19_atomic_round_semantics.is_complete()
+            || self
+                .cms19_atomic_round_semantics
+                .logical_verifier_message_count
+                != self.logical_verifier_message_count
+            || !self
+                .cms19_atomic_round_semantics
+                .state_transitions
+                .is_complete_for(&self.cms19_whole_state_transitions)
+            || self
+                .cms19_atomic_round_semantics
+                .accepting_database_extractor
+                .construction_plan_identity_hash
+                != self.construction_plan_identity_hash
+            || self
+                .cms19_atomic_round_semantics
+                .accepting_database_extractor
+                .linear_bcs_transcript_plan_hash
+                != self
+                    .cms19_whole_state_transitions
+                    .linear_bcs_transcript_plan_hash
+            || self
+                .cms19_atomic_round_semantics
+                .accepting_database_extractor
+                .round_ranges
+                .len()
+                != usize::try_from(self.cms19_whole_state_transitions.covered_bcs_round_count)
+                    .unwrap_or(usize::MAX)
+        {
+            return Some(ProductionGeometryCertificateFailure::IncompleteAtomicRoundSemantics);
         }
         if self.cms19_arithmetic.verifier_hash_query_count
             != self
@@ -6766,6 +6923,20 @@ fn checked_row_code_whir_production_geometry_certificate_with_masking(
         &complete_verifier_oracle_ledger.merkle_rows,
     )
     .map_err(|error| contextualize(ProductionGeometryCertificateStage::CommitmentSubtree, error))?;
+    let cms19_atomic_round_semantics = derive_cms19_atomic_round_semantic_certificate(
+        plan,
+        &catalog,
+        &selected_plan_state_predicate,
+        &cms19_whole_state_transitions,
+        &cms19_whole_database_support,
+        &commitment_subtree_extraction,
+    )
+    .map_err(|error| {
+        contextualize(
+            ProductionGeometryCertificateStage::AtomicRoundSemantics,
+            error,
+        )
+    })?;
     let cms19_arithmetic = derive_cms19_arithmetic_certificate(
         deployed_aggregate_leaf_oracle.deployed_verifier_hash_query_count,
         deployed_aggregate_leaf_oracle.deployed_accepting_database_equation_count,
@@ -6804,6 +6975,7 @@ fn checked_row_code_whir_production_geometry_certificate_with_masking(
         deployed_aggregate_leaf_oracle,
         cms19_whole_database_support,
         commitment_subtree_extraction,
+        cms19_atomic_round_semantics,
         maximum_transcript_hash_query_count,
         logical_verifier_message_count,
         cms19_arithmetic,
@@ -10512,48 +10684,62 @@ fn derive_cms19_strong_state_evaluator_certificate(
     {
         return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
     }
+    let certificate = Cms19StrongStateEvaluatorCertificate {
+        state_transitions: derive_cms19_atomic_state_transition_certificate(
+            whole_state_transitions,
+        )?,
+        full_false_rejection_authority: full_false_requirement.discharge_authority,
+    };
+    if !certificate.is_complete() {
+        return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
+    }
+    Ok(certificate)
+}
+
+fn derive_cms19_atomic_state_transition_certificate(
+    whole_state_transitions: &Cms19WholeStateTransitionCertificate,
+) -> Result<Cms19AtomicStateTransitionCertificate, WhirTheoremCertificateError> {
     let rows = whole_state_transitions
         .rows
         .iter()
         .map(|row| {
             let rule = match row.transition {
                 Cms19SemanticStateTransition::InitialCanonicalPrefix => {
-                    Cms19StrongStateEvaluatorRule::EmptyTranscriptIsFalse
+                    Cms19AtomicStateTransitionRule::EmptyTranscriptIsFalse
                 }
                 Cms19SemanticStateTransition::ProverOracle { .. } => {
-                    Cms19StrongStateEvaluatorRule::ProverMovePreservesFalseState
+                    Cms19AtomicStateTransitionRule::ProverMovePreservesState
                 }
                 Cms19SemanticStateTransition::VerifierMessageFill {
                     round_ordinal,
                     output_byte_length,
                     failure_event_owner,
                     ..
-                } => Cms19StrongStateEvaluatorRule::AtomicVerifierMessageFill {
+                } => Cms19AtomicStateTransitionRule::AtomicVerifierMessageFill {
                     round_ordinal,
                     output_byte_length,
                     failure_event_owner,
                 },
                 Cms19SemanticStateTransition::DeterministicObservation { .. } => {
-                    Cms19StrongStateEvaluatorRule::DeterministicObservationPreservesState
+                    Cms19AtomicStateTransitionRule::DeterministicObservationPreservesState
                 }
                 Cms19SemanticStateTransition::TerminalDecision { .. } => {
-                    Cms19StrongStateEvaluatorRule::FullFalseTranscriptImpliesVerifierRejection
+                    Cms19AtomicStateTransitionRule::TerminalDecisionPreservesDerivedState
                 }
             };
-            Cms19StrongStateEvaluatorRow {
+            Cms19AtomicStateTransitionRow {
                 operation_ordinal: row.operation_ordinal,
                 predecessor_operation_ordinal: row.predecessor_operation_ordinal,
                 rule,
             }
         })
         .collect::<Vec<_>>();
-    let certificate = Cms19StrongStateEvaluatorCertificate {
+    let certificate = Cms19AtomicStateTransitionCertificate {
         construction_plan_identity_hash: whole_state_transitions.construction_plan_identity_hash,
         linear_bcs_transcript_plan_hash: whole_state_transitions.linear_bcs_transcript_plan_hash,
         rows,
-        full_false_rejection_authority: full_false_requirement.discharge_authority,
     };
-    if !certificate.is_complete() {
+    if !certificate.is_complete_for(whole_state_transitions) {
         return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
     }
     Ok(certificate)
@@ -10578,6 +10764,67 @@ fn derive_cms19_accepting_database_extractor_certificate(
         challenge_selection_rule: transcript_plan.challenge_selection_rule(),
     };
     if !certificate.is_complete() {
+        return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
+    }
+    Ok(certificate)
+}
+
+fn derive_cms19_atomic_round_semantic_certificate(
+    plan: &RowCodeWhirConstructionPlan,
+    catalog: &RowCodeWhirOracleEquationCatalog,
+    selected_plan_state_predicate: &SelectedPlanStatePredicateCertificate,
+    whole_state_transitions: &Cms19WholeStateTransitionCertificate,
+    whole_database_support: &Cms19WholeDatabaseSupportCertificate,
+    commitment_subtree_extraction: &CommitmentSubtreeExtractionCertificate,
+) -> Result<Cms19AtomicRoundSemanticCertificate, WhirTheoremCertificateError> {
+    if catalog.operations.len() != selected_plan_state_predicate.transition_rows.len()
+        || !whole_state_transitions.is_complete_for(plan, catalog, selected_plan_state_predicate)
+    {
+        return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
+    }
+    let mut logical_verifier_message_count = 0_u64;
+    let mut multi_output_verifier_message_count = 0_u64;
+    let mut maximum_output_count_per_verifier_message = 0_u64;
+    for (operation, state_row) in catalog
+        .operations
+        .iter()
+        .zip(&selected_plan_state_predicate.transition_rows)
+    {
+        if state_row.failure_event_owner.is_none() {
+            continue;
+        }
+        cms19_atomic_challenge_output_byte_length(operation)?;
+        logical_verifier_message_count = logical_verifier_message_count
+            .checked_add(1)
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+        let output_count = 1_u64;
+        maximum_output_count_per_verifier_message =
+            maximum_output_count_per_verifier_message.max(output_count);
+        if output_count > 1 {
+            multi_output_verifier_message_count = multi_output_verifier_message_count
+                .checked_add(1)
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+        }
+    }
+    let state_transitions =
+        derive_cms19_atomic_state_transition_certificate(whole_state_transitions)?;
+    let accepting_database_extractor = derive_cms19_accepting_database_extractor_certificate(plan)?;
+    let certificate = Cms19AtomicRoundSemanticCertificate {
+        sampling_shape: Cms19VerifierMessageSamplingShape::AtomicFixedWidthXofOutput,
+        logical_verifier_message_count,
+        multi_output_verifier_message_count,
+        maximum_output_count_per_verifier_message,
+        state_transitions,
+        accepting_database_extractor,
+    };
+    if !certificate.is_complete_for(
+        plan,
+        catalog,
+        selected_plan_state_predicate,
+        whole_state_transitions,
+        whole_database_support,
+        commitment_subtree_extraction,
+    ) {
         return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
     }
     Ok(certificate)
@@ -13167,11 +13414,13 @@ fn cms19_whole_state_and_database_support_are_exact_and_mutation_sensitive() {
     let mut zero_width_state_evaluator = strong_semantics.clone();
     let evaluator_output_byte_length = zero_width_state_evaluator
         .state_evaluator
+        .state_transitions
         .rows
         .iter_mut()
         .find_map(|row| match &mut row.rule {
-            Cms19StrongStateEvaluatorRule::AtomicVerifierMessageFill {
-                output_byte_length, ..
+            Cms19AtomicStateTransitionRule::AtomicVerifierMessageFill {
+                output_byte_length,
+                ..
             } => Some(output_byte_length),
             _ => None,
         })
@@ -13194,8 +13443,14 @@ fn cms19_whole_state_and_database_support_are_exact_and_mutation_sensitive() {
     assert!(!altered_construction_identity.has_complete_construction_theorem_for(&plan));
 
     let unknown_assignment = BTreeMap::from([(
-        u32::try_from(strong_semantics.state_evaluator.rows.len())
-            .expect("the evaluator row count fits u32"),
+        u32::try_from(
+            strong_semantics
+                .state_evaluator
+                .state_transitions
+                .rows
+                .len(),
+        )
+        .expect("the evaluator row count fits u32"),
         Cms19VerifierMessageAssignment::FailureEventOccurred,
     )]);
     assert_eq!(
@@ -13931,6 +14186,27 @@ fn ballot_width_eight_has_complete_semantic_state_and_database_support() {
         &oracle_equation_rows,
     )
     .expect("the ballot database-support correspondence derives");
+    let commitment_subtree_extraction =
+        derive_commitment_subtree_extraction_certificate(&plan, &verifier_ledger.merkle_rows)
+            .expect("the ballot commitment-subtree extraction derives");
+    let atomic_round_semantics = derive_cms19_atomic_round_semantic_certificate(
+        &plan,
+        &catalog,
+        &selected_plan_state_predicate,
+        &whole_state,
+        &database_support,
+        &commitment_subtree_extraction,
+    )
+    .expect("the ballot atomic round semantics derive");
+    let mut production_geometry_certificate =
+        checked_row_code_whir_production_geometry_certificate_with_masking(
+            &plan,
+            &artifact,
+            relation_variant,
+            &context,
+            &aggregate_wide_masking,
+        )
+        .expect("the ballot production geometry includes atomic round semantics");
 
     assert_eq!(
         plan.selected_parameters()
@@ -13939,6 +14215,88 @@ fn ballot_width_eight_has_complete_semantic_state_and_database_support() {
     );
     assert!(whole_state.is_complete_for(&plan, &catalog, &selected_plan_state_predicate,));
     assert!(database_support.is_complete());
+    assert!(atomic_round_semantics.is_complete_for(
+        &plan,
+        &catalog,
+        &selected_plan_state_predicate,
+        &whole_state,
+        &database_support,
+        &commitment_subtree_extraction,
+    ));
+    assert!(production_geometry_certificate.is_complete());
+    assert_eq!(
+        production_geometry_certificate.cms19_atomic_round_semantics,
+        atomic_round_semantics,
+    );
+    assert_eq!(
+        atomic_round_semantics
+            .state_transitions
+            .evaluate(&BTreeMap::new()),
+        Ok(false),
+    );
+    let first_atomic_operation = atomic_round_semantics
+        .state_transitions
+        .rows
+        .iter()
+        .find_map(|row| {
+            matches!(
+                row.rule,
+                Cms19AtomicStateTransitionRule::AtomicVerifierMessageFill { .. }
+            )
+            .then_some(row.operation_ordinal)
+        })
+        .expect("the ballot transcript has an atomic verifier message");
+    assert_eq!(
+        atomic_round_semantics
+            .state_transitions
+            .evaluate(&BTreeMap::from([(
+                first_atomic_operation,
+                Cms19VerifierMessageAssignment::FailureEventOccurred,
+            )])),
+        Ok(true),
+    );
+
+    let mut zero_width_transition = atomic_round_semantics.clone();
+    let output_byte_length = zero_width_transition
+        .state_transitions
+        .rows
+        .iter_mut()
+        .find_map(|row| match &mut row.rule {
+            Cms19AtomicStateTransitionRule::AtomicVerifierMessageFill {
+                output_byte_length,
+                ..
+            } => Some(output_byte_length),
+            _ => None,
+        })
+        .expect("the ballot transition evaluator has an atomic message");
+    *output_byte_length = 0;
+    assert!(!zero_width_transition.is_complete());
+
+    let mut altered_response_address = atomic_round_semantics.clone();
+    altered_response_address
+        .accepting_database_extractor
+        .round_ranges[0]
+        .response_operation_ordinal += 1;
+    assert!(!altered_response_address.is_complete());
+
+    let production_output_byte_length = production_geometry_certificate
+        .cms19_atomic_round_semantics
+        .state_transitions
+        .rows
+        .iter_mut()
+        .find_map(|row| match &mut row.rule {
+            Cms19AtomicStateTransitionRule::AtomicVerifierMessageFill {
+                output_byte_length,
+                ..
+            } => Some(output_byte_length),
+            _ => None,
+        })
+        .expect("the production geometry has an atomic verifier message");
+    *production_output_byte_length = 0;
+    assert_eq!(
+        production_geometry_certificate.completeness_failure(),
+        Some(ProductionGeometryCertificateFailure::IncompleteAtomicRoundSemantics),
+    );
     assert_eq!(
         database_support.mapped_hash_query_count,
         deployed_leaf_oracle.deployed_verifier_hash_query_count,
