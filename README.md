@@ -126,11 +126,15 @@ Works today:
   degrees, statement-family multiplicity, and classical and
   quantum-random-oracle loss from the selected plan. Focused current evidence
   passes this stronger constructor and full-false terminal rejection for the
-  selected same-secret and width-8 ballot plans. Hostile tests refuse omitted
-  phase polynomials, changed aggregate opening columns or scalar counts,
-  proof-supplied points, changed basis identities, and wrong family or
-  multiplicity bindings. The remaining identities have not yet been
-  regenerated under the stronger gate. Families with no bound tree or
+  selected same-secret and width-8 ballot plans. The width-8 VSS plan also
+  derives its exact failure ledger: eight application-modulus alpha vectors
+  use seven coordinates each, retain their distinct sample-space
+  denominators, and enter the classical and quantum-random-oracle bounds as an
+  exact rational sum. Hostile tests refuse omitted phase polynomials, changed
+  aggregate opening columns or scalar counts, proof-supplied points, changed
+  basis identities, wrong family or multiplicity bindings, and altered VSS
+  product or algebraic denominators. The remaining identities have not yet
+  been regenerated under the stronger gate. Families with no bound tree or
   verifier-sequence source do not acquire an invented ledger row.
 - Production-derived phase-liveness accounting now covers the complete
   same-secret prover live set, including source ownership, replay readers,
@@ -176,9 +180,10 @@ Not yet:
   The reusable atomic predecessor and database-extraction layer is now enforced
   by the production-geometry constructor. Exact family failure ledgers,
   plan-derived polynomial and point extraction, and full-false terminal
-  rejection now derive for the focused same-secret and ballot geometries; the
-  remaining geometries still need independent regeneration under the complete
-  gate. The final
+  rejection now derive for the focused same-secret and ballot geometries. The
+  VSS geometry additionally derives its heterogeneous application-modulus
+  product-challenge ledger; the remaining geometries still need independent
+  regeneration under the complete gate. The final
   theorem-to-transported-bytes correspondence and ceremony-level failure
   composition also remain open.
 - The static liveness model has not yet been confirmed by a completed native

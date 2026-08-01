@@ -1052,6 +1052,15 @@ struct ExactProductChallengeFailureRow {
     sample_space_denominator: BigUint,
 }
 
+impl ExactProductChallengeFailureRow {
+    fn probability_ceiling(&self) -> Result<ExactBigFraction, WhirTheoremCertificateError> {
+        ExactBigFraction::new(
+            self.bad_set_numerator.clone(),
+            self.sample_space_denominator.clone(),
+        )
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ExactAlgebraicFailureEvent {
     NonNativeThetaExtraction,
@@ -1076,6 +1085,13 @@ struct ExactAlgebraicFailureRow {
     owner_kinds: Vec<ExactFailureOwnerKind>,
     theorem_event_count: u64,
     numerator: BigUint,
+    denominator: BigUint,
+}
+
+impl ExactAlgebraicFailureRow {
+    fn probability_ceiling(&self) -> Result<ExactBigFraction, WhirTheoremCertificateError> {
+        ExactBigFraction::new(self.numerator.clone(), self.denominator.clone())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1124,6 +1140,8 @@ impl ExactFailureMagnitudeCertificate {
 enum ExactFailureMagnitudeFault {
     DropFirstQueryRow,
     ReduceFirstQueryAgreementCeiling,
+    ChangeFirstProductSampleSpaceDenominator,
+    ChangeFirstAlgebraicDenominator,
     DropRelationCompositionOwner,
     ReduceAggregateWideBaseNumerator,
     ChangeVerifierHashQueryCount,
@@ -7075,6 +7093,7 @@ fn checked_row_code_whir_production_geometry_certificate_with_masking(
         derive_exact_failure_magnitude_certificate(ExactFailureMagnitudeDerivationInput {
             plan,
             relation_variant,
+            relation_context,
             catalog: &catalog,
             selected_plan_state_predicate: &selected_plan_state_predicate,
             code_state_rows: &whir_geometry.code_state_rows,
@@ -7735,6 +7754,7 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
         derive_exact_failure_magnitude_certificate(ExactFailureMagnitudeDerivationInput {
             plan,
             relation_variant,
+            relation_context: &relation_context,
             catalog: &catalog,
             selected_plan_state_predicate: &selected_plan_state_predicate,
             code_state_rows: &code_state_rows,
@@ -11655,9 +11675,11 @@ fn derive_exact_failure_owner_rows(
 
 fn derive_exact_product_challenge_failure_rows(
     relation_variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
     catalog: &RowCodeWhirOracleEquationCatalog,
 ) -> Result<Vec<ExactProductChallengeFailureRow>, WhirTheoremCertificateError> {
     let mut degrees_by_challenge = BTreeMap::<CommonProofChallenge, BTreeMap<u16, u64>>::new();
+    let mut modulus_by_challenge = BTreeMap::<CommonProofChallenge, u64>::new();
     for batch in relation_variant.ordered_integer_lift_batches() {
         let challenge = CommonProofChallenge::Theta {
             modulus_ordinal: relation_variant
@@ -11674,6 +11696,12 @@ fn derive_exact_product_challenge_failure_rows(
             .or_default()
             .insert(batch.challenge_ordinal(), degree)
             .is_some()
+        {
+            return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
+        }
+        if modulus_by_challenge
+            .insert(challenge, PROOF_BASE_FIELD_MODULUS)
+            .is_some_and(|previous| previous != PROOF_BASE_FIELD_MODULUS)
         {
             return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
         }
@@ -11695,6 +11723,15 @@ fn derive_exact_product_challenge_failure_rows(
             .entry(batch.challenge_ordinal())
             .and_modify(|current| *current = (*current).max(degree))
             .or_insert(degree);
+        let modulus = relation_context
+            .resolved_modulus(batch.modulus_reference())
+            .map_err(|_| WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence)?;
+        if modulus_by_challenge
+            .insert(challenge, modulus)
+            .is_some_and(|previous| previous != modulus)
+        {
+            return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
+        }
     }
 
     let mut rows = Vec::new();
@@ -11713,8 +11750,20 @@ fn derive_exact_product_challenge_failure_rows(
         let ordered_degrees = degrees_by_challenge
             .remove(&challenge)
             .ok_or(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence)?;
-        if group.modulus() != PROOF_BASE_FIELD_MODULUS
-            || usize::from(group.coordinate_count()) != PROOF_CHALLENGE_EXTENSION_DEGREE
+        let expected_modulus = modulus_by_challenge
+            .remove(&challenge)
+            .ok_or(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence)?;
+        let expected_coordinate_count = match challenge {
+            CommonProofChallenge::Theta { .. } => {
+                relation_context.non_native_theta_repetition_count
+            }
+            CommonProofChallenge::Alpha { .. } => {
+                relation_context.non_native_alpha_repetition_count
+            }
+            _ => return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence),
+        };
+        if group.modulus() != expected_modulus
+            || group.coordinate_count() != expected_coordinate_count
             || ordered_degrees.len() != usize::from(group.coordinate_count())
             || !ordered_degrees
                 .keys()
@@ -11743,7 +11792,7 @@ fn derive_exact_product_challenge_failure_rows(
         });
     }
     rows.sort_by_key(|row| row.challenge);
-    if !degrees_by_challenge.is_empty() || rows.is_empty() {
+    if !degrees_by_challenge.is_empty() || !modulus_by_challenge.is_empty() || rows.is_empty() {
         return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
     }
     Ok(rows)
@@ -12213,6 +12262,7 @@ fn present_exact_failure_owner_kinds(
 struct ExactFailureMagnitudeDerivationInput<'a> {
     plan: &'a RowCodeWhirConstructionPlan,
     relation_variant: &'a RelationPlanVariant,
+    relation_context: &'a RelationPlanCheckContext,
     catalog: &'a RowCodeWhirOracleEquationCatalog,
     selected_plan_state_predicate: &'a SelectedPlanStatePredicateCertificate,
     code_state_rows: &'a [WhirCodeStateRow],
@@ -12222,6 +12272,18 @@ struct ExactFailureMagnitudeDerivationInput<'a> {
     initial_constraint_batch_numerator: u64,
     logical_verifier_message_count: u64,
     cms19_arithmetic: &'a Cms19ArithmeticCertificate,
+}
+
+fn sum_product_challenge_probability_ceiling(
+    product_challenge_rows: &[ExactProductChallengeFailureRow],
+    include: impl Fn(CommonProofChallenge) -> bool,
+) -> Result<ExactBigFraction, WhirTheoremCertificateError> {
+    product_challenge_rows
+        .iter()
+        .filter(|row| include(row.challenge))
+        .try_fold(ExactBigFraction::zero(), |total, row| {
+            total.add(&row.probability_ceiling()?)
+        })
 }
 
 fn derive_exact_algebraic_failure_rows(
@@ -12238,16 +12300,18 @@ fn derive_exact_algebraic_failure_rows(
         initial_constraint_batch_numerator,
         ..
     } = input;
-    let theta_numerator = product_challenge_rows
-        .iter()
-        .filter(|row| matches!(row.challenge, CommonProofChallenge::Theta { .. }))
-        .map(|row| row.bad_set_numerator.clone())
-        .sum::<BigUint>();
-    let alpha_numerator = product_challenge_rows
-        .iter()
-        .filter(|row| matches!(row.challenge, CommonProofChallenge::Alpha { .. }))
-        .map(|row| row.bad_set_numerator.clone())
-        .sum::<BigUint>();
+    let theta_probability =
+        sum_product_challenge_probability_ceiling(product_challenge_rows, |challenge| {
+            matches!(challenge, CommonProofChallenge::Theta { .. })
+        })?;
+    let alpha_probability =
+        sum_product_challenge_probability_ceiling(product_challenge_rows, |challenge| {
+            matches!(challenge, CommonProofChallenge::Alpha { .. })
+        })?;
+    let extension_field_cardinality = BigUint::from(PROOF_BASE_FIELD_MODULUS).pow(
+        u32::try_from(PROOF_CHALLENGE_EXTENSION_DEGREE)
+            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+    );
     let opening_point_count = plan
         .aggregate_column_roles
         .iter()
@@ -12324,27 +12388,29 @@ fn derive_exact_algebraic_failure_rows(
     let theta_owner_count =
         exact_owner_count(owner_rows, ExactFailureOwnerKind::NonNativeThetaProduct)?;
     if theta_owner_count > 0 {
-        if theta_numerator.is_zero() {
+        if theta_probability.numerator.is_zero() {
             return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
         }
         rows.push(ExactAlgebraicFailureRow {
             event: ExactAlgebraicFailureEvent::NonNativeThetaExtraction,
             owner_kinds: vec![ExactFailureOwnerKind::NonNativeThetaProduct],
             theorem_event_count: theta_owner_count,
-            numerator: theta_numerator,
+            numerator: theta_probability.numerator,
+            denominator: theta_probability.denominator,
         });
     }
     let alpha_owner_count =
         exact_owner_count(owner_rows, ExactFailureOwnerKind::NonNativeAlphaProduct)?;
     if alpha_owner_count > 0 {
-        if alpha_numerator.is_zero() {
+        if alpha_probability.numerator.is_zero() {
             return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
         }
         rows.push(ExactAlgebraicFailureRow {
             event: ExactAlgebraicFailureEvent::NonNativeAlphaExtraction,
             owner_kinds: vec![ExactFailureOwnerKind::NonNativeAlphaProduct],
             theorem_event_count: alpha_owner_count,
-            numerator: alpha_numerator,
+            numerator: alpha_probability.numerator,
+            denominator: alpha_probability.denominator,
         });
     }
     rows.push(ExactAlgebraicFailureRow {
@@ -12352,12 +12418,14 @@ fn derive_exact_algebraic_failure_rows(
         owner_kinds: vec![ExactFailureOwnerKind::RelationComposition],
         theorem_event_count: 1,
         numerator: BigUint::one(),
+        denominator: extension_field_cardinality.clone(),
     });
     rows.push(ExactAlgebraicFailureRow {
         event: ExactAlgebraicFailureEvent::OpeningPointExceptionalSets,
         owner_kinds: vec![ExactFailureOwnerKind::OutOfDomainPoint],
         theorem_event_count: 1,
         numerator: BigUint::from(exceptional_set_numerator),
+        denominator: extension_field_cardinality.clone(),
     });
     rows.push(ExactAlgebraicFailureRow {
         event: ExactAlgebraicFailureEvent::PhaseRowAndSelectorBatching,
@@ -12371,6 +12439,7 @@ fn derive_exact_algebraic_failure_rows(
         )?,
         theorem_event_count: phase_batch_numerator,
         numerator: BigUint::from(phase_batch_numerator),
+        denominator: extension_field_cardinality.clone(),
     });
     if exact_owner_count(owner_rows, ExactFailureOwnerKind::OpeningBatchMask)? > 0 {
         rows.push(ExactAlgebraicFailureRow {
@@ -12378,6 +12447,7 @@ fn derive_exact_algebraic_failure_rows(
             owner_kinds: vec![ExactFailureOwnerKind::OpeningBatchMask],
             theorem_event_count: 0,
             numerator: BigUint::zero(),
+            denominator: extension_field_cardinality.clone(),
         });
     }
     if exact_owner_count(owner_rows, ExactFailureOwnerKind::BoundOpening)? > 0 {
@@ -12386,6 +12456,7 @@ fn derive_exact_algebraic_failure_rows(
             owner_kinds: vec![ExactFailureOwnerKind::BoundOpening],
             theorem_event_count: 1,
             numerator: BigUint::one(),
+            denominator: extension_field_cardinality.clone(),
         });
     }
     let bound_degree_owner_count =
@@ -12396,6 +12467,7 @@ fn derive_exact_algebraic_failure_rows(
             owner_kinds: vec![ExactFailureOwnerKind::BoundDegreeCoordinate],
             theorem_event_count: bound_degree_owner_count,
             numerator: BigUint::from(bound_degree_owner_count),
+            denominator: extension_field_cardinality.clone(),
         });
     }
     rows.push(ExactAlgebraicFailureRow {
@@ -12403,6 +12475,7 @@ fn derive_exact_algebraic_failure_rows(
         owner_kinds: vec![ExactFailureOwnerKind::WhirOpeningBatching],
         theorem_event_count: 1,
         numerator: BigUint::from(initial_constraint_batch_numerator),
+        denominator: extension_field_cardinality.clone(),
     });
     rows.push(ExactAlgebraicFailureRow {
         event: ExactAlgebraicFailureEvent::MaskedSumcheckInitialTransitions,
@@ -12415,6 +12488,7 @@ fn derive_exact_algebraic_failure_rows(
             owner_rows,
             ExactFailureOwnerKind::MaskedSumcheckEpsilon,
         )?),
+        denominator: extension_field_cardinality.clone(),
     });
     // CFW Construction 6.3 and Lemma 6.5 contribute the WHIR mutual
     // correlated-agreement domain numerator plus the cubic sumcheck term
@@ -12427,6 +12501,7 @@ fn derive_exact_algebraic_failure_rows(
             ExactFailureOwnerKind::MaskedSumcheckFold,
         )?,
         numerator: BigUint::from(fold_numerator),
+        denominator: extension_field_cardinality.clone(),
     });
     // The checkpoint scalar is sampled and transcript-bound but is not an
     // algebraic input. Its following query vector owns the query event.
@@ -12435,6 +12510,7 @@ fn derive_exact_algebraic_failure_rows(
         owner_kinds: vec![ExactFailureOwnerKind::RoundCheckpoint],
         theorem_event_count: 0,
         numerator: BigUint::zero(),
+        denominator: extension_field_cardinality.clone(),
     });
     rows.push(ExactAlgebraicFailureRow {
         event: ExactAlgebraicFailureEvent::WhirQueryCombinations,
@@ -12444,6 +12520,7 @@ fn derive_exact_algebraic_failure_rows(
             ExactFailureOwnerKind::RoundCombination,
         )?,
         numerator: BigUint::from(shift_numerator),
+        denominator: extension_field_cardinality.clone(),
     });
     // CFW Construction 7.2 and Lemma 7.4 give one source-code MCA term,
     // one pad-code MCA term, and the singleton list-product term.
@@ -12452,6 +12529,7 @@ fn derive_exact_algebraic_failure_rows(
         owner_kinds: vec![ExactFailureOwnerKind::BaseCaseBlinding],
         theorem_event_count: 1,
         numerator: BigUint::from(base_blinding_numerator),
+        denominator: extension_field_cardinality,
     });
     if rows.iter().any(|row| row.owner_kinds.is_empty()) {
         return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
@@ -12500,8 +12578,14 @@ fn sum_query_probability_ceiling(
         })
 }
 
-fn sum_algebraic_numerator(algebraic_rows: &[ExactAlgebraicFailureRow]) -> BigUint {
-    algebraic_rows.iter().map(|row| row.numerator.clone()).sum()
+fn sum_algebraic_probability_ceiling(
+    algebraic_rows: &[ExactAlgebraicFailureRow],
+) -> Result<ExactBigFraction, WhirTheoremCertificateError> {
+    algebraic_rows
+        .iter()
+        .try_fold(ExactBigFraction::zero(), |total, row| {
+            total.add(&row.probability_ceiling()?)
+        })
 }
 
 fn derive_exact_failure_magnitude_certificate(
@@ -12517,6 +12601,7 @@ fn derive_exact_failure_magnitude_certificate_with_mutation(
     let ExactFailureMagnitudeDerivationInput {
         plan,
         relation_variant,
+        relation_context,
         catalog,
         selected_plan_state_predicate,
         code_state_rows,
@@ -12538,24 +12623,21 @@ fn derive_exact_failure_magnitude_certificate_with_mutation(
     let query_rows =
         derive_exact_query_failure_rows(plan, code_state_rows, aggregate_wide_masking)?;
     let product_challenge_rows =
-        derive_exact_product_challenge_failure_rows(relation_variant, catalog)?;
+        derive_exact_product_challenge_failure_rows(relation_variant, relation_context, catalog)?;
     let extension_field_cardinality = BigUint::from(PROOF_BASE_FIELD_MODULUS).pow(
         u32::try_from(PROOF_CHALLENGE_EXTENSION_DEGREE)
             .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
     );
-    if product_challenge_rows
-        .iter()
-        .any(|row| row.sample_space_denominator != extension_field_cardinality)
-    {
+    if product_challenge_rows.iter().any(|row| {
+        matches!(row.challenge, CommonProofChallenge::Theta { .. })
+            && row.sample_space_denominator != extension_field_cardinality
+    }) {
         return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
     }
     let algebraic_rows =
         derive_exact_algebraic_failure_rows(input, &owner_rows, &product_challenge_rows)?;
     let query_failure_probability_ceiling = sum_query_probability_ceiling(&query_rows)?;
-    let algebraic_failure_probability_ceiling = ExactBigFraction::new(
-        sum_algebraic_numerator(&algebraic_rows),
-        extension_field_cardinality.clone(),
-    )?;
+    let algebraic_failure_probability_ceiling = sum_algebraic_probability_ceiling(&algebraic_rows)?;
     let classical_failure_probability_ceiling =
         query_failure_probability_ceiling.add(&algebraic_failure_probability_ceiling)?;
     let ideal_oracle_penalty = ExactBigFraction::new(
@@ -12631,6 +12713,7 @@ fn validate_exact_failure_magnitude_certificate(
     let ExactFailureMagnitudeDerivationInput {
         plan,
         relation_variant,
+        relation_context,
         catalog,
         selected_plan_state_predicate,
         code_state_rows,
@@ -12644,7 +12727,7 @@ fn validate_exact_failure_magnitude_certificate(
     let expected_query_rows =
         derive_exact_query_failure_rows(plan, code_state_rows, aggregate_wide_masking)?;
     let expected_product_challenge_rows =
-        derive_exact_product_challenge_failure_rows(relation_variant, catalog)?;
+        derive_exact_product_challenge_failure_rows(relation_variant, relation_context, catalog)?;
     let expected_algebraic_rows = derive_exact_algebraic_failure_rows(
         input,
         &expected_owner_rows,
@@ -12655,10 +12738,7 @@ fn validate_exact_failure_magnitude_certificate(
             .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
     );
     let expected_query_ceiling = sum_query_probability_ceiling(&expected_query_rows)?;
-    let expected_algebraic_ceiling = ExactBigFraction::new(
-        sum_algebraic_numerator(&expected_algebraic_rows),
-        expected_extension_field_cardinality.clone(),
-    )?;
+    let expected_algebraic_ceiling = sum_algebraic_probability_ceiling(&expected_algebraic_rows)?;
     let expected_classical_ceiling = expected_query_ceiling.add(&expected_algebraic_ceiling)?;
     let expected_qrom_ceiling = expected_classical_ceiling
         .multiply_integer(&cms19_arithmetic.classical_soundness_multiplier)?
@@ -12745,6 +12825,12 @@ fn checked_exact_failure_magnitude_with_fault(
         }
         ExactFailureMagnitudeFault::ReduceFirstQueryAgreementCeiling => {
             certificate.query_rows[0].agreement_ceiling -= 1;
+        }
+        ExactFailureMagnitudeFault::ChangeFirstProductSampleSpaceDenominator => {
+            certificate.product_challenge_rows[0].sample_space_denominator += BigUint::one();
+        }
+        ExactFailureMagnitudeFault::ChangeFirstAlgebraicDenominator => {
+            certificate.algebraic_rows[0].denominator += BigUint::one();
         }
         ExactFailureMagnitudeFault::DropRelationCompositionOwner => {
             certificate.algebraic_rows[1].owner_kinds.clear();
@@ -13838,6 +13924,153 @@ fn every_width_8_construction_identity_has_a_complete_geometry_certificate() {
         ),
         Err(changed_vss_plan_error),
     );
+}
+
+#[test]
+#[ignore = "owned by test:rust:kernel:theorem-evidence"]
+fn vss_share_linkage_has_a_complete_geometry_certificate() {
+    let _certificate_test_guard = PRODUCTION_GEOMETRY_CERTIFICATE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let artifacts = selected_relation_plans().expect("selected relation plans derive");
+    let artifact = artifacts
+        .iter()
+        .find(|artifact| {
+            artifact.application_statement_schema_identifier()
+                == ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+        })
+        .expect("the selected VSS relation artifact exists");
+    let relation_variant = artifact
+        .compiled_plan()
+        .variants()
+        .first()
+        .expect("the selected VSS relation has one variant");
+    let relation_context = selected_relation_plan_check_context(
+        ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+    )
+    .expect("the selected VSS context exists");
+    let plan = RowCodeWhirConstructionPlan::for_selected_variant(
+        artifact,
+        relation_variant.schedule_position(),
+        relation_variant.top_count(),
+    )
+    .expect("the selected VSS construction derives");
+    let hiding_configuration =
+        super::super::hiding_whir::selected_hiding_whir_config(plan.selected_parameters())
+            .expect("the selected VSS hiding configuration derives");
+    let aggregate_wide_masking = AggregateWideMaskingCertificate::derive(&hiding_configuration)
+        .expect("the selected VSS masking certificate derives");
+    let certificate = checked_row_code_whir_production_geometry_certificate_with_masking(
+        &plan,
+        artifact,
+        relation_variant,
+        &relation_context,
+        &aggregate_wide_masking,
+    )
+    .expect("the VSS production geometry certificate derives");
+    assert!(certificate.is_complete());
+    assert_eq!(
+        certificate.application_statement_schema_identifier,
+        ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+    );
+    assert_eq!(
+        certificate.parameters.logical_polynomials_per_physical_row,
+        8
+    );
+
+    let exact_failure = &certificate.exact_failure_magnitude;
+    let expected_alpha_challenges = relation_variant
+        .ordered_coefficient_local_identity_batches()
+        .iter()
+        .map(|batch| CommonProofChallenge::Alpha {
+            modulus_ordinal: relation_variant
+                .non_native_modulus_ordinal(batch.modulus_reference())
+                .expect("the VSS alpha modulus ordinal derives"),
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        exact_failure.product_challenge_rows.len(),
+        expected_alpha_challenges.len(),
+    );
+    assert_eq!(expected_alpha_challenges.len(), 8);
+    for row in &exact_failure.product_challenge_rows {
+        assert!(expected_alpha_challenges.contains(&row.challenge));
+        let CommonProofChallenge::Alpha { modulus_ordinal } = row.challenge else {
+            panic!("VSS product challenges must all be alpha vectors");
+        };
+        let batch = relation_variant
+            .ordered_coefficient_local_identity_batches()
+            .iter()
+            .find(|batch| {
+                relation_variant
+                    .non_native_modulus_ordinal(batch.modulus_reference())
+                    .ok()
+                    == Some(modulus_ordinal)
+            })
+            .expect("every VSS alpha challenge owns a coefficient-local batch");
+        let expected_modulus = relation_context
+            .resolved_modulus(batch.modulus_reference())
+            .expect("the VSS alpha modulus resolves");
+        assert_eq!(
+            row.ordered_bad_polynomial_degrees.len(),
+            usize::from(relation_context.non_native_alpha_repetition_count),
+        );
+        assert_eq!(
+            row.sample_space_denominator,
+            BigUint::from(expected_modulus).pow(u32::from(
+                relation_context.non_native_alpha_repetition_count
+            )),
+        );
+    }
+    let expected_alpha_probability = sum_product_challenge_probability_ceiling(
+        &exact_failure.product_challenge_rows,
+        |challenge| matches!(challenge, CommonProofChallenge::Alpha { .. }),
+    )
+    .expect("the exact VSS alpha probability derives");
+    let alpha_algebraic_row = exact_failure
+        .algebraic_rows
+        .iter()
+        .find(|row| row.event == ExactAlgebraicFailureEvent::NonNativeAlphaExtraction)
+        .expect("the VSS failure ledger carries its alpha event");
+    assert_eq!(
+        alpha_algebraic_row.probability_ceiling(),
+        Ok(expected_alpha_probability),
+    );
+    assert_eq!(
+        alpha_algebraic_row.theorem_event_count,
+        u64::try_from(expected_alpha_challenges.len()).unwrap(),
+    );
+    assert!(exact_failure.ordinary_family_mass_gate_holds);
+    assert!(exact_failure.transformed_initial_mass_gate_holds);
+    assert!(exact_failure.complete_qrom_mass_gate_holds);
+
+    let catalog = plan
+        .oracle_equation_catalog()
+        .expect("the VSS oracle-equation catalog derives");
+    let failure_input = ExactFailureMagnitudeDerivationInput {
+        plan: &plan,
+        relation_variant,
+        relation_context: &relation_context,
+        catalog: &catalog,
+        selected_plan_state_predicate: &certificate.selected_plan_state_predicate,
+        code_state_rows: &certificate.whir_geometry.code_state_rows,
+        fold_rows: &certificate.whir_geometry.fold_rows,
+        shift_rows: &certificate.whir_geometry.shift_rows,
+        aggregate_wide_masking: &certificate.aggregate_wide_masking,
+        initial_constraint_batch_numerator: certificate.prefix_stacking.scalar_opening_count - 1,
+        logical_verifier_message_count: certificate.logical_verifier_message_count,
+        cms19_arithmetic: &certificate.cms19_arithmetic,
+    };
+    for fault in [
+        ExactFailureMagnitudeFault::ChangeFirstProductSampleSpaceDenominator,
+        ExactFailureMagnitudeFault::ChangeFirstAlgebraicDenominator,
+    ] {
+        assert_eq!(
+            checked_exact_failure_magnitude_with_fault(failure_input, fault),
+            Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence),
+            "the hostile VSS failure-ledger mutation {fault:?} must be rejected",
+        );
+    }
 }
 
 #[test]
@@ -14991,6 +15224,7 @@ fn ballot_width_eight_has_complete_semantic_state_and_database_support() {
     let ballot_failure_input = ExactFailureMagnitudeDerivationInput {
         plan: &plan,
         relation_variant,
+        relation_context: &context,
         catalog: &catalog,
         selected_plan_state_predicate: &selected_plan_state_predicate,
         code_state_rows: &whir_geometry.code_state_rows,
@@ -16089,7 +16323,17 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
             .collect::<Vec<_>>(),
         vec![single_theta_numerator.clone(); 3],
     );
-    let complete_algebraic_numerator = sum_algebraic_numerator(&exact_failure.algebraic_rows);
+    assert!(
+        exact_failure
+            .algebraic_rows
+            .iter()
+            .all(|row| row.denominator == exact_failure.extension_field_cardinality),
+    );
+    let complete_algebraic_numerator = exact_failure
+        .algebraic_rows
+        .iter()
+        .map(|row| row.numerator.clone())
+        .sum::<BigUint>();
     let theta_numerator = BigUint::from(3_u8) * single_theta_numerator;
     assert_eq!(
         &complete_algebraic_numerator - &theta_numerator,
@@ -16163,6 +16407,7 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
                 ExactFailureMagnitudeDerivationInput {
                     plan: &plan,
                     relation_variant: extractor_variant,
+                    relation_context: &extractor_context,
                     catalog: &failure_catalog,
                     selected_plan_state_predicate: &certificate.selected_plan_state_predicate,
                     code_state_rows: &certificate.code_state_rows,
