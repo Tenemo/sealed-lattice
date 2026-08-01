@@ -114,12 +114,13 @@ const privateCursorManifest = (input: {
 const boundaryProfile = (
     orderedPurposes: readonly number[] = [],
     schemaIdentifier = stateSchemaIdentifier,
+    randomUseFamily = proofRandomnessFamily,
 ): CheckpointBoundaryProfile =>
     Object.freeze({
         orderedRandomUses: Object.freeze(
             orderedPurposes.map((purpose) =>
                 Object.freeze({
-                    family: proofRandomnessFamily,
+                    family: randomUseFamily,
                     purpose,
                 }),
             ),
@@ -245,61 +246,81 @@ describe('runtime build checkpoint boundary policy', () => {
         expect(Object.isFrozen(policy)).toBe(true);
     });
 
-    it('accepts an identity-bearing zero-purpose boundary for every public-only proof family', () => {
+    it('binds each public-witness proof family to its construction-hiding cursor before and after first use', () => {
         for (const publicOnlyProofFamily of publicOnlyProofFamilies) {
             const policy = createRuntimeBuildCheckpointBoundaryPolicy({
                 operationKind: publicOnlyProofFamily,
                 orderedBoundaryBindings: Object.freeze([exactBinding()]),
                 runtimeBuildManifest: manifestForOperationProfiles([
                     operationProfile(publicOnlyProofFamily, [
-                        boundaryProfile(),
+                        boundaryProfile(
+                            [4],
+                            stateSchemaIdentifier,
+                            publicOnlyProofFamily,
+                        ),
                     ]),
                 ]),
             });
             const streamAttemptIdentifier = new Uint8Array(32).fill(
                 publicOnlyProofFamily & 0xff,
             );
-            const boundary = createBoundary({
-                cursorManifestBytes: privateCursorManifest({
-                    family: publicOnlyProofFamily,
-                    orderedPurposes: [],
+            for (const orderedPurposes of [[], [4]] as const) {
+                const boundary = createBoundary({
+                    cursorManifestBytes: privateCursorManifest({
+                        family: publicOnlyProofFamily,
+                        orderedPurposes,
+                        streamAttemptIdentifier,
+                    }),
+                    operationKind: publicOnlyProofFamily,
                     streamAttemptIdentifier,
-                }),
-                operationKind: publicOnlyProofFamily,
-                streamAttemptIdentifier,
-            });
+                });
 
-            expect(() => validatePublication(policy, boundary)).not.toThrow();
-            expect(() => validateResume(policy, boundary)).not.toThrow();
+                expect(() =>
+                    validatePublication(policy, boundary),
+                ).not.toThrow();
+                expect(() => validateResume(policy, boundary)).not.toThrow();
+            }
         }
 
         const publicOnlyProofFamily = publicOnlyProofFamilies[0] ?? 0x1213;
-        expect(() =>
-            createRuntimeBuildCheckpointBoundaryPolicy({
-                operationKind: publicOnlyProofFamily,
-                orderedBoundaryBindings: Object.freeze([exactBinding()]),
-                runtimeBuildManifest: manifestForOperationProfiles([
-                    operationProfile(publicOnlyProofFamily, [
-                        boundaryProfile([1]),
+        for (const invalidBoundaryProfile of [
+            boundaryProfile(),
+            boundaryProfile([4]),
+            boundaryProfile([1], stateSchemaIdentifier, publicOnlyProofFamily),
+        ]) {
+            expect(() =>
+                createRuntimeBuildCheckpointBoundaryPolicy({
+                    operationKind: publicOnlyProofFamily,
+                    orderedBoundaryBindings: Object.freeze([exactBinding()]),
+                    runtimeBuildManifest: manifestForOperationProfiles([
+                        operationProfile(publicOnlyProofFamily, [
+                            invalidBoundaryProfile,
+                        ]),
                     ]),
-                ]),
-            }),
-        ).toThrow('Public-only runtime operation');
+                }),
+            ).toThrow(RuntimeBuildCheckpointBoundaryPolicyError);
+        }
     });
 
-    it('refuses mutated public-only family, purpose, attempt, and derivation bindings', () => {
+    it('refuses mutated public-witness family, purpose, attempt, and derivation bindings', () => {
         const publicOnlyProofFamily = publicOnlyProofFamilies[0] ?? 0x1213;
         const policy = createRuntimeBuildCheckpointBoundaryPolicy({
             operationKind: publicOnlyProofFamily,
             orderedBoundaryBindings: Object.freeze([exactBinding()]),
             runtimeBuildManifest: manifestForOperationProfiles([
-                operationProfile(publicOnlyProofFamily, [boundaryProfile()]),
+                operationProfile(publicOnlyProofFamily, [
+                    boundaryProfile(
+                        [4],
+                        stateSchemaIdentifier,
+                        publicOnlyProofFamily,
+                    ),
+                ]),
             ]),
         });
         const streamAttemptIdentifier = new Uint8Array(32).fill(0x64);
         const exactCursorManifest = privateCursorManifest({
             family: publicOnlyProofFamily,
-            orderedPurposes: [],
+            orderedPurposes: [4],
             streamAttemptIdentifier,
         });
 
@@ -311,21 +332,21 @@ describe('runtime build checkpoint boundary policy', () => {
                     streamAttemptIdentifier,
                 }),
             ),
-        ).toThrow('public-only');
+        ).toThrow('random-use profile');
         expect(() =>
             validateResume(
                 policy,
                 createBoundary({
                     cursorManifestBytes: privateCursorManifest({
                         family: publicOnlyProofFamilies[1] ?? 0x1215,
-                        orderedPurposes: [],
+                        orderedPurposes: [4],
                         streamAttemptIdentifier,
                     }),
                     operationKind: publicOnlyProofFamily,
                     streamAttemptIdentifier,
                 }),
             ),
-        ).toThrow('public-only');
+        ).toThrow('random-use profile');
         expect(() =>
             validatePublication(
                 policy,
@@ -693,7 +714,7 @@ describe('runtime build checkpoint boundary policy', () => {
                 operationProfile(otherOperationKind, [boundaryProfile()]),
             ],
             [operationProfile(operationKind, [boundaryProfile([3, 1])])],
-            [operationProfile(operationKind, [boundaryProfile([4])])],
+            [operationProfile(operationKind, [boundaryProfile([5])])],
         ] as const;
 
         for (const operationProfiles of invalidProfileSets) {

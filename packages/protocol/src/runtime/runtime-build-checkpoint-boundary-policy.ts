@@ -316,14 +316,21 @@ const copyExactBoundaryProfiles = (
                 purpose: randomUse.purpose,
             }),
         );
+        const onlyRandomUse = orderedRandomUses[0];
         if (
             isPublicOnlyCommonProofCheckpointFamily(
                 operationProfile.operationKind,
             ) &&
-            orderedRandomUses.length !== 0
+            (orderedRandomUses.length !== 1 ||
+                onlyRandomUse === undefined ||
+                onlyRandomUse.family !== operationProfile.operationKind ||
+                !isAssignedRuntimeCheckpointRandomUse(
+                    onlyRandomUse.family,
+                    onlyRandomUse.purpose,
+                ))
         ) {
             return fail(
-                `Public-only runtime operation ${operationProfile.operationKind} boundary ${safeBoundaryOrdinal} assigns a private-randomness cursor use.`,
+                `Public-witness runtime operation ${operationProfile.operationKind} boundary ${safeBoundaryOrdinal} must assign exactly its construction-hiding cursor use.`,
             );
         }
         if (
@@ -427,19 +434,6 @@ const validateCursorProfile = (
         );
     }
     if (expectedProfile.orderedRandomUses.length === 0) {
-        if (isPublicOnlyCommonProofCheckpointFamily(boundary.operationKind)) {
-            if (
-                !decoded.hasPrivateRandomnessIdentity ||
-                decoded.familySchemaIdentifier !== boundary.operationKind ||
-                decoded.orderedPurposeClasses.length !== 0
-            ) {
-                return fail(
-                    'A public-only checkpoint cursor manifest does not bind its exact operation family with zero private-randomness purposes.',
-                );
-            }
-            validateCursorIdentityBindings(boundary, decoded);
-            return;
-        }
         if (
             decoded.hasPrivateRandomnessIdentity ||
             boundary.privateRandomnessStreamAttemptIdentifier !== undefined

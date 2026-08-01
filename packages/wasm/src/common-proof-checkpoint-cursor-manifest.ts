@@ -1,7 +1,6 @@
 import {
     isAssignedRuntimeCheckpointRandomUse,
     isAssignedRuntimeCheckpointRandomUseFamily,
-    isPublicOnlyCommonProofCheckpointFamily,
 } from './runtime-build-canonical.js';
 
 const checkpointCursorManifestMagic = Uint8Array.of(
@@ -124,22 +123,9 @@ export const decodeCommonProofCheckpointCursorManifest = (
         checkpointCursorManifestFamilyOffset,
         true,
     );
-    const isPublicOnlyCommonProofFamily =
-        isPublicOnlyCommonProofCheckpointFamily(familySchemaIdentifier);
-    if (
-        !isPublicOnlyCommonProofFamily &&
-        !isAssignedRuntimeCheckpointRandomUseFamily(familySchemaIdentifier)
-    ) {
+    if (!isAssignedRuntimeCheckpointRandomUseFamily(familySchemaIdentifier)) {
         return fail(
             'A common-proof checkpoint cursor manifest has an unassigned family.',
-        );
-    }
-    if (
-        isPublicOnlyCommonProofFamily &&
-        (runCount !== 0 || logicalCursorCount !== 0)
-    ) {
-        return fail(
-            'A public-only common-proof checkpoint cursor manifest contains a private-randomness purpose.',
         );
     }
     const derivationBindingHash = manifestBytes.slice(

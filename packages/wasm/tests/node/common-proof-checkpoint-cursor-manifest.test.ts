@@ -145,7 +145,7 @@ describe('common-proof checkpoint cursor manifest', () => {
         );
     });
 
-    it('accepts every assigned public-only family before its first cursor', () => {
+    it('accepts every public-witness family before and after its construction-hiding cursor materializes', () => {
         for (const publicOnlyFamilySchemaIdentifier of [
             0x1213, 0x1215, 0x1218,
         ]) {
@@ -155,34 +155,41 @@ describe('common-proof checkpoint cursor manifest', () => {
             const streamAttemptIdentifier = new Uint8Array(32).fill(
                 (publicOnlyFamilySchemaIdentifier + 1) & 0xff,
             );
-            const manifest = identityManifest({
-                derivationBindingHash,
-                familySchemaIdentifier: publicOnlyFamilySchemaIdentifier,
-                streamAttemptIdentifier,
-            });
-            const decoded = decodeCommonProofCheckpointCursorManifest(manifest);
-            manifest.fill(0);
+            for (const runs of [
+                [],
+                [{ coordinateCount: 1, purposeClass: 4 }],
+            ] as const) {
+                const manifest = identityManifest({
+                    derivationBindingHash,
+                    familySchemaIdentifier: publicOnlyFamilySchemaIdentifier,
+                    runs,
+                    streamAttemptIdentifier,
+                });
+                const decoded =
+                    decodeCommonProofCheckpointCursorManifest(manifest);
+                manifest.fill(0);
 
-            expect(decoded).toMatchObject({
-                familySchemaIdentifier: publicOnlyFamilySchemaIdentifier,
-                hasPrivateRandomnessIdentity: true,
-                orderedPurposeClasses: [],
-            });
-            if (!decoded.hasPrivateRandomnessIdentity) {
-                throw new Error(
-                    'The public-only identity fixture decoded incorrectly.',
+                expect(decoded).toMatchObject({
+                    familySchemaIdentifier: publicOnlyFamilySchemaIdentifier,
+                    hasPrivateRandomnessIdentity: true,
+                    orderedPurposeClasses: runs.length === 0 ? [] : [4],
+                });
+                if (!decoded.hasPrivateRandomnessIdentity) {
+                    throw new Error(
+                        'The public-witness identity fixture decoded incorrectly.',
+                    );
+                }
+                expect(decoded.derivationBindingHash).toEqual(
+                    derivationBindingHash,
                 );
+                expect(
+                    decoded.privateRandomnessStreamAttemptIdentifier,
+                ).toEqual(streamAttemptIdentifier);
             }
-            expect(decoded.derivationBindingHash).toEqual(
-                derivationBindingHash,
-            );
-            expect(decoded.privateRandomnessStreamAttemptIdentifier).toEqual(
-                streamAttemptIdentifier,
-            );
         }
     });
 
-    it('rejects truly unassigned families and public-only cursor purposes', () => {
+    it('rejects truly unassigned families and forbidden public-witness cursor purposes', () => {
         expect(() =>
             decodeCommonProofCheckpointCursorManifest(
                 identityManifest({ familySchemaIdentifier: 0x1210 }),
@@ -200,7 +207,7 @@ describe('common-proof checkpoint cursor manifest', () => {
                         runs: [{ coordinateCount: 1, purposeClass: 1 }],
                     }),
                 ),
-            ).toThrow('public-only');
+            ).toThrow('malformed');
         }
     });
 
@@ -224,6 +231,24 @@ describe('common-proof checkpoint cursor manifest', () => {
             expect(
                 isAssignedRuntimeCheckpointRandomUse(0x2120, invalidPurpose),
             ).toBe(false);
+        }
+        for (const publicOnlyFamilySchemaIdentifier of [
+            0x1213, 0x1215, 0x1218,
+        ]) {
+            expect(
+                isAssignedRuntimeCheckpointRandomUse(
+                    publicOnlyFamilySchemaIdentifier,
+                    4,
+                ),
+            ).toBe(true);
+            for (const forbiddenPurpose of [1, 2, 3, 0xfffe]) {
+                expect(
+                    isAssignedRuntimeCheckpointRandomUse(
+                        publicOnlyFamilySchemaIdentifier,
+                        forbiddenPurpose,
+                    ),
+                ).toBe(false);
+            }
         }
         expect(isAssignedRuntimeCheckpointRandomUse(0x1211, 0xfffe)).toBe(true);
     });
@@ -266,7 +291,7 @@ describe('common-proof checkpoint cursor manifest', () => {
             ],
         });
         const unassignedPurpose = identityManifest({
-            runs: [{ coordinateCount: 1, purposeClass: 4 }],
+            runs: [{ coordinateCount: 1, purposeClass: 5 }],
         });
         const wrongLogicalCount = identityManifest({
             runs: [{ coordinateCount: 2, purposeClass: 1 }],
