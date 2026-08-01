@@ -105,6 +105,91 @@ pub(crate) enum StreamingFoundationHashError {
     ItemLengthOverflow,
     PayloadOverrun,
     PayloadIncomplete,
+    OutputOverrun,
+    OutputIncomplete,
+}
+
+/// Bounded reader for one canonically framed SHAKE256 XOF invocation.
+///
+/// The requested output length is the final typed tuple item, so two logical
+/// verifier messages with different fixed widths cannot share an oracle-query
+/// preimage. Reading in fragments does not start another SHAKE invocation and
+/// never materializes the complete output in memory.
+pub(crate) struct FoundationTupleXofReader {
+    reader: <Shake256 as ExtendableOutput>::Reader,
+    remaining_output_byte_length: usize,
+}
+
+impl FoundationTupleXofReader {
+    pub(crate) fn new(
+        domain: &str,
+        prefix_items: &[CanonicalItem],
+        output_byte_length: usize,
+    ) -> Result<Self, StreamingFoundationHashError> {
+        if output_byte_length == 0 {
+            return Err(StreamingFoundationHashError::OutputIncomplete);
+        }
+        CanonicalItem::nonempty_ascii(domain)
+            .map_err(|_| StreamingFoundationHashError::InvalidDomain)?;
+        let output_byte_length = u64::try_from(output_byte_length)
+            .map_err(|_| StreamingFoundationHashError::ItemLengthOverflow)?;
+        let mut items = Vec::new();
+        items
+            .try_reserve_exact(
+                prefix_items
+                    .len()
+                    .checked_add(1)
+                    .ok_or(StreamingFoundationHashError::ItemCountOverflow)?,
+            )
+            .map_err(|_| StreamingFoundationHashError::ItemCountOverflow)?;
+        items.extend_from_slice(prefix_items);
+        items.push(CanonicalItem::unsigned64(output_byte_length));
+        let hasher = foundation_tuple_hasher(domain, &items)
+            .map_err(|_| StreamingFoundationHashError::ItemLengthOverflow)?;
+        Ok(Self {
+            reader: hasher.finalize_xof(),
+            remaining_output_byte_length: usize::try_from(output_byte_length)
+                .map_err(|_| StreamingFoundationHashError::ItemLengthOverflow)?,
+        })
+    }
+
+    pub(crate) fn read(
+        &mut self,
+        output_fragment: &mut [u8],
+    ) -> Result<(), StreamingFoundationHashError> {
+        if output_fragment.len() > self.remaining_output_byte_length {
+            return Err(StreamingFoundationHashError::OutputOverrun);
+        }
+        self.reader.read(output_fragment);
+        self.remaining_output_byte_length -= output_fragment.len();
+        Ok(())
+    }
+
+    pub(crate) fn discard(
+        &mut self,
+        output_byte_length: usize,
+    ) -> Result<(), StreamingFoundationHashError> {
+        if output_byte_length > self.remaining_output_byte_length {
+            return Err(StreamingFoundationHashError::OutputOverrun);
+        }
+        let mut buffer = [0_u8; 256];
+        let mut remaining = output_byte_length;
+        while remaining > 0 {
+            let fragment_byte_length = remaining.min(buffer.len());
+            self.reader.read(&mut buffer[..fragment_byte_length]);
+            remaining -= fragment_byte_length;
+        }
+        self.remaining_output_byte_length -= output_byte_length;
+        Ok(())
+    }
+
+    pub(crate) fn finish(self) -> Result<(), StreamingFoundationHashError> {
+        if self.remaining_output_byte_length == 0 {
+            Ok(())
+        } else {
+            Err(StreamingFoundationHashError::OutputIncomplete)
+        }
+    }
 }
 
 /// Incremental form of `H_512(domain, prefixItems..., bytes(payload))`.
@@ -289,6 +374,136 @@ mod tests {
             incomplete.finalize(),
             Err(StreamingFoundationHashError::PayloadIncomplete),
         );
+    }
+
+    #[test]
+    fn bounded_xof_reader_matches_one_shot_framing_across_fragmentation() {
+        let domain = "sealed-lattice/test/bounded-xof/v1";
+        let prefix_items = [
+            CanonicalItem::hash512([0x51; 64]),
+            CanonicalItem::nonempty_ascii("aggregate/query-vector").expect("test tag"),
+            CanonicalItem::unsigned32(393),
+        ];
+        let output_byte_length = 1_025_usize;
+        let mut expected_items = prefix_items.to_vec();
+        expected_items.push(CanonicalItem::unsigned64(
+            u64::try_from(output_byte_length).expect("test length fits u64"),
+        ));
+        let mut expected_reader = foundation_tuple_hasher(domain, &expected_items)
+            .expect("one-shot XOF framing")
+            .finalize_xof();
+        let mut expected = vec![0_u8; output_byte_length];
+        expected_reader.read(&mut expected);
+
+        for fragment_byte_length in [1, 7, 63, 64, 65, 256, output_byte_length] {
+            let mut actual_reader =
+                FoundationTupleXofReader::new(domain, &prefix_items, output_byte_length)
+                    .expect("bounded XOF reader initializes");
+            let mut actual = vec![0_u8; output_byte_length];
+            for fragment in actual.chunks_mut(fragment_byte_length) {
+                actual_reader.read(fragment).expect("fragment is in bounds");
+            }
+            actual_reader.finish().expect("all output was consumed");
+            assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    fn bounded_xof_reader_binds_output_width_into_the_oracle_preimage() {
+        let domain = "sealed-lattice/test/bounded-xof-width/v1";
+        let prefix_items = [CanonicalItem::hash512([0x52; 64])];
+        let mut short_reader = FoundationTupleXofReader::new(domain, &prefix_items, 64)
+            .expect("short reader initializes");
+        let mut long_reader = FoundationTupleXofReader::new(domain, &prefix_items, 65)
+            .expect("long reader initializes");
+        let mut short_prefix = [0_u8; 64];
+        let mut long_prefix = [0_u8; 64];
+        short_reader
+            .read(&mut short_prefix)
+            .expect("short output fits");
+        long_reader
+            .read(&mut long_prefix)
+            .expect("long output prefix fits");
+        short_reader.finish().expect("short output is complete");
+        long_reader.discard(1).expect("long suffix fits");
+        long_reader.finish().expect("long output is complete");
+        assert_ne!(short_prefix, long_prefix);
+
+        let mut short_items = prefix_items.to_vec();
+        short_items.push(CanonicalItem::unsigned64(64));
+        let mut long_items = prefix_items.to_vec();
+        long_items.push(CanonicalItem::unsigned64(65));
+        assert_ne!(
+            canonical_foundation_tuple_hash_preimage(domain, &short_items).expect("short preimage"),
+            canonical_foundation_tuple_hash_preimage(domain, &long_items).expect("long preimage"),
+        );
+    }
+
+    #[test]
+    fn bounded_xof_reader_discard_preserves_the_exact_stream_suffix() {
+        let domain = "sealed-lattice/test/bounded-xof-discard/v1";
+        let prefix_items = [CanonicalItem::unsigned64(17)];
+        let output_byte_length = 777_usize;
+        let discarded_prefix_byte_length = 513_usize;
+        let mut complete_reader =
+            FoundationTupleXofReader::new(domain, &prefix_items, output_byte_length)
+                .expect("complete reader initializes");
+        let mut complete_output = vec![0_u8; output_byte_length];
+        complete_reader
+            .read(&mut complete_output)
+            .expect("complete output fits");
+        complete_reader.finish().expect("complete output consumed");
+
+        let mut discarded_reader =
+            FoundationTupleXofReader::new(domain, &prefix_items, output_byte_length)
+                .expect("discarding reader initializes");
+        discarded_reader
+            .discard(discarded_prefix_byte_length)
+            .expect("discarded prefix fits");
+        let mut suffix = vec![0_u8; output_byte_length - discarded_prefix_byte_length];
+        discarded_reader.read(&mut suffix).expect("suffix fits");
+        discarded_reader
+            .finish()
+            .expect("discarded output consumed");
+        assert_eq!(suffix, complete_output[discarded_prefix_byte_length..]);
+    }
+
+    #[test]
+    fn bounded_xof_reader_refuses_zero_width_overrun_and_incomplete_consumption() {
+        assert!(matches!(
+            FoundationTupleXofReader::new("sealed-lattice/test/bounded-xof-errors/v1", &[], 0),
+            Err(StreamingFoundationHashError::OutputIncomplete),
+        ));
+
+        let mut overrun =
+            FoundationTupleXofReader::new("sealed-lattice/test/bounded-xof-errors/v1", &[], 2)
+                .expect("reader initializes");
+        assert_eq!(
+            overrun.read(&mut [0_u8; 3]),
+            Err(StreamingFoundationHashError::OutputOverrun),
+        );
+        assert_eq!(
+            overrun.discard(3),
+            Err(StreamingFoundationHashError::OutputOverrun),
+        );
+
+        let mut incomplete =
+            FoundationTupleXofReader::new("sealed-lattice/test/bounded-xof-errors/v1", &[], 2)
+                .expect("reader initializes");
+        incomplete.read(&mut [0_u8; 1]).expect("prefix fits");
+        assert_eq!(
+            incomplete.finish(),
+            Err(StreamingFoundationHashError::OutputIncomplete),
+        );
+
+        assert!(matches!(
+            FoundationTupleXofReader::new("", &[], 1),
+            Err(StreamingFoundationHashError::InvalidDomain),
+        ));
+        assert!(matches!(
+            FoundationTupleXofReader::new("sealed-lattice/test\n", &[], 1),
+            Err(StreamingFoundationHashError::InvalidDomain),
+        ));
     }
 
     #[test]

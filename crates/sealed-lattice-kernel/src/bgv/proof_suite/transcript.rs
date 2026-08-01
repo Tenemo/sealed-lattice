@@ -7,8 +7,8 @@ use num_traits::One;
 use super::relation_plan::OutOfDomainPointSamplerCardinalityBound;
 
 use crate::foundation::{
-    CanonicalItem, CanonicalItemType, Hash512, StreamingFoundationHashError,
-    StreamingFoundationTupleHash512, hash_foundation_tuple_512,
+    CanonicalItem, CanonicalItemType, FoundationTupleXofReader, Hash512,
+    StreamingFoundationHashError, StreamingFoundationTupleHash512, hash_foundation_tuple_512,
 };
 
 use super::field::{
@@ -24,34 +24,34 @@ pub(crate) const TRANSCRIPT_INITIAL_DOMAIN: &str = "sealed-lattice/proof/transcr
 pub(crate) const TRANSCRIPT_ABSORB_DOMAIN: &str = "sealed-lattice/proof/transcript/absorb/v2";
 pub(crate) const TRANSCRIPT_RESPONSE_ROOT_DOMAIN: &str =
     "sealed-lattice/proof/transcript/response-root/v1";
-pub(crate) const TRANSCRIPT_CHALLENGE_HANDLE_DOMAIN: &str =
-    "sealed-lattice/proof/transcript/challenge-handle/v2";
-pub(crate) const TRANSCRIPT_ACCEPTED_CHALLENGE_DOMAIN: &str =
-    "sealed-lattice/proof/transcript/accepted-challenge/v2";
+pub(crate) const TRANSCRIPT_ATOMIC_CHALLENGE_XOF_DOMAIN: &str =
+    "sealed-lattice/proof/transcript/atomic-challenge-xof/v3";
 pub(crate) const TRANSCRIPT_RESPONSE_BINDING_DOMAIN: &str =
     "sealed-lattice/proof/transcript/response-binding/v2";
-pub(crate) const TRANSCRIPT_CHALLENGE_EXPANSION_ACCUMULATOR_DOMAIN: &str =
-    "sealed-lattice/proof/transcript/challenge-expansion-accumulator/v1";
+pub(crate) const TRANSCRIPT_EMPTY_PROVER_RESPONSE_TAG_SUFFIX: &str = "/empty-prover-response";
+pub(crate) const TRANSCRIPT_EMPTY_PROVER_RESPONSE_ROOT: [u8; Hash512::BYTE_LENGTH] =
+    [0_u8; Hash512::BYTE_LENGTH];
 const TRANSCRIPT_INITIAL_HEADER_TAG: &str = "proof/initial-header/0000";
 
 pub(crate) const TRANSCRIPT_INITIAL_DOMAIN_BYTES: &[u8] = TRANSCRIPT_INITIAL_DOMAIN.as_bytes();
 pub(crate) const TRANSCRIPT_ABSORB_DOMAIN_BYTES: &[u8] = TRANSCRIPT_ABSORB_DOMAIN.as_bytes();
 pub(crate) const TRANSCRIPT_RESPONSE_ROOT_DOMAIN_BYTES: &[u8] =
     TRANSCRIPT_RESPONSE_ROOT_DOMAIN.as_bytes();
-pub(crate) const TRANSCRIPT_CHALLENGE_HANDLE_DOMAIN_BYTES: &[u8] =
-    TRANSCRIPT_CHALLENGE_HANDLE_DOMAIN.as_bytes();
-pub(crate) const TRANSCRIPT_ACCEPTED_CHALLENGE_DOMAIN_BYTES: &[u8] =
-    TRANSCRIPT_ACCEPTED_CHALLENGE_DOMAIN.as_bytes();
+pub(crate) const TRANSCRIPT_ATOMIC_CHALLENGE_XOF_DOMAIN_BYTES: &[u8] =
+    TRANSCRIPT_ATOMIC_CHALLENGE_XOF_DOMAIN.as_bytes();
 pub(crate) const TRANSCRIPT_RESPONSE_BINDING_DOMAIN_BYTES: &[u8] =
     TRANSCRIPT_RESPONSE_BINDING_DOMAIN.as_bytes();
-pub(crate) const TRANSCRIPT_CHALLENGE_EXPANSION_ACCUMULATOR_DOMAIN_BYTES: &[u8] =
-    TRANSCRIPT_CHALLENGE_EXPANSION_ACCUMULATOR_DOMAIN.as_bytes();
+pub(crate) const TRANSCRIPT_EMPTY_PROVER_RESPONSE_TAG_SUFFIX_BYTES: &[u8] =
+    TRANSCRIPT_EMPTY_PROVER_RESPONSE_TAG_SUFFIX.as_bytes();
 
 pub(crate) const PRODUCT_RESIDUE_VECTOR_SAMPLER_TYPE: &str =
-    "sealed-lattice/proof/product-residue-vector/v1";
+    "sealed-lattice/proof/product-residue-vector/v2";
 pub(crate) const DISTINCT_QUERY_VECTOR_SAMPLER_TYPE: &str =
-    "sealed-lattice/proof/distinct-query-vector/v1";
-pub(crate) const FIXED_CHALLENGE_BLOCK_BYTE_LENGTH: usize = Hash512::BYTE_LENGTH;
+    "sealed-lattice/proof/distinct-query-vector/v2";
+pub(crate) const EXTENSION_ELEMENT_SAMPLER_TYPE: &str = "sealed-lattice/proof/extension-element/v2";
+pub(crate) const FIXED_BITS_SAMPLER_TYPE: &str = "sealed-lattice/proof/fixed-bits/v2";
+pub(crate) const EXTENSION_CHALLENGE_CANDIDATE_BYTE_LENGTH: usize = Hash512::BYTE_LENGTH;
+pub(crate) const PRODUCT_RESIDUE_CANDIDATE_ALIGNMENT_BYTE_LENGTH: usize = Hash512::BYTE_LENGTH;
 const COMMON_PROOF_RELATION_PREFIX_SCHEDULE_IDENTITY_ENCODING_VERSION: u16 = 1;
 
 fn transcript_hash(domain: &str, items: Vec<CanonicalItem>) -> Result<[u8; 64], TranscriptError> {
@@ -101,7 +101,8 @@ impl ObservedPublicSamplerRow {
         if modulus <= 1
             || coordinate_count == 0
             || candidate_byte_length == 0
-            || !candidate_byte_length.is_multiple_of(FIXED_CHALLENGE_BLOCK_BYTE_LENGTH as u64)
+            || !candidate_byte_length
+                .is_multiple_of(PRODUCT_RESIDUE_CANDIDATE_ALIGNMENT_BYTE_LENGTH as u64)
             || maximum_candidate_draws_per_output == 0
         {
             return Err(TranscriptError::InvalidCommonProofSchedule);
@@ -189,7 +190,6 @@ pub(crate) struct CanonicalProofTranscript {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct PendingCommonChallenge {
-    candidate_seed: [u8; 64],
     challenge_tag: String,
     canonical_output_bytes: Vec<u8>,
 }
@@ -359,36 +359,58 @@ impl CanonicalProofTranscript {
     fn begin_common_challenge(
         &mut self,
         challenge: CommonProofChallenge,
+        maximum_candidate_draws: u32,
     ) -> Result<CommonChallengeStream, TranscriptError> {
-        self.begin_typed_challenge(challenge.tag(self.application_statement_schema_identifier))
+        self.begin_typed_extension_challenge(
+            challenge.tag(self.application_statement_schema_identifier),
+            maximum_candidate_draws,
+        )
     }
 
-    fn begin_typed_challenge(
+    fn begin_typed_extension_challenge(
         &mut self,
         challenge_tag: String,
+        maximum_candidate_draws: u32,
     ) -> Result<CommonChallengeStream, TranscriptError> {
-        self.close_pending_common_challenge()?;
-        let challenge_seed = transcript_hash(
-            TRANSCRIPT_CHALLENGE_HANDLE_DOMAIN,
+        if maximum_candidate_draws == 0 {
+            return Err(TranscriptError::InvalidCommonProofSchedule);
+        }
+        let output_byte_length = usize::try_from(maximum_candidate_draws)
+            .map_err(|_| TranscriptError::ChallengeCounterOverflow)?
+            .checked_mul(EXTENSION_CHALLENGE_CANDIDATE_BYTE_LENGTH)
+            .ok_or(TranscriptError::ChallengeCounterOverflow)?;
+        self.begin_atomic_challenge(
+            challenge_tag,
+            EXTENSION_ELEMENT_SAMPLER_TYPE,
             vec![
-                CanonicalItem::hash512(self.state),
-                CanonicalItem::nonempty_ascii(&challenge_tag)
-                    .map_err(|_| TranscriptError::CanonicalEncoding)?,
-                CanonicalItem::unsigned64(0),
+                CanonicalItem::unsigned64(PROOF_BASE_FIELD_MODULUS),
+                CanonicalItem::unsigned16(
+                    u16::try_from(PROOF_CHALLENGE_EXTENSION_DEGREE)
+                        .map_err(|_| TranscriptError::ChallengeCounterOverflow)?,
+                ),
+                CanonicalItem::unsigned32(maximum_candidate_draws),
+                CanonicalItem::unsigned64(
+                    u64::try_from(EXTENSION_CHALLENGE_CANDIDATE_BYTE_LENGTH)
+                        .map_err(|_| TranscriptError::ChallengeCounterOverflow)?,
+                ),
             ],
-        )?;
-        Ok(CommonChallengeStream::new(challenge_seed, challenge_tag))
+            output_byte_length,
+            CommonChallengeStreamMode::Extension {
+                maximum_candidate_draws,
+                consumed_candidate_draws: 0,
+                last_candidate_is_decoded: false,
+                accepted: false,
+            },
+        )
     }
 
-    /// Begins one typed product-space verifier message. The fixed-width chain
-    /// handle binds the sampler geometry. Every candidate block advances one
-    /// typed predecessor chain and supplies the bytes for the next draw.
+    /// Begins one typed product-space verifier message. The complete bounded
+    /// draw budget is one fixed-width XOF output and is consumed incrementally.
     fn begin_common_product_residue_challenge(
         &mut self,
         group: CommonProofApplicationChallengeGroup,
         maximum_candidate_draws: u32,
     ) -> Result<CommonChallengeStream, TranscriptError> {
-        self.close_pending_common_challenge()?;
         if !group.challenge.is_application_challenge() || maximum_candidate_draws == 0 {
             return Err(TranscriptError::UnexpectedCommonProofChallenge);
         }
@@ -397,36 +419,39 @@ impl CanonicalProofTranscript {
             .tag(self.application_statement_schema_identifier);
         let candidate_byte_length = usize::try_from(group.candidate_byte_length)
             .map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
-        let chain_handle = transcript_hash(
-            TRANSCRIPT_CHALLENGE_HANDLE_DOMAIN,
+        if candidate_byte_length == 0
+            || !candidate_byte_length
+                .is_multiple_of(PRODUCT_RESIDUE_CANDIDATE_ALIGNMENT_BYTE_LENGTH)
+        {
+            return Err(TranscriptError::InvalidCommonProofSchedule);
+        }
+        let output_byte_length = candidate_byte_length
+            .checked_mul(
+                usize::try_from(maximum_candidate_draws)
+                    .map_err(|_| TranscriptError::ChallengeCounterOverflow)?,
+            )
+            .ok_or(TranscriptError::ChallengeCounterOverflow)?;
+        self.begin_atomic_challenge(
+            challenge_tag,
+            PRODUCT_RESIDUE_VECTOR_SAMPLER_TYPE,
             vec![
-                CanonicalItem::hash512(self.state),
-                CanonicalItem::nonempty_ascii(&challenge_tag)
-                    .map_err(|_| TranscriptError::CanonicalEncoding)?,
-                CanonicalItem::nonempty_ascii(PRODUCT_RESIDUE_VECTOR_SAMPLER_TYPE)
-                    .map_err(|_| TranscriptError::CanonicalEncoding)?,
                 CanonicalItem::unsigned64(group.modulus),
                 CanonicalItem::unsigned16(group.coordinate_count),
                 CanonicalItem::unsigned64(group.candidate_byte_length),
                 CanonicalItem::unsigned32(maximum_candidate_draws),
-                CanonicalItem::unsigned64(FIXED_CHALLENGE_BLOCK_BYTE_LENGTH as u64),
+                CanonicalItem::unsigned64(
+                    u64::try_from(PRODUCT_RESIDUE_CANDIDATE_ALIGNMENT_BYTE_LENGTH)
+                        .map_err(|_| TranscriptError::ChallengeCounterOverflow)?,
+                ),
             ],
-        )?;
-        let candidate_block_count = candidate_byte_length
-            .checked_div(FIXED_CHALLENGE_BLOCK_BYTE_LENGTH)
-            .filter(|block_count| {
-                *block_count > 0
-                    && candidate_byte_length.is_multiple_of(FIXED_CHALLENGE_BLOCK_BYTE_LENGTH)
-            })
-            .ok_or(TranscriptError::InvalidCommonProofSchedule)?;
-        Ok(CommonChallengeStream::new_product(
-            chain_handle,
-            challenge_tag,
-            group,
-            maximum_candidate_draws,
-            u64::try_from(candidate_block_count)
-                .map_err(|_| TranscriptError::ChallengeCounterOverflow)?,
-        ))
+            output_byte_length,
+            CommonChallengeStreamMode::Product {
+                group,
+                maximum_candidate_draws,
+                consumed_candidate_draws: 0,
+                accepted: false,
+            },
+        )
     }
 
     fn begin_distinct_query_challenge(
@@ -436,7 +461,6 @@ impl CanonicalProofTranscript {
         output_count: u32,
         maximum_candidate_draws_per_output: u32,
     ) -> Result<CommonChallengeStream, TranscriptError> {
-        self.close_pending_common_challenge()?;
         if query_domain_cardinality == 0
             || !query_domain_cardinality.is_power_of_two()
             || output_count == 0
@@ -445,36 +469,100 @@ impl CanonicalProofTranscript {
         {
             return Err(TranscriptError::InvalidCommonProofSchedule);
         }
-        let chain_handle = transcript_hash(
-            TRANSCRIPT_CHALLENGE_HANDLE_DOMAIN,
+        let candidate_slot_byte_length = std::mem::size_of::<u64>();
+        let output_byte_length = usize::try_from(output_count)
+            .map_err(|_| TranscriptError::ChallengeCounterOverflow)?
+            .checked_mul(
+                usize::try_from(maximum_candidate_draws_per_output)
+                    .map_err(|_| TranscriptError::ChallengeCounterOverflow)?,
+            )
+            .and_then(|count| count.checked_mul(candidate_slot_byte_length))
+            .ok_or(TranscriptError::ChallengeCounterOverflow)?;
+        self.begin_atomic_challenge(
+            challenge_tag,
+            DISTINCT_QUERY_VECTOR_SAMPLER_TYPE,
             vec![
-                CanonicalItem::hash512(self.state),
-                CanonicalItem::nonempty_ascii(&challenge_tag)
-                    .map_err(|_| TranscriptError::CanonicalEncoding)?,
-                CanonicalItem::nonempty_ascii(DISTINCT_QUERY_VECTOR_SAMPLER_TYPE)
-                    .map_err(|_| TranscriptError::CanonicalEncoding)?,
                 CanonicalItem::unsigned64(query_domain_cardinality),
                 CanonicalItem::unsigned32(output_count),
                 CanonicalItem::unsigned32(maximum_candidate_draws_per_output),
-                CanonicalItem::unsigned64(FIXED_CHALLENGE_BLOCK_BYTE_LENGTH as u64),
+                CanonicalItem::unsigned64(
+                    u64::try_from(candidate_slot_byte_length)
+                        .map_err(|_| TranscriptError::ChallengeCounterOverflow)?,
+                ),
             ],
-        )?;
-        let candidates_per_block = FIXED_CHALLENGE_BLOCK_BYTE_LENGTH
-            .checked_div(std::mem::size_of::<u64>())
-            .filter(|candidate_count| *candidate_count > 0)
-            .ok_or(TranscriptError::InvalidCommonProofSchedule)?;
-        let maximum_block_count_per_output = usize::try_from(maximum_candidate_draws_per_output)
-            .map_err(|_| TranscriptError::ChallengeCounterOverflow)?
-            .div_ceil(candidates_per_block);
-        Ok(CommonChallengeStream::new_distinct(
-            chain_handle,
+            output_byte_length,
+            CommonChallengeStreamMode::Distinct {
+                query_domain_cardinality,
+                output_count,
+                maximum_candidate_draws_per_output,
+                current_output_ordinal: 0,
+                consumed_draws_for_current_output: 0,
+                complete: false,
+            },
+        )
+    }
+
+    fn begin_fixed_bits_challenge(
+        &mut self,
+        challenge_tag: String,
+        bit_count: usize,
+    ) -> Result<CommonChallengeStream, TranscriptError> {
+        if bit_count >= u64::BITS as usize {
+            return Err(TranscriptError::InvalidCommonProofSchedule);
+        }
+        self.begin_atomic_challenge(
             challenge_tag,
-            query_domain_cardinality,
-            output_count,
-            maximum_candidate_draws_per_output,
-            u64::try_from(maximum_block_count_per_output)
-                .map_err(|_| TranscriptError::ChallengeCounterOverflow)?,
-        ))
+            FIXED_BITS_SAMPLER_TYPE,
+            vec![CanonicalItem::unsigned16(
+                u16::try_from(bit_count).map_err(|_| TranscriptError::ChallengeCounterOverflow)?,
+            )],
+            Hash512::BYTE_LENGTH,
+            CommonChallengeStreamMode::FixedBits {
+                bit_count,
+                consumed: false,
+            },
+        )
+    }
+
+    fn begin_atomic_challenge(
+        &mut self,
+        challenge_tag: String,
+        sampler_type: &str,
+        geometry_items: Vec<CanonicalItem>,
+        output_byte_length: usize,
+        mode: CommonChallengeStreamMode,
+    ) -> Result<CommonChallengeStream, TranscriptError> {
+        self.close_pending_common_challenge_with_empty_response()?;
+        let mut prefix_items = Vec::new();
+        prefix_items
+            .try_reserve_exact(
+                geometry_items
+                    .len()
+                    .checked_add(3)
+                    .ok_or(TranscriptError::ChallengeCounterOverflow)?,
+            )
+            .map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
+        prefix_items.push(CanonicalItem::hash512(self.state));
+        prefix_items.push(
+            CanonicalItem::nonempty_ascii(&challenge_tag)
+                .map_err(|_| TranscriptError::CanonicalEncoding)?,
+        );
+        prefix_items.push(
+            CanonicalItem::nonempty_ascii(sampler_type)
+                .map_err(|_| TranscriptError::CanonicalEncoding)?,
+        );
+        prefix_items.extend(geometry_items);
+        let reader = FoundationTupleXofReader::new(
+            TRANSCRIPT_ATOMIC_CHALLENGE_XOF_DOMAIN,
+            &prefix_items,
+            output_byte_length,
+        )
+        .map_err(transcript_streaming_hash_error)?;
+        Ok(CommonChallengeStream {
+            reader,
+            challenge_tag,
+            mode,
+        })
     }
 
     fn finish_common_challenge(
@@ -485,36 +573,36 @@ impl CanonicalProofTranscript {
         if canonical_output_bytes.is_empty() || self.pending_common_challenge.is_some() {
             return Err(TranscriptError::UnexpectedCommonProofChallenge);
         }
-        let (accepted_terminal_seed, challenge_tag) = stream.into_accepted_terminal_seed()?;
+        let challenge_tag = stream.finish()?;
         self.pending_common_challenge = Some(PendingCommonChallenge {
-            candidate_seed: accepted_terminal_seed,
             challenge_tag,
             canonical_output_bytes,
         });
         Ok(())
     }
 
-    fn close_pending_common_challenge(&mut self) -> Result<(), TranscriptError> {
+    fn close_pending_common_challenge_with_empty_response(
+        &mut self,
+    ) -> Result<(), TranscriptError> {
         let Some(pending) = self.pending_common_challenge.take() else {
             return Ok(());
         };
-        let response_tag = format!("{}/accepted", pending.challenge_tag);
-        self.state = transcript_hash(
-            TRANSCRIPT_ACCEPTED_CHALLENGE_DOMAIN,
-            vec![
-                CanonicalItem::hash512(pending.candidate_seed),
-                CanonicalItem::nonempty_ascii(&response_tag)
-                    .map_err(|_| TranscriptError::CanonicalEncoding)?,
-                CanonicalItem::variable_bytes(pending.canonical_output_bytes)
-                    .map_err(|_| TranscriptError::CanonicalEncoding)?,
-            ],
+        let response_tag = format!(
+            "{}{}",
+            pending.challenge_tag, TRANSCRIPT_EMPTY_PROVER_RESPONSE_TAG_SUFFIX
+        );
+        self.state = response_absorption_state(
+            self.state,
+            &response_tag,
+            TRANSCRIPT_EMPTY_PROVER_RESPONSE_ROOT,
         )?;
         Ok(())
     }
 
     fn prepare_typed_response(&mut self, round_tag: &str) -> Result<(), TranscriptError> {
         if self.pending_common_challenge.is_some() {
-            return self.close_pending_common_challenge();
+            self.pending_common_challenge = None;
+            return Ok(());
         }
         let virtual_challenge_tag = format!("{round_tag}/response-binding");
         self.state = transcript_hash(
@@ -872,9 +960,8 @@ pub(crate) struct CommonProofApplicationChallengeSamplerAccounting {
     candidate_byte_length: u64,
     maximum_candidate_draw_count: u32,
     accepted_vector_byte_length: u64,
-    chain_handle_xof_query_count: u64,
-    candidate_xof_query_count_ceiling: u64,
-    total_xof_query_count_ceiling: u64,
+    fixed_xof_output_byte_length: u64,
+    atomic_xof_query_count: u64,
 }
 
 impl CommonProofApplicationChallengeSamplerAccounting {
@@ -903,22 +990,17 @@ impl CommonProofApplicationChallengeSamplerAccounting {
         self.accepted_vector_byte_length
     }
 
-    #[cfg(test)]
-    pub(crate) const fn chain_handle_xof_query_count(self) -> u64 {
-        self.chain_handle_xof_query_count
+    pub(crate) const fn fixed_xof_output_byte_length(self) -> u64 {
+        self.fixed_xof_output_byte_length
     }
 
-    pub(crate) const fn candidate_xof_query_count_ceiling(self) -> u64 {
-        self.candidate_xof_query_count_ceiling
-    }
-
-    pub(crate) const fn total_xof_query_count_ceiling(self) -> u64 {
-        self.total_xof_query_count_ceiling
+    pub(crate) const fn atomic_xof_query_count(self) -> u64 {
+        self.atomic_xof_query_count
     }
 
     #[cfg(test)]
     pub(crate) const fn maximum_oracle_answer_byte_length(self) -> u64 {
-        FIXED_CHALLENGE_BLOCK_BYTE_LENGTH as u64
+        self.fixed_xof_output_byte_length
     }
 }
 
@@ -1155,7 +1237,7 @@ impl CommonProofRelationPrefixSchedule {
                     *challenge,
                     self.maximum_candidate_draws_per_output,
                 )?
-                .total_xof_query_count_ceiling(),
+                .atomic_xof_query_count(),
             )?;
         }
         for _ in &self.ordered_auxiliary_tree_ordinals {
@@ -1254,11 +1336,14 @@ impl TranscriptHashQueryCounter {
         &mut self,
         response_root_is_recomputed: bool,
     ) -> Result<(), TranscriptError> {
-        // One edge either closes the preceding accepted challenge or derives
-        // the cataloged virtual verifier message. The next edge absorbs the
-        // response root. Variable responses additionally recompute their
-        // fixed-width canonical root before that absorption edge.
-        self.add_hash_queries(2 + u64::from(response_root_is_recomputed))?;
+        // A response to a pending verifier challenge needs only its absorption
+        // edge. A response with no pending challenge first derives the
+        // cataloged virtual verifier message. Variable responses additionally
+        // recompute their fixed-width canonical root.
+        let transition_hash_query_count = if self.pending_challenge { 1 } else { 2 };
+        self.add_hash_queries(
+            transition_hash_query_count + u64::from(response_root_is_recomputed),
+        )?;
         self.pending_challenge = false;
         Ok(())
     }
@@ -1290,23 +1375,15 @@ fn application_challenge_sampler_accounting(
     if maximum_candidate_draws == 0 {
         return Err(TranscriptError::InvalidChallengeModulus);
     }
-    let chain_handle_xof_query_count = 1_u64;
-    let candidate_block_count = group
-        .candidate_byte_length
-        .checked_div(FIXED_CHALLENGE_BLOCK_BYTE_LENGTH as u64)
-        .ok_or(TranscriptError::ChallengeCounterOverflow)?;
-    if candidate_block_count == 0
+    if group.candidate_byte_length == 0
         || !group
             .candidate_byte_length
-            .is_multiple_of(FIXED_CHALLENGE_BLOCK_BYTE_LENGTH as u64)
+            .is_multiple_of(PRODUCT_RESIDUE_CANDIDATE_ALIGNMENT_BYTE_LENGTH as u64)
     {
         return Err(TranscriptError::InvalidCommonProofSchedule);
     }
-    let candidate_xof_query_count_ceiling = u64::from(maximum_candidate_draws)
-        .checked_mul(candidate_block_count)
-        .ok_or(TranscriptError::ChallengeCounterOverflow)?;
-    let total_xof_query_count_ceiling = candidate_xof_query_count_ceiling
-        .checked_add(chain_handle_xof_query_count)
+    let fixed_xof_output_byte_length = u64::from(maximum_candidate_draws)
+        .checked_mul(group.candidate_byte_length)
         .ok_or(TranscriptError::ChallengeCounterOverflow)?;
     let accepted_vector_byte_length = u64::from(group.coordinate_count)
         .checked_mul(
@@ -1321,9 +1398,8 @@ fn application_challenge_sampler_accounting(
         candidate_byte_length: group.candidate_byte_length,
         maximum_candidate_draw_count: maximum_candidate_draws,
         accepted_vector_byte_length,
-        chain_handle_xof_query_count,
-        candidate_xof_query_count_ceiling,
-        total_xof_query_count_ceiling,
+        fixed_xof_output_byte_length,
+        atomic_xof_query_count: 1,
     })
 }
 
@@ -1341,7 +1417,7 @@ fn product_residue_candidate_byte_length(
         .checked_add(7)
         .and_then(|length| length.checked_div(8))
         .ok_or(TranscriptError::ChallengeCounterOverflow)?;
-    let fixed_block_byte_length = u64::try_from(FIXED_CHALLENGE_BLOCK_BYTE_LENGTH)
+    let fixed_block_byte_length = u64::try_from(PRODUCT_RESIDUE_CANDIDATE_ALIGNMENT_BYTE_LENGTH)
         .map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
     let candidate_block_count = minimum_candidate_byte_length
         .checked_add(fixed_block_byte_length - 1)
@@ -1355,47 +1431,6 @@ fn product_residue_candidate_byte_length(
     .map_err(|_| TranscriptError::ChallengeCounterOverflow)
 }
 
-fn product_residue_candidate_block_input(
-    previous_chain_state: [u8; Hash512::BYTE_LENGTH],
-    candidate_ordinal: u64,
-    block_ordinal: u64,
-) -> Result<Vec<CanonicalItem>, TranscriptError> {
-    challenge_expansion_block_input(
-        previous_chain_state,
-        PRODUCT_RESIDUE_VECTOR_SAMPLER_TYPE,
-        candidate_ordinal,
-        block_ordinal,
-    )
-}
-
-fn product_residue_candidate_block(
-    previous_chain_state: [u8; Hash512::BYTE_LENGTH],
-    candidate_ordinal: u64,
-    block_ordinal: u64,
-) -> Result<[u8; Hash512::BYTE_LENGTH], TranscriptError> {
-    transcript_hash(
-        TRANSCRIPT_CHALLENGE_EXPANSION_ACCUMULATOR_DOMAIN,
-        product_residue_candidate_block_input(
-            previous_chain_state,
-            candidate_ordinal,
-            block_ordinal,
-        )?,
-    )
-}
-
-fn distinct_query_block_input(
-    previous_chain_state: [u8; Hash512::BYTE_LENGTH],
-    output_ordinal: u64,
-    block_ordinal: u64,
-) -> Result<Vec<CanonicalItem>, TranscriptError> {
-    challenge_expansion_block_input(
-        previous_chain_state,
-        DISTINCT_QUERY_VECTOR_SAMPLER_TYPE,
-        output_ordinal,
-        block_ordinal,
-    )
-}
-
 fn distinct_query_challenge_hash_count(
     output_count: u32,
     maximum_candidate_draws_per_output: u32,
@@ -1403,29 +1438,14 @@ fn distinct_query_challenge_hash_count(
     if output_count == 0 || maximum_candidate_draws_per_output == 0 {
         return Err(TranscriptError::InvalidCommonProofSchedule);
     }
-    let candidates_per_block =
-        u64::try_from(FIXED_CHALLENGE_BLOCK_BYTE_LENGTH / std::mem::size_of::<u64>())
-            .map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
-    let block_count_per_output = u64::from(maximum_candidate_draws_per_output)
-        .checked_add(candidates_per_block - 1)
-        .and_then(|count| count.checked_div(candidates_per_block))
-        .ok_or(TranscriptError::ChallengeCounterOverflow)?;
-    let maximum_block_count = u64::from(output_count)
-        .checked_mul(block_count_per_output)
-        .ok_or(TranscriptError::ChallengeCounterOverflow)?;
-    maximum_block_count
-        .checked_add(1)
-        .ok_or(TranscriptError::ChallengeCounterOverflow)
+    Ok(1)
 }
 
 fn sample_distinct_query_positions_from_transcript_blocks(
     stream: &mut CommonChallengeStream,
 ) -> Result<Vec<u64>, TranscriptError> {
-    let (query_domain_cardinality, output_count, maximum_candidate_draws_per_output) = stream
-        .expansion_accumulator
-        .as_ref()
-        .ok_or(TranscriptError::UnexpectedCommonProofChallenge)?
-        .distinct_sampling_geometry()?;
+    let (query_domain_cardinality, output_count, maximum_candidate_draws_per_output) =
+        stream.distinct_sampling_geometry()?;
     if query_domain_cardinality == 0
         || !query_domain_cardinality.is_power_of_two()
         || output_count == 0
@@ -1444,27 +1464,9 @@ fn sample_distinct_query_positions_from_transcript_blocks(
         )
         .map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
     for output_ordinal in 0..output_count {
-        let mut block = [0_u8; FIXED_CHALLENGE_BLOCK_BYTE_LENGTH];
-        let mut block_offset = block.len();
-        let mut block_ordinal = 0_u64;
         let mut accepted_index = None;
         for _ in 0..maximum_candidate_draws_per_output {
-            if block_offset == block.len() {
-                block = stream.derive_distinct_query_block(output_ordinal, block_ordinal)?;
-                block_ordinal = block_ordinal
-                    .checked_add(1)
-                    .ok_or(TranscriptError::ChallengeCounterOverflow)?;
-                block_offset = 0;
-            }
-            let candidate_end = block_offset
-                .checked_add(std::mem::size_of::<u64>())
-                .ok_or(TranscriptError::ChallengeCounterOverflow)?;
-            let candidate = u64::from_le_bytes(
-                block[block_offset..candidate_end]
-                    .try_into()
-                    .map_err(|_| TranscriptError::ChallengeCounterOverflow)?,
-            ) & candidate_mask;
-            block_offset = candidate_end;
+            let candidate = stream.sample_distinct_candidate(output_ordinal)? & candidate_mask;
             if accepted_set.insert(candidate) {
                 accepted_index = Some(candidate);
                 break;
@@ -1483,16 +1485,7 @@ fn maximum_extension_challenge_hash_count(
     if maximum_candidate_draws == 0 {
         return Err(TranscriptError::InvalidChallengeModulus);
     }
-    maximum_rejection_chain_hash_count(maximum_candidate_draws)
-}
-
-fn maximum_rejection_chain_hash_count(
-    maximum_candidate_draws: u32,
-) -> Result<u64, TranscriptError> {
-    u64::from(maximum_candidate_draws)
-        .checked_mul(2)
-        .and_then(|count| count.checked_sub(1))
-        .ok_or(TranscriptError::ChallengeCounterOverflow)
+    Ok(1)
 }
 
 fn strictly_increasing(values: &[u16]) -> bool {
@@ -1923,7 +1916,7 @@ impl CommonProofTranscript {
                 self.relation_prefix_schedule
                     .maximum_candidate_draws_per_output,
             )?
-            .total_xof_query_count_ceiling(),
+            .atomic_xof_query_count(),
         )?;
         #[cfg(test)]
         self.record_public_sampler_row(observed_sampler_row)?;
@@ -2109,14 +2102,19 @@ impl CommonProofTranscript {
     {
         #[cfg(test)]
         let observed_sampler_row = self.traced_extension_sampler_row(challenge)?;
-        let mut stream = self.transcript.begin_common_challenge(challenge)?;
-        for draw_ordinal in 0..self
+        let mut stream = self.transcript.begin_common_challenge(
+            challenge,
+            self.relation_prefix_schedule
+                .maximum_candidate_draws_per_output,
+        )?;
+        for _ in 0..self
             .relation_prefix_schedule
             .maximum_candidate_draws_per_output
         {
             if let Some(candidate) = stream.sample_extension_candidate()?
                 && !is_forbidden(candidate)
             {
+                stream.accept_extension_candidate()?;
                 let mut canonical_output_bytes = Vec::with_capacity(
                     PROOF_CHALLENGE_EXTENSION_DEGREE * std::mem::size_of::<u64>(),
                 );
@@ -2133,13 +2131,6 @@ impl CommonProofTranscript {
                 #[cfg(test)]
                 self.record_public_sampler_row(observed_sampler_row)?;
                 return Ok(candidate);
-            }
-            if draw_ordinal + 1
-                < self
-                    .relation_prefix_schedule
-                    .maximum_candidate_draws_per_output
-            {
-                stream.reject_current_candidate()?;
             }
         }
         Err(TranscriptError::CommonChallengeDrawsExhausted)
@@ -2207,11 +2198,11 @@ enum RowCodeWhirProgress {
     Complete,
 }
 
-const ROW_CODE_WHIR_TRANSCRIPT_CURSOR_MAGIC: &[u8; 8] = b"SLXTCU02";
-const ROW_CODE_WHIR_TRANSCRIPT_CURSOR_VERSION: u16 = 2;
+const ROW_CODE_WHIR_TRANSCRIPT_CURSOR_MAGIC: &[u8; 8] = b"SLXTCU03";
+const ROW_CODE_WHIR_TRANSCRIPT_CURSOR_VERSION: u16 = 3;
 const MAXIMUM_ROW_CODE_WHIR_TRANSCRIPT_CURSOR_BYTE_LENGTH: usize = 16 * 1024;
 const ROW_CODE_WHIR_TRANSCRIPT_CURSOR_DIGEST_DOMAIN: &str =
-    "sealed-lattice/proof/transcript/checkpoint-cursor/v2";
+    "sealed-lattice/proof/transcript/checkpoint-cursor/v3";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RowCodeWhirTranscriptCheckpointSnapshot {
@@ -2377,7 +2368,6 @@ fn encode_row_code_whir_transcript_checkpoint_snapshot(
     bytes.extend_from_slice(&snapshot.next_whir_bit_challenge_ordinal.to_le_bytes());
     bytes.push(u8::from(snapshot.pending_common_challenge.is_some()));
     if let Some(pending) = &snapshot.pending_common_challenge {
-        bytes.extend_from_slice(&pending.candidate_seed);
         bytes.extend_from_slice(&pending_tag_byte_length.to_le_bytes());
         bytes.extend_from_slice(pending.challenge_tag.as_bytes());
         bytes.extend_from_slice(&pending_output_byte_length.to_le_bytes());
@@ -2443,7 +2433,6 @@ fn decode_row_code_whir_transcript_checkpoint_snapshot(
     let next_whir_challenge_ordinal = decoder.read_u32()?;
     let next_whir_bit_challenge_ordinal = decoder.read_u32()?;
     let pending_common_challenge = if decoder.read_bool()? {
-        let candidate_seed = decoder.read_array()?;
         let challenge_tag_byte_length = usize::from(decoder.read_u16()?);
         let challenge_tag_bytes = decoder.read_bytes(challenge_tag_byte_length)?;
         let challenge_tag = String::from_utf8(challenge_tag_bytes.to_vec())
@@ -2458,7 +2447,6 @@ fn decode_row_code_whir_transcript_checkpoint_snapshot(
         }
         let canonical_output_bytes = decoder.read_bytes(canonical_output_byte_length)?.to_vec();
         Some(PendingCommonChallenge {
-            candidate_seed,
             challenge_tag,
             canonical_output_bytes,
         })
@@ -3660,14 +3648,8 @@ impl RowCodeWhirTranscript {
             .checked_add(1)
             .ok_or(TranscriptError::ChallengeCounterOverflow)?;
         let tag = format!("row-code-whir/whir-bits/{challenge_ordinal:08x}/{bits:04x}");
-        let stream = self.transcript.begin_typed_challenge(tag)?;
-        let bytes: [u8; std::mem::size_of::<u64>()] = stream.current_candidate_seed
-            [..std::mem::size_of::<u64>()]
-            .try_into()
-            .map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
-        let mask = if bits == 0 { 0 } else { (1_u64 << bits) - 1 };
-        let sampled = usize::try_from(u64::from_le_bytes(bytes) & mask)
-            .map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
+        let mut stream = self.transcript.begin_fixed_bits_challenge(tag, bits)?;
+        let sampled = stream.sample_fixed_bits()?;
         self.transcript
             .finish_common_challenge(stream, (sampled as u64).to_le_bytes().to_vec())?;
         self.hash_query_counter.begin_challenge(1)?;
@@ -3821,9 +3803,13 @@ impl RowCodeWhirTranscript {
         } else {
             None
         };
-        let mut stream = self.transcript.begin_typed_challenge(challenge_tag)?;
-        for draw_ordinal in 0..self.maximum_candidate_draws_per_output {
+        let mut stream = self.transcript.begin_typed_extension_challenge(
+            challenge_tag,
+            self.maximum_candidate_draws_per_output,
+        )?;
+        for _ in 0..self.maximum_candidate_draws_per_output {
             if let Some(candidate) = stream.sample_extension_candidate()? {
+                stream.accept_extension_candidate()?;
                 let mut canonical_output_bytes = Vec::with_capacity(
                     PROOF_CHALLENGE_EXTENSION_DEGREE * std::mem::size_of::<u64>(),
                 );
@@ -3840,142 +3826,70 @@ impl RowCodeWhirTranscript {
                 self.record_public_sampler_row(observed_sampler_row)?;
                 return Ok(candidate);
             }
-            if draw_ordinal + 1 < self.maximum_candidate_draws_per_output {
-                stream.reject_current_candidate()?;
-            }
         }
         Err(TranscriptError::CommonChallengeDrawsExhausted)
     }
 }
 
 struct CommonChallengeStream {
-    current_candidate_seed: [u8; 64],
+    reader: FoundationTupleXofReader,
     challenge_tag: String,
-    next_draw_ordinal: Option<u64>,
-    expansion_accumulator: Option<ChallengeExpansionAccumulator>,
+    mode: CommonChallengeStreamMode,
 }
 
-impl CommonChallengeStream {
-    fn new(challenge_seed: [u8; 64], challenge_tag: String) -> Self {
-        Self {
-            current_candidate_seed: challenge_seed,
-            challenge_tag,
-            next_draw_ordinal: Some(1),
-            expansion_accumulator: None,
-        }
-    }
-
-    fn new_product(
-        chain_handle: [u8; 64],
-        challenge_tag: String,
+enum CommonChallengeStreamMode {
+    Extension {
+        maximum_candidate_draws: u32,
+        consumed_candidate_draws: u32,
+        last_candidate_is_decoded: bool,
+        accepted: bool,
+    },
+    Product {
         group: CommonProofApplicationChallengeGroup,
         maximum_candidate_draws: u32,
-        block_count_per_candidate: u64,
-    ) -> Self {
-        Self {
-            current_candidate_seed: chain_handle,
-            challenge_tag,
-            next_draw_ordinal: None,
-            expansion_accumulator: Some(ChallengeExpansionAccumulator::new_product(
-                group,
-                maximum_candidate_draws,
-                block_count_per_candidate,
-            )),
-        }
-    }
-
-    fn new_distinct(
-        chain_handle: [u8; 64],
-        challenge_tag: String,
+        consumed_candidate_draws: u32,
+        accepted: bool,
+    },
+    Distinct {
         query_domain_cardinality: u64,
         output_count: u32,
         maximum_candidate_draws_per_output: u32,
-        maximum_block_count_per_output: u64,
-    ) -> Self {
-        Self {
-            current_candidate_seed: chain_handle,
-            challenge_tag,
-            next_draw_ordinal: None,
-            expansion_accumulator: Some(ChallengeExpansionAccumulator::new_distinct(
+        current_output_ordinal: u32,
+        consumed_draws_for_current_output: u32,
+        complete: bool,
+    },
+    FixedBits {
+        bit_count: usize,
+        consumed: bool,
+    },
+}
+
+impl CommonChallengeStream {
+    fn extension_sampling_geometry(&self) -> Result<(u32, u32), TranscriptError> {
+        match self.mode {
+            CommonChallengeStreamMode::Extension {
+                maximum_candidate_draws,
+                consumed_candidate_draws,
+                ..
+            } => Ok((maximum_candidate_draws, consumed_candidate_draws)),
+            _ => Err(TranscriptError::UnexpectedCommonProofChallenge),
+        }
+    }
+
+    fn distinct_sampling_geometry(&self) -> Result<(u64, u32, u32), TranscriptError> {
+        match self.mode {
+            CommonChallengeStreamMode::Distinct {
                 query_domain_cardinality,
                 output_count,
                 maximum_candidate_draws_per_output,
-                maximum_block_count_per_output,
+                ..
+            } => Ok((
+                query_domain_cardinality,
+                output_count,
+                maximum_candidate_draws_per_output,
             )),
+            _ => Err(TranscriptError::UnexpectedCommonProofChallenge),
         }
-    }
-
-    fn into_accepted_terminal_seed(self) -> Result<([u8; 64], String), TranscriptError> {
-        let terminal_seed = match self.expansion_accumulator {
-            Some(accumulator) => {
-                accumulator.ensure_complete()?;
-                self.current_candidate_seed
-            }
-            None => self.current_candidate_seed,
-        };
-        Ok((terminal_seed, self.challenge_tag))
-    }
-
-    fn derive_product_residue_candidate(
-        &mut self,
-        candidate_ordinal: u64,
-        candidate_byte_length: usize,
-    ) -> Result<Vec<u8>, TranscriptError> {
-        let (group, _) = self
-            .expansion_accumulator
-            .as_ref()
-            .ok_or(TranscriptError::UnexpectedCommonProofChallenge)?
-            .product_sampling_geometry()?;
-        let bound_candidate_byte_length = usize::try_from(group.candidate_byte_length)
-            .map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
-        if candidate_byte_length == 0
-            || candidate_byte_length != bound_candidate_byte_length
-            || !candidate_byte_length.is_multiple_of(FIXED_CHALLENGE_BLOCK_BYTE_LENGTH)
-        {
-            return Err(TranscriptError::InvalidChallengeModulus);
-        }
-        let block_count = candidate_byte_length / FIXED_CHALLENGE_BLOCK_BYTE_LENGTH;
-        let mut candidate_bytes = Vec::new();
-        candidate_bytes
-            .try_reserve_exact(candidate_byte_length)
-            .map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
-        for block_index in 0..block_count {
-            let block_ordinal = u64::try_from(block_index)
-                .map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
-            let block = self
-                .expansion_accumulator
-                .as_mut()
-                .ok_or(TranscriptError::UnexpectedCommonProofChallenge)?
-                .derive_product_block(
-                    self.current_candidate_seed,
-                    candidate_ordinal,
-                    block_ordinal,
-                )?;
-            self.current_candidate_seed = block;
-            candidate_bytes.extend_from_slice(&block);
-        }
-        Ok(candidate_bytes)
-    }
-
-    fn derive_distinct_query_block(
-        &mut self,
-        output_ordinal: u32,
-        block_ordinal: u64,
-    ) -> Result<[u8; 64], TranscriptError> {
-        let block = self
-            .expansion_accumulator
-            .as_mut()
-            .ok_or(TranscriptError::UnexpectedCommonProofChallenge)?
-            .derive_distinct_block(self.current_candidate_seed, output_ordinal, block_ordinal)?;
-        self.current_candidate_seed = block;
-        Ok(block)
-    }
-
-    fn finish_distinct_output(&mut self, output_ordinal: u32) -> Result<(), TranscriptError> {
-        self.expansion_accumulator
-            .as_mut()
-            .ok_or(TranscriptError::UnexpectedCommonProofChallenge)?
-            .finish_distinct_output(output_ordinal)
     }
 
     /// Samples one uniform vector from `Z_modulus^coordinate_count` as one
@@ -3984,32 +3898,46 @@ impl CommonChallengeStream {
     /// Rejection occurs against the complete product cardinality before the
     /// accepted residue is decoded into base-`modulus` coordinates.
     fn sample_residue_vector(&mut self) -> Result<Vec<u64>, TranscriptError> {
-        let (group, maximum_candidate_draws) = self
-            .expansion_accumulator
-            .as_ref()
-            .ok_or(TranscriptError::UnexpectedCommonProofChallenge)?
-            .product_sampling_geometry()?;
+        let (group, maximum_candidate_draws, consumed_candidate_draws, accepted) = match self.mode {
+            CommonChallengeStreamMode::Product {
+                group,
+                maximum_candidate_draws,
+                consumed_candidate_draws,
+                accepted,
+            } => (
+                group,
+                maximum_candidate_draws,
+                consumed_candidate_draws,
+                accepted,
+            ),
+            _ => return Err(TranscriptError::UnexpectedCommonProofChallenge),
+        };
         if group.modulus <= 1 || group.coordinate_count == 0 || maximum_candidate_draws == 0 {
             return Err(TranscriptError::InvalidChallengeModulus);
         }
+        if consumed_candidate_draws != 0 || accepted {
+            return Err(TranscriptError::UnexpectedCommonProofChallenge);
+        }
         let candidate_byte_length = usize::try_from(group.candidate_byte_length)
             .map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
-        for candidate_ordinal in 0..maximum_candidate_draws {
-            let candidate_bytes = self.derive_product_residue_candidate(
-                u64::from(candidate_ordinal),
-                candidate_byte_length,
-            )?;
+        let mut candidate_bytes = vec![0_u8; candidate_byte_length];
+        for candidate_draw_count in 1..=maximum_candidate_draws {
+            self.reader
+                .read(&mut candidate_bytes)
+                .map_err(transcript_streaming_hash_error)?;
+            let CommonChallengeStreamMode::Product {
+                consumed_candidate_draws,
+                accepted,
+                ..
+            } = &mut self.mode
+            else {
+                return Err(TranscriptError::UnexpectedCommonProofChallenge);
+            };
+            *consumed_candidate_draws = candidate_draw_count;
             if let Some(coordinates) = decode_product_residue_candidate(&candidate_bytes, group)? {
-                self.expansion_accumulator
-                    .as_mut()
-                    .ok_or(TranscriptError::UnexpectedCommonProofChallenge)?
-                    .finish_product_candidate(u64::from(candidate_ordinal), true)?;
+                *accepted = true;
                 return Ok(coordinates);
             }
-            self.expansion_accumulator
-                .as_mut()
-                .ok_or(TranscriptError::UnexpectedCommonProofChallenge)?
-                .finish_product_candidate(u64::from(candidate_ordinal), false)?;
         }
         Err(TranscriptError::CommonChallengeDrawsExhausted)
     }
@@ -4019,8 +3947,23 @@ impl CommonChallengeStream {
     /// rejection is performed once against the extension cardinality. A
     /// caller's draw ceiling therefore bounds the whole logical output.
     fn sample_extension_candidate(
-        &self,
+        &mut self,
     ) -> Result<Option<ProofChallengeExtensionElement>, TranscriptError> {
+        let (maximum_candidate_draws, consumed_candidate_draws) =
+            self.extension_sampling_geometry()?;
+        if consumed_candidate_draws >= maximum_candidate_draws {
+            return Err(TranscriptError::CommonChallengeDrawsExhausted);
+        }
+        if matches!(
+            self.mode,
+            CommonChallengeStreamMode::Extension { accepted: true, .. }
+        ) {
+            return Err(TranscriptError::UnexpectedCommonProofChallenge);
+        }
+        let mut candidate_bytes = [0_u8; EXTENSION_CHALLENGE_CANDIDATE_BYTE_LENGTH];
+        self.reader
+            .read(&mut candidate_bytes)
+            .map_err(transcript_streaming_hash_error)?;
         let base_field_modulus = BigUint::from(PROOF_BASE_FIELD_MODULUS);
         let extension_cardinality = base_field_modulus.pow(
             u32::try_from(PROOF_CHALLENGE_EXTENSION_DEGREE)
@@ -4028,317 +3971,233 @@ impl CommonChallengeStream {
         );
         let sample_space = BigUint::one() << 512_usize;
         let acceptance_limit = (&sample_space / &extension_cardinality) * &extension_cardinality;
-        let candidate = BigUint::from_bytes_le(&self.current_candidate_seed);
-        if candidate >= acceptance_limit {
-            return Ok(None);
-        }
-
-        let mut residue = candidate % &extension_cardinality;
-        let mut coordinates = [0_u64; PROOF_CHALLENGE_EXTENSION_DEGREE];
-        for coordinate in &mut coordinates {
-            *coordinate = u64::try_from(&residue % &base_field_modulus)
-                .map_err(|_| TranscriptError::InvalidChallengeModulus)?;
-            residue /= &base_field_modulus;
-        }
-        if residue != BigUint::default() {
-            return Err(TranscriptError::InvalidChallengeModulus);
-        }
-        ProofChallengeExtensionElement::from_canonical_coordinates(coordinates)
-            .map(Some)
-            .map_err(|_| TranscriptError::InvalidChallengeModulus)
-    }
-
-    fn reject_current_candidate(&mut self) -> Result<(), TranscriptError> {
-        let response_tag = format!("{}/rejected", self.challenge_tag);
-        let rejection_state = transcript_hash(
-            TRANSCRIPT_ABSORB_DOMAIN,
-            vec![
-                CanonicalItem::hash512(self.current_candidate_seed),
-                CanonicalItem::nonempty_ascii(&response_tag)
-                    .map_err(|_| TranscriptError::CanonicalEncoding)?,
-            ],
-        )?;
-        let draw_ordinal = self
-            .next_draw_ordinal
-            .ok_or(TranscriptError::ChallengeCounterOverflow)?;
-        self.current_candidate_seed = transcript_hash(
-            TRANSCRIPT_CHALLENGE_HANDLE_DOMAIN,
-            vec![
-                CanonicalItem::hash512(rejection_state),
-                CanonicalItem::nonempty_ascii(&self.challenge_tag)
-                    .map_err(|_| TranscriptError::CanonicalEncoding)?,
-                CanonicalItem::unsigned64(draw_ordinal),
-            ],
-        )?;
-        self.next_draw_ordinal = draw_ordinal.checked_add(1);
-        Ok(())
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct ChallengeExpansionAccumulator {
-    progress: ChallengeExpansionProgress,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum ChallengeExpansionProgress {
-    Product {
-        group: CommonProofApplicationChallengeGroup,
-        maximum_candidate_draws: u32,
-        block_count_per_candidate: u64,
-        current_candidate_ordinal: u64,
-        next_block_ordinal: u64,
-        awaiting_candidate_outcome: bool,
-        accepted: bool,
-    },
-    Distinct {
-        query_domain_cardinality: u64,
-        output_count: u32,
-        maximum_candidate_draws_per_output: u32,
-        maximum_block_count_per_output: u64,
-        current_output_ordinal: u32,
-        next_block_ordinal: u64,
-        current_output_has_block: bool,
-        complete: bool,
-    },
-}
-
-impl ChallengeExpansionAccumulator {
-    fn new_product(
-        group: CommonProofApplicationChallengeGroup,
-        maximum_candidate_draws: u32,
-        block_count_per_candidate: u64,
-    ) -> Self {
-        Self {
-            progress: ChallengeExpansionProgress::Product {
-                group,
-                maximum_candidate_draws,
-                block_count_per_candidate,
-                current_candidate_ordinal: 0,
-                next_block_ordinal: 0,
-                awaiting_candidate_outcome: false,
-                accepted: false,
-            },
-        }
-    }
-
-    fn new_distinct(
-        query_domain_cardinality: u64,
-        output_count: u32,
-        maximum_candidate_draws_per_output: u32,
-        maximum_block_count_per_output: u64,
-    ) -> Self {
-        Self {
-            progress: ChallengeExpansionProgress::Distinct {
-                query_domain_cardinality,
-                output_count,
-                maximum_candidate_draws_per_output,
-                maximum_block_count_per_output,
-                current_output_ordinal: 0,
-                next_block_ordinal: 0,
-                current_output_has_block: false,
-                complete: false,
-            },
-        }
-    }
-
-    fn product_sampling_geometry(
-        &self,
-    ) -> Result<(CommonProofApplicationChallengeGroup, u32), TranscriptError> {
-        match &self.progress {
-            ChallengeExpansionProgress::Product {
-                group,
-                maximum_candidate_draws,
-                ..
-            } => Ok((*group, *maximum_candidate_draws)),
-            ChallengeExpansionProgress::Distinct { .. } => {
-                Err(TranscriptError::UnexpectedCommonProofChallenge)
+        let candidate = BigUint::from_bytes_le(&candidate_bytes);
+        let decoded = if candidate >= acceptance_limit {
+            None
+        } else {
+            let mut residue = candidate % &extension_cardinality;
+            let mut coordinates = [0_u64; PROOF_CHALLENGE_EXTENSION_DEGREE];
+            for coordinate in &mut coordinates {
+                *coordinate = u64::try_from(&residue % &base_field_modulus)
+                    .map_err(|_| TranscriptError::InvalidChallengeModulus)?;
+                residue /= &base_field_modulus;
             }
-        }
-    }
-
-    fn distinct_sampling_geometry(&self) -> Result<(u64, u32, u32), TranscriptError> {
-        match &self.progress {
-            ChallengeExpansionProgress::Distinct {
-                query_domain_cardinality,
-                output_count,
-                maximum_candidate_draws_per_output,
-                ..
-            } => Ok((
-                *query_domain_cardinality,
-                *output_count,
-                *maximum_candidate_draws_per_output,
-            )),
-            ChallengeExpansionProgress::Product { .. } => {
-                Err(TranscriptError::UnexpectedCommonProofChallenge)
+            if residue != BigUint::default() {
+                return Err(TranscriptError::InvalidChallengeModulus);
             }
-        }
-    }
-
-    fn derive_product_block(
-        &mut self,
-        previous_chain_state: [u8; 64],
-        candidate_ordinal: u64,
-        block_ordinal: u64,
-    ) -> Result<[u8; 64], TranscriptError> {
-        let ChallengeExpansionProgress::Product {
-            maximum_candidate_draws,
-            block_count_per_candidate,
-            current_candidate_ordinal,
-            next_block_ordinal,
-            awaiting_candidate_outcome,
-            accepted,
+            Some(
+                ProofChallengeExtensionElement::from_canonical_coordinates(coordinates)
+                    .map_err(|_| TranscriptError::InvalidChallengeModulus)?,
+            )
+        };
+        let CommonChallengeStreamMode::Extension {
+            consumed_candidate_draws,
+            last_candidate_is_decoded,
             ..
-        } = &mut self.progress
+        } = &mut self.mode
         else {
             return Err(TranscriptError::UnexpectedCommonProofChallenge);
         };
-        if *accepted
-            || *awaiting_candidate_outcome
-            || candidate_ordinal >= u64::from(*maximum_candidate_draws)
-            || *block_count_per_candidate == 0
-            || candidate_ordinal != *current_candidate_ordinal
-            || block_ordinal != *next_block_ordinal
-            || block_ordinal >= *block_count_per_candidate
-        {
-            return Err(TranscriptError::UnexpectedCommonProofChallenge);
-        }
-        let block = product_residue_candidate_block(
-            previous_chain_state,
-            candidate_ordinal,
-            block_ordinal,
-        )?;
-        *next_block_ordinal = next_block_ordinal
+        *consumed_candidate_draws = consumed_candidate_draws
             .checked_add(1)
             .ok_or(TranscriptError::ChallengeCounterOverflow)?;
-        if *next_block_ordinal == *block_count_per_candidate {
-            *awaiting_candidate_outcome = true;
-        }
-        Ok(block)
+        *last_candidate_is_decoded = decoded.is_some();
+        Ok(decoded)
     }
 
-    fn finish_product_candidate(
-        &mut self,
-        candidate_ordinal: u64,
-        accepted_candidate: bool,
-    ) -> Result<(), TranscriptError> {
-        let ChallengeExpansionProgress::Product {
-            current_candidate_ordinal,
-            next_block_ordinal,
-            awaiting_candidate_outcome,
+    fn accept_extension_candidate(&mut self) -> Result<(), TranscriptError> {
+        let CommonChallengeStreamMode::Extension {
+            last_candidate_is_decoded,
             accepted,
             ..
-        } = &mut self.progress
+        } = &mut self.mode
         else {
             return Err(TranscriptError::UnexpectedCommonProofChallenge);
         };
-        if *accepted
-            || !*awaiting_candidate_outcome
-            || candidate_ordinal != *current_candidate_ordinal
-        {
+        if !*last_candidate_is_decoded || *accepted {
             return Err(TranscriptError::UnexpectedCommonProofChallenge);
         }
-        if accepted_candidate {
-            *accepted = true;
-        } else {
-            *current_candidate_ordinal = current_candidate_ordinal
-                .checked_add(1)
-                .ok_or(TranscriptError::ChallengeCounterOverflow)?;
-            *next_block_ordinal = 0;
-            *awaiting_candidate_outcome = false;
-        }
+        *accepted = true;
         Ok(())
     }
 
-    fn derive_distinct_block(
-        &mut self,
-        previous_chain_state: [u8; 64],
-        output_ordinal: u32,
-        block_ordinal: u64,
-    ) -> Result<[u8; 64], TranscriptError> {
-        let ChallengeExpansionProgress::Distinct {
-            maximum_block_count_per_output,
+    fn sample_distinct_candidate(&mut self, output_ordinal: u32) -> Result<u64, TranscriptError> {
+        let CommonChallengeStreamMode::Distinct {
+            maximum_candidate_draws_per_output,
             current_output_ordinal,
-            next_block_ordinal,
-            current_output_has_block,
+            consumed_draws_for_current_output,
             complete,
             ..
-        } = &mut self.progress
+        } = &self.mode
         else {
             return Err(TranscriptError::UnexpectedCommonProofChallenge);
         };
         if *complete
-            || *maximum_block_count_per_output == 0
             || output_ordinal != *current_output_ordinal
-            || block_ordinal != *next_block_ordinal
-            || block_ordinal >= *maximum_block_count_per_output
+            || *consumed_draws_for_current_output >= *maximum_candidate_draws_per_output
         {
             return Err(TranscriptError::UnexpectedCommonProofChallenge);
         }
-        let block = transcript_hash(
-            TRANSCRIPT_CHALLENGE_EXPANSION_ACCUMULATOR_DOMAIN,
-            distinct_query_block_input(
-                previous_chain_state,
-                u64::from(output_ordinal),
-                block_ordinal,
-            )?,
-        )?;
-        *next_block_ordinal = next_block_ordinal
-            .checked_add(1)
-            .ok_or(TranscriptError::ChallengeCounterOverflow)?;
-        *current_output_has_block = true;
-        Ok(block)
-    }
-
-    fn finish_distinct_output(&mut self, output_ordinal: u32) -> Result<(), TranscriptError> {
-        let ChallengeExpansionProgress::Distinct {
-            output_count,
-            current_output_ordinal,
-            next_block_ordinal,
-            current_output_has_block,
-            complete,
+        let mut candidate_bytes = [0_u8; std::mem::size_of::<u64>()];
+        self.reader
+            .read(&mut candidate_bytes)
+            .map_err(transcript_streaming_hash_error)?;
+        let CommonChallengeStreamMode::Distinct {
+            consumed_draws_for_current_output,
             ..
-        } = &mut self.progress
+        } = &mut self.mode
         else {
             return Err(TranscriptError::UnexpectedCommonProofChallenge);
         };
-        if *complete || !*current_output_has_block || output_ordinal != *current_output_ordinal {
+        *consumed_draws_for_current_output = consumed_draws_for_current_output
+            .checked_add(1)
+            .ok_or(TranscriptError::ChallengeCounterOverflow)?;
+        Ok(u64::from_le_bytes(candidate_bytes))
+    }
+
+    fn finish_distinct_output(&mut self, output_ordinal: u32) -> Result<(), TranscriptError> {
+        let CommonChallengeStreamMode::Distinct {
+            maximum_candidate_draws_per_output,
+            current_output_ordinal,
+            consumed_draws_for_current_output,
+            complete,
+            ..
+        } = &self.mode
+        else {
+            return Err(TranscriptError::UnexpectedCommonProofChallenge);
+        };
+        if *complete
+            || output_ordinal != *current_output_ordinal
+            || *consumed_draws_for_current_output == 0
+        {
             return Err(TranscriptError::UnexpectedCommonProofChallenge);
         }
+        let remaining_draw_count = maximum_candidate_draws_per_output
+            .checked_sub(*consumed_draws_for_current_output)
+            .ok_or(TranscriptError::ChallengeCounterOverflow)?;
+        let remaining_byte_length = usize::try_from(remaining_draw_count)
+            .map_err(|_| TranscriptError::ChallengeCounterOverflow)?
+            .checked_mul(std::mem::size_of::<u64>())
+            .ok_or(TranscriptError::ChallengeCounterOverflow)?;
+        self.reader
+            .discard(remaining_byte_length)
+            .map_err(transcript_streaming_hash_error)?;
+        let CommonChallengeStreamMode::Distinct {
+            output_count,
+            current_output_ordinal,
+            consumed_draws_for_current_output,
+            complete,
+            ..
+        } = &mut self.mode
+        else {
+            return Err(TranscriptError::UnexpectedCommonProofChallenge);
+        };
         *current_output_ordinal = current_output_ordinal
             .checked_add(1)
             .ok_or(TranscriptError::ChallengeCounterOverflow)?;
-        *next_block_ordinal = 0;
-        *current_output_has_block = false;
+        *consumed_draws_for_current_output = 0;
         *complete = *current_output_ordinal == *output_count;
         Ok(())
     }
 
-    fn ensure_complete(self) -> Result<(), TranscriptError> {
-        let complete = match self.progress {
-            ChallengeExpansionProgress::Product { accepted, .. } => accepted,
-            ChallengeExpansionProgress::Distinct { complete, .. } => complete,
+    fn sample_fixed_bits(&mut self) -> Result<usize, TranscriptError> {
+        let CommonChallengeStreamMode::FixedBits {
+            bit_count,
+            consumed,
+        } = self.mode
+        else {
+            return Err(TranscriptError::UnexpectedCommonProofChallenge);
         };
-        if !complete {
+        if consumed {
             return Err(TranscriptError::UnexpectedCommonProofChallenge);
         }
-        Ok(())
+        let mut candidate_bytes = [0_u8; std::mem::size_of::<u64>()];
+        self.reader
+            .read(&mut candidate_bytes)
+            .map_err(transcript_streaming_hash_error)?;
+        self.reader
+            .discard(Hash512::BYTE_LENGTH - candidate_bytes.len())
+            .map_err(transcript_streaming_hash_error)?;
+        let mask = if bit_count == 0 {
+            0
+        } else {
+            (1_u64 << bit_count) - 1
+        };
+        let sampled = usize::try_from(u64::from_le_bytes(candidate_bytes) & mask)
+            .map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
+        let CommonChallengeStreamMode::FixedBits { consumed, .. } = &mut self.mode else {
+            return Err(TranscriptError::UnexpectedCommonProofChallenge);
+        };
+        *consumed = true;
+        Ok(sampled)
     }
-}
 
-fn challenge_expansion_block_input(
-    previous_chain_state: [u8; 64],
-    sampler_type: &str,
-    candidate_or_output_ordinal: u64,
-    block_ordinal: u64,
-) -> Result<Vec<CanonicalItem>, TranscriptError> {
-    Ok(vec![
-        CanonicalItem::hash512(previous_chain_state),
-        CanonicalItem::nonempty_ascii(sampler_type)
-            .map_err(|_| TranscriptError::CanonicalEncoding)?,
-        CanonicalItem::unsigned64(candidate_or_output_ordinal),
-        CanonicalItem::unsigned64(block_ordinal),
-    ])
+    fn finish(self) -> Result<String, TranscriptError> {
+        let Self {
+            mut reader,
+            challenge_tag,
+            mode,
+        } = self;
+        match mode {
+            CommonChallengeStreamMode::Extension {
+                maximum_candidate_draws,
+                consumed_candidate_draws,
+                accepted,
+                ..
+            } => {
+                if !accepted {
+                    return Err(TranscriptError::UnexpectedCommonProofChallenge);
+                }
+                let remaining_draw_count = maximum_candidate_draws
+                    .checked_sub(consumed_candidate_draws)
+                    .ok_or(TranscriptError::ChallengeCounterOverflow)?;
+                reader
+                    .discard(
+                        usize::try_from(remaining_draw_count)
+                            .map_err(|_| TranscriptError::ChallengeCounterOverflow)?
+                            .checked_mul(EXTENSION_CHALLENGE_CANDIDATE_BYTE_LENGTH)
+                            .ok_or(TranscriptError::ChallengeCounterOverflow)?,
+                    )
+                    .map_err(transcript_streaming_hash_error)?;
+            }
+            CommonChallengeStreamMode::Product {
+                group,
+                maximum_candidate_draws,
+                consumed_candidate_draws,
+                accepted,
+            } => {
+                if !accepted {
+                    return Err(TranscriptError::UnexpectedCommonProofChallenge);
+                }
+                let remaining_draw_count = maximum_candidate_draws
+                    .checked_sub(consumed_candidate_draws)
+                    .ok_or(TranscriptError::ChallengeCounterOverflow)?;
+                reader
+                    .discard(
+                        usize::try_from(remaining_draw_count)
+                            .map_err(|_| TranscriptError::ChallengeCounterOverflow)?
+                            .checked_mul(
+                                usize::try_from(group.candidate_byte_length)
+                                    .map_err(|_| TranscriptError::ChallengeCounterOverflow)?,
+                            )
+                            .ok_or(TranscriptError::ChallengeCounterOverflow)?,
+                    )
+                    .map_err(transcript_streaming_hash_error)?;
+            }
+            CommonChallengeStreamMode::Distinct { complete, .. } => {
+                if !complete {
+                    return Err(TranscriptError::UnexpectedCommonProofChallenge);
+                }
+            }
+            CommonChallengeStreamMode::FixedBits { consumed, .. } => {
+                if !consumed {
+                    return Err(TranscriptError::UnexpectedCommonProofChallenge);
+                }
+            }
+        }
+        reader.finish().map_err(transcript_streaming_hash_error)?;
+        Ok(challenge_tag)
+    }
 }
 
 fn decode_product_residue_candidate(

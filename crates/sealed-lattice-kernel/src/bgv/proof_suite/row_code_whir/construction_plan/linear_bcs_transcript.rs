@@ -1,26 +1,26 @@
 //! Original-BCS strong-state correspondence derived from the checked
 //! construction plan.
 //!
-//! The live sampler uses one typed hash edge per expansion block; that answer
-//! is both the sampled block and the next predecessor. Sampler blocks therefore
-//! do not acquire a synthetic second prover-root absorption edge. Fully
+//! Every live logical challenge is one fixed-width XOF answer. The deployed
+//! implementation streams that answer in fixed candidate slots without
+//! changing its single oracle-query identity. Consecutive verifier messages
+//! receive the deployed deterministic empty-prover response; a following real
+//! prover message supplies the response for the pending challenge. Fully
 //! transported messages use their deployed framed 512-bit response digest;
-//! this plan never invents a parallel Merkle tree for those bytes. Supplied
-//! polynomial-oracle roots remain bound to their production commitment and
-//! compact-opening geometry.
+//! this plan never invents a parallel Merkle tree for those bytes.
 
 use super::*;
 use crate::bgv::proof_suite::PROOF_CHALLENGE_EXTENSION_DEGREE;
 use crate::hashing::hash_framed_parts_512;
 
-const LINEAR_BCS_TRANSCRIPT_PLAN_ENCODING_VERSION: u16 = 5;
-const LINEAR_BCS_ORACLE_VALUE_BYTE_LENGTH: usize = 64;
+const LINEAR_BCS_TRANSCRIPT_PLAN_ENCODING_VERSION: u16 = 7;
+const LINEAR_BCS_ORACLE_ADDRESS_BYTE_LENGTH: usize = 64;
 const LINEAR_BCS_TRANSCRIPT_PLAN_HASH_DOMAIN: &str =
-    "sealed-lattice/proof/row-code-whir/linear-bcs-transcript-plan/v5";
+    "sealed-lattice/proof/row-code-whir/linear-bcs-transcript-plan/v7";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::bgv::proof_suite) enum LinearBcsChallengeSelectionRule {
-    FirstAcceptedInCompleteFixedBlockRange,
+    FirstAcceptedInCompleteFixedSlotRange,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,9 +76,9 @@ pub(in crate::bgv::proof_suite) enum LinearBcsProverOracleRoot {
         value_count: usize,
         canonical_message_byte_length: usize,
     },
-    OneEdgeSamplerBlock {
+    CanonicalFinalProofStreamDigest,
+    DeterministicEmptyProverResponse {
         source_operation_ordinal: u32,
-        first_block_ordinal: u64,
     },
 }
 
@@ -108,7 +108,8 @@ impl LinearBcsProverOracleRoot {
                     return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
                 }
             }
-            Self::OneEdgeSamplerBlock { .. } => {}
+            Self::CanonicalFinalProofStreamDigest => {}
+            Self::DeterministicEmptyProverResponse { .. } => {}
         }
         Ok(())
     }
@@ -119,13 +120,9 @@ pub(in crate::bgv::proof_suite) enum LinearBcsVerifierMessageRole {
     UnusedRoundMessageBeforeProverOracle {
         source_operation_ordinal: u32,
     },
-    SamplerPrefixBlock {
+    AtomicChallenge {
         source_operation_ordinal: u32,
-        first_block_ordinal: u64,
-    },
-    SamplerTerminalBlock {
-        source_operation_ordinal: u32,
-        block_ordinal: u64,
+        output_byte_length: u64,
     },
 }
 
@@ -135,6 +132,7 @@ pub(in crate::bgv::proof_suite) struct LinearBcsRoundRangePlan {
     pub(in crate::bgv::proof_suite) round_count: u64,
     pub(in crate::bgv::proof_suite) verifier_message_role: LinearBcsVerifierMessageRole,
     pub(in crate::bgv::proof_suite) prover_oracle_root: LinearBcsProverOracleRoot,
+    pub(in crate::bgv::proof_suite) response_operation_ordinal: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -181,20 +179,14 @@ impl LinearBcsTranscriptPlan {
         })
     }
 
-    /// Counts only the live typed chain edges represented by this candidate
-    /// correspondence. A prover-oracle round has the two ordinary response
-    /// edges; a sampler block has exactly one expansion edge. There is no
-    /// synthetic terminal query or fixed-continuation absorption.
+    /// Counts the live typed chain edges represented by this correspondence.
+    /// Every BCS round has one verifier-message query and one prover-response
+    /// absorption. Canonical complete-message digests are counted separately.
     pub(in crate::bgv::proof_suite) fn chain_hash_query_count(
         &self,
     ) -> Result<u64, RowCodeWhirConstructionPlanError> {
         self.round_ranges.iter().try_fold(0_u64, |total, range| {
-            let hashes_per_entry = match range.prover_oracle_root {
-                LinearBcsProverOracleRoot::OneEdgeSamplerBlock { .. } => 1_u64,
-                LinearBcsProverOracleRoot::SuppliedCommitment { .. }
-                | LinearBcsProverOracleRoot::CanonicalCompleteMessageDigest { .. } => 2_u64,
-            };
-            let range_hashes = hashes_per_entry
+            let range_hashes = 2_u64
                 .checked_mul(range.round_count)
                 .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?;
             total
@@ -210,6 +202,7 @@ impl LinearBcsTranscriptPlan {
             if matches!(
                 range.prover_oracle_root,
                 LinearBcsProverOracleRoot::CanonicalCompleteMessageDigest { .. }
+                    | LinearBcsProverOracleRoot::CanonicalFinalProofStreamDigest
             ) {
                 total
                     .checked_add(range.round_count)
@@ -235,13 +228,13 @@ impl LinearBcsTranscriptPlan {
             })
     }
 
-    pub(in crate::bgv::proof_suite) fn one_edge_sampler_block_count(
+    pub(in crate::bgv::proof_suite) fn atomic_challenge_message_count(
         &self,
     ) -> Result<u64, RowCodeWhirConstructionPlanError> {
         self.round_ranges.iter().try_fold(0_u64, |total, range| {
             if matches!(
-                range.prover_oracle_root,
-                LinearBcsProverOracleRoot::OneEdgeSamplerBlock { .. }
+                range.verifier_message_role,
+                LinearBcsVerifierMessageRole::AtomicChallenge { .. }
             ) {
                 total
                     .checked_add(range.round_count)
@@ -258,9 +251,9 @@ impl LinearBcsTranscriptPlan {
         validate_linear_bcs_transcript_plan(self)?;
         let mut encoder = RowCodeWhirConstructionPlanIdentityEncoder::default();
         encoder.push_u16(LINEAR_BCS_TRANSCRIPT_PLAN_ENCODING_VERSION);
-        encoder.push_usize(LINEAR_BCS_ORACLE_VALUE_BYTE_LENGTH)?;
+        encoder.push_usize(LINEAR_BCS_ORACLE_ADDRESS_BYTE_LENGTH)?;
         encoder.push_u16(match self.challenge_selection_rule {
-            LinearBcsChallengeSelectionRule::FirstAcceptedInCompleteFixedBlockRange => 1,
+            LinearBcsChallengeSelectionRule::FirstAcceptedInCompleteFixedSlotRange => 1,
         });
         encoder.push_length(self.round_ranges.len())?;
         for range in &self.round_ranges {
@@ -268,6 +261,7 @@ impl LinearBcsTranscriptPlan {
             encoder.push_u64(range.round_count);
             encode_verifier_message_role(&mut encoder, range.verifier_message_role);
             encode_prover_oracle_root(&mut encoder, range.prover_oracle_root)?;
+            encoder.push_u32(range.response_operation_ordinal);
         }
         encoder.push_length(self.supplied_commitment_openings.len())?;
         for opening in &self.supplied_commitment_openings {
@@ -303,6 +297,21 @@ impl LinearBcsTranscriptPlan {
     }
 }
 
+pub(in crate::bgv::proof_suite) fn checked_linear_bcs_transcript_plan_hash_from_parts(
+    round_ranges: &[LinearBcsRoundRangePlan],
+    supplied_commitment_openings: &[LinearBcsSuppliedCommitmentOpeningPlan],
+    final_query: LinearBcsFinalQueryPlan,
+    challenge_selection_rule: LinearBcsChallengeSelectionRule,
+) -> Result<[u8; 64], RowCodeWhirConstructionPlanError> {
+    LinearBcsTranscriptPlan {
+        round_ranges: round_ranges.to_vec(),
+        supplied_commitment_openings: supplied_commitment_openings.to_vec(),
+        final_query,
+        challenge_selection_rule,
+    }
+    .canonical_hash()
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LinearBcsSemanticStep {
     ProverOracle {
@@ -311,33 +320,48 @@ enum LinearBcsSemanticStep {
     },
     Sampler {
         source_operation_ordinal: u32,
-        fixed_block_count: u64,
+        output_byte_length: u64,
     },
 }
 
 pub(in crate::bgv::proof_suite) fn linear_bcs_round_ordinal_encoding(
     round_ordinal: u64,
-) -> Result<[u8; LINEAR_BCS_ORACLE_VALUE_BYTE_LENGTH], RowCodeWhirConstructionPlanError> {
+) -> Result<[u8; LINEAR_BCS_ORACLE_ADDRESS_BYTE_LENGTH], RowCodeWhirConstructionPlanError> {
     if round_ordinal == 0 {
         return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
     }
-    let mut encoded = [0_u8; LINEAR_BCS_ORACLE_VALUE_BYTE_LENGTH];
-    encoded[..8].copy_from_slice(b"SLXBCS01");
+    let mut encoded = [0_u8; LINEAR_BCS_ORACLE_ADDRESS_BYTE_LENGTH];
+    encoded[..8].copy_from_slice(b"SLXBCS02");
     encoded[8] = 1;
     encoded[16..24].copy_from_slice(&round_ordinal.to_le_bytes());
     Ok(encoded)
 }
 
-pub(in crate::bgv::proof_suite) fn linear_bcs_sampler_block_address_encoding(
+pub(in crate::bgv::proof_suite) fn linear_bcs_atomic_challenge_address_encoding(
     source_operation_ordinal: u32,
-    block_ordinal: u64,
-) -> [u8; LINEAR_BCS_ORACLE_VALUE_BYTE_LENGTH] {
-    let mut encoded = [0_u8; LINEAR_BCS_ORACLE_VALUE_BYTE_LENGTH];
-    encoded[..8].copy_from_slice(b"SLXBCS01");
+    output_byte_length: u64,
+) -> [u8; LINEAR_BCS_ORACLE_ADDRESS_BYTE_LENGTH] {
+    let mut encoded = [0_u8; LINEAR_BCS_ORACLE_ADDRESS_BYTE_LENGTH];
+    encoded[..8].copy_from_slice(b"SLXBCS02");
     encoded[8] = 2;
     encoded[12..16].copy_from_slice(&source_operation_ordinal.to_le_bytes());
-    encoded[16..24].copy_from_slice(&block_ordinal.to_le_bytes());
+    encoded[16..24].copy_from_slice(&output_byte_length.to_le_bytes());
     encoded
+}
+
+pub(in crate::bgv::proof_suite) fn linear_bcs_response_address_encoding(
+    round_ordinal: u64,
+    response_operation_ordinal: u32,
+) -> Result<[u8; LINEAR_BCS_ORACLE_ADDRESS_BYTE_LENGTH], RowCodeWhirConstructionPlanError> {
+    if round_ordinal == 0 {
+        return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
+    }
+    let mut encoded = [0_u8; LINEAR_BCS_ORACLE_ADDRESS_BYTE_LENGTH];
+    encoded[..8].copy_from_slice(b"SLXBCS02");
+    encoded[8] = 3;
+    encoded[12..16].copy_from_slice(&response_operation_ordinal.to_le_bytes());
+    encoded[16..24].copy_from_slice(&round_ordinal.to_le_bytes());
+    Ok(encoded)
 }
 
 pub(in crate::bgv::proof_suite) fn derive_linear_bcs_transcript_plan(
@@ -347,6 +371,9 @@ pub(in crate::bgv::proof_suite) fn derive_linear_bcs_transcript_plan(
     let mut semantic_steps = Vec::new();
     let mut saw_terminal_marker = false;
     for operation in source_catalog.operations.iter().skip(1) {
+        if saw_terminal_marker {
+            return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
+        }
         let source_operation_ordinal = operation.operation_ordinal;
         let semantic_step = match &operation.kind {
             RowCodeWhirOracleEquationOperationKind::InitialTranscript => {
@@ -362,7 +389,7 @@ pub(in crate::bgv::proof_suite) fn derive_linear_bcs_transcript_plan(
             | RowCodeWhirOracleEquationOperationKind::CommonExtensionChallenge(_) => {
                 Some(LinearBcsSemanticStep::Sampler {
                     source_operation_ordinal,
-                    fixed_block_count: fixed_sampler_block_count(operation)?,
+                    output_byte_length: atomic_challenge_output_byte_length(operation)?,
                 })
             }
             RowCodeWhirOracleEquationOperationKind::RowCodeWhir {
@@ -371,22 +398,17 @@ pub(in crate::bgv::proof_suite) fn derive_linear_bcs_transcript_plan(
             } => match transcript_operation {
                 RowCodeWhirTranscriptOperation::ObserveMaskEvaluations { value_count }
                 | RowCodeWhirTranscriptOperation::ObserveExtensionValues { value_count, .. } => {
-                    if matches!(
-                        transcript_operation,
-                        RowCodeWhirTranscriptOperation::ObserveExtensionValues {
-                            role: RowCodeWhirObservationRole::OpeningPoint { .. },
-                            ..
-                        }
-                    ) {
-                        None
-                    } else {
-                        Some(LinearBcsSemanticStep::ProverOracle {
-                            source_operation_ordinal,
-                            root: canonical_extension_message_root(*value_count)?,
-                        })
-                    }
+                    Some(LinearBcsSemanticStep::ProverOracle {
+                        source_operation_ordinal,
+                        root: canonical_extension_message_root(*value_count)?,
+                    })
                 }
-                RowCodeWhirTranscriptOperation::ObserveProtocolSchedule { .. } => None,
+                RowCodeWhirTranscriptOperation::ObserveProtocolSchedule { canonical_values } => {
+                    Some(LinearBcsSemanticStep::ProverOracle {
+                        source_operation_ordinal,
+                        root: canonical_extension_message_root(canonical_values.len())?,
+                    })
+                }
                 RowCodeWhirTranscriptOperation::ObserveCommitment { role } => {
                     Some(LinearBcsSemanticStep::ProverOracle {
                         source_operation_ordinal,
@@ -397,21 +419,18 @@ pub(in crate::bgv::proof_suite) fn derive_linear_bcs_transcript_plan(
                 | RowCodeWhirTranscriptOperation::SampleDistinctIndices { .. } => {
                     Some(LinearBcsSemanticStep::Sampler {
                         source_operation_ordinal,
-                        fixed_block_count: fixed_sampler_block_count(operation)?,
+                        output_byte_length: atomic_challenge_output_byte_length(operation)?,
                     })
                 }
                 RowCodeWhirTranscriptOperation::FinishProofStream => {
-                    if saw_terminal_marker {
-                        return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
-                    }
                     saw_terminal_marker = true;
-                    None
+                    Some(LinearBcsSemanticStep::ProverOracle {
+                        source_operation_ordinal,
+                        root: LinearBcsProverOracleRoot::CanonicalFinalProofStreamDigest,
+                    })
                 }
             },
         };
-        if saw_terminal_marker && semantic_step.is_some() {
-            return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
-        }
         if let Some(semantic_step) = semantic_step {
             semantic_steps.push(semantic_step);
         }
@@ -422,57 +441,59 @@ pub(in crate::bgv::proof_suite) fn derive_linear_bcs_transcript_plan(
 
     let mut round_ranges = Vec::new();
     let mut next_round_ordinal = 1_u64;
+    let mut pending_challenge = None::<(u32, u64)>;
     for semantic_step in semantic_steps {
         match semantic_step {
             LinearBcsSemanticStep::ProverOracle {
                 source_operation_ordinal,
                 root,
-            } => push_round_range(
-                &mut round_ranges,
-                &mut next_round_ordinal,
-                1,
-                LinearBcsVerifierMessageRole::UnusedRoundMessageBeforeProverOracle {
-                    source_operation_ordinal,
-                },
-                root,
-            )?,
-            LinearBcsSemanticStep::Sampler {
-                source_operation_ordinal,
-                fixed_block_count,
             } => {
-                let prefix_block_count = fixed_block_count
-                    .checked_sub(1)
-                    .ok_or(RowCodeWhirConstructionPlanError::InvalidVariantGeometry)?;
-                if prefix_block_count > 0 {
-                    push_round_range(
-                        &mut round_ranges,
-                        &mut next_round_ordinal,
-                        prefix_block_count,
-                        LinearBcsVerifierMessageRole::SamplerPrefixBlock {
-                            source_operation_ordinal,
-                            first_block_ordinal: 0,
-                        },
-                        LinearBcsProverOracleRoot::OneEdgeSamplerBlock {
-                            source_operation_ordinal,
-                            first_block_ordinal: 0,
-                        },
-                    )?;
-                }
+                let verifier_message_role = pending_challenge.take().map_or(
+                    LinearBcsVerifierMessageRole::UnusedRoundMessageBeforeProverOracle {
+                        source_operation_ordinal,
+                    },
+                    |(challenge_operation_ordinal, output_byte_length)| {
+                        LinearBcsVerifierMessageRole::AtomicChallenge {
+                            source_operation_ordinal: challenge_operation_ordinal,
+                            output_byte_length,
+                        }
+                    },
+                );
                 push_round_range(
                     &mut round_ranges,
                     &mut next_round_ordinal,
                     1,
-                    LinearBcsVerifierMessageRole::SamplerTerminalBlock {
-                        source_operation_ordinal,
-                        block_ordinal: prefix_block_count,
-                    },
-                    LinearBcsProverOracleRoot::OneEdgeSamplerBlock {
-                        source_operation_ordinal,
-                        first_block_ordinal: prefix_block_count,
-                    },
+                    verifier_message_role,
+                    root,
+                    source_operation_ordinal,
                 )?;
             }
+            LinearBcsSemanticStep::Sampler {
+                source_operation_ordinal,
+                output_byte_length,
+            } => {
+                if let Some((pending_operation_ordinal, pending_output_byte_length)) =
+                    pending_challenge.replace((source_operation_ordinal, output_byte_length))
+                {
+                    push_round_range(
+                        &mut round_ranges,
+                        &mut next_round_ordinal,
+                        1,
+                        LinearBcsVerifierMessageRole::AtomicChallenge {
+                            source_operation_ordinal: pending_operation_ordinal,
+                            output_byte_length: pending_output_byte_length,
+                        },
+                        LinearBcsProverOracleRoot::DeterministicEmptyProverResponse {
+                            source_operation_ordinal: pending_operation_ordinal,
+                        },
+                        source_operation_ordinal,
+                    )?;
+                }
+            }
         }
+    }
+    if pending_challenge.is_some() {
+        return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
     }
     let supplied_commitment_openings =
         derive_supplied_commitment_opening_plans(plan, &round_ranges)?;
@@ -483,7 +504,7 @@ pub(in crate::bgv::proof_suite) fn derive_linear_bcs_transcript_plan(
             verifier_message_ordinal: next_round_ordinal,
         },
         challenge_selection_rule:
-            LinearBcsChallengeSelectionRule::FirstAcceptedInCompleteFixedBlockRange,
+            LinearBcsChallengeSelectionRule::FirstAcceptedInCompleteFixedSlotRange,
     };
     validate_linear_bcs_transcript_plan(&transcript_plan)?;
     Ok(transcript_plan)
@@ -495,6 +516,7 @@ fn push_round_range(
     round_count: u64,
     verifier_message_role: LinearBcsVerifierMessageRole,
     prover_oracle_root: LinearBcsProverOracleRoot,
+    response_operation_ordinal: u32,
 ) -> Result<(), RowCodeWhirConstructionPlanError> {
     if round_count == 0 {
         return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
@@ -504,6 +526,7 @@ fn push_round_range(
         round_count,
         verifier_message_role,
         prover_oracle_root,
+        response_operation_ordinal,
     });
     *next_round_ordinal = next_round_ordinal
         .checked_add(round_count)
@@ -865,7 +888,8 @@ fn validate_supplied_commitment_root_owner_bijection(
                 payload_leaf_count,
             } => Some((range.round_count, role, payload_leaf_count)),
             LinearBcsProverOracleRoot::CanonicalCompleteMessageDigest { .. }
-            | LinearBcsProverOracleRoot::OneEdgeSamplerBlock { .. } => None,
+            | LinearBcsProverOracleRoot::CanonicalFinalProofStreamDigest
+            | LinearBcsProverOracleRoot::DeterministicEmptyProverResponse { .. } => None,
         })
         .collect::<Vec<_>>();
     if supplied_roots.is_empty() || supplied_roots.len() != openings.len() {
@@ -958,35 +982,26 @@ fn canonical_extension_message_root(
     })
 }
 
-fn fixed_sampler_block_count(
+fn atomic_challenge_output_byte_length(
     operation: &RowCodeWhirOracleEquationOperationPlan,
 ) -> Result<u64, RowCodeWhirConstructionPlanError> {
-    let expansion_counts = operation
+    let output_byte_lengths = operation
         .ranges
         .iter()
         .filter_map(|range| match range.kind {
-            RowCodeWhirOracleEquationRangeKind::ExtensionRejectionChain {
-                maximum_rejection_count,
-            } => Some(u64::from(maximum_rejection_count).checked_add(1)),
-            RowCodeWhirOracleEquationRangeKind::ProductExpansion {
-                maximum_candidate_count,
-                block_count_per_candidate,
-            } => Some(u64::from(maximum_candidate_count).checked_mul(block_count_per_candidate)),
-            RowCodeWhirOracleEquationRangeKind::DistinctExpansion {
-                output_count,
-                maximum_block_count_per_output,
-            } => Some(u64::from(output_count).checked_mul(maximum_block_count_per_output)),
+            RowCodeWhirOracleEquationRangeKind::AtomicChallengeXof { output_byte_length } => {
+                Some(output_byte_length)
+            }
             _ => None,
         })
         .collect::<Vec<_>>();
-    if expansion_counts.len() != 1 {
+    if output_byte_lengths.len() != 1 {
         return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
     }
-    expansion_counts[0]
-        .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?
-        .checked_add(0)
-        .filter(|count| *count > 0)
-        .ok_or(RowCodeWhirConstructionPlanError::InvalidVariantGeometry)
+    if output_byte_lengths[0] == 0 {
+        return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
+    }
+    Ok(output_byte_lengths[0])
 }
 
 fn validate_linear_bcs_transcript_plan(
@@ -995,7 +1010,7 @@ fn validate_linear_bcs_transcript_plan(
     if plan.round_ranges.is_empty()
         || plan.supplied_commitment_openings.is_empty()
         || plan.challenge_selection_rule
-            != LinearBcsChallengeSelectionRule::FirstAcceptedInCompleteFixedBlockRange
+            != LinearBcsChallengeSelectionRule::FirstAcceptedInCompleteFixedSlotRange
     {
         return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
     }
@@ -1004,35 +1019,52 @@ fn validate_linear_bcs_transcript_plan(
         if range.first_round_ordinal != next_round_ordinal || range.round_count == 0 {
             return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
         }
-        match (range.verifier_message_role, range.prover_oracle_root) {
+        match (
+            range.verifier_message_role,
+            range.prover_oracle_root,
+            range.response_operation_ordinal,
+        ) {
             (
-                LinearBcsVerifierMessageRole::SamplerPrefixBlock {
+                LinearBcsVerifierMessageRole::AtomicChallenge {
                     source_operation_ordinal,
-                    first_block_ordinal,
+                    output_byte_length,
                 },
-                LinearBcsProverOracleRoot::OneEdgeSamplerBlock {
+                LinearBcsProverOracleRoot::DeterministicEmptyProverResponse {
                     source_operation_ordinal: root_source_operation_ordinal,
-                    first_block_ordinal: root_first_block_ordinal,
                 },
+                response_operation_ordinal,
             ) if source_operation_ordinal == root_source_operation_ordinal
-                && first_block_ordinal == root_first_block_ordinal => {}
+                && response_operation_ordinal > source_operation_ordinal
+                && output_byte_length > 0
+                && range.round_count == 1 => {}
             (
-                LinearBcsVerifierMessageRole::SamplerTerminalBlock {
+                LinearBcsVerifierMessageRole::AtomicChallenge {
                     source_operation_ordinal,
-                    block_ordinal,
+                    output_byte_length,
                 },
-                LinearBcsProverOracleRoot::OneEdgeSamplerBlock {
-                    source_operation_ordinal: root_source_operation_ordinal,
-                    first_block_ordinal: root_first_block_ordinal,
-                },
-            ) if range.round_count == 1
-                && source_operation_ordinal == root_source_operation_ordinal
-                && block_ordinal == root_first_block_ordinal => {}
-            (
-                LinearBcsVerifierMessageRole::UnusedRoundMessageBeforeProverOracle { .. },
                 root @ (LinearBcsProverOracleRoot::SuppliedCommitment { .. }
-                | LinearBcsProverOracleRoot::CanonicalCompleteMessageDigest { .. }),
-            ) if range.round_count == 1 => root.validate_geometry()?,
+                | LinearBcsProverOracleRoot::CanonicalCompleteMessageDigest { .. }
+                | LinearBcsProverOracleRoot::CanonicalFinalProofStreamDigest),
+                response_operation_ordinal,
+            ) if output_byte_length > 0
+                && response_operation_ordinal > source_operation_ordinal
+                && range.round_count == 1 =>
+            {
+                root.validate_geometry()?
+            }
+            (
+                LinearBcsVerifierMessageRole::UnusedRoundMessageBeforeProverOracle {
+                    source_operation_ordinal,
+                },
+                root @ (LinearBcsProverOracleRoot::SuppliedCommitment { .. }
+                | LinearBcsProverOracleRoot::CanonicalCompleteMessageDigest { .. }
+                | LinearBcsProverOracleRoot::CanonicalFinalProofStreamDigest),
+                response_operation_ordinal,
+            ) if source_operation_ordinal == response_operation_ordinal
+                && range.round_count == 1 =>
+            {
+                root.validate_geometry()?
+            }
             _ => return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry),
         }
         next_round_ordinal = next_round_ordinal
@@ -1061,21 +1093,13 @@ fn encode_verifier_message_role(
             encoder.push_u16(1);
             encoder.push_u32(source_operation_ordinal);
         }
-        LinearBcsVerifierMessageRole::SamplerPrefixBlock {
+        LinearBcsVerifierMessageRole::AtomicChallenge {
             source_operation_ordinal,
-            first_block_ordinal,
+            output_byte_length,
         } => {
             encoder.push_u16(2);
             encoder.push_u32(source_operation_ordinal);
-            encoder.push_u64(first_block_ordinal);
-        }
-        LinearBcsVerifierMessageRole::SamplerTerminalBlock {
-            source_operation_ordinal,
-            block_ordinal,
-        } => {
-            encoder.push_u16(3);
-            encoder.push_u32(source_operation_ordinal);
-            encoder.push_u64(block_ordinal);
+            encoder.push_u64(output_byte_length);
         }
     }
 }
@@ -1101,13 +1125,14 @@ fn encode_prover_oracle_root(
             encoder.push_usize(value_count)?;
             encoder.push_usize(canonical_message_byte_length)?;
         }
-        LinearBcsProverOracleRoot::OneEdgeSamplerBlock {
-            source_operation_ordinal,
-            first_block_ordinal,
-        } => {
+        LinearBcsProverOracleRoot::CanonicalFinalProofStreamDigest => {
             encoder.push_u16(3);
+        }
+        LinearBcsProverOracleRoot::DeterministicEmptyProverResponse {
+            source_operation_ordinal,
+        } => {
+            encoder.push_u16(4);
             encoder.push_u32(source_operation_ordinal);
-            encoder.push_u64(first_block_ordinal);
         }
     }
     Ok(())

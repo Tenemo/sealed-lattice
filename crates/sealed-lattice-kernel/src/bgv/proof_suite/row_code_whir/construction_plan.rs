@@ -21,10 +21,12 @@ use super::super::selected_profile::{
 };
 use super::super::transcript::{
     CommonProofApplicationChallengeGroup, CommonProofChallenge, CommonProofRelationPrefixSchedule,
-    CommonProofRound, DISTINCT_QUERY_VECTOR_SAMPLER_TYPE, FIXED_CHALLENGE_BLOCK_BYTE_LENGTH,
+    CommonProofRound, DISTINCT_QUERY_VECTOR_SAMPLER_TYPE,
+    EXTENSION_CHALLENGE_CANDIDATE_BYTE_LENGTH, EXTENSION_ELEMENT_SAMPLER_TYPE,
+    FIXED_BITS_SAMPLER_TYPE, PRODUCT_RESIDUE_CANDIDATE_ALIGNMENT_BYTE_LENGTH,
     PRODUCT_RESIDUE_VECTOR_SAMPLER_TYPE, RowCodeWhirChallenge, RowCodeWhirTracePhase,
-    TRANSCRIPT_ABSORB_DOMAIN, TRANSCRIPT_ACCEPTED_CHALLENGE_DOMAIN,
-    TRANSCRIPT_CHALLENGE_EXPANSION_ACCUMULATOR_DOMAIN, TRANSCRIPT_CHALLENGE_HANDLE_DOMAIN,
+    TRANSCRIPT_ABSORB_DOMAIN, TRANSCRIPT_ATOMIC_CHALLENGE_XOF_DOMAIN,
+    TRANSCRIPT_EMPTY_PROVER_RESPONSE_ROOT, TRANSCRIPT_EMPTY_PROVER_RESPONSE_TAG_SUFFIX,
     TRANSCRIPT_INITIAL_DOMAIN, TRANSCRIPT_RESPONSE_BINDING_DOMAIN, TRANSCRIPT_RESPONSE_ROOT_DOMAIN,
 };
 use super::super::{
@@ -96,10 +98,10 @@ pub(super) const ROW_CODE_WHIR_PRIOR_PROOF_BOUND_QUERY_COUNT: usize = 40;
 const ROW_CODE_WHIR_FOLDING_FACTOR: usize = 3;
 const ROW_CODE_WHIR_SECURITY_LEVEL: usize = 262;
 const ROW_CODE_WHIR_PROOF_OF_WORK_BITS: usize = 0;
-const ROW_CODE_WHIR_CONSTRUCTION_PLAN_IDENTITY_ENCODING_VERSION: u16 = 11;
+const ROW_CODE_WHIR_CONSTRUCTION_PLAN_IDENTITY_ENCODING_VERSION: u16 = 12;
 const ROW_CODE_WHIR_CONSTRUCTION_PLAN_IDENTITY_HASH_DOMAIN: &str =
     "sealed-lattice/proof/row-code-whir/construction-plan/v1";
-const ROW_CODE_WHIR_ORACLE_EQUATION_CATALOG_ENCODING_VERSION: u16 = 2;
+const ROW_CODE_WHIR_ORACLE_EQUATION_CATALOG_ENCODING_VERSION: u16 = 3;
 const ROW_CODE_WHIR_ORACLE_EQUATION_CATALOG_HASH_DOMAIN: &str =
     "sealed-lattice/proof/row-code-whir/oracle-equation-catalog/v2";
 const VERIFIED_VSS_LOW_DEGREE_CERTIFICATE_GEOMETRY_DOMAIN: &str =
@@ -682,13 +684,13 @@ enum RowCodeWhirOracleEquationOperationKind {
     },
 }
 
-/// Compact equation grammar for one contiguous maximum-support range. Product
-/// and distinct expansion entries are literal linear-chain edges: each hash
-/// answer is both the sampled block and the predecessor of the next addressed
-/// block. Variable prover responses first derive one fixed-width response root;
-/// the separate absorption edge consumes both the current chain state and that
-/// root. A fixed-width Merkle commitment is already a response root and does
-/// not add the independent root equation.
+/// Compact equation grammar for one contiguous maximum-support range. Every
+/// logical verifier challenge is one fixed-width, incrementally consumed XOF
+/// answer. Consecutive verifier messages are separated by one deterministic
+/// empty-prover absorption. Variable prover responses first derive one
+/// fixed-width response root; the separate absorption edge consumes both the
+/// current transcript state and that root. A fixed-width Merkle commitment is
+/// already a response root and does not add the independent root equation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RowCodeWhirOracleEquationRangeKind {
     InitialHeaderRoot,
@@ -696,19 +698,8 @@ enum RowCodeWhirOracleEquationRangeKind {
     ResponseRoot,
     ResponseBinding,
     ResponseAbsorption,
-    AcceptedChallenge,
-    ChallengeHandle,
-    ExtensionRejectionChain {
-        maximum_rejection_count: u32,
-    },
-    ProductExpansion {
-        maximum_candidate_count: u32,
-        block_count_per_candidate: u64,
-    },
-    DistinctExpansion {
-        output_count: u32,
-        maximum_block_count_per_output: u64,
-    },
+    EmptyProverResponseAbsorption,
+    AtomicChallengeXof { output_byte_length: u64 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -716,6 +707,7 @@ enum RowCodeWhirOracleEquationPredecessor {
     Independent,
     FixedZeroState,
     PreviousOperationTerminal { operation_ordinal: u32 },
+    PreviousOperationTranscriptState { operation_ordinal: u32 },
     PriorRangeTerminal { range_ordinal: u16 },
 }
 
@@ -2062,20 +2054,17 @@ impl RowCodeWhirOracleEquationCatalogBuilder {
         let previous_operation_ordinal = self.previous_operation_ordinal()?;
         let mut ranges = Vec::new();
         let mut next_offset = 0_u64;
-        let chain_predecessor_range_kind = if self.pending_challenge {
-            RowCodeWhirOracleEquationRangeKind::AcceptedChallenge
-        } else {
-            RowCodeWhirOracleEquationRangeKind::ResponseBinding
-        };
-        push_oracle_equation_range(
-            &mut ranges,
-            &mut next_offset,
-            chain_predecessor_range_kind,
-            1,
-            RowCodeWhirOracleEquationPredecessor::PreviousOperationTerminal {
-                operation_ordinal: previous_operation_ordinal,
-            },
-        )?;
+        if !self.pending_challenge {
+            push_oracle_equation_range(
+                &mut ranges,
+                &mut next_offset,
+                RowCodeWhirOracleEquationRangeKind::ResponseBinding,
+                1,
+                RowCodeWhirOracleEquationPredecessor::PreviousOperationTerminal {
+                    operation_ordinal: previous_operation_ordinal,
+                },
+            )?;
+        }
         if response_root_is_recomputed {
             push_oracle_equation_range(
                 &mut ranges,
@@ -2090,7 +2079,13 @@ impl RowCodeWhirOracleEquationCatalogBuilder {
             &mut next_offset,
             RowCodeWhirOracleEquationRangeKind::ResponseAbsorption,
             1,
-            RowCodeWhirOracleEquationPredecessor::PriorRangeTerminal { range_ordinal: 0 },
+            if self.pending_challenge {
+                RowCodeWhirOracleEquationPredecessor::PreviousOperationTranscriptState {
+                    operation_ordinal: previous_operation_ordinal,
+                }
+            } else {
+                RowCodeWhirOracleEquationPredecessor::PriorRangeTerminal { range_ordinal: 0 }
+            },
         )?;
         self.push_operation(kind, Some(oracle_tag), ranges)?;
         self.pending_challenge = false;
@@ -2106,35 +2101,23 @@ impl RowCodeWhirOracleEquationCatalogBuilder {
         if maximum_candidate_draws == 0 {
             return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
         }
+        let output_byte_length = u64::from(maximum_candidate_draws)
+            .checked_mul(
+                u64::try_from(EXTENSION_CHALLENGE_CANDIDATE_BYTE_LENGTH)
+                    .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?,
+            )
+            .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?;
         let mut ranges = Vec::new();
         let mut next_offset = 0_u64;
-        let handle_predecessor =
+        let challenge_predecessor =
             self.push_pending_close_if_needed(&mut ranges, &mut next_offset)?;
         push_oracle_equation_range(
             &mut ranges,
             &mut next_offset,
-            RowCodeWhirOracleEquationRangeKind::ChallengeHandle,
+            RowCodeWhirOracleEquationRangeKind::AtomicChallengeXof { output_byte_length },
             1,
-            handle_predecessor,
+            challenge_predecessor,
         )?;
-        let maximum_rejection_count = maximum_candidate_draws - 1;
-        if maximum_rejection_count > 0 {
-            let handle_range_ordinal = u16::try_from(ranges.len() - 1)
-                .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?;
-            push_oracle_equation_range(
-                &mut ranges,
-                &mut next_offset,
-                RowCodeWhirOracleEquationRangeKind::ExtensionRejectionChain {
-                    maximum_rejection_count,
-                },
-                u64::from(maximum_rejection_count)
-                    .checked_mul(2)
-                    .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?,
-                RowCodeWhirOracleEquationPredecessor::PriorRangeTerminal {
-                    range_ordinal: handle_range_ordinal,
-                },
-            )?;
-        }
         self.push_operation(kind, Some(oracle_tag), ranges)?;
         self.pending_challenge = true;
         Ok(())
@@ -2147,42 +2130,27 @@ impl RowCodeWhirOracleEquationCatalogBuilder {
         maximum_candidate_draws: u32,
     ) -> Result<(), RowCodeWhirConstructionPlanError> {
         let candidate_byte_length = group.candidate_byte_length();
-        let block_byte_length = u64::try_from(FIXED_CHALLENGE_BLOCK_BYTE_LENGTH)
+        let alignment_byte_length = u64::try_from(PRODUCT_RESIDUE_CANDIDATE_ALIGNMENT_BYTE_LENGTH)
             .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?;
-        let block_count_per_candidate = candidate_byte_length
-            .checked_div(block_byte_length)
-            .filter(|count| *count > 0 && candidate_byte_length.is_multiple_of(block_byte_length))
-            .ok_or(RowCodeWhirConstructionPlanError::InvalidVariantGeometry)?;
-        if maximum_candidate_draws == 0 {
+        if maximum_candidate_draws == 0
+            || candidate_byte_length == 0
+            || !candidate_byte_length.is_multiple_of(alignment_byte_length)
+        {
             return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
         }
+        let output_byte_length = candidate_byte_length
+            .checked_mul(u64::from(maximum_candidate_draws))
+            .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?;
         let mut ranges = Vec::new();
         let mut next_offset = 0_u64;
-        let handle_predecessor =
+        let challenge_predecessor =
             self.push_pending_close_if_needed(&mut ranges, &mut next_offset)?;
         push_oracle_equation_range(
             &mut ranges,
             &mut next_offset,
-            RowCodeWhirOracleEquationRangeKind::ChallengeHandle,
+            RowCodeWhirOracleEquationRangeKind::AtomicChallengeXof { output_byte_length },
             1,
-            handle_predecessor,
-        )?;
-        let handle_range_ordinal = u16::try_from(ranges.len() - 1)
-            .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?;
-        let expansion_equation_count = u64::from(maximum_candidate_draws)
-            .checked_mul(block_count_per_candidate)
-            .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?;
-        push_oracle_equation_range(
-            &mut ranges,
-            &mut next_offset,
-            RowCodeWhirOracleEquationRangeKind::ProductExpansion {
-                maximum_candidate_count: maximum_candidate_draws,
-                block_count_per_candidate,
-            },
-            expansion_equation_count,
-            RowCodeWhirOracleEquationPredecessor::PriorRangeTerminal {
-                range_ordinal: handle_range_ordinal,
-            },
+            challenge_predecessor,
         )?;
         self.push_operation(
             RowCodeWhirOracleEquationOperationKind::CommonProductChallenge(group),
@@ -2204,42 +2172,20 @@ impl RowCodeWhirOracleEquationCatalogBuilder {
         if output_count == 0 || maximum_candidate_draws_per_output == 0 {
             return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
         }
-        let candidates_per_block = FIXED_CHALLENGE_BLOCK_BYTE_LENGTH
-            .checked_div(std::mem::size_of::<u64>())
-            .filter(|count| *count > 0)
-            .ok_or(RowCodeWhirConstructionPlanError::InvalidVariantGeometry)?;
-        let maximum_block_count_per_output = usize::try_from(maximum_candidate_draws_per_output)
-            .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?
-            .div_ceil(candidates_per_block);
-        let maximum_block_count_per_output = u64::try_from(maximum_block_count_per_output)
-            .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?;
+        let output_byte_length = u64::from(output_count)
+            .checked_mul(u64::from(maximum_candidate_draws_per_output))
+            .and_then(|count| count.checked_mul(u64::try_from(std::mem::size_of::<u64>()).ok()?))
+            .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?;
         let mut ranges = Vec::new();
         let mut next_offset = 0_u64;
-        let handle_predecessor =
+        let challenge_predecessor =
             self.push_pending_close_if_needed(&mut ranges, &mut next_offset)?;
         push_oracle_equation_range(
             &mut ranges,
             &mut next_offset,
-            RowCodeWhirOracleEquationRangeKind::ChallengeHandle,
+            RowCodeWhirOracleEquationRangeKind::AtomicChallengeXof { output_byte_length },
             1,
-            handle_predecessor,
-        )?;
-        let handle_range_ordinal = u16::try_from(ranges.len() - 1)
-            .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?;
-        let expansion_equation_count = u64::from(output_count)
-            .checked_mul(maximum_block_count_per_output)
-            .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?;
-        push_oracle_equation_range(
-            &mut ranges,
-            &mut next_offset,
-            RowCodeWhirOracleEquationRangeKind::DistinctExpansion {
-                output_count,
-                maximum_block_count_per_output,
-            },
-            expansion_equation_count,
-            RowCodeWhirOracleEquationPredecessor::PriorRangeTerminal {
-                range_ordinal: handle_range_ordinal,
-            },
+            challenge_predecessor,
         )?;
         self.push_operation(
             RowCodeWhirOracleEquationOperationKind::RowCodeWhir {
@@ -2269,9 +2215,9 @@ impl RowCodeWhirOracleEquationCatalogBuilder {
         push_oracle_equation_range(
             ranges,
             next_offset,
-            RowCodeWhirOracleEquationRangeKind::AcceptedChallenge,
+            RowCodeWhirOracleEquationRangeKind::EmptyProverResponseAbsorption,
             1,
-            RowCodeWhirOracleEquationPredecessor::PreviousOperationTerminal {
+            RowCodeWhirOracleEquationPredecessor::PreviousOperationTranscriptState {
                 operation_ordinal: previous_operation_ordinal,
             },
         )?;
@@ -2585,37 +2531,28 @@ fn validate_oracle_equation_operation_shape(
             )?;
         }
         RowCodeWhirOracleEquationOperationKind::CommonProductChallenge(group) => {
-            let expansion_range_index = validate_challenge_equation_range_prefix(
+            let output_byte_length = group
+                .candidate_byte_length()
+                .checked_mul(u64::from(
+                    PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
+                ))
+                .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?;
+            validate_atomic_challenge_equation_ranges(
                 &operation.ranges,
                 previous_operation_left_pending_challenge,
+                output_byte_length,
             )?;
-            let block_byte_length = u64::try_from(FIXED_CHALLENGE_BLOCK_BYTE_LENGTH)
-                .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?;
-            let block_count_per_candidate = group
-                .candidate_byte_length()
-                .checked_div(block_byte_length)
-                .filter(|block_count| {
-                    *block_count > 0
-                        && group
-                            .candidate_byte_length()
-                            .is_multiple_of(block_byte_length)
-                })
-                .ok_or(RowCodeWhirConstructionPlanError::InvalidVariantGeometry)?;
-            if operation.ranges.len() != expansion_range_index + 1
-                || operation.ranges[expansion_range_index].kind
-                    != (RowCodeWhirOracleEquationRangeKind::ProductExpansion {
-                        maximum_candidate_count:
-                            PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
-                        block_count_per_candidate,
-                    })
-            {
-                return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
-            }
         }
         RowCodeWhirOracleEquationOperationKind::CommonExtensionChallenge(_) => {
-            validate_extension_challenge_equation_ranges(
+            validate_atomic_challenge_equation_ranges(
                 &operation.ranges,
                 previous_operation_left_pending_challenge,
+                u64::from(PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT)
+                    .checked_mul(
+                        u64::try_from(EXTENSION_CHALLENGE_CANDIDATE_BYTE_LENGTH)
+                            .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?,
+                    )
+                    .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?,
             )?;
         }
         RowCodeWhirOracleEquationOperationKind::RowCodeWhir {
@@ -2623,9 +2560,15 @@ fn validate_oracle_equation_operation_shape(
             ..
         } => match transcript_operation {
             RowCodeWhirTranscriptOperation::SampleExtension { .. } => {
-                validate_extension_challenge_equation_ranges(
+                validate_atomic_challenge_equation_ranges(
                     &operation.ranges,
                     previous_operation_left_pending_challenge,
+                    u64::from(PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT)
+                        .checked_mul(
+                            u64::try_from(EXTENSION_CHALLENGE_CANDIDATE_BYTE_LENGTH)
+                                .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?,
+                        )
+                        .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?,
                 )?;
             }
             RowCodeWhirTranscriptOperation::SampleDistinctIndices {
@@ -2633,10 +2576,6 @@ fn validate_oracle_equation_operation_shape(
                 output_count,
                 ..
             } => {
-                let expansion_range_index = validate_challenge_equation_range_prefix(
-                    &operation.ranges,
-                    previous_operation_left_pending_challenge,
-                )?;
                 if *upper_bound == 0
                     || !upper_bound.is_power_of_two()
                     || *output_count == 0
@@ -2644,27 +2583,20 @@ fn validate_oracle_equation_operation_shape(
                 {
                     return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
                 }
-                let candidates_per_block = FIXED_CHALLENGE_BLOCK_BYTE_LENGTH
-                    .checked_div(std::mem::size_of::<u64>())
-                    .filter(|candidate_count| *candidate_count > 0)
-                    .ok_or(RowCodeWhirConstructionPlanError::InvalidVariantGeometry)?;
-                let maximum_block_count_per_output =
-                    usize::try_from(PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT)
-                        .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?
-                        .div_ceil(candidates_per_block);
-                if operation.ranges.len() != expansion_range_index + 1
-                    || operation.ranges[expansion_range_index].kind
-                        != (RowCodeWhirOracleEquationRangeKind::DistinctExpansion {
-                            output_count: u32::try_from(*output_count)
-                                .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?,
-                            maximum_block_count_per_output: u64::try_from(
-                                maximum_block_count_per_output,
-                            )
-                            .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?,
-                        })
-                {
-                    return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
-                }
+                let output_byte_length = u64::try_from(*output_count)
+                    .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?
+                    .checked_mul(u64::from(
+                        PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
+                    ))
+                    .and_then(|count| {
+                        count.checked_mul(u64::try_from(std::mem::size_of::<u64>()).ok()?)
+                    })
+                    .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?;
+                validate_atomic_challenge_equation_ranges(
+                    &operation.ranges,
+                    previous_operation_left_pending_challenge,
+                    output_byte_length,
+                )?;
             }
             RowCodeWhirTranscriptOperation::ObserveMaskEvaluations { .. }
             | RowCodeWhirTranscriptOperation::ObserveProtocolSchedule { .. }
@@ -2702,57 +2634,55 @@ fn validate_response_equation_ranges(
     previous_operation_left_pending_challenge: bool,
     response_root_is_recomputed: bool,
 ) -> Result<(), RowCodeWhirConstructionPlanError> {
-    let expected_chain_predecessor_kind = if previous_operation_left_pending_challenge {
-        RowCodeWhirOracleEquationRangeKind::AcceptedChallenge
+    let response_binding_range_count = usize::from(!previous_operation_left_pending_challenge);
+    let response_root_range_count = usize::from(response_root_is_recomputed);
+    let response_absorption_range_index = response_binding_range_count + response_root_range_count;
+    let expected_absorption_predecessor = if previous_operation_left_pending_challenge {
+        matches!(
+            ranges
+                .get(response_absorption_range_index)
+                .map(|range| range.predecessor),
+            Some(
+                RowCodeWhirOracleEquationPredecessor::PreviousOperationTranscriptState {
+                    operation_ordinal: _,
+                }
+            )
+        )
     } else {
-        RowCodeWhirOracleEquationRangeKind::ResponseBinding
+        ranges
+            .get(response_absorption_range_index)
+            .is_some_and(|range| {
+                range.predecessor
+                    == RowCodeWhirOracleEquationPredecessor::PriorRangeTerminal { range_ordinal: 0 }
+            })
     };
-    let response_absorption_range_index = usize::from(response_root_is_recomputed) + 1;
     let has_exact_shape = ranges.len() == response_absorption_range_index + 1
-        && ranges[0].kind == expected_chain_predecessor_kind
+        && (previous_operation_left_pending_challenge
+            || ranges[0].kind == RowCodeWhirOracleEquationRangeKind::ResponseBinding)
         && (!response_root_is_recomputed
-            || ranges[1].kind == RowCodeWhirOracleEquationRangeKind::ResponseRoot)
+            || ranges[response_binding_range_count].kind
+                == RowCodeWhirOracleEquationRangeKind::ResponseRoot)
         && ranges[response_absorption_range_index].kind
             == RowCodeWhirOracleEquationRangeKind::ResponseAbsorption
-        && ranges[response_absorption_range_index].predecessor
-            == RowCodeWhirOracleEquationPredecessor::PriorRangeTerminal { range_ordinal: 0 };
+        && expected_absorption_predecessor;
     if !has_exact_shape {
         return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
     }
     Ok(())
 }
 
-fn validate_challenge_equation_range_prefix(
+fn validate_atomic_challenge_equation_ranges(
     ranges: &[RowCodeWhirOracleEquationRangePlan],
     previous_operation_left_pending_challenge: bool,
-) -> Result<usize, RowCodeWhirConstructionPlanError> {
-    let handle_range_index = usize::from(previous_operation_left_pending_challenge);
-    if ranges.len() <= handle_range_index
-        || (previous_operation_left_pending_challenge
-            && ranges[0].kind != RowCodeWhirOracleEquationRangeKind::AcceptedChallenge)
-        || ranges[handle_range_index].kind != RowCodeWhirOracleEquationRangeKind::ChallengeHandle
-    {
-        return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
-    }
-    Ok(handle_range_index + 1)
-}
-
-fn validate_extension_challenge_equation_ranges(
-    ranges: &[RowCodeWhirOracleEquationRangePlan],
-    previous_operation_left_pending_challenge: bool,
+    output_byte_length: u64,
 ) -> Result<(), RowCodeWhirConstructionPlanError> {
-    let rejection_range_index = validate_challenge_equation_range_prefix(
-        ranges,
-        previous_operation_left_pending_challenge,
-    )?;
-    let maximum_rejection_count = PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT
-        .checked_sub(1)
-        .ok_or(RowCodeWhirConstructionPlanError::InvalidVariantGeometry)?;
-    if ranges.len() != rejection_range_index + 1
-        || ranges[rejection_range_index].kind
-            != (RowCodeWhirOracleEquationRangeKind::ExtensionRejectionChain {
-                maximum_rejection_count,
-            })
+    let challenge_range_index = usize::from(previous_operation_left_pending_challenge);
+    if output_byte_length == 0
+        || ranges.len() != challenge_range_index + 1
+        || (previous_operation_left_pending_challenge
+            && ranges[0].kind != RowCodeWhirOracleEquationRangeKind::EmptyProverResponseAbsorption)
+        || ranges[challenge_range_index].kind
+            != (RowCodeWhirOracleEquationRangeKind::AtomicChallengeXof { output_byte_length })
     {
         return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
     }
@@ -2808,6 +2738,13 @@ fn validate_oracle_equation_catalog(
                 RowCodeWhirOracleEquationPredecessor::PreviousOperationTerminal {
                     operation_ordinal,
                 } if range_index == 0 && Some(operation_ordinal) == expected_predecessor => {}
+                RowCodeWhirOracleEquationPredecessor::PreviousOperationTranscriptState {
+                    operation_ordinal,
+                } if Some(operation_ordinal) == expected_predecessor
+                    && (range.kind
+                        == RowCodeWhirOracleEquationRangeKind::EmptyProverResponseAbsorption
+                        || range.kind
+                            == RowCodeWhirOracleEquationRangeKind::ResponseAbsorption) => {}
                 RowCodeWhirOracleEquationPredecessor::PriorRangeTerminal { range_ordinal }
                     if range_index > 0
                         && (range_ordinal.checked_add(1) == Some(expected_range_ordinal)
@@ -2822,25 +2759,8 @@ fn validate_oracle_equation_catalog(
                 | RowCodeWhirOracleEquationRangeKind::ResponseRoot
                 | RowCodeWhirOracleEquationRangeKind::ResponseBinding
                 | RowCodeWhirOracleEquationRangeKind::ResponseAbsorption
-                | RowCodeWhirOracleEquationRangeKind::AcceptedChallenge
-                | RowCodeWhirOracleEquationRangeKind::ChallengeHandle => 1,
-                RowCodeWhirOracleEquationRangeKind::ExtensionRejectionChain {
-                    maximum_rejection_count,
-                } => u64::from(maximum_rejection_count)
-                    .checked_mul(2)
-                    .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?,
-                RowCodeWhirOracleEquationRangeKind::ProductExpansion {
-                    maximum_candidate_count,
-                    block_count_per_candidate,
-                } => u64::from(maximum_candidate_count)
-                    .checked_mul(block_count_per_candidate)
-                    .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?,
-                RowCodeWhirOracleEquationRangeKind::DistinctExpansion {
-                    output_count,
-                    maximum_block_count_per_output,
-                } => u64::from(output_count)
-                    .checked_mul(maximum_block_count_per_output)
-                    .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?,
+                | RowCodeWhirOracleEquationRangeKind::EmptyProverResponseAbsorption
+                | RowCodeWhirOracleEquationRangeKind::AtomicChallengeXof { .. } => 1,
             };
             if range.equation_count != expected_equation_count {
                 return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
@@ -3524,16 +3444,19 @@ fn encode_oracle_equation_catalog(
         TRANSCRIPT_INITIAL_DOMAIN,
         TRANSCRIPT_ABSORB_DOMAIN,
         TRANSCRIPT_RESPONSE_ROOT_DOMAIN,
-        TRANSCRIPT_CHALLENGE_HANDLE_DOMAIN,
-        TRANSCRIPT_ACCEPTED_CHALLENGE_DOMAIN,
+        TRANSCRIPT_ATOMIC_CHALLENGE_XOF_DOMAIN,
         TRANSCRIPT_RESPONSE_BINDING_DOMAIN,
-        TRANSCRIPT_CHALLENGE_EXPANSION_ACCUMULATOR_DOMAIN,
+        TRANSCRIPT_EMPTY_PROVER_RESPONSE_TAG_SUFFIX,
+        EXTENSION_ELEMENT_SAMPLER_TYPE,
         PRODUCT_RESIDUE_VECTOR_SAMPLER_TYPE,
         DISTINCT_QUERY_VECTOR_SAMPLER_TYPE,
+        FIXED_BITS_SAMPLER_TYPE,
     ] {
         encoder.push_bytes(domain.as_bytes())?;
     }
-    encoder.push_usize(FIXED_CHALLENGE_BLOCK_BYTE_LENGTH)?;
+    encoder.push_bytes(&TRANSCRIPT_EMPTY_PROVER_RESPONSE_ROOT)?;
+    encoder.push_usize(EXTENSION_CHALLENGE_CANDIDATE_BYTE_LENGTH)?;
+    encoder.push_usize(PRODUCT_RESIDUE_CANDIDATE_ALIGNMENT_BYTE_LENGTH)?;
     encoder.push_length(catalog.operations.len())?;
     for operation in &catalog.operations {
         encoder.push_u32(operation.operation_ordinal);
@@ -3562,8 +3485,14 @@ fn encode_oracle_equation_catalog(
                     encoder.push_u16(3);
                     encoder.push_u32(operation_ordinal);
                 }
-                RowCodeWhirOracleEquationPredecessor::PriorRangeTerminal { range_ordinal } => {
+                RowCodeWhirOracleEquationPredecessor::PreviousOperationTranscriptState {
+                    operation_ordinal,
+                } => {
                     encoder.push_u16(4);
+                    encoder.push_u32(operation_ordinal);
+                }
+                RowCodeWhirOracleEquationPredecessor::PriorRangeTerminal { range_ordinal } => {
+                    encoder.push_u16(5);
                     encoder.push_u16(range_ordinal);
                 }
             }
@@ -3657,29 +3586,10 @@ fn encode_oracle_equation_range_kind(
         RowCodeWhirOracleEquationRangeKind::ResponseRoot => encoder.push_u16(3),
         RowCodeWhirOracleEquationRangeKind::ResponseBinding => encoder.push_u16(4),
         RowCodeWhirOracleEquationRangeKind::ResponseAbsorption => encoder.push_u16(5),
-        RowCodeWhirOracleEquationRangeKind::AcceptedChallenge => encoder.push_u16(6),
-        RowCodeWhirOracleEquationRangeKind::ChallengeHandle => encoder.push_u16(7),
-        RowCodeWhirOracleEquationRangeKind::ExtensionRejectionChain {
-            maximum_rejection_count,
-        } => {
-            encoder.push_u16(8);
-            encoder.push_u32(maximum_rejection_count);
-        }
-        RowCodeWhirOracleEquationRangeKind::ProductExpansion {
-            maximum_candidate_count,
-            block_count_per_candidate,
-        } => {
-            encoder.push_u16(9);
-            encoder.push_u32(maximum_candidate_count);
-            encoder.push_u64(block_count_per_candidate);
-        }
-        RowCodeWhirOracleEquationRangeKind::DistinctExpansion {
-            output_count,
-            maximum_block_count_per_output,
-        } => {
-            encoder.push_u16(10);
-            encoder.push_u32(output_count);
-            encoder.push_u64(maximum_block_count_per_output);
+        RowCodeWhirOracleEquationRangeKind::EmptyProverResponseAbsorption => encoder.push_u16(6),
+        RowCodeWhirOracleEquationRangeKind::AtomicChallengeXof { output_byte_length } => {
+            encoder.push_u16(7);
+            encoder.push_u64(output_byte_length);
         }
     }
 }
@@ -7348,7 +7258,51 @@ mod tests {
                 .maximum_equation_count()
                 .expect("the catalog equation ceiling derives"),
         );
-        assert_eq!(maximum_transcript_hash_query_count, 1_141_598);
+        let mut independently_derived_hash_query_count = 2_u64;
+        let mut independently_pending_challenge = false;
+        for operation in catalog.operations.iter().skip(1) {
+            let response_root_is_recomputed = match &operation.kind {
+                RowCodeWhirOracleEquationOperationKind::InitialTranscript => {
+                    panic!("only operation zero is the initial transcript")
+                }
+                RowCodeWhirOracleEquationOperationKind::CommonProductChallenge(_)
+                | RowCodeWhirOracleEquationOperationKind::CommonExtensionChallenge(_) => {
+                    independently_derived_hash_query_count +=
+                        1 + u64::from(independently_pending_challenge);
+                    independently_pending_challenge = true;
+                    continue;
+                }
+                RowCodeWhirOracleEquationOperationKind::CommonRound(round) => {
+                    common_round_response_root_is_recomputed(*round)
+                }
+                RowCodeWhirOracleEquationOperationKind::RowCodeWhir { operation, .. } => {
+                    match operation {
+                        RowCodeWhirTranscriptOperation::SampleExtension { .. }
+                        | RowCodeWhirTranscriptOperation::SampleDistinctIndices { .. } => {
+                            independently_derived_hash_query_count +=
+                                1 + u64::from(independently_pending_challenge);
+                            independently_pending_challenge = true;
+                            continue;
+                        }
+                        RowCodeWhirTranscriptOperation::ObserveCommitment { .. } => false,
+                        RowCodeWhirTranscriptOperation::ObserveMaskEvaluations { .. }
+                        | RowCodeWhirTranscriptOperation::ObserveProtocolSchedule { .. }
+                        | RowCodeWhirTranscriptOperation::ObserveExtensionValues { .. }
+                        | RowCodeWhirTranscriptOperation::FinishProofStream => true,
+                    }
+                }
+            };
+            independently_derived_hash_query_count += 1
+                + u64::from(!independently_pending_challenge)
+                + u64::from(response_root_is_recomputed);
+            independently_pending_challenge = false;
+        }
+        assert!(!independently_pending_challenge);
+        assert_eq!(
+            maximum_transcript_hash_query_count,
+            independently_derived_hash_query_count,
+        );
+        assert_eq!(maximum_transcript_hash_query_count, 14_673);
         assert_eq!(
             logical_verifier_message_count,
             u64::try_from(
@@ -7364,43 +7318,46 @@ mod tests {
         );
         assert_eq!(logical_verifier_message_count, 4_272);
 
-        let mut product_expansion_count = 0_usize;
-        let mut distinct_expansion_count = 0_usize;
-        let mut linear_expansion_equation_count = 0_u64;
+        let mut atomic_challenge_count = 0_usize;
+        let mut total_atomic_challenge_output_byte_length = 0_u64;
         for range in catalog
             .operations
             .iter()
             .flat_map(|operation| &operation.ranges)
         {
-            match range.kind {
-                RowCodeWhirOracleEquationRangeKind::ProductExpansion { .. } => {
-                    product_expansion_count += 1;
-                    linear_expansion_equation_count += range.equation_count;
-                }
-                RowCodeWhirOracleEquationRangeKind::DistinctExpansion { .. } => {
-                    distinct_expansion_count += 1;
-                    linear_expansion_equation_count += range.equation_count;
-                }
-                _ => {}
+            if let RowCodeWhirOracleEquationRangeKind::AtomicChallengeXof { output_byte_length } =
+                range.kind
+            {
+                atomic_challenge_count += 1;
+                total_atomic_challenge_output_byte_length =
+                    total_atomic_challenge_output_byte_length
+                        .checked_add(output_byte_length)
+                        .expect("the atomic challenge output ledger fits u64");
             }
         }
-        assert_eq!(
-            product_expansion_count,
-            plan.relation_prefix_schedule()
-                .ordered_application_challenge_groups()
-                .len(),
-        );
-        assert_eq!(
-            distinct_expansion_count,
-            plan.transcript_operations
+        let expected_atomic_challenge_count = plan
+            .relation_prefix_schedule()
+            .ordered_application_challenge_groups()
+            .len()
+            + usize::try_from(
+                plan.relation_prefix_schedule()
+                    .composition_challenge_count(),
+            )
+            .expect("the composition challenge count fits usize")
+            + usize::from(plan.relation_prefix_schedule().out_of_domain_point_count())
+            + plan
+                .transcript_operations
                 .iter()
-                .filter(|operation| matches!(
-                    operation,
-                    RowCodeWhirTranscriptOperation::SampleDistinctIndices { .. }
-                ))
-                .count(),
-        );
-        assert!(linear_expansion_equation_count > 0);
+                .filter(|operation| {
+                    matches!(
+                        operation,
+                        RowCodeWhirTranscriptOperation::SampleExtension { .. }
+                            | RowCodeWhirTranscriptOperation::SampleDistinctIndices { .. }
+                    )
+                })
+                .count();
+        assert_eq!(atomic_challenge_count, expected_atomic_challenge_count,);
+        assert!(total_atomic_challenge_output_byte_length > 0);
 
         let canonical_catalog_bytes = encode_oracle_equation_catalog(&catalog)
             .expect("the oracle-equation catalog encodes canonically");
@@ -7479,7 +7436,7 @@ mod tests {
                 .expect("the changed cryptographic catalog remains canonical"),
             canonical_catalog_bytes,
         );
-        assert_ne!(
+        assert_eq!(
             cryptographically_rescheduled_catalog
                 .maximum_transcript_hash_query_count()
                 .expect("the changed transcript ceiling remains defined"),
@@ -7529,7 +7486,7 @@ mod tests {
             .operations
             .iter()
             .position(|operation| operation.ranges.len() >= 3)
-            .expect("one challenge closes a predecessor before its handle");
+            .expect("one variable response has binding, root, and absorption ranges");
         let mut reordered_ranges = catalog.clone();
         reordered_ranges.operations[multi_range_operation_index]
             .ranges
@@ -7538,7 +7495,7 @@ mod tests {
 
         let mut stale_range_predecessor = catalog.clone();
         stale_range_predecessor.operations[multi_range_operation_index].ranges[2].predecessor =
-            RowCodeWhirOracleEquationPredecessor::PriorRangeTerminal { range_ordinal: 0 };
+            RowCodeWhirOracleEquationPredecessor::PriorRangeTerminal { range_ordinal: 1 };
         assert!(validate_oracle_equation_catalog(&stale_range_predecessor).is_err());
 
         let mut forward_operation_predecessor = catalog;
@@ -7547,7 +7504,7 @@ mod tests {
     }
 
     #[test]
-    fn candidate_bcs_catalog_uses_the_live_one_edge_sampler_chain() {
+    fn candidate_bcs_catalog_uses_atomic_challenges_and_empty_prover_responses() {
         let plan = selected_same_secret_construction_plan();
         let catalog = plan
             .linear_bcs_transcript_plan()
@@ -7561,92 +7518,48 @@ mod tests {
         let production_oracle_catalog = plan
             .oracle_equation_catalog()
             .expect("the production oracle-equation catalog derives");
-        let independently_derived_sampler_block_count =
-            |operation: &RowCodeWhirOracleEquationOperationPlan| -> u64 {
-                let expansion_counts = operation
-                    .ranges
-                    .iter()
-                    .filter_map(|range| match range.kind {
-                        RowCodeWhirOracleEquationRangeKind::ExtensionRejectionChain {
-                            maximum_rejection_count,
-                        } => Some(u64::from(maximum_rejection_count) + 1),
-                        RowCodeWhirOracleEquationRangeKind::ProductExpansion {
-                            maximum_candidate_count,
-                            block_count_per_candidate,
-                        } => Some(
-                            u64::from(maximum_candidate_count)
-                                .checked_mul(block_count_per_candidate)
-                                .expect("the product sampler block count fits u64"),
-                        ),
-                        RowCodeWhirOracleEquationRangeKind::DistinctExpansion {
-                            output_count,
-                            maximum_block_count_per_output,
-                        } => Some(
-                            u64::from(output_count)
-                                .checked_mul(maximum_block_count_per_output)
-                                .expect("the distinct sampler block count fits u64"),
-                        ),
-                        RowCodeWhirOracleEquationRangeKind::InitialHeaderRoot
-                        | RowCodeWhirOracleEquationRangeKind::InitialAbsorption
-                        | RowCodeWhirOracleEquationRangeKind::ResponseRoot
-                        | RowCodeWhirOracleEquationRangeKind::ResponseBinding
-                        | RowCodeWhirOracleEquationRangeKind::ResponseAbsorption
-                        | RowCodeWhirOracleEquationRangeKind::AcceptedChallenge
-                        | RowCodeWhirOracleEquationRangeKind::ChallengeHandle => None,
-                    })
-                    .collect::<Vec<_>>();
-                assert_eq!(
-                    expansion_counts.len(),
-                    1,
-                    "one sampler operation has one expansion range",
-                );
-                expansion_counts[0]
-            };
-        let mut independently_derived_prover_round_count = 0_u64;
-        let mut independently_derived_sampler_round_count = 0_u64;
+        let mut independently_derived_round_count = 0_u64;
+        let mut pending_atomic_challenge = false;
         for operation in production_oracle_catalog.operations.iter().skip(1) {
-            match &operation.kind {
+            let is_semantic_prover_response = match &operation.kind {
                 RowCodeWhirOracleEquationOperationKind::InitialTranscript => {
                     panic!("only operation zero is the initial transcript")
                 }
-                RowCodeWhirOracleEquationOperationKind::CommonRound(_) => {
-                    independently_derived_prover_round_count += 1;
-                }
+                RowCodeWhirOracleEquationOperationKind::CommonRound(_) => Some(true),
                 RowCodeWhirOracleEquationOperationKind::CommonProductChallenge(_)
                 | RowCodeWhirOracleEquationOperationKind::CommonExtensionChallenge(_) => {
-                    independently_derived_sampler_round_count +=
-                        independently_derived_sampler_block_count(operation);
+                    Some(false)
                 }
                 RowCodeWhirOracleEquationOperationKind::RowCodeWhir {
                     operation: transcript_operation,
                     ..
                 } => match transcript_operation {
                     RowCodeWhirTranscriptOperation::ObserveMaskEvaluations { .. }
-                    | RowCodeWhirTranscriptOperation::ObserveCommitment { .. } => {
-                        independently_derived_prover_round_count += 1;
-                    }
-                    RowCodeWhirTranscriptOperation::ObserveExtensionValues {
-                        role: RowCodeWhirObservationRole::OpeningPoint { .. },
-                        ..
-                    }
+                    | RowCodeWhirTranscriptOperation::ObserveCommitment { .. }
                     | RowCodeWhirTranscriptOperation::ObserveProtocolSchedule { .. }
-                    | RowCodeWhirTranscriptOperation::FinishProofStream => {}
-                    RowCodeWhirTranscriptOperation::ObserveExtensionValues { .. } => {
-                        independently_derived_prover_round_count += 1;
-                    }
+                    | RowCodeWhirTranscriptOperation::ObserveExtensionValues { .. }
+                    | RowCodeWhirTranscriptOperation::FinishProofStream => Some(true),
                     RowCodeWhirTranscriptOperation::SampleExtension { .. }
-                    | RowCodeWhirTranscriptOperation::SampleDistinctIndices { .. } => {
-                        independently_derived_sampler_round_count +=
-                            independently_derived_sampler_block_count(operation);
-                    }
+                    | RowCodeWhirTranscriptOperation::SampleDistinctIndices { .. } => Some(false),
                 },
+            };
+            match is_semantic_prover_response {
+                Some(true) => {
+                    independently_derived_round_count += 1;
+                    pending_atomic_challenge = false;
+                }
+                Some(false) => {
+                    if pending_atomic_challenge {
+                        independently_derived_round_count += 1;
+                    }
+                    pending_atomic_challenge = true;
+                }
+                None => {}
             }
         }
-        let independently_derived_round_count = independently_derived_prover_round_count
-            .checked_add(independently_derived_sampler_round_count)
-            .expect("the independent BCS round count fits u64");
+        assert!(!pending_atomic_challenge);
         assert_eq!(round_count, independently_derived_round_count);
-        assert_eq!(round_count, 591_189);
+        assert_eq!(round_count, 6_306);
         assert_ne!(selected_catalog_hash, [0_u8; 64]);
         assert_eq!(
             catalog
@@ -7829,26 +7742,20 @@ mod tests {
             catalog.final_query().verifier_message_ordinal,
             round_count + 1
         );
-        let one_edge_sampler_block_count = catalog
-            .one_edge_sampler_block_count()
-            .expect("the one-edge sampler block count derives");
-        let prover_oracle_round_count = round_count - one_edge_sampler_block_count;
+        let atomic_challenge_message_count = catalog
+            .atomic_challenge_message_count()
+            .expect("the atomic challenge message count derives");
         assert_eq!(
             catalog
                 .chain_hash_query_count()
                 .expect("the typed chain query count derives"),
-            one_edge_sampler_block_count + 2 * prover_oracle_round_count,
+            2 * round_count,
         );
         assert_eq!(
             catalog.challenge_selection_rule(),
-            linear_bcs_transcript::LinearBcsChallengeSelectionRule::FirstAcceptedInCompleteFixedBlockRange,
+            linear_bcs_transcript::LinearBcsChallengeSelectionRule::FirstAcceptedInCompleteFixedSlotRange,
         );
-        assert!(
-            catalog
-                .one_edge_sampler_block_count()
-                .expect("the one-edge sampler count derives")
-                > 0,
-        );
+        assert!(atomic_challenge_message_count > 0);
         let complete_message_digest_count = catalog
             .complete_message_digest_hash_query_count()
             .expect("the canonical complete-message digest count derives");
@@ -7889,16 +7796,17 @@ mod tests {
             .filter(|range| range.kind == RowCodeWhirOracleEquationRangeKind::ResponseRoot)
             .map(|range| range.equation_count)
             .sum::<u64>();
-        assert_eq!(complete_message_digest_count, 1_049);
+        assert_eq!(complete_message_digest_count, 2_059);
         assert_eq!(deterministic_response_digest_count, 1_009);
         assert_eq!(terminal_response_digest_count, 1);
+        assert_eq!(complete_message_digest_count, response_root_equation_count,);
         assert_eq!(
             complete_message_digest_count
-                + u64::try_from(deterministic_response_digest_count)
+                - u64::try_from(deterministic_response_digest_count)
                     .expect("the deterministic response-digest count fits u64")
-                + u64::try_from(terminal_response_digest_count)
+                - u64::try_from(terminal_response_digest_count)
                     .expect("the terminal response-digest count fits u64"),
-            response_root_equation_count,
+            1_049,
         );
         assert_eq!(
             linear_bcs_transcript::linear_bcs_round_ordinal_encoding(0),
@@ -7911,8 +7819,8 @@ mod tests {
                 .expect("the second round has one canonical encoding"),
         );
         assert_ne!(
-            linear_bcs_transcript::linear_bcs_sampler_block_address_encoding(1, 0),
-            linear_bcs_transcript::linear_bcs_sampler_block_address_encoding(1, 1),
+            linear_bcs_transcript::linear_bcs_atomic_challenge_address_encoding(1, 64),
+            linear_bcs_transcript::linear_bcs_atomic_challenge_address_encoding(1, 65),
         );
 
         let aggregate_commitment_operation_ordinal = plan

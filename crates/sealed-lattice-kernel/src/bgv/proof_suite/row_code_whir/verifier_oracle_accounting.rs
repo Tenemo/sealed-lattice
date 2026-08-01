@@ -837,13 +837,13 @@ mod tests {
             relation_variant.proof_privacy_mode(),
             ProofPrivacyMode::SecretBearing
         );
-        assert_eq!(accounting.maximum_transcript_hash_query_count(), 1_141_598);
+        assert_eq!(accounting.maximum_transcript_hash_query_count(), 14_673);
         assert_eq!(accounting.logical_verifier_message_count(), 4_272);
         assert_eq!(accounting.transcript_output_bit_length(), 512);
-        assert_eq!(accounting.maximum_verifier_hash_query_count(), 1_232_362);
+        assert_eq!(accounting.maximum_verifier_hash_query_count(), 105_437);
         assert_eq!(
             accounting.maximum_accepting_database_equation_count(),
-            1_229_573
+            102_648
         );
         assert_eq!(accounting.merkle_rows().len(), 23);
         assert_eq!(accounting.fixed_hash_rows().len(), 5);

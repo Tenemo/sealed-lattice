@@ -42,10 +42,10 @@ use super::selected_accounting::resource_accounting::{
 };
 
 use super::transcript::{
-    TRANSCRIPT_ABSORB_DOMAIN_BYTES, TRANSCRIPT_ACCEPTED_CHALLENGE_DOMAIN_BYTES,
-    TRANSCRIPT_CHALLENGE_EXPANSION_ACCUMULATOR_DOMAIN_BYTES,
-    TRANSCRIPT_CHALLENGE_HANDLE_DOMAIN_BYTES, TRANSCRIPT_INITIAL_DOMAIN_BYTES,
-    TRANSCRIPT_RESPONSE_BINDING_DOMAIN_BYTES, TRANSCRIPT_RESPONSE_ROOT_DOMAIN_BYTES,
+    TRANSCRIPT_ABSORB_DOMAIN_BYTES, TRANSCRIPT_ATOMIC_CHALLENGE_XOF_DOMAIN_BYTES,
+    TRANSCRIPT_EMPTY_PROVER_RESPONSE_ROOT, TRANSCRIPT_EMPTY_PROVER_RESPONSE_TAG_SUFFIX_BYTES,
+    TRANSCRIPT_INITIAL_DOMAIN_BYTES, TRANSCRIPT_RESPONSE_BINDING_DOMAIN_BYTES,
+    TRANSCRIPT_RESPONSE_ROOT_DOMAIN_BYTES,
 };
 
 use super::field::PROOF_CHALLENGE_EXTENSION_POLYNOMIAL_COEFFICIENTS;
@@ -175,16 +175,16 @@ mod construction_profile_decoder_tests {
                     .expect("the transcript-initial domain encodes"),
                 CanonicalItem::fixed_bytes(TRANSCRIPT_ABSORB_DOMAIN_BYTES)
                     .expect("the transcript-absorb domain encodes"),
-                CanonicalItem::fixed_bytes(TRANSCRIPT_CHALLENGE_HANDLE_DOMAIN_BYTES)
-                    .expect("the challenge-handle domain encodes"),
-                CanonicalItem::fixed_bytes(TRANSCRIPT_ACCEPTED_CHALLENGE_DOMAIN_BYTES)
-                    .expect("the accepted-challenge domain encodes"),
+                CanonicalItem::fixed_bytes(TRANSCRIPT_ATOMIC_CHALLENGE_XOF_DOMAIN_BYTES)
+                    .expect("the atomic-challenge XOF domain encodes"),
                 CanonicalItem::fixed_bytes(TRANSCRIPT_RESPONSE_BINDING_DOMAIN_BYTES)
                     .expect("the response-binding domain encodes"),
                 CanonicalItem::fixed_bytes(TRANSCRIPT_RESPONSE_ROOT_DOMAIN_BYTES)
                     .expect("the response-root domain encodes"),
-                CanonicalItem::fixed_bytes(TRANSCRIPT_CHALLENGE_EXPANSION_ACCUMULATOR_DOMAIN_BYTES)
-                    .expect("the challenge-expansion domain encodes"),
+                CanonicalItem::fixed_bytes(TRANSCRIPT_EMPTY_PROVER_RESPONSE_TAG_SUFFIX_BYTES)
+                    .expect("the empty-prover response suffix encodes"),
+                CanonicalItem::fixed_bytes(TRANSCRIPT_EMPTY_PROVER_RESPONSE_ROOT)
+                    .expect("the empty-prover response root encodes"),
             ],
         )
     }
@@ -1111,7 +1111,7 @@ fn verify_row_code_whir_hash_profile(tuple: &CanonicalTuple) -> Result<(), Proof
     let algorithm = tuple.items[0]
         .variable_value_bytes()
         .map_err(|_| ProofProfileError::CanonicalEncoding)?;
-    let domains: [&[u8]; 12] = [
+    let domains: [&[u8]; 10] = [
         ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN,
         ROW_CODE_WHIR_PHASE_COLUMN_LEAF_DOMAIN,
         ROW_CODE_WHIR_PHASE_COLUMN_NODE_DOMAIN,
@@ -1119,11 +1119,9 @@ fn verify_row_code_whir_hash_profile(tuple: &CanonicalTuple) -> Result<(), Proof
         ROW_CODE_WHIR_AGGREGATE_NODE_DOMAIN,
         TRANSCRIPT_INITIAL_DOMAIN_BYTES,
         TRANSCRIPT_ABSORB_DOMAIN_BYTES,
-        TRANSCRIPT_CHALLENGE_HANDLE_DOMAIN_BYTES,
-        TRANSCRIPT_ACCEPTED_CHALLENGE_DOMAIN_BYTES,
+        TRANSCRIPT_ATOMIC_CHALLENGE_XOF_DOMAIN_BYTES,
         TRANSCRIPT_RESPONSE_BINDING_DOMAIN_BYTES,
         TRANSCRIPT_RESPONSE_ROOT_DOMAIN_BYTES,
-        TRANSCRIPT_CHALLENGE_EXPANSION_ACCUMULATOR_DOMAIN_BYTES,
     ];
     if tuple.items[0].item_type() != CanonicalItemType::Ascii
         || algorithm != ROW_CODE_WHIR_HASH_ALGORITHM_IDENTIFIER.as_bytes()
@@ -1131,13 +1129,17 @@ fn verify_row_code_whir_hash_profile(tuple: &CanonicalTuple) -> Result<(), Proof
         || profile_u16(&tuple.items[2])? != ROW_CODE_WHIR_AGGREGATE_LEAF_STATE_BYTE_LENGTH
         || tuple.items[3].item_type() != CanonicalItemType::RawBytes
         || tuple.items[3].canonical_bytes() != ROW_CODE_WHIR_AGGREGATE_LEAF_FRAME_TAGS
-        || tuple.items[4..]
+        || tuple.items[4..14]
             .iter()
             .zip(domains)
             .any(|(item, expected)| {
                 item.item_type() != CanonicalItemType::RawBytes
                     || item.canonical_bytes() != expected
             })
+        || tuple.items[14].item_type() != CanonicalItemType::RawBytes
+        || tuple.items[14].canonical_bytes() != TRANSCRIPT_EMPTY_PROVER_RESPONSE_TAG_SUFFIX_BYTES
+        || tuple.items[15].item_type() != CanonicalItemType::RawBytes
+        || tuple.items[15].canonical_bytes() != TRANSCRIPT_EMPTY_PROVER_RESPONSE_ROOT
     {
         return Err(ProofProfileError::InvalidSchedule);
     }
@@ -1692,11 +1694,11 @@ mod canonical_profile_artifact {
         aggregate_node_domain: Vec<u8>,
         transcript_initial_domain: Vec<u8>,
         transcript_absorb_domain: Vec<u8>,
-        transcript_challenge_handle_domain: Vec<u8>,
-        transcript_accepted_challenge_domain: Vec<u8>,
+        transcript_atomic_challenge_xof_domain: Vec<u8>,
         transcript_response_binding_domain: Vec<u8>,
         transcript_response_root_domain: Vec<u8>,
-        transcript_challenge_expansion_accumulator_domain: Vec<u8>,
+        transcript_empty_prover_response_tag_suffix: Vec<u8>,
+        transcript_empty_prover_response_root: Vec<u8>,
     }
 
     impl RowCodeWhirHashProfile {
@@ -1713,15 +1715,15 @@ mod canonical_profile_artifact {
                 aggregate_node_domain: ROW_CODE_WHIR_AGGREGATE_NODE_DOMAIN.to_vec(),
                 transcript_initial_domain: TRANSCRIPT_INITIAL_DOMAIN_BYTES.to_vec(),
                 transcript_absorb_domain: TRANSCRIPT_ABSORB_DOMAIN_BYTES.to_vec(),
-                transcript_challenge_handle_domain: TRANSCRIPT_CHALLENGE_HANDLE_DOMAIN_BYTES
-                    .to_vec(),
-                transcript_accepted_challenge_domain: TRANSCRIPT_ACCEPTED_CHALLENGE_DOMAIN_BYTES
-                    .to_vec(),
+                transcript_atomic_challenge_xof_domain:
+                    TRANSCRIPT_ATOMIC_CHALLENGE_XOF_DOMAIN_BYTES.to_vec(),
                 transcript_response_binding_domain: TRANSCRIPT_RESPONSE_BINDING_DOMAIN_BYTES
                     .to_vec(),
                 transcript_response_root_domain: TRANSCRIPT_RESPONSE_ROOT_DOMAIN_BYTES.to_vec(),
-                transcript_challenge_expansion_accumulator_domain:
-                    TRANSCRIPT_CHALLENGE_EXPANSION_ACCUMULATOR_DOMAIN_BYTES.to_vec(),
+                transcript_empty_prover_response_tag_suffix:
+                    TRANSCRIPT_EMPTY_PROVER_RESPONSE_TAG_SUFFIX_BYTES.to_vec(),
+                transcript_empty_prover_response_root: TRANSCRIPT_EMPTY_PROVER_RESPONSE_ROOT
+                    .to_vec(),
             }
         }
 
@@ -1758,18 +1760,16 @@ mod canonical_profile_artifact {
                         .map_err(canonical_encoding_error)?,
                     CanonicalItem::fixed_bytes(&self.transcript_absorb_domain)
                         .map_err(canonical_encoding_error)?,
-                    CanonicalItem::fixed_bytes(&self.transcript_challenge_handle_domain)
-                        .map_err(canonical_encoding_error)?,
-                    CanonicalItem::fixed_bytes(&self.transcript_accepted_challenge_domain)
+                    CanonicalItem::fixed_bytes(&self.transcript_atomic_challenge_xof_domain)
                         .map_err(canonical_encoding_error)?,
                     CanonicalItem::fixed_bytes(&self.transcript_response_binding_domain)
                         .map_err(canonical_encoding_error)?,
                     CanonicalItem::fixed_bytes(&self.transcript_response_root_domain)
                         .map_err(canonical_encoding_error)?,
-                    CanonicalItem::fixed_bytes(
-                        &self.transcript_challenge_expansion_accumulator_domain,
-                    )
-                    .map_err(canonical_encoding_error)?,
+                    CanonicalItem::fixed_bytes(&self.transcript_empty_prover_response_tag_suffix)
+                        .map_err(canonical_encoding_error)?,
+                    CanonicalItem::fixed_bytes(&self.transcript_empty_prover_response_root)
+                        .map_err(canonical_encoding_error)?,
                 ],
             ))
         }
@@ -2209,14 +2209,14 @@ mod canonical_profile_artifact {
 
             self.row_code_whir_construction_profile
                 .hash_profile
-                .transcript_challenge_handle_domain[0] ^= 1;
+                .transcript_atomic_challenge_xof_domain[0] ^= 1;
             assert_eq!(
                 self.canonical_bytes(),
                 Err(ProofProfileError::InvalidConstructionProfile)
             );
             self.row_code_whir_construction_profile
                 .hash_profile
-                .transcript_challenge_handle_domain[0] ^= 1;
+                .transcript_atomic_challenge_xof_domain[0] ^= 1;
 
             self.row_code_whir_construction_profile.ordered_references[0]
                 .canonical_identity_byte_length += 1;
@@ -4032,20 +4032,18 @@ mod canonical_profile_artifact {
                             .expect("transcript initial domain fits the canonical byte limit"),
                         CanonicalItem::fixed_bytes(TRANSCRIPT_ABSORB_DOMAIN_BYTES)
                             .expect("transcript absorb domain fits the canonical byte limit"),
-                        CanonicalItem::fixed_bytes(TRANSCRIPT_CHALLENGE_HANDLE_DOMAIN_BYTES)
-                            .expect("transcript challenge domain fits the canonical byte limit"),
-                        CanonicalItem::fixed_bytes(TRANSCRIPT_ACCEPTED_CHALLENGE_DOMAIN_BYTES)
-                            .expect("accepted-challenge domain fits the canonical byte limit"),
+                        CanonicalItem::fixed_bytes(TRANSCRIPT_ATOMIC_CHALLENGE_XOF_DOMAIN_BYTES)
+                            .expect("atomic-challenge XOF domain fits the canonical byte limit",),
                         CanonicalItem::fixed_bytes(TRANSCRIPT_RESPONSE_BINDING_DOMAIN_BYTES)
                             .expect("response-binding domain fits the canonical byte limit"),
                         CanonicalItem::fixed_bytes(TRANSCRIPT_RESPONSE_ROOT_DOMAIN_BYTES)
                             .expect("response-root domain fits the canonical byte limit"),
                         CanonicalItem::fixed_bytes(
-                            TRANSCRIPT_CHALLENGE_EXPANSION_ACCUMULATOR_DOMAIN_BYTES,
+                            TRANSCRIPT_EMPTY_PROVER_RESPONSE_TAG_SUFFIX_BYTES,
                         )
-                        .expect(
-                            "challenge-expansion accumulator domain fits the canonical byte limit",
-                        ),
+                        .expect("empty-prover response suffix fits the canonical byte limit"),
+                        CanonicalItem::fixed_bytes(TRANSCRIPT_EMPTY_PROVER_RESPONSE_ROOT)
+                            .expect("empty-prover response root fits the canonical byte limit"),
                     ],
                 ),
             );

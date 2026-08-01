@@ -68,17 +68,22 @@ Works today:
   construction and supplied-opening plans. Every class uses a
   coordinate-derived compact frontier. The nine column-streamed classes expand
   into their exact initial, ordered-column, and final SHAKE calls, deriving
-  `1,232,362` verifier hash queries and `1,229,573` accepting equations. The
+  `105,437` verifier hash queries and `102,648` accepting equations. The
   census derives and binds the 512-bit output width for transcript, fixed,
   ordinary-leaf, streamed-leaf, and parent calls. The construction and
   hash-profile identities also bind the 512-bit streamed state and three
-  canonical frame tags. The original-BCS whole-state table binds every
-  production transcript operation and every response-root equation. The exact
-  `2,059` response digests comprise `1,049` complete prover messages, `1,009`
-  deterministic schedule or opening-point observations, and one terminal
-  canonical proof stream; hostile width, domain, slot, leaf-call, frontier, and
-  message-shape mutations refuse. This remains structural evidence, not a
-  complete classical or quantum-random-oracle reduction.
+  canonical frame tags. The production transcript uses one plan-bound,
+  fixed-width SHAKE256 XOF invocation for each of its `4,272` logical
+  challenges and consumes the complete candidate-slot budget. Its exact
+  `14,673`-query census contains `6,306` original-BCS rounds. The executable
+  whole-state evaluator and collision-free accepting-database extractor bind
+  every plan-derived verifier and response address, recover every exact round
+  prefix plus its next verifier message, and connect all `2,059` response
+  digests to the complete verifier database and coordinate-derived commitment
+  subtrees. Hostile width, domain, slot, address, response-owner, identity,
+  leaf-call, frontier, and message-shape mutations refuse. This is focused
+  same-secret construction evidence; suite-wide and ceremony-level reduction
+  evidence remains open.
 - Secret-bearing phase-row padding now uses three KMAC-derived 512-bit seeds.
   The selected same-secret certificate inventories 62 framed SHAKE streams,
   130,023,424 accepted field outputs, seed collision, bounded rejection
@@ -126,8 +131,12 @@ Works today:
   transported-verification test. It durably seals each canonical safe boundary,
   rejects stale or malformed retained state, and resumes by deterministic
   replay through the kernel's authenticated checkpoint decoder. Its latest
-  diagnostic generated the browser-owned setup authority and reached base-tree
-  materialization before being stopped after `9,195,256` ms. The selected VSS
+  complete same-secret diagnostic ran for `6,037,835` ms and failed while
+  preparing the VSS prerequisite with `Generation(Prover(InvalidColumn))`;
+  peak process-tree RSS was `3,554,246,656` bytes and the guard did not report a
+  memory violation. A later focused VSS diagnostic generated the browser-owned
+  setup authority and reached base-tree materialization before being stopped
+  after `9,195,256` ms. The selected VSS
   geometry has 1,128 base rows and 16 commitment stripes, while the current
   builder repeats a complete `2^24`-point DFT for every row in every stripe:
   18,048 full transforms before auxiliary or quotient work. Peak process-tree
@@ -147,15 +156,13 @@ Not yet:
   established. The selected same-secret aggregate-leaf predecessor
   correspondence, collision arithmetic, aggregate-wide production affine
   correspondence, pre-aggregate physical masking correspondence, and all
-  production geometry certificates now derive. The strong-state eligibility
-  check additionally derives the live aggregate-wide agreement event with
-  population `8,192`, agreement ceiling `5,055`, and `393` queries. It refuses
-  the deployed block-chained sampler: if all but one query coordinate are fixed,
-  the remaining fill has probability `5,055 / 8,192`, not the complete
-  without-replacement probability. The predecessor census therefore cannot be
-  promoted into the CMS19 Section 8.6 hypothesis. An atomic verifier-message
-  sampler, its independent state evaluator and extractor, and the complete
-  reduction to emitted transported bytes remain open.
+  production geometry certificates now derive. The selected same-secret path
+  now also derives the live `8,192`-coordinate, `5,055`-agreement, `393`-query
+  event under one atomic fixed-width verifier message, an executable
+  predecessor-state evaluator, and an exact next-message database extractor.
+  Independent regeneration for every distinct production geometry, the final
+  theorem-to-transported-bytes correspondence, and ceremony-level failure
+  composition remain open.
 - The static liveness model has not yet been confirmed by a completed native
   proof or release-WebAssembly browser measurement. Complete participant
   transport accounting is also open. Production-derived sizes for 73 of the
@@ -241,10 +248,9 @@ pnpm run smoke:pack:npm
 ```
 
 Proof-heavy evidence belongs in separate guarded runners and is intended to be
-excluded from routine commands. The current fast Rust lane still contains
-three multi-minute production-geometry theorem tests; restoring that ownership
-boundary is open stabilization work. Follow the repository instructions when
-changing proof or setup code.
+excluded from routine commands. Multi-minute construction-geometry and theorem
+tests have an explicitly registered, serialized evidence lane. Follow the
+repository instructions when changing proof or setup code.
 
 ## License
 

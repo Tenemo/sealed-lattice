@@ -116,7 +116,7 @@ struct SelectedNonNativeIdentitySoundnessRow {
     sampler_accounting: CommonProofApplicationChallengeSamplerAccounting,
 }
 
-fn expected_product_sampler_total_xof_query_count_ceiling(
+fn expected_product_sampler_fixed_xof_output_byte_length(
     sampler_accounting: CommonProofApplicationChallengeSamplerAccounting,
 ) -> Result<u64, ProofProfileError> {
     let oracle_answer_byte_length =
@@ -127,16 +127,15 @@ fn expected_product_sampler_total_xof_query_count_ceiling(
     {
         return Err(ProofProfileError::InvalidSchedule);
     }
-    let candidate_block_count = candidate_byte_length / oracle_answer_byte_length;
-    let expansion_block_query_count = u64::from(sampler_accounting.maximum_candidate_draw_count())
-        .checked_mul(candidate_block_count)
+    let fixed_xof_output_byte_length = u64::from(sampler_accounting.maximum_candidate_draw_count())
+        .checked_mul(candidate_byte_length)
         .ok_or(ProofProfileError::CountOverflow)?;
-    if sampler_accounting.candidate_xof_query_count_ceiling() != expansion_block_query_count {
+    if sampler_accounting.fixed_xof_output_byte_length() != fixed_xof_output_byte_length
+        || sampler_accounting.atomic_xof_query_count() != 1
+    {
         return Err(ProofProfileError::InvalidSchedule);
     }
-    expansion_block_query_count
-        .checked_add(1)
-        .ok_or(ProofProfileError::CountOverflow)
+    Ok(fixed_xof_output_byte_length)
 }
 
 impl SelectedNonNativeIdentitySoundnessRow {
@@ -153,8 +152,8 @@ impl SelectedNonNativeIdentitySoundnessRow {
                 != ordered_bad_polynomial_degrees.len()
             || sampler_accounting.maximum_candidate_draw_count()
                 != PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT
-            || sampler_accounting.total_xof_query_count_ceiling()
-                != expected_product_sampler_total_xof_query_count_ceiling(sampler_accounting)?
+            || sampler_accounting.fixed_xof_output_byte_length()
+                != expected_product_sampler_fixed_xof_output_byte_length(sampler_accounting)?
         {
             return Err(ProofProfileError::InvalidSchedule);
         }
@@ -1220,44 +1219,37 @@ mod tests {
     };
     use super::*;
 
-    fn assert_fixed_block_sampler_accounting(
+    fn assert_atomic_product_sampler_accounting(
         sampler_accounting: CommonProofApplicationChallengeSamplerAccounting,
         expected_candidate_block_count: u64,
     ) {
-        let oracle_answer_byte_length = sampler_accounting.maximum_oracle_answer_byte_length();
-        assert_eq!(
-            oracle_answer_byte_length,
-            u64::try_from(Hash512::BYTE_LENGTH).expect("the oracle answer length fits u64"),
-        );
+        let candidate_alignment_byte_length =
+            u64::try_from(Hash512::BYTE_LENGTH).expect("the candidate alignment fits u64");
         assert_eq!(
             sampler_accounting.candidate_byte_length(),
-            expected_candidate_block_count * oracle_answer_byte_length,
+            expected_candidate_block_count * candidate_alignment_byte_length,
         );
         assert_eq!(
             sampler_accounting.maximum_candidate_draw_count(),
             PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
         );
-        assert_eq!(sampler_accounting.chain_handle_xof_query_count(), 1);
-        let expected_candidate_xof_query_count =
+        assert_eq!(sampler_accounting.atomic_xof_query_count(), 1);
+        let expected_fixed_xof_output_byte_length =
             u64::from(sampler_accounting.maximum_candidate_draw_count())
-                * expected_candidate_block_count;
+                * sampler_accounting.candidate_byte_length();
         assert_eq!(
-            sampler_accounting.candidate_xof_query_count_ceiling(),
-            expected_candidate_xof_query_count,
+            sampler_accounting.fixed_xof_output_byte_length(),
+            expected_fixed_xof_output_byte_length,
         );
         assert_eq!(
-            sampler_accounting.total_xof_query_count_ceiling(),
-            sampler_accounting.chain_handle_xof_query_count() + expected_candidate_xof_query_count,
-        );
-        assert_eq!(
-            sampler_accounting.total_xof_query_count_ceiling(),
-            expected_product_sampler_total_xof_query_count_ceiling(sampler_accounting)
-                .expect("the fixed-block sampler query ceiling derives"),
+            sampler_accounting.maximum_oracle_answer_byte_length(),
+            expected_product_sampler_fixed_xof_output_byte_length(sampler_accounting)
+                .expect("the fixed-width sampler output length derives"),
         );
     }
 
     #[test]
-    fn product_sampler_query_ceiling_scales_with_rounded_candidate_blocks() {
+    fn product_sampler_uses_one_width_bound_xof_for_all_rounded_candidates() {
         let group = CommonProofApplicationChallengeGroup::new(
             CommonProofChallenge::Alpha { modulus_ordinal: 0 },
             2,
@@ -1282,7 +1274,7 @@ mod tests {
             .try_into()
             .expect("the schedule has exactly one application sampler");
 
-        assert_fixed_block_sampler_accounting(sampler_accounting, 2);
+        assert_atomic_product_sampler_accounting(sampler_accounting, 2);
     }
 
     #[test]
@@ -1477,7 +1469,7 @@ mod tests {
             PROOF_BASE_FIELD_MODULUS
         );
         assert_eq!(ballot_theta_row.sampler_accounting.coordinate_count(), 5);
-        assert_fixed_block_sampler_accounting(ballot_theta_row.sampler_accounting, 1);
+        assert_atomic_product_sampler_accounting(ballot_theta_row.sampler_accounting, 1);
         assert_eq!(
             ballot_theta_row
                 .sampler_accounting
@@ -1524,7 +1516,7 @@ mod tests {
         );
         assert_eq!(vss_alpha_row.sampler_accounting.modulus(), DATA_PRIMES[0]);
         assert_eq!(vss_alpha_row.sampler_accounting.coordinate_count(), 7);
-        assert_fixed_block_sampler_accounting(vss_alpha_row.sampler_accounting, 1);
+        assert_atomic_product_sampler_accounting(vss_alpha_row.sampler_accounting, 1);
         assert_eq!(
             vss_alpha_row
                 .sampler_accounting
