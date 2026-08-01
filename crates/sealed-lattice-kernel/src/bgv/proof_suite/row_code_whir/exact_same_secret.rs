@@ -100,9 +100,7 @@ pub(in crate::bgv::proof_suite::row_code_whir) use exact_proof::{
 };
 #[cfg(all(test, feature = "theorem-evidence"))]
 pub(in crate::bgv::proof_suite) use exact_proof::{
-    ExactExtractorCorrespondenceFault, ExactPointConstraintExtractorCertificate,
-    ExactPolynomialProtocolExtractorCertificate,
-    checked_exact_same_secret_extractor_correspondence,
+    ExactExtractorCorrespondenceFault, checked_exact_same_secret_extractor_correspondence,
     checked_exact_same_secret_extractor_correspondence_with_fault,
 };
 pub(crate) use exact_proof::{

@@ -37,9 +37,7 @@ use crate::bgv::proof_suite::row_code_whir::{
         AggregateWideNonlinearViewBoundary, checked_fold_limb_affine_map,
     },
     exact_same_secret::{
-        ExactExtractorCorrespondenceFault, ExactPointConstraintExtractorCertificate,
-        ExactPolynomialProtocolExtractorCertificate,
-        checked_exact_same_secret_extractor_correspondence,
+        ExactExtractorCorrespondenceFault, checked_exact_same_secret_extractor_correspondence,
         checked_exact_same_secret_extractor_correspondence_with_fault,
     },
     recomputable_oracle::{
@@ -75,6 +73,14 @@ use crate::foundation::{
     DECLARED_ADVERSARIAL_QUERY_BUDGET, MaskGeneratorHybridAssumption, MaskGeneratorHybridHop,
     MaskGeneratorHybridLoss, PRIVATE_RANDOMNESS_BLOCK_BYTE_LENGTH, deployed_private_stream_hybrid,
     quantum_private_stream_hybrid,
+};
+
+mod production_extractor;
+
+use production_extractor::{
+    ProductionExtractorCorrespondenceFault, ProductionPointConstraintExtractorCertificate,
+    ProductionPolynomialProtocolExtractorCertificate, checked_production_extractor_correspondence,
+    checked_production_extractor_correspondence_with_fault,
 };
 
 const WHIR_SUMCHECK_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE: u64 = 3;
@@ -146,6 +152,8 @@ pub(in crate::bgv::proof_suite) enum ProductionGeometryCertificateStage {
     WholeDatabaseSupport,
     CommitmentSubtree,
     AtomicRoundSemantics,
+    PolynomialExtractor,
+    TerminalStatePredicate,
     FailureMagnitude,
     ConstructionIdentity,
     Completeness,
@@ -176,6 +184,7 @@ pub(in crate::bgv::proof_suite) enum ProductionGeometryCertificateFailure {
     IncompleteWholeDatabaseSupport,
     IncompleteCommitmentSubtreeExtraction,
     IncompleteAtomicRoundSemantics,
+    IncompleteTerminalStatePredicate,
     InconsistentQromArithmetic,
 }
 
@@ -5973,8 +5982,8 @@ pub(in crate::bgv::proof_suite) struct RowCodeWhirFailurePartitionCertificate {
     production_aggregate_wide_views: ProductionAggregateWideViewCorrespondenceCertificate,
     private_row_pad_generator_hybrid: PrivateRowPadGeneratorHybridCertificate,
     relation_compiler_interpreter_semantics: RelationCompilerInterpreterSemanticCertificate,
-    polynomial_protocol_extractor: ExactPolynomialProtocolExtractorCertificate,
-    point_constraint_extractor: ExactPointConstraintExtractorCertificate,
+    polynomial_protocol_extractor: ProductionPolynomialProtocolExtractorCertificate,
+    point_constraint_extractor: ProductionPointConstraintExtractorCertificate,
 }
 
 impl RowCodeWhirFailurePartitionCertificate {
@@ -6026,6 +6035,16 @@ impl RowCodeWhirFailurePartitionCertificate {
                 == self
                     .polynomial_protocol_extractor
                     .construction_plan_identity_hash()
+            && self
+                .production_aggregate_wide_views
+                .construction_plan_identity_hash
+                == self
+                    .point_constraint_extractor
+                    .construction_plan_identity_hash()
+            && self
+                .polynomial_protocol_extractor
+                .relation_plan_variant_hash()
+                == self.point_constraint_extractor.relation_plan_variant_hash()
             && self.private_row_pad_generator_hybrid.is_complete()
             && self.relation_compiler_interpreter_semantics.is_complete()
             && self.polynomial_protocol_extractor.is_complete()
@@ -6115,6 +6134,8 @@ struct RowCodeWhirProductionGeometryCertificate {
     opening_degree_bound_exclusive: u64,
     proof_privacy_mode: ProofPrivacyMode,
     relation_compiler_interpreter_semantics: RelationCompilerInterpreterSemanticCertificate,
+    polynomial_protocol_extractor: ProductionPolynomialProtocolExtractorCertificate,
+    point_constraint_extractor: ProductionPointConstraintExtractorCertificate,
     construction_masking: ConstructionMaskingCertificate,
     production_construction_masking: ProductionConstructionMaskingCorrespondenceCertificate,
     aggregate_wide_masking: AggregateWideMaskingCertificate,
@@ -6132,6 +6153,9 @@ struct RowCodeWhirProductionGeometryCertificate {
     cms19_whole_database_support: Cms19WholeDatabaseSupportCertificate,
     commitment_subtree_extraction: CommitmentSubtreeExtractionCertificate,
     cms19_atomic_round_semantics: Cms19AtomicRoundSemanticCertificate,
+    cms19_state_predicate: Cms19StatePredicateCertificate,
+    cms19_strong_round_by_round_semantics: Cms19StrongRoundByRoundSemanticCertificate,
+    cms19_applicability: Cms19ApplicabilityCertificate,
     maximum_transcript_hash_query_count: u64,
     logical_verifier_message_count: u64,
     cms19_arithmetic: Cms19ArithmeticCertificate,
@@ -6225,6 +6249,27 @@ impl RowCodeWhirProductionGeometryCertificate {
         {
             return Some(
                 ProductionGeometryCertificateFailure::IncompleteRelationOrMaskingCertificate,
+            );
+        }
+        if !self.polynomial_protocol_extractor.is_complete()
+            || !self.point_constraint_extractor.is_complete()
+            || self
+                .polynomial_protocol_extractor
+                .construction_plan_identity_hash()
+                != self.construction_plan_identity_hash
+            || self
+                .point_constraint_extractor
+                .construction_plan_identity_hash()
+                != self.construction_plan_identity_hash
+            || self
+                .polynomial_protocol_extractor
+                .relation_plan_variant_hash()
+                != self.relation_plan_variant_hash
+            || self.point_constraint_extractor.relation_plan_variant_hash()
+                != self.relation_plan_variant_hash
+        {
+            return Some(
+                ProductionGeometryCertificateFailure::IncompletePolynomialExtractorCorrespondence,
             );
         }
         if expected_code_state_count != Some(self.whir_geometry.code_state_rows.len())
@@ -6363,6 +6408,27 @@ impl RowCodeWhirProductionGeometryCertificate {
                     .unwrap_or(usize::MAX)
         {
             return Some(ProductionGeometryCertificateFailure::IncompleteAtomicRoundSemantics);
+        }
+        if !self.cms19_state_predicate.is_complete()
+            || !self.cms19_state_predicate.has_exact_abstract_partition()
+            || !self.cms19_strong_round_by_round_semantics.is_complete()
+            || !self
+                .cms19_strong_round_by_round_semantics
+                .state_evaluator
+                .is_complete_for(
+                    &self.cms19_whole_state_transitions,
+                    &self.cms19_state_predicate,
+                )
+            || self
+                .cms19_strong_round_by_round_semantics
+                .accepting_database_extractor
+                .construction_plan_identity_hash
+                != self.construction_plan_identity_hash
+            || !self
+                .cms19_applicability
+                .has_complete_structural_correspondence()
+        {
+            return Some(ProductionGeometryCertificateFailure::IncompleteTerminalStatePredicate);
         }
         if self.cms19_arithmetic.verifier_hash_query_count
             != self
@@ -6782,6 +6848,38 @@ fn checked_row_code_whir_production_geometry_certificate_with_masking(
             WhirTheoremCertificateError::IncompleteRelationSemanticCorrespondence,
         ));
     }
+    let (polynomial_protocol_extractor, point_constraint_extractor) =
+        checked_production_extractor_correspondence(
+            plan,
+            relation_variant,
+            relation_context,
+            artifact.canonical_plan_hash(),
+            relation_plan_variant_hash,
+        )
+        .map_err(|_| {
+            contextualize(
+                ProductionGeometryCertificateStage::PolynomialExtractor,
+                WhirTheoremCertificateError::IncompletePolynomialExtractorCorrespondence,
+            )
+        })?;
+    let construction_plan_identity_hash = plan.canonical_identity_hash().map_err(|_| {
+        contextualize(
+            ProductionGeometryCertificateStage::ConstructionIdentity,
+            WhirTheoremCertificateError::InvalidSelectedGeometry,
+        )
+    })?;
+    if !polynomial_protocol_extractor.is_complete()
+        || !point_constraint_extractor.is_complete()
+        || polynomial_protocol_extractor.construction_plan_identity_hash()
+            != construction_plan_identity_hash
+        || point_constraint_extractor.construction_plan_identity_hash()
+            != construction_plan_identity_hash
+    {
+        return Err(contextualize(
+            ProductionGeometryCertificateStage::PolynomialExtractor,
+            WhirTheoremCertificateError::IncompletePolynomialExtractorCorrespondence,
+        ));
+    }
     let construction_masking = checked_zero_knowledge_mask_image_for_parameters(
         relation_variant,
         relation_context,
@@ -6994,16 +7092,70 @@ fn checked_row_code_whir_production_geometry_certificate_with_masking(
         .map_err(|error| {
             contextualize(ProductionGeometryCertificateStage::FailureMagnitude, error)
         })?;
+    let cms19_accepting_database_extractor =
+        derive_cms19_accepting_database_extractor_certificate(plan).map_err(|error| {
+            contextualize(
+                ProductionGeometryCertificateStage::TerminalStatePredicate,
+                error,
+            )
+        })?;
+    let cms19_state_predicate =
+        derive_cms19_state_predicate_certificate(Cms19StatePredicateCertificateInput {
+            selected_plan_state_predicate: &selected_plan_state_predicate,
+            plan,
+            catalog: &catalog,
+            code_state_rows: &whir_geometry.code_state_rows,
+            interleaved_unique_decoding_rows: &whir_geometry.interleaved_unique_decoding_rows,
+            whole_state_transitions: &cms19_whole_state_transitions,
+            whole_database_support: &cms19_whole_database_support,
+            commitment_subtree_extraction: &commitment_subtree_extraction,
+            accepting_database_extractor: &cms19_accepting_database_extractor,
+            strong_state_hash_chain: &cms19_strong_state_hash_chain,
+            relation_compiler_interpreter_semantics: &relation_compiler_interpreter_semantics,
+            polynomial_protocol_extractor: &polynomial_protocol_extractor,
+            point_constraint_extractor: &point_constraint_extractor,
+            exact_failure_magnitude: &exact_failure_magnitude,
+        });
+    let cms19_strong_round_by_round_semantics =
+        derive_cms19_strong_round_by_round_semantic_certificate(
+            plan,
+            &catalog,
+            &selected_plan_state_predicate,
+            &cms19_whole_state_transitions,
+            &cms19_state_predicate,
+            &exact_failure_magnitude,
+            cms19_accepting_database_extractor,
+        )
+        .map_err(|error| {
+            contextualize(
+                ProductionGeometryCertificateStage::TerminalStatePredicate,
+                error,
+            )
+        })?;
+    let cms19_applicability =
+        derive_cms19_applicability_certificate(Cms19ApplicabilityCertificateInput {
+            plan,
+            catalog: &catalog,
+            selected_plan_state_predicate: &selected_plan_state_predicate,
+            whole_state_transitions: &cms19_whole_state_transitions,
+            whole_database_support: &cms19_whole_database_support,
+            state_predicate: &cms19_state_predicate,
+            strong_state_hash_chain: &cms19_strong_state_hash_chain,
+            verifier_oracle_ledger: &complete_verifier_oracle_ledger,
+            deployed_leaf_oracle: &deployed_aggregate_leaf_oracle,
+            exact_failure_magnitude: &exact_failure_magnitude,
+        })
+        .map_err(|error| {
+            contextualize(
+                ProductionGeometryCertificateStage::TerminalStatePredicate,
+                error,
+            )
+        })?;
     let certificate = RowCodeWhirProductionGeometryCertificate {
         application_statement_schema_identifier: plan.application_statement_schema_identifier,
         schedule_position: plan.schedule_position,
         top_count: plan.top_count,
-        construction_plan_identity_hash: plan.canonical_identity_hash().map_err(|_| {
-            contextualize(
-                ProductionGeometryCertificateStage::ConstructionIdentity,
-                WhirTheoremCertificateError::InvalidSelectedGeometry,
-            )
-        })?,
+        construction_plan_identity_hash,
         relation_plan_hash: plan.relation_plan_hash,
         relation_plan_variant_hash,
         parameters,
@@ -7012,6 +7164,8 @@ fn checked_row_code_whir_production_geometry_certificate_with_masking(
         opening_degree_bound_exclusive: plan.opening_degree_bound_exclusive,
         proof_privacy_mode: plan.proof_privacy_mode,
         relation_compiler_interpreter_semantics,
+        polynomial_protocol_extractor,
+        point_constraint_extractor,
         construction_masking,
         production_construction_masking,
         aggregate_wide_masking: aggregate_wide_masking.clone(),
@@ -7029,6 +7183,9 @@ fn checked_row_code_whir_production_geometry_certificate_with_masking(
         cms19_whole_database_support,
         commitment_subtree_extraction,
         cms19_atomic_round_semantics,
+        cms19_state_predicate,
+        cms19_strong_round_by_round_semantics,
+        cms19_applicability,
         maximum_transcript_hash_query_count,
         logical_verifier_message_count,
         cms19_arithmetic,
@@ -7220,15 +7377,25 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
     if &expected_construction_plan != plan {
         return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
     }
+    let relation_plan_variant_hash = relation_variant
+        .canonical_hash()
+        .map_err(|_| WhirTheoremCertificateError::IncompletePolynomialExtractorCorrespondence)?;
     let (polynomial_protocol_extractor, point_constraint_extractor) =
+        checked_production_extractor_correspondence(
+            plan,
+            relation_variant,
+            &relation_context,
+            validated_relation_plan.canonical_plan_hash(),
+            relation_plan_variant_hash,
+        )
+        .map_err(|_| WhirTheoremCertificateError::IncompletePolynomialExtractorCorrespondence)?;
+    let (exact_polynomial_protocol_extractor, exact_point_constraint_extractor) =
         checked_exact_same_secret_extractor_correspondence(
             plan,
             relation_variant,
             &relation_context,
             validated_relation_plan.canonical_plan_hash(),
-            relation_variant.canonical_hash().map_err(|_| {
-                WhirTheoremCertificateError::IncompletePolynomialExtractorCorrespondence
-            })?,
+            relation_plan_variant_hash,
         )
         .map_err(|_| WhirTheoremCertificateError::IncompletePolynomialExtractorCorrespondence)?;
     let construction_plan_identity_hash = plan
@@ -7239,6 +7406,12 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
         || polynomial_protocol_extractor.construction_plan_identity_hash()
             != construction_plan_identity_hash
         || point_constraint_extractor.construction_plan_identity_hash()
+            != construction_plan_identity_hash
+        || !exact_polynomial_protocol_extractor.is_complete()
+        || !exact_point_constraint_extractor.is_complete()
+        || exact_polynomial_protocol_extractor.construction_plan_identity_hash()
+            != construction_plan_identity_hash
+        || exact_point_constraint_extractor.construction_plan_identity_hash()
             != construction_plan_identity_hash
     {
         return Err(WhirTheoremCertificateError::IncompletePolynomialExtractorCorrespondence);
@@ -11019,8 +11192,8 @@ struct Cms19StatePredicateCertificateInput<'a> {
     accepting_database_extractor: &'a Cms19AcceptingDatabaseExtractorCertificate,
     strong_state_hash_chain: &'a Cms19StrongStateHashChainCertificate,
     relation_compiler_interpreter_semantics: &'a RelationCompilerInterpreterSemanticCertificate,
-    polynomial_protocol_extractor: &'a ExactPolynomialProtocolExtractorCertificate,
-    point_constraint_extractor: &'a ExactPointConstraintExtractorCertificate,
+    polynomial_protocol_extractor: &'a ProductionPolynomialProtocolExtractorCertificate,
+    point_constraint_extractor: &'a ProductionPointConstraintExtractorCertificate,
     exact_failure_magnitude: &'a ExactFailureMagnitudeCertificate,
 }
 
@@ -11091,6 +11264,18 @@ fn derive_cms19_state_predicate_certificate(
                 && row.lower_bound_uses_nonzero_component
                 && row.upper_bound_uses_one_nonzero_component
         });
+    let construction_plan_identity_hash = plan.canonical_identity_hash().ok();
+    let polynomial_extractor_correspondence_is_complete = polynomial_protocol_extractor
+        .is_complete()
+        && construction_plan_identity_hash
+            == Some(polynomial_protocol_extractor.construction_plan_identity_hash())
+        && polynomial_protocol_extractor.relation_plan_variant_hash()
+            == plan.relation_plan_variant_hash;
+    let point_extractor_correspondence_is_complete = point_constraint_extractor.is_complete()
+        && construction_plan_identity_hash
+            == Some(point_constraint_extractor.construction_plan_identity_hash())
+        && point_constraint_extractor.relation_plan_variant_hash()
+            == plan.relation_plan_variant_hash;
     let requirements = [
         (
             StatePredicateRequirement::OriginalBcsStrongStateRuntimeHashChainCorrespondence,
@@ -11126,8 +11311,8 @@ fn derive_cms19_state_predicate_certificate(
                 && selected_geometry_is_strict
                 && interleaved_distance_is_exact
                 && relation_compiler_interpreter_semantics.is_complete()
-                && polynomial_protocol_extractor.is_complete()
-                && point_constraint_extractor.is_complete()
+                && polynomial_extractor_correspondence_is_complete
+                && point_extractor_correspondence_is_complete
                 && exact_failure_magnitude.is_complete(),
         ),
         (
@@ -11173,27 +11358,28 @@ fn derive_cms19_state_predicate_certificate(
         (
             StatePredicateRequirement::ExtractCompleteRelationPhaseCodewords,
             StatePredicateDischargeAuthority::CheckedRoundByRoundPolynomialExtractor,
-            polynomial_protocol_extractor.is_complete(),
+            polynomial_extractor_correspondence_is_complete,
         ),
         (
             StatePredicateRequirement::ExtractCompleteBoundCodewords,
             StatePredicateDischargeAuthority::CheckedRoundByRoundPolynomialExtractor,
-            polynomial_protocol_extractor.is_complete(),
+            polynomial_extractor_correspondence_is_complete,
         ),
         (
             StatePredicateRequirement::ExtractCompleteWhirEpochCodewords,
             StatePredicateDischargeAuthority::CheckedRoundByRoundPolynomialExtractor,
-            polynomial_protocol_extractor.is_complete(),
+            polynomial_extractor_correspondence_is_complete,
         ),
         (
             StatePredicateRequirement::ExplicitPointConstraintExtractorCorrespondence,
             StatePredicateDischargeAuthority::CheckedExplicitPointConstraintExtractor,
-            point_constraint_extractor.is_complete(),
+            point_extractor_correspondence_is_complete,
         ),
         (
             StatePredicateRequirement::ExtractThetaAndPhaseReductions,
             StatePredicateDischargeAuthority::CheckedRoundByRoundPolynomialExtractor,
-            polynomial_protocol_extractor.is_complete() && point_constraint_extractor.is_complete(),
+            polynomial_extractor_correspondence_is_complete
+                && point_extractor_correspondence_is_complete,
         ),
         (
             StatePredicateRequirement::ExactFailureMagnitudeCorrespondence,
@@ -14654,6 +14840,109 @@ fn ballot_width_eight_has_complete_semantic_state_and_database_support() {
             &aggregate_wide_masking,
         )
         .expect("the ballot production geometry includes atomic round semantics");
+    assert!(
+        production_geometry_certificate
+            .polynomial_protocol_extractor
+            .is_complete()
+    );
+    assert!(
+        production_geometry_certificate
+            .point_constraint_extractor
+            .is_complete()
+    );
+    assert_eq!(
+        production_geometry_certificate
+            .point_constraint_extractor
+            .explicit_point_count(),
+        relation_variant.ordered_opening_points().len(),
+    );
+    assert_eq!(
+        production_geometry_certificate
+            .point_constraint_extractor
+            .row_selector_coordinate_count(),
+        3,
+    );
+    assert_eq!(
+        production_geometry_certificate
+            .point_constraint_extractor
+            .proof_supplied_point_coordinate_count(),
+        0,
+    );
+    assert!(
+        production_geometry_certificate
+            .polynomial_protocol_extractor
+            .relation_phase_row_counts()
+            .iter()
+            .all(|count| *count > 0),
+    );
+    assert!(
+        production_geometry_certificate
+            .polynomial_protocol_extractor
+            .relation_phase_polynomial_counts()
+            .iter()
+            .all(|count| *count > 0),
+    );
+    assert_eq!(
+        production_geometry_certificate
+            .polynomial_protocol_extractor
+            .bound_polynomial_count(),
+        0,
+    );
+    assert_eq!(
+        production_geometry_certificate
+            .polynomial_protocol_extractor
+            .opening_batch_count(),
+        plan.opening_batches().len(),
+    );
+    assert_eq!(
+        production_geometry_certificate
+            .polynomial_protocol_extractor
+            .scalar_opening_count(),
+        plan.opening_batches()
+            .iter()
+            .map(|batch| batch.requested_aggregate_column_ordinals.len())
+            .sum::<usize>(),
+    );
+    assert!(
+        production_geometry_certificate
+            .cms19_state_predicate
+            .is_complete()
+    );
+    assert!(
+        production_geometry_certificate
+            .cms19_strong_round_by_round_semantics
+            .is_complete_for(
+                &plan,
+                &production_geometry_certificate.cms19_whole_state_transitions,
+                &production_geometry_certificate.cms19_whole_database_support,
+                &production_geometry_certificate.commitment_subtree_extraction,
+                &production_geometry_certificate.cms19_state_predicate,
+                &production_geometry_certificate.exact_failure_magnitude,
+            ),
+    );
+    for fault in [
+        ProductionExtractorCorrespondenceFault::DropFirstRelationPhasePolynomial,
+        ProductionExtractorCorrespondenceFault::ChangeFirstAggregateOpeningColumn,
+        ProductionExtractorCorrespondenceFault::ChangeScalarOpeningCount,
+        ProductionExtractorCorrespondenceFault::PermitProofSuppliedPoint,
+        ProductionExtractorCorrespondenceFault::ChangeFirstPolynomialBasisIdentity,
+        ProductionExtractorCorrespondenceFault::ChangeFirstSelectorBasisIdentity,
+    ] {
+        assert!(
+            checked_production_extractor_correspondence_with_fault(
+                &plan,
+                relation_variant,
+                &context,
+                artifact.canonical_plan_hash(),
+                relation_variant
+                    .canonical_hash()
+                    .expect("the ballot relation identity derives"),
+                fault,
+            )
+            .is_err(),
+            "the hostile production extractor mutation {fault:?} must be rejected",
+        );
+    }
     let exact_failure = &production_geometry_certificate.exact_failure_magnitude;
     let expected_family_application_multiplicity =
         crate::bgv::proof_suite::selected_profile::selected_proof_application_slot_ceilings()
@@ -14755,6 +15044,18 @@ fn ballot_width_eight_has_complete_semantic_state_and_database_support() {
     assert_eq!(
         wrong_family_failure_certificate.completeness_failure(),
         Some(ProductionGeometryCertificateFailure::IncompleteFailureMagnitudeCorrespondence),
+    );
+    let mut missing_terminal_rejection = production_geometry_certificate.clone();
+    missing_terminal_rejection
+        .cms19_state_predicate
+        .requirements
+        .iter_mut()
+        .find(|row| row.requirement == StatePredicateRequirement::FullFalseTranscriptIsRejected)
+        .expect("the ballot terminal-rejection requirement exists")
+        .is_discharged = false;
+    assert_eq!(
+        missing_terminal_rejection.completeness_failure(),
+        Some(ProductionGeometryCertificateFailure::IncompleteTerminalStatePredicate),
     );
 
     assert_eq!(
