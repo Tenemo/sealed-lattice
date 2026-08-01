@@ -14,7 +14,10 @@ use num_bigint::BigUint;
 use num_traits::{One, Zero};
 use p3_whir::{FoldedRsCode, MaskCodeShape};
 
-use super::shared_query_partition::{SharedQueryEventClass, selected_shared_query_partition};
+use super::shared_query_partition::{
+    SharedQueryChargeReason, SharedQueryEventClass, SharedQueryPartitionRow,
+    selected_shared_query_partition,
+};
 use super::*;
 use crate::bgv::proof_suite::relation_plan::{
     RelationCompilerInterpreterSemanticCertificate, RelationMaskDescriptor,
@@ -143,6 +146,7 @@ pub(in crate::bgv::proof_suite) enum ProductionGeometryCertificateStage {
     WholeDatabaseSupport,
     CommitmentSubtree,
     AtomicRoundSemantics,
+    FailureMagnitude,
     ConstructionIdentity,
     Completeness,
 }
@@ -1036,7 +1040,7 @@ impl ExactQueryFailureRow {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct ExactThetaFailureRow {
+struct ExactProductChallengeFailureRow {
     challenge: CommonProofChallenge,
     ordered_bad_polynomial_degrees: Vec<u64>,
     bad_set_numerator: BigUint,
@@ -1046,6 +1050,7 @@ struct ExactThetaFailureRow {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ExactAlgebraicFailureEvent {
     NonNativeThetaExtraction,
+    NonNativeAlphaExtraction,
     RelationCompositionBatch,
     OpeningPointExceptionalSets,
     PhaseRowAndSelectorBatching,
@@ -1070,16 +1075,17 @@ struct ExactAlgebraicFailureRow {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ExactFailureMagnitudeCertificate {
+    application_statement_schema_identifier: u16,
     owner_rows: Vec<ExactFailureOwnerRow>,
     query_rows: Vec<ExactQueryFailureRow>,
-    theta_rows: Vec<ExactThetaFailureRow>,
+    product_challenge_rows: Vec<ExactProductChallengeFailureRow>,
     algebraic_rows: Vec<ExactAlgebraicFailureRow>,
     extension_field_cardinality: BigUint,
     query_failure_probability_ceiling: ExactBigFraction,
     algebraic_failure_probability_ceiling: ExactBigFraction,
     classical_failure_probability_ceiling: ExactBigFraction,
     qrom_failure_probability_ceiling: ExactBigFraction,
-    same_secret_family_multiplicity: u64,
+    family_application_multiplicity: u64,
     cms19_verifier_hash_query_count: u64,
     cms19_accepting_database_equation_count: u64,
     all_failure_owners_mapped_once: bool,
@@ -1091,13 +1097,15 @@ struct ExactFailureMagnitudeCertificate {
 
 impl ExactFailureMagnitudeCertificate {
     fn is_complete(&self) -> bool {
-        self.owner_rows
-            .iter()
-            .all(|row| row.transition_count == row.expected_transition_count)
-            && self.query_rows.len() == 11
-            && self.theta_rows.len() == 3
-            && self.algebraic_rows.len() == 13
-            && self.same_secret_family_multiplicity == 10
+        self.application_statement_schema_identifier != 0
+            && self
+                .owner_rows
+                .iter()
+                .all(|row| row.transition_count == row.expected_transition_count)
+            && !self.query_rows.is_empty()
+            && !self.product_challenge_rows.is_empty()
+            && !self.algebraic_rows.is_empty()
+            && self.family_application_multiplicity > 0
             && self.all_failure_owners_mapped_once
             && self.exact_query_products_bounded
             && self.ordinary_family_mass_gate_holds
@@ -1114,6 +1122,8 @@ enum ExactFailureMagnitudeFault {
     DropRelationCompositionOwner,
     ReduceAggregateWideBaseNumerator,
     ChangeVerifierHashQueryCount,
+    ChangeApplicationStatementSchemaIdentifier,
+    ChangeFamilyApplicationMultiplicity,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -6125,6 +6135,7 @@ struct RowCodeWhirProductionGeometryCertificate {
     maximum_transcript_hash_query_count: u64,
     logical_verifier_message_count: u64,
     cms19_arithmetic: Cms19ArithmeticCertificate,
+    exact_failure_magnitude: ExactFailureMagnitudeCertificate,
 }
 
 impl RowCodeWhirProductionGeometryCertificate {
@@ -6363,6 +6374,22 @@ impl RowCodeWhirProductionGeometryCertificate {
                     .deployed_accepting_database_equation_count
         {
             return Some(ProductionGeometryCertificateFailure::InconsistentQromArithmetic);
+        }
+        if !self.exact_failure_magnitude.is_complete()
+            || self
+                .exact_failure_magnitude
+                .application_statement_schema_identifier
+                != self.application_statement_schema_identifier
+            || self.exact_failure_magnitude.cms19_verifier_hash_query_count
+                != self.cms19_arithmetic.verifier_hash_query_count
+            || self
+                .exact_failure_magnitude
+                .cms19_accepting_database_equation_count
+                != self.cms19_arithmetic.accepting_database_equation_count
+        {
+            return Some(
+                ProductionGeometryCertificateFailure::IncompleteFailureMagnitudeCorrespondence,
+            );
         }
         None
     }
@@ -6941,6 +6968,32 @@ fn checked_row_code_whir_production_geometry_certificate_with_masking(
         deployed_aggregate_leaf_oracle.deployed_verifier_hash_query_count,
         deployed_aggregate_leaf_oracle.deployed_accepting_database_equation_count,
     );
+    let initial_constraint_batch_numerator = prefix_stacking
+        .scalar_opening_count
+        .checked_sub(1)
+        .ok_or_else(|| {
+            contextualize(
+                ProductionGeometryCertificateStage::FailureMagnitude,
+                WhirTheoremCertificateError::InvalidSelectedGeometry,
+            )
+        })?;
+    let exact_failure_magnitude =
+        derive_exact_failure_magnitude_certificate(ExactFailureMagnitudeDerivationInput {
+            plan,
+            relation_variant,
+            catalog: &catalog,
+            selected_plan_state_predicate: &selected_plan_state_predicate,
+            code_state_rows: &whir_geometry.code_state_rows,
+            fold_rows: &whir_geometry.fold_rows,
+            shift_rows: &whir_geometry.shift_rows,
+            aggregate_wide_masking,
+            initial_constraint_batch_numerator,
+            logical_verifier_message_count,
+            cms19_arithmetic: &cms19_arithmetic,
+        })
+        .map_err(|error| {
+            contextualize(ProductionGeometryCertificateStage::FailureMagnitude, error)
+        })?;
     let certificate = RowCodeWhirProductionGeometryCertificate {
         application_statement_schema_identifier: plan.application_statement_schema_identifier,
         schedule_position: plan.schedule_position,
@@ -6979,6 +7032,7 @@ fn checked_row_code_whir_production_geometry_certificate_with_masking(
         maximum_transcript_hash_query_count,
         logical_verifier_message_count,
         cms19_arithmetic,
+        exact_failure_magnitude,
     };
     if let Some(failure) = certificate.completeness_failure() {
         return Err(WhirTheoremCertificateError::SelectedProductionGeometry {
@@ -11266,26 +11320,26 @@ fn derive_cms19_arithmetic_certificate(
     }
 }
 
-const EXACT_FAILURE_OWNER_COUNTS: [(ExactFailureOwnerKind, usize); 19] = [
-    (ExactFailureOwnerKind::NonNativeThetaProduct, 3),
-    (ExactFailureOwnerKind::NonNativeAlphaProduct, 0),
-    (ExactFailureOwnerKind::RelationComposition, 4_046),
-    (ExactFailureOwnerKind::OutOfDomainPoint, 1),
-    (ExactFailureOwnerKind::PointSelector, 18),
-    (ExactFailureOwnerKind::TraceColumnGroup, 63),
-    (ExactFailureOwnerKind::QuotientGroup, 1),
-    (ExactFailureOwnerKind::OpeningBatchMask, 1),
-    (ExactFailureOwnerKind::BoundOpening, 44),
-    (ExactFailureOwnerKind::BoundDegreeCoordinate, 50),
-    (ExactFailureOwnerKind::OuterQueryVector, 1),
-    (ExactFailureOwnerKind::BoundQueryVector, 1),
-    (ExactFailureOwnerKind::WhirQueryVector, 7),
-    (ExactFailureOwnerKind::WhirOpeningBatching, 1),
-    (ExactFailureOwnerKind::MaskedSumcheckEpsilon, 6),
-    (ExactFailureOwnerKind::MaskedSumcheckFold, 18),
-    (ExactFailureOwnerKind::RoundCheckpoint, 5),
-    (ExactFailureOwnerKind::RoundCombination, 5),
-    (ExactFailureOwnerKind::BaseCaseBlinding, 1),
+const EXACT_FAILURE_OWNER_KINDS: [ExactFailureOwnerKind; 19] = [
+    ExactFailureOwnerKind::NonNativeThetaProduct,
+    ExactFailureOwnerKind::NonNativeAlphaProduct,
+    ExactFailureOwnerKind::RelationComposition,
+    ExactFailureOwnerKind::OutOfDomainPoint,
+    ExactFailureOwnerKind::PointSelector,
+    ExactFailureOwnerKind::TraceColumnGroup,
+    ExactFailureOwnerKind::QuotientGroup,
+    ExactFailureOwnerKind::OpeningBatchMask,
+    ExactFailureOwnerKind::BoundOpening,
+    ExactFailureOwnerKind::BoundDegreeCoordinate,
+    ExactFailureOwnerKind::OuterQueryVector,
+    ExactFailureOwnerKind::BoundQueryVector,
+    ExactFailureOwnerKind::WhirQueryVector,
+    ExactFailureOwnerKind::WhirOpeningBatching,
+    ExactFailureOwnerKind::MaskedSumcheckEpsilon,
+    ExactFailureOwnerKind::MaskedSumcheckFold,
+    ExactFailureOwnerKind::RoundCheckpoint,
+    ExactFailureOwnerKind::RoundCombination,
+    ExactFailureOwnerKind::BaseCaseBlinding,
 ];
 
 fn exact_failure_owner_kind(
@@ -11354,11 +11408,60 @@ fn exact_failure_owner_kind(
 }
 
 fn derive_exact_failure_owner_rows(
+    catalog: &RowCodeWhirOracleEquationCatalog,
     selected_plan_state_predicate: &SelectedPlanStatePredicateCertificate,
 ) -> Result<Vec<ExactFailureOwnerRow>, WhirTheoremCertificateError> {
-    let mut counts = EXACT_FAILURE_OWNER_COUNTS
+    let mut expected_counts = EXACT_FAILURE_OWNER_KINDS
         .iter()
-        .map(|(kind, _)| (*kind, 0_usize))
+        .map(|kind| (*kind, 0_usize))
+        .collect::<BTreeMap<_, _>>();
+    for operation in &catalog.operations {
+        let expected_owner = match &operation.kind {
+            RowCodeWhirOracleEquationOperationKind::CommonProductChallenge(group) => {
+                Some(SelectedPlanFailureEventOwner::CommonProductChallenge {
+                    challenge: group.challenge(),
+                })
+            }
+            RowCodeWhirOracleEquationOperationKind::CommonExtensionChallenge(challenge) => {
+                Some(SelectedPlanFailureEventOwner::CommonExtensionChallenge {
+                    challenge: *challenge,
+                })
+            }
+            RowCodeWhirOracleEquationOperationKind::RowCodeWhir { operation, .. } => {
+                match operation {
+                    RowCodeWhirTranscriptOperation::SampleExtension {
+                        role: RowCodeWhirExtensionRole::Direct(challenge),
+                        ..
+                    } => Some(SelectedPlanFailureEventOwner::DirectExtensionChallenge {
+                        challenge: *challenge,
+                    }),
+                    RowCodeWhirTranscriptOperation::SampleExtension { role, .. } => {
+                        Some(SelectedPlanFailureEventOwner::WhirExtensionChallenge { role: *role })
+                    }
+                    RowCodeWhirTranscriptOperation::SampleDistinctIndices { role, .. } => {
+                        Some(SelectedPlanFailureEventOwner::DistinctQueryVector { role: *role })
+                    }
+                    _ => None,
+                }
+            }
+            RowCodeWhirOracleEquationOperationKind::InitialTranscript
+            | RowCodeWhirOracleEquationOperationKind::CommonRound(_) => None,
+        };
+        let Some(expected_owner) = expected_owner else {
+            continue;
+        };
+        let kind = exact_failure_owner_kind(expected_owner)?;
+        let count = expected_counts
+            .get_mut(&kind)
+            .ok_or(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence)?;
+        *count = count
+            .checked_add(1)
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    }
+
+    let mut observed_counts = EXACT_FAILURE_OWNER_KINDS
+        .iter()
+        .map(|kind| (*kind, 0_usize))
         .collect::<BTreeMap<_, _>>();
     for owner in selected_plan_state_predicate
         .transition_rows
@@ -11366,27 +11469,27 @@ fn derive_exact_failure_owner_rows(
         .filter_map(|row| row.failure_event_owner)
     {
         let kind = exact_failure_owner_kind(owner)?;
-        let count = counts
+        let count = observed_counts
             .get_mut(&kind)
             .ok_or(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence)?;
         *count = count
             .checked_add(1)
             .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
     }
-    Ok(EXACT_FAILURE_OWNER_COUNTS
+    Ok(EXACT_FAILURE_OWNER_KINDS
         .iter()
-        .map(|(kind, expected_transition_count)| ExactFailureOwnerRow {
+        .map(|kind| ExactFailureOwnerRow {
             kind: *kind,
-            transition_count: counts.get(kind).copied().unwrap_or(0),
-            expected_transition_count: *expected_transition_count,
+            transition_count: observed_counts.get(kind).copied().unwrap_or(0),
+            expected_transition_count: expected_counts.get(kind).copied().unwrap_or(0),
         })
         .collect())
 }
 
-fn derive_exact_theta_failure_rows(
+fn derive_exact_product_challenge_failure_rows(
     relation_variant: &RelationPlanVariant,
     catalog: &RowCodeWhirOracleEquationCatalog,
-) -> Result<Vec<ExactThetaFailureRow>, WhirTheoremCertificateError> {
+) -> Result<Vec<ExactProductChallengeFailureRow>, WhirTheoremCertificateError> {
     let mut degrees_by_challenge = BTreeMap::<CommonProofChallenge, BTreeMap<u16, u64>>::new();
     for batch in relation_variant.ordered_integer_lift_batches() {
         let challenge = CommonProofChallenge::Theta {
@@ -11408,6 +11511,24 @@ fn derive_exact_theta_failure_rows(
             return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
         }
     }
+    for batch in relation_variant.ordered_coefficient_local_identity_batches() {
+        let challenge = CommonProofChallenge::Alpha {
+            modulus_ordinal: relation_variant
+                .non_native_modulus_ordinal(batch.modulus_reference())
+                .map_err(|_| {
+                    WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence
+                })?,
+        };
+        let degree = batch
+            .alpha_bad_polynomial_degree()
+            .map_err(|_| WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence)?;
+        degrees_by_challenge
+            .entry(challenge)
+            .or_default()
+            .entry(batch.challenge_ordinal())
+            .and_modify(|current| *current = (*current).max(degree))
+            .or_insert(degree);
+    }
 
     let mut rows = Vec::new();
     for operation in &catalog.operations {
@@ -11416,7 +11537,10 @@ fn derive_exact_theta_failure_rows(
             continue;
         };
         let challenge = group.challenge();
-        if !matches!(challenge, CommonProofChallenge::Theta { .. }) {
+        if !matches!(
+            challenge,
+            CommonProofChallenge::Theta { .. } | CommonProofChallenge::Alpha { .. }
+        ) {
             return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
         }
         let ordered_degrees = degrees_by_challenge
@@ -11433,10 +11557,13 @@ fn derive_exact_theta_failure_rows(
             return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
         }
         let ordered_bad_polynomial_degrees = ordered_degrees.into_values().collect::<Vec<_>>();
-        if ordered_bad_polynomial_degrees != vec![32_766_u64; PROOF_CHALLENGE_EXTENSION_DEGREE] {
+        if ordered_bad_polynomial_degrees
+            .iter()
+            .any(|degree| *degree == 0 || *degree >= group.modulus())
+        {
             return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
         }
-        rows.push(ExactThetaFailureRow {
+        rows.push(ExactProductChallengeFailureRow {
             challenge,
             bad_set_numerator: ordered_bad_polynomial_degrees
                 .iter()
@@ -11449,7 +11576,169 @@ fn derive_exact_theta_failure_rows(
         });
     }
     rows.sort_by_key(|row| row.challenge);
-    if !degrees_by_challenge.is_empty() || rows.len() != 3 {
+    if !degrees_by_challenge.is_empty() || rows.is_empty() {
+        return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
+    }
+    Ok(rows)
+}
+
+fn derive_plan_shared_query_partition(
+    plan: &RowCodeWhirConstructionPlan,
+) -> Result<Vec<SharedQueryPartitionRow>, WhirTheoremCertificateError> {
+    let aggregate_commitment_operation_ordinal = plan
+        .transcript_operations
+        .iter()
+        .position(|operation| {
+            matches!(
+                operation,
+                RowCodeWhirTranscriptOperation::ObserveCommitment {
+                    role: RowCodeWhirCommitmentRole::Aggregate,
+                }
+            )
+        })
+        .ok_or(WhirTheoremCertificateError::IncompleteTranscriptMapping)?;
+    let outer_queries = plan
+        .transcript_operations
+        .iter()
+        .enumerate()
+        .filter_map(|(operation_ordinal, operation)| match operation {
+            RowCodeWhirTranscriptOperation::SampleDistinctIndices {
+                role: RowCodeWhirQueryRole::Outer,
+                upper_bound,
+                output_count,
+            } => Some((operation_ordinal, *upper_bound, *output_count)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if outer_queries.len() != 1
+        || outer_queries[0].0 <= aggregate_commitment_operation_ordinal
+        || outer_queries[0].1 != usize::try_from(plan.evaluation_domain_size).unwrap_or(usize::MAX)
+        || outer_queries[0].2 != plan.parameters.outer_query_count
+    {
+        return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
+    }
+
+    let bound_queries = plan
+        .transcript_operations
+        .iter()
+        .enumerate()
+        .filter_map(|(operation_ordinal, operation)| match operation {
+            RowCodeWhirTranscriptOperation::SampleDistinctIndices {
+                role: RowCodeWhirQueryRole::Bound,
+                upper_bound,
+                output_count,
+            } => Some((operation_ordinal, *upper_bound, *output_count)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let prior_bound_word_count = plan
+        .bound_trees
+        .iter()
+        .filter(|tree| tree.low_degree_mode == RowCodeWhirBoundLowDegreeMode::PriorVssProofRequired)
+        .count();
+    let direct_bound_word_count = plan
+        .bound_trees
+        .iter()
+        .filter(|tree| tree.low_degree_mode == RowCodeWhirBoundLowDegreeMode::Direct)
+        .count();
+    if prior_bound_word_count + direct_bound_word_count == 0 {
+        if !bound_queries.is_empty() {
+            return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
+        }
+    } else if bound_queries.len() != 1
+        || bound_queries[0].0 <= outer_queries[0].0
+        || bound_queries[0].2 != plan.parameters.direct_bound_query_count
+        || plan
+            .bound_trees
+            .iter()
+            .any(|tree| tree.leaf_count != bound_queries[0].1)
+    {
+        return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
+    }
+
+    let opening_point_word_count = plan
+        .aggregate_column_roles
+        .iter()
+        .filter(|role| matches!(role, RowCodeWhirAggregateColumnRole::OpeningPoint { .. }))
+        .count();
+    let relation_phase_word_count = plan.phase_order.len();
+    let relation_commitment_sections = plan
+        .proof_sections
+        .iter()
+        .filter_map(|section| match section.role {
+            RowCodeWhirProofSectionRole::RelationCommitment { phase } => {
+                Some((section.section_ordinal, phase))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let aggregate_commitment_section_ordinal = plan
+        .proof_sections
+        .iter()
+        .find_map(|section| {
+            (section.role == RowCodeWhirProofSectionRole::AggregateCommitment)
+                .then_some(section.section_ordinal)
+        })
+        .ok_or(WhirTheoremCertificateError::IncompleteTranscriptMapping)?;
+    if opening_point_word_count == 0
+        || relation_phase_word_count == 0
+        || relation_commitment_sections.len() != relation_phase_word_count
+        || relation_commitment_sections
+            .iter()
+            .map(|(_, phase)| *phase)
+            .ne(plan.phase_order.iter().copied())
+        || relation_commitment_sections
+            .iter()
+            .any(|(section_ordinal, _)| *section_ordinal >= aggregate_commitment_section_ordinal)
+    {
+        return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
+    }
+    let mut rows = vec![
+        SharedQueryPartitionRow {
+            class: SharedQueryEventClass::OuterOpeningPointWords,
+            word_count: opening_point_word_count,
+            sampled_coordinate_count: outer_queries[0].2,
+            words_fixed_before_sampling: true,
+            shares_one_query_vector: true,
+            charge_reason: SharedQueryChargeReason::DeterministicBadWordSelection,
+            charged_term_count: 1,
+        },
+        SharedQueryPartitionRow {
+            class: SharedQueryEventClass::RelationPhaseColumns,
+            word_count: relation_phase_word_count,
+            sampled_coordinate_count: outer_queries[0].2,
+            words_fixed_before_sampling: true,
+            shares_one_query_vector: true,
+            charge_reason: SharedQueryChargeReason::DeterministicBadWordSelection,
+            charged_term_count: 1,
+        },
+    ];
+    if prior_bound_word_count > 0 {
+        rows.push(SharedQueryPartitionRow {
+            class: SharedQueryEventClass::BoundTreeWords,
+            word_count: prior_bound_word_count,
+            sampled_coordinate_count: plan.parameters.prior_proof_bound_query_count,
+            words_fixed_before_sampling: true,
+            shares_one_query_vector: true,
+            charge_reason: SharedQueryChargeReason::DeterministicBadWordSelection,
+            charged_term_count: 1,
+        });
+    }
+    if direct_bound_word_count > 0 {
+        rows.push(SharedQueryPartitionRow {
+            class: SharedQueryEventClass::StatementRootWords,
+            word_count: direct_bound_word_count,
+            sampled_coordinate_count: plan.parameters.direct_bound_query_count,
+            words_fixed_before_sampling: true,
+            shares_one_query_vector: true,
+            charge_reason: SharedQueryChargeReason::DeterministicBadWordSelection,
+            charged_term_count: 1,
+        });
+    }
+    if plan.application_statement_schema_identifier
+        == ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER
+        && rows.as_slice() != selected_shared_query_partition().as_slice()
+    {
         return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
     }
     Ok(rows)
@@ -11460,64 +11749,32 @@ fn derive_exact_query_failure_rows(
     code_state_rows: &[WhirCodeStateRow],
     aggregate_wide_masking: &AggregateWideMaskingCertificate,
 ) -> Result<Vec<ExactQueryFailureRow>, WhirTheoremCertificateError> {
-    let shared_partition = selected_shared_query_partition();
-    if shared_partition.map(|row| row.class)
-        != [
-            SharedQueryEventClass::OuterOpeningPointWords,
-            SharedQueryEventClass::RelationPhaseColumns,
-            SharedQueryEventClass::BoundTreeWords,
-            SharedQueryEventClass::StatementRootWords,
-        ]
-        || shared_partition.iter().any(|row| {
-            !row.words_fixed_before_sampling
-                || !row.shares_one_query_vector
-                || row.charged_term_count != 1
-        })
-    {
+    let shared_partition = derive_plan_shared_query_partition(plan)?;
+    if shared_partition.iter().any(|row| {
+        !row.words_fixed_before_sampling
+            || !row.shares_one_query_vector
+            || row.charged_term_count != 1
+    }) {
         return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
     }
-    let bound_population = plan
-        .bound_trees
-        .first()
-        .map(|tree| tree.leaf_count)
-        .ok_or(WhirTheoremCertificateError::InvalidSelectedGeometry)?;
-    if plan.bound_trees.len() != 11
-        || plan
-            .bound_trees
-            .iter()
-            .any(|tree| tree.leaf_count != bound_population)
-    {
-        return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
-    }
-    let bound_population = u64::try_from(bound_population)
-        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
-    let outer_population = ROW_CODE_WHIR_EVALUATION_DOMAIN_SIZE;
-    let shared_geometries = [
-        (
-            ExactQueryFailureEvent::OuterOpeningPointWords,
-            ExactFailureOwnerKind::OuterQueryVector,
-            outer_population,
-            outer_population * 5 / 8,
-        ),
-        (
-            ExactQueryFailureEvent::RelationPhaseColumns,
-            ExactFailureOwnerKind::OuterQueryVector,
-            outer_population,
-            outer_population * 5 / 8,
-        ),
-        (
-            ExactQueryFailureEvent::BoundTreeWords,
-            ExactFailureOwnerKind::BoundQueryVector,
-            bound_population,
-            9_217,
-        ),
-        (
-            ExactQueryFailureEvent::StatementRootWords,
-            ExactFailureOwnerKind::BoundQueryVector,
-            bound_population,
-            bound_population * 65 / 128,
-        ),
-    ];
+    let outer_population = plan.evaluation_domain_size;
+    let row_code_rate_denominator = 1_u64
+        .checked_shl(
+            u32::try_from(plan.parameters.row_code_log_inverse_rate)
+                .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+        )
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let doubled_row_code_rate_denominator = row_code_rate_denominator
+        .checked_mul(2)
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let outer_agreement_ceiling = outer_population
+        .checked_mul(
+            row_code_rate_denominator
+                .checked_add(1)
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+        )
+        .and_then(|numerator| numerator.checked_div(doubled_row_code_rate_denominator))
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
     let mut rows = Vec::with_capacity(
         shared_partition
             .len()
@@ -11530,9 +11787,116 @@ fn derive_exact_query_failure_rows(
             )
             .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
     );
-    for (partition_row, (event, sponsoring_owner, population, agreement_ceiling)) in
-        shared_partition.into_iter().zip(shared_geometries)
-    {
+    for partition_row in shared_partition {
+        let (event, sponsoring_owner, population, agreement_ceiling) = match partition_row.class {
+            SharedQueryEventClass::OuterOpeningPointWords => (
+                ExactQueryFailureEvent::OuterOpeningPointWords,
+                ExactFailureOwnerKind::OuterQueryVector,
+                outer_population,
+                outer_agreement_ceiling,
+            ),
+            SharedQueryEventClass::RelationPhaseColumns => (
+                ExactQueryFailureEvent::RelationPhaseColumns,
+                ExactFailureOwnerKind::OuterQueryVector,
+                outer_population,
+                outer_agreement_ceiling,
+            ),
+            SharedQueryEventClass::BoundTreeWords => {
+                let trees = plan
+                    .bound_trees
+                    .iter()
+                    .filter(|tree| {
+                        tree.low_degree_mode == RowCodeWhirBoundLowDegreeMode::PriorVssProofRequired
+                    })
+                    .collect::<Vec<_>>();
+                let first = trees
+                    .first()
+                    .ok_or(WhirTheoremCertificateError::InvalidSelectedGeometry)?;
+                if trees.iter().any(|tree| {
+                    tree.leaf_count != first.leaf_count
+                        || tree.source_trace_domain_size != first.source_trace_domain_size
+                }) {
+                    return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
+                }
+                let source_degree_bound_exclusive = plan
+                    .bound_reduction_blocks
+                    .iter()
+                    .filter(|block| {
+                        block.low_degree_mode
+                            == RowCodeWhirBoundLowDegreeMode::PriorVssProofRequired
+                    })
+                    .map(|block| block.maximum_source_degree_bound_exclusive)
+                    .max()
+                    .ok_or(WhirTheoremCertificateError::InvalidSelectedGeometry)?;
+                let population = u64::try_from(first.leaf_count)
+                    .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+                let encoded_values_per_leaf = first
+                    .evaluation_domain_size
+                    .checked_div(population)
+                    .filter(|value_count| {
+                        *value_count > 0
+                            && population.checked_mul(*value_count)
+                                == Some(first.evaluation_domain_size)
+                    })
+                    .ok_or(WhirTheoremCertificateError::InvalidSelectedGeometry)?;
+                (
+                    ExactQueryFailureEvent::BoundTreeWords,
+                    ExactFailureOwnerKind::BoundQueryVector,
+                    population,
+                    source_degree_bound_exclusive
+                        .checked_div(encoded_values_per_leaf)
+                        .and_then(|ceiling| ceiling.checked_add(1))
+                        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+                )
+            }
+            SharedQueryEventClass::StatementRootWords => {
+                let trees = plan
+                    .bound_trees
+                    .iter()
+                    .filter(|tree| tree.low_degree_mode == RowCodeWhirBoundLowDegreeMode::Direct)
+                    .collect::<Vec<_>>();
+                let first = trees
+                    .first()
+                    .ok_or(WhirTheoremCertificateError::InvalidSelectedGeometry)?;
+                let table_padding_factor = 1_u64
+                    .checked_shl(
+                        u32::try_from(
+                            plan.parameters
+                                .table_variable_count
+                                .checked_sub(plan.parameters.physical_row_witness_variable_count)
+                                .ok_or(WhirTheoremCertificateError::InvalidSelectedGeometry)?,
+                        )
+                        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+                    )
+                    .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+                let padded_message_dimension = first
+                    .source_trace_domain_size
+                    .checked_mul(
+                        u64::try_from(first.ordered_columns.len())
+                            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+                    )
+                    .and_then(|dimension| dimension.checked_mul(table_padding_factor))
+                    .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+                if trees.iter().any(|tree| {
+                    tree.leaf_count != first.leaf_count
+                        || tree.source_trace_domain_size != first.source_trace_domain_size
+                        || tree.ordered_columns.len() != first.ordered_columns.len()
+                }) {
+                    return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
+                }
+                let population = u64::try_from(first.leaf_count)
+                    .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+                (
+                    ExactQueryFailureEvent::StatementRootWords,
+                    ExactFailureOwnerKind::BoundQueryVector,
+                    population,
+                    population
+                        .checked_add(padded_message_dimension)
+                        .and_then(|numerator| numerator.checked_div(2))
+                        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+                )
+            }
+        };
         rows.push(ExactQueryFailureRow::derive(
             event,
             sponsoring_owner,
@@ -11663,6 +12027,21 @@ fn exact_owner_count(
     u64::try_from(count).map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)
 }
 
+fn present_exact_failure_owner_kinds(
+    owner_rows: &[ExactFailureOwnerRow],
+    kinds: &[ExactFailureOwnerKind],
+) -> Result<Vec<ExactFailureOwnerKind>, WhirTheoremCertificateError> {
+    kinds
+        .iter()
+        .copied()
+        .filter_map(|kind| match exact_owner_count(owner_rows, kind) {
+            Ok(0) => None,
+            Ok(_) => Some(Ok(kind)),
+            Err(error) => Some(Err(error)),
+        })
+        .collect()
+}
+
 #[derive(Clone, Copy)]
 struct ExactFailureMagnitudeDerivationInput<'a> {
     plan: &'a RowCodeWhirConstructionPlan,
@@ -11681,7 +12060,7 @@ struct ExactFailureMagnitudeDerivationInput<'a> {
 fn derive_exact_algebraic_failure_rows(
     input: ExactFailureMagnitudeDerivationInput<'_>,
     owner_rows: &[ExactFailureOwnerRow],
-    theta_rows: &[ExactThetaFailureRow],
+    product_challenge_rows: &[ExactProductChallengeFailureRow],
 ) -> Result<Vec<ExactAlgebraicFailureRow>, WhirTheoremCertificateError> {
     let ExactFailureMagnitudeDerivationInput {
         plan,
@@ -11692,8 +12071,14 @@ fn derive_exact_algebraic_failure_rows(
         initial_constraint_batch_numerator,
         ..
     } = input;
-    let theta_numerator = theta_rows
+    let theta_numerator = product_challenge_rows
         .iter()
+        .filter(|row| matches!(row.challenge, CommonProofChallenge::Theta { .. }))
+        .map(|row| row.bad_set_numerator.clone())
+        .sum::<BigUint>();
+    let alpha_numerator = product_challenge_rows
+        .iter()
+        .filter(|row| matches!(row.challenge, CommonProofChallenge::Alpha { .. }))
         .map(|row| row.bad_set_numerator.clone())
         .sum::<BigUint>();
     let opening_point_count = plan
@@ -11701,14 +12086,23 @@ fn derive_exact_algebraic_failure_rows(
         .iter()
         .filter(|role| matches!(role, RowCodeWhirAggregateColumnRole::OpeningPoint { .. }))
         .count();
-    let outer_population = ROW_CODE_WHIR_EVALUATION_DOMAIN_SIZE;
-    let bound_population = u64::try_from(
-        plan.bound_trees
-            .first()
-            .ok_or(WhirTheoremCertificateError::InvalidSelectedGeometry)?
-            .leaf_count,
-    )
-    .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let outer_population = plan.evaluation_domain_size;
+    let bound_population = plan
+        .bound_trees
+        .first()
+        .map(|tree| {
+            u64::try_from(tree.leaf_count)
+                .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)
+        })
+        .transpose()?
+        .unwrap_or(0);
+    if plan
+        .bound_trees
+        .iter()
+        .any(|tree| u64::try_from(tree.leaf_count).ok() != Some(bound_population))
+    {
+        return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
+    }
     let exceptional_set_numerator = outer_population
         .checked_add(
             outer_population
@@ -11727,7 +12121,7 @@ fn derive_exact_algebraic_failure_rows(
     let phase_batch_numerator = u64::try_from(opening_point_count)
         .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?
         .checked_mul(
-            u64::try_from(SAME_SECRET_AGGREGATE_TABLE_WIDTH)
+            u64::try_from(plan.aggregate_table_width())
                 .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
         )
         .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
@@ -11759,118 +12153,143 @@ fn derive_exact_algebraic_failure_rows(
         .and_then(|value| value.checked_add(1))
         .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
 
-    Ok(vec![
-        ExactAlgebraicFailureRow {
+    let mut rows = Vec::new();
+    let theta_owner_count =
+        exact_owner_count(owner_rows, ExactFailureOwnerKind::NonNativeThetaProduct)?;
+    if theta_owner_count > 0 {
+        if theta_numerator.is_zero() {
+            return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
+        }
+        rows.push(ExactAlgebraicFailureRow {
             event: ExactAlgebraicFailureEvent::NonNativeThetaExtraction,
             owner_kinds: vec![ExactFailureOwnerKind::NonNativeThetaProduct],
-            theorem_event_count: exact_owner_count(
-                owner_rows,
-                ExactFailureOwnerKind::NonNativeThetaProduct,
-            )?,
+            theorem_event_count: theta_owner_count,
             numerator: theta_numerator,
-        },
-        ExactAlgebraicFailureRow {
-            event: ExactAlgebraicFailureEvent::RelationCompositionBatch,
-            owner_kinds: vec![ExactFailureOwnerKind::RelationComposition],
-            theorem_event_count: 1,
-            numerator: BigUint::one(),
-        },
-        ExactAlgebraicFailureRow {
-            event: ExactAlgebraicFailureEvent::OpeningPointExceptionalSets,
-            owner_kinds: vec![ExactFailureOwnerKind::OutOfDomainPoint],
-            theorem_event_count: 1,
-            numerator: BigUint::from(exceptional_set_numerator),
-        },
-        ExactAlgebraicFailureRow {
-            event: ExactAlgebraicFailureEvent::PhaseRowAndSelectorBatching,
-            owner_kinds: vec![
+        });
+    }
+    let alpha_owner_count =
+        exact_owner_count(owner_rows, ExactFailureOwnerKind::NonNativeAlphaProduct)?;
+    if alpha_owner_count > 0 {
+        if alpha_numerator.is_zero() {
+            return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
+        }
+        rows.push(ExactAlgebraicFailureRow {
+            event: ExactAlgebraicFailureEvent::NonNativeAlphaExtraction,
+            owner_kinds: vec![ExactFailureOwnerKind::NonNativeAlphaProduct],
+            theorem_event_count: alpha_owner_count,
+            numerator: alpha_numerator,
+        });
+    }
+    rows.push(ExactAlgebraicFailureRow {
+        event: ExactAlgebraicFailureEvent::RelationCompositionBatch,
+        owner_kinds: vec![ExactFailureOwnerKind::RelationComposition],
+        theorem_event_count: 1,
+        numerator: BigUint::one(),
+    });
+    rows.push(ExactAlgebraicFailureRow {
+        event: ExactAlgebraicFailureEvent::OpeningPointExceptionalSets,
+        owner_kinds: vec![ExactFailureOwnerKind::OutOfDomainPoint],
+        theorem_event_count: 1,
+        numerator: BigUint::from(exceptional_set_numerator),
+    });
+    rows.push(ExactAlgebraicFailureRow {
+        event: ExactAlgebraicFailureEvent::PhaseRowAndSelectorBatching,
+        owner_kinds: present_exact_failure_owner_kinds(
+            owner_rows,
+            &[
                 ExactFailureOwnerKind::PointSelector,
                 ExactFailureOwnerKind::TraceColumnGroup,
                 ExactFailureOwnerKind::QuotientGroup,
             ],
-            theorem_event_count: phase_batch_numerator,
-            numerator: BigUint::from(phase_batch_numerator),
-        },
-        ExactAlgebraicFailureRow {
+        )?,
+        theorem_event_count: phase_batch_numerator,
+        numerator: BigUint::from(phase_batch_numerator),
+    });
+    if exact_owner_count(owner_rows, ExactFailureOwnerKind::OpeningBatchMask)? > 0 {
+        rows.push(ExactAlgebraicFailureRow {
             event: ExactAlgebraicFailureEvent::OpeningBatchMaskConsistency,
             owner_kinds: vec![ExactFailureOwnerKind::OpeningBatchMask],
             theorem_event_count: 0,
             numerator: BigUint::zero(),
-        },
-        ExactAlgebraicFailureRow {
+        });
+    }
+    if exact_owner_count(owner_rows, ExactFailureOwnerKind::BoundOpening)? > 0 {
+        rows.push(ExactAlgebraicFailureRow {
             event: ExactAlgebraicFailureEvent::BoundOpeningBatch,
             owner_kinds: vec![ExactFailureOwnerKind::BoundOpening],
             theorem_event_count: 1,
             numerator: BigUint::one(),
-        },
-        ExactAlgebraicFailureRow {
+        });
+    }
+    let bound_degree_owner_count =
+        exact_owner_count(owner_rows, ExactFailureOwnerKind::BoundDegreeCoordinate)?;
+    if bound_degree_owner_count > 0 {
+        rows.push(ExactAlgebraicFailureRow {
             event: ExactAlgebraicFailureEvent::BoundDegreeSuffixes,
             owner_kinds: vec![ExactFailureOwnerKind::BoundDegreeCoordinate],
-            theorem_event_count: exact_owner_count(
-                owner_rows,
-                ExactFailureOwnerKind::BoundDegreeCoordinate,
-            )?,
-            numerator: BigUint::from(exact_owner_count(
-                owner_rows,
-                ExactFailureOwnerKind::BoundDegreeCoordinate,
-            )?),
-        },
-        ExactAlgebraicFailureRow {
-            event: ExactAlgebraicFailureEvent::WhirOpeningBatch,
-            owner_kinds: vec![ExactFailureOwnerKind::WhirOpeningBatching],
-            theorem_event_count: 1,
-            numerator: BigUint::from(initial_constraint_batch_numerator),
-        },
-        ExactAlgebraicFailureRow {
-            event: ExactAlgebraicFailureEvent::MaskedSumcheckInitialTransitions,
-            owner_kinds: vec![ExactFailureOwnerKind::MaskedSumcheckEpsilon],
-            theorem_event_count: exact_owner_count(
-                owner_rows,
-                ExactFailureOwnerKind::MaskedSumcheckEpsilon,
-            )?,
-            numerator: BigUint::from(exact_owner_count(
-                owner_rows,
-                ExactFailureOwnerKind::MaskedSumcheckEpsilon,
-            )?),
-        },
-        // CFW Construction 6.3 and Lemma 6.5 contribute the WHIR mutual
-        // correlated-agreement domain numerator plus the cubic sumcheck term
-        // for each of the fifteen masked folds.
-        ExactAlgebraicFailureRow {
-            event: ExactAlgebraicFailureEvent::MaskedSumcheckFolds,
-            owner_kinds: vec![ExactFailureOwnerKind::MaskedSumcheckFold],
-            theorem_event_count: exact_owner_count(
-                owner_rows,
-                ExactFailureOwnerKind::MaskedSumcheckFold,
-            )?,
-            numerator: BigUint::from(fold_numerator),
-        },
-        // The checkpoint scalar is sampled and transcript-bound but is not an
-        // algebraic input. Its following query vector owns the query event.
-        ExactAlgebraicFailureRow {
-            event: ExactAlgebraicFailureEvent::RoundCommitmentCheckpoints,
-            owner_kinds: vec![ExactFailureOwnerKind::RoundCheckpoint],
-            theorem_event_count: 0,
-            numerator: BigUint::zero(),
-        },
-        ExactAlgebraicFailureRow {
-            event: ExactAlgebraicFailureEvent::WhirQueryCombinations,
-            owner_kinds: vec![ExactFailureOwnerKind::RoundCombination],
-            theorem_event_count: exact_owner_count(
-                owner_rows,
-                ExactFailureOwnerKind::RoundCombination,
-            )?,
-            numerator: BigUint::from(shift_numerator),
-        },
-        // CFW Construction 7.2 and Lemma 7.4 give one source-code MCA term,
-        // one pad-code MCA term, and the singleton list-product term.
-        ExactAlgebraicFailureRow {
-            event: ExactAlgebraicFailureEvent::AggregateWideBaseBlinding,
-            owner_kinds: vec![ExactFailureOwnerKind::BaseCaseBlinding],
-            theorem_event_count: 1,
-            numerator: BigUint::from(base_blinding_numerator),
-        },
-    ])
+            theorem_event_count: bound_degree_owner_count,
+            numerator: BigUint::from(bound_degree_owner_count),
+        });
+    }
+    rows.push(ExactAlgebraicFailureRow {
+        event: ExactAlgebraicFailureEvent::WhirOpeningBatch,
+        owner_kinds: vec![ExactFailureOwnerKind::WhirOpeningBatching],
+        theorem_event_count: 1,
+        numerator: BigUint::from(initial_constraint_batch_numerator),
+    });
+    rows.push(ExactAlgebraicFailureRow {
+        event: ExactAlgebraicFailureEvent::MaskedSumcheckInitialTransitions,
+        owner_kinds: vec![ExactFailureOwnerKind::MaskedSumcheckEpsilon],
+        theorem_event_count: exact_owner_count(
+            owner_rows,
+            ExactFailureOwnerKind::MaskedSumcheckEpsilon,
+        )?,
+        numerator: BigUint::from(exact_owner_count(
+            owner_rows,
+            ExactFailureOwnerKind::MaskedSumcheckEpsilon,
+        )?),
+    });
+    // CFW Construction 6.3 and Lemma 6.5 contribute the WHIR mutual
+    // correlated-agreement domain numerator plus the cubic sumcheck term
+    // for each of the fifteen masked folds.
+    rows.push(ExactAlgebraicFailureRow {
+        event: ExactAlgebraicFailureEvent::MaskedSumcheckFolds,
+        owner_kinds: vec![ExactFailureOwnerKind::MaskedSumcheckFold],
+        theorem_event_count: exact_owner_count(
+            owner_rows,
+            ExactFailureOwnerKind::MaskedSumcheckFold,
+        )?,
+        numerator: BigUint::from(fold_numerator),
+    });
+    // The checkpoint scalar is sampled and transcript-bound but is not an
+    // algebraic input. Its following query vector owns the query event.
+    rows.push(ExactAlgebraicFailureRow {
+        event: ExactAlgebraicFailureEvent::RoundCommitmentCheckpoints,
+        owner_kinds: vec![ExactFailureOwnerKind::RoundCheckpoint],
+        theorem_event_count: 0,
+        numerator: BigUint::zero(),
+    });
+    rows.push(ExactAlgebraicFailureRow {
+        event: ExactAlgebraicFailureEvent::WhirQueryCombinations,
+        owner_kinds: vec![ExactFailureOwnerKind::RoundCombination],
+        theorem_event_count: exact_owner_count(
+            owner_rows,
+            ExactFailureOwnerKind::RoundCombination,
+        )?,
+        numerator: BigUint::from(shift_numerator),
+    });
+    // CFW Construction 7.2 and Lemma 7.4 give one source-code MCA term,
+    // one pad-code MCA term, and the singleton list-product term.
+    rows.push(ExactAlgebraicFailureRow {
+        event: ExactAlgebraicFailureEvent::AggregateWideBaseBlinding,
+        owner_kinds: vec![ExactFailureOwnerKind::BaseCaseBlinding],
+        theorem_event_count: 1,
+        numerator: BigUint::from(base_blinding_numerator),
+    });
+    if rows.iter().any(|row| row.owner_kinds.is_empty()) {
+        return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
+    }
+    Ok(rows)
 }
 
 fn exact_failure_owners_are_completely_mapped(
@@ -11939,7 +12358,7 @@ fn derive_exact_failure_magnitude_certificate_with_mutation(
         cms19_arithmetic,
         ..
     } = input;
-    let owner_rows = derive_exact_failure_owner_rows(selected_plan_state_predicate)?;
+    let owner_rows = derive_exact_failure_owner_rows(catalog, selected_plan_state_predicate)?;
     if owner_rows
         .iter()
         .any(|row| row.transition_count != row.expected_transition_count)
@@ -11951,18 +12370,20 @@ fn derive_exact_failure_magnitude_certificate_with_mutation(
     }
     let query_rows =
         derive_exact_query_failure_rows(plan, code_state_rows, aggregate_wide_masking)?;
-    let theta_rows = derive_exact_theta_failure_rows(relation_variant, catalog)?;
+    let product_challenge_rows =
+        derive_exact_product_challenge_failure_rows(relation_variant, catalog)?;
     let extension_field_cardinality = BigUint::from(PROOF_BASE_FIELD_MODULUS).pow(
         u32::try_from(PROOF_CHALLENGE_EXTENSION_DEGREE)
             .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
     );
-    if theta_rows
+    if product_challenge_rows
         .iter()
         .any(|row| row.sample_space_denominator != extension_field_cardinality)
     {
         return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
     }
-    let algebraic_rows = derive_exact_algebraic_failure_rows(input, &owner_rows, &theta_rows)?;
+    let algebraic_rows =
+        derive_exact_algebraic_failure_rows(input, &owner_rows, &product_challenge_rows)?;
     let query_failure_probability_ceiling = sum_query_probability_ceiling(&query_rows)?;
     let algebraic_failure_probability_ceiling = ExactBigFraction::new(
         sum_algebraic_numerator(&algebraic_rows),
@@ -11977,24 +12398,30 @@ fn derive_exact_failure_magnitude_certificate_with_mutation(
     let qrom_failure_probability_ceiling = classical_failure_probability_ceiling
         .multiply_integer(&cms19_arithmetic.classical_soundness_multiplier)?
         .add(&ideal_oracle_penalty)?;
-    let same_secret_family_multiplicity = u64::from(
+    let family_application_multiplicity = u64::from(
         crate::bgv::proof_suite::selected_profile::selected_proof_application_slot_ceilings()
             .map_err(|_| WhirTheoremCertificateError::InvalidSelectedGeometry)?
-            .family_ceiling(ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER)
+            .family_ceiling(plan.application_statement_schema_identifier)
             .ok_or(WhirTheoremCertificateError::InvalidSelectedGeometry)?,
     );
     let one = ExactBigFraction::from_u64(1, 1)?;
     let ordinary_family_mass_gate_holds = classical_failure_probability_ceiling
         .multiply_integer(
-            &(BigUint::from(same_secret_family_multiplicity) << CMS19_ADVERSARIAL_QUERY_EXPONENT),
+            &(BigUint::from(family_application_multiplicity) << CMS19_ADVERSARIAL_QUERY_EXPONENT),
         )?
         .less_than_or_equal(&one);
     let transformed_initial_mass_gate_holds = classical_failure_probability_ceiling
-        .multiply_integer(&(BigUint::from(same_secret_family_multiplicity * 12) << 176_usize))?
+        .multiply_integer(
+            &(BigUint::from(
+                family_application_multiplicity
+                    .checked_mul(12)
+                    .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+            ) << 176_usize),
+        )?
         .less_than_or_equal(&one);
     let complete_qrom_mass_gate_holds = qrom_failure_probability_ceiling
         .multiply_u64(
-            same_secret_family_multiplicity
+            family_application_multiplicity
                 .checked_mul(4)
                 .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
         )?
@@ -12006,16 +12433,17 @@ fn derive_exact_failure_magnitude_certificate_with_mutation(
             .less_than_or_equal(&row.power_probability_ceiling)
     });
     let mut certificate = ExactFailureMagnitudeCertificate {
+        application_statement_schema_identifier: plan.application_statement_schema_identifier,
         owner_rows,
         query_rows,
-        theta_rows,
+        product_challenge_rows,
         algebraic_rows,
         extension_field_cardinality,
         query_failure_probability_ceiling,
         algebraic_failure_probability_ceiling,
         classical_failure_probability_ceiling,
         qrom_failure_probability_ceiling,
-        same_secret_family_multiplicity,
+        family_application_multiplicity,
         cms19_verifier_hash_query_count: cms19_arithmetic.verifier_hash_query_count,
         cms19_accepting_database_equation_count: cms19_arithmetic.accepting_database_equation_count,
         all_failure_owners_mapped_once,
@@ -12044,12 +12472,17 @@ fn validate_exact_failure_magnitude_certificate(
         cms19_arithmetic,
         ..
     } = input;
-    let expected_owner_rows = derive_exact_failure_owner_rows(selected_plan_state_predicate)?;
+    let expected_owner_rows =
+        derive_exact_failure_owner_rows(catalog, selected_plan_state_predicate)?;
     let expected_query_rows =
         derive_exact_query_failure_rows(plan, code_state_rows, aggregate_wide_masking)?;
-    let expected_theta_rows = derive_exact_theta_failure_rows(relation_variant, catalog)?;
-    let expected_algebraic_rows =
-        derive_exact_algebraic_failure_rows(input, &expected_owner_rows, &expected_theta_rows)?;
+    let expected_product_challenge_rows =
+        derive_exact_product_challenge_failure_rows(relation_variant, catalog)?;
+    let expected_algebraic_rows = derive_exact_algebraic_failure_rows(
+        input,
+        &expected_owner_rows,
+        &expected_product_challenge_rows,
+    )?;
     let expected_extension_field_cardinality = BigUint::from(PROOF_BASE_FIELD_MODULUS).pow(
         u32::try_from(PROOF_CHALLENGE_EXTENSION_DEGREE)
             .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
@@ -12069,7 +12502,7 @@ fn validate_exact_failure_magnitude_certificate(
     let expected_multiplicity = u64::from(
         crate::bgv::proof_suite::selected_profile::selected_proof_application_slot_ceilings()
             .map_err(|_| WhirTheoremCertificateError::InvalidSelectedGeometry)?
-            .family_ceiling(ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER)
+            .family_ceiling(plan.application_statement_schema_identifier)
             .ok_or(WhirTheoremCertificateError::InvalidSelectedGeometry)?,
     );
     let one = ExactBigFraction::from_u64(1, 1)?;
@@ -12079,7 +12512,13 @@ fn validate_exact_failure_magnitude_certificate(
         )?
         .less_than_or_equal(&one);
     let expected_transformed_gate = expected_classical_ceiling
-        .multiply_integer(&(BigUint::from(expected_multiplicity * 12) << 176_usize))?
+        .multiply_integer(
+            &(BigUint::from(
+                expected_multiplicity
+                    .checked_mul(12)
+                    .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+            ) << 176_usize),
+        )?
         .less_than_or_equal(&one);
     let expected_qrom_gate = expected_qrom_ceiling
         .multiply_u64(
@@ -12091,16 +12530,18 @@ fn validate_exact_failure_magnitude_certificate(
     let expected_owner_count = expected_owner_rows.iter().try_fold(0_u64, |total, row| {
         total.checked_add(u64::try_from(row.transition_count).ok()?)
     });
-    if certificate.owner_rows != expected_owner_rows
+    if certificate.application_statement_schema_identifier
+        != plan.application_statement_schema_identifier
+        || certificate.owner_rows != expected_owner_rows
         || certificate.query_rows != expected_query_rows
-        || certificate.theta_rows != expected_theta_rows
+        || certificate.product_challenge_rows != expected_product_challenge_rows
         || certificate.algebraic_rows != expected_algebraic_rows
         || certificate.extension_field_cardinality != expected_extension_field_cardinality
         || certificate.query_failure_probability_ceiling != expected_query_ceiling
         || certificate.algebraic_failure_probability_ceiling != expected_algebraic_ceiling
         || certificate.classical_failure_probability_ceiling != expected_classical_ceiling
         || certificate.qrom_failure_probability_ceiling != expected_qrom_ceiling
-        || certificate.same_secret_family_multiplicity != expected_multiplicity
+        || certificate.family_application_multiplicity != expected_multiplicity
         || certificate.cms19_verifier_hash_query_count != cms19_arithmetic.verifier_hash_query_count
         || certificate.cms19_accepting_database_equation_count
             != cms19_arithmetic.accepting_database_equation_count
@@ -12146,6 +12587,12 @@ fn checked_exact_failure_magnitude_with_fault(
         }
         ExactFailureMagnitudeFault::ChangeVerifierHashQueryCount => {
             certificate.cms19_verifier_hash_query_count += 1;
+        }
+        ExactFailureMagnitudeFault::ChangeApplicationStatementSchemaIdentifier => {
+            certificate.application_statement_schema_identifier ^= 1;
+        }
+        ExactFailureMagnitudeFault::ChangeFamilyApplicationMultiplicity => {
+            certificate.family_application_multiplicity += 1;
         }
     })
 }
@@ -14207,6 +14654,108 @@ fn ballot_width_eight_has_complete_semantic_state_and_database_support() {
             &aggregate_wide_masking,
         )
         .expect("the ballot production geometry includes atomic round semantics");
+    let exact_failure = &production_geometry_certificate.exact_failure_magnitude;
+    let expected_family_application_multiplicity =
+        crate::bgv::proof_suite::selected_profile::selected_proof_application_slot_ceilings()
+            .expect("the selected family ceilings derive")
+            .family_ceiling(
+                ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
+            )
+            .expect("the ballot family ceiling exists");
+    assert_eq!(
+        exact_failure.application_statement_schema_identifier,
+        plan.application_statement_schema_identifier
+    );
+    assert_eq!(
+        exact_failure.family_application_multiplicity,
+        u64::from(expected_family_application_multiplicity),
+    );
+    let mut expected_query_events = vec![
+        ExactQueryFailureEvent::OuterOpeningPointWords,
+        ExactQueryFailureEvent::RelationPhaseColumns,
+    ];
+    expected_query_events.extend(
+        (0..=u32::try_from(plan.whir.rounds.len()).expect("the WHIR epoch count fits u32"))
+            .map(|epoch_ordinal| ExactQueryFailureEvent::WhirSource { epoch_ordinal }),
+    );
+    expected_query_events.push(ExactQueryFailureEvent::AggregateWidePad);
+    assert_eq!(
+        exact_failure
+            .query_rows
+            .iter()
+            .map(|row| row.event)
+            .collect::<Vec<_>>(),
+        expected_query_events,
+    );
+    assert!(exact_failure.query_rows.iter().all(|row| !matches!(
+        row.event,
+        ExactQueryFailureEvent::BoundTreeWords | ExactQueryFailureEvent::StatementRootWords
+    )));
+    let compact_rate_denominator = 1_u64 << plan.parameters.row_code_log_inverse_rate;
+    let expected_outer_agreement_ceiling = plan.evaluation_domain_size
+        * (compact_rate_denominator + 1)
+        / (2 * compact_rate_denominator);
+    for row in exact_failure.query_rows.iter().take(2) {
+        assert_eq!(row.population, plan.evaluation_domain_size);
+        assert_eq!(row.agreement_ceiling, expected_outer_agreement_ceiling);
+        assert_eq!(
+            row.query_count,
+            u64::try_from(plan.parameters.outer_query_count).unwrap()
+        );
+    }
+    assert_eq!(
+        exact_failure.product_challenge_rows.len(),
+        catalog
+            .operations
+            .iter()
+            .filter(|operation| matches!(
+                operation.kind,
+                RowCodeWhirOracleEquationOperationKind::CommonProductChallenge(_)
+            ))
+            .count(),
+    );
+    let ballot_cms19_arithmetic = derive_cms19_arithmetic_certificate(
+        deployed_leaf_oracle.deployed_verifier_hash_query_count,
+        deployed_leaf_oracle.deployed_accepting_database_equation_count,
+    );
+    let ballot_failure_input = ExactFailureMagnitudeDerivationInput {
+        plan: &plan,
+        relation_variant,
+        catalog: &catalog,
+        selected_plan_state_predicate: &selected_plan_state_predicate,
+        code_state_rows: &whir_geometry.code_state_rows,
+        fold_rows: &whir_geometry.fold_rows,
+        shift_rows: &whir_geometry.shift_rows,
+        aggregate_wide_masking: &aggregate_wide_masking,
+        initial_constraint_batch_numerator: production_geometry_certificate
+            .prefix_stacking
+            .scalar_opening_count
+            - 1,
+        logical_verifier_message_count: catalog
+            .logical_verifier_message_count()
+            .expect("the ballot verifier-message count derives"),
+        cms19_arithmetic: &ballot_cms19_arithmetic,
+    };
+    for fault in [
+        ExactFailureMagnitudeFault::DropFirstQueryRow,
+        ExactFailureMagnitudeFault::ReduceFirstQueryAgreementCeiling,
+        ExactFailureMagnitudeFault::ChangeVerifierHashQueryCount,
+        ExactFailureMagnitudeFault::ChangeApplicationStatementSchemaIdentifier,
+        ExactFailureMagnitudeFault::ChangeFamilyApplicationMultiplicity,
+    ] {
+        assert_eq!(
+            checked_exact_failure_magnitude_with_fault(ballot_failure_input, fault),
+            Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence),
+        );
+    }
+    let mut wrong_family_failure_certificate = production_geometry_certificate.clone();
+    wrong_family_failure_certificate
+        .exact_failure_magnitude
+        .application_statement_schema_identifier ^= 1;
+    assert_eq!(
+        wrong_family_failure_certificate.completeness_failure(),
+        Some(ProductionGeometryCertificateFailure::IncompleteFailureMagnitudeCorrespondence),
+    );
 
     assert_eq!(
         plan.selected_parameters()
@@ -15251,8 +15800,9 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
     let single_theta_numerator = BigUint::from(32_766_u64).pow(5);
     assert_eq!(
         exact_failure
-            .theta_rows
+            .product_challenge_rows
             .iter()
+            .filter(|row| matches!(row.challenge, CommonProofChallenge::Theta { .. }))
             .map(|row| row.bad_set_numerator.clone())
             .collect::<Vec<_>>(),
         vec![single_theta_numerator.clone(); 3],

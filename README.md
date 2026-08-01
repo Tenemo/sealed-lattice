@@ -117,11 +117,15 @@ Works today:
   and four width-8, log-inverse-rate-five (inverse-rate-32) identities. The
   constructor now additionally requires one executable atomic predecessor-state
   evolution and one plan-addressed, collision-free prefix-plus-next-message
-  extractor before it emits a checked geometry record. Focused current evidence
-  passes this stronger constructor for the selected same-secret and width-8
-  ballot plans. The remaining identities have not yet been regenerated under
-  the stronger gate. Families with no bound tree or verifier-sequence source do
-  not acquire an invented ledger row.
+  extractor plus a plan-derived family failure ledger before it emits a checked
+  geometry record. The failure ledger derives query-event presence, row-code
+  rate, agreement ceilings, product-challenge degrees, statement-family
+  multiplicity, and classical and quantum-random-oracle loss from the selected
+  plan. Focused current evidence passes this stronger constructor for the
+  selected same-secret and width-8 ballot plans and refuses wrong family or
+  multiplicity bindings. The remaining identities have not yet been regenerated
+  under the stronger gate. Families with no bound tree or verifier-sequence
+  source do not acquire an invented ledger row.
 - Production-derived phase-liveness accounting now covers the complete
   same-secret prover live set, including source ownership, replay readers,
   DFTs, Merkle frontiers, proof material, transcript state, private material,
@@ -164,9 +168,10 @@ Not yet:
   event under one atomic fixed-width verifier message, an executable
   predecessor-state evaluator, and an exact next-message database extractor.
   The reusable atomic predecessor and database-extraction layer is now enforced
-  by the production-geometry constructor, but family-specific terminal
-  rejection and failure-magnitude certificates still need independent
-  regeneration for the remaining geometries. The final
+  by the production-geometry constructor. Exact family failure ledgers now
+  derive for the focused same-secret and ballot geometries; ballot terminal
+  rejection and both certificates for the remaining geometries still need
+  independent derivation. The final
   theorem-to-transported-bytes correspondence and ceremony-level failure
   composition also remain open.
 - The static liveness model has not yet been confirmed by a completed native
