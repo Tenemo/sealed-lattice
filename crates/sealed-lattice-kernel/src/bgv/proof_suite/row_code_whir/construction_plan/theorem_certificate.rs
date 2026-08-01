@@ -36,10 +36,6 @@ use crate::bgv::proof_suite::row_code_whir::{
         AggregateWideJointAffineViewRow, AggregateWideMaskingCertificate,
         AggregateWideNonlinearViewBoundary, checked_fold_limb_affine_map,
     },
-    exact_same_secret::{
-        ExactExtractorCorrespondenceFault, checked_exact_same_secret_extractor_correspondence,
-        checked_exact_same_secret_extractor_correspondence_with_fault,
-    },
     recomputable_oracle::{
         RecomputableOracleAffineMapDescriptor, checked_recomputable_oracle_affine_map,
     },
@@ -7389,15 +7385,6 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
             relation_plan_variant_hash,
         )
         .map_err(|_| WhirTheoremCertificateError::IncompletePolynomialExtractorCorrespondence)?;
-    let (exact_polynomial_protocol_extractor, exact_point_constraint_extractor) =
-        checked_exact_same_secret_extractor_correspondence(
-            plan,
-            relation_variant,
-            &relation_context,
-            validated_relation_plan.canonical_plan_hash(),
-            relation_plan_variant_hash,
-        )
-        .map_err(|_| WhirTheoremCertificateError::IncompletePolynomialExtractorCorrespondence)?;
     let construction_plan_identity_hash = plan
         .canonical_identity_hash()
         .map_err(|_| WhirTheoremCertificateError::IncompletePolynomialExtractorCorrespondence)?;
@@ -7406,12 +7393,6 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
         || polynomial_protocol_extractor.construction_plan_identity_hash()
             != construction_plan_identity_hash
         || point_constraint_extractor.construction_plan_identity_hash()
-            != construction_plan_identity_hash
-        || !exact_polynomial_protocol_extractor.is_complete()
-        || !exact_point_constraint_extractor.is_complete()
-        || exact_polynomial_protocol_extractor.construction_plan_identity_hash()
-            != construction_plan_identity_hash
-        || exact_point_constraint_extractor.construction_plan_identity_hash()
             != construction_plan_identity_hash
     {
         return Err(WhirTheoremCertificateError::IncompletePolynomialExtractorCorrespondence);
@@ -16200,14 +16181,15 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
         );
     }
     for fault in [
-        ExactExtractorCorrespondenceFault::DropFirstRelationPhasePolynomial,
-        ExactExtractorCorrespondenceFault::ChangeFirstAggregateOpeningColumn,
-        ExactExtractorCorrespondenceFault::ChangeScalarOpeningCount,
-        ExactExtractorCorrespondenceFault::PermitProofSuppliedPoint,
-        ExactExtractorCorrespondenceFault::ChangeFirstPolynomialBasisIdentity,
+        ProductionExtractorCorrespondenceFault::DropFirstRelationPhasePolynomial,
+        ProductionExtractorCorrespondenceFault::ChangeFirstAggregateOpeningColumn,
+        ProductionExtractorCorrespondenceFault::ChangeScalarOpeningCount,
+        ProductionExtractorCorrespondenceFault::PermitProofSuppliedPoint,
+        ProductionExtractorCorrespondenceFault::ChangeFirstPolynomialBasisIdentity,
+        ProductionExtractorCorrespondenceFault::ChangeFirstSelectorBasisIdentity,
     ] {
         assert!(
-            checked_exact_same_secret_extractor_correspondence_with_fault(
+            checked_production_extractor_correspondence_with_fault(
                 &plan,
                 extractor_variant,
                 &extractor_context,
