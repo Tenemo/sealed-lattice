@@ -91,9 +91,9 @@ pub(crate) fn proof_attempt_identifier_derivation_count(
 ) -> Option<u64> {
     if RESET_SAFE_PROOF_FAMILIES.contains(&application_statement_schema_identifier) {
         Some(2)
-    } else if application_statement_schema_identifier == ORDINARY_BALLOT_PROOF_FAMILY {
-        Some(1)
-    } else if PUBLIC_ONLY_PROOF_FAMILIES.contains(&application_statement_schema_identifier) {
+    } else if application_statement_schema_identifier == ORDINARY_BALLOT_PROOF_FAMILY
+        || PUBLIC_ONLY_PROOF_FAMILIES.contains(&application_statement_schema_identifier)
+    {
         Some(1)
     } else {
         None
