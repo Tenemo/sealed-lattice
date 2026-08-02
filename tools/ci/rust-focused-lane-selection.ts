@@ -69,6 +69,21 @@ export const theoremEvidenceRustTests = [
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::selected_same_secret_affine_masking_composition_is_exact_and_hostile_mutations_refuse',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::independent_unique_decoder_and_explicit_constraint_filter_cover_hostile_words',
+    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::soundness_composition::aggregate_threshold_share_mapped_soundness_derives_in_isolation',
+    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::soundness_composition::ballot_validity_mapped_soundness_derives_in_isolation',
+    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::soundness_composition::collective_public_key_aggregate_mapped_soundness_derives_in_isolation',
+    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::soundness_composition::conservative_physical_proof_composition_rejects_accounting_mutations',
+    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::soundness_composition::evaluator_key_aggregate_mapped_soundness_derives_in_isolation',
+    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::soundness_composition::galois_key_share_mapped_soundness_derives_in_isolation',
+    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::soundness_composition::public_key_share_mapped_soundness_derives_in_isolation',
+    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::soundness_composition::relinearization_round_one_mapped_soundness_derives_in_isolation',
+    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::soundness_composition::relinearization_round_two_mapped_soundness_derives_in_isolation',
+    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::soundness_composition::rkg_round_one_aggregate_mapped_soundness_derives_in_isolation',
+    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::soundness_composition::same_secret_mapped_soundness_derives_in_isolation',
+    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::soundness_composition::selected_complete_action_maps_one_transform_to_each_physical_proof',
+    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::soundness_composition::selected_mapped_soundness_checkpoints_consolidate_canonically',
+    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::soundness_composition::target_share_mapped_soundness_derives_in_isolation',
+    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::soundness_composition::vss_share_linkage_mapped_soundness_derives_in_isolation',
 ] as const;
 
 type FocusedRustLane =

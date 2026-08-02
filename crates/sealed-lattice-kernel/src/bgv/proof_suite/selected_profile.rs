@@ -738,6 +738,29 @@ fn selected_committed_material_quotient_component_degree_bound_exclusive()
 
 pub(crate) fn selected_relation_plans()
 -> Result<Vec<ValidatedRelationPlanArtifact>, ProofProfileError> {
+    selected_relation_plans_internal(None)
+}
+
+#[cfg(all(test, feature = "theorem-evidence"))]
+pub(crate) fn selected_relation_plan_for_schema(
+    application_statement_schema_identifier: u16,
+) -> Result<ValidatedRelationPlanArtifact, ProofProfileError> {
+    let mut matching_plans =
+        selected_relation_plans_internal(Some(application_statement_schema_identifier))?;
+    if matching_plans.len() != 1 {
+        return Err(ProofProfileError::InvalidRelationPlan);
+    }
+    matching_plans
+        .pop()
+        .ok_or(ProofProfileError::InvalidRelationPlan)
+}
+
+fn selected_relation_plans_internal(
+    requested_schema_identifier: Option<u16>,
+) -> Result<Vec<ValidatedRelationPlanArtifact>, ProofProfileError> {
+    let includes_schema = |schema_identifier| {
+        requested_schema_identifier.is_none_or(|requested| requested == schema_identifier)
+    };
     let ordinary_context = selected_relation_plan_check_context(
         ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
     )
@@ -753,14 +776,24 @@ pub(crate) fn selected_relation_plans()
     let evaluator_candidate = EvaluatorCandidateInput::implemented()
         .map_err(|_| ProofProfileError::InvalidRelationPlan)?;
     let commitment_data_modulus_indices = selected_commitment_data_modulus_indices()?;
-    let same_secret = compile_same_secret_relation_plan(
-        &selected_same_secret_relation_plan_input()?,
-        &ordinary_context,
-    )?;
-    let public_key_share = compile_public_key_share_relation_plan(
-        &selected_public_key_share_relation_plan_input()?,
-        &ordinary_context,
-    )?;
+    let same_secret =
+        includes_schema(ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER)
+            .then(|| -> Result<_, ProofProfileError> {
+                Ok(compile_same_secret_relation_plan(
+                    &selected_same_secret_relation_plan_input()?,
+                    &ordinary_context,
+                )?)
+            })
+            .transpose()?;
+    let public_key_share =
+        includes_schema(ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER)
+            .then(|| -> Result<_, ProofProfileError> {
+                Ok(compile_public_key_share_relation_plan(
+                    &selected_public_key_share_relation_plan_input()?,
+                    &ordinary_context,
+                )?)
+            })
+            .transpose()?;
     let active_data_modulus_indices = selected_data_modulus_indices();
 
     let aggregate_geometry = PublicAggregateRelationGeometry {
@@ -771,19 +804,25 @@ pub(crate) fn selected_relation_plans()
             SELECTED_PUBLIC_POLYNOMIAL_COLUMN_DEGREE_BOUND_EXCLUSIVE,
         participant_count: FOUNDATION_PROFILE.participant_count,
     };
-    let collective_public_key = compile_collective_public_key_aggregate_relation_plan(
-        &CollectivePublicKeyAggregatePlanInput {
-            geometry: aggregate_geometry.clone(),
-            ordered_component_moduli: trace_half_modulus_references(
-                &active_data_modulus_indices
-                    .iter()
-                    .copied()
-                    .map(SuiteModulusReference::data)
-                    .collect::<Vec<_>>(),
-            ),
-        },
-        &public_aggregate_context,
-    )?;
+    let collective_public_key = includes_schema(
+        ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+    )
+    .then(|| {
+        compile_collective_public_key_aggregate_relation_plan(
+            &CollectivePublicKeyAggregatePlanInput {
+                geometry: aggregate_geometry.clone(),
+                ordered_component_moduli: trace_half_modulus_references(
+                    &active_data_modulus_indices
+                        .iter()
+                        .copied()
+                        .map(SuiteModulusReference::data)
+                        .collect::<Vec<_>>(),
+                ),
+            },
+            &public_aggregate_context,
+        )
+    })
+    .transpose()?;
 
     let (relinearization_schedule_position, relinearization_catalog_level) = evaluator_candidate
         .relinearization_levels
@@ -800,34 +839,52 @@ pub(crate) fn selected_relation_plans()
         relinearization_catalog_level,
         commitment_data_modulus_indices.clone(),
     )?;
-    let relinearization_round_one = compile_relinearization_round_one_relation_plan(
-        &RelinearizationRoundOneRelationPlanInput {
-            schedule_position: relinearization_schedule_position,
-            geometry: relinearization_geometry.clone(),
-        },
-        &ordinary_context,
-    )?;
+    let relinearization_round_one = includes_schema(
+        ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER,
+    )
+    .then(|| {
+        compile_relinearization_round_one_relation_plan(
+            &RelinearizationRoundOneRelationPlanInput {
+                schedule_position: relinearization_schedule_position,
+                geometry: relinearization_geometry.clone(),
+            },
+            &ordinary_context,
+        )
+    })
+    .transpose()?;
     let relinearization_root_component_moduli = trace_half_modulus_references(
         &ordered_trustee_root_row_modulus_references(&relinearization_geometry)?,
     );
-    let rkg_round_one_aggregate = compile_rkg_round_one_aggregate_relation_plan(
-        &RkgRoundOneAggregatePlanInput {
-            geometry: aggregate_geometry.clone(),
-            ordered_variants: vec![RkgRoundOneAggregateVariantInput {
+    let rkg_round_one_aggregate = includes_schema(
+        ProofApplicationSlotCeilings::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+    )
+    .then(|| {
+        compile_rkg_round_one_aggregate_relation_plan(
+            &RkgRoundOneAggregatePlanInput {
+                geometry: aggregate_geometry.clone(),
+                ordered_variants: vec![RkgRoundOneAggregateVariantInput {
+                    schedule_position: relinearization_schedule_position,
+                    ordered_left_component_moduli: relinearization_root_component_moduli.clone(),
+                    ordered_right_component_moduli: relinearization_root_component_moduli.clone(),
+                }],
+            },
+            &public_aggregate_context,
+        )
+    })
+    .transpose()?;
+    let relinearization_round_two = includes_schema(
+        ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER,
+    )
+    .then(|| {
+        compile_relinearization_round_two_relation_plan(
+            &RelinearizationRoundTwoRelationPlanInput {
                 schedule_position: relinearization_schedule_position,
-                ordered_left_component_moduli: relinearization_root_component_moduli.clone(),
-                ordered_right_component_moduli: relinearization_root_component_moduli.clone(),
-            }],
-        },
-        &public_aggregate_context,
-    )?;
-    let relinearization_round_two = compile_relinearization_round_two_relation_plan(
-        &RelinearizationRoundTwoRelationPlanInput {
-            schedule_position: relinearization_schedule_position,
-            geometry: relinearization_geometry,
-        },
-        &ordinary_context,
-    )?;
+                geometry: relinearization_geometry,
+            },
+            &ordinary_context,
+        )
+    })
+    .transpose()?;
 
     let galois_catalog_level = evaluator_candidate
         .galois_key_schedule
@@ -856,51 +913,95 @@ pub(crate) fn selected_relation_plans()
         })
         .collect::<Result<Vec<_>, ProofProfileError>>()?;
     let [galois_batch_schedule_position] = selected_galois_key_share_batch_schedule();
-    let galois_key_shares = compile_galois_key_share_relation_plan(
-        &GaloisKeyShareRelationPlanInput {
-            batch_schedule_position: galois_batch_schedule_position,
-            ordered_entries: galois_entries,
-            geometry: galois_geometry.clone(),
-        },
-        &ordinary_context,
-    )?;
-    let evaluator_variants = selected_evaluator_aggregate_variants(
-        &evaluator_candidate,
-        &relinearization_root_component_moduli,
-    )?;
-    let evaluator_key_aggregate = compile_evaluator_key_aggregate_relation_plan(
-        &EvaluatorKeyAggregatePlanInput {
-            geometry: aggregate_geometry,
-            ordered_variants: evaluator_variants,
-        },
-        &public_aggregate_context,
-    )?;
+    let galois_key_shares =
+        includes_schema(ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER)
+            .then(|| {
+                compile_galois_key_share_relation_plan(
+                    &GaloisKeyShareRelationPlanInput {
+                        batch_schedule_position: galois_batch_schedule_position,
+                        ordered_entries: galois_entries,
+                        geometry: galois_geometry.clone(),
+                    },
+                    &ordinary_context,
+                )
+            })
+            .transpose()?;
+    let evaluator_key_aggregate = includes_schema(
+        ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+    )
+    .then(|| -> Result<_, ProofProfileError> {
+        let evaluator_variants = selected_evaluator_aggregate_variants(
+            &evaluator_candidate,
+            &relinearization_root_component_moduli,
+        )?;
+        Ok(compile_evaluator_key_aggregate_relation_plan(
+            &EvaluatorKeyAggregatePlanInput {
+                geometry: aggregate_geometry,
+                ordered_variants: evaluator_variants,
+            },
+            &public_aggregate_context,
+        )?)
+    })
+    .transpose()?;
 
-    let ballot_validity = compile_ballot_validity_relation_plan(
-        &BallotValidityRelationPlanInput {
-            ring_degree: selected_ring_degree(),
-            evaluation_domain_size: SELECTED_EVALUATION_DOMAIN_SIZE,
-            opening_degree_bound_exclusive: ROW_CODE_WHIR_BALLOT_OPENING_DEGREE_BOUND_EXCLUSIVE,
-            active_data_modulus_indices: active_data_modulus_indices.clone(),
-            plaintext_modulus: PLAINTEXT_MODULUS,
-            reserved_slot_rule: RESERVED_BALLOT_SLOT_RULE,
-        },
-        &ordinary_context,
-    )?;
+    let ballot_validity =
+        includes_schema(ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER)
+            .then(|| {
+                compile_ballot_validity_relation_plan(
+                    &BallotValidityRelationPlanInput {
+                        ring_degree: selected_ring_degree(),
+                        evaluation_domain_size: SELECTED_EVALUATION_DOMAIN_SIZE,
+                        opening_degree_bound_exclusive:
+                            ROW_CODE_WHIR_BALLOT_OPENING_DEGREE_BOUND_EXCLUSIVE,
+                        active_data_modulus_indices: active_data_modulus_indices.clone(),
+                        plaintext_modulus: PLAINTEXT_MODULUS,
+                        reserved_slot_rule: RESERVED_BALLOT_SLOT_RULE,
+                    },
+                    &ordinary_context,
+                )
+            })
+            .transpose()?;
 
-    let target_release = selected_target_release_relation()?.relation_plan().clone();
+    let target_release = includes_schema(
+        ProofApplicationSlotCeilings::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER,
+    )
+    .then(|| selected_target_release_relation().map(|relation| relation.relation_plan().clone()))
+    .transpose()?;
 
-    let committed_material_input = selected_committed_material_relation_plan_input()?;
-    let vss_share_linkage = compile_vss_share_linkage_relation_plan(
-        &committed_material_input,
-        &committed_material_context,
-    )?;
-    let aggregate_threshold_share = compile_aggregate_threshold_share_relation_plan(
-        &committed_material_input,
-        &committed_material_context,
-    )?;
+    let includes_committed_material = includes_schema(
+        ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+    ) || includes_schema(
+        ProofApplicationSlotCeilings::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+    );
+    let committed_material_input = includes_committed_material
+        .then(selected_committed_material_relation_plan_input)
+        .transpose()?;
+    let vss_share_linkage = includes_schema(
+        ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+    )
+    .then(|| -> Result<_, ProofProfileError> {
+        Ok(compile_vss_share_linkage_relation_plan(
+            committed_material_input
+                .as_ref()
+                .ok_or(ProofProfileError::InvalidRelationPlan)?,
+            &committed_material_context,
+        )?)
+    })
+    .transpose()?;
+    let aggregate_threshold_share = includes_schema(
+        ProofApplicationSlotCeilings::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+    )
+    .then(|| -> Result<_, ProofProfileError> {
+        Ok(compile_aggregate_threshold_share_relation_plan(
+            committed_material_input
+                .as_ref()
+                .ok_or(ProofProfileError::InvalidRelationPlan)?,
+            &committed_material_context,
+        )?)
+    })
+    .transpose()?;
 
-    let compiled_plans = vec![
+    let compiled_plans = [
         same_secret,
         public_key_share,
         collective_public_key,
@@ -913,9 +1014,17 @@ pub(crate) fn selected_relation_plans()
         target_release,
         vss_share_linkage,
         aggregate_threshold_share,
-    ];
-    let _non_native_identity_soundness_ledger =
-        selected_non_native_identity_soundness_ledger(&compiled_plans)?;
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    if compiled_plans.is_empty() {
+        return Err(ProofProfileError::InvalidRelationPlan);
+    }
+    if requested_schema_identifier.is_none() {
+        let _non_native_identity_soundness_ledger =
+            selected_non_native_identity_soundness_ledger(&compiled_plans)?;
+    }
     compiled_plans
         .into_iter()
         .map(|plan| {

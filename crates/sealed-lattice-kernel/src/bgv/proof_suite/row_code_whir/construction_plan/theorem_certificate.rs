@@ -81,7 +81,8 @@ use crate::bgv::proof_suite::{
     compile_collective_public_key_aggregate_relation_plan, compile_public_key_share_relation_plan,
     compile_same_secret_relation_plan, selected_ballot_validity_relation_compilation,
     selected_committed_material_profile, selected_public_key_share_relation_plan_input,
-    selected_relation_plans, selected_same_secret_persistent_mask_image_accounting,
+    selected_relation_plan_for_schema, selected_relation_plans,
+    selected_same_secret_persistent_mask_image_accounting,
     selected_same_secret_relation_plan_input,
 };
 use crate::foundation::{
@@ -91,6 +92,7 @@ use crate::foundation::{
 };
 
 mod production_extractor;
+mod soundness_composition;
 
 use production_extractor::{
     ProductionExtractorCorrespondenceFault, ProductionPointConstraintExtractorCertificate,
@@ -9649,13 +9651,21 @@ fn derive_production_whir_geometry_certificate(
     })
 }
 
-fn checked_row_code_whir_production_geometry_certificate_with_masking(
+struct ProductionSoundnessPrerequisites {
+    relation_plan_variant_hash: [u8; 64],
+    construction_plan_identity_hash: [u8; 64],
+    parameters: RowCodeWhirSelectedParameters,
+    relation_compiler_interpreter_semantics: RelationCompilerInterpreterSemanticCertificate,
+    polynomial_protocol_extractor: ProductionPolynomialProtocolExtractorCertificate,
+    point_constraint_extractor: ProductionPointConstraintExtractorCertificate,
+}
+
+fn checked_production_soundness_prerequisites(
     plan: &RowCodeWhirConstructionPlan,
     artifact: &ValidatedRelationPlanArtifact,
     relation_variant: &RelationPlanVariant,
     relation_context: &RelationPlanCheckContext,
-    aggregate_wide_masking: &AggregateWideMaskingCertificate,
-) -> Result<RowCodeWhirProductionGeometryCertificate, WhirTheoremCertificateError> {
+) -> Result<ProductionSoundnessPrerequisites, WhirTheoremCertificateError> {
     let contextualize = |stage: ProductionGeometryCertificateStage,
                          error: WhirTheoremCertificateError| {
         WhirTheoremCertificateError::SelectedProductionGeometry {
@@ -9765,80 +9775,58 @@ fn checked_row_code_whir_production_geometry_certificate_with_masking(
             WhirTheoremCertificateError::IncompletePolynomialExtractorCorrespondence,
         ));
     }
-    let construction_masking = checked_zero_knowledge_mask_image_for_parameters(
-        relation_variant,
-        relation_context,
+    Ok(ProductionSoundnessPrerequisites {
+        relation_plan_variant_hash,
+        construction_plan_identity_hash,
         parameters,
-    )
-    .map_err(|_| {
-        contextualize(
-            ProductionGeometryCertificateStage::MaskingCorrespondence,
-            WhirTheoremCertificateError::IncompleteMaskingCorrespondence,
-        )
-    })?;
-    if !construction_masking.is_complete()
-        || !aggregate_wide_masking.is_complete()
-        || !construction_masking.aggregate_claims_factor_through_masked_openings()
-        || !construction_masking.aggregate_wide_views_delegate_to_precommitted_pad()
-    {
-        return Err(contextualize(
-            ProductionGeometryCertificateStage::MaskingCorrespondence,
-            WhirTheoremCertificateError::IncompleteMaskingCorrespondence,
-        ));
-    }
-    let production_construction_masking = derive_production_construction_masking_correspondence(
-        plan,
-        relation_variant,
-        relation_context,
-    )
-    .map_err(|error| {
-        contextualize(
-            ProductionGeometryCertificateStage::MaskingCorrespondence,
-            error,
-        )
-    })?;
-    let production_aggregate_wide_views =
-        derive_production_aggregate_wide_view_correspondence(plan, aggregate_wide_masking)
-            .map_err(|error| {
-                contextualize(
-                    ProductionGeometryCertificateStage::MaskingCorrespondence,
-                    error,
-                )
-            })?;
-    let private_row_pad_generator_hybrid = PrivateRowPadGeneratorHybridCertificate::derive(plan)
-        .map_err(|error| {
-            contextualize(
-                ProductionGeometryCertificateStage::RowPadGeneratorHybrid,
-                error,
-            )
-        })?;
-    if !private_row_pad_generator_hybrid.is_complete_for_plan(plan) {
-        return Err(contextualize(
-            ProductionGeometryCertificateStage::RowPadGeneratorHybrid,
-            WhirTheoremCertificateError::IncompleteRowPadGeneratorHybrid,
-        ));
-    }
-    let private_leaf_salt_prf = PrivateLeafSaltPrfCertificate::derive(
-        plan,
-        aggregate_wide_masking,
-        &private_row_pad_generator_hybrid,
-    )
-    .map_err(|error| {
-        contextualize(
-            ProductionGeometryCertificateStage::PrivateLeafSaltPrf,
-            error,
-        )
-    })?;
-    if !private_leaf_salt_prf.is_complete_for(
-        plan,
-        aggregate_wide_masking,
-        &private_row_pad_generator_hybrid,
-    ) {
-        return Err(contextualize(
-            ProductionGeometryCertificateStage::PrivateLeafSaltPrf,
-            WhirTheoremCertificateError::IncompletePrivateLeafSaltPrf,
-        ));
-    }
+        relation_compiler_interpreter_semantics,
+        polynomial_protocol_extractor,
+        point_constraint_extractor,
+    })
+}
+
+struct ProductionMappedSoundnessCertificate {
+    whir_geometry: ProductionWhirGeometryCertificate,
+    prefix_stacking: PrefixStackingCertificate,
+    state_epoch_rows: Vec<StateEpochRow>,
+    oracle_equation_rows: Vec<OracleEquationCoverageRow>,
+    selected_plan_state_predicate: SelectedPlanStatePredicateCertificate,
+    cms19_whole_state_transitions: Cms19WholeStateTransitionCertificate,
+    cms19_strong_state_hash_chain: Cms19StrongStateHashChainCertificate,
+    cms19_transcript_oracle_output_inventory: Cms19TranscriptOracleOutputInventory,
+    cms19_typed_variable_output_oracle_model: Cms19TypedVariableOutputOracleModelCertificate,
+    complete_verifier_oracle_ledger: CompleteVerifierOracleLedger,
+    deployed_aggregate_leaf_oracle: DeployedAggregateLeafOracleCertificate,
+    cms19_whole_database_support: Cms19WholeDatabaseSupportCertificate,
+    commitment_subtree_extraction: CommitmentSubtreeExtractionCertificate,
+    nonlinear_commitment_binding: NonlinearCommitmentBindingCertificate,
+    cms19_atomic_round_semantics: Cms19AtomicRoundSemanticCertificate,
+    cms19_state_predicate: Cms19StatePredicateCertificate,
+    cms19_strong_round_by_round_semantics: Cms19StrongRoundByRoundSemanticCertificate,
+    cms19_applicability: Cms19ApplicabilityCertificate,
+    maximum_transcript_hash_query_count: u64,
+    logical_verifier_message_count: u64,
+    cms19_arithmetic: Cms19ArithmeticCertificate,
+    exact_failure_magnitude: ExactFailureMagnitudeCertificate,
+}
+
+fn checked_production_mapped_soundness_certificate(
+    plan: &RowCodeWhirConstructionPlan,
+    relation_variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
+    aggregate_wide_masking: &AggregateWideMaskingCertificate,
+    prerequisites: &ProductionSoundnessPrerequisites,
+) -> Result<ProductionMappedSoundnessCertificate, WhirTheoremCertificateError> {
+    let contextualize = |stage: ProductionGeometryCertificateStage,
+                         error: WhirTheoremCertificateError| {
+        WhirTheoremCertificateError::SelectedProductionGeometry {
+            application_statement_schema_identifier: plan.application_statement_schema_identifier,
+            schedule_position: plan.schedule_position,
+            top_count: plan.top_count,
+            stage,
+            failure: error.into(),
+        }
+    };
     let whir_geometry = derive_production_whir_geometry_certificate(plan, aggregate_wide_masking)
         .map_err(|error| {
         contextualize(ProductionGeometryCertificateStage::WhirGeometry, error)
@@ -10052,9 +10040,10 @@ fn checked_row_code_whir_production_geometry_certificate_with_masking(
             commitment_subtree_extraction: &commitment_subtree_extraction,
             accepting_database_extractor: &cms19_accepting_database_extractor,
             strong_state_hash_chain: &cms19_strong_state_hash_chain,
-            relation_compiler_interpreter_semantics: &relation_compiler_interpreter_semantics,
-            polynomial_protocol_extractor: &polynomial_protocol_extractor,
-            point_constraint_extractor: &point_constraint_extractor,
+            relation_compiler_interpreter_semantics: &prerequisites
+                .relation_compiler_interpreter_semantics,
+            polynomial_protocol_extractor: &prerequisites.polynomial_protocol_extractor,
+            point_constraint_extractor: &prerequisites.point_constraint_extractor,
             exact_failure_magnitude: &exact_failure_magnitude,
         });
     let cms19_strong_round_by_round_semantics =
@@ -10094,6 +10083,177 @@ fn checked_row_code_whir_production_geometry_certificate_with_masking(
                 error,
             )
         })?;
+    if !cms19_state_predicate.is_complete()
+        || !cms19_strong_round_by_round_semantics.is_complete()
+        || !cms19_applicability.is_selected_transform_eligible()
+    {
+        return Err(contextualize(
+            ProductionGeometryCertificateStage::TerminalStatePredicate,
+            WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence,
+        ));
+    }
+    Ok(ProductionMappedSoundnessCertificate {
+        whir_geometry,
+        prefix_stacking,
+        state_epoch_rows,
+        oracle_equation_rows,
+        selected_plan_state_predicate,
+        cms19_whole_state_transitions,
+        cms19_strong_state_hash_chain,
+        cms19_transcript_oracle_output_inventory,
+        cms19_typed_variable_output_oracle_model,
+        complete_verifier_oracle_ledger,
+        deployed_aggregate_leaf_oracle,
+        cms19_whole_database_support,
+        commitment_subtree_extraction,
+        nonlinear_commitment_binding,
+        cms19_atomic_round_semantics,
+        cms19_state_predicate,
+        cms19_strong_round_by_round_semantics,
+        cms19_applicability,
+        maximum_transcript_hash_query_count,
+        logical_verifier_message_count,
+        cms19_arithmetic,
+        exact_failure_magnitude,
+    })
+}
+
+fn checked_row_code_whir_production_geometry_certificate_with_masking(
+    plan: &RowCodeWhirConstructionPlan,
+    artifact: &ValidatedRelationPlanArtifact,
+    relation_variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
+    aggregate_wide_masking: &AggregateWideMaskingCertificate,
+) -> Result<RowCodeWhirProductionGeometryCertificate, WhirTheoremCertificateError> {
+    let contextualize = |stage: ProductionGeometryCertificateStage,
+                         error: WhirTheoremCertificateError| {
+        WhirTheoremCertificateError::SelectedProductionGeometry {
+            application_statement_schema_identifier: plan.application_statement_schema_identifier,
+            schedule_position: plan.schedule_position,
+            top_count: plan.top_count,
+            stage,
+            failure: error.into(),
+        }
+    };
+    let soundness_prerequisites = checked_production_soundness_prerequisites(
+        plan,
+        artifact,
+        relation_variant,
+        relation_context,
+    )?;
+    let parameters = soundness_prerequisites.parameters;
+    let construction_masking = checked_zero_knowledge_mask_image_for_parameters(
+        relation_variant,
+        relation_context,
+        parameters,
+    )
+    .map_err(|_| {
+        contextualize(
+            ProductionGeometryCertificateStage::MaskingCorrespondence,
+            WhirTheoremCertificateError::IncompleteMaskingCorrespondence,
+        )
+    })?;
+    if !construction_masking.is_complete()
+        || !aggregate_wide_masking.is_complete()
+        || !construction_masking.aggregate_claims_factor_through_masked_openings()
+        || !construction_masking.aggregate_wide_views_delegate_to_precommitted_pad()
+    {
+        return Err(contextualize(
+            ProductionGeometryCertificateStage::MaskingCorrespondence,
+            WhirTheoremCertificateError::IncompleteMaskingCorrespondence,
+        ));
+    }
+    let production_construction_masking = derive_production_construction_masking_correspondence(
+        plan,
+        relation_variant,
+        relation_context,
+    )
+    .map_err(|error| {
+        contextualize(
+            ProductionGeometryCertificateStage::MaskingCorrespondence,
+            error,
+        )
+    })?;
+    let production_aggregate_wide_views =
+        derive_production_aggregate_wide_view_correspondence(plan, aggregate_wide_masking)
+            .map_err(|error| {
+                contextualize(
+                    ProductionGeometryCertificateStage::MaskingCorrespondence,
+                    error,
+                )
+            })?;
+    let private_row_pad_generator_hybrid = PrivateRowPadGeneratorHybridCertificate::derive(plan)
+        .map_err(|error| {
+            contextualize(
+                ProductionGeometryCertificateStage::RowPadGeneratorHybrid,
+                error,
+            )
+        })?;
+    if !private_row_pad_generator_hybrid.is_complete_for_plan(plan) {
+        return Err(contextualize(
+            ProductionGeometryCertificateStage::RowPadGeneratorHybrid,
+            WhirTheoremCertificateError::IncompleteRowPadGeneratorHybrid,
+        ));
+    }
+    let private_leaf_salt_prf = PrivateLeafSaltPrfCertificate::derive(
+        plan,
+        aggregate_wide_masking,
+        &private_row_pad_generator_hybrid,
+    )
+    .map_err(|error| {
+        contextualize(
+            ProductionGeometryCertificateStage::PrivateLeafSaltPrf,
+            error,
+        )
+    })?;
+    if !private_leaf_salt_prf.is_complete_for(
+        plan,
+        aggregate_wide_masking,
+        &private_row_pad_generator_hybrid,
+    ) {
+        return Err(contextualize(
+            ProductionGeometryCertificateStage::PrivateLeafSaltPrf,
+            WhirTheoremCertificateError::IncompletePrivateLeafSaltPrf,
+        ));
+    }
+    let ProductionMappedSoundnessCertificate {
+        whir_geometry,
+        prefix_stacking,
+        state_epoch_rows,
+        oracle_equation_rows,
+        selected_plan_state_predicate,
+        cms19_whole_state_transitions,
+        cms19_strong_state_hash_chain,
+        cms19_transcript_oracle_output_inventory,
+        cms19_typed_variable_output_oracle_model,
+        complete_verifier_oracle_ledger,
+        deployed_aggregate_leaf_oracle,
+        cms19_whole_database_support,
+        commitment_subtree_extraction,
+        nonlinear_commitment_binding,
+        cms19_atomic_round_semantics,
+        cms19_state_predicate,
+        cms19_strong_round_by_round_semantics,
+        cms19_applicability,
+        maximum_transcript_hash_query_count,
+        logical_verifier_message_count,
+        cms19_arithmetic,
+        exact_failure_magnitude,
+    } = checked_production_mapped_soundness_certificate(
+        plan,
+        relation_variant,
+        relation_context,
+        aggregate_wide_masking,
+        &soundness_prerequisites,
+    )?;
+    let ProductionSoundnessPrerequisites {
+        relation_plan_variant_hash,
+        construction_plan_identity_hash,
+        parameters: _,
+        relation_compiler_interpreter_semantics,
+        polynomial_protocol_extractor,
+        point_constraint_extractor,
+    } = soundness_prerequisites;
     let certificate = RowCodeWhirProductionGeometryCertificate {
         application_statement_schema_identifier: plan.application_statement_schema_identifier,
         schedule_position: plan.schedule_position,

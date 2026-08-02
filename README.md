@@ -123,9 +123,16 @@ Works today:
   Hostile width, domain, slot, address, response-owner, root-authority,
   shared-query, leaf-call, frontier, and message-shape mutations refuse. This
   is focused same-secret construction soundness evidence under the declared
-  ideal-XOF model. Nonlinear privacy, emitted transported-proof evidence,
-  conservative physical-proof composition, and ceremony-level reduction
-  evidence remain open.
+  ideal-XOF model. Twelve independently derived family rows now feed one
+  conservative per-physical-proof transform and explicit ceremony union. Each
+  of the 103 physical proofs receives the complete `2^80 - 1` adversarial query
+  budget, while 159 logical relation instances are unioned inside their owning
+  proofs. The tracked composition places classical failure in
+  `(2^-190, 2^-189]`, fixed-budget quantum-random-oracle failure in
+  `(2^-26, 2^-25]`, and the separately reported constant-success query boundary
+  at 93 bits. It assumes no cross-proof independence, takes no shared-root
+  hybrid credit, and makes no concatenated-IOP or concrete-sponge claim.
+  Nonlinear privacy and emitted transported-proof evidence remain open.
 - Secret-bearing phase-row padding now uses three KMAC-derived 512-bit seeds.
   The selected same-secret certificate inventories 62 framed SHAKE streams,
   130,023,424 accepted field outputs, seed collision, bounded rejection
@@ -284,8 +291,8 @@ Not yet:
 
 - The generic construction certificate does not establish family simulation,
   malicious-verifier zero knowledge, or quantum-random-oracle zero knowledge.
-- Exact complete-action classical and quantum-random-oracle soundness is not
-  established. The selected same-secret aggregate-leaf
+- Exact emitted-byte complete-action soundness is not established. The
+  selected same-secret aggregate-leaf
   predecessor correspondence, collision arithmetic, aggregate-wide production
   affine correspondence, pre-aggregate physical masking correspondence, exact
   six-source affine masking composition, and all production geometry
@@ -303,15 +310,16 @@ Not yet:
   product-challenge ledger. All 27 width-64 and four width-8 identities passed
   the complete constructor at the reviewed checkpoint, and the focused
   `0x1212` production certificate now passes independently. The exact
-  same-secret codec now has a complete
-  static section-to-decoder-to-verifier correspondence, while its instantiation
-  by one emitted and freshly transported proof, nonlinear privacy and
-  composition across commitments, and ceremony-level failure composition
-  remain open. The current certificate enumerates 103 physical proofs and 159
-  logical instances, but it does not yet prove that their separately domain-
-  separated transcripts form one CMS-eligible concatenated IOP. A conservative
-  per-proof transform and explicit union bound remains the default closure path
-  unless that global reduction is supplied.
+  same-secret codec now has a complete static section-to-decoder-to-verifier
+  correspondence. The conservative action certificate maps one transform to
+  each of 103 physical proofs, unions the 159 logical instances within their
+  owning proofs, charges every proof the full global query budget, and then
+  unions the exact family multiplicities. Its twelve tracked rows are bound to
+  their construction identities and independently rederived by focused
+  production-geometry tests. The result is conditional on the declared typed
+  ideal-XOF/QRO model and deliberately does not claim one concatenated IOP.
+  Instantiation by one emitted and freshly transported proof, nonlinear privacy
+  across commitments, and a concrete SHAKE256 reduction remain open.
 - The static liveness model has not yet been confirmed by a completed native
   proof or release-WebAssembly browser measurement. Complete participant
   transport accounting is also open. Production-derived sizes for 73 of the

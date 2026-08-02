@@ -293,6 +293,8 @@ pub(crate) use selected_accounting::selected_complete_proof_resource_accounting;
 pub(crate) use selected_accounting::{SelectedProofAccountingError, selected_proof_runtime_limits};
 #[cfg(test)]
 pub(crate) use selected_profile::selected_proof_profile_set;
+#[cfg(all(test, feature = "theorem-evidence"))]
+pub(crate) use selected_profile::selected_relation_plan_for_schema;
 #[cfg(test)]
 pub(crate) use selected_profile::selected_target_decryption_flooding_bound;
 pub(crate) use selected_profile::{
