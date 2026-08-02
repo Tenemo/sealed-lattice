@@ -20,6 +20,7 @@ const sourcePaths = [
     'Cargo.toml',
     'Cargo.lock',
     'crates/sealed-lattice-kernel/Cargo.toml',
+    'crates/sealed-lattice-kernel/src/foundation/hash.rs',
     'crates/sealed-lattice-kernel/src/foundation/schemas.rs',
     'crates/sealed-lattice-kernel/src/foundation/proof_application.rs',
     'crates/sealed-lattice-kernel/src/foundation/suite.rs',
@@ -39,6 +40,7 @@ const sourcePaths = [
     'crates/sealed-lattice-kernel/src/bgv/evaluator/top_k/rotations.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/application_statement.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/profile.rs',
+    'crates/sealed-lattice-kernel/src/bgv/proof_suite/transcript.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/relation_plan.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/relation_plan/interpreter.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/selected_profile.rs',
@@ -163,7 +165,7 @@ const assumptionNodeIdentifiers = [
 ] as const;
 
 const unresolvedNodeIdentifiers = [
-    'commonConstructionQromTransform',
+    'commonProofQromComposition',
     'setupFamilySimulationComposition',
     'collectiveSetupHybridComposition',
 ] as const;
@@ -185,6 +187,7 @@ const requiredReductionNodeIdentifiers = [
     'jointSetupSampleHybrid',
     'commonConstructionKnowledgeSoundness',
     'commonConstructionQromTransform',
+    'commonProofQromComposition',
     'commonConstructionMaskingCorrespondence',
     'setupFamilySimulationComposition',
     'selectedSetupCorrectnessImport',
@@ -216,6 +219,7 @@ const exactCoverageIdentifiers = [
     'jointSetupSampleHybrid',
     'commonConstructionKnowledgeSoundness',
     'commonConstructionQromTransform',
+    'commonProofQromComposition',
     'commonConstructionMaskingCorrespondence',
     'setupFamilySimulationComposition',
     'selectedSetupCorrectnessImport',
@@ -713,6 +717,8 @@ const buildConstructionEvidenceImports = (
         'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/exact_same_secret/exact_proof.rs',
     ] as const;
     const qromOwnerSourcePaths = [
+        'crates/sealed-lattice-kernel/src/foundation/hash.rs',
+        'crates/sealed-lattice-kernel/src/bgv/proof_suite/transcript.rs',
         'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/compact_merkle_frontier.rs',
         'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan.rs',
         'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/linear_bcs_transcript.rs',
@@ -745,14 +751,13 @@ const buildConstructionEvidenceImports = (
             identifier: exactConstructionEvidenceImportIdentifiers[1],
             ownerSourcePaths: qromOwnerSourcePaths,
             requiredClosurePredicate:
-                'typedCmsNineteenApplicabilityAndAcceptingPathCeilings',
-            observedStatus: 'unresolved',
+                'typedCmsNineteenVariableOutputApplicabilityAndAcceptingPathCeilings',
+            observedStatus: 'resolved',
             checkedArtifactDigest: checkedSourceBundleDigest(
                 sourceAuthority,
                 qromOwnerSourcePaths,
             ),
-            missingEvidence:
-                'The production logical challenges use plan-sized variable-output SHAKE256 streams. The exact fixed-output seed sampler or variable-output ideal-XOF transform and concrete sponge mapping have not been proved.',
+            missingEvidence: null,
         },
         {
             identifier: exactConstructionEvidenceImportIdentifiers[2],
@@ -1008,12 +1013,21 @@ const buildReductionDag = (): JsonValue => [
     },
     {
         identifier: 'commonConstructionQromTransform',
-        kind: 'obligation',
-        status: 'unresolved',
+        kind: 'reduction',
+        status: 'resolved',
         dependencies: ['shakeQuantumOracle'],
         advantageExpression: 'epsilon_common_construction_qrom',
         statement:
-            'The typed strong-state hash chain, accepting-database catalog, verifier hash ceiling, and failure partition are structural inputs only. The plan-sized variable-output transcript has not yet been mapped to an eligible quantum transform.',
+            'The canonically width-bound transcript domains, typed variable-output ideal-XOF direct-sum theorem, complete-prefix dominance over fragment access, independent unused suffix, strong-state hash chain, accepting-database catalog, verifier hash ceiling, and exact failure partition instantiate the CMS19 transform separately for each complete construction under the declared SHAKE256 ideal-XOF quantum-oracle assumption.',
+    },
+    {
+        identifier: 'commonProofQromComposition',
+        kind: 'obligation',
+        status: 'unresolved',
+        dependencies: ['commonConstructionQromTransform'],
+        advantageExpression: 'unresolved_common_proof_qrom_composition_error',
+        statement:
+            'Every physical proof must own one mapped transform under the complete global adversarial query budget, union its logical failure events internally, and enter explicit family and ceremony union bounds. No concatenated-IOP transform or conservative per-proof composition certificate has yet discharged that lifecycle.',
     },
     {
         identifier: 'commonConstructionMaskingCorrespondence',
@@ -1061,6 +1075,7 @@ const buildReductionDag = (): JsonValue => [
             'jointSetupSampleHybrid',
             'commonConstructionKnowledgeSoundness',
             'commonConstructionQromTransform',
+            'commonProofQromComposition',
             'commonConstructionMaskingCorrespondence',
             'setupFamilySimulationComposition',
             'selectedSetupCorrectnessImport',
@@ -1117,6 +1132,11 @@ const buildResidualLedgers = (): JsonValue => [
             {
                 source: 'common-proof multi-round transform',
                 symbolicTerm: 'epsilon_common_construction_qrom',
+                status: 'resolved',
+            },
+            {
+                source: 'common-proof physical-proof composition',
+                symbolicTerm: 'unresolved_common_proof_qrom_composition_error',
                 status: 'unresolved',
             },
             {
@@ -1126,7 +1146,7 @@ const buildResidualLedgers = (): JsonValue => [
             },
         ],
         queryBudgetRule:
-            'Uses the complete selected adversarial query budget per family and includes verifier, expansion, and accepting-database queries.',
+            'Uses the complete selected adversarial query budget for every physical proof and includes verifier, expansion, and accepting-database queries.',
     },
     {
         identifier: exactResidualLedgerIdentifiers[2],

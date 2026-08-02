@@ -66,7 +66,7 @@ describe('Selected collective-setup security evidence', () => {
             physicalProofApplicationCount: 73,
             readyForClosure: false,
             unresolvedNonAssumptionLeaves: [
-                'commonConstructionQromTransform',
+                'commonProofQromComposition',
                 'setupFamilySimulationComposition',
                 'collectiveSetupHybridComposition',
             ],
@@ -116,12 +116,35 @@ describe('Selected collective-setup security evidence', () => {
                     value.identifier === 'commonConstructionQromTransform',
             );
         expect(qromImport).toMatchObject({
-            observedStatus: 'unresolved',
+            observedStatus: 'resolved',
             requiredClosurePredicate:
-                'typedCmsNineteenApplicabilityAndAcceptingPathCeilings',
+                'typedCmsNineteenVariableOutputApplicabilityAndAcceptingPathCeilings',
+            missingEvidence: null,
         });
-        expect(qromImport?.missingEvidence).toContain(
-            'variable-output SHAKE256 streams',
+        expect(qromImport?.ownerSourcePaths).toEqual(
+            expect.arrayContaining([
+                'crates/sealed-lattice-kernel/src/foundation/hash.rs',
+                'crates/sealed-lattice-kernel/src/bgv/proof_suite/transcript.rs',
+                'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate.rs',
+            ]),
+        );
+        const quantumRandomOracleLedger = requireArray(record.residualLedgers)
+            .map((value) => requireRecord(value))
+            .find((value) => value.identifier === 'qromInvalidAcceptance');
+        expect(quantumRandomOracleLedger?.queryBudgetRule).toBe(
+            'Uses the complete selected adversarial query budget for every physical proof and includes verifier, expansion, and accepting-database queries.',
+        );
+        expect(quantumRandomOracleLedger?.rows).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    source: 'common-proof multi-round transform',
+                    status: 'resolved',
+                }),
+                expect.objectContaining({
+                    source: 'common-proof physical-proof composition',
+                    status: 'unresolved',
+                }),
+            ]),
         );
     });
 
@@ -269,7 +292,7 @@ describe('Selected collective-setup security evidence', () => {
                 expectedEvidence,
             ),
         ).toThrow(
-            'Collective-setup security closure is blocked by: commonConstructionQromTransform, setupFamilySimulationComposition, collectiveSetupHybridComposition.',
+            'Collective-setup security closure is blocked by: commonProofQromComposition, setupFamilySimulationComposition, collectiveSetupHybridComposition.',
         );
         const closure = requireRecord(requireRecord(checkedEvidence).closure);
         expect(closure).toMatchObject({

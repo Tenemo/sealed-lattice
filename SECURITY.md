@@ -50,22 +50,22 @@ instantiated that correspondence through fresh transported-byte verification,
 so `SEC-005` remains open together with nonlinear privacy, emitted-proof, and
 ceremony-level reductions.
 
-The transcript part of `SEC-005` is also open at the theorem interface. A
-logical extension challenge currently requests `8,192` SHAKE256 bytes and the
-selected 393-index query vector requests `402,432` bytes. CMS19's fixed-output
-random-oracle model is not made applicable merely by binding that length into
-the input or by using a sponge with 512-bit capacity. The 512-bit transformed-
-soundness arithmetic now carries an explicit fixed-output-model requirement.
-The production-derived inventory records zero 64-byte logical challenges and
-therefore keeps the QROM transform and complete-construction predicate refused
-until an exact seed-to-sampler or ideal-XOF mapping is proved. Likewise,
+The variable-output transcript interface now has a construction-level theorem
+mapping under the declared domain-separated SHAKE256 ideal-XOF/QRO assumption.
+A logical extension challenge requests `8,192` bytes and the selected 393-index
+query vector requests `402,432` bytes; neither is modeled as one fixed 512-bit
+answer. Canonical output-length framing gives disjoint typed domains, and an
+orthogonal-width compressed-oracle argument preserves the CMS19 lifting
+constant while using the smallest 512-bit full-output projection for collision,
+half-preimage, and programming terms. The mapping does not claim a concrete
+Keccak or sponge-indifferentiability reduction. `SEC-005` remains open because
 enumerating 103 physical proofs and 159
 logical instances does not prove that their separate transcripts form one
 concatenated interactive oracle proof; use per-proof reductions and an explicit
 union bound unless that global composition theorem is supplied. The
 public-key-share schema `0x1212` now derives through an isolated production-
-geometry owner, but that structural result does not discharge the variable-
-output transcript model or proof-composition obligation.
+geometry owner. Emitted transported-proof verification, nonlinear privacy, and
+proof-composition obligations are still unresolved.
 
 The VSS work ledger behind `SEC-004` currently owns two materialization passes:
 72,192 lane DFTs, `359,569,293,312` butterflies, and `37,849,399,296` value

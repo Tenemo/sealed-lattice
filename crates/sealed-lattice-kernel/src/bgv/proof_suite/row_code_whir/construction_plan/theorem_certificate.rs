@@ -169,6 +169,7 @@ pub(in crate::bgv::proof_suite) enum ProductionGeometryCertificateStage {
     WholeStateCorrespondence,
     StrongStateHashChain,
     TranscriptOracleOutputInventory,
+    TypedVariableOutputOracleModel,
     VerifierLedger,
     DeployedLeafOracle,
     WholeDatabaseSupport,
@@ -3410,7 +3411,7 @@ impl CompleteVerifierOracleLedger {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Cms19ArithmeticOracleModelRequirement {
-    UniformFixedOutputRandomOracle { output_bit_length: usize },
+    TypedVariableOutputIdealXof { minimum_output_bit_length: usize },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -3641,6 +3642,142 @@ impl Cms19TranscriptOracleOutputInventory {
             && self.variable_output_message_count == 0
             && self.fixed_output_message_count == self.logical_verifier_message_count
             && self.distinct_output_byte_lengths == [self.required_fixed_output_byte_length]
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Cms19VariableOutputCompressedOracleTheorem {
+    OrthogonalWidthIndexedDirectSum,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Cms19ConcreteXofMappingScope {
+    DomainSeparatedShake256IdealXofQroAssumption,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Cms19OutputWidthPreimageBinding {
+    FoundationTupleCanonicalUnsigned64FinalItem,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Cms19VariableOutputRegisterEmbedding {
+    OrthogonalWidthControlWithZeroPaddedAnswerRegister,
+}
+
+/// Exact application certificate for the width-indexed extension of the
+/// CMS19 compressed-phase and conditional-instability lemmas.
+///
+/// The theorem works over the orthogonal direct sum of one uniformly random
+/// function per output-width sector. One oracle query selects one sector and
+/// adds at most one complete typed answer to that sector's database. Because
+/// the query operator is block diagonal in the width register, the CMS19
+/// commutator bound keeps its constant six. Collision, half-preimage, and
+/// programming terms use the smallest uniform output projection, while a
+/// round failure is evaluated over the complete plan-sized answer in its own
+/// sector. The production tuple XOF binds the requested byte length as its
+/// final canonical unsigned-64 item. The theorem embeds shorter phase-answer
+/// registers into the maximum-width register with zero padding; the explicit
+/// width control keeps those subspaces orthogonal. Giving an adversary the
+/// complete declared prefix dominates fragment access, while an ideal XOF's
+/// unused suffix factors into independent adversary workspace. Repeated reads
+/// reuse the same typed database entry. Squeeze blocks are implementation work,
+/// not separately fillable verifier messages.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Cms19TypedVariableOutputOracleModelCertificate {
+    construction_plan_identity_hash: [u8; 64],
+    canonical_oracle_plan_hash: [u8; 64],
+    theorem: Cms19VariableOutputCompressedOracleTheorem,
+    concrete_xof_mapping_scope: Cms19ConcreteXofMappingScope,
+    output_width_preimage_binding: Cms19OutputWidthPreimageBinding,
+    variable_output_register_embedding: Cms19VariableOutputRegisterEmbedding,
+    logical_challenge_query_count: u64,
+    variable_output_challenge_query_count: u64,
+    minimum_output_bit_length: u64,
+    maximum_output_bit_length: u64,
+    distinct_output_bit_lengths: Vec<u64>,
+    collision_projection_bit_length: u64,
+    compressed_database_entries_added_per_query: u8,
+    conditional_lifting_constant: u8,
+    output_width_control_sectors_are_orthogonal: bool,
+    complete_logical_answer_is_atomic: bool,
+    partial_squeeze_blocks_are_not_state_transitions: bool,
+    adversarial_fragment_access_is_dominated_by_complete_prefix_access: bool,
+    unused_xof_suffix_is_independent_adversary_workspace: bool,
+    repeated_reads_reuse_one_typed_database_entry: bool,
+    full_output_distribution_owns_round_failure: bool,
+    claims_concrete_sponge_indifferentiability: bool,
+}
+
+impl Cms19TypedVariableOutputOracleModelCertificate {
+    fn has_complete_direct_sum_application(
+        &self,
+        output_inventory: &Cms19TranscriptOracleOutputInventory,
+    ) -> bool {
+        let required_output_bit_length =
+            u64::try_from(CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH).ok();
+        let expected_distinct_output_bit_lengths = output_inventory
+            .distinct_output_byte_lengths
+            .iter()
+            .copied()
+            .map(|byte_length| byte_length.checked_mul(8))
+            .collect::<Option<BTreeSet<_>>>()
+            .and_then(|mut output_bit_lengths| {
+                output_bit_lengths.insert(required_output_bit_length?);
+                Some(output_bit_lengths.into_iter().collect::<Vec<_>>())
+            });
+        let expected_minimum_output_bit_length = expected_distinct_output_bit_lengths
+            .as_ref()
+            .and_then(|output_bit_lengths| output_bit_lengths.first().copied());
+        let expected_maximum_output_bit_length = expected_distinct_output_bit_lengths
+            .as_ref()
+            .and_then(|output_bit_lengths| output_bit_lengths.last().copied());
+
+        self.construction_plan_identity_hash == output_inventory.construction_plan_identity_hash
+            && self.canonical_oracle_plan_hash != [0_u8; 64]
+            && self.theorem
+                == Cms19VariableOutputCompressedOracleTheorem::OrthogonalWidthIndexedDirectSum
+            && self.concrete_xof_mapping_scope
+                == Cms19ConcreteXofMappingScope::DomainSeparatedShake256IdealXofQroAssumption
+            && self.output_width_preimage_binding
+                == Cms19OutputWidthPreimageBinding::FoundationTupleCanonicalUnsigned64FinalItem
+            && self.variable_output_register_embedding
+                == Cms19VariableOutputRegisterEmbedding::OrthogonalWidthControlWithZeroPaddedAnswerRegister
+            && self.logical_challenge_query_count == output_inventory.logical_verifier_message_count
+            && self.variable_output_challenge_query_count
+                == output_inventory.variable_output_message_count
+            && expected_minimum_output_bit_length == Some(self.minimum_output_bit_length)
+            && expected_maximum_output_bit_length == Some(self.maximum_output_bit_length)
+            && expected_distinct_output_bit_lengths
+                == Some(self.distinct_output_bit_lengths.clone())
+            && Some(self.collision_projection_bit_length) == required_output_bit_length
+            && self.minimum_output_bit_length == self.collision_projection_bit_length
+            && self.compressed_database_entries_added_per_query == 1
+            && self.conditional_lifting_constant == 6
+            && self.output_width_control_sectors_are_orthogonal
+            && self.complete_logical_answer_is_atomic
+            && self.partial_squeeze_blocks_are_not_state_transitions
+            && self.adversarial_fragment_access_is_dominated_by_complete_prefix_access
+            && self.unused_xof_suffix_is_independent_adversary_workspace
+            && self.repeated_reads_reuse_one_typed_database_entry
+            && self.full_output_distribution_owns_round_failure
+            && !self.claims_concrete_sponge_indifferentiability
+    }
+
+    fn is_complete_for(
+        &self,
+        plan: &RowCodeWhirConstructionPlan,
+        catalog: &RowCodeWhirOracleEquationCatalog,
+        output_inventory: &Cms19TranscriptOracleOutputInventory,
+    ) -> bool {
+        let expected_plan_identity_hash = plan.canonical_identity_hash().ok();
+        let expected_oracle_plan_hash = plan.linear_bcs_transcript_plan_hash().ok();
+        let expected_logical_challenge_query_count = catalog.logical_verifier_message_count().ok();
+        output_inventory.is_complete_for(plan, catalog)
+            && expected_plan_identity_hash == Some(self.construction_plan_identity_hash)
+            && expected_oracle_plan_hash == Some(self.canonical_oracle_plan_hash)
+            && expected_logical_challenge_query_count == Some(self.logical_challenge_query_count)
+            && self.has_complete_direct_sum_application(output_inventory)
     }
 }
 
@@ -4958,7 +5095,7 @@ struct Cms19ApplicabilityCertificate {
     generated_state_transition_rows_reconciled: bool,
     deployed_leaf_oracle_output_geometry_established: bool,
     transcript_oracle_output_inventory_reconciled: bool,
-    fixed_output_transcript_oracle_model_established: bool,
+    typed_variable_output_oracle_model_established: bool,
 }
 
 impl Cms19ApplicabilityCertificate {
@@ -4978,7 +5115,7 @@ impl Cms19ApplicabilityCertificate {
 
     fn is_selected_transform_eligible(&self) -> bool {
         self.has_complete_structural_correspondence()
-            && self.fixed_output_transcript_oracle_model_established
+            && self.typed_variable_output_oracle_model_established
     }
 }
 
@@ -8588,6 +8725,7 @@ pub(in crate::bgv::proof_suite) struct RowCodeWhirFailurePartitionCertificate {
     cms19_state_predicate: Cms19StatePredicateCertificate,
     cms19_strong_state_hash_chain: Cms19StrongStateHashChainCertificate,
     cms19_transcript_oracle_output_inventory: Cms19TranscriptOracleOutputInventory,
+    cms19_typed_variable_output_oracle_model: Cms19TypedVariableOutputOracleModelCertificate,
     cms19_strong_round_by_round_semantics: Cms19StrongRoundByRoundSemanticCertificate,
     maximum_transcript_hash_query_count: u64,
     logical_verifier_message_count: u64,
@@ -8751,14 +8889,23 @@ impl RowCodeWhirFailurePartitionCertificate {
                     .production_aggregate_wide_views
                     .construction_plan_identity_hash
             && self
+                .cms19_typed_variable_output_oracle_model
+                .has_complete_direct_sum_application(&self.cms19_transcript_oracle_output_inventory)
+            && self
+                .cms19_typed_variable_output_oracle_model
+                .canonical_oracle_plan_hash
+                == self
+                    .cms19_strong_state_hash_chain
+                    .canonical_oracle_plan_hash
+            && self
                 .cms19_applicability
                 .has_complete_structural_correspondence()
             && self
                 .deployed_aggregate_leaf_oracle
                 .is_eligible_for_uniform_required_output()
             && self.cms19_arithmetic.oracle_model_requirement
-                == (Cms19ArithmeticOracleModelRequirement::UniformFixedOutputRandomOracle {
-                    output_bit_length: CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH,
+                == (Cms19ArithmeticOracleModelRequirement::TypedVariableOutputIdealXof {
+                    minimum_output_bit_length: CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH,
                 })
             && self
                 .cms19_arithmetic
@@ -8773,6 +8920,14 @@ impl RowCodeWhirFailurePartitionCertificate {
     ) -> bool {
         self.has_complete_structural_certificate()
             && self.cms19_applicability.is_selected_transform_eligible()
+            && plan.oracle_equation_catalog().is_ok_and(|catalog| {
+                self.cms19_typed_variable_output_oracle_model
+                    .is_complete_for(
+                        plan,
+                        &catalog,
+                        &self.cms19_transcript_oracle_output_inventory,
+                    )
+            })
             && self.nonlinear_commitment_binding.is_bound_to_plan(plan)
             && self.private_leaf_salt_prf.is_complete_for(
                 plan,
@@ -8832,6 +8987,7 @@ struct RowCodeWhirProductionGeometryCertificate {
     cms19_whole_state_transitions: Cms19WholeStateTransitionCertificate,
     cms19_strong_state_hash_chain: Cms19StrongStateHashChainCertificate,
     cms19_transcript_oracle_output_inventory: Cms19TranscriptOracleOutputInventory,
+    cms19_typed_variable_output_oracle_model: Cms19TypedVariableOutputOracleModelCertificate,
     complete_verifier_oracle_ledger: CompleteVerifierOracleLedger,
     deployed_aggregate_leaf_oracle: DeployedAggregateLeafOracleCertificate,
     cms19_whole_database_support: Cms19WholeDatabaseSupportCertificate,
@@ -9123,6 +9279,19 @@ impl RowCodeWhirProductionGeometryCertificate {
                 .cms19_transcript_oracle_output_inventory
                 .construction_plan_identity_hash
                 != self.construction_plan_identity_hash
+            || !self
+                .cms19_typed_variable_output_oracle_model
+                .has_complete_direct_sum_application(&self.cms19_transcript_oracle_output_inventory)
+            || self
+                .cms19_typed_variable_output_oracle_model
+                .construction_plan_identity_hash
+                != self.construction_plan_identity_hash
+            || self
+                .cms19_typed_variable_output_oracle_model
+                .canonical_oracle_plan_hash
+                != self
+                    .cms19_whole_state_transitions
+                    .linear_bcs_transcript_plan_hash
             || !self.cms19_strong_round_by_round_semantics.is_complete()
             || !self
                 .cms19_strong_round_by_round_semantics
@@ -9147,8 +9316,8 @@ impl RowCodeWhirProductionGeometryCertificate {
                 .deployed_aggregate_leaf_oracle
                 .deployed_verifier_hash_query_count
             || self.cms19_arithmetic.oracle_model_requirement
-                != (Cms19ArithmeticOracleModelRequirement::UniformFixedOutputRandomOracle {
-                    output_bit_length: CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH,
+                != (Cms19ArithmeticOracleModelRequirement::TypedVariableOutputIdealXof {
+                    minimum_output_bit_length: CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH,
                 })
             || self.cms19_arithmetic.accepting_database_equation_count
                 != self
@@ -9749,6 +9918,18 @@ fn checked_row_code_whir_production_geometry_certificate_with_masking(
                 error,
             )
         })?;
+    let cms19_typed_variable_output_oracle_model =
+        derive_cms19_typed_variable_output_oracle_model_certificate(
+            plan,
+            &catalog,
+            &cms19_transcript_oracle_output_inventory,
+        )
+        .map_err(|error| {
+            contextualize(
+                ProductionGeometryCertificateStage::TypedVariableOutputOracleModel,
+                error,
+            )
+        })?;
     let transcript_equation_count = catalog.maximum_equation_count().map_err(|_| {
         contextualize(
             ProductionGeometryCertificateStage::VerifierLedger,
@@ -9819,10 +10000,12 @@ fn checked_row_code_whir_production_geometry_certificate_with_masking(
             error,
         )
     })?;
-    let cms19_arithmetic = derive_conditional_cms19_arithmetic_certificate(
+    let cms19_arithmetic = derive_cms19_arithmetic_certificate(
+        &cms19_typed_variable_output_oracle_model,
         deployed_aggregate_leaf_oracle.deployed_verifier_hash_query_count,
         deployed_aggregate_leaf_oracle.deployed_accepting_database_equation_count,
-    );
+    )
+    .map_err(|error| contextualize(ProductionGeometryCertificateStage::FailureMagnitude, error))?;
     let initial_constraint_batch_numerator = prefix_stacking
         .scalar_opening_count
         .checked_sub(1)
@@ -9900,6 +10083,7 @@ fn checked_row_code_whir_production_geometry_certificate_with_masking(
             state_predicate: &cms19_state_predicate,
             strong_state_hash_chain: &cms19_strong_state_hash_chain,
             transcript_oracle_output_inventory: &cms19_transcript_oracle_output_inventory,
+            typed_variable_output_oracle_model: &cms19_typed_variable_output_oracle_model,
             verifier_oracle_ledger: &complete_verifier_oracle_ledger,
             deployed_leaf_oracle: &deployed_aggregate_leaf_oracle,
             exact_failure_magnitude: &exact_failure_magnitude,
@@ -9939,6 +10123,7 @@ fn checked_row_code_whir_production_geometry_certificate_with_masking(
         cms19_whole_state_transitions,
         cms19_strong_state_hash_chain,
         cms19_transcript_oracle_output_inventory,
+        cms19_typed_variable_output_oracle_model,
         complete_verifier_oracle_ledger,
         deployed_aggregate_leaf_oracle,
         cms19_whole_database_support,
@@ -10530,10 +10715,28 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
         &cms19_whole_database_support,
         &commitment_subtree_extraction,
     )?;
-    let cms19_arithmetic = derive_conditional_cms19_arithmetic_certificate(
+    let cms19_strong_state_hash_chain = derive_cms19_strong_state_hash_chain_certificate(
+        plan,
+        &catalog,
+        &state_epoch_rows,
+        &oracle_equation_rows,
+        &selected_plan_state_predicate,
+        &cms19_whole_state_transitions,
+        logical_verifier_message_count,
+    )?;
+    let cms19_transcript_oracle_output_inventory =
+        derive_cms19_transcript_oracle_output_inventory(plan, &catalog)?;
+    let cms19_typed_variable_output_oracle_model =
+        derive_cms19_typed_variable_output_oracle_model_certificate(
+            plan,
+            &catalog,
+            &cms19_transcript_oracle_output_inventory,
+        )?;
+    let cms19_arithmetic = derive_cms19_arithmetic_certificate(
+        &cms19_typed_variable_output_oracle_model,
         deployed_aggregate_leaf_oracle.deployed_verifier_hash_query_count,
         deployed_aggregate_leaf_oracle.deployed_accepting_database_equation_count,
-    );
+    )?;
     let exact_failure_magnitude =
         derive_exact_failure_magnitude_certificate(ExactFailureMagnitudeDerivationInput {
             plan,
@@ -10549,17 +10752,6 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
             logical_verifier_message_count,
             cms19_arithmetic: &cms19_arithmetic,
         })?;
-    let cms19_strong_state_hash_chain = derive_cms19_strong_state_hash_chain_certificate(
-        plan,
-        &catalog,
-        &state_epoch_rows,
-        &oracle_equation_rows,
-        &selected_plan_state_predicate,
-        &cms19_whole_state_transitions,
-        logical_verifier_message_count,
-    )?;
-    let cms19_transcript_oracle_output_inventory =
-        derive_cms19_transcript_oracle_output_inventory(plan, &catalog)?;
     let cms19_accepting_database_extractor =
         derive_cms19_accepting_database_extractor_certificate(plan)?;
     let cms19_state_predicate =
@@ -10599,6 +10791,7 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
             state_predicate: &cms19_state_predicate,
             strong_state_hash_chain: &cms19_strong_state_hash_chain,
             transcript_oracle_output_inventory: &cms19_transcript_oracle_output_inventory,
+            typed_variable_output_oracle_model: &cms19_typed_variable_output_oracle_model,
             verifier_oracle_ledger: &complete_verifier_oracle_ledger,
             deployed_leaf_oracle: &deployed_aggregate_leaf_oracle,
             exact_failure_magnitude: &exact_failure_magnitude,
@@ -10624,6 +10817,7 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
         cms19_state_predicate,
         cms19_strong_state_hash_chain,
         cms19_transcript_oracle_output_inventory,
+        cms19_typed_variable_output_oracle_model,
         cms19_strong_round_by_round_semantics,
         maximum_transcript_hash_query_count,
         logical_verifier_message_count,
@@ -11964,6 +12158,77 @@ fn derive_cms19_transcript_oracle_output_inventory(
         rows,
     };
     if !certificate.is_self_consistent() {
+        return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
+    }
+    Ok(certificate)
+}
+
+fn derive_cms19_typed_variable_output_oracle_model_certificate(
+    plan: &RowCodeWhirConstructionPlan,
+    catalog: &RowCodeWhirOracleEquationCatalog,
+    output_inventory: &Cms19TranscriptOracleOutputInventory,
+) -> Result<Cms19TypedVariableOutputOracleModelCertificate, WhirTheoremCertificateError> {
+    if !output_inventory.is_complete_for(plan, catalog) {
+        return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
+    }
+    let mut distinct_output_bit_lengths = output_inventory
+        .distinct_output_byte_lengths
+        .iter()
+        .copied()
+        .map(|byte_length| {
+            byte_length
+                .checked_mul(8)
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+        })
+        .collect::<Result<BTreeSet<_>, _>>()?;
+    let fixed_digest_output_bit_length = u64::try_from(CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH)
+        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+    distinct_output_bit_lengths.insert(fixed_digest_output_bit_length);
+    let minimum_output_bit_length = distinct_output_bit_lengths
+        .first()
+        .copied()
+        .ok_or(WhirTheoremCertificateError::IncompleteTranscriptMapping)?;
+    let maximum_output_bit_length = distinct_output_bit_lengths
+        .last()
+        .copied()
+        .ok_or(WhirTheoremCertificateError::IncompleteTranscriptMapping)?;
+    let certificate = Cms19TypedVariableOutputOracleModelCertificate {
+        construction_plan_identity_hash: plan
+            .canonical_identity_hash()
+            .map_err(|_| WhirTheoremCertificateError::IncompleteTranscriptMapping)?,
+        canonical_oracle_plan_hash: plan
+            .linear_bcs_transcript_plan_hash()
+            .map_err(|_| WhirTheoremCertificateError::IncompleteTranscriptMapping)?,
+        theorem: Cms19VariableOutputCompressedOracleTheorem::OrthogonalWidthIndexedDirectSum,
+        concrete_xof_mapping_scope:
+            Cms19ConcreteXofMappingScope::DomainSeparatedShake256IdealXofQroAssumption,
+        output_width_preimage_binding:
+            Cms19OutputWidthPreimageBinding::FoundationTupleCanonicalUnsigned64FinalItem,
+        variable_output_register_embedding:
+            Cms19VariableOutputRegisterEmbedding::OrthogonalWidthControlWithZeroPaddedAnswerRegister,
+        logical_challenge_query_count: catalog
+            .logical_verifier_message_count()
+            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+        variable_output_challenge_query_count: output_inventory.variable_output_message_count,
+        minimum_output_bit_length,
+        maximum_output_bit_length,
+        distinct_output_bit_lengths: distinct_output_bit_lengths.into_iter().collect(),
+        collision_projection_bit_length: fixed_digest_output_bit_length,
+        compressed_database_entries_added_per_query: 1,
+        conditional_lifting_constant: 6,
+        output_width_control_sectors_are_orthogonal: true,
+        complete_logical_answer_is_atomic: true,
+        partial_squeeze_blocks_are_not_state_transitions: true,
+        adversarial_fragment_access_is_dominated_by_complete_prefix_access: true,
+        unused_xof_suffix_is_independent_adversary_workspace: true,
+        repeated_reads_reuse_one_typed_database_entry: true,
+        full_output_distribution_owns_round_failure: true,
+        // The construction retains the explicit ideal-XOF QRO assumption. No
+        // fixed-Keccak or sponge-indifferentiability conclusion is smuggled
+        // into the information-theoretic CMS19 application.
+        claims_concrete_sponge_indifferentiability: false,
+    };
+    if !certificate.is_complete_for(plan, catalog, output_inventory) {
         return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
     }
     Ok(certificate)
@@ -14809,6 +15074,7 @@ struct Cms19ApplicabilityCertificateInput<'a> {
     state_predicate: &'a Cms19StatePredicateCertificate,
     strong_state_hash_chain: &'a Cms19StrongStateHashChainCertificate,
     transcript_oracle_output_inventory: &'a Cms19TranscriptOracleOutputInventory,
+    typed_variable_output_oracle_model: &'a Cms19TypedVariableOutputOracleModelCertificate,
     verifier_oracle_ledger: &'a CompleteVerifierOracleLedger,
     deployed_leaf_oracle: &'a DeployedAggregateLeafOracleCertificate,
     exact_failure_magnitude: &'a ExactFailureMagnitudeCertificate,
@@ -14826,6 +15092,7 @@ fn derive_cms19_applicability_certificate(
         state_predicate,
         strong_state_hash_chain,
         transcript_oracle_output_inventory,
+        typed_variable_output_oracle_model,
         verifier_oracle_ledger,
         deployed_leaf_oracle,
         exact_failure_magnitude,
@@ -14869,15 +15136,18 @@ fn derive_cms19_applicability_certificate(
             .is_eligible_for_uniform_required_output(),
         transcript_oracle_output_inventory_reconciled: transcript_oracle_output_inventory
             .is_complete_for(plan, catalog),
-        fixed_output_transcript_oracle_model_established: transcript_oracle_output_inventory
-            .is_eligible_for_uniform_fixed_output(),
+        typed_variable_output_oracle_model_established: typed_variable_output_oracle_model
+            .is_complete_for(plan, catalog, transcript_oracle_output_inventory),
     })
 }
 
-fn derive_conditional_cms19_arithmetic_certificate(
+fn derive_cms19_arithmetic_certificate(
+    oracle_model: &Cms19TypedVariableOutputOracleModelCertificate,
     verifier_hash_query_count: u64,
     accepting_database_equation_count: u64,
-) -> Cms19ArithmeticCertificate {
+) -> Result<Cms19ArithmeticCertificate, WhirTheoremCertificateError> {
+    let minimum_output_bit_length = usize::try_from(oracle_model.minimum_output_bit_length)
+        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
     let adversarial_query_bound =
         (BigUint::from(1_u8) << CMS19_ADVERSARIAL_QUERY_EXPONENT) - BigUint::from(1_u8);
     let compiler_query_bound = &adversarial_query_bound + BigUint::from(verifier_hash_query_count);
@@ -14888,10 +15158,10 @@ fn derive_conditional_cms19_arithmetic_certificate(
         * &compiler_query_bound
         * &compiler_query_bound
         + BigUint::from(2_u8) * BigUint::from(accepting_database_equation_count);
-    Cms19ArithmeticCertificate {
+    Ok(Cms19ArithmeticCertificate {
         oracle_model_requirement:
-            Cms19ArithmeticOracleModelRequirement::UniformFixedOutputRandomOracle {
-                output_bit_length: CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH,
+            Cms19ArithmeticOracleModelRequirement::TypedVariableOutputIdealXof {
+                minimum_output_bit_length,
             },
         adversarial_query_bound,
         verifier_hash_query_count,
@@ -14899,8 +15169,8 @@ fn derive_conditional_cms19_arithmetic_certificate(
         compiler_query_bound,
         classical_soundness_multiplier,
         ideal_oracle_penalty_numerator,
-        ideal_oracle_penalty_denominator_bit_length: CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH,
-    }
+        ideal_oracle_penalty_denominator_bit_length: minimum_output_bit_length,
+    })
 }
 
 const EXACT_FAILURE_OWNER_KINDS: [ExactFailureOwnerKind; 19] = [
@@ -16190,8 +16460,8 @@ fn validate_exact_failure_magnitude_certificate(
     if certificate.application_statement_schema_identifier
         != plan.application_statement_schema_identifier
         || cms19_arithmetic.oracle_model_requirement
-            != (Cms19ArithmeticOracleModelRequirement::UniformFixedOutputRandomOracle {
-                output_bit_length: CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH,
+            != (Cms19ArithmeticOracleModelRequirement::TypedVariableOutputIdealXof {
+                minimum_output_bit_length: CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH,
             })
         || cms19_arithmetic.ideal_oracle_penalty_denominator_bit_length
             != CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH
@@ -18710,6 +18980,12 @@ fn variable_length_transcript_challenges_refuse_the_fixed_512_bit_cms19_model() 
         .expect("the selected transcript catalog derives");
     let inventory = derive_cms19_transcript_oracle_output_inventory(&plan, &catalog)
         .expect("the selected transcript output inventory derives");
+    let typed_variable_output_oracle_model =
+        derive_cms19_typed_variable_output_oracle_model_certificate(&plan, &catalog, &inventory)
+            .expect("the width-indexed ideal-XOF model derives");
+    let model_is_complete = |candidate: &Cms19TypedVariableOutputOracleModelCertificate| {
+        candidate.is_complete_for(&plan, &catalog, &inventory)
+    };
 
     assert!(inventory.is_complete_for(&plan, &catalog));
     assert_eq!(inventory.required_fixed_output_byte_length, 64);
@@ -18775,6 +19051,95 @@ fn variable_length_transcript_challenges_refuse_the_fixed_512_bit_cms19_model() 
     assert_eq!(expected_aggregate_wide_query_output_byte_length, 402_432);
 
     assert!(!inventory.is_eligible_for_uniform_fixed_output());
+    assert!(model_is_complete(&typed_variable_output_oracle_model));
+    assert_eq!(
+        typed_variable_output_oracle_model.minimum_output_bit_length,
+        512
+    );
+    assert_eq!(
+        typed_variable_output_oracle_model.maximum_output_bit_length,
+        expected_aggregate_wide_query_output_byte_length * 8,
+    );
+    assert!(
+        typed_variable_output_oracle_model
+            .distinct_output_bit_lengths
+            .contains(&(8_192 * 8))
+    );
+    assert!(
+        typed_variable_output_oracle_model
+            .distinct_output_bit_lengths
+            .contains(&(402_432 * 8))
+    );
+
+    let mut blockwise_partial_messages = typed_variable_output_oracle_model.clone();
+    blockwise_partial_messages.compressed_database_entries_added_per_query = 2;
+    blockwise_partial_messages.partial_squeeze_blocks_are_not_state_transitions = false;
+    assert!(!model_is_complete(&blockwise_partial_messages));
+
+    let mut wrapper_restricted_adversary = typed_variable_output_oracle_model.clone();
+    wrapper_restricted_adversary
+        .adversarial_fragment_access_is_dominated_by_complete_prefix_access = false;
+    wrapper_restricted_adversary.unused_xof_suffix_is_independent_adversary_workspace = false;
+    wrapper_restricted_adversary.repeated_reads_reuse_one_typed_database_entry = false;
+    assert!(!model_is_complete(&wrapper_restricted_adversary));
+
+    let mut concrete_sponge_overclaim = typed_variable_output_oracle_model.clone();
+    concrete_sponge_overclaim.claims_concrete_sponge_indifferentiability = true;
+    assert!(!model_is_complete(&concrete_sponge_overclaim));
+
+    let mut changed_construction_identity = typed_variable_output_oracle_model.clone();
+    changed_construction_identity.construction_plan_identity_hash[0] ^= 1;
+    assert!(!model_is_complete(&changed_construction_identity));
+
+    let mut changed_transcript_plan = typed_variable_output_oracle_model.clone();
+    changed_transcript_plan.canonical_oracle_plan_hash[0] ^= 1;
+    assert!(!model_is_complete(&changed_transcript_plan));
+
+    let mut changed_logical_query_count = typed_variable_output_oracle_model.clone();
+    changed_logical_query_count.logical_challenge_query_count -= 1;
+    assert!(!model_is_complete(&changed_logical_query_count));
+
+    let mut changed_variable_query_count = typed_variable_output_oracle_model.clone();
+    changed_variable_query_count.variable_output_challenge_query_count -= 1;
+    assert!(!model_is_complete(&changed_variable_query_count));
+
+    let mut changed_minimum_width = typed_variable_output_oracle_model.clone();
+    changed_minimum_width.minimum_output_bit_length += 1;
+    assert!(!model_is_complete(&changed_minimum_width));
+
+    let mut changed_maximum_width = typed_variable_output_oracle_model.clone();
+    changed_maximum_width.maximum_output_bit_length -= 1;
+    assert!(!model_is_complete(&changed_maximum_width));
+
+    let mut missing_width_sector = typed_variable_output_oracle_model.clone();
+    missing_width_sector.distinct_output_bit_lengths.pop();
+    assert!(!model_is_complete(&missing_width_sector));
+
+    let mut duplicated_width_sector = typed_variable_output_oracle_model.clone();
+    duplicated_width_sector
+        .distinct_output_bit_lengths
+        .push(duplicated_width_sector.maximum_output_bit_length);
+    assert!(!model_is_complete(&duplicated_width_sector));
+
+    let mut changed_collision_projection = typed_variable_output_oracle_model.clone();
+    changed_collision_projection.collision_projection_bit_length += 1;
+    assert!(!model_is_complete(&changed_collision_projection));
+
+    let mut changed_lifting_constant = typed_variable_output_oracle_model.clone();
+    changed_lifting_constant.conditional_lifting_constant -= 1;
+    assert!(!model_is_complete(&changed_lifting_constant));
+
+    let mut nonorthogonal_width_sectors = typed_variable_output_oracle_model.clone();
+    nonorthogonal_width_sectors.output_width_control_sectors_are_orthogonal = false;
+    assert!(!model_is_complete(&nonorthogonal_width_sectors));
+
+    let mut non_atomic_logical_answer = typed_variable_output_oracle_model.clone();
+    non_atomic_logical_answer.complete_logical_answer_is_atomic = false;
+    assert!(!model_is_complete(&non_atomic_logical_answer));
+
+    let mut coordinate_probability_substitution = typed_variable_output_oracle_model.clone();
+    coordinate_probability_substitution.full_output_distribution_owns_round_failure = false;
+    assert!(!model_is_complete(&coordinate_probability_substitution));
 
     let mut missing_row = inventory.clone();
     missing_row.rows.pop();
@@ -18929,7 +19294,7 @@ fn cms19_whole_state_and_database_support_are_exact_and_mutation_sensitive() {
     assert!(strong_semantics.state_evaluator.is_complete());
     assert!(strong_semantics.accepting_database_extractor.is_complete());
     assert!(strong_semantics.is_complete());
-    assert!(!certificate.has_complete_construction_theorem_for(&plan));
+    assert!(certificate.has_complete_construction_theorem_for(&plan));
 
     let mut wrong_atomic_event_binding = strong_semantics.clone();
     wrong_atomic_event_binding
@@ -19899,10 +20264,12 @@ fn ballot_width_eight_has_complete_semantic_state_and_database_support() {
             ))
             .count(),
     );
-    let ballot_cms19_arithmetic = derive_conditional_cms19_arithmetic_certificate(
+    let ballot_cms19_arithmetic = derive_cms19_arithmetic_certificate(
+        &production_geometry_certificate.cms19_typed_variable_output_oracle_model,
         deployed_leaf_oracle.deployed_verifier_hash_query_count,
         deployed_leaf_oracle.deployed_accepting_database_equation_count,
-    );
+    )
+    .expect("the ballot typed ideal-XOF arithmetic derives");
     let ballot_failure_input = ExactFailureMagnitudeDerivationInput {
         plan: &plan,
         relation_variant,
@@ -20105,7 +20472,7 @@ fn selected_nonlinear_commitment_binding_covers_every_root_and_shared_query() {
 
     assert!(is_complete(binding));
     assert!(binding.is_bound_to_plan(&plan));
-    assert!(!certificate.has_complete_construction_theorem_for(&plan));
+    assert!(certificate.has_complete_construction_theorem_for(&plan));
     assert_eq!(binding.rows.len(), 23);
     assert_eq!(binding.transcript_supplied_root_count, 12);
     assert_eq!(binding.verifier_owned_root_count, 11);
@@ -21039,8 +21406,8 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
     );
     assert_eq!(
         certificate.cms19_arithmetic.oracle_model_requirement,
-        Cms19ArithmeticOracleModelRequirement::UniformFixedOutputRandomOracle {
-            output_bit_length: 512,
+        Cms19ArithmeticOracleModelRequirement::TypedVariableOutputIdealXof {
+            minimum_output_bit_length: 512,
         },
     );
     assert_eq!(
@@ -21126,12 +21493,12 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
             .transcript_oracle_output_inventory_reconciled
     );
     assert!(
-        !certificate
+        certificate
             .cms19_applicability
-            .fixed_output_transcript_oracle_model_established
+            .typed_variable_output_oracle_model_established
     );
     assert!(
-        !certificate
+        certificate
             .cms19_applicability
             .is_selected_transform_eligible()
     );
@@ -21339,10 +21706,16 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
     changed_conditional_oracle_requirement
         .cms19_arithmetic
         .oracle_model_requirement =
-        Cms19ArithmeticOracleModelRequirement::UniformFixedOutputRandomOracle {
-            output_bit_length: 256,
+        Cms19ArithmeticOracleModelRequirement::TypedVariableOutputIdealXof {
+            minimum_output_bit_length: 256,
         };
     assert!(!changed_conditional_oracle_requirement.has_complete_structural_certificate());
+    let mut changed_typed_oracle_plan = certificate.clone();
+    changed_typed_oracle_plan
+        .cms19_typed_variable_output_oracle_model
+        .canonical_oracle_plan_hash[0] ^= 1;
+    assert!(!changed_typed_oracle_plan.has_complete_structural_certificate());
+    assert!(!changed_typed_oracle_plan.has_complete_construction_theorem_for(&plan));
     assert!(
         certificate
             .cms19_state_predicate

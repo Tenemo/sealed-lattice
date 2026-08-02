@@ -89,16 +89,22 @@ Works today:
   consumes the complete candidate-slot budget. These invocations have
   plan-fixed but variable output lengths: a 128-draw extension challenge emits
   `8,192` bytes, while a 393-index, 128-draw query vector emits `402,432`
-  bytes. Treating either invocation as one fixed 512-bit random-oracle answer
-  for the selected QROM transform remains an open theorem-mapping obligation.
+  bytes. Neither invocation is treated as one fixed 512-bit answer. The
+  selected typed ideal-XOF model instead uses the canonically width-bound,
+  pairwise disjoint query domains and one complete atomic answer per logical
+  challenge.
   A production-derived transcript inventory now checks every logical output
   against its live sampler formula. It records zero 64-byte challenge outputs
   and all `4,272` messages as variable-output invocations, with an `8,192`-byte
-  minimum and `402,432`-byte maximum. The structural predecessor and database
-  certificates remain derivable, but transform eligibility and the complete-
-  construction predicate refuse. The existing 512-bit transform arithmetic is
-  explicitly conditional on supplying the missing fixed-output oracle model.
-  Its exact
+  minimum and `402,432`-byte maximum. The heterogeneous compressed-oracle
+  certificate embeds answer registers under an orthogonal width control,
+  proves that one superposed query adds at most one complete database entry,
+  and preserves the CMS19 lifting constant six. Collision, half-preimage, and
+  programming terms use the smallest full-output projection, which is 512
+  bits; each round failure still uses its complete production distribution.
+  This mapping and the complete-construction predicate derive under the stated
+  domain-separated SHAKE256 ideal-XOF/QRO assumption. It makes no concrete
+  Keccak or sponge-indifferentiability claim. Its exact
   `14,673`-query census contains `6,306` original-BCS rounds. The executable
   whole-state evaluator and collision-free accepting-database extractor bind
   every plan-derived verifier and response address, recover every exact round
@@ -116,9 +122,10 @@ Works today:
   a different statement or transcript and is not charged as a collision.
   Hostile width, domain, slot, address, response-owner, root-authority,
   shared-query, leaf-call, frontier, and message-shape mutations refuse. This
-  is focused same-secret structural soundness evidence; the variable-output
-  XOF mapping, nonlinear privacy, suite-wide reduction, and ceremony-level
-  reduction evidence remain open.
+  is focused same-secret construction soundness evidence under the declared
+  ideal-XOF model. Nonlinear privacy, emitted transported-proof evidence,
+  conservative physical-proof composition, and ceremony-level reduction
+  evidence remain open.
 - Secret-bearing phase-row padding now uses three KMAC-derived 512-bit seeds.
   The selected same-secret certificate inventories 62 framed SHAKE streams,
   130,023,424 accepted field outputs, seed collision, bounded rejection
@@ -277,8 +284,8 @@ Not yet:
 
 - The generic construction certificate does not establish family simulation,
   malicious-verifier zero knowledge, or quantum-random-oracle zero knowledge.
-- Exact complete construction-wide classical and quantum-random-oracle
-  soundness is not established. The selected same-secret aggregate-leaf
+- Exact complete-action classical and quantum-random-oracle soundness is not
+  established. The selected same-secret aggregate-leaf
   predecessor correspondence, collision arithmetic, aggregate-wide production
   affine correspondence, pre-aggregate physical masking correspondence, exact
   six-source affine masking composition, and all production geometry
@@ -287,10 +294,12 @@ Not yet:
   event under one atomic plan-bounded verifier message, an executable
   predecessor-state evaluator, and an exact next-message database extractor.
   The reusable atomic predecessor and database-extraction layer is now enforced
-  by the production-geometry constructor. At the pushed checkpoint, exact
+  by the production-geometry constructor. The typed variable-output ideal-XOF
+  application and its 512-bit minimum-projection arithmetic are now enforced by
+  that constructor under the declared SHAKE256 ideal-XOF/QRO assumption. Exact
   family failure ledgers, plan-derived polynomial and point extraction, and
-  full-false terminal rejection derived for every production geometry. The VSS geometry
-  additionally derives its heterogeneous application-modulus
+  full-false terminal rejection derive for every production geometry. The VSS
+  geometry additionally derives its heterogeneous application-modulus
   product-challenge ledger. All 27 width-64 and four width-8 identities passed
   the complete constructor at the reviewed checkpoint, and the focused
   `0x1212` production certificate now passes independently. The exact
