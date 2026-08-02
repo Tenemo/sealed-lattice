@@ -78,8 +78,9 @@ use crate::bgv::proof_suite::{
     ValidatedRelationPlanArtifact, checked_construction_masking_correspondence_for_parameters,
     checked_zero_knowledge_mask_image_for_parameters,
     committed_material_private_derivation_description,
-    compile_collective_public_key_aggregate_relation_plan, compile_same_secret_relation_plan,
-    selected_ballot_validity_relation_compilation, selected_committed_material_profile,
+    compile_collective_public_key_aggregate_relation_plan, compile_public_key_share_relation_plan,
+    compile_same_secret_relation_plan, selected_ballot_validity_relation_compilation,
+    selected_committed_material_profile, selected_public_key_share_relation_plan_input,
     selected_relation_plans, selected_same_secret_persistent_mask_image_accounting,
     selected_same_secret_relation_plan_input,
 };
@@ -17155,6 +17156,382 @@ fn assert_ballot_commitment_subtree_certificate_accepts_its_zero_bound_tree_geom
         row.implementation != CoordinateDerivedOpeningImplementation::ExactBoundTree
     }));
     assert!(certificate.is_complete());
+}
+
+#[test]
+#[ignore = "owned by test:rust:kernel:theorem-evidence"]
+fn public_key_share_schema_0x1212_derives_from_its_production_geometry() {
+    let _certificate_test_guard = PRODUCTION_GEOMETRY_CERTIFICATE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let application_statement_schema_identifier =
+        ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER;
+    assert_eq!(application_statement_schema_identifier, 0x1212);
+
+    let relation_context =
+        selected_relation_plan_check_context(application_statement_schema_identifier)
+            .expect("the selected public-key-share relation context exists");
+    let compiled_plan = compile_public_key_share_relation_plan(
+        &selected_public_key_share_relation_plan_input()
+            .expect("the selected public-key-share relation input derives"),
+        &relation_context,
+    )
+    .expect("the selected public-key-share relation compiles");
+    let artifact =
+        ValidatedRelationPlanArtifact::from_owned_compiled_plan(compiled_plan, &relation_context)
+            .expect("the selected public-key-share relation validates");
+    assert_eq!(
+        artifact.application_statement_schema_identifier(),
+        application_statement_schema_identifier,
+    );
+    assert_eq!(artifact.checked_context(), &relation_context);
+    let [relation_variant] = artifact.compiled_plan().variants() else {
+        panic!("the selected public-key-share relation must have exactly one variant");
+    };
+    let relation_plan_variant_hash = relation_variant
+        .canonical_hash()
+        .expect("the public-key-share relation variant hashes");
+    let plan = RowCodeWhirConstructionPlan::for_selected_variant(
+        &artifact,
+        relation_variant.schedule_position(),
+        relation_variant.top_count(),
+    )
+    .expect("the selected public-key-share construction derives");
+    assert_eq!(plan.application_statement_schema_identifier, 0x1212);
+    assert_eq!(plan.relation_plan_hash, artifact.canonical_plan_hash());
+    assert_eq!(plan.relation_plan_variant_hash, relation_plan_variant_hash);
+
+    let expected_bound_root_authorities = relation_variant
+        .ordered_trees()
+        .iter()
+        .enumerate()
+        .filter_map(|(relation_tree_ordinal, tree)| {
+            let RelationTreeDescriptor::BoundPublic {
+                construction_kind,
+                expected_root_source_ordinal,
+                root_use,
+                ordered_column_ordinals,
+            } = tree
+            else {
+                return None;
+            };
+            Some((
+                u32::try_from(relation_tree_ordinal)
+                    .expect("the relation-tree ordinal fits the production plan"),
+                *construction_kind,
+                *expected_root_source_ordinal,
+                *root_use,
+                ordered_column_ordinals.clone(),
+            ))
+        })
+        .collect::<Vec<_>>();
+    let production_bound_root_authorities = plan
+        .bound_trees
+        .iter()
+        .map(|tree| {
+            (
+                tree.relation_tree_ordinal,
+                tree.construction_kind,
+                tree.expected_root_source_ordinal,
+                tree.root_use,
+                tree.ordered_columns
+                    .iter()
+                    .map(|column| column.column_ordinal)
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(!expected_bound_root_authorities.is_empty());
+    assert_eq!(
+        production_bound_root_authorities,
+        expected_bound_root_authorities,
+    );
+    let verifier_source_ordinals = relation_variant
+        .ordered_columns()
+        .iter()
+        .filter_map(|column| match column.origin() {
+            RelationColumnOrigin::VerifierSequence {
+                verifier_source_ordinal,
+                ..
+            } => Some(*verifier_source_ordinal),
+            RelationColumnOrigin::BoundTree {
+                expected_root_source_ordinal,
+            } => Some(*expected_root_source_ordinal),
+            RelationColumnOrigin::Prover => None,
+        })
+        .collect::<BTreeSet<_>>();
+    assert!(!verifier_source_ordinals.is_empty());
+    assert!(
+        verifier_source_ordinals
+            .iter()
+            .all(|source_ordinal| relation_variant.verifier_source(*source_ordinal).is_some()),
+    );
+
+    let prefix_stacking =
+        derive_prefix_stacking_certificate(&plan).expect("the production opening geometry derives");
+    let expected_scalar_opening_count = plan
+        .opening_batches
+        .iter()
+        .try_fold(0_u64, |total, batch| {
+            total.checked_add(u64::try_from(batch.requested_aggregate_column_ordinals.len()).ok()?)
+        })
+        .expect("the public-key-share scalar-opening count fits u64");
+    assert_eq!(prefix_stacking.source_table_count, 1);
+    assert_eq!(prefix_stacking.committed_polynomial_count, 1);
+    assert_eq!(prefix_stacking.table_width, plan.aggregate_table_width());
+    assert_eq!(
+        prefix_stacking.selector_variable_count,
+        plan.parameters.polynomial_commitment_variable_count - plan.parameters.table_variable_count,
+    );
+    assert_eq!(
+        prefix_stacking.opening_batch_count,
+        plan.opening_batches.len()
+    );
+    assert_eq!(
+        prefix_stacking.scalar_opening_count,
+        expected_scalar_opening_count,
+    );
+
+    let catalog = plan
+        .oracle_equation_catalog()
+        .expect("the public-key-share oracle-equation catalog derives");
+    let maximum_candidate_draws = u64::from(
+        plan.parameters
+            .maximum_fiat_shamir_candidate_draws_per_output,
+    );
+    let extension_candidate_byte_length = u64::try_from(EXTENSION_CHALLENGE_CANDIDATE_BYTE_LENGTH)
+        .expect("the extension candidate byte length fits u64");
+    let expected_extension_sampler_byte_length = maximum_candidate_draws
+        .checked_mul(extension_candidate_byte_length)
+        .expect("the extension sampler byte length fits u64");
+    let mut extension_sampler_count = 0_u64;
+    let mut distinct_query_sampler_count = 0_u64;
+    let mut product_sampler_count = 0_u64;
+    let mut saw_outer_query_sampler = false;
+    for operation in &catalog.operations {
+        let atomic_output_byte_lengths = operation
+            .ranges
+            .iter()
+            .filter_map(|range| match range.kind {
+                RowCodeWhirOracleEquationRangeKind::AtomicChallengeXof { output_byte_length } => {
+                    Some(output_byte_length)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        match &operation.kind {
+            RowCodeWhirOracleEquationOperationKind::CommonProductChallenge(_) => {
+                product_sampler_count += 1;
+                assert_eq!(atomic_output_byte_lengths.len(), 1);
+                assert!(atomic_output_byte_lengths[0] > 0);
+            }
+            RowCodeWhirOracleEquationOperationKind::CommonExtensionChallenge(_)
+            | RowCodeWhirOracleEquationOperationKind::RowCodeWhir {
+                operation: RowCodeWhirTranscriptOperation::SampleExtension { .. },
+                ..
+            } => {
+                extension_sampler_count += 1;
+                assert_eq!(
+                    atomic_output_byte_lengths,
+                    [expected_extension_sampler_byte_length],
+                );
+            }
+            RowCodeWhirOracleEquationOperationKind::RowCodeWhir {
+                operation:
+                    RowCodeWhirTranscriptOperation::SampleDistinctIndices {
+                        role,
+                        upper_bound,
+                        output_count,
+                    },
+                ..
+            } => {
+                distinct_query_sampler_count += 1;
+                let expected_output_byte_length = u64::try_from(*output_count)
+                    .expect("the query output count fits u64")
+                    .checked_mul(maximum_candidate_draws)
+                    .and_then(|count| {
+                        count.checked_mul(
+                            u64::try_from(size_of::<u64>())
+                                .expect("the query candidate byte length fits u64"),
+                        )
+                    })
+                    .expect("the query sampler byte length fits u64");
+                assert!(*upper_bound > *output_count);
+                assert_eq!(atomic_output_byte_lengths, [expected_output_byte_length]);
+                if *role == RowCodeWhirQueryRole::Outer {
+                    assert_eq!(*output_count, plan.parameters.outer_query_count);
+                    saw_outer_query_sampler = true;
+                }
+            }
+            RowCodeWhirOracleEquationOperationKind::InitialTranscript
+            | RowCodeWhirOracleEquationOperationKind::CommonRound(_)
+            | RowCodeWhirOracleEquationOperationKind::RowCodeWhir { .. } => {
+                assert!(atomic_output_byte_lengths.is_empty());
+            }
+        }
+    }
+    assert!(extension_sampler_count > 0);
+    assert!(distinct_query_sampler_count > 0);
+    assert!(product_sampler_count > 0);
+    assert!(saw_outer_query_sampler);
+    let logical_verifier_message_count = extension_sampler_count
+        .checked_add(distinct_query_sampler_count)
+        .and_then(|count| count.checked_add(product_sampler_count))
+        .expect("the public-key-share logical verifier-message count fits u64");
+    assert_eq!(
+        catalog
+            .logical_verifier_message_count()
+            .expect("the catalog verifier-message count derives"),
+        logical_verifier_message_count,
+    );
+
+    let hiding_configuration =
+        super::super::hiding_whir::selected_hiding_whir_config(plan.selected_parameters())
+            .expect("the public-key-share hiding configuration derives");
+    let aggregate_wide_masking = AggregateWideMaskingCertificate::derive(&hiding_configuration)
+        .expect("the public-key-share aggregate-wide masking certificate derives");
+    let certificate = checked_row_code_whir_production_geometry_certificate_with_masking(
+        &plan,
+        &artifact,
+        relation_variant,
+        &relation_context,
+        &aggregate_wide_masking,
+    )
+    .expect("schema 0x1212 derives from the production geometry");
+    assert!(certificate.is_complete());
+    assert_eq!(
+        certificate.application_statement_schema_identifier,
+        application_statement_schema_identifier,
+    );
+    assert_eq!(
+        certificate.construction_plan_identity_hash,
+        plan.canonical_identity_hash()
+            .expect("the public-key-share construction identity hashes"),
+    );
+    assert_eq!(
+        certificate.relation_plan_hash,
+        artifact.canonical_plan_hash()
+    );
+    assert_eq!(
+        certificate.relation_plan_variant_hash,
+        relation_plan_variant_hash,
+    );
+    assert_eq!(certificate.prefix_stacking, prefix_stacking);
+    assert_eq!(
+        certificate
+            .polynomial_protocol_extractor
+            .opening_batch_count(),
+        plan.opening_batches.len(),
+    );
+    assert_eq!(
+        certificate
+            .polynomial_protocol_extractor
+            .scalar_opening_count(),
+        usize::try_from(expected_scalar_opening_count)
+            .expect("the scalar-opening count fits usize"),
+    );
+    assert_eq!(
+        certificate
+            .point_constraint_extractor
+            .explicit_point_count(),
+        relation_variant.ordered_opening_points().len(),
+    );
+    assert_eq!(
+        certificate
+            .point_constraint_extractor
+            .row_selector_coordinate_count(),
+        plan.parameters.logical_polynomials_per_physical_row.ilog2() as usize,
+    );
+    assert_eq!(
+        certificate
+            .point_constraint_extractor
+            .proof_supplied_point_coordinate_count(),
+        0,
+    );
+
+    let expected_persistent_mask_sources = plan
+        .bound_trees
+        .iter()
+        .flat_map(|tree| {
+            tree.ordered_columns.iter().map(|column| {
+                ConstructionMaskSourceIdentifier::BoundColumn {
+                    relation_tree_ordinal: tree.relation_tree_ordinal,
+                    column_ordinal: column.column_ordinal,
+                    root_use: tree.root_use as u16,
+                }
+            })
+        })
+        .collect::<BTreeSet<_>>();
+    let observed_persistent_mask_sources = certificate
+        .production_construction_masking
+        .production_sources
+        .iter()
+        .filter_map(|source| {
+            (source.authority == ConstructionMaskSourceAuthority::AuthenticatedPersistentObject)
+                .then_some(source.identifier)
+        })
+        .collect::<BTreeSet<_>>();
+    assert!(!expected_persistent_mask_sources.is_empty());
+    assert_eq!(
+        observed_persistent_mask_sources,
+        expected_persistent_mask_sources,
+    );
+    for source in &certificate
+        .production_construction_masking
+        .production_sources
+    {
+        let expected = if expected_persistent_mask_sources.contains(&source.identifier) {
+            ConstructionMaskSourceDescriptor::authenticated_persistent_object(source.identifier)
+        } else {
+            ConstructionMaskSourceDescriptor::current_attempt(source.identifier)
+        };
+        assert_eq!(*source, expected);
+    }
+
+    assert_eq!(
+        certificate.maximum_transcript_hash_query_count,
+        catalog
+            .maximum_transcript_hash_query_count()
+            .expect("the transcript hash-query count derives"),
+    );
+    assert_eq!(
+        certificate.logical_verifier_message_count,
+        logical_verifier_message_count,
+    );
+    let exact_failure = &certificate.exact_failure_magnitude;
+    let expected_family_application_multiplicity =
+        crate::bgv::proof_suite::selected_profile::selected_proof_application_slot_ceilings()
+            .expect("the selected proof-application ceilings derive")
+            .family_ceiling(application_statement_schema_identifier)
+            .expect("the public-key-share family ceiling exists");
+    assert_eq!(
+        exact_failure.application_statement_schema_identifier,
+        application_statement_schema_identifier,
+    );
+    assert_eq!(
+        exact_failure.family_application_multiplicity,
+        u64::from(expected_family_application_multiplicity),
+    );
+    assert_eq!(
+        exact_failure
+            .owner_rows
+            .iter()
+            .map(|row| u64::try_from(row.transition_count).expect("owner count fits u64"))
+            .sum::<u64>(),
+        logical_verifier_message_count,
+    );
+    assert_eq!(
+        exact_failure.product_challenge_rows.len(),
+        usize::try_from(product_sampler_count).expect("the product-sampler count fits usize"),
+    );
+    assert!(!exact_failure.query_rows.is_empty());
+    assert!(!exact_failure.algebraic_rows.is_empty());
+    assert!(exact_failure.all_failure_owners_mapped_once);
+    assert!(exact_failure.exact_query_products_bounded);
+    assert!(exact_failure.ordinary_family_mass_gate_holds);
+    assert!(exact_failure.transformed_initial_mass_gate_holds);
+    assert!(exact_failure.complete_qrom_mass_gate_holds);
+    assert!(exact_failure.is_complete());
 }
 
 #[test]

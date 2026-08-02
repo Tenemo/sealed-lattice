@@ -50,6 +50,28 @@ instantiated that correspondence through fresh transported-byte verification,
 so `SEC-005` remains open together with nonlinear privacy, emitted-proof, and
 ceremony-level reductions.
 
+The transcript part of `SEC-005` is also open at the theorem interface. A
+logical extension challenge currently requests `8,192` SHAKE256 bytes and the
+selected 393-index query vector requests `402,432` bytes. CMS19's fixed-output
+random-oracle model is not made applicable merely by binding that length into
+the input or by using a sponge with 512-bit capacity. The 512-bit transformed-
+soundness arithmetic is conditional until an exact seed-to-sampler or ideal-
+XOF mapping is proved. Likewise, enumerating 103 physical proofs and 159
+logical instances does not prove that their separate transcripts form one
+concatenated interactive oracle proof; use per-proof reductions and an explicit
+union bound unless that global composition theorem is supplied. The
+public-key-share schema `0x1212` now derives through an isolated production-
+geometry owner, but that structural result does not discharge the variable-
+output transcript model or proof-composition obligation.
+
+The VSS work ledger behind `SEC-004` currently owns two materialization passes:
+72,192 lane DFTs, `359,569,293,312` butterflies, and `37,849,399,296` value
+deliveries. Each salted 1,128-value phase leaf performs 68 Keccak-f
+permutations, for `2,281,701,376` across both `2^24`-leaf passes before KMAC
+salt derivation and Merkle-parent hashing. These counts require primitive-level
+native and release-WebAssembly benchmarks; scaling an old elapsed time only by
+the butterfly reduction is not feasibility evidence.
+
 ## Required security boundary
 
 - Use synthetic data only.

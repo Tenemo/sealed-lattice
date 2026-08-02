@@ -80,12 +80,18 @@ Works today:
   secret-bearing initial call absorbs a distinct transported 128-byte private
   salt; canonical encoding and decoding reject a reused salt across opening
   batches. The
-  census derives and binds the 512-bit output width for transcript, fixed,
-  ordinary-leaf, streamed-leaf, and parent calls. The construction and
+  census derives and binds the 512-bit output width for fixed transcript
+  hashes, ordinary-leaf, streamed-leaf, and parent calls. Logical challenge XOF
+  length is accounted separately. The construction and
   hash-profile identities also bind the 512-bit streamed state and three
-  canonical frame tags. The production transcript uses one plan-bound,
-  fixed-width SHAKE256 XOF invocation for each of its `4,272` logical
-  challenges and consumes the complete candidate-slot budget. Its exact
+  canonical frame tags. The production transcript uses one plan-bound
+  SHAKE256 XOF invocation for each of its `4,272` logical challenges and
+  consumes the complete candidate-slot budget. These invocations have
+  plan-fixed but variable output lengths: a 128-draw extension challenge emits
+  `8,192` bytes, while a 393-index, 128-draw query vector emits `402,432`
+  bytes. Treating either invocation as one fixed 512-bit random-oracle answer
+  for the selected QROM transform remains an open theorem-mapping obligation.
+  Its exact
   `14,673`-query census contains `6,306` original-BCS rounds. The executable
   whole-state evaluator and collision-free accepting-database extractor bind
   every plan-derived verifier and response address, recover every exact round
@@ -103,8 +109,9 @@ Works today:
   a different statement or transcript and is not charged as a collision.
   Hostile width, domain, slot, address, response-owner, root-authority,
   shared-query, leaf-call, frontier, and message-shape mutations refuse. This
-  is focused same-secret soundness evidence; nonlinear privacy, suite-wide
-  reduction, and ceremony-level reduction evidence remain open.
+  is focused same-secret structural soundness evidence; the variable-output
+  XOF mapping, nonlinear privacy, suite-wide reduction, and ceremony-level
+  reduction evidence remain open.
 - Secret-bearing phase-row padding now uses three KMAC-derived 512-bit seeds.
   The selected same-secret certificate inventories 62 framed SHAKE streams,
   130,023,424 accepted field outputs, seed collision, bounded rejection
@@ -159,7 +166,8 @@ Works today:
   generator hybrids. It refuses deficient ranks, omitted coordinates, changed
   authorities or query schedules, challenge-dependent or publicly recomputable
   masks, and zero-knowledge claims outside its scope. This establishes the
-  selected construction's affine masking composition. The separate
+  selected construction's affine masking correspondence under its uniform-
+  source idealization. The separate
   soundness-only fixed-root commitment certificate does not turn this affine
   result into nonlinear privacy, emitted-proof instantiation, complete
   Fiat-Shamir soundness, or ceremony composition.
@@ -175,7 +183,7 @@ Works today:
   ledgers. This is a static parser-to-verifier correspondence. It does not
   establish acceptance of an emitted proof or discharge nonlinear privacy and
   ceremony-level reductions.
-- Checked construction-geometry certificates have derived for all 31
+- Checked construction-geometry certificates derived for all 31
   production identities: 27 width-64, log-inverse-rate-two
   (inverse-rate-four) identities, including evaluator top counts 1 through 20,
   and four width-8, log-inverse-rate-five (inverse-rate-32) identities. The
@@ -189,8 +197,12 @@ Works today:
   query-event presence, row-code rate, agreement ceilings, product-challenge
   degrees, statement-family multiplicity, and classical and
   quantum-random-oracle loss from the selected plan. All 27 width-64 and all
-  four width-8 production identities now pass this stronger constructor and
-  full-false terminal rejection. Bound query accounting follows the deployed
+  four width-8 production identities passed that constructor and full-false
+  terminal rejection at the reviewed checkpoint. The public-key-share schema
+  `0x1212` now also has an isolated certificate owner: it recompiles the exact
+  production relation, validates verifier and bound-root authorities, derives
+  opening and sampler geometry, and closes its family failure rows without
+  evaluating neighboring schemas. Bound query accounting follows the deployed
   reduction polynomials rather than counting each underlying tree as a
   separate logical word. In the same-secret plan, eight prior-proof roots form
   one prior-certified block with agreement ceiling `9,217`, while three direct
@@ -244,6 +256,15 @@ Works today:
   exact old root and compact frontier. One authenticated pre-base checkpoint remains
   available for current decoder-and-verifier resume validation, but the focused
   guarded VSS prerequisite and any complete proof run have not been resumed.
+  The current liveness plan materializes this geometry twice. The two passes
+  therefore require `72,192` lane DFTs, `359,569,293,312` butterflies, and
+  `37,849,399,296` value deliveries, or about 282 GiB of eight-byte value
+  traffic before allocator and replay effects. Each salted 1,128-value phase
+  leaf performs exactly 68 Keccak-f permutations, for `1,140,850,688`
+  permutations per `2^24`-leaf pass and `2,281,701,376` across both passes,
+  before coordinate-salt KMAC derivations and Merkle-parent hashing. No elapsed-
+  time projection derived only from the butterfly reduction is runtime
+  evidence.
 
 Not yet:
 
@@ -256,19 +277,25 @@ Not yet:
   six-source affine masking composition, and all production geometry
   certificates now derive. The selected same-secret path now also derives the
   live `8,192`-coordinate, `5,055`-agreement, `393`-query
-  event under one atomic fixed-width verifier message, an executable
+  event under one atomic plan-bounded verifier message, an executable
   predecessor-state evaluator, and an exact next-message database extractor.
   The reusable atomic predecessor and database-extraction layer is now enforced
-  by the production-geometry constructor. Exact family failure ledgers,
-  plan-derived polynomial and point extraction, and full-false terminal
-  rejection now derive for every production geometry. The VSS geometry
+  by the production-geometry constructor. At the pushed checkpoint, exact
+  family failure ledgers, plan-derived polynomial and point extraction, and
+  full-false terminal rejection derived for every production geometry. The VSS geometry
   additionally derives its heterogeneous application-modulus
-  product-challenge ledger. All 27 width-64 and four width-8 identities pass
-  the complete constructor. The exact same-secret codec now has a complete
+  product-challenge ledger. All 27 width-64 and four width-8 identities passed
+  the complete constructor at the reviewed checkpoint, and the focused
+  `0x1212` production certificate now passes independently. The exact
+  same-secret codec now has a complete
   static section-to-decoder-to-verifier correspondence, while its instantiation
   by one emitted and freshly transported proof, nonlinear privacy and
   composition across commitments, and ceremony-level failure composition
-  remain open.
+  remain open. The current certificate enumerates 103 physical proofs and 159
+  logical instances, but it does not yet prove that their separately domain-
+  separated transcripts form one CMS-eligible concatenated IOP. A conservative
+  per-proof transform and explicit union bound remains the default closure path
+  unless that global reduction is supplied.
 - The static liveness model has not yet been confirmed by a completed native
   proof or release-WebAssembly browser measurement. Complete participant
   transport accounting is also open. Production-derived sizes for 73 of the
@@ -280,11 +307,22 @@ Not yet:
   release WebAssembly proof has been generated and freshly verified across the
   desktop browsers. Recent guarded native attempts ended before proof emission,
   so their observed memory is diagnostic rather than completion evidence.
-- The routine workspace graph currently passes build, type checking, lint,
-  unused-code analysis, package smoke, Node tests, and all 952 ordinary Rust
-  inventory entries. Long theorem, heavy-kernel, full-width, and manual browser
-  proof lanes remain separately guarded and are not implied by that routine
-  result.
+- The routine workspace graph passes after the focused repairs. Its 725.5-second
+  run covered the workspace build, type checking, package smoke, lint, unused-
+  code analysis, Node tests, Rust formatting and Clippy, process-memory-guard
+  self-tests, and all 975 ordinary Rust inventory entries. The stale
+  construction-evidence source authority, identity-version 11 versus production
+  version 12, copied scratch-read total, and recovery-frame width 90 versus
+  derived width 98 regressions also pass their focused owners. The `0x1212`
+  production certificate passes its isolated owner. The pushed
+  measured-heavy job reached its 110-minute job timeout after one of six tests;
+  the second active test was the aggregate-wide same-secret round trip, last
+  observed while constructing VSS material. Its artifact has no terminal
+  summary, peaked at 1,735,847,936 bytes of process-tree RSS under a
+  10,737,418,240-byte guard, and records no memory-limit violation. It is an
+  interrupted scheduling or termination diagnostic, not an out-of-memory
+  result. Long theorem, heavy-kernel, full-width, and manual browser proof lanes
+  remain separately guarded.
 - No exact `n = 10` suite is frozen, no complete accepted vote runs end to end,
   and ballot, evaluator, and target-release operations are not public APIs.
 - No physical-phone profile is qualified. Desktop-browser, Node.js, native, and

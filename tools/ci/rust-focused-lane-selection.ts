@@ -47,6 +47,7 @@ export const theoremEvidenceRustTests = [
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::production_aggregate_wide_views_bind_every_affine_and_nonlinear_catalog',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::production_row_pad_hybrid_refuses_256_bit_secret_prefixes',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::production_private_leaf_salt_prf_binds_every_clean_and_replayed_derivation',
+    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::public_key_share_schema_0x1212_derives_from_its_production_geometry',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::width_64_same_secret_through_rkg_round_one_aggregate_have_complete_geometry_certificates',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::width_64_relinearization_round_two_and_galois_share_have_complete_geometry_certificates',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::evaluator_width_64_top_count_one_has_a_complete_geometry_certificate',
