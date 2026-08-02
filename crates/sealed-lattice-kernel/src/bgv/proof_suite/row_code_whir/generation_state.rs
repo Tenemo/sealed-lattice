@@ -7530,7 +7530,7 @@ const fn row_code_whir_phase_index(phase: RowCodeWhirPhase) -> usize {
     }
 }
 
-const fn private_column_leaf_salt_role(phase: RowCodeWhirPhase) -> &'static [u8] {
+pub(super) const fn private_column_leaf_salt_role(phase: RowCodeWhirPhase) -> &'static [u8] {
     match phase {
         RowCodeWhirPhase::Base => b"relation-phase/base",
         RowCodeWhirPhase::Auxiliary => b"relation-phase/auxiliary",

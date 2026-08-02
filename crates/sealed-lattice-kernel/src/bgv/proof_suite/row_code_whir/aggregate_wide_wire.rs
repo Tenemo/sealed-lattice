@@ -4,15 +4,13 @@
 //! carries its opened rows followed by one coordinate-derived minimal Merkle
 //! frontier; individual paths and coordinates are never serialized.
 
+#[cfg(test)]
+use core::ops::Range;
 use p3_field::{BasedVectorSpace, PrimeCharacteristicRing, PrimeField64};
 use p3_goldilocks::Goldilocks;
 use p3_sumcheck::{OpeningBatch, zk::ZkSumcheckData};
 use p3_symmetric::MerkleCap;
 use p3_whir::{BaseCaseZkProof, BlindedMask, MaskOpeningPair, QueryOpening};
-use std::collections::BTreeSet;
-
-#[cfg(test)]
-use core::ops::Range;
 
 use super::aggregate_wide_hiding::{AggregateWideOpeningProof, AggregateWidePadLayout};
 use super::aggregate_wide_pcs::AggregateWideCommitment;
@@ -20,6 +18,7 @@ use super::coordinate_derived_hiding_mmcs::{
     CoordinateDerivedLeafSaltProof, TransportedPrivateLeafSalt,
 };
 use super::hiding_whir::SelectedHidingWhirConfig;
+use super::private_leaf_salt::AcceptedPrivateLeafSaltSet;
 #[cfg(test)]
 use super::private_leaf_salt::PRIVATE_LEAF_SALT_BYTE_LENGTH;
 use super::{
@@ -254,6 +253,7 @@ impl AggregateWideWireSinkEncoder {
         proof: &AggregateWideOpeningProof,
         expected_opening_widths: &[usize],
         table_width: usize,
+        prior_private_leaf_salts: AcceptedPrivateLeafSaltSet,
     ) -> Result<Self, String> {
         Ok(Self {
             canonical: encode_aggregate_wide_opening(
@@ -261,6 +261,7 @@ impl AggregateWideWireSinkEncoder {
                 proof,
                 expected_opening_widths,
                 table_width,
+                prior_private_leaf_salts,
             )?,
             next_byte_offset: 0,
         })
@@ -302,11 +303,12 @@ pub(super) fn encode_aggregate_wide_opening(
     proof: &AggregateWideOpeningProof,
     expected_opening_widths: &[usize],
     table_width: usize,
+    prior_private_leaf_salts: AcceptedPrivateLeafSaltSet,
 ) -> Result<Vec<u8>, String> {
     validate_top_level_shape(configuration, proof, expected_opening_widths, table_width)?;
     let pad_layout = AggregateWidePadLayout::derive(configuration)?;
     let query_schedule = proof.query_index_schedule();
-    let mut writer = CanonicalWriter::new();
+    let mut writer = CanonicalWriter::with_prior_private_leaf_salts(prior_private_leaf_salts);
     writer.write_bytes(WIRE_MAGIC)?;
     writer.write_u32(checked_u32(configuration.num_variables, "variable count")?)?;
     writer.write_u32(checked_u32(expected_opening_widths.len(), "opening count")?)?;
@@ -382,6 +384,22 @@ pub(super) fn decode_compact_aggregate_wide_opening(
     expected_opening_widths: &[usize],
     table_width: usize,
 ) -> Result<CompactAggregateWideOpeningProof, String> {
+    decode_compact_aggregate_wide_opening_with_prior_private_leaf_salts(
+        configuration,
+        canonical,
+        expected_opening_widths,
+        table_width,
+        AcceptedPrivateLeafSaltSet::default(),
+    )
+}
+
+pub(super) fn decode_compact_aggregate_wide_opening_with_prior_private_leaf_salts(
+    configuration: &SelectedHidingWhirConfig,
+    canonical: &[u8],
+    expected_opening_widths: &[usize],
+    table_width: usize,
+    prior_private_leaf_salts: AcceptedPrivateLeafSaltSet,
+) -> Result<CompactAggregateWideOpeningProof, String> {
     if canonical.is_empty() || canonical.len() > MAXIMUM_COMMON_PROOF_BYTE_LENGTH {
         return Err("aggregate-wide canonical byte length is outside the proof bound".to_owned());
     }
@@ -394,7 +412,8 @@ pub(super) fn decode_compact_aggregate_wide_opening(
         return Err("aggregate-wide verifier opening geometry is invalid".to_owned());
     }
     let pad_layout = AggregateWidePadLayout::derive(configuration)?;
-    let mut reader = CanonicalReader::new(canonical);
+    let mut reader =
+        CanonicalReader::with_prior_private_leaf_salts(canonical, prior_private_leaf_salts);
     if reader.read_array::<8>()? != *WIRE_MAGIC {
         return Err("aggregate-wide wire magic is not canonical".to_owned());
     }
@@ -1226,14 +1245,14 @@ fn checked_u32(value: usize, label: &str) -> Result<u32, String> {
 
 struct CanonicalWriter {
     bytes: Vec<u8>,
-    private_leaf_salts: BTreeSet<TransportedPrivateLeafSalt>,
+    private_leaf_salts: AcceptedPrivateLeafSaltSet,
 }
 
 impl CanonicalWriter {
-    fn new() -> Self {
+    fn with_prior_private_leaf_salts(private_leaf_salts: AcceptedPrivateLeafSaltSet) -> Self {
         Self {
             bytes: Vec::new(),
-            private_leaf_salts: BTreeSet::new(),
+            private_leaf_salts,
         }
     }
 
@@ -1275,9 +1294,7 @@ impl CanonicalWriter {
     }
 
     fn write_private_leaf_salt(&mut self, salt: &TransportedPrivateLeafSalt) -> Result<(), String> {
-        if !self.private_leaf_salts.insert(salt.clone()) {
-            return Err("aggregate-wide proof reuses a private leaf salt".to_owned());
-        }
+        self.private_leaf_salts.insert(salt.bytes())?;
         self.write_bytes(&salt.bytes())
     }
 
@@ -1304,15 +1321,18 @@ impl CanonicalWriter {
 struct CanonicalReader<'a> {
     bytes: &'a [u8],
     offset: usize,
-    private_leaf_salts: BTreeSet<TransportedPrivateLeafSalt>,
+    private_leaf_salts: AcceptedPrivateLeafSaltSet,
 }
 
 impl<'a> CanonicalReader<'a> {
-    fn new(bytes: &'a [u8]) -> Self {
+    fn with_prior_private_leaf_salts(
+        bytes: &'a [u8],
+        private_leaf_salts: AcceptedPrivateLeafSaltSet,
+    ) -> Self {
         Self {
             bytes,
             offset: 0,
-            private_leaf_salts: BTreeSet::new(),
+            private_leaf_salts,
         }
     }
 
@@ -1370,9 +1390,7 @@ impl<'a> CanonicalReader<'a> {
 
     fn read_private_leaf_salt(&mut self) -> Result<TransportedPrivateLeafSalt, String> {
         let salt = TransportedPrivateLeafSalt::from_bytes(self.read_array()?);
-        if !self.private_leaf_salts.insert(salt.clone()) {
-            return Err("aggregate-wide proof reuses a private leaf salt".to_owned());
-        }
+        self.private_leaf_salts.insert(salt.bytes())?;
         Ok(salt)
     }
 
@@ -1411,12 +1429,15 @@ mod tests {
 
     #[test]
     fn disabled_proof_of_work_has_no_wire_field() {
-        let mut writer = CanonicalWriter::new();
+        let mut writer =
+            CanonicalWriter::with_prior_private_leaf_salts(AcceptedPrivateLeafSaltSet::default());
         encode_optional_witness(&mut writer, 0, ChallengeField::ZERO, "test witness")
             .expect("encode disabled witness");
         assert!(writer.finish().is_err(), "disabled witness writes no bytes");
         let error = encode_optional_witness(
-            &mut CanonicalWriter::new(),
+            &mut CanonicalWriter::with_prior_private_leaf_salts(
+                AcceptedPrivateLeafSaltSet::default(),
+            ),
             0,
             ChallengeField::ONE,
             "test witness",
@@ -1429,7 +1450,8 @@ mod tests {
     fn canonical_wire_refuses_reused_private_leaf_salts_across_batches() {
         let first = TransportedPrivateLeafSalt::from_bytes([0x31; PRIVATE_LEAF_SALT_BYTE_LENGTH]);
         let second = TransportedPrivateLeafSalt::from_bytes([0x92; PRIVATE_LEAF_SALT_BYTE_LENGTH]);
-        let mut writer = CanonicalWriter::new();
+        let mut writer =
+            CanonicalWriter::with_prior_private_leaf_salts(AcceptedPrivateLeafSaltSet::default());
         writer
             .write_private_leaf_salt(&first)
             .expect("the first salt is accepted");
@@ -1442,9 +1464,38 @@ mod tests {
         canonical.extend_from_slice(&first.bytes());
         canonical.extend_from_slice(&second.bytes());
         canonical.extend_from_slice(&first.bytes());
-        let mut reader = CanonicalReader::new(&canonical);
+        let mut reader = CanonicalReader::with_prior_private_leaf_salts(
+            &canonical,
+            AcceptedPrivateLeafSaltSet::default(),
+        );
         assert_eq!(reader.read_private_leaf_salt(), Ok(first.clone()));
         assert_eq!(reader.read_private_leaf_salt(), Ok(second));
         assert!(reader.read_private_leaf_salt().is_err());
+    }
+
+    #[test]
+    fn canonical_wire_refuses_a_salt_already_accepted_by_an_earlier_proof_section() {
+        let prior = TransportedPrivateLeafSalt::from_bytes([0x47; PRIVATE_LEAF_SALT_BYTE_LENGTH]);
+        let fresh = TransportedPrivateLeafSalt::from_bytes([0xa6; PRIVATE_LEAF_SALT_BYTE_LENGTH]);
+        let mut prior_salts = AcceptedPrivateLeafSaltSet::default();
+        prior_salts
+            .insert(prior.bytes())
+            .expect("the earlier section accepts its first salt");
+
+        let mut writer = CanonicalWriter::with_prior_private_leaf_salts(prior_salts.clone());
+        assert!(writer.write_private_leaf_salt(&prior).is_err());
+        writer
+            .write_private_leaf_salt(&fresh)
+            .expect("a salt distinct from every earlier section is accepted");
+
+        let prior_bytes = prior.bytes();
+        let mut reader =
+            CanonicalReader::with_prior_private_leaf_salts(&prior_bytes, prior_salts.clone());
+        assert!(reader.read_private_leaf_salt().is_err());
+
+        let fresh_bytes = fresh.bytes();
+        let mut reader = CanonicalReader::with_prior_private_leaf_salts(&fresh_bytes, prior_salts);
+        assert_eq!(reader.read_private_leaf_salt(), Ok(fresh));
+        reader.finish().expect("the fresh salt consumes the wire");
     }
 }

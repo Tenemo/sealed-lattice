@@ -28,7 +28,9 @@ use super::super::construction_plan::{
     RowCodeWhirProofSectionRole, RowCodeWhirSoundnessAssumption, RowCodeWhirTracePhasePlan,
 };
 use super::super::opening_schedule::phase_index;
-use super::super::private_leaf_salt::{PRIVATE_LEAF_SALT_BYTE_LENGTH, PrivateLeafSalt};
+use super::super::private_leaf_salt::{
+    AcceptedPrivateLeafSaltSet, PRIVATE_LEAF_SALT_BYTE_LENGTH, PrivateLeafSalt,
+};
 use super::super::row_encoding::RowEncodingGeometry;
 #[cfg(test)]
 use super::super::verifier_oracle_accounting::derive_deployed_verifier_oracle_accounting;
@@ -3505,14 +3507,16 @@ impl ExactSameSecretProofSinkEncoder {
             construction_plan.selected_parameters(),
         )
         .map_err(|error| format!("derive aggregate-wide configuration: {error:?}"))?;
+        let (canonical_prefix, prior_private_leaf_salts) =
+            encode_exact_same_secret_prefix(construction_plan, &proof)?;
         let aggregate_wide_encoder =
             super::super::aggregate_wide_wire::AggregateWideWireSinkEncoder::new(
                 &configuration,
                 &proof.aggregate_wide_opening_proof,
                 &expected_opening_widths(construction_plan),
                 construction_plan.aggregate_table_width(),
+                prior_private_leaf_salts,
             )?;
-        let canonical_prefix = encode_exact_same_secret_prefix(construction_plan, &proof)?;
         let canonical_byte_length = canonical_prefix
             .len()
             .checked_add(aggregate_wide_encoder.canonical_byte_length())
@@ -3577,8 +3581,9 @@ impl ExactSameSecretProofSinkEncoder {
 fn encode_exact_same_secret_prefix(
     construction_plan: &RowCodeWhirConstructionPlan,
     proof: &ExactSameSecretProof,
-) -> Result<Vec<u8>, String> {
+) -> Result<(Vec<u8>, AcceptedPrivateLeafSaltSet), String> {
     let mut canonical = Vec::new();
+    let mut private_leaf_salts = AcceptedPrivateLeafSaltSet::default();
     canonical
         .try_reserve_exact(checked_exact_proof_prefix_byte_length(
             construction_plan,
@@ -3633,6 +3638,7 @@ fn encode_exact_same_secret_prefix(
                 return Err("scheduled proof phase has the wrong leaf-salt shape".to_owned());
             }
             if let Some(salt) = column.persistent_salt {
+                private_leaf_salts.insert(salt)?;
                 canonical.extend_from_slice(&salt);
             }
             for value in &column.values {
@@ -3665,7 +3671,7 @@ fn encode_exact_same_secret_prefix(
             canonical.extend_from_slice(node);
         }
     }
-    Ok(canonical)
+    Ok((canonical, private_leaf_salts))
 }
 
 fn checked_exact_proof_prefix_byte_length(
@@ -4339,6 +4345,7 @@ struct ExactSameSecretIncrementalDecoder {
     offset: usize,
     phase: ExactSameSecretDecoderPhase,
     maximum_resident_section_byte_length: usize,
+    private_leaf_salts: AcceptedPrivateLeafSaltSet,
     semantic_verifier: Option<ExactSameSecretIncrementalSemanticVerifier>,
     final_semantic_verification: Option<ExactSameSecretFinalProofVerification>,
     complete: bool,
@@ -4391,6 +4398,7 @@ impl ExactSameSecretIncrementalDecoder {
             offset: 0,
             phase: ExactSameSecretDecoderPhase::TranscriptMaterial,
             maximum_resident_section_byte_length: 0,
+            private_leaf_salts: AcceptedPrivateLeafSaltSet::default(),
             semantic_verifier: None,
             final_semantic_verification: None,
             complete: false,
@@ -4608,7 +4616,9 @@ impl ExactSameSecretIncrementalDecoder {
         let persistent_salt = if self.shape.phase_leaf_salt_byte_length == 0 {
             None
         } else if self.shape.phase_leaf_salt_byte_length == PRIVATE_LEAF_SALT_BYTE_LENGTH {
-            Some(reader.read_array::<PRIVATE_LEAF_SALT_BYTE_LENGTH>()?)
+            let salt = reader.read_array::<PRIVATE_LEAF_SALT_BYTE_LENGTH>()?;
+            self.private_leaf_salts.insert(salt)?;
+            Some(salt)
         } else {
             return Err("exact phase leaf-salt length is invalid".to_owned());
         };
@@ -4867,12 +4877,12 @@ impl ExactSameSecretIncrementalDecoder {
             self.construction_plan.selected_parameters(),
         )
         .map_err(|error| format!("derive aggregate-wide configuration: {error:?}"))?;
-        let compact_proof =
-            super::super::aggregate_wide_wire::decode_compact_aggregate_wide_opening(
+        let compact_proof = super::super::aggregate_wide_wire::decode_compact_aggregate_wide_opening_with_prior_private_leaf_salts(
                 &configuration,
                 &canonical,
                 &self.opening_widths,
                 self.shape.aggregate_table_width,
+                core::mem::take(&mut self.private_leaf_salts),
             )?;
         let semantic_verifier = self
             .semantic_verifier

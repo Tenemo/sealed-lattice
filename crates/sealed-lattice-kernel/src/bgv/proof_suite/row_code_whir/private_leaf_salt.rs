@@ -1,13 +1,39 @@
 //! Attempt-private salts for secret-bearing Merkle leaves.
 
 use core::mem::size_of;
+use std::collections::BTreeSet;
 
 use tiny_keccak::{Hasher, Kmac};
 
 pub(super) const PRIVATE_LEAF_SALT_BYTE_LENGTH: usize = 128;
 pub(super) type PrivateLeafSalt = [u8; PRIVATE_LEAF_SALT_BYTE_LENGTH];
 
-const PRIVATE_LEAF_SALT_CUSTOMIZATION: &[u8] = b"sealed-lattice/row-code-whir/private-leaf-salt/v1";
+pub(super) const PRIVATE_LEAF_SALT_CUSTOMIZATION: &[u8] =
+    b"sealed-lattice/row-code-whir/private-leaf-salt/v1";
+
+/// One proof-wide set of every accepted 1,024-bit leaf salt.
+///
+/// The exact proof decoder carries this set from the phase openings into the
+/// aggregate opening. A repeated byte string is therefore non-canonical even
+/// when its two occurrences belong to different commitment classes.
+#[derive(Clone, Debug, Default)]
+pub(super) struct AcceptedPrivateLeafSaltSet {
+    salts: BTreeSet<PrivateLeafSalt>,
+}
+
+impl AcceptedPrivateLeafSaltSet {
+    pub(super) fn insert(&mut self, salt: PrivateLeafSalt) -> Result<(), String> {
+        if !self.salts.insert(salt) {
+            return Err("common proof reuses a private leaf salt".to_owned());
+        }
+        Ok(())
+    }
+
+    #[cfg(all(test, feature = "theorem-evidence"))]
+    pub(super) fn len(&self) -> usize {
+        self.salts.len()
+    }
+}
 
 /// Complete design-owned stack workspace for one coordinate derivation.
 ///
@@ -34,8 +60,32 @@ pub(super) fn derive_private_leaf_salt(
     matrix_ordinal: usize,
     leaf_index: usize,
 ) -> Result<PrivateLeafSalt, String> {
-    if private_seed.len() < 32
-        || commitment_role.is_empty()
+    if private_seed.len() < 32 {
+        return Err("private leaf-salt geometry is invalid".to_owned());
+    }
+    let mut kmac = Kmac::v256(private_seed, PRIVATE_LEAF_SALT_CUSTOMIZATION);
+    visit_private_leaf_salt_frames(
+        commitment_role,
+        leaf_count,
+        logical_leaf_width,
+        matrix_ordinal,
+        leaf_index,
+        |frame| update_framed(&mut kmac, frame),
+    )?;
+    let mut salt = [0_u8; PRIVATE_LEAF_SALT_BYTE_LENGTH];
+    kmac.finalize(&mut salt);
+    Ok(salt)
+}
+
+fn visit_private_leaf_salt_frames(
+    commitment_role: &[u8],
+    leaf_count: usize,
+    logical_leaf_width: usize,
+    matrix_ordinal: usize,
+    leaf_index: usize,
+    mut visit: impl FnMut(&[u8]) -> Result<(), String>,
+) -> Result<(), String> {
+    if commitment_role.is_empty()
         || leaf_count == 0
         || !leaf_count.is_power_of_two()
         || logical_leaf_width == 0
@@ -43,27 +93,37 @@ pub(super) fn derive_private_leaf_salt(
     {
         return Err("private leaf-salt geometry is invalid".to_owned());
     }
-    let mut kmac = Kmac::v256(private_seed, PRIVATE_LEAF_SALT_CUSTOMIZATION);
-    update_framed(&mut kmac, commitment_role)?;
-    update_framed(
-        &mut kmac,
-        &checked_u64(leaf_count, "leaf count")?.to_le_bytes(),
+    visit(commitment_role)?;
+    visit(&checked_u64(leaf_count, "leaf count")?.to_le_bytes())?;
+    visit(&checked_u64(logical_leaf_width, "logical leaf width")?.to_le_bytes())?;
+    visit(&checked_u64(matrix_ordinal, "matrix ordinal")?.to_le_bytes())?;
+    visit(&checked_u64(leaf_index, "leaf index")?.to_le_bytes())
+}
+
+#[cfg(all(test, feature = "theorem-evidence"))]
+pub(super) fn private_leaf_salt_framed_input_bytes(
+    commitment_role: &[u8],
+    leaf_count: usize,
+    logical_leaf_width: usize,
+    matrix_ordinal: usize,
+    leaf_index: usize,
+) -> Result<Vec<u8>, String> {
+    let mut encoded = Vec::new();
+    visit_private_leaf_salt_frames(
+        commitment_role,
+        leaf_count,
+        logical_leaf_width,
+        matrix_ordinal,
+        leaf_index,
+        |frame| {
+            encoded.extend_from_slice(
+                &checked_u64(frame.len(), "private leaf-salt frame length")?.to_le_bytes(),
+            );
+            encoded.extend_from_slice(frame);
+            Ok(())
+        },
     )?;
-    update_framed(
-        &mut kmac,
-        &checked_u64(logical_leaf_width, "logical leaf width")?.to_le_bytes(),
-    )?;
-    update_framed(
-        &mut kmac,
-        &checked_u64(matrix_ordinal, "matrix ordinal")?.to_le_bytes(),
-    )?;
-    update_framed(
-        &mut kmac,
-        &checked_u64(leaf_index, "leaf index")?.to_le_bytes(),
-    )?;
-    let mut salt = [0_u8; PRIVATE_LEAF_SALT_BYTE_LENGTH];
-    kmac.finalize(&mut salt);
-    Ok(salt)
+    Ok(encoded)
 }
 
 fn update_framed(kmac: &mut Kmac, bytes: &[u8]) -> Result<(), String> {

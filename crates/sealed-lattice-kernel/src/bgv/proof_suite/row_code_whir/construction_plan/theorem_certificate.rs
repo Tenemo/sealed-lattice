@@ -36,8 +36,16 @@ use crate::bgv::proof_suite::row_code_whir::{
         AggregateWideJointAffineViewRow, AggregateWideMaskingCertificate,
         AggregateWideNonlinearViewBoundary, checked_fold_limb_affine_map,
     },
-    coordinate_derived_hiding_mmcs::AGGREGATE_PRIVATE_LEAF_SALT_KEY_EXTENSION_ELEMENT_COUNT,
-    private_leaf_salt::PRIVATE_LEAF_SALT_BYTE_LENGTH,
+    commitment_liveness::derive_aggregate_commitment_liveness,
+    coordinate_derived_hiding_mmcs::{
+        AGGREGATE_PRIVATE_LEAF_SALT_KEY_EXTENSION_ELEMENT_COUNT, AggregateLeafSaltRole,
+        MATERIALIZED_COMMITMENT_ROLES,
+    },
+    generation_state::private_column_leaf_salt_role,
+    private_leaf_salt::{
+        AcceptedPrivateLeafSaltSet, PRIVATE_LEAF_SALT_BYTE_LENGTH, PRIVATE_LEAF_SALT_CUSTOMIZATION,
+        private_leaf_salt_framed_input_bytes,
+    },
     recomputable_oracle::{
         RecomputableOracleAffineMapDescriptor, checked_recomputable_oracle_affine_map,
     },
@@ -118,6 +126,7 @@ pub(in crate::bgv::proof_suite) enum WhirTheoremCertificateError {
     IncompleteOracleEquationMapping,
     IncompleteMaskingCorrespondence,
     IncompleteRowPadGeneratorHybrid,
+    IncompletePrivateLeafSaltPrf,
     IncompleteRelationSemanticCorrespondence,
     IncompletePolynomialExtractorCorrespondence,
     IncompleteFailureMagnitudeCorrespondence,
@@ -137,6 +146,7 @@ pub(in crate::bgv::proof_suite) enum ProductionGeometryCertificateStage {
     RelationSemantics,
     MaskingCorrespondence,
     RowPadGeneratorHybrid,
+    PrivateLeafSaltPrf,
     WhirGeometry,
     PrefixStacking,
     OracleEquationCatalog,
@@ -165,6 +175,7 @@ pub(in crate::bgv::proof_suite) enum ProductionGeometryCertificateFailure {
     IncompleteOracleEquationMapping,
     IncompleteMaskingCorrespondence,
     IncompleteRowPadGeneratorHybrid,
+    IncompletePrivateLeafSaltPrf,
     IncompleteRelationSemanticCorrespondence,
     IncompletePolynomialExtractorCorrespondence,
     IncompleteFailureMagnitudeCorrespondence,
@@ -202,6 +213,9 @@ impl From<WhirTheoremCertificateError> for ProductionGeometryCertificateFailure 
             }
             WhirTheoremCertificateError::IncompleteRowPadGeneratorHybrid => {
                 Self::IncompleteRowPadGeneratorHybrid
+            }
+            WhirTheoremCertificateError::IncompletePrivateLeafSaltPrf => {
+                Self::IncompletePrivateLeafSaltPrf
             }
             WhirTheoremCertificateError::IncompleteRelationSemanticCorrespondence => {
                 Self::IncompleteRelationSemanticCorrespondence
@@ -929,6 +943,811 @@ fn row_pad_production_frames_are_injective(
             .iter()
             .map(|phase| phase.row_count)
             .sum::<usize>())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum PrivateLeafSaltKeySource {
+    RelationPhase(RowCodeWhirPhase),
+    AggregateWide,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum PrivateLeafSaltCommitmentRole {
+    RelationPhase(RowCodeWhirPhase),
+    InitialSource,
+    FoldedSource { epoch_ordinal: u32 },
+    CarriedPad,
+    FreshSource,
+    FreshPad,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PrivateLeafSaltKeyDistribution {
+    UniformBytes {
+        byte_length: usize,
+    },
+    UniformCanonicalFieldCoordinates {
+        byte_length: usize,
+        modulus: u64,
+        coordinate_count: usize,
+    },
+}
+
+impl PrivateLeafSaltKeyDistribution {
+    fn ideal_key_space_size(self) -> Result<BigUint, WhirTheoremCertificateError> {
+        match self {
+            Self::UniformBytes { byte_length } => {
+                let bit_length = byte_length
+                    .checked_mul(u8::BITS as usize)
+                    .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+                Ok(BigUint::one() << bit_length)
+            }
+            Self::UniformCanonicalFieldCoordinates {
+                byte_length,
+                modulus,
+                coordinate_count,
+            } => {
+                if byte_length
+                    != coordinate_count
+                        .checked_mul(size_of::<u64>())
+                        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?
+                    || modulus == 0
+                    || coordinate_count == 0
+                {
+                    return Err(WhirTheoremCertificateError::IncompletePrivateLeafSaltPrf);
+                }
+                Ok(BigUint::from(modulus).pow(
+                    u32::try_from(coordinate_count)
+                        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+                ))
+            }
+        }
+    }
+
+    fn conservative_key_bit_length(self) -> Result<u32, WhirTheoremCertificateError> {
+        let key_space_size = self.ideal_key_space_size()?;
+        u32::try_from(
+            key_space_size
+                .bits()
+                .checked_sub(1)
+                .ok_or(WhirTheoremCertificateError::IncompletePrivateLeafSaltPrf)?,
+        )
+        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PrivateLeafSaltGeneratorBridge {
+    PrivateRowPadSeedHybrid,
+    AggregateWidePrivateCoinHybrid,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PrivateLeafSaltKeyRow {
+    source: PrivateLeafSaltKeySource,
+    distribution: PrivateLeafSaltKeyDistribution,
+    ideal_key_space_size: BigUint,
+    conservative_key_bit_length: u32,
+    distinct_framed_input_count: u64,
+    clean_prover_derivation_call_count: u64,
+    generator_bridge: PrivateLeafSaltGeneratorBridge,
+    classical_prf_reduction: MaskGeneratorHybridLoss,
+    quantum_prf_reduction: MaskGeneratorHybridLoss,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PrivateLeafSaltCommitmentRow {
+    role: PrivateLeafSaltCommitmentRole,
+    key_source: PrivateLeafSaltKeySource,
+    framed_commitment_role: Vec<u8>,
+    leaf_count: usize,
+    logical_leaf_width: usize,
+    framed_matrix_ordinal: usize,
+    distinct_framed_input_count: u64,
+    root_generation_call_count: u64,
+    recomputation_call_count: u64,
+    opening_materialization_call_count: u64,
+    transported_salt_count: u64,
+}
+
+impl PrivateLeafSaltCommitmentRow {
+    fn clean_prover_derivation_call_count(&self) -> Result<u64, WhirTheoremCertificateError> {
+        self.root_generation_call_count
+            .checked_add(self.recomputation_call_count)
+            .and_then(|count| count.checked_add(self.opening_materialization_call_count))
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+    }
+
+    fn repeated_or_cached_call_count(&self) -> Result<u64, WhirTheoremCertificateError> {
+        self.clean_prover_derivation_call_count()?
+            .checked_sub(self.distinct_framed_input_count)
+            .ok_or(WhirTheoremCertificateError::IncompletePrivateLeafSaltPrf)
+    }
+}
+
+/// Construction-level deployment bridge for every attempt-private leaf salt.
+///
+/// The KMAC reductions remain explicit computational assumptions. The only
+/// numeric term introduced here is the exact pairwise union bound after those
+/// keyed functions are replaced by independent 1,024-bit random functions.
+/// It is a hiding bad event, not an algebraic or CMS soundness term.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PrivateLeafSaltPrfCertificate {
+    proof_privacy_mode: ProofPrivacyMode,
+    construction_plan_identity_hash: [u8; 64],
+    customization: Vec<u8>,
+    output_byte_length: usize,
+    output_bit_length: usize,
+    commitment_rows: Vec<PrivateLeafSaltCommitmentRow>,
+    key_rows: Vec<PrivateLeafSaltKeyRow>,
+    distinct_framed_input_count: u64,
+    clean_prover_derivation_call_count: u64,
+    repeated_or_cached_call_count: u64,
+    verifier_derivation_call_count: u64,
+    transported_salt_count: u64,
+    framed_input_partition_is_injective: bool,
+    repeated_derivations_preserve_key_and_frame: bool,
+    proof_wide_accepted_salt_uniqueness_enforced: bool,
+    family_application_multiplicity: u32,
+    ideal_function_pairwise_collision_union_bound: ExactBigFraction,
+    ceremony_pairwise_collision_union_bound: ExactBigFraction,
+}
+
+impl PrivateLeafSaltPrfCertificate {
+    fn derive(
+        plan: &RowCodeWhirConstructionPlan,
+        aggregate_wide_masking: &AggregateWideMaskingCertificate,
+        private_row_pad_generator_hybrid: &PrivateRowPadGeneratorHybridCertificate,
+    ) -> Result<Self, WhirTheoremCertificateError> {
+        let construction_plan_identity_hash = plan
+            .canonical_identity_hash()
+            .map_err(|_| WhirTheoremCertificateError::IncompletePrivateLeafSaltPrf)?;
+        let family_application_multiplicity =
+            crate::bgv::proof_suite::selected_profile::selected_proof_application_slot_ceilings()
+                .map_err(|_| WhirTheoremCertificateError::IncompletePrivateLeafSaltPrf)?
+                .family_ceiling(plan.application_statement_schema_identifier)
+                .ok_or(WhirTheoremCertificateError::IncompletePrivateLeafSaltPrf)?;
+        let secret_bearing = plan.proof_privacy_mode == ProofPrivacyMode::SecretBearing;
+        let mut commitment_rows = Vec::new();
+
+        if secret_bearing {
+            for phase in &plan.phase_order {
+                let leaf_count = plan
+                    .phase_encoded_column_count(*phase)
+                    .ok_or(WhirTheoremCertificateError::IncompletePrivateLeafSaltPrf)?;
+                let logical_leaf_width = plan
+                    .phase_row_count(*phase)
+                    .ok_or(WhirTheoremCertificateError::IncompletePrivateLeafSaltPrf)?;
+                commitment_rows.push(private_leaf_salt_commitment_row(
+                    PrivateLeafSaltCommitmentRole::RelationPhase(*phase),
+                    PrivateLeafSaltKeySource::RelationPhase(*phase),
+                    private_column_leaf_salt_role(*phase),
+                    leaf_count,
+                    logical_leaf_width,
+                    0,
+                    PrivateLeafSaltCallCounts {
+                        root_generation: leaf_count,
+                        recomputation: leaf_count,
+                        opening_materialization: plan.outer_query_count(),
+                        transported: plan.outer_query_count(),
+                    },
+                )?);
+            }
+
+            let aggregate_liveness = derive_aggregate_commitment_liveness(plan)
+                .map_err(|_| WhirTheoremCertificateError::IncompletePrivateLeafSaltPrf)?;
+            let source_epochs = plan
+                .whir
+                .rounds
+                .iter()
+                .map(|round| (round.encoded_oracle, round.query_epoch))
+                .chain(core::iter::once((
+                    plan.whir.final_round.encoded_oracle,
+                    plan.whir.final_round.query_epoch,
+                )))
+                .collect::<Vec<_>>();
+            if source_epochs.len() != aggregate_liveness.epochs().len() {
+                return Err(WhirTheoremCertificateError::IncompletePrivateLeafSaltPrf);
+            }
+            for (epoch_index, ((encoded_oracle, query_epoch), liveness_epoch)) in source_epochs
+                .iter()
+                .zip(aggregate_liveness.epochs())
+                .enumerate()
+            {
+                if encoded_oracle.leaf_count != liveness_epoch.leaf_count()
+                    || encoded_oracle.leaf_width != liveness_epoch.leaf_width()
+                    || query_epoch.query_count != liveness_epoch.query_count()
+                {
+                    return Err(WhirTheoremCertificateError::IncompletePrivateLeafSaltPrf);
+                }
+                let aggregate_role = if epoch_index == 0 {
+                    AggregateLeafSaltRole::InitialSource
+                } else {
+                    AggregateLeafSaltRole::FoldedSource {
+                        epoch_ordinal: epoch_index,
+                    }
+                };
+                let role = if epoch_index == 0 {
+                    PrivateLeafSaltCommitmentRole::InitialSource
+                } else {
+                    PrivateLeafSaltCommitmentRole::FoldedSource {
+                        epoch_ordinal: u32::try_from(epoch_index)
+                            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+                    }
+                };
+                commitment_rows.push(private_leaf_salt_commitment_row(
+                    role,
+                    PrivateLeafSaltKeySource::AggregateWide,
+                    aggregate_role.domain(),
+                    encoded_oracle.leaf_count,
+                    encoded_oracle.leaf_width,
+                    aggregate_role
+                        .derivation_ordinal()
+                        .checked_mul(2)
+                        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+                    PrivateLeafSaltCallCounts {
+                        root_generation: encoded_oracle.leaf_count,
+                        recomputation: encoded_oracle.leaf_count,
+                        opening_materialization: 0,
+                        transported: query_epoch.query_count,
+                    },
+                )?);
+            }
+            let source_derivation_call_count = commitment_rows
+                .iter()
+                .filter(|row| {
+                    matches!(
+                        row.role,
+                        PrivateLeafSaltCommitmentRole::InitialSource
+                            | PrivateLeafSaltCommitmentRole::FoldedSource { .. }
+                    )
+                })
+                .try_fold(0_u64, |count, row| {
+                    count
+                        .checked_add(row.clean_prover_derivation_call_count()?)
+                        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+                })?;
+            if source_derivation_call_count
+                != aggregate_liveness.private_leaf_salt_derivation_count()
+            {
+                return Err(WhirTheoremCertificateError::IncompletePrivateLeafSaltPrf);
+            }
+
+            for aggregate_role in MATERIALIZED_COMMITMENT_ROLES {
+                let (role, leaf_count, query_count) = match aggregate_role {
+                    AggregateLeafSaltRole::AggregateWidePad => (
+                        PrivateLeafSaltCommitmentRole::CarriedPad,
+                        aggregate_wide_masking.pad_domain_size(),
+                        aggregate_wide_masking.pad_randomness_length(),
+                    ),
+                    AggregateLeafSaltRole::FreshSource => (
+                        PrivateLeafSaltCommitmentRole::FreshSource,
+                        plan.whir.final_round.encoded_oracle.leaf_count,
+                        plan.whir.final_round.query_epoch.query_count,
+                    ),
+                    AggregateLeafSaltRole::FreshPad => (
+                        PrivateLeafSaltCommitmentRole::FreshPad,
+                        aggregate_wide_masking.pad_domain_size(),
+                        aggregate_wide_masking.pad_randomness_length(),
+                    ),
+                    AggregateLeafSaltRole::InitialSource
+                    | AggregateLeafSaltRole::FoldedSource { .. } => {
+                        return Err(WhirTheoremCertificateError::IncompletePrivateLeafSaltPrf);
+                    }
+                };
+                commitment_rows.push(private_leaf_salt_commitment_row(
+                    role,
+                    PrivateLeafSaltKeySource::AggregateWide,
+                    aggregate_role.domain(),
+                    leaf_count,
+                    1,
+                    aggregate_role
+                        .derivation_ordinal()
+                        .checked_mul(2)
+                        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+                    PrivateLeafSaltCallCounts {
+                        root_generation: leaf_count,
+                        recomputation: 0,
+                        opening_materialization: query_count,
+                        transported: query_count,
+                    },
+                )?);
+            }
+        }
+
+        let mut key_rows = Vec::new();
+        if secret_bearing {
+            for phase in &plan.phase_order {
+                let distribution = PrivateLeafSaltKeyDistribution::UniformBytes {
+                    byte_length: PRIVATE_ROW_PAD_SEED_BYTE_LENGTH,
+                };
+                key_rows.push(private_leaf_salt_key_row(
+                    PrivateLeafSaltKeySource::RelationPhase(*phase),
+                    distribution,
+                    PrivateLeafSaltGeneratorBridge::PrivateRowPadSeedHybrid,
+                    &commitment_rows,
+                )?);
+            }
+            let aggregate_key_coordinate_count =
+                AGGREGATE_PRIVATE_LEAF_SALT_KEY_EXTENSION_ELEMENT_COUNT
+                    .checked_mul(PROOF_CHALLENGE_EXTENSION_DEGREE)
+                    .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+            let aggregate_key_byte_length = aggregate_key_coordinate_count
+                .checked_mul(size_of::<u64>())
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+            key_rows.push(private_leaf_salt_key_row(
+                PrivateLeafSaltKeySource::AggregateWide,
+                PrivateLeafSaltKeyDistribution::UniformCanonicalFieldCoordinates {
+                    byte_length: aggregate_key_byte_length,
+                    modulus: PROOF_BASE_FIELD_MODULUS,
+                    coordinate_count: aggregate_key_coordinate_count,
+                },
+                PrivateLeafSaltGeneratorBridge::AggregateWidePrivateCoinHybrid,
+                &commitment_rows,
+            )?);
+        }
+
+        let distinct_framed_input_count =
+            commitment_rows.iter().try_fold(0_u64, |count, row| {
+                count
+                    .checked_add(row.distinct_framed_input_count)
+                    .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+            })?;
+        let clean_prover_derivation_call_count =
+            commitment_rows.iter().try_fold(0_u64, |count, row| {
+                count
+                    .checked_add(row.clean_prover_derivation_call_count()?)
+                    .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+            })?;
+        let repeated_or_cached_call_count =
+            commitment_rows.iter().try_fold(0_u64, |count, row| {
+                count
+                    .checked_add(row.repeated_or_cached_call_count()?)
+                    .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+            })?;
+        let transported_salt_count = commitment_rows.iter().try_fold(0_u64, |count, row| {
+            count
+                .checked_add(row.transported_salt_count)
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+        })?;
+        let ideal_function_pairwise_collision_union_bound =
+            private_leaf_salt_pairwise_collision_union_bound(
+                distinct_framed_input_count,
+                PRIVATE_LEAF_SALT_BYTE_LENGTH
+                    .checked_mul(u8::BITS as usize)
+                    .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+            )?;
+        let ceremony_pairwise_collision_union_bound = ideal_function_pairwise_collision_union_bound
+            .multiply_u64(u64::from(family_application_multiplicity))?;
+        let certificate = Self {
+            proof_privacy_mode: plan.proof_privacy_mode,
+            construction_plan_identity_hash,
+            customization: PRIVATE_LEAF_SALT_CUSTOMIZATION.to_vec(),
+            output_byte_length: PRIVATE_LEAF_SALT_BYTE_LENGTH,
+            output_bit_length: PRIVATE_LEAF_SALT_BYTE_LENGTH
+                .checked_mul(u8::BITS as usize)
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+            framed_input_partition_is_injective: private_leaf_salt_production_frames_are_injective(
+                &commitment_rows,
+            )?,
+            repeated_derivations_preserve_key_and_frame: true,
+            proof_wide_accepted_salt_uniqueness_enforced:
+                accepted_private_leaf_salt_set_refuses_proof_wide_duplicates(),
+            commitment_rows,
+            key_rows,
+            distinct_framed_input_count,
+            clean_prover_derivation_call_count,
+            repeated_or_cached_call_count,
+            verifier_derivation_call_count: 0,
+            transported_salt_count,
+            family_application_multiplicity,
+            ideal_function_pairwise_collision_union_bound,
+            ceremony_pairwise_collision_union_bound,
+        };
+        if !certificate.has_complete_internal_correspondence(
+            plan,
+            aggregate_wide_masking,
+            private_row_pad_generator_hybrid,
+        ) {
+            return Err(WhirTheoremCertificateError::IncompletePrivateLeafSaltPrf);
+        }
+        Ok(certificate)
+    }
+
+    fn is_complete_for(
+        &self,
+        plan: &RowCodeWhirConstructionPlan,
+        aggregate_wide_masking: &AggregateWideMaskingCertificate,
+        private_row_pad_generator_hybrid: &PrivateRowPadGeneratorHybridCertificate,
+    ) -> bool {
+        self.has_complete_internal_correspondence(
+            plan,
+            aggregate_wide_masking,
+            private_row_pad_generator_hybrid,
+        ) && Self::derive(
+            plan,
+            aggregate_wide_masking,
+            private_row_pad_generator_hybrid,
+        )
+        .is_ok_and(|expected| expected == *self)
+    }
+
+    fn has_complete_internal_correspondence(
+        &self,
+        plan: &RowCodeWhirConstructionPlan,
+        aggregate_wide_masking: &AggregateWideMaskingCertificate,
+        private_row_pad_generator_hybrid: &PrivateRowPadGeneratorHybridCertificate,
+    ) -> bool {
+        let expected_family_application_multiplicity =
+            crate::bgv::proof_suite::selected_profile::selected_proof_application_slot_ceilings()
+                .ok()
+                .and_then(|ceilings| {
+                    ceilings.family_ceiling(plan.application_statement_schema_identifier)
+                });
+        self.has_complete_for_bound_geometry(
+            self.construction_plan_identity_hash,
+            plan.proof_privacy_mode,
+            aggregate_wide_masking,
+            private_row_pad_generator_hybrid,
+        ) && plan
+            .canonical_identity_hash()
+            .is_ok_and(|identity| identity == self.construction_plan_identity_hash)
+            && expected_family_application_multiplicity
+                == Some(self.family_application_multiplicity)
+            && private_row_pad_generator_hybrid.is_complete_for_plan(plan)
+            && if self.proof_privacy_mode == ProofPrivacyMode::SecretBearing {
+                self.key_rows.len() == plan.phase_order.len() + 1
+            } else {
+                true
+            }
+    }
+
+    fn has_complete_for_bound_geometry(
+        &self,
+        construction_plan_identity_hash: [u8; 64],
+        proof_privacy_mode: ProofPrivacyMode,
+        aggregate_wide_masking: &AggregateWideMaskingCertificate,
+        private_row_pad_generator_hybrid: &PrivateRowPadGeneratorHybridCertificate,
+    ) -> bool {
+        let secret_bearing = self.proof_privacy_mode == ProofPrivacyMode::SecretBearing;
+        let production_generator_bridges_are_complete = if secret_bearing {
+            private_row_pad_generator_hybrid.is_complete()
+                && aggregate_wide_masking.is_complete()
+                && self
+                    .key_rows
+                    .iter()
+                    .filter(|row| {
+                        row.generator_bridge
+                            == PrivateLeafSaltGeneratorBridge::PrivateRowPadSeedHybrid
+                    })
+                    .count()
+                    == private_row_pad_generator_hybrid.active_phase_seed_count
+                && self.key_rows.iter().any(|row| {
+                    row.source == PrivateLeafSaltKeySource::AggregateWide
+                        && row.generator_bridge
+                            == PrivateLeafSaltGeneratorBridge::AggregateWidePrivateCoinHybrid
+                })
+                && aggregate_wide_masking
+                    .chronology()
+                    .first()
+                    .is_some_and(|row| {
+                        row.ordinal == 0
+                            && row.immediate_predecessor.is_none()
+                            && row.event == AggregateWideChronologyEvent::PrivateMaterialSampled
+                    })
+                && aggregate_wide_masking
+                    .chronology()
+                    .get(1)
+                    .is_some_and(|row| {
+                        row.ordinal == 1
+                            && row.immediate_predecessor == Some(0)
+                            && row.event
+                                == AggregateWideChronologyEvent::InitialSourceCommitmentObserved
+                    })
+                && aggregate_wide_masking
+                    .nonlinear_view_boundary()
+                    .private_leaf_salt_key_extension_element_count
+                    == AGGREGATE_PRIVATE_LEAF_SALT_KEY_EXTENSION_ELEMENT_COUNT
+                && aggregate_wide_masking
+                    .nonlinear_view_boundary()
+                    .private_leaf_salt_derivation_role_count
+                    == self
+                        .commitment_rows
+                        .iter()
+                        .filter(|row| row.key_source == PrivateLeafSaltKeySource::AggregateWide)
+                        .count()
+                && aggregate_wide_masking
+                    .nonlinear_view_boundary()
+                    .private_leaf_salt_byte_length
+                    == PRIVATE_LEAF_SALT_BYTE_LENGTH
+        } else {
+            true
+        };
+        self.has_complete_standalone_correspondence()
+            && self.construction_plan_identity_hash == construction_plan_identity_hash
+            && self.proof_privacy_mode == proof_privacy_mode
+            && production_generator_bridges_are_complete
+    }
+
+    fn has_complete_standalone_correspondence(&self) -> bool {
+        let secret_bearing = self.proof_privacy_mode == ProofPrivacyMode::SecretBearing;
+        let expected_distinct_input_count =
+            self.commitment_rows.iter().try_fold(0_u64, |count, row| {
+                count.checked_add(row.distinct_framed_input_count)
+            });
+        let expected_derivation_call_count =
+            self.commitment_rows.iter().try_fold(0_u64, |count, row| {
+                count.checked_add(row.clean_prover_derivation_call_count().ok()?)
+            });
+        let expected_repeated_call_count =
+            self.commitment_rows.iter().try_fold(0_u64, |count, row| {
+                count.checked_add(row.repeated_or_cached_call_count().ok()?)
+            });
+        let expected_transported_salt_count =
+            self.commitment_rows.iter().try_fold(0_u64, |count, row| {
+                count.checked_add(row.transported_salt_count)
+            });
+        let expected_collision_union_bound = private_leaf_salt_pairwise_collision_union_bound(
+            self.distinct_framed_input_count,
+            self.output_bit_length,
+        );
+        let expected_ceremony_collision_union_bound = expected_collision_union_bound
+            .as_ref()
+            .ok()
+            .and_then(|bound| {
+                bound
+                    .multiply_u64(u64::from(self.family_application_multiplicity))
+                    .ok()
+            });
+        let key_rows_are_complete = self.key_rows.iter().all(|key_row| {
+            let expected_key_space_size = key_row.distribution.ideal_key_space_size().ok();
+            let expected_key_bit_length = key_row.distribution.conservative_key_bit_length().ok();
+            let expected_distinct_count = self
+                .commitment_rows
+                .iter()
+                .filter(|row| row.key_source == key_row.source)
+                .try_fold(0_u64, |count, row| {
+                    count.checked_add(row.distinct_framed_input_count)
+                });
+            let expected_call_count = self
+                .commitment_rows
+                .iter()
+                .filter(|row| row.key_source == key_row.source)
+                .try_fold(0_u64, |count, row| {
+                    count.checked_add(row.clean_prover_derivation_call_count().ok()?)
+                });
+            expected_key_space_size.as_ref() == Some(&key_row.ideal_key_space_size)
+                && expected_key_bit_length == Some(key_row.conservative_key_bit_length)
+                && expected_distinct_count == Some(key_row.distinct_framed_input_count)
+                && expected_call_count == Some(key_row.clean_prover_derivation_call_count)
+                && u128::from(key_row.clean_prover_derivation_call_count)
+                    <= DECLARED_ADVERSARIAL_QUERY_BUDGET
+                && key_row.classical_prf_reduction
+                    == (MaskGeneratorHybridLoss::ComputationalReduction {
+                        assumption: MaskGeneratorHybridAssumption::Kmac256PseudorandomFunction,
+                        key_bit_length: key_row.conservative_key_bit_length,
+                        classical_query_budget: DECLARED_ADVERSARIAL_QUERY_BUDGET,
+                    })
+                && key_row.quantum_prf_reduction
+                    == (MaskGeneratorHybridLoss::ComputationalReduction {
+                        assumption:
+                            MaskGeneratorHybridAssumption::Kmac256QuantumPseudorandomFunction,
+                        key_bit_length: key_row.conservative_key_bit_length,
+                        classical_query_budget: DECLARED_ADVERSARIAL_QUERY_BUDGET,
+                    })
+        });
+        self.customization == PRIVATE_LEAF_SALT_CUSTOMIZATION
+            && self.output_byte_length == PRIVATE_LEAF_SALT_BYTE_LENGTH
+            && self.output_bit_length == PRIVATE_LEAF_SALT_BYTE_LENGTH * u8::BITS as usize
+            && self.family_application_multiplicity > 0
+            && expected_distinct_input_count == Some(self.distinct_framed_input_count)
+            && expected_derivation_call_count == Some(self.clean_prover_derivation_call_count)
+            && expected_repeated_call_count == Some(self.repeated_or_cached_call_count)
+            && expected_transported_salt_count == Some(self.transported_salt_count)
+            && self
+                .distinct_framed_input_count
+                .checked_add(self.repeated_or_cached_call_count)
+                == Some(self.clean_prover_derivation_call_count)
+            && self.verifier_derivation_call_count == 0
+            && self.framed_input_partition_is_injective
+            && private_leaf_salt_production_frames_are_injective(&self.commitment_rows)
+                .is_ok_and(|is_injective| is_injective)
+            && self.repeated_derivations_preserve_key_and_frame
+            && self.proof_wide_accepted_salt_uniqueness_enforced
+            && accepted_private_leaf_salt_set_refuses_proof_wide_duplicates()
+            && key_rows_are_complete
+            && expected_collision_union_bound.as_ref().ok()
+                == Some(&self.ideal_function_pairwise_collision_union_bound)
+            && expected_ceremony_collision_union_bound.as_ref()
+                == Some(&self.ceremony_pairwise_collision_union_bound)
+            && self
+                .ceremony_pairwise_collision_union_bound
+                .is_at_most_inverse_power_of_two(128)
+            && if secret_bearing {
+                !self.commitment_rows.is_empty()
+                    && !self.key_rows.is_empty()
+                    && self.distinct_framed_input_count > 0
+                    && self.clean_prover_derivation_call_count > self.distinct_framed_input_count
+                    && self.transported_salt_count > 0
+            } else {
+                self.commitment_rows.is_empty()
+                    && self.key_rows.is_empty()
+                    && self.distinct_framed_input_count == 0
+                    && self.clean_prover_derivation_call_count == 0
+                    && self.repeated_or_cached_call_count == 0
+                    && self.transported_salt_count == 0
+                    && self
+                        .ideal_function_pairwise_collision_union_bound
+                        .numerator
+                        .is_zero()
+                    && self
+                        .ceremony_pairwise_collision_union_bound
+                        .numerator
+                        .is_zero()
+            }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PrivateLeafSaltCallCounts {
+    root_generation: usize,
+    recomputation: usize,
+    opening_materialization: usize,
+    transported: usize,
+}
+
+fn private_leaf_salt_commitment_row(
+    role: PrivateLeafSaltCommitmentRole,
+    key_source: PrivateLeafSaltKeySource,
+    framed_commitment_role: &[u8],
+    leaf_count: usize,
+    logical_leaf_width: usize,
+    framed_matrix_ordinal: usize,
+    call_counts: PrivateLeafSaltCallCounts,
+) -> Result<PrivateLeafSaltCommitmentRow, WhirTheoremCertificateError> {
+    if framed_commitment_role.is_empty()
+        || leaf_count == 0
+        || !leaf_count.is_power_of_two()
+        || logical_leaf_width == 0
+        || call_counts.transported == 0
+        || call_counts.transported > leaf_count
+    {
+        return Err(WhirTheoremCertificateError::IncompletePrivateLeafSaltPrf);
+    }
+    Ok(PrivateLeafSaltCommitmentRow {
+        role,
+        key_source,
+        framed_commitment_role: framed_commitment_role.to_vec(),
+        leaf_count,
+        logical_leaf_width,
+        framed_matrix_ordinal,
+        distinct_framed_input_count: u64::try_from(leaf_count)
+            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+        root_generation_call_count: u64::try_from(call_counts.root_generation)
+            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+        recomputation_call_count: u64::try_from(call_counts.recomputation)
+            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+        opening_materialization_call_count: u64::try_from(call_counts.opening_materialization)
+            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+        transported_salt_count: u64::try_from(call_counts.transported)
+            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+    })
+}
+
+fn private_leaf_salt_key_row(
+    source: PrivateLeafSaltKeySource,
+    distribution: PrivateLeafSaltKeyDistribution,
+    generator_bridge: PrivateLeafSaltGeneratorBridge,
+    commitment_rows: &[PrivateLeafSaltCommitmentRow],
+) -> Result<PrivateLeafSaltKeyRow, WhirTheoremCertificateError> {
+    let ideal_key_space_size = distribution.ideal_key_space_size()?;
+    let conservative_key_bit_length = distribution.conservative_key_bit_length()?;
+    let distinct_framed_input_count = commitment_rows
+        .iter()
+        .filter(|row| row.key_source == source)
+        .try_fold(0_u64, |count, row| {
+            count
+                .checked_add(row.distinct_framed_input_count)
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+        })?;
+    let clean_prover_derivation_call_count = commitment_rows
+        .iter()
+        .filter(|row| row.key_source == source)
+        .try_fold(0_u64, |count, row| {
+            count
+                .checked_add(row.clean_prover_derivation_call_count()?)
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+        })?;
+    if distinct_framed_input_count == 0
+        || clean_prover_derivation_call_count < distinct_framed_input_count
+        || u128::from(clean_prover_derivation_call_count) > DECLARED_ADVERSARIAL_QUERY_BUDGET
+    {
+        return Err(WhirTheoremCertificateError::IncompletePrivateLeafSaltPrf);
+    }
+    Ok(PrivateLeafSaltKeyRow {
+        source,
+        distribution,
+        ideal_key_space_size,
+        conservative_key_bit_length,
+        distinct_framed_input_count,
+        clean_prover_derivation_call_count,
+        generator_bridge,
+        classical_prf_reduction: MaskGeneratorHybridLoss::ComputationalReduction {
+            assumption: MaskGeneratorHybridAssumption::Kmac256PseudorandomFunction,
+            key_bit_length: conservative_key_bit_length,
+            classical_query_budget: DECLARED_ADVERSARIAL_QUERY_BUDGET,
+        },
+        quantum_prf_reduction: MaskGeneratorHybridLoss::ComputationalReduction {
+            assumption: MaskGeneratorHybridAssumption::Kmac256QuantumPseudorandomFunction,
+            key_bit_length: conservative_key_bit_length,
+            classical_query_budget: DECLARED_ADVERSARIAL_QUERY_BUDGET,
+        },
+    })
+}
+
+fn private_leaf_salt_pairwise_collision_union_bound(
+    distinct_input_count: u64,
+    output_bit_length: usize,
+) -> Result<ExactBigFraction, WhirTheoremCertificateError> {
+    if distinct_input_count < 2 {
+        return Ok(ExactBigFraction::zero());
+    }
+    let input_count = BigUint::from(distinct_input_count);
+    let pair_count = &input_count * (&input_count - BigUint::one()) / BigUint::from(2_u8);
+    ExactBigFraction::new(pair_count, BigUint::one() << output_bit_length)
+}
+
+fn private_leaf_salt_production_frames_are_injective(
+    rows: &[PrivateLeafSaltCommitmentRow],
+) -> Result<bool, WhirTheoremCertificateError> {
+    let mut row_prefixes = BTreeSet::new();
+    let mut boundary_frames = BTreeSet::new();
+    for row in rows {
+        if row.leaf_count < 2
+            || u64::try_from(row.leaf_count).is_err()
+            || u64::try_from(row.logical_leaf_width).is_err()
+            || u64::try_from(row.framed_matrix_ordinal).is_err()
+            || !row_prefixes.insert((
+                row.framed_commitment_role.clone(),
+                row.leaf_count,
+                row.logical_leaf_width,
+                row.framed_matrix_ordinal,
+            ))
+        {
+            return Ok(false);
+        }
+        let first = private_leaf_salt_framed_input_bytes(
+            &row.framed_commitment_role,
+            row.leaf_count,
+            row.logical_leaf_width,
+            row.framed_matrix_ordinal,
+            0,
+        )
+        .map_err(|_| WhirTheoremCertificateError::IncompletePrivateLeafSaltPrf)?;
+        let last = private_leaf_salt_framed_input_bytes(
+            &row.framed_commitment_role,
+            row.leaf_count,
+            row.logical_leaf_width,
+            row.framed_matrix_ordinal,
+            row.leaf_count - 1,
+        )
+        .map_err(|_| WhirTheoremCertificateError::IncompletePrivateLeafSaltPrf)?;
+        if first == last || !boundary_frames.insert(first) || !boundary_frames.insert(last) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn accepted_private_leaf_salt_set_refuses_proof_wide_duplicates() -> bool {
+    let first = [0x31_u8; PRIVATE_LEAF_SALT_BYTE_LENGTH];
+    let second = [0x72_u8; PRIVATE_LEAF_SALT_BYTE_LENGTH];
+    let mut accepted = AcceptedPrivateLeafSaltSet::default();
+    accepted.insert(first).is_ok()
+        && accepted.insert(second).is_ok()
+        && accepted.len() == 2
+        && accepted.insert(first).is_err()
+        && accepted.len() == 2
 }
 
 fn falling_factorial(
@@ -6064,6 +6883,7 @@ pub(in crate::bgv::proof_suite) struct RowCodeWhirFailurePartitionCertificate {
     aggregate_wide_masking: AggregateWideMaskingCertificate,
     production_aggregate_wide_views: ProductionAggregateWideViewCorrespondenceCertificate,
     private_row_pad_generator_hybrid: PrivateRowPadGeneratorHybridCertificate,
+    private_leaf_salt_prf: PrivateLeafSaltPrfCertificate,
     relation_compiler_interpreter_semantics: RelationCompilerInterpreterSemanticCertificate,
     polynomial_protocol_extractor: ProductionPolynomialProtocolExtractorCertificate,
     point_constraint_extractor: ProductionPointConstraintExtractorCertificate,
@@ -6129,6 +6949,13 @@ impl RowCodeWhirFailurePartitionCertificate {
                 .relation_plan_variant_hash()
                 == self.point_constraint_extractor.relation_plan_variant_hash()
             && self.private_row_pad_generator_hybrid.is_complete()
+            && self.private_leaf_salt_prf.has_complete_for_bound_geometry(
+                self.production_aggregate_wide_views
+                    .construction_plan_identity_hash,
+                ProofPrivacyMode::SecretBearing,
+                &self.aggregate_wide_masking,
+                &self.private_row_pad_generator_hybrid,
+            )
             && self.relation_compiler_interpreter_semantics.is_complete()
             && self.polynomial_protocol_extractor.is_complete()
             && self.point_constraint_extractor.is_complete()
@@ -6183,6 +7010,11 @@ impl RowCodeWhirFailurePartitionCertificate {
         plan: &RowCodeWhirConstructionPlan,
     ) -> bool {
         self.has_complete_structural_certificate()
+            && self.private_leaf_salt_prf.is_complete_for(
+                plan,
+                &self.aggregate_wide_masking,
+                &self.private_row_pad_generator_hybrid,
+            )
             && self.cms19_strong_round_by_round_semantics.is_complete_for(
                 plan,
                 &self.cms19_whole_state_transitions,
@@ -6224,6 +7056,7 @@ struct RowCodeWhirProductionGeometryCertificate {
     aggregate_wide_masking: AggregateWideMaskingCertificate,
     production_aggregate_wide_views: ProductionAggregateWideViewCorrespondenceCertificate,
     private_row_pad_generator_hybrid: PrivateRowPadGeneratorHybridCertificate,
+    private_leaf_salt_prf: PrivateLeafSaltPrfCertificate,
     whir_geometry: ProductionWhirGeometryCertificate,
     prefix_stacking: PrefixStackingCertificate,
     state_epoch_rows: Vec<StateEpochRow>,
@@ -6333,6 +7166,14 @@ impl RowCodeWhirProductionGeometryCertificate {
             return Some(
                 ProductionGeometryCertificateFailure::IncompleteRelationOrMaskingCertificate,
             );
+        }
+        if !self.private_leaf_salt_prf.has_complete_for_bound_geometry(
+            self.construction_plan_identity_hash,
+            self.proof_privacy_mode,
+            &self.aggregate_wide_masking,
+            &self.private_row_pad_generator_hybrid,
+        ) {
+            return Some(ProductionGeometryCertificateFailure::IncompletePrivateLeafSaltPrf);
         }
         if !self.polynomial_protocol_extractor.is_complete()
             || !self.point_constraint_extractor.is_complete()
@@ -7016,6 +7857,27 @@ fn checked_row_code_whir_production_geometry_certificate_with_masking(
             WhirTheoremCertificateError::IncompleteRowPadGeneratorHybrid,
         ));
     }
+    let private_leaf_salt_prf = PrivateLeafSaltPrfCertificate::derive(
+        plan,
+        aggregate_wide_masking,
+        &private_row_pad_generator_hybrid,
+    )
+    .map_err(|error| {
+        contextualize(
+            ProductionGeometryCertificateStage::PrivateLeafSaltPrf,
+            error,
+        )
+    })?;
+    if !private_leaf_salt_prf.is_complete_for(
+        plan,
+        aggregate_wide_masking,
+        &private_row_pad_generator_hybrid,
+    ) {
+        return Err(contextualize(
+            ProductionGeometryCertificateStage::PrivateLeafSaltPrf,
+            WhirTheoremCertificateError::IncompletePrivateLeafSaltPrf,
+        ));
+    }
     let whir_geometry = derive_production_whir_geometry_certificate(plan, aggregate_wide_masking)
         .map_err(|error| {
         contextualize(ProductionGeometryCertificateStage::WhirGeometry, error)
@@ -7255,6 +8117,7 @@ fn checked_row_code_whir_production_geometry_certificate_with_masking(
         aggregate_wide_masking: aggregate_wide_masking.clone(),
         production_aggregate_wide_views,
         private_row_pad_generator_hybrid,
+        private_leaf_salt_prf,
         whir_geometry,
         prefix_stacking,
         state_epoch_rows,
@@ -7511,6 +8374,18 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
         .map_err(|_| WhirTheoremCertificateError::IncompleteRowPadGeneratorHybrid)?;
     if !private_row_pad_generator_hybrid.is_complete_for_plan(plan) {
         return Err(WhirTheoremCertificateError::IncompleteRowPadGeneratorHybrid);
+    }
+    let private_leaf_salt_prf = PrivateLeafSaltPrfCertificate::derive(
+        plan,
+        &aggregate_wide_masking,
+        &private_row_pad_generator_hybrid,
+    )?;
+    if !private_leaf_salt_prf.is_complete_for(
+        plan,
+        &aggregate_wide_masking,
+        &private_row_pad_generator_hybrid,
+    ) {
+        return Err(WhirTheoremCertificateError::IncompletePrivateLeafSaltPrf);
     }
 
     let encoded_oracles = plan
@@ -7915,6 +8790,7 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
         aggregate_wide_masking,
         production_aggregate_wide_views,
         private_row_pad_generator_hybrid,
+        private_leaf_salt_prf,
         relation_compiler_interpreter_semantics,
         polynomial_protocol_extractor,
         point_constraint_extractor,
@@ -13810,6 +14686,272 @@ fn production_row_pad_hybrid_refuses_256_bit_secret_prefixes() {
             classical_query_budget: DECLARED_ADVERSARIAL_QUERY_BUDGET,
         };
     assert!(!classical_block_replacement_in_quantum_ledger.is_complete_for_plan(&plan));
+}
+
+#[test]
+#[ignore = "owned by test:rust:kernel:theorem-evidence"]
+fn production_private_leaf_salt_prf_binds_every_clean_and_replayed_derivation() {
+    let plan = selected_same_secret_construction_plan();
+    let hiding_configuration =
+        super::super::hiding_whir::selected_hiding_whir_config(plan.selected_parameters())
+            .expect("the selected hiding configuration derives");
+    let aggregate_wide_masking = AggregateWideMaskingCertificate::derive(&hiding_configuration)
+        .expect("the aggregate-wide masking certificate derives");
+    let private_row_pad_generator_hybrid = PrivateRowPadGeneratorHybridCertificate::derive(&plan)
+        .expect("the private row-pad generator hybrid derives");
+    let certificate = PrivateLeafSaltPrfCertificate::derive(
+        &plan,
+        &aggregate_wide_masking,
+        &private_row_pad_generator_hybrid,
+    )
+    .expect("the production private leaf-salt PRF certificate derives");
+
+    assert!(certificate.has_complete_internal_correspondence(
+        &plan,
+        &aggregate_wide_masking,
+        &private_row_pad_generator_hybrid,
+    ));
+    assert_eq!(certificate.customization, PRIVATE_LEAF_SALT_CUSTOMIZATION);
+    assert_eq!(certificate.output_byte_length, 128);
+    assert_eq!(certificate.output_bit_length, 1_024);
+    assert_eq!(certificate.commitment_rows.len(), 12);
+    assert_eq!(certificate.key_rows.len(), 4);
+    assert_eq!(certificate.distinct_framed_input_count, 67_125_248);
+    assert_eq!(certificate.clean_prover_derivation_call_count, 133_974_178);
+    assert_eq!(certificate.repeated_or_cached_call_count, 66_848_930);
+    assert_eq!(certificate.verifier_derivation_call_count, 0);
+    assert_eq!(certificate.transported_salt_count, 3_943);
+    assert_eq!(certificate.family_application_multiplicity, 10);
+    assert_eq!(
+        certificate
+            .commitment_rows
+            .iter()
+            .map(|row| (
+                row.role,
+                row.leaf_count,
+                row.logical_leaf_width,
+                row.framed_matrix_ordinal,
+                row.transported_salt_count,
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                PrivateLeafSaltCommitmentRole::RelationPhase(RowCodeWhirPhase::Base),
+                16_777_216,
+                32,
+                0,
+                387,
+            ),
+            (
+                PrivateLeafSaltCommitmentRole::RelationPhase(RowCodeWhirPhase::Auxiliary),
+                16_777_216,
+                15,
+                0,
+                387,
+            ),
+            (
+                PrivateLeafSaltCommitmentRole::RelationPhase(RowCodeWhirPhase::Quotient),
+                16_777_216,
+                15,
+                0,
+                387,
+            ),
+            (
+                PrivateLeafSaltCommitmentRole::InitialSource,
+                8_388_608,
+                8,
+                0,
+                387,
+            ),
+            (
+                PrivateLeafSaltCommitmentRole::FoldedSource { epoch_ordinal: 1 },
+                4_194_304,
+                8,
+                2,
+                288,
+            ),
+            (
+                PrivateLeafSaltCommitmentRole::FoldedSource { epoch_ordinal: 2 },
+                2_097_152,
+                8,
+                4,
+                268,
+            ),
+            (
+                PrivateLeafSaltCommitmentRole::FoldedSource { epoch_ordinal: 3 },
+                1_048_576,
+                8,
+                6,
+                264,
+            ),
+            (
+                PrivateLeafSaltCommitmentRole::FoldedSource { epoch_ordinal: 4 },
+                524_288,
+                8,
+                8,
+                263,
+            ),
+            (
+                PrivateLeafSaltCommitmentRole::FoldedSource { epoch_ordinal: 5 },
+                262_144,
+                8,
+                10,
+                263,
+            ),
+            (PrivateLeafSaltCommitmentRole::CarriedPad, 8_192, 1, 0, 393,),
+            (
+                PrivateLeafSaltCommitmentRole::FreshSource,
+                262_144,
+                1,
+                0,
+                263,
+            ),
+            (PrivateLeafSaltCommitmentRole::FreshPad, 8_192, 1, 0, 393,),
+        ],
+    );
+    assert_eq!(
+        certificate
+            .key_rows
+            .iter()
+            .map(|row| (
+                row.source,
+                row.conservative_key_bit_length,
+                row.distinct_framed_input_count,
+                row.clean_prover_derivation_call_count,
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                PrivateLeafSaltKeySource::RelationPhase(RowCodeWhirPhase::Base),
+                512,
+                16_777_216,
+                33_554_819,
+            ),
+            (
+                PrivateLeafSaltKeySource::RelationPhase(RowCodeWhirPhase::Auxiliary),
+                512,
+                16_777_216,
+                33_554_819,
+            ),
+            (
+                PrivateLeafSaltKeySource::RelationPhase(RowCodeWhirPhase::Quotient),
+                512,
+                16_777_216,
+                33_554_819,
+            ),
+            (
+                PrivateLeafSaltKeySource::AggregateWide,
+                639,
+                16_793_600,
+                33_309_721,
+            ),
+        ],
+    );
+    assert_eq!(
+        certificate.ideal_function_pairwise_collision_union_bound,
+        ExactBigFraction::new(
+            BigUint::from(2_252_899_425_968_128_u64),
+            BigUint::one() << 1_024_usize,
+        )
+        .expect("the exact per-proof collision union bound reduces"),
+    );
+    assert_eq!(
+        certificate.ceremony_pairwise_collision_union_bound,
+        ExactBigFraction::new(
+            BigUint::from(22_528_994_259_681_280_u64),
+            BigUint::one() << 1_024_usize,
+        )
+        .expect("the exact ceremony collision union bound reduces"),
+    );
+    assert!(
+        certificate
+            .ceremony_pairwise_collision_union_bound
+            .is_at_most_inverse_power_of_two(969)
+    );
+    assert!(
+        certificate
+            .ceremony_pairwise_collision_union_bound
+            .is_greater_than_inverse_power_of_two(970)
+    );
+
+    let baseline_frame =
+        private_leaf_salt_framed_input_bytes(b"aggregate-source/folded", 64, 8, 2, 7)
+            .expect("the baseline frame derives");
+    for changed_frame in [
+        private_leaf_salt_framed_input_bytes(b"aggregate-source/initial", 64, 8, 2, 7),
+        private_leaf_salt_framed_input_bytes(b"aggregate-source/folded", 128, 8, 2, 7),
+        private_leaf_salt_framed_input_bytes(b"aggregate-source/folded", 64, 9, 2, 7),
+        private_leaf_salt_framed_input_bytes(b"aggregate-source/folded", 64, 8, 4, 7),
+        private_leaf_salt_framed_input_bytes(b"aggregate-source/folded", 64, 8, 2, 8),
+    ] {
+        assert_ne!(
+            baseline_frame,
+            changed_frame.expect("the changed frame derives")
+        );
+    }
+    assert!(accepted_private_leaf_salt_set_refuses_proof_wide_duplicates());
+
+    let mut wrong_customization = certificate.clone();
+    wrong_customization.customization.push(0);
+    assert!(!wrong_customization.has_complete_standalone_correspondence());
+
+    let mut truncated_output = certificate.clone();
+    truncated_output.output_byte_length = 64;
+    truncated_output.output_bit_length = 512;
+    assert!(!truncated_output.has_complete_standalone_correspondence());
+
+    let mut wrong_aggregate_key_space = certificate.clone();
+    wrong_aggregate_key_space
+        .key_rows
+        .last_mut()
+        .expect("the aggregate key row exists")
+        .ideal_key_space_size += BigUint::one();
+    assert!(!wrong_aggregate_key_space.has_complete_standalone_correspondence());
+
+    let mut changed_query_schedule = certificate.clone();
+    changed_query_schedule.commitment_rows[0].transported_salt_count += 1;
+    assert!(!changed_query_schedule.has_complete_standalone_correspondence());
+
+    let mut changed_fold_domain = certificate.clone();
+    changed_fold_domain.commitment_rows[4].framed_matrix_ordinal = 4;
+    assert!(!changed_fold_domain.is_complete_for(
+        &plan,
+        &aggregate_wide_masking,
+        &private_row_pad_generator_hybrid,
+    ));
+
+    let mut omitted_commitment = certificate.clone();
+    omitted_commitment.commitment_rows.pop();
+    assert!(!omitted_commitment.has_complete_standalone_correspondence());
+
+    let mut classical_assumption_in_quantum_ledger = certificate.clone();
+    classical_assumption_in_quantum_ledger.key_rows[0].quantum_prf_reduction =
+        classical_assumption_in_quantum_ledger.key_rows[0].classical_prf_reduction;
+    assert!(!classical_assumption_in_quantum_ledger.has_complete_standalone_correspondence());
+
+    let mut uniqueness_not_enforced = certificate.clone();
+    uniqueness_not_enforced.proof_wide_accepted_salt_uniqueness_enforced = false;
+    assert!(!uniqueness_not_enforced.has_complete_standalone_correspondence());
+
+    let mut public_plan = plan.clone();
+    public_plan.proof_privacy_mode = ProofPrivacyMode::PublicOnly;
+    let public_row_pad = PrivateRowPadGeneratorHybridCertificate::derive(&public_plan)
+        .expect("the public-only row-pad certificate derives");
+    let public_certificate = PrivateLeafSaltPrfCertificate::derive(
+        &public_plan,
+        &aggregate_wide_masking,
+        &public_row_pad,
+    )
+    .expect("the inactive public-only leaf-salt certificate derives");
+    assert!(public_certificate.has_complete_internal_correspondence(
+        &public_plan,
+        &aggregate_wide_masking,
+        &public_row_pad,
+    ));
+    assert!(public_certificate.commitment_rows.is_empty());
+    assert!(public_certificate.key_rows.is_empty());
+    assert_eq!(public_certificate.distinct_framed_input_count, 0);
+    assert_eq!(public_certificate.transported_salt_count, 0);
 }
 
 fn assert_public_key_share_prefix_stacking_is_derived_from_its_production_plan(

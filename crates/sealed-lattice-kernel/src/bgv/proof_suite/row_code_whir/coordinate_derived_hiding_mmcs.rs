@@ -36,7 +36,7 @@ const PRIVATE_LEAF_SALT_PADDING_COORDINATES: [u64; 3] = [
     0x6c61_7474_6963_6501,
     0x7361_6c74_7631_0001,
 ];
-const MATERIALIZED_COMMITMENT_ROLES: [AggregateLeafSaltRole; 3] = [
+pub(super) const MATERIALIZED_COMMITMENT_ROLES: [AggregateLeafSaltRole; 3] = [
     AggregateLeafSaltRole::AggregateWidePad,
     AggregateLeafSaltRole::FreshSource,
     AggregateLeafSaltRole::FreshPad,
@@ -53,7 +53,7 @@ pub(super) enum AggregateLeafSaltRole {
 }
 
 impl AggregateLeafSaltRole {
-    const fn domain(self) -> &'static [u8] {
+    pub(super) const fn domain(self) -> &'static [u8] {
         match self {
             Self::InitialSource => b"aggregate-source/initial",
             Self::FoldedSource { .. } => b"aggregate-source/folded",
@@ -63,7 +63,7 @@ impl AggregateLeafSaltRole {
         }
     }
 
-    const fn derivation_ordinal(self) -> usize {
+    pub(super) const fn derivation_ordinal(self) -> usize {
         match self {
             Self::FoldedSource { epoch_ordinal } => epoch_ordinal,
             Self::InitialSource | Self::AggregateWidePad | Self::FreshSource | Self::FreshPad => 0,

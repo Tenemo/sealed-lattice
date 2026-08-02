@@ -86,8 +86,8 @@ Works today:
   digests to the complete verifier database and coordinate-derived commitment
   subtrees. Hostile width, domain, slot, address, response-owner, identity,
   leaf-call, frontier, and message-shape mutations refuse. This is focused
-  same-secret construction evidence; private-salt PRF composition, suite-wide
-  reduction, and ceremony-level reduction evidence remain open.
+  same-secret construction evidence; construction-wide nonlinear composition,
+  suite-wide reduction, and ceremony-level reduction evidence remain open.
 - Secret-bearing phase-row padding now uses three KMAC-derived 512-bit seeds.
   The selected same-secret certificate inventories 62 framed SHAKE streams,
   130,023,424 accepted field outputs, seed collision, bounded rejection
@@ -95,6 +95,17 @@ Works today:
   refuses the former 256-bit seed geometry at the declared quantum query
   budget. This is component evidence under the stated KMAC and ideal-oracle
   assumptions, not a complete zero-knowledge theorem.
+- Attempt-private leaf salts now have one production-derived PRF certificate
+  across all phase and aggregate commitments. For the selected same-secret
+  construction it inventories 12 commitment roles, four private key sources,
+  67,125,248 distinct framed inputs, 133,974,178 clean-path KMAC derivations,
+  and 3,943 transported salts. The exact proof codec carries one duplicate set
+  across phase and aggregate openings. The certificate retains symbolic
+  classical and quantum KMAC PRF reductions and bounds the ten-proof ideal-
+  function collision union by
+  `10 * C(67,125,248, 2) / 2^1024`, between `2^-969` and `2^-970`. This is a
+  hiding-component bridge, not complete common-proof soundness or
+  zero-knowledge evidence.
 - The aggregate-wide masking certificate now has an independent production
   correspondence for all 15 affine-view blocks. It walks the deployed
   transcript and commitment-opening catalogs, binds the six recomputable

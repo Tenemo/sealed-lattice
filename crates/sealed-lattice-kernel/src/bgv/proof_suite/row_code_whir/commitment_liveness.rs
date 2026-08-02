@@ -389,8 +389,8 @@ fn derive_private_leaf_salt_liveness(
         .map_err(|_| "aggregate private leaf-salt row workspace exceeds u64".to_owned())?,
         canonical_uniqueness_set_byte_length: u64::try_from(
             transported_private_leaf_salt_uniqueness_set_byte_length(
-                usize::try_from(aggregate_opening_salt_count)
-                    .map_err(|_| "aggregate salt count exceeds usize".to_owned())?,
+                usize::try_from(total_salt_count)
+                    .map_err(|_| "private leaf-salt count exceeds usize".to_owned())?,
             )?,
         )
         .map_err(|_| "private leaf-salt uniqueness set exceeds u64".to_owned())?,
@@ -1459,7 +1459,7 @@ mod tests {
         assert_eq!(accounting.aggregate_resident_state_byte_length, 56);
         assert_eq!(accounting.derivation_workspace_byte_length, 392);
         assert_eq!(accounting.aggregate_row_workspace_byte_length, 584);
-        assert_eq!(accounting.canonical_uniqueness_set_byte_length, 489_656);
+        assert_eq!(accounting.canonical_uniqueness_set_byte_length, 693_992);
         assert_eq!(
             accounting.retained_pad_commitment_payload_byte_length,
             1_376_720,
