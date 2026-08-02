@@ -13,9 +13,10 @@ pub(super) const PRIVATE_LEAF_SALT_CUSTOMIZATION: &[u8] =
 
 /// One proof-wide set of every accepted 1,024-bit leaf salt.
 ///
-/// The exact proof decoder carries this set from the phase openings into the
-/// aggregate opening. A repeated byte string is therefore non-canonical even
-/// when its two occurrences belong to different commitment classes.
+/// The exact proof decoder carries this set across phase openings, bound-tree
+/// openings, and the aggregate opening. A repeated byte string is therefore
+/// non-canonical even when its two occurrences belong to different commitment
+/// classes.
 #[derive(Clone, Debug, Default)]
 pub(super) struct AcceptedPrivateLeafSaltSet {
     salts: BTreeSet<PrivateLeafSalt>,

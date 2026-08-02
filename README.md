@@ -99,10 +99,11 @@ Works today:
   across all phase and aggregate commitments. For the selected same-secret
   construction it inventories 12 commitment roles, four private key sources,
   67,125,248 distinct framed inputs, 133,974,178 clean-path KMAC derivations,
-  and 3,943 transported salts. The exact proof codec carries one duplicate set
-  across phase and aggregate openings. The certificate retains symbolic
-  classical and quantum KMAC PRF reductions and bounds the ten-proof ideal-
-  function collision union by
+  and 3,943 transported attempt-derived salts. The exact proof additionally
+  transports 320 persistent salts from statement-owned committed-material
+  openings and carries one duplicate set across all phase, bound-tree, and
+  aggregate openings. The certificate retains symbolic classical and quantum
+  KMAC PRF reductions and bounds the ten-proof ideal-function collision union by
   `10 * C(67,125,248, 2) / 2^1024`, between `2^-969` and `2^-970`. This is a
   hiding-component bridge, not complete common-proof soundness or
   zero-knowledge evidence.
@@ -163,9 +164,9 @@ Works today:
   readers, DFTs, Merkle frontiers, proof material, transcript state, private
   material, browser-bridge copies, a WebAssembly runtime reserve, and allocator
   overhead. It now also accounts for the private-salt key, adapter state, KMAC
-  and row-conversion workspaces, `504,704` transported salt bytes, canonical
-  duplicate detection, and the three materialized direct commitments. The
-  exact static maximum is `556,576,413` bytes during aggregate-source
+  and row-conversion workspaces, `545,664` transported salt bytes, the
+  `750,312`-byte proof-wide uniqueness set, and the three materialized direct
+  commitments. The exact static maximum is `556,576,413` bytes during aggregate-source
   materialization: `153,923,229` bytes above the nominal target,
   `47,403,363` bytes below the automatic ceiling, and `114,512,227` bytes below
   the hard WebAssembly bound. Bound-tree authentication uses one in-place DFT

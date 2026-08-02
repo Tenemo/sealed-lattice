@@ -3638,8 +3638,7 @@ fn encode_exact_same_secret_prefix(
                 return Err("scheduled proof phase has the wrong leaf-salt shape".to_owned());
             }
             if let Some(salt) = column.persistent_salt {
-                private_leaf_salts.insert(salt)?;
-                canonical.extend_from_slice(&salt);
+                append_accepted_private_leaf_salt(&mut canonical, &mut private_leaf_salts, salt)?;
             }
             for value in &column.values {
                 canonical.extend_from_slice(&value.as_canonical_u64().to_le_bytes());
@@ -3654,7 +3653,7 @@ fn encode_exact_same_secret_prefix(
     for authentication in &proof.bound_tree_authentications {
         for opening in &authentication.opened_leaves {
             if let Some(salt) = opening.persistent_salt {
-                canonical.extend_from_slice(&salt);
+                append_accepted_private_leaf_salt(&mut canonical, &mut private_leaf_salts, salt)?;
             }
             for value in opening
                 .first_point_values
@@ -3672,6 +3671,16 @@ fn encode_exact_same_secret_prefix(
         }
     }
     Ok((canonical, private_leaf_salts))
+}
+
+fn append_accepted_private_leaf_salt(
+    canonical: &mut Vec<u8>,
+    accepted_salts: &mut AcceptedPrivateLeafSaltSet,
+    salt: PrivateLeafSalt,
+) -> Result<(), String> {
+    accepted_salts.insert(salt)?;
+    canonical.extend_from_slice(&salt);
+    Ok(())
 }
 
 fn checked_exact_proof_prefix_byte_length(
@@ -4616,9 +4625,10 @@ impl ExactSameSecretIncrementalDecoder {
         let persistent_salt = if self.shape.phase_leaf_salt_byte_length == 0 {
             None
         } else if self.shape.phase_leaf_salt_byte_length == PRIVATE_LEAF_SALT_BYTE_LENGTH {
-            let salt = reader.read_array::<PRIVATE_LEAF_SALT_BYTE_LENGTH>()?;
-            self.private_leaf_salts.insert(salt)?;
-            Some(salt)
+            Some(read_accepted_private_leaf_salt(
+                &mut reader,
+                &mut self.private_leaf_salts,
+            )?)
         } else {
             return Err("exact phase leaf-salt length is invalid".to_owned());
         };
@@ -4751,7 +4761,10 @@ impl ExactSameSecretIncrementalDecoder {
         let persistent_salt = if salt_byte_length == 0 {
             None
         } else {
-            Some(reader.read_array()?)
+            Some(read_accepted_private_leaf_salt(
+                &mut reader,
+                &mut self.private_leaf_salts,
+            )?)
         };
         let mut first_point_values = vec![ProofBaseFieldElement::ZERO; row_width];
         let mut opposite_point_values = vec![ProofBaseFieldElement::ZERO; row_width];
@@ -4949,6 +4962,15 @@ impl ExactSameSecretIncrementalDecoder {
     }
 }
 
+fn read_accepted_private_leaf_salt(
+    reader: &mut ExactCanonicalReader<'_>,
+    accepted_salts: &mut AcceptedPrivateLeafSaltSet,
+) -> Result<PrivateLeafSalt, String> {
+    let salt = reader.read_array::<PRIVATE_LEAF_SALT_BYTE_LENGTH>()?;
+    accepted_salts.insert(salt)?;
+    Ok(salt)
+}
+
 struct ExactCanonicalReader<'a> {
     canonical: &'a [u8],
     offset: usize,
@@ -5142,6 +5164,36 @@ fn checked_u32(value: usize, label: &str) -> Result<u32, String> {
 #[cfg(test)]
 mod aggregate_wide_tests {
     use super::*;
+
+    #[test]
+    fn exact_prefix_codec_refuses_private_leaf_salt_reuse_across_commitment_classes() {
+        let repeated_salt = [0x8d_u8; PRIVATE_LEAF_SALT_BYTE_LENGTH];
+        let distinct_salt = [0x3a_u8; PRIVATE_LEAF_SALT_BYTE_LENGTH];
+        let mut canonical = Vec::new();
+        let mut encoder_salts = AcceptedPrivateLeafSaltSet::default();
+        append_accepted_private_leaf_salt(&mut canonical, &mut encoder_salts, repeated_salt)
+            .expect("the phase salt is accepted");
+        assert_eq!(
+            append_accepted_private_leaf_salt(&mut canonical, &mut encoder_salts, repeated_salt,),
+            Err("common proof reuses a private leaf salt".to_owned()),
+        );
+        append_accepted_private_leaf_salt(&mut canonical, &mut encoder_salts, distinct_salt)
+            .expect("a distinct bound-tree salt is accepted");
+
+        let mut reader = ExactCanonicalReader::new(&canonical);
+        let mut decoder_salts = AcceptedPrivateLeafSaltSet::default();
+        assert_eq!(
+            read_accepted_private_leaf_salt(&mut reader, &mut decoder_salts),
+            Ok(repeated_salt),
+        );
+        decoder_salts
+            .insert(distinct_salt)
+            .expect("the prior bound-tree salt is accepted");
+        assert_eq!(
+            read_accepted_private_leaf_salt(&mut reader, &mut decoder_salts),
+            Err("common proof reuses a private leaf salt".to_owned()),
+        );
+    }
 
     #[test]
     fn exact_declared_proof_length_enforces_both_allocation_boundaries() {

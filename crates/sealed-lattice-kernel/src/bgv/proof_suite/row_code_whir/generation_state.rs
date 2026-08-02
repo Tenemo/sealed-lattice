@@ -8338,9 +8338,9 @@ mod tests {
                 0,
                 0,
                 0,
-                489_656,
+                750_312,
                 0,
-                63_739_446,
+                64_032_684,
             ),
         ];
         assert_eq!(complete_liveness.rows().len(), expected_rows.len());
@@ -8378,7 +8378,7 @@ mod tests {
                 if phase == GenerationPhaseLivenessKind::LoadingAuthenticatedSources {
                     0
                 } else {
-                    7_605_914
+                    7_564_954
                 },
             );
             assert_eq!(
@@ -8386,7 +8386,7 @@ mod tests {
                 if phase == GenerationPhaseLivenessKind::LoadingAuthenticatedSources {
                     0
                 } else {
-                    504_704
+                    545_664
                 },
             );
             assert_eq!(row.transcript_byte_length(), 207_336);

@@ -284,6 +284,7 @@ pub(super) fn derive_aggregate_commitment_liveness(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct PrivateLeafSaltLiveness {
     phase_opening_salt_count: u64,
+    bound_opening_salt_count: u64,
     aggregate_opening_salt_count: u64,
     transported_salt_byte_length: u64,
     aggregate_resident_state_byte_length: u64,
@@ -297,15 +298,38 @@ struct PrivateLeafSaltLiveness {
 fn derive_private_leaf_salt_liveness(
     construction_plan: &RowCodeWhirConstructionPlan,
 ) -> Result<PrivateLeafSaltLiveness, String> {
+    let bound_opening_salt_count = construction_plan
+        .bound_trees
+        .iter()
+        .filter(|tree| tree.construction_kind == BoundTreeConstructionKind::CommittedMaterial)
+        .try_fold(0_u64, |total, tree| {
+            u64::try_from(tree.query_count)
+                .ok()
+                .and_then(|query_count| total.checked_add(query_count))
+                .ok_or_else(|| "bound private leaf-salt count overflowed".to_owned())
+        })?;
     if construction_plan.proof_privacy_mode == ProofPrivacyMode::PublicOnly {
+        let transported_salt_byte_length = bound_opening_salt_count
+            .checked_mul(
+                u64::try_from(PRIVATE_LEAF_SALT_BYTE_LENGTH)
+                    .map_err(|_| "private leaf-salt width exceeds u64".to_owned())?,
+            )
+            .ok_or_else(|| "transported private leaf-salt bytes overflowed".to_owned())?;
         return Ok(PrivateLeafSaltLiveness {
             phase_opening_salt_count: 0,
+            bound_opening_salt_count,
             aggregate_opening_salt_count: 0,
-            transported_salt_byte_length: 0,
+            transported_salt_byte_length,
             aggregate_resident_state_byte_length: 0,
             derivation_workspace_byte_length: 0,
             aggregate_row_workspace_byte_length: 0,
-            canonical_uniqueness_set_byte_length: 0,
+            canonical_uniqueness_set_byte_length: u64::try_from(
+                transported_private_leaf_salt_uniqueness_set_byte_length(
+                    usize::try_from(bound_opening_salt_count)
+                        .map_err(|_| "private leaf-salt count exceeds usize".to_owned())?,
+                )?,
+            )
+            .map_err(|_| "private leaf-salt uniqueness set exceeds u64".to_owned())?,
             retained_pad_commitment_payload_byte_length: 0,
             base_case_commitment_payload_byte_length: 0,
         });
@@ -351,7 +375,8 @@ fn derive_private_leaf_salt_liveness(
         })
         .ok_or_else(|| "aggregate private leaf-salt count overflowed".to_owned())?;
     let total_salt_count = phase_opening_salt_count
-        .checked_add(aggregate_opening_salt_count)
+        .checked_add(bound_opening_salt_count)
+        .and_then(|total| total.checked_add(aggregate_opening_salt_count))
         .ok_or_else(|| "transported private leaf-salt count overflowed".to_owned())?;
     let transported_salt_byte_length = total_salt_count
         .checked_mul(
@@ -373,6 +398,7 @@ fn derive_private_leaf_salt_liveness(
         .ok_or_else(|| "base-case commitment liveness overflowed".to_owned())?;
     Ok(PrivateLeafSaltLiveness {
         phase_opening_salt_count,
+        bound_opening_salt_count,
         aggregate_opening_salt_count,
         transported_salt_byte_length,
         aggregate_resident_state_byte_length: u64::try_from(
@@ -1454,12 +1480,13 @@ mod tests {
         let accounting =
             derive_private_leaf_salt_liveness(&plan).expect("private salt liveness derives");
         assert_eq!(accounting.phase_opening_salt_count, 1_161);
+        assert_eq!(accounting.bound_opening_salt_count, 320);
         assert_eq!(accounting.aggregate_opening_salt_count, 2_782);
-        assert_eq!(accounting.transported_salt_byte_length, 504_704);
+        assert_eq!(accounting.transported_salt_byte_length, 545_664);
         assert_eq!(accounting.aggregate_resident_state_byte_length, 56);
         assert_eq!(accounting.derivation_workspace_byte_length, 392);
         assert_eq!(accounting.aggregate_row_workspace_byte_length, 584);
-        assert_eq!(accounting.canonical_uniqueness_set_byte_length, 693_992);
+        assert_eq!(accounting.canonical_uniqueness_set_byte_length, 750_312);
         assert_eq!(
             accounting.retained_pad_commitment_payload_byte_length,
             1_376_720,

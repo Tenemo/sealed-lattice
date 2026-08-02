@@ -3260,15 +3260,15 @@ mod tests {
             .expect("derive selected aggregate-wide private-material shape");
         let hiding_base_field_sample_count =
             hiding_shape.total_extension_element_count() * PROOF_CHALLENGE_EXTENSION_DEGREE;
-        assert_eq!(hiding_shape.total_extension_element_count(), 18_025);
-        assert_eq!(hiding_base_field_sample_count, 90_125);
+        assert_eq!(hiding_shape.total_extension_element_count(), 18_027);
+        assert_eq!(hiding_base_field_sample_count, 90_135);
         assert_eq!(
             catalog.entry(CommonProofPrivateCoinCoordinate::hiding_argument()),
             Some(CommonProofPrivateCoinSamplingOperation::ModuloSamples {
                 modulus: crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS,
                 maximum_candidate_draws_per_output:
                     SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
-                output_count: 90_125,
+                output_count: 90_135,
             })
         );
         assert_eq!(catalog.entry_count(), variant.ordered_masks().len() + 2);
