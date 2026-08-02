@@ -405,7 +405,7 @@ impl CanonicalProofTranscript {
     }
 
     /// Begins one typed product-space verifier message. The complete bounded
-    /// draw budget is one fixed-width XOF output and is consumed incrementally.
+    /// draw budget is one plan-sized XOF output and is consumed incrementally.
     fn begin_common_product_residue_challenge(
         &mut self,
         group: CommonProofApplicationChallengeGroup,

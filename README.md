@@ -91,6 +91,13 @@ Works today:
   `8,192` bytes, while a 393-index, 128-draw query vector emits `402,432`
   bytes. Treating either invocation as one fixed 512-bit random-oracle answer
   for the selected QROM transform remains an open theorem-mapping obligation.
+  A production-derived transcript inventory now checks every logical output
+  against its live sampler formula. It records zero 64-byte challenge outputs
+  and all `4,272` messages as variable-output invocations, with an `8,192`-byte
+  minimum and `402,432`-byte maximum. The structural predecessor and database
+  certificates remain derivable, but transform eligibility and the complete-
+  construction predicate refuse. The existing 512-bit transform arithmetic is
+  explicitly conditional on supplying the missing fixed-output oracle model.
   Its exact
   `14,673`-query census contains `6,306` original-BCS rounds. The executable
   whole-state evaluator and collision-free accepting-database extractor bind

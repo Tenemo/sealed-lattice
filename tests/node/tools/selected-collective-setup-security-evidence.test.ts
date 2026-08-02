@@ -66,6 +66,7 @@ describe('Selected collective-setup security evidence', () => {
             physicalProofApplicationCount: 73,
             readyForClosure: false,
             unresolvedNonAssumptionLeaves: [
+                'commonConstructionQromTransform',
                 'setupFamilySimulationComposition',
                 'collectiveSetupHybridComposition',
             ],
@@ -104,8 +105,23 @@ describe('Selected collective-setup security evidence', () => {
         expect(
             requireRecord(record.selectedSetupCorrectnessImport).status,
         ).toBe('resolved');
-        expect(requireArray(record.constructionEvidenceImports)).toHaveLength(
-            3,
+        const constructionEvidenceImports = requireArray(
+            record.constructionEvidenceImports,
+        );
+        expect(constructionEvidenceImports).toHaveLength(3);
+        const qromImport = constructionEvidenceImports
+            .map((value) => requireRecord(value))
+            .find(
+                (value) =>
+                    value.identifier === 'commonConstructionQromTransform',
+            );
+        expect(qromImport).toMatchObject({
+            observedStatus: 'unresolved',
+            requiredClosurePredicate:
+                'typedCmsNineteenApplicabilityAndAcceptingPathCeilings',
+        });
+        expect(qromImport?.missingEvidence).toContain(
+            'variable-output SHAKE256 streams',
         );
     });
 
@@ -253,7 +269,7 @@ describe('Selected collective-setup security evidence', () => {
                 expectedEvidence,
             ),
         ).toThrow(
-            'Collective-setup security closure is blocked by: setupFamilySimulationComposition',
+            'Collective-setup security closure is blocked by: commonConstructionQromTransform, setupFamilySimulationComposition, collectiveSetupHybridComposition.',
         );
         const closure = requireRecord(requireRecord(checkedEvidence).closure);
         expect(closure).toMatchObject({

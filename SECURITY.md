@@ -55,8 +55,11 @@ logical extension challenge currently requests `8,192` SHAKE256 bytes and the
 selected 393-index query vector requests `402,432` bytes. CMS19's fixed-output
 random-oracle model is not made applicable merely by binding that length into
 the input or by using a sponge with 512-bit capacity. The 512-bit transformed-
-soundness arithmetic is conditional until an exact seed-to-sampler or ideal-
-XOF mapping is proved. Likewise, enumerating 103 physical proofs and 159
+soundness arithmetic now carries an explicit fixed-output-model requirement.
+The production-derived inventory records zero 64-byte logical challenges and
+therefore keeps the QROM transform and complete-construction predicate refused
+until an exact seed-to-sampler or ideal-XOF mapping is proved. Likewise,
+enumerating 103 physical proofs and 159
 logical instances does not prove that their separate transcripts form one
 concatenated interactive oracle proof; use per-proof reductions and an explicit
 union bound unless that global composition theorem is supplied. The

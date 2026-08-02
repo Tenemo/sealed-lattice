@@ -163,6 +163,7 @@ const assumptionNodeIdentifiers = [
 ] as const;
 
 const unresolvedNodeIdentifiers = [
+    'commonConstructionQromTransform',
     'setupFamilySimulationComposition',
     'collectiveSetupHybridComposition',
 ] as const;
@@ -731,7 +732,8 @@ const buildConstructionEvidenceImports = (
         {
             identifier: exactConstructionEvidenceImportIdentifiers[0],
             ownerSourcePaths: knowledgeOwnerSourcePaths,
-            requiredClosurePredicate: 'isCompleteConstructionTheorem',
+            requiredClosurePredicate:
+                'completeConstructionExtractorCorrespondence',
             observedStatus: 'resolved',
             checkedArtifactDigest: checkedSourceBundleDigest(
                 sourceAuthority,
@@ -744,12 +746,13 @@ const buildConstructionEvidenceImports = (
             ownerSourcePaths: qromOwnerSourcePaths,
             requiredClosurePredicate:
                 'typedCmsNineteenApplicabilityAndAcceptingPathCeilings',
-            observedStatus: 'resolved',
+            observedStatus: 'unresolved',
             checkedArtifactDigest: checkedSourceBundleDigest(
                 sourceAuthority,
                 qromOwnerSourcePaths,
             ),
-            missingEvidence: null,
+            missingEvidence:
+                'The production logical challenges use plan-sized variable-output SHAKE256 streams. The exact fixed-output seed sampler or variable-output ideal-XOF transform and concrete sponge mapping have not been proved.',
         },
         {
             identifier: exactConstructionEvidenceImportIdentifiers[2],
@@ -1001,16 +1004,16 @@ const buildReductionDag = (): JsonValue => [
         dependencies: ['canonicalHashBinding'],
         advantageExpression: 'epsilon_common_construction_knowledge',
         statement:
-            'The live plan, compiler-interpreter semantics, round-by-round polynomial extractor, explicit-point constraint extractor, and coordinate-derived commitment subtree close the selected common-construction knowledge theorem.',
+            'The live plan, compiler-interpreter semantics, round-by-round polynomial extractor, explicit-point constraint extractor, and coordinate-derived commitment subtree establish the interactive construction extractor correspondence. This does not instantiate the Fiat-Shamir quantum transform.',
     },
     {
         identifier: 'commonConstructionQromTransform',
-        kind: 'reduction',
-        status: 'resolved',
+        kind: 'obligation',
+        status: 'unresolved',
         dependencies: ['shakeQuantumOracle'],
         advantageExpression: 'epsilon_common_construction_qrom',
         statement:
-            'The runtime-identical typed strong-state hash chain, complete accepting-database equation catalog, verifier hash ceiling, and exact failure partition instantiate the selected multi-round quantum transform.',
+            'The typed strong-state hash chain, accepting-database catalog, verifier hash ceiling, and failure partition are structural inputs only. The plan-sized variable-output transcript has not yet been mapped to an eligible quantum transform.',
     },
     {
         identifier: 'commonConstructionMaskingCorrespondence',
@@ -1114,7 +1117,7 @@ const buildResidualLedgers = (): JsonValue => [
             {
                 source: 'common-proof multi-round transform',
                 symbolicTerm: 'epsilon_common_construction_qrom',
-                status: 'resolved',
+                status: 'unresolved',
             },
             {
                 source: 'collective setup composition',

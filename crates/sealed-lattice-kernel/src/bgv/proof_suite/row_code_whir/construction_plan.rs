@@ -685,8 +685,9 @@ enum RowCodeWhirOracleEquationOperationKind {
 }
 
 /// Compact equation grammar for one contiguous maximum-support range. Every
-/// logical verifier challenge is one fixed-width, incrementally consumed XOF
-/// answer. Consecutive verifier messages are separated by one deterministic
+/// logical verifier challenge is one plan-sized, incrementally consumed XOF
+/// answer. Different challenge samplers can request different output lengths.
+/// Consecutive verifier messages are separated by one deterministic
 /// empty-prover absorption. Variable prover responses first derive one
 /// fixed-width response root; the separate absorption edge consumes both the
 /// current transcript state and that root. A fixed-width Merkle commitment is
