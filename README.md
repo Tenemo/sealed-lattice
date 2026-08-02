@@ -150,8 +150,20 @@ Works today:
   authorities or query schedules, challenge-dependent or publicly recomputable
   masks, and zero-knowledge claims outside its scope. This establishes the
   selected construction's affine masking composition, not the still-open
-  nonlinear commitment reduction, transported-byte reduction, complete
+  nonlinear commitment reduction, emitted-proof instantiation, complete
   Fiat-Shamir soundness, or ceremony composition.
+- The exact same-secret transport correspondence now walks all 22
+  construction-plan proof sections through their production decoder and
+  semantic-verifier owners. It derives a `5,813,652`-byte family body and the
+  `2,942,104`-byte aggregate-wide terminal from the canonical section rules;
+  the complete proof remains `5,814,554` bytes after its 902-byte canonical
+  header. The catalog binds the statement, protocol, suite, ceremony, action,
+  application slot, relation, construction, declared length, and final stream
+  digest, and mutation tests refuse omitted or reordered sections, stale
+  identities, incomplete binding or refusal catalogs, and altered byte
+  ledgers. This is a static parser-to-verifier correspondence. It does not
+  establish acceptance of an emitted proof or discharge the nonlinear and
+  ceremony-level reductions.
 - Checked construction-geometry certificates have derived for all 31
   production identities: 27 width-64, log-inverse-rate-two
   (inverse-rate-four) identities, including evaluator top counts 1 through 20,
@@ -241,9 +253,10 @@ Not yet:
   rejection now derive for every production geometry. The VSS geometry
   additionally derives its heterogeneous application-modulus
   product-challenge ledger. All 27 width-64 and four width-8 identities pass
-  the complete constructor. The nonlinear commitment reduction, final
-  theorem-to-transported-bytes correspondence, and ceremony-level failure
-  composition remain open.
+  the complete constructor. The exact same-secret codec now has a complete
+  static section-to-decoder-to-verifier correspondence, while its instantiation
+  by one emitted and freshly transported proof, the nonlinear commitment
+  reduction, and ceremony-level failure composition remain open.
 - The static liveness model has not yet been confirmed by a completed native
   proof or release-WebAssembly browser measurement. Complete participant
   transport accounting is also open. Production-derived sizes for 73 of the

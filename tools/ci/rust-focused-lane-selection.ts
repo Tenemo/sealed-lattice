@@ -59,6 +59,7 @@ export const theoremEvidenceRustTests = [
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::relinearization_round_one_uses_the_maximum_shared_bound_agreement',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::a_256_bit_transition_chain_refuses_a_uniform_512_bit_oracle_denominator',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::deployed_streaming_leaf_chain_uses_uniform_512_bit_oracle_outputs',
+    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::exact_transported_proof_catalog_binds_every_production_section',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::cms19_whole_state_and_database_support_are_exact_and_mutation_sensitive',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::ballot_width_eight_has_complete_semantic_state_and_database_support',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::one_transition_collision_propagates_through_the_shared_suffix_and_final_digest',

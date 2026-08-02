@@ -348,6 +348,505 @@ impl ExactProofShape {
     }
 }
 
+#[cfg(all(test, feature = "theorem-evidence"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::bgv::proof_suite) enum ExactSameSecretTransportDecoderOwner {
+    TranscriptMaterial,
+    PhaseColumnsAndCompactFrontier { phase: RowCodeWhirPhase },
+    BoundLeavesAndCompactFrontier { bound_tree_ordinal: u32 },
+    CanonicalAggregateWideTerminal,
+}
+
+#[cfg(all(test, feature = "theorem-evidence"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::bgv::proof_suite) enum ExactSameSecretTransportSemanticOwner {
+    RelationCommitment { phase: RowCodeWhirPhase },
+    OutOfDomainCompositionAndRegisteredClaims,
+    OpeningBatchMaskConsistency,
+    AggregateConstrainedPolynomialCommitment,
+    AggregateWidePadCommitmentBinding,
+    PhaseOpeningAuthenticationAndReduction { phase: RowCodeWhirPhase },
+    BoundAuthenticationAndReduction { bound_tree_ordinal: u32 },
+    ExplicitPointAggregateWideOpening,
+}
+
+#[cfg(all(test, feature = "theorem-evidence"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::bgv::proof_suite) enum ExactSameSecretTransportCountSource {
+    ConstructionPlanFixed,
+    TransportedU32EqualToConstructionPlan,
+    ConstructionPlanFixedWithTransportedCoordinateFrontierCount,
+    DeclaredRemainingLengthWithCanonicalInnerDecoder,
+}
+
+#[cfg(all(test, feature = "theorem-evidence"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::bgv::proof_suite) enum ExactSameSecretTransportLengthRule {
+    Digest,
+    CountedExtensionValues {
+        value_count: usize,
+    },
+    FixedExtensionValues {
+        value_count: usize,
+    },
+    PhaseCompactOpening {
+        query_count: usize,
+        row_count: usize,
+        leaf_salt_byte_length: usize,
+        encoded_column_count: usize,
+    },
+    BoundCompactOpening {
+        query_count: usize,
+        row_width: usize,
+        leaf_salt_byte_length: usize,
+        leaf_count: usize,
+    },
+    CanonicalAggregateWideOpening {
+        byte_length: usize,
+    },
+}
+
+#[cfg(all(test, feature = "theorem-evidence"))]
+impl ExactSameSecretTransportLengthRule {
+    fn canonical_byte_length_ceiling(self) -> Result<usize, String> {
+        let extension_byte_length = PROOF_CHALLENGE_EXTENSION_DEGREE
+            .checked_mul(core::mem::size_of::<u64>())
+            .ok_or_else(|| "exact transport extension width overflowed".to_owned())?;
+        match self {
+            Self::Digest => Ok(64),
+            Self::CountedExtensionValues { value_count } => value_count
+                .checked_mul(extension_byte_length)
+                .and_then(|length| length.checked_add(core::mem::size_of::<u32>()))
+                .ok_or_else(|| "exact transported extension section overflowed".to_owned()),
+            Self::FixedExtensionValues { value_count } => value_count
+                .checked_mul(extension_byte_length)
+                .ok_or_else(|| "exact transported extension section overflowed".to_owned()),
+            Self::PhaseCompactOpening {
+                query_count,
+                row_count,
+                leaf_salt_byte_length,
+                encoded_column_count,
+            } => {
+                let opened_leaf_byte_length = row_count
+                    .checked_mul(core::mem::size_of::<u64>())
+                    .and_then(|length| length.checked_add(leaf_salt_byte_length))
+                    .ok_or_else(|| "exact transported phase leaf width overflowed".to_owned())?;
+                let maximum_frontier_node_count =
+                    crate::bgv::proof_suite::merkle::maximum_minimal_frontier_node_count(
+                        encoded_column_count,
+                        query_count,
+                    )
+                    .map_err(|error| {
+                        format!("derive exact transported phase frontier: {error:?}")
+                    })?;
+                query_count
+                    .checked_mul(opened_leaf_byte_length)
+                    .and_then(|length| length.checked_add(core::mem::size_of::<u32>()))
+                    .and_then(|length| {
+                        maximum_frontier_node_count
+                            .checked_mul(64)
+                            .and_then(|frontier_length| length.checked_add(frontier_length))
+                    })
+                    .ok_or_else(|| "exact transported phase section overflowed".to_owned())
+            }
+            Self::BoundCompactOpening {
+                query_count,
+                row_width,
+                leaf_salt_byte_length,
+                leaf_count,
+            } => {
+                let opened_leaf_byte_length = row_width
+                    .checked_mul(2)
+                    .and_then(|value_count| value_count.checked_mul(core::mem::size_of::<u64>()))
+                    .and_then(|length| length.checked_add(leaf_salt_byte_length))
+                    .ok_or_else(|| "exact transported bound leaf width overflowed".to_owned())?;
+                let maximum_frontier_node_count =
+                    crate::bgv::proof_suite::merkle::maximum_minimal_frontier_node_count(
+                        leaf_count,
+                        query_count,
+                    )
+                    .map_err(|error| {
+                        format!("derive exact transported bound frontier: {error:?}")
+                    })?;
+                query_count
+                    .checked_mul(opened_leaf_byte_length)
+                    .and_then(|length| length.checked_add(core::mem::size_of::<u32>()))
+                    .and_then(|length| {
+                        maximum_frontier_node_count
+                            .checked_mul(64)
+                            .and_then(|frontier_length| length.checked_add(frontier_length))
+                    })
+                    .ok_or_else(|| "exact transported bound section overflowed".to_owned())
+            }
+            Self::CanonicalAggregateWideOpening { byte_length } if byte_length > 0 => {
+                Ok(byte_length)
+            }
+            Self::CanonicalAggregateWideOpening { .. } => {
+                Err("exact transported aggregate-wide section is empty".to_owned())
+            }
+        }
+    }
+}
+
+#[cfg(all(test, feature = "theorem-evidence"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::bgv::proof_suite) struct ExactSameSecretTransportSectionRow {
+    pub(in crate::bgv::proof_suite) section: RowCodeWhirProofSectionPlan,
+    pub(in crate::bgv::proof_suite) decoder_owner: ExactSameSecretTransportDecoderOwner,
+    pub(in crate::bgv::proof_suite) semantic_owner: ExactSameSecretTransportSemanticOwner,
+    pub(in crate::bgv::proof_suite) count_source: ExactSameSecretTransportCountSource,
+    pub(in crate::bgv::proof_suite) length_rule: ExactSameSecretTransportLengthRule,
+}
+
+#[cfg(all(test, feature = "theorem-evidence"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::bgv::proof_suite) enum ExactSameSecretTransportBinding {
+    CanonicalApplicationStatement,
+    ProtocolVersion,
+    SuiteIdentifier,
+    CeremonyContext,
+    ActionContext,
+    ApplicationSlot,
+    RelationPlanIdentity,
+    RelationPlanVariantIdentity,
+    ConstructionPlanIdentity,
+    DeclaredCompleteProofLength,
+    FinalCanonicalProofStreamDigest,
+}
+
+#[cfg(all(test, feature = "theorem-evidence"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::bgv::proof_suite) enum ExactSameSecretTransportRefusal {
+    WrongCanonicalProofObjectHeader,
+    WrongDeclaredProofLength,
+    OversizedDeclaredProofLength,
+    WrongFamilyWireMagic,
+    TruncatedSection,
+    TrailingBytes,
+    OmittedOrReorderedConstructionSection,
+    WrongFixedItemCount,
+    OversizedCoordinateFrontierCount,
+    ReusedPrivateLeafSalt,
+    NonCanonicalBaseFieldEncoding,
+    NonCanonicalExtensionFieldEncoding,
+    NonCanonicalAggregateWideSuffix,
+}
+
+/// Production-code correspondence from the checked construction sections to
+/// the exact transported same-secret decoder and its semantic verifier.
+///
+/// The certificate is structural: it proves that the canonical parser has one
+/// plan-owned interpretation and that its byte ceiling is the sum of those
+/// exact section rules. Acceptance of a concrete emitted proof remains runtime
+/// evidence and is not inferred from this catalog.
+#[cfg(all(test, feature = "theorem-evidence"))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::bgv::proof_suite) struct ExactSameSecretTransportCorrespondenceCertificate {
+    pub(in crate::bgv::proof_suite) construction_plan_identity_hash: [u8; 64],
+    pub(in crate::bgv::proof_suite) relation_plan_hash: [u8; 64],
+    pub(in crate::bgv::proof_suite) relation_plan_variant_hash: [u8; 64],
+    pub(in crate::bgv::proof_suite) family_wire_magic: [u8; 8],
+    pub(in crate::bgv::proof_suite) section_rows: Vec<ExactSameSecretTransportSectionRow>,
+    pub(in crate::bgv::proof_suite) bindings: Vec<ExactSameSecretTransportBinding>,
+    pub(in crate::bgv::proof_suite) refusals: Vec<ExactSameSecretTransportRefusal>,
+    pub(in crate::bgv::proof_suite) aggregate_opening_section_ledger: Vec<(&'static str, usize)>,
+    pub(in crate::bgv::proof_suite) family_body_byte_length_ceiling: usize,
+}
+
+#[cfg(all(test, feature = "theorem-evidence"))]
+const EXACT_SAME_SECRET_TRANSPORT_BINDINGS: [ExactSameSecretTransportBinding; 11] = [
+    ExactSameSecretTransportBinding::CanonicalApplicationStatement,
+    ExactSameSecretTransportBinding::ProtocolVersion,
+    ExactSameSecretTransportBinding::SuiteIdentifier,
+    ExactSameSecretTransportBinding::CeremonyContext,
+    ExactSameSecretTransportBinding::ActionContext,
+    ExactSameSecretTransportBinding::ApplicationSlot,
+    ExactSameSecretTransportBinding::RelationPlanIdentity,
+    ExactSameSecretTransportBinding::RelationPlanVariantIdentity,
+    ExactSameSecretTransportBinding::ConstructionPlanIdentity,
+    ExactSameSecretTransportBinding::DeclaredCompleteProofLength,
+    ExactSameSecretTransportBinding::FinalCanonicalProofStreamDigest,
+];
+
+#[cfg(all(test, feature = "theorem-evidence"))]
+const EXACT_SAME_SECRET_TRANSPORT_REFUSALS: [ExactSameSecretTransportRefusal; 13] = [
+    ExactSameSecretTransportRefusal::WrongCanonicalProofObjectHeader,
+    ExactSameSecretTransportRefusal::WrongDeclaredProofLength,
+    ExactSameSecretTransportRefusal::OversizedDeclaredProofLength,
+    ExactSameSecretTransportRefusal::WrongFamilyWireMagic,
+    ExactSameSecretTransportRefusal::TruncatedSection,
+    ExactSameSecretTransportRefusal::TrailingBytes,
+    ExactSameSecretTransportRefusal::OmittedOrReorderedConstructionSection,
+    ExactSameSecretTransportRefusal::WrongFixedItemCount,
+    ExactSameSecretTransportRefusal::OversizedCoordinateFrontierCount,
+    ExactSameSecretTransportRefusal::ReusedPrivateLeafSalt,
+    ExactSameSecretTransportRefusal::NonCanonicalBaseFieldEncoding,
+    ExactSameSecretTransportRefusal::NonCanonicalExtensionFieldEncoding,
+    ExactSameSecretTransportRefusal::NonCanonicalAggregateWideSuffix,
+];
+
+#[cfg(all(test, feature = "theorem-evidence"))]
+fn exact_same_secret_transport_section_rows(
+    construction_plan: &RowCodeWhirConstructionPlan,
+) -> Result<Vec<ExactSameSecretTransportSectionRow>, String> {
+    let aggregate_opening_byte_length =
+        canonical_row_code_whir_aggregate_opening_section_byte_ledger(construction_plan)?
+            .iter()
+            .try_fold(0_usize, |total, (_, byte_length)| {
+                total
+                    .checked_add(*byte_length)
+                    .ok_or_else(|| "exact aggregate opening byte length overflowed".to_owned())
+            })?;
+    construction_plan
+        .proof_sections()
+        .iter()
+        .copied()
+        .map(|section| {
+            let (decoder_owner, semantic_owner, count_source, length_rule) = match section.role {
+                RowCodeWhirProofSectionRole::RelationCommitment { phase } => (
+                    ExactSameSecretTransportDecoderOwner::TranscriptMaterial,
+                    ExactSameSecretTransportSemanticOwner::RelationCommitment { phase },
+                    ExactSameSecretTransportCountSource::ConstructionPlanFixed,
+                    ExactSameSecretTransportLengthRule::Digest,
+                ),
+                RowCodeWhirProofSectionRole::OutOfDomainEvaluations => (
+                    ExactSameSecretTransportDecoderOwner::TranscriptMaterial,
+                    ExactSameSecretTransportSemanticOwner::OutOfDomainCompositionAndRegisteredClaims,
+                    ExactSameSecretTransportCountSource::TransportedU32EqualToConstructionPlan,
+                    ExactSameSecretTransportLengthRule::CountedExtensionValues {
+                        value_count: section.item_count,
+                    },
+                ),
+                RowCodeWhirProofSectionRole::OpeningBatchMaskEvaluations => (
+                    ExactSameSecretTransportDecoderOwner::TranscriptMaterial,
+                    ExactSameSecretTransportSemanticOwner::OpeningBatchMaskConsistency,
+                    ExactSameSecretTransportCountSource::ConstructionPlanFixed,
+                    ExactSameSecretTransportLengthRule::FixedExtensionValues {
+                        value_count: section.item_count,
+                    },
+                ),
+                RowCodeWhirProofSectionRole::AggregateCommitment => (
+                    ExactSameSecretTransportDecoderOwner::TranscriptMaterial,
+                    ExactSameSecretTransportSemanticOwner::AggregateConstrainedPolynomialCommitment,
+                    ExactSameSecretTransportCountSource::ConstructionPlanFixed,
+                    ExactSameSecretTransportLengthRule::Digest,
+                ),
+                RowCodeWhirProofSectionRole::AggregateWidePadCommitment => (
+                    ExactSameSecretTransportDecoderOwner::TranscriptMaterial,
+                    ExactSameSecretTransportSemanticOwner::AggregateWidePadCommitmentBinding,
+                    ExactSameSecretTransportCountSource::ConstructionPlanFixed,
+                    ExactSameSecretTransportLengthRule::Digest,
+                ),
+                RowCodeWhirProofSectionRole::PhaseOpenings { phase } => {
+                    let row_count = construction_plan
+                        .phase_row_count(phase)
+                        .ok_or_else(|| "exact transported phase has no row geometry".to_owned())?;
+                    let encoded_column_count = construction_plan
+                        .phase_encoded_column_count(phase)
+                        .ok_or_else(|| {
+                            "exact transported phase has no encoded domain".to_owned()
+                        })?;
+                    (
+                        ExactSameSecretTransportDecoderOwner::PhaseColumnsAndCompactFrontier {
+                            phase,
+                        },
+                        ExactSameSecretTransportSemanticOwner::PhaseOpeningAuthenticationAndReduction {
+                            phase,
+                        },
+                        ExactSameSecretTransportCountSource::ConstructionPlanFixedWithTransportedCoordinateFrontierCount,
+                        ExactSameSecretTransportLengthRule::PhaseCompactOpening {
+                            query_count: section.item_count,
+                            row_count,
+                            leaf_salt_byte_length: if construction_plan.proof_privacy_mode
+                                == ProofPrivacyMode::SecretBearing
+                            {
+                                PRIVATE_LEAF_SALT_BYTE_LENGTH
+                            } else {
+                                0
+                            },
+                            encoded_column_count,
+                        },
+                    )
+                }
+                RowCodeWhirProofSectionRole::BoundTreeOpenings {
+                    bound_tree_ordinal,
+                } => {
+                    let bound_tree_index = usize::try_from(bound_tree_ordinal)
+                        .map_err(|_| "exact transported bound-tree ordinal exceeds usize".to_owned())?;
+                    let bound_tree = construction_plan
+                        .bound_trees
+                        .get(bound_tree_index)
+                        .ok_or_else(|| "exact transported bound tree is absent".to_owned())?;
+                    if bound_tree.bound_tree_ordinal != bound_tree_ordinal
+                        || bound_tree.query_count != section.item_count
+                    {
+                        return Err("exact transported bound-tree section diverges from the plan".to_owned());
+                    }
+                    (
+                        ExactSameSecretTransportDecoderOwner::BoundLeavesAndCompactFrontier {
+                            bound_tree_ordinal,
+                        },
+                        ExactSameSecretTransportSemanticOwner::BoundAuthenticationAndReduction {
+                            bound_tree_ordinal,
+                        },
+                        ExactSameSecretTransportCountSource::ConstructionPlanFixedWithTransportedCoordinateFrontierCount,
+                        ExactSameSecretTransportLengthRule::BoundCompactOpening {
+                            query_count: section.item_count,
+                            row_width: bound_tree.ordered_columns.len(),
+                            leaf_salt_byte_length: if bound_tree.construction_kind
+                                == BoundTreeConstructionKind::CommittedMaterial
+                            {
+                                COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH
+                            } else {
+                                0
+                            },
+                            leaf_count: bound_tree.leaf_count,
+                        },
+                    )
+                }
+                RowCodeWhirProofSectionRole::AggregateWideOpening => (
+                    ExactSameSecretTransportDecoderOwner::CanonicalAggregateWideTerminal,
+                    ExactSameSecretTransportSemanticOwner::ExplicitPointAggregateWideOpening,
+                    ExactSameSecretTransportCountSource::DeclaredRemainingLengthWithCanonicalInnerDecoder,
+                    ExactSameSecretTransportLengthRule::CanonicalAggregateWideOpening {
+                        byte_length: aggregate_opening_byte_length,
+                    },
+                ),
+            };
+            Ok(ExactSameSecretTransportSectionRow {
+                section,
+                decoder_owner,
+                semantic_owner,
+                count_source,
+                length_rule,
+            })
+        })
+        .collect()
+}
+
+#[cfg(all(test, feature = "theorem-evidence"))]
+impl ExactSameSecretTransportCorrespondenceCertificate {
+    pub(in crate::bgv::proof_suite) fn is_bound_to_construction_plan(
+        &self,
+        construction_plan: &RowCodeWhirConstructionPlan,
+    ) -> bool {
+        let Ok(construction_plan_identity_hash) = construction_plan.canonical_identity_hash()
+        else {
+            return false;
+        };
+        let Ok(expected_rows) = exact_same_secret_transport_section_rows(construction_plan) else {
+            return false;
+        };
+        let Ok(expected_family_body_byte_length_ceiling) =
+            expected_rows
+                .iter()
+                .try_fold(EXACT_PROOF_WIRE_MAGIC.len(), |total, row| {
+                    row.length_rule
+                        .canonical_byte_length_ceiling()
+                        .and_then(|byte_length| {
+                            total.checked_add(byte_length).ok_or_else(|| {
+                                "exact transported family-body length overflowed".to_owned()
+                            })
+                        })
+                })
+        else {
+            return false;
+        };
+        self.construction_plan_identity_hash == construction_plan_identity_hash
+            && self.relation_plan_hash == construction_plan.relation_plan_hash
+            && self.relation_plan_variant_hash == construction_plan.relation_plan_variant_hash
+            && self.family_wire_magic == *EXACT_PROOF_WIRE_MAGIC
+            && self.section_rows == expected_rows
+            && self
+                .section_rows
+                .iter()
+                .map(|row| row.section)
+                .eq(construction_plan.proof_sections().iter().copied())
+            && self.bindings == EXACT_SAME_SECRET_TRANSPORT_BINDINGS
+            && self.refusals == EXACT_SAME_SECRET_TRANSPORT_REFUSALS
+            && self.aggregate_opening_section_ledger
+                == canonical_row_code_whir_aggregate_opening_section_byte_ledger(construction_plan)
+                    .unwrap_or_default()
+            && self.family_body_byte_length_ceiling == expected_family_body_byte_length_ceiling
+            && self.family_body_byte_length_ceiling > 0
+            && self.family_body_byte_length_ceiling <= MAXIMUM_COMMON_PROOF_BYTE_LENGTH
+    }
+
+    pub(in crate::bgv::proof_suite) fn is_complete_for(
+        &self,
+        construction_plan: &RowCodeWhirConstructionPlan,
+        relation_variant: &RelationPlanVariant,
+        relation_context: &RelationPlanCheckContext,
+    ) -> bool {
+        let Ok(relation_plan_variant_hash) = relation_variant.canonical_hash() else {
+            return false;
+        };
+        if validate_exact_same_secret_construction_plan(
+            construction_plan,
+            relation_variant,
+            relation_context,
+            self.relation_plan_hash,
+            relation_plan_variant_hash,
+        )
+        .is_err()
+        {
+            return false;
+        }
+        self.relation_plan_variant_hash == relation_plan_variant_hash
+            && self.is_bound_to_construction_plan(construction_plan)
+    }
+}
+
+#[cfg(all(test, feature = "theorem-evidence"))]
+pub(in crate::bgv::proof_suite) fn checked_exact_same_secret_transport_correspondence(
+    construction_plan: &RowCodeWhirConstructionPlan,
+    relation_variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
+    relation_plan_hash: [u8; 64],
+) -> Result<ExactSameSecretTransportCorrespondenceCertificate, String> {
+    let relation_plan_variant_hash = relation_variant
+        .canonical_hash()
+        .map_err(|error| format!("hash exact relation variant for transport: {error:?}"))?;
+    validate_exact_same_secret_construction_plan(
+        construction_plan,
+        relation_variant,
+        relation_context,
+        relation_plan_hash,
+        relation_plan_variant_hash,
+    )?;
+    let section_rows = exact_same_secret_transport_section_rows(construction_plan)?;
+    let family_body_byte_length_ceiling =
+        section_rows
+            .iter()
+            .try_fold(EXACT_PROOF_WIRE_MAGIC.len(), |total, row| {
+                row.length_rule
+                    .canonical_byte_length_ceiling()
+                    .and_then(|byte_length| {
+                        total.checked_add(byte_length).ok_or_else(|| {
+                            "exact transported family-body length overflowed".to_owned()
+                        })
+                    })
+            })?;
+    let certificate = ExactSameSecretTransportCorrespondenceCertificate {
+        construction_plan_identity_hash: construction_plan
+            .canonical_identity_hash()
+            .map_err(|error| format!("hash exact construction for transport: {error:?}"))?,
+        relation_plan_hash,
+        relation_plan_variant_hash,
+        family_wire_magic: *EXACT_PROOF_WIRE_MAGIC,
+        section_rows,
+        bindings: EXACT_SAME_SECRET_TRANSPORT_BINDINGS.to_vec(),
+        refusals: EXACT_SAME_SECRET_TRANSPORT_REFUSALS.to_vec(),
+        aggregate_opening_section_ledger:
+            canonical_row_code_whir_aggregate_opening_section_byte_ledger(construction_plan)?,
+        family_body_byte_length_ceiling,
+    };
+    if !certificate.is_complete_for(construction_plan, relation_variant, relation_context) {
+        return Err("exact transported-proof correspondence is incomplete".to_owned());
+    }
+    Ok(certificate)
+}
+
 fn validate_exact_trace_phase_plan(
     phase: Option<&RowCodeWhirTracePhasePlan>,
     expected_layout: &ExactBasePhaseLayout,

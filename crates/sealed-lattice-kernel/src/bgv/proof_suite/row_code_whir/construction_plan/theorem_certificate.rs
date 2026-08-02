@@ -25,9 +25,9 @@ use crate::bgv::proof_suite::relation_plan::{
 };
 use crate::bgv::proof_suite::row_code_whir::{
     ChallengeField, ColumnStreamableLeafHasher, ColumnStreamableLeafOracleFrame,
-    ColumnStreamableLeafOracleFrameDescriptor, MERKLE_DIGEST_WORD_LENGTH,
-    ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN, ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN,
-    aggregate_leaf_hasher,
+    ColumnStreamableLeafOracleFrameDescriptor, ExactSameSecretTransportCorrespondenceCertificate,
+    MERKLE_DIGEST_WORD_LENGTH, ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN,
+    ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN, aggregate_leaf_hasher,
     aggregate_wide_hiding::{
         AGGREGATE_WIDE_PAD_LOG_INVERSE_RATE, AggregateWideChronologyEvent,
         AggregateWideChronologyRow, AggregateWideDerivedAffineIdentity,
@@ -37,6 +37,7 @@ use crate::bgv::proof_suite::row_code_whir::{
         AggregateWideMaskingCertificate, AggregateWideNonlinearViewBoundary,
         checked_fold_limb_affine_map,
     },
+    checked_exact_same_secret_transport_correspondence,
     commitment_liveness::derive_aggregate_commitment_liveness,
     coordinate_derived_hiding_mmcs::{
         AGGREGATE_PRIVATE_LEAF_SALT_KEY_EXTENSION_ELEMENT_COUNT, AggregateLeafSaltRole,
@@ -137,6 +138,7 @@ pub(in crate::bgv::proof_suite) enum WhirTheoremCertificateError {
     IncompleteRelationSemanticCorrespondence,
     IncompletePolynomialExtractorCorrespondence,
     IncompleteFailureMagnitudeCorrespondence,
+    IncompleteTransportedProofCorrespondence,
     SelectedProductionGeometry {
         application_statement_schema_identifier: u16,
         schedule_position: Option<u32>,
@@ -186,6 +188,7 @@ pub(in crate::bgv::proof_suite) enum ProductionGeometryCertificateFailure {
     IncompleteRelationSemanticCorrespondence,
     IncompletePolynomialExtractorCorrespondence,
     IncompleteFailureMagnitudeCorrespondence,
+    IncompleteTransportedProofCorrespondence,
     InvalidCoordinateOrIdentity,
     InvalidWitnessGeometry,
     IncompleteRelationOrMaskingCertificate,
@@ -232,6 +235,9 @@ impl From<WhirTheoremCertificateError> for ProductionGeometryCertificateFailure 
             }
             WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence => {
                 Self::IncompleteFailureMagnitudeCorrespondence
+            }
+            WhirTheoremCertificateError::IncompleteTransportedProofCorrespondence => {
+                Self::IncompleteTransportedProofCorrespondence
             }
             WhirTheoremCertificateError::SelectedProductionGeometry { failure, .. } => failure,
         }
@@ -7886,6 +7892,7 @@ pub(in crate::bgv::proof_suite) struct RowCodeWhirFailurePartitionCertificate {
     relation_compiler_interpreter_semantics: RelationCompilerInterpreterSemanticCertificate,
     polynomial_protocol_extractor: ProductionPolynomialProtocolExtractorCertificate,
     point_constraint_extractor: ProductionPointConstraintExtractorCertificate,
+    transported_proof_correspondence: ExactSameSecretTransportCorrespondenceCertificate,
 }
 
 impl RowCodeWhirFailurePartitionCertificate {
@@ -7969,6 +7976,18 @@ impl RowCodeWhirFailurePartitionCertificate {
             && self.relation_compiler_interpreter_semantics.is_complete()
             && self.polynomial_protocol_extractor.is_complete()
             && self.point_constraint_extractor.is_complete()
+            && self
+                .transported_proof_correspondence
+                .construction_plan_identity_hash
+                == self
+                    .production_aggregate_wide_views
+                    .construction_plan_identity_hash
+            && self
+                .transported_proof_correspondence
+                .relation_plan_variant_hash
+                == self
+                    .production_construction_masking
+                    .relation_plan_variant_hash
             && self.selected_plan_state_predicate.transition_rows.len()
                 == usize::try_from(self.logical_verifier_message_count).unwrap_or(usize::MAX)
                     + self
@@ -8033,6 +8052,9 @@ impl RowCodeWhirFailurePartitionCertificate {
                 &self.cms19_state_predicate,
                 &self.exact_failure_magnitude,
             )
+            && self
+                .transported_proof_correspondence
+                .is_bound_to_construction_plan(plan)
     }
 }
 
@@ -9337,6 +9359,13 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
     let relation_plan_variant_hash = relation_variant
         .canonical_hash()
         .map_err(|_| WhirTheoremCertificateError::IncompletePolynomialExtractorCorrespondence)?;
+    let transported_proof_correspondence = checked_exact_same_secret_transport_correspondence(
+        plan,
+        relation_variant,
+        &relation_context,
+        validated_relation_plan.canonical_plan_hash(),
+    )
+    .map_err(|_| WhirTheoremCertificateError::IncompleteTransportedProofCorrespondence)?;
     let (polynomial_protocol_extractor, point_constraint_extractor) =
         checked_production_extractor_correspondence(
             plan,
@@ -9816,6 +9845,7 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
         relation_compiler_interpreter_semantics,
         polynomial_protocol_extractor,
         point_constraint_extractor,
+        transported_proof_correspondence,
     })
 }
 
@@ -17017,6 +17047,89 @@ fn deployed_streaming_leaf_chain_uses_uniform_512_bit_oracle_outputs() {
             .has_complete_structural_correspondence()
     );
     assert!(certificate.has_complete_structural_certificate());
+}
+
+#[test]
+#[ignore = "owned by test:rust:kernel:theorem-evidence"]
+fn exact_transported_proof_catalog_binds_every_production_section() {
+    let relation_context = selected_relation_plan_check_context(
+        ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+    )
+    .expect("the selected same-secret relation context exists");
+    let compiled_relation_plan = compile_same_secret_relation_plan(
+        &selected_same_secret_relation_plan_input()
+            .expect("the selected same-secret relation input derives"),
+        &relation_context,
+    )
+    .expect("the selected same-secret relation compiles");
+    let validated_relation_plan = ValidatedRelationPlanArtifact::from_owned_compiled_plan(
+        compiled_relation_plan,
+        &relation_context,
+    )
+    .expect("the selected same-secret relation validates");
+    let relation_variant = validated_relation_plan
+        .compiled_plan()
+        .select_variant(None, None)
+        .expect("the exact same-secret variant exists");
+    let plan =
+        RowCodeWhirConstructionPlan::for_selected_variant(&validated_relation_plan, None, None)
+            .expect("the exact same-secret construction derives");
+    let certificate = checked_exact_same_secret_transport_correspondence(
+        &plan,
+        relation_variant,
+        &relation_context,
+        validated_relation_plan.canonical_plan_hash(),
+    )
+    .expect("the transported-proof correspondence derives");
+
+    assert!(certificate.is_complete_for(&plan, relation_variant, &relation_context));
+    assert_eq!(certificate.section_rows.len(), 22);
+    assert_eq!(certificate.section_rows.len(), plan.proof_sections().len());
+    assert_eq!(certificate.family_body_byte_length_ceiling, 5_813_652);
+    assert_eq!(
+        certificate
+            .aggregate_opening_section_ledger
+            .iter()
+            .map(|(_, byte_length)| *byte_length)
+            .sum::<usize>(),
+        2_942_104,
+    );
+
+    let mut omitted_section = certificate.clone();
+    omitted_section.section_rows.remove(7);
+    assert!(!omitted_section.is_complete_for(&plan, relation_variant, &relation_context));
+
+    let mut reordered_sections = certificate.clone();
+    reordered_sections.section_rows.swap(7, 8);
+    assert!(!reordered_sections.is_complete_for(&plan, relation_variant, &relation_context));
+
+    let mut stale_construction = certificate.clone();
+    stale_construction.construction_plan_identity_hash[0] ^= 1;
+    assert!(!stale_construction.is_complete_for(&plan, relation_variant, &relation_context));
+
+    let mut incomplete_refusal_catalog = certificate.clone();
+    incomplete_refusal_catalog.refusals.pop();
+    assert!(!incomplete_refusal_catalog.is_complete_for(
+        &plan,
+        relation_variant,
+        &relation_context,
+    ));
+
+    let mut incomplete_binding_catalog = certificate.clone();
+    incomplete_binding_catalog.bindings.pop();
+    assert!(!incomplete_binding_catalog.is_complete_for(
+        &plan,
+        relation_variant,
+        &relation_context,
+    ));
+
+    let mut changed_aggregate_ledger = certificate.clone();
+    changed_aggregate_ledger.aggregate_opening_section_ledger[0].1 += 1;
+    assert!(!changed_aggregate_ledger.is_complete_for(&plan, relation_variant, &relation_context,));
+
+    let mut changed_body_length = certificate;
+    changed_body_length.family_body_byte_length_ceiling -= 1;
+    assert!(!changed_body_length.is_complete_for(&plan, relation_variant, &relation_context));
 }
 
 #[test]

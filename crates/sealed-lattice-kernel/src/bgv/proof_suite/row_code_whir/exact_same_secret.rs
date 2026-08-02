@@ -103,6 +103,11 @@ pub(in crate::bgv::proof_suite::row_code_whir) use exact_proof::{
 pub(crate) use exact_proof::{
     ExactSameSecretFinalProofVerification, ExactSameSecretIncrementalVerification,
 };
+#[cfg(all(test, feature = "theorem-evidence"))]
+pub(in crate::bgv::proof_suite) use exact_proof::{
+    ExactSameSecretTransportCorrespondenceCertificate,
+    checked_exact_same_secret_transport_correspondence,
+};
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 const SOURCE_POLYNOMIAL_DIGEST_DOMAIN: &str =

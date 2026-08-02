@@ -61,6 +61,11 @@ pub(crate) use exact_same_secret::{
     PreparedExactSameSecretVerification, exact_same_secret_verification_resident_memory_accounting,
     exact_same_secret_verification_runtime_limits, prepare_exact_same_secret_verification,
 };
+#[cfg(all(test, feature = "theorem-evidence"))]
+pub(in crate::bgv::proof_suite) use exact_same_secret::{
+    ExactSameSecretTransportCorrespondenceCertificate,
+    checked_exact_same_secret_transport_correspondence,
+};
 pub(in crate::bgv::proof_suite) use generation_state::{
     RowCodeWhirGenerationStateMachine, RowCodeWhirTranscriptPrefixAuthority,
     planned_row_code_whir_external_memory_requirement,
