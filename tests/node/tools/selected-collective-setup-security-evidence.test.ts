@@ -66,7 +66,6 @@ describe('Selected collective-setup security evidence', () => {
             physicalProofApplicationCount: 73,
             readyForClosure: false,
             unresolvedNonAssumptionLeaves: [
-                'commonProofQromComposition',
                 'setupFamilySimulationComposition',
                 'collectiveSetupHybridComposition',
             ],
@@ -108,7 +107,19 @@ describe('Selected collective-setup security evidence', () => {
         const constructionEvidenceImports = requireArray(
             record.constructionEvidenceImports,
         );
-        expect(constructionEvidenceImports).toHaveLength(3);
+        const sourceAuthorityPaths = requireArray(record.sourceAuthority).map(
+            (sourceValue) => {
+                const relativePath = requireRecord(sourceValue).relativePath;
+                if (typeof relativePath !== 'string') {
+                    throw new Error('Expected a source-authority path.');
+                }
+                return relativePath;
+            },
+        );
+        expect(new Set(sourceAuthorityPaths).size).toBe(
+            sourceAuthorityPaths.length,
+        );
+        expect(constructionEvidenceImports).toHaveLength(4);
         const qromImport = constructionEvidenceImports
             .map((value) => requireRecord(value))
             .find(
@@ -128,6 +139,22 @@ describe('Selected collective-setup security evidence', () => {
                 'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate.rs',
             ]),
         );
+        const qromCompositionImport = constructionEvidenceImports
+            .map((value) => requireRecord(value))
+            .find((value) => value.identifier === 'commonProofQromComposition');
+        expect(qromCompositionImport).toMatchObject({
+            observedStatus: 'resolved',
+            requiredClosurePredicate:
+                'conservativePerPhysicalProofTransformAndExplicitCeremonyUnion',
+            missingEvidence: null,
+        });
+        expect(qromCompositionImport?.ownerSourcePaths).toEqual(
+            expect.arrayContaining([
+                'crates/sealed-lattice-kernel/src/bgv/proof_suite/selected_accounting.rs',
+                'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate/soundness_composition.rs',
+                'test-vectors/selected-common-proof-mapped-soundness-evidence.json',
+            ]),
+        );
         const quantumRandomOracleLedger = requireArray(record.residualLedgers)
             .map((value) => requireRecord(value))
             .find((value) => value.identifier === 'qromInvalidAcceptance');
@@ -142,7 +169,7 @@ describe('Selected collective-setup security evidence', () => {
                 }),
                 expect.objectContaining({
                     source: 'common-proof physical-proof composition',
-                    status: 'unresolved',
+                    status: 'resolved',
                 }),
             ]),
         );
@@ -292,7 +319,7 @@ describe('Selected collective-setup security evidence', () => {
                 expectedEvidence,
             ),
         ).toThrow(
-            'Collective-setup security closure is blocked by: commonProofQromComposition, setupFamilySimulationComposition, collectiveSetupHybridComposition.',
+            'Collective-setup security closure is blocked by: setupFamilySimulationComposition, collectiveSetupHybridComposition.',
         );
         const closure = requireRecord(requireRecord(checkedEvidence).closure);
         expect(closure).toMatchObject({

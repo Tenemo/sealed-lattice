@@ -28,6 +28,7 @@ const sourcePaths = [
     'crates/sealed-lattice-kernel/src/foundation/authenticated_mailbox.rs',
     'crates/sealed-lattice-kernel/src/foundation/mailbox_gcm.rs',
     'crates/sealed-lattice-kernel/src/foundation/private_randomness.rs',
+    'crates/sealed-lattice-kernel/src/foundation/private_randomness/generator_hybrid.rs',
     'crates/sealed-lattice-kernel/src/foundation/state.rs',
     'crates/sealed-lattice-kernel/src/foundation/setup_transcript_runtime.rs',
     'crates/sealed-lattice-kernel/src/bgv/parameters.rs',
@@ -43,6 +44,7 @@ const sourcePaths = [
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/transcript.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/relation_plan.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/relation_plan/interpreter.rs',
+    'crates/sealed-lattice-kernel/src/bgv/proof_suite/selected_accounting.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/selected_profile.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/zero_knowledge.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/aggregate_wide_hiding.rs',
@@ -54,6 +56,7 @@ const sourcePaths = [
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/linear_bcs_transcript.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate.rs',
+    'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate/soundness_composition.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/exact_same_secret/exact_proof.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/generation_state.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/verification.rs',
@@ -70,6 +73,7 @@ const sourcePaths = [
     'crates/sealed-lattice-kernel/src/bgv/setup/accepted_setup/verified_public_randomness.rs',
     'crates/sealed-lattice-kernel/src/bgv/setup/accepted_setup/vss_qualification.rs',
     'crates/sealed-lattice-kernel/src/bgv/setup/collective_setup_security_evidence.rs',
+    'test-vectors/selected-common-proof-mapped-soundness-evidence.json',
     'tools/ci/selected-collective-setup-security-evidence.ts',
 ] as const;
 
@@ -165,7 +169,6 @@ const assumptionNodeIdentifiers = [
 ] as const;
 
 const unresolvedNodeIdentifiers = [
-    'commonProofQromComposition',
     'setupFamilySimulationComposition',
     'collectiveSetupHybridComposition',
 ] as const;
@@ -173,6 +176,7 @@ const unresolvedNodeIdentifiers = [
 const exactConstructionEvidenceImportIdentifiers = [
     'commonConstructionKnowledgeSoundness',
     'commonConstructionQromTransform',
+    'commonProofQromComposition',
     'commonConstructionMaskingCorrespondence',
 ] as const;
 
@@ -302,13 +306,19 @@ const requireInteger = (
 
 const deriveSourceAuthority = async (
     rootPath: string,
-): Promise<readonly JsonValue[]> =>
-    Promise.all(
+): Promise<readonly JsonValue[]> => {
+    if (new Set(sourcePaths).size !== sourcePaths.length) {
+        throw new Error(
+            'The source-authority path catalog contains a duplicate.',
+        );
+    }
+    return Promise.all(
         sourcePaths.map(async (relativePath) => ({
             relativePath,
             sha256: sha256(await readFile(path.join(rootPath, relativePath))),
         })),
     );
+};
 
 const enumerateCorruptionSubsets = (
     participantCount: number,
@@ -725,6 +735,16 @@ const buildConstructionEvidenceImports = (
         'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate.rs',
         'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/verification.rs',
     ] as const;
+    const qromCompositionOwnerSourcePaths = [
+        'crates/sealed-lattice-kernel/src/foundation/private_randomness/generator_hybrid.rs',
+        'crates/sealed-lattice-kernel/src/foundation/proof_application.rs',
+        'crates/sealed-lattice-kernel/src/bgv/proof_suite/selected_accounting.rs',
+        'crates/sealed-lattice-kernel/src/bgv/proof_suite/selected_profile.rs',
+        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan.rs',
+        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate.rs',
+        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate/soundness_composition.rs',
+        'test-vectors/selected-common-proof-mapped-soundness-evidence.json',
+    ] as const;
     const maskingOwnerSourcePaths = [
         'crates/sealed-lattice-kernel/src/bgv/proof_suite/zero_knowledge.rs',
         'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/aggregate_wide_hiding.rs',
@@ -761,6 +781,18 @@ const buildConstructionEvidenceImports = (
         },
         {
             identifier: exactConstructionEvidenceImportIdentifiers[2],
+            ownerSourcePaths: qromCompositionOwnerSourcePaths,
+            requiredClosurePredicate:
+                'conservativePerPhysicalProofTransformAndExplicitCeremonyUnion',
+            observedStatus: 'resolved',
+            checkedArtifactDigest: checkedSourceBundleDigest(
+                sourceAuthority,
+                qromCompositionOwnerSourcePaths,
+            ),
+            missingEvidence: null,
+        },
+        {
+            identifier: exactConstructionEvidenceImportIdentifiers[3],
             ownerSourcePaths: maskingOwnerSourcePaths,
             requiredClosurePredicate:
                 'completeConstructionMaskingCorrespondence',
@@ -1022,12 +1054,12 @@ const buildReductionDag = (): JsonValue => [
     },
     {
         identifier: 'commonProofQromComposition',
-        kind: 'obligation',
-        status: 'unresolved',
+        kind: 'reduction',
+        status: 'resolved',
         dependencies: ['commonConstructionQromTransform'],
-        advantageExpression: 'unresolved_common_proof_qrom_composition_error',
+        advantageExpression: 'epsilon_common_proof_qrom_composition',
         statement:
-            'Every physical proof must own one mapped transform under the complete global adversarial query budget, union its logical failure events internally, and enter explicit family and ceremony union bounds. No concatenated-IOP transform or conservative per-proof composition certificate has yet discharged that lifecycle.',
+            'The construction-bound evidence assigns one mapped transform and the complete global adversarial query budget to each of 103 physical proofs, unions 159 logical failure instances inside their owning proofs, applies exact family multiplicities, and then takes the explicit action union without cross-proof independence, shared-root hybrid credit, or a concatenated-IOP claim.',
     },
     {
         identifier: 'commonConstructionMaskingCorrespondence',
@@ -1136,8 +1168,8 @@ const buildResidualLedgers = (): JsonValue => [
             },
             {
                 source: 'common-proof physical-proof composition',
-                symbolicTerm: 'unresolved_common_proof_qrom_composition_error',
-                status: 'unresolved',
+                symbolicTerm: 'epsilon_common_proof_qrom_composition',
+                status: 'resolved',
             },
             {
                 source: 'collective setup composition',
