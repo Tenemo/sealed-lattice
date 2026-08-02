@@ -126,6 +126,26 @@ const HASH_BYTE_LENGTH: usize = 64;
 const ROW_CODE_WHIR_PRIVATE_SAMPLER_CANDIDATE_DRAW_CEILING: u32 =
     SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT;
 
+fn validate_phase_materialization_shape(
+    logical_polynomial_coefficient_count: usize,
+    logical_polynomials_per_physical_row: usize,
+    geometry: RowEncodingGeometry,
+    actual_row_count: usize,
+    has_noncanonical_padding_chunk: bool,
+) -> Result<(), CommonProofProverError> {
+    let expected_witness_value_count = logical_polynomial_coefficient_count
+        .checked_mul(logical_polynomials_per_physical_row)
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    if actual_row_count != geometry.row_count
+        || expected_witness_value_count != geometry.witness_values_per_row
+        || geometry.encoded_column_count == 0
+        || has_noncanonical_padding_chunk
+    {
+        return Err(CommonProofProverError::InvalidColumn);
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RowCodeWhirGenerationPhase {
     PreparingAuthenticatedSources,
@@ -6353,28 +6373,21 @@ impl RowCodeWhirGenerationStateMachine {
             .construction_plan
             .parameters
             .logical_polynomial_coefficient_count;
-        let expected_witness_value_count = logical_polynomial_coefficient_count
-            .checked_mul(
-                self.construction_plan
-                    .parameters
-                    .logical_polynomials_per_physical_row,
-            )
-            .ok_or(CommonProofProverError::CountOverflow)?;
         let logical_polynomials_per_physical_row = self
             .construction_plan
             .parameters
             .logical_polynomials_per_physical_row;
-        if phase.rows.len() != phase.geometry.row_count
-            || expected_witness_value_count != phase.geometry.witness_values_per_row
-            || phase.geometry.encoded_column_count == 0
-            || phase.rows.iter().any(|row| {
+        validate_phase_materialization_shape(
+            logical_polynomial_coefficient_count,
+            logical_polynomials_per_physical_row,
+            phase.geometry,
+            phase.rows.len(),
+            phase.rows.iter().any(|row| {
                 row.logical_polynomial_chunks
                     .get(logical_polynomials_per_physical_row..)
                     .is_none_or(|padding| padding.iter().any(Option::is_some))
-            })
-        {
-            return Err(CommonProofProverError::InvalidColumn);
-        }
+            }),
+        )?;
         let opened_column_indices =
             self.phase_opening_traversal_indices(purpose, phase.geometry.encoded_column_count)?;
         let builder = StripedColumnCommitmentBuilder::new_with_opened_columns_and_private_salt(
@@ -6677,28 +6690,21 @@ impl RowCodeWhirGenerationStateMachine {
             .construction_plan
             .parameters
             .logical_polynomial_coefficient_count;
-        let expected_witness_value_count = logical_polynomial_coefficient_count
-            .checked_mul(
-                self.construction_plan
-                    .parameters
-                    .logical_polynomials_per_physical_row,
-            )
-            .ok_or(CommonProofProverError::CountOverflow)?;
         let logical_polynomials_per_physical_row = self
             .construction_plan
             .parameters
             .logical_polynomials_per_physical_row;
-        if phase.rows.len() != phase.geometry.row_count
-            || expected_witness_value_count != phase.geometry.witness_values_per_row
-            || phase.geometry.encoded_column_count == 0
-            || phase.rows.iter().any(|row| {
+        validate_phase_materialization_shape(
+            logical_polynomial_coefficient_count,
+            logical_polynomials_per_physical_row,
+            phase.geometry,
+            phase.rows.len(),
+            phase.rows.iter().any(|row| {
                 row.logical_polynomial_chunks
                     .get(logical_polynomials_per_physical_row..)
                     .is_none_or(|padding| padding.iter().any(Option::is_some))
-            })
-        {
-            return Err(CommonProofProverError::InvalidColumn);
-        }
+            }),
+        )?;
         let opened_column_indices =
             self.phase_opening_traversal_indices(purpose, phase.geometry.encoded_column_count)?;
         let builder = StripedColumnCommitmentBuilder::new_with_opened_columns_and_private_salt(
@@ -7863,6 +7869,16 @@ mod tests {
             .parameters
             .logical_polynomial_coefficient_count
             * selected_row_width;
+        let base_has_noncanonical_padding = base_phase.rows.iter().any(|row| {
+            row.logical_polynomial_chunks
+                .get(selected_row_width..)
+                .is_none_or(|padding| padding.iter().any(Option::is_some))
+        });
+        let quotient_has_noncanonical_padding = quotient_phase.rows.iter().any(|row| {
+            row.logical_polynomial_chunks
+                .get(selected_row_width..)
+                .is_none_or(|padding| padding.iter().any(Option::is_some))
+        });
 
         assert_eq!(selected_row_width, 8);
         assert_eq!(base_phase.rows.len(), base_phase.geometry.row_count);
@@ -7885,6 +7901,91 @@ mod tests {
                 .iter()
                 .all(Option::is_none)
         }));
+        validate_phase_materialization_shape(
+            construction_plan
+                .parameters
+                .logical_polynomial_coefficient_count,
+            selected_row_width,
+            base_phase.geometry,
+            base_phase.rows.len(),
+            base_has_noncanonical_padding,
+        )
+        .expect("the production base-materialization guard accepts the width-eight VSS plan");
+        validate_phase_materialization_shape(
+            construction_plan
+                .parameters
+                .logical_polynomial_coefficient_count,
+            selected_row_width,
+            quotient_phase.geometry,
+            quotient_phase.rows.len(),
+            quotient_has_noncanonical_padding,
+        )
+        .expect("the production quotient-materialization guard accepts the width-eight VSS plan");
+
+        let stale_same_secret_row_width =
+            super::super::construction_plan::ROW_CODE_WHIR_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW;
+        assert_eq!(stale_same_secret_row_width, 64);
+        assert_eq!(
+            validate_phase_materialization_shape(
+                construction_plan
+                    .parameters
+                    .logical_polynomial_coefficient_count,
+                stale_same_secret_row_width,
+                base_phase.geometry,
+                base_phase.rows.len(),
+                base_has_noncanonical_padding,
+            ),
+            Err(CommonProofProverError::InvalidColumn),
+            "the stale same-secret width reproduces the archived VSS base-materialization refusal",
+        );
+        assert_eq!(
+            validate_phase_materialization_shape(
+                construction_plan
+                    .parameters
+                    .logical_polynomial_coefficient_count
+                    .checked_mul(2)
+                    .expect("the hostile coefficient count fits usize"),
+                selected_row_width,
+                base_phase.geometry,
+                base_phase.rows.len(),
+                base_has_noncanonical_padding,
+            ),
+            Err(CommonProofProverError::InvalidColumn),
+        );
+        assert_eq!(
+            validate_phase_materialization_shape(
+                construction_plan
+                    .parameters
+                    .logical_polynomial_coefficient_count,
+                selected_row_width,
+                base_phase.geometry,
+                base_phase.rows.len() - 1,
+                base_has_noncanonical_padding,
+            ),
+            Err(CommonProofProverError::InvalidColumn),
+        );
+        assert_eq!(
+            validate_phase_materialization_shape(
+                construction_plan
+                    .parameters
+                    .logical_polynomial_coefficient_count,
+                selected_row_width,
+                base_phase.geometry,
+                base_phase.rows.len(),
+                true,
+            ),
+            Err(CommonProofProverError::InvalidColumn),
+        );
+        assert_eq!(
+            validate_phase_materialization_shape(
+                usize::MAX,
+                2,
+                base_phase.geometry,
+                base_phase.rows.len(),
+                false,
+            ),
+            Err(CommonProofProverError::CountOverflow),
+        );
     }
 
     #[test]

@@ -3256,6 +3256,7 @@ mod canonical_profile_artifact {
     /// the complete persistent-root topology and the two production
     /// construction plans; this compact row merely exposes the facts needed by
     /// the construction theorem without duplicating that derivation.
+    #[cfg(feature = "theorem-evidence")]
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub(crate) struct SelectedSameSecretPersistentMaskImageAccounting {
         pub(crate) vss_construction_plan_identity_hash: [u8; 64],
@@ -3312,6 +3313,7 @@ mod canonical_profile_artifact {
             .collect()
     }
 
+    #[cfg(feature = "theorem-evidence")]
     pub(crate) fn selected_same_secret_persistent_mask_image_accounting()
     -> Result<SelectedSameSecretPersistentMaskImageAccounting, ProofProfileError> {
         let relation_plans = selected_persistent_committed_material_relation_plans()?;
