@@ -59,7 +59,7 @@ use crate::bgv::proof_suite::row_code_whir::{
     verifier_oracle_accounting::{
         DeployedVerifierOracleAccounting, FixedVerifierHashRole as ProductionFixedVerifierHashRole,
         VerifierLeafHashConstruction, VerifierMerkleOpeningRole,
-        derive_deployed_verifier_oracle_accounting,
+        derive_deployed_verifier_oracle_accounting, streaming_opening_width,
     },
 };
 use crate::bgv::proof_suite::{
@@ -139,6 +139,7 @@ pub(in crate::bgv::proof_suite) enum WhirTheoremCertificateError {
     IncompletePolynomialExtractorCorrespondence,
     IncompleteFailureMagnitudeCorrespondence,
     IncompleteTransportedProofCorrespondence,
+    IncompleteNonlinearCommitmentBinding,
     SelectedProductionGeometry {
         application_statement_schema_identifier: u16,
         schedule_position: Option<u32>,
@@ -168,6 +169,7 @@ pub(in crate::bgv::proof_suite) enum ProductionGeometryCertificateStage {
     DeployedLeafOracle,
     WholeDatabaseSupport,
     CommitmentSubtree,
+    NonlinearCommitmentBinding,
     AtomicRoundSemantics,
     PolynomialExtractor,
     TerminalStatePredicate,
@@ -189,6 +191,7 @@ pub(in crate::bgv::proof_suite) enum ProductionGeometryCertificateFailure {
     IncompletePolynomialExtractorCorrespondence,
     IncompleteFailureMagnitudeCorrespondence,
     IncompleteTransportedProofCorrespondence,
+    IncompleteNonlinearCommitmentBinding,
     InvalidCoordinateOrIdentity,
     InvalidWitnessGeometry,
     IncompleteRelationOrMaskingCertificate,
@@ -238,6 +241,9 @@ impl From<WhirTheoremCertificateError> for ProductionGeometryCertificateFailure 
             }
             WhirTheoremCertificateError::IncompleteTransportedProofCorrespondence => {
                 Self::IncompleteTransportedProofCorrespondence
+            }
+            WhirTheoremCertificateError::IncompleteNonlinearCommitmentBinding => {
+                Self::IncompleteNonlinearCommitmentBinding
             }
             WhirTheoremCertificateError::SelectedProductionGeometry { failure, .. } => failure,
         }
@@ -2768,6 +2774,599 @@ impl CommitmentSubtreeExtractionCertificate {
             && self.complete_message_digests_are_recomputed
             && self.compact_frontiers_are_coordinate_derived
             && self.coordinates_are_derived_from_accepted_transcript_order
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NonlinearCommitmentRootAuthority {
+    TranscriptSupplied {
+        commitment_role: linear_bcs_transcript::LinearBcsCommittedOracleRole,
+        response_operation_ordinal: u32,
+    },
+    CanonicalApplicationStatement {
+        bound_tree_ordinal: u32,
+        construction_kind: BoundTreeConstructionKind,
+        expected_root_source_ordinal: u32,
+        root_use: BoundTreeRootUse,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum NonlinearCommitmentQueryOwner {
+    Outer,
+    Bound,
+    WhirEpoch { epoch_ordinal: u32 },
+}
+
+impl NonlinearCommitmentQueryOwner {
+    const fn transcript_role(self) -> RowCodeWhirQueryRole {
+        match self {
+            Self::Outer => RowCodeWhirQueryRole::Outer,
+            Self::Bound => RowCodeWhirQueryRole::Bound,
+            Self::WhirEpoch { epoch_ordinal } => RowCodeWhirQueryRole::WhirEpoch { epoch_ordinal },
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NonlinearCommitmentLeafConstruction {
+    PhaseColumnSingleCall512 {
+        private_leaf_salt_byte_length: usize,
+    },
+    BoundMaterializedSingleCall512 {
+        construction_kind: BoundTreeConstructionKind,
+        private_leaf_salt_byte_length: usize,
+    },
+    AggregateColumnStreamable512 {
+        column_count: usize,
+        private_leaf_salt_byte_length: usize,
+        intermediate_output_bit_length: usize,
+        final_output_bit_length: usize,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NonlinearCommitmentParentConstruction {
+    PhaseColumnMerkle512,
+    BoundMaterializedMerkle512 {
+        construction_kind: BoundTreeConstructionKind,
+    },
+    AggregateWideMerkle512,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct NonlinearCommitmentBindingRow {
+    role: MerkleOracleEquationRole,
+    root_authority: NonlinearCommitmentRootAuthority,
+    query_owner: NonlinearCommitmentQueryOwner,
+    dependent_query_operation_ordinal: u32,
+    sampled_query_vector_length: usize,
+    leaf_construction: NonlinearCommitmentLeafConstruction,
+    parent_construction: NonlinearCommitmentParentConstruction,
+    leaf_count: usize,
+    query_count: usize,
+    initial_hash_query_count: u64,
+    transition_hash_query_count: u64,
+    final_hash_query_count: u64,
+    parent_hash_query_count: u64,
+    parent_output_bit_length: usize,
+}
+
+impl NonlinearCommitmentBindingRow {
+    fn leaf_hash_query_count(self) -> Option<u64> {
+        self.initial_hash_query_count
+            .checked_add(self.transition_hash_query_count)
+            .and_then(|count| count.checked_add(self.final_hash_query_count))
+    }
+
+    fn root_authority_matches_role(self) -> bool {
+        match (self.role, self.root_authority) {
+            (
+                MerkleOracleEquationRole::RelationPhase { phase },
+                NonlinearCommitmentRootAuthority::TranscriptSupplied {
+                    commitment_role:
+                        linear_bcs_transcript::LinearBcsCommittedOracleRole::RelationPhase {
+                            phase: committed_phase,
+                        },
+                    ..
+                },
+            ) => phase == committed_phase,
+            (
+                MerkleOracleEquationRole::WhirEpoch { epoch_ordinal: 0 },
+                NonlinearCommitmentRootAuthority::TranscriptSupplied {
+                    commitment_role: linear_bcs_transcript::LinearBcsCommittedOracleRole::Aggregate,
+                    ..
+                },
+            ) => true,
+            (
+                MerkleOracleEquationRole::WhirEpoch { epoch_ordinal },
+                NonlinearCommitmentRootAuthority::TranscriptSupplied {
+                    commitment_role:
+                        linear_bcs_transcript::LinearBcsCommittedOracleRole::WhirRound { round_ordinal },
+                    ..
+                },
+            ) => round_ordinal.checked_add(1) == Some(epoch_ordinal),
+            (
+                MerkleOracleEquationRole::AggregateWideMask { commitment_role },
+                NonlinearCommitmentRootAuthority::TranscriptSupplied {
+                    commitment_role: supplied_role,
+                    ..
+                },
+            ) => commitment_role == supplied_role,
+            (
+                MerkleOracleEquationRole::BoundTree { bound_tree_ordinal },
+                NonlinearCommitmentRootAuthority::CanonicalApplicationStatement {
+                    bound_tree_ordinal: authority_ordinal,
+                    ..
+                },
+            ) => bound_tree_ordinal == authority_ordinal,
+            _ => false,
+        }
+    }
+
+    fn query_owner_matches_role(self) -> bool {
+        match (self.role, self.query_owner) {
+            (
+                MerkleOracleEquationRole::RelationPhase { .. },
+                NonlinearCommitmentQueryOwner::Outer,
+            )
+            | (MerkleOracleEquationRole::BoundTree { .. }, NonlinearCommitmentQueryOwner::Bound) => {
+                true
+            }
+            (
+                MerkleOracleEquationRole::WhirEpoch { epoch_ordinal },
+                NonlinearCommitmentQueryOwner::WhirEpoch {
+                    epoch_ordinal: query_epoch,
+                },
+            ) => epoch_ordinal == query_epoch,
+            (
+                MerkleOracleEquationRole::AggregateWideMask { .. },
+                NonlinearCommitmentQueryOwner::WhirEpoch { .. },
+            ) => true,
+            _ => false,
+        }
+    }
+
+    fn is_complete(self, proof_privacy_mode: ProofPrivacyMode) -> bool {
+        let query_count = u64::try_from(self.query_count).ok();
+        let expected_private_salt_byte_length = match proof_privacy_mode {
+            ProofPrivacyMode::PublicOnly => 0,
+            ProofPrivacyMode::SecretBearing => PRIVATE_LEAF_SALT_BYTE_LENGTH,
+        };
+        let root_precedes_query = match self.root_authority {
+            NonlinearCommitmentRootAuthority::TranscriptSupplied {
+                response_operation_ordinal,
+                ..
+            } => response_operation_ordinal < self.dependent_query_operation_ordinal,
+            NonlinearCommitmentRootAuthority::CanonicalApplicationStatement { .. } => true,
+        };
+        let leaf_schedule_is_complete = match self.leaf_construction {
+            NonlinearCommitmentLeafConstruction::PhaseColumnSingleCall512 {
+                private_leaf_salt_byte_length,
+            } => {
+                matches!(self.role, MerkleOracleEquationRole::RelationPhase { .. })
+                    && private_leaf_salt_byte_length == expected_private_salt_byte_length
+                    && self.initial_hash_query_count == 0
+                    && Some(self.transition_hash_query_count) == query_count
+                    && self.final_hash_query_count == 0
+            }
+            NonlinearCommitmentLeafConstruction::BoundMaterializedSingleCall512 {
+                construction_kind,
+                private_leaf_salt_byte_length,
+            } => {
+                matches!(self.role, MerkleOracleEquationRole::BoundTree { .. })
+                    && private_leaf_salt_byte_length
+                        == match construction_kind {
+                            BoundTreeConstructionKind::CommittedMaterial => {
+                                crate::bgv::proof_suite::COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH
+                            }
+                            BoundTreeConstructionKind::SetupPolynomial => 0,
+                        }
+                    && self.initial_hash_query_count == 0
+                    && Some(self.transition_hash_query_count) == query_count
+                    && self.final_hash_query_count == 0
+            }
+            NonlinearCommitmentLeafConstruction::AggregateColumnStreamable512 {
+                column_count,
+                private_leaf_salt_byte_length,
+                intermediate_output_bit_length,
+                final_output_bit_length,
+            } => {
+                matches!(
+                    self.role,
+                    MerkleOracleEquationRole::WhirEpoch { .. }
+                        | MerkleOracleEquationRole::AggregateWideMask { .. }
+                ) && column_count > 0
+                    && private_leaf_salt_byte_length == expected_private_salt_byte_length
+                    && intermediate_output_bit_length == CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH
+                    && final_output_bit_length == CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH
+                    && Some(self.initial_hash_query_count) == query_count
+                    && query_count.is_some_and(|query_count| {
+                        query_count.checked_mul(u64::try_from(column_count).unwrap_or(u64::MAX))
+                            == Some(self.transition_hash_query_count)
+                    })
+                    && Some(self.final_hash_query_count) == query_count
+            }
+        };
+        let commitment_constructions_match = matches!(
+            (
+                self.role,
+                self.root_authority,
+                self.leaf_construction,
+                self.parent_construction,
+            ),
+            (
+                MerkleOracleEquationRole::RelationPhase { .. },
+                NonlinearCommitmentRootAuthority::TranscriptSupplied { .. },
+                NonlinearCommitmentLeafConstruction::PhaseColumnSingleCall512 { .. },
+                NonlinearCommitmentParentConstruction::PhaseColumnMerkle512,
+            )
+        ) || matches!(
+            (
+                self.role,
+                self.root_authority,
+                self.leaf_construction,
+                self.parent_construction,
+            ),
+            (
+                MerkleOracleEquationRole::BoundTree { .. },
+                NonlinearCommitmentRootAuthority::CanonicalApplicationStatement {
+                    construction_kind: root_construction_kind,
+                    ..
+                },
+                NonlinearCommitmentLeafConstruction::BoundMaterializedSingleCall512 {
+                    construction_kind: leaf_construction_kind,
+                    ..
+                },
+                NonlinearCommitmentParentConstruction::BoundMaterializedMerkle512 {
+                    construction_kind: parent_construction_kind,
+                },
+            ) if root_construction_kind == leaf_construction_kind
+                && leaf_construction_kind == parent_construction_kind
+        ) || matches!(
+            (
+                self.role,
+                self.root_authority,
+                self.leaf_construction,
+                self.parent_construction,
+            ),
+            (
+                MerkleOracleEquationRole::WhirEpoch { .. }
+                    | MerkleOracleEquationRole::AggregateWideMask { .. },
+                NonlinearCommitmentRootAuthority::TranscriptSupplied { .. },
+                NonlinearCommitmentLeafConstruction::AggregateColumnStreamable512 { .. },
+                NonlinearCommitmentParentConstruction::AggregateWideMerkle512,
+            )
+        );
+        self.root_authority_matches_role()
+            && self.query_owner_matches_role()
+            && root_precedes_query
+            && self.leaf_count.is_power_of_two()
+            && self.query_count > 0
+            && self.query_count <= self.leaf_count
+            && self.query_count <= self.sampled_query_vector_length
+            && (self.query_owner == NonlinearCommitmentQueryOwner::Bound
+                || self.query_count == self.sampled_query_vector_length)
+            && leaf_schedule_is_complete
+            && commitment_constructions_match
+            && self.parent_hash_query_count > 0
+            && self.parent_output_bit_length == CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH
+    }
+}
+
+/// Soundness-only reduction across every nonlinear commitment boundary reached
+/// by the production verifier.
+///
+/// The certificate conditions on the root already fixed by the canonical
+/// statement or transcript. In a collision-free oracle database, its compact
+/// opening determines one partial tree and the exact values consumed by the
+/// semantic verifier. Selecting a different root is a different statement or
+/// transcript, not a collision event; no such event is charged here.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct NonlinearCommitmentBindingCertificate {
+    construction_plan_identity_hash: [u8; 64],
+    proof_privacy_mode: ProofPrivacyMode,
+    rows: Vec<NonlinearCommitmentBindingRow>,
+    transcript_supplied_root_count: usize,
+    verifier_owned_root_count: usize,
+    distinct_shared_query_vector_count: usize,
+    semantic_opened_leaf_count: u64,
+    underlying_leaf_hash_query_count: u64,
+    parent_hash_query_count: u64,
+    complete_merkle_hash_query_count: u64,
+    whole_database_hash_query_count: u64,
+    whole_database_accepting_equation_count: u64,
+    collision_free_fixed_root_yields_unique_partial_tree: bool,
+    extracted_values_are_exact_semantic_verifier_inputs: bool,
+    changed_opening_under_same_root_requires_collision_or_half_preimage: bool,
+    arbitrary_changed_root_is_not_charged_as_collision: bool,
+    unopened_leaves_remain_undefined: bool,
+    queried_missing_leaves_are_rejected: bool,
+    canonical_response_digests_are_recomputed: bool,
+}
+
+impl NonlinearCommitmentBindingCertificate {
+    fn is_bound_to_plan(&self, plan: &RowCodeWhirConstructionPlan) -> bool {
+        let Ok(construction_plan_identity_hash) = plan.canonical_identity_hash() else {
+            return false;
+        };
+        let Ok(catalog) = plan.oracle_equation_catalog() else {
+            return false;
+        };
+        let Ok(transcript_plan) = plan.linear_bcs_transcript_plan() else {
+            return false;
+        };
+        let Some(expected_row_count) = transcript_plan
+            .supplied_commitment_openings()
+            .len()
+            .checked_add(plan.bound_trees.len())
+        else {
+            return false;
+        };
+        if self.construction_plan_identity_hash != construction_plan_identity_hash
+            || self.proof_privacy_mode != plan.proof_privacy_mode
+            || self.rows.len() != expected_row_count
+        {
+            return false;
+        }
+        self.rows.iter().all(|row| {
+            let (
+                expected_root_authority,
+                expected_query_owner,
+                expected_leaf_count,
+                expected_query_count,
+                expected_leaf_construction,
+                expected_parent_construction,
+            ) = match row.role {
+                MerkleOracleEquationRole::BoundTree { bound_tree_ordinal } => {
+                    let Some(tree) = usize::try_from(bound_tree_ordinal)
+                        .ok()
+                        .and_then(|index| plan.bound_trees.get(index))
+                        .filter(|tree| tree.bound_tree_ordinal == bound_tree_ordinal)
+                    else {
+                        return false;
+                    };
+                    (
+                        NonlinearCommitmentRootAuthority::CanonicalApplicationStatement {
+                            bound_tree_ordinal,
+                            construction_kind: tree.construction_kind,
+                            expected_root_source_ordinal: tree.expected_root_source_ordinal,
+                            root_use: tree.root_use,
+                        },
+                        NonlinearCommitmentQueryOwner::Bound,
+                        tree.leaf_count,
+                        tree.query_count,
+                        NonlinearCommitmentLeafConstruction::BoundMaterializedSingleCall512 {
+                            construction_kind: tree.construction_kind,
+                            private_leaf_salt_byte_length: match tree.construction_kind {
+                                BoundTreeConstructionKind::CommittedMaterial => {
+                                    crate::bgv::proof_suite::COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH
+                                }
+                                BoundTreeConstructionKind::SetupPolynomial => 0,
+                            },
+                        },
+                        NonlinearCommitmentParentConstruction::BoundMaterializedMerkle512 {
+                            construction_kind: tree.construction_kind,
+                        },
+                    )
+                }
+                supplied_role => {
+                    let mut matching_openings = transcript_plan
+                        .supplied_commitment_openings()
+                        .iter()
+                        .filter(|opening| {
+                            supplied_commitment_protocol_tree_role(opening.commitment_role)
+                                == Ok(supplied_role)
+                        });
+                    let Some(opening) = matching_openings.next() else {
+                        return false;
+                    };
+                    if matching_openings.next().is_some() {
+                        return false;
+                    }
+                    let Ok(root_authority) = supplied_nonlinear_root_authority(
+                        &transcript_plan,
+                        opening.commitment_role,
+                        opening.payload_leaf_count,
+                    ) else {
+                        return false;
+                    };
+                    let Ok(streaming_width) = streaming_opening_width(
+                        plan,
+                        opening.commitment_role,
+                        opening.owner,
+                        opening.payload_leaf_count,
+                        opening.query_count,
+                    ) else {
+                        return false;
+                    };
+                    let (leaf_construction, parent_construction) =
+                        streaming_width.map_or_else(
+                            || {
+                                (
+                                    NonlinearCommitmentLeafConstruction::PhaseColumnSingleCall512 {
+                                        private_leaf_salt_byte_length: match plan.proof_privacy_mode {
+                                            ProofPrivacyMode::PublicOnly => 0,
+                                            ProofPrivacyMode::SecretBearing => {
+                                                PRIVATE_LEAF_SALT_BYTE_LENGTH
+                                            }
+                                        },
+                                    },
+                                    NonlinearCommitmentParentConstruction::PhaseColumnMerkle512,
+                                )
+                            },
+                            |column_count| {
+                                (
+                                    NonlinearCommitmentLeafConstruction::AggregateColumnStreamable512 {
+                                        column_count,
+                                        private_leaf_salt_byte_length: match plan.proof_privacy_mode {
+                                            ProofPrivacyMode::PublicOnly => 0,
+                                            ProofPrivacyMode::SecretBearing => {
+                                                PRIVATE_LEAF_SALT_BYTE_LENGTH
+                                            }
+                                        },
+                                        intermediate_output_bit_length:
+                                            ColumnStreamableLeafHasher::intermediate_output_bit_length(),
+                                        final_output_bit_length:
+                                            ColumnStreamableLeafHasher::final_output_bit_length(),
+                                    },
+                                    NonlinearCommitmentParentConstruction::AggregateWideMerkle512,
+                                )
+                            },
+                        );
+                    (
+                        root_authority,
+                        nonlinear_query_owner(opening.owner),
+                        opening.payload_leaf_count,
+                        opening.query_count,
+                        leaf_construction,
+                        parent_construction,
+                    )
+                }
+            };
+            let Ok((query_operation_ordinal, sampled_query_vector_length)) =
+                unique_nonlinear_query_operation_ordinal(
+                    &catalog,
+                    expected_query_owner,
+                    expected_leaf_count,
+                    expected_query_count,
+                )
+            else {
+                return false;
+            };
+            let Some(opened_leaf_count) = u64::try_from(expected_query_count).ok() else {
+                return false;
+            };
+            let Some((expected_initial_hash_query_count, expected_transition_hash_query_count, expected_final_hash_query_count)) =
+                (match expected_leaf_construction {
+                    NonlinearCommitmentLeafConstruction::PhaseColumnSingleCall512 { .. }
+                    | NonlinearCommitmentLeafConstruction::BoundMaterializedSingleCall512 { .. } => {
+                        Some((0, opened_leaf_count, 0))
+                    }
+                    NonlinearCommitmentLeafConstruction::AggregateColumnStreamable512 {
+                        column_count,
+                        ..
+                    } => u64::try_from(column_count)
+                        .ok()
+                        .and_then(|column_count| opened_leaf_count.checked_mul(column_count))
+                        .map(|transition_count| {
+                            (opened_leaf_count, transition_count, opened_leaf_count)
+                        }),
+                })
+            else {
+                return false;
+            };
+            let Ok(expected_parent_hash_query_count) =
+                maximum_compact_parent_hash_query_count(expected_leaf_count, expected_query_count)
+            else {
+                return false;
+            };
+            row.root_authority == expected_root_authority
+                && row.query_owner == expected_query_owner
+                && row.dependent_query_operation_ordinal == query_operation_ordinal
+                && row.sampled_query_vector_length == sampled_query_vector_length
+                && row.leaf_construction == expected_leaf_construction
+                && row.parent_construction == expected_parent_construction
+                && row.leaf_count == expected_leaf_count
+                && row.query_count == expected_query_count
+                && row.initial_hash_query_count == expected_initial_hash_query_count
+                && row.transition_hash_query_count == expected_transition_hash_query_count
+                && row.final_hash_query_count == expected_final_hash_query_count
+                && row.parent_hash_query_count == expected_parent_hash_query_count
+                && row.parent_output_bit_length == CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH
+        })
+    }
+
+    fn is_complete_for(
+        &self,
+        whole_database_support: &Cms19WholeDatabaseSupportCertificate,
+        subtree_extraction: &CommitmentSubtreeExtractionCertificate,
+    ) -> bool {
+        let transcript_supplied_root_count = self
+            .rows
+            .iter()
+            .filter(|row| {
+                matches!(
+                    row.root_authority,
+                    NonlinearCommitmentRootAuthority::TranscriptSupplied { .. }
+                )
+            })
+            .count();
+        let verifier_owned_root_count = self.rows.len() - transcript_supplied_root_count;
+        let distinct_shared_query_vector_count = self
+            .rows
+            .iter()
+            .map(|row| (row.query_owner, row.dependent_query_operation_ordinal))
+            .collect::<BTreeSet<_>>()
+            .len();
+        let semantic_opened_leaf_count = self.rows.iter().try_fold(0_u64, |count, row| {
+            count.checked_add(u64::try_from(row.query_count).ok()?)
+        });
+        let underlying_leaf_hash_query_count = self.rows.iter().try_fold(0_u64, |count, row| {
+            count.checked_add(row.leaf_hash_query_count()?)
+        });
+        let parent_hash_query_count = self.rows.iter().try_fold(0_u64, |count, row| {
+            count.checked_add(row.parent_hash_query_count)
+        });
+        let complete_merkle_hash_query_count =
+            underlying_leaf_hash_query_count.and_then(|leaf_count| {
+                parent_hash_query_count.and_then(|parent| leaf_count.checked_add(parent))
+            });
+        let subtree_roles_match = self.rows.len() == subtree_extraction.rows.len()
+            && self.rows.iter().all(|row| {
+                let mut matching_subtrees = subtree_extraction
+                    .rows
+                    .iter()
+                    .filter(|subtree| subtree.role == row.role);
+                matching_subtrees.next().is_some_and(|subtree| {
+                    subtree.leaf_count == row.leaf_count
+                        && subtree.query_count == row.query_count
+                        && subtree.parent_hash_query_count_ceiling == row.parent_hash_query_count
+                }) && matching_subtrees.next().is_none()
+            });
+        self.construction_plan_identity_hash
+            == whole_database_support.construction_plan_identity_hash
+            && self.construction_plan_identity_hash != [0_u8; 64]
+            && !self.rows.is_empty()
+            && self
+                .rows
+                .iter()
+                .copied()
+                .all(|row| row.is_complete(self.proof_privacy_mode))
+            && self.rows.iter().enumerate().all(|(row_index, row)| {
+                self.rows[..row_index]
+                    .iter()
+                    .all(|prior| prior.role != row.role)
+            })
+            && self.transcript_supplied_root_count == transcript_supplied_root_count
+            && self.verifier_owned_root_count == verifier_owned_root_count
+            && self.transcript_supplied_root_count
+                == subtree_extraction.supplied_commitment_root_count
+            && self.verifier_owned_root_count == subtree_extraction.bound_tree_root_count
+            && self.distinct_shared_query_vector_count == distinct_shared_query_vector_count
+            && self.distinct_shared_query_vector_count > 0
+            && Some(self.semantic_opened_leaf_count) == semantic_opened_leaf_count
+            && Some(self.underlying_leaf_hash_query_count) == underlying_leaf_hash_query_count
+            && Some(self.parent_hash_query_count) == parent_hash_query_count
+            && Some(self.complete_merkle_hash_query_count) == complete_merkle_hash_query_count
+            && self.whole_database_hash_query_count
+                == whole_database_support.mapped_hash_query_count
+            && self.whole_database_accepting_equation_count
+                == whole_database_support.mapped_accepting_database_equation_count
+            && self.complete_merkle_hash_query_count <= self.whole_database_hash_query_count
+            && subtree_roles_match
+            && subtree_extraction.is_complete()
+            && self.collision_free_fixed_root_yields_unique_partial_tree
+                == subtree_extraction.collision_free_extraction_is_unique
+            && self.extracted_values_are_exact_semantic_verifier_inputs
+            && self.changed_opening_under_same_root_requires_collision_or_half_preimage
+                == subtree_extraction.changed_extracted_tree_requires_a_root_or_half_preimage
+            && self.arbitrary_changed_root_is_not_charged_as_collision
+            && self.unopened_leaves_remain_undefined == subtree_extraction.missing_leaf_is_undefined
+            && self.queried_missing_leaves_are_rejected
+                == subtree_extraction.queried_missing_leaf_is_rejected
+            && self.canonical_response_digests_are_recomputed
+                == subtree_extraction.complete_message_digests_are_recomputed
     }
 }
 
@@ -7871,6 +8470,7 @@ pub(in crate::bgv::proof_suite) struct RowCodeWhirFailurePartitionCertificate {
     complete_verifier_oracle_ledger: CompleteVerifierOracleLedger,
     deployed_aggregate_leaf_oracle: DeployedAggregateLeafOracleCertificate,
     commitment_subtree_extraction: CommitmentSubtreeExtractionCertificate,
+    nonlinear_commitment_binding: NonlinearCommitmentBindingCertificate,
     selected_plan_state_predicate: SelectedPlanStatePredicateCertificate,
     cms19_whole_state_transitions: Cms19WholeStateTransitionCertificate,
     cms19_whole_database_support: Cms19WholeDatabaseSupportCertificate,
@@ -7926,6 +8526,10 @@ impl RowCodeWhirFailurePartitionCertificate {
 
     pub(in crate::bgv::proof_suite) fn has_complete_structural_certificate(&self) -> bool {
         self.commitment_subtree_extraction.is_complete()
+            && self.nonlinear_commitment_binding.is_complete_for(
+                &self.cms19_whole_database_support,
+                &self.commitment_subtree_extraction,
+            )
             && self.construction_masking.is_complete()
             && self.production_construction_masking.is_complete()
             && self.aggregate_wide_masking.is_complete()
@@ -8039,6 +8643,7 @@ impl RowCodeWhirFailurePartitionCertificate {
         plan: &RowCodeWhirConstructionPlan,
     ) -> bool {
         self.has_complete_structural_certificate()
+            && self.nonlinear_commitment_binding.is_bound_to_plan(plan)
             && self.private_leaf_salt_prf.is_complete_for(
                 plan,
                 &self.aggregate_wide_masking,
@@ -8100,6 +8705,7 @@ struct RowCodeWhirProductionGeometryCertificate {
     deployed_aggregate_leaf_oracle: DeployedAggregateLeafOracleCertificate,
     cms19_whole_database_support: Cms19WholeDatabaseSupportCertificate,
     commitment_subtree_extraction: CommitmentSubtreeExtractionCertificate,
+    nonlinear_commitment_binding: NonlinearCommitmentBindingCertificate,
     cms19_atomic_round_semantics: Cms19AtomicRoundSemanticCertificate,
     cms19_state_predicate: Cms19StatePredicateCertificate,
     cms19_strong_round_by_round_semantics: Cms19StrongRoundByRoundSemanticCertificate,
@@ -8332,6 +8938,18 @@ impl RowCodeWhirProductionGeometryCertificate {
         if !self.commitment_subtree_extraction.is_complete() {
             return Some(
                 ProductionGeometryCertificateFailure::IncompleteCommitmentSubtreeExtraction,
+            );
+        }
+        if !self.nonlinear_commitment_binding.is_complete_for(
+            &self.cms19_whole_database_support,
+            &self.commitment_subtree_extraction,
+        ) || self
+            .nonlinear_commitment_binding
+            .construction_plan_identity_hash
+            != self.construction_plan_identity_hash
+        {
+            return Some(
+                ProductionGeometryCertificateFailure::IncompleteNonlinearCommitmentBinding,
             );
         }
         if !self.cms19_atomic_round_semantics.is_complete()
@@ -9025,6 +9643,19 @@ fn checked_row_code_whir_production_geometry_certificate_with_masking(
         &complete_verifier_oracle_ledger.merkle_rows,
     )
     .map_err(|error| contextualize(ProductionGeometryCertificateStage::CommitmentSubtree, error))?;
+    let nonlinear_commitment_binding = derive_nonlinear_commitment_binding_certificate(
+        plan,
+        relation_variant,
+        &catalog,
+        &cms19_whole_database_support,
+        &commitment_subtree_extraction,
+    )
+    .map_err(|error| {
+        contextualize(
+            ProductionGeometryCertificateStage::NonlinearCommitmentBinding,
+            error,
+        )
+    })?;
     let cms19_atomic_round_semantics = derive_cms19_atomic_round_semantic_certificate(
         plan,
         &catalog,
@@ -9161,6 +9792,7 @@ fn checked_row_code_whir_production_geometry_certificate_with_masking(
         deployed_aggregate_leaf_oracle,
         cms19_whole_database_support,
         commitment_subtree_extraction,
+        nonlinear_commitment_binding,
         cms19_atomic_round_semantics,
         cms19_state_predicate,
         cms19_strong_round_by_round_semantics,
@@ -9740,6 +10372,13 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
         plan,
         &complete_verifier_oracle_ledger.merkle_rows,
     )?;
+    let nonlinear_commitment_binding = derive_nonlinear_commitment_binding_certificate(
+        plan,
+        relation_variant,
+        &catalog,
+        &cms19_whole_database_support,
+        &commitment_subtree_extraction,
+    )?;
     let cms19_arithmetic = derive_cms19_arithmetic_certificate(
         deployed_aggregate_leaf_oracle.deployed_verifier_hash_query_count,
         deployed_aggregate_leaf_oracle.deployed_accepting_database_equation_count,
@@ -9824,6 +10463,7 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
         complete_verifier_oracle_ledger,
         deployed_aggregate_leaf_oracle,
         commitment_subtree_extraction,
+        nonlinear_commitment_binding,
         selected_plan_state_predicate,
         cms19_whole_state_transitions,
         cms19_whole_database_support,
@@ -12820,6 +13460,317 @@ fn derive_commitment_subtree_extraction_certificate(
     };
     if !certificate.is_complete() {
         return Err(WhirTheoremCertificateError::IncompleteOracleEquationMapping);
+    }
+    Ok(certificate)
+}
+
+fn nonlinear_query_owner(
+    owner: linear_bcs_transcript::LinearBcsSuppliedCommitmentOpeningOwner,
+) -> NonlinearCommitmentQueryOwner {
+    match owner {
+        linear_bcs_transcript::LinearBcsSuppliedCommitmentOpeningOwner::OuterQueryVector => {
+            NonlinearCommitmentQueryOwner::Outer
+        }
+        linear_bcs_transcript::LinearBcsSuppliedCommitmentOpeningOwner::WhirEpoch {
+            epoch_ordinal,
+        } => NonlinearCommitmentQueryOwner::WhirEpoch { epoch_ordinal },
+    }
+}
+
+fn unique_nonlinear_query_operation_ordinal(
+    catalog: &RowCodeWhirOracleEquationCatalog,
+    query_owner: NonlinearCommitmentQueryOwner,
+    expected_leaf_count: usize,
+    expected_query_count: usize,
+) -> Result<(u32, usize), WhirTheoremCertificateError> {
+    let expected_role = query_owner.transcript_role();
+    let mut matches = catalog
+        .operations
+        .iter()
+        .filter_map(|operation| match &operation.kind {
+            RowCodeWhirOracleEquationOperationKind::RowCodeWhir {
+                operation:
+                    RowCodeWhirTranscriptOperation::SampleDistinctIndices {
+                        role,
+                        upper_bound,
+                        output_count,
+                    },
+                ..
+            } if *role == expected_role => {
+                Some((operation.operation_ordinal, *upper_bound, *output_count))
+            }
+            _ => None,
+        });
+    let (operation_ordinal, leaf_count, query_count) = matches
+        .next()
+        .ok_or(WhirTheoremCertificateError::IncompleteTranscriptMapping)?;
+    if matches.next().is_some()
+        || leaf_count != expected_leaf_count
+        || query_count < expected_query_count
+        || (query_owner != NonlinearCommitmentQueryOwner::Bound
+            && query_count != expected_query_count)
+    {
+        return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
+    }
+    Ok((operation_ordinal, query_count))
+}
+
+fn supplied_nonlinear_root_authority(
+    transcript_plan: &linear_bcs_transcript::LinearBcsTranscriptPlan,
+    commitment_role: linear_bcs_transcript::LinearBcsCommittedOracleRole,
+    expected_leaf_count: usize,
+) -> Result<NonlinearCommitmentRootAuthority, WhirTheoremCertificateError> {
+    let mut matches =
+        transcript_plan
+            .round_ranges()
+            .iter()
+            .filter_map(|range| match range.prover_oracle_root {
+                linear_bcs_transcript::LinearBcsProverOracleRoot::SuppliedCommitment {
+                    role,
+                    payload_leaf_count,
+                } if role == commitment_role => Some((
+                    range.round_count,
+                    payload_leaf_count,
+                    range.response_operation_ordinal,
+                )),
+                _ => None,
+            });
+    let (round_count, leaf_count, response_operation_ordinal) = matches
+        .next()
+        .ok_or(WhirTheoremCertificateError::IncompleteTranscriptMapping)?;
+    if matches.next().is_some() || round_count != 1 || leaf_count != expected_leaf_count {
+        return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
+    }
+    Ok(NonlinearCommitmentRootAuthority::TranscriptSupplied {
+        commitment_role,
+        response_operation_ordinal,
+    })
+}
+
+fn derive_nonlinear_commitment_binding_certificate(
+    plan: &RowCodeWhirConstructionPlan,
+    relation_variant: &RelationPlanVariant,
+    catalog: &RowCodeWhirOracleEquationCatalog,
+    whole_database_support: &Cms19WholeDatabaseSupportCertificate,
+    subtree_extraction: &CommitmentSubtreeExtractionCertificate,
+) -> Result<NonlinearCommitmentBindingCertificate, WhirTheoremCertificateError> {
+    let construction_plan_identity_hash = plan
+        .canonical_identity_hash()
+        .map_err(|_| WhirTheoremCertificateError::IncompleteOracleEquationMapping)?;
+    if construction_plan_identity_hash != whole_database_support.construction_plan_identity_hash {
+        return Err(WhirTheoremCertificateError::IncompleteOracleEquationMapping);
+    }
+    let transcript_plan = plan
+        .linear_bcs_transcript_plan()
+        .map_err(|_| WhirTheoremCertificateError::IncompleteTranscriptMapping)?;
+    let deployed_accounting = derive_deployed_verifier_oracle_accounting(plan, relation_variant)
+        .map_err(|_| WhirTheoremCertificateError::IncompleteOracleEquationMapping)?;
+    let mut rows = Vec::new();
+    rows.try_reserve_exact(deployed_accounting.merkle_rows().len())
+        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+    for production_row in deployed_accounting.merkle_rows() {
+        let role = theorem_merkle_role_for_production_row(production_row.role())?;
+        let (root_authority, query_owner, leaf_construction, parent_construction) =
+            match production_row.role() {
+                VerifierMerkleOpeningRole::SuppliedCommitment(commitment_role) => {
+                    let mut matching_openings = transcript_plan
+                        .supplied_commitment_openings()
+                        .iter()
+                        .filter(|opening| opening.commitment_role == commitment_role);
+                    let opening = matching_openings
+                        .next()
+                        .ok_or(WhirTheoremCertificateError::IncompleteTranscriptMapping)?;
+                    if matching_openings.next().is_some()
+                        || opening.payload_leaf_count != production_row.leaf_count()
+                        || opening.query_count != production_row.query_count()
+                    {
+                        return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
+                    }
+                    let root_authority = supplied_nonlinear_root_authority(
+                        &transcript_plan,
+                        commitment_role,
+                        production_row.leaf_count(),
+                    )?;
+                    let query_owner = nonlinear_query_owner(opening.owner);
+                    let (leaf_construction, parent_construction) =
+                        match production_row.leaf_hash_construction() {
+                            VerifierLeafHashConstruction::SingleCall { output_bit_length }
+                                if matches!(
+                                    commitment_role,
+                                    linear_bcs_transcript::LinearBcsCommittedOracleRole::RelationPhase { .. }
+                                ) && output_bit_length
+                                    == CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH =>
+                            {
+                                (
+                                    NonlinearCommitmentLeafConstruction::PhaseColumnSingleCall512 {
+                                        private_leaf_salt_byte_length: match plan.proof_privacy_mode {
+                                            ProofPrivacyMode::PublicOnly => 0,
+                                            ProofPrivacyMode::SecretBearing => {
+                                                PRIVATE_LEAF_SALT_BYTE_LENGTH
+                                            }
+                                        },
+                                    },
+                                    NonlinearCommitmentParentConstruction::PhaseColumnMerkle512,
+                                )
+                            }
+                            VerifierLeafHashConstruction::ColumnStreamable {
+                                column_count,
+                                private_leaf_salt_byte_length,
+                                intermediate_output_bit_length,
+                                final_output_bit_length,
+                            } => (
+                                NonlinearCommitmentLeafConstruction::AggregateColumnStreamable512 {
+                                    column_count,
+                                    private_leaf_salt_byte_length,
+                                    intermediate_output_bit_length,
+                                    final_output_bit_length,
+                                },
+                                NonlinearCommitmentParentConstruction::AggregateWideMerkle512,
+                            ),
+                            _ => {
+                                return Err(
+                                    WhirTheoremCertificateError::IncompleteOracleEquationMapping,
+                                );
+                            }
+                        };
+                    (
+                        root_authority,
+                        query_owner,
+                        leaf_construction,
+                        parent_construction,
+                    )
+                }
+                VerifierMerkleOpeningRole::BoundTree { bound_tree_ordinal } => {
+                    let bound_tree_index = usize::try_from(bound_tree_ordinal)
+                        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+                    let tree = plan
+                        .bound_trees
+                        .get(bound_tree_index)
+                        .filter(|tree| tree.bound_tree_ordinal == bound_tree_ordinal)
+                        .ok_or(WhirTheoremCertificateError::InvalidSelectedGeometry)?;
+                    let VerifierLeafHashConstruction::SingleCall { output_bit_length } =
+                        production_row.leaf_hash_construction()
+                    else {
+                        return Err(WhirTheoremCertificateError::IncompleteOracleEquationMapping);
+                    };
+                    if output_bit_length != CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH {
+                        return Err(WhirTheoremCertificateError::IncompleteOracleEquationMapping);
+                    }
+                    (
+                        NonlinearCommitmentRootAuthority::CanonicalApplicationStatement {
+                            bound_tree_ordinal,
+                            construction_kind: tree.construction_kind,
+                            expected_root_source_ordinal: tree.expected_root_source_ordinal,
+                            root_use: tree.root_use,
+                        },
+                        NonlinearCommitmentQueryOwner::Bound,
+                        NonlinearCommitmentLeafConstruction::BoundMaterializedSingleCall512 {
+                            construction_kind: tree.construction_kind,
+                            private_leaf_salt_byte_length: match tree.construction_kind {
+                                BoundTreeConstructionKind::CommittedMaterial => {
+                                    crate::bgv::proof_suite::COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH
+                                }
+                                BoundTreeConstructionKind::SetupPolynomial => 0,
+                            },
+                        },
+                        NonlinearCommitmentParentConstruction::BoundMaterializedMerkle512 {
+                            construction_kind: tree.construction_kind,
+                        },
+                    )
+                }
+            };
+        let (dependent_query_operation_ordinal, sampled_query_vector_length) =
+            unique_nonlinear_query_operation_ordinal(
+                catalog,
+                query_owner,
+                production_row.leaf_count(),
+                production_row.query_count(),
+            )?;
+        rows.push(NonlinearCommitmentBindingRow {
+            role,
+            root_authority,
+            query_owner,
+            dependent_query_operation_ordinal,
+            sampled_query_vector_length,
+            leaf_construction,
+            parent_construction,
+            leaf_count: production_row.leaf_count(),
+            query_count: production_row.query_count(),
+            initial_hash_query_count: production_row.initial_hash_query_count(),
+            transition_hash_query_count: production_row.transition_hash_query_count(),
+            final_hash_query_count: production_row.final_hash_query_count(),
+            parent_hash_query_count: production_row.parent_hash_query_count(),
+            parent_output_bit_length: production_row.parent_output_bit_length(),
+        });
+    }
+    let transcript_supplied_root_count = rows
+        .iter()
+        .filter(|row| {
+            matches!(
+                row.root_authority,
+                NonlinearCommitmentRootAuthority::TranscriptSupplied { .. }
+            )
+        })
+        .count();
+    let verifier_owned_root_count = rows
+        .len()
+        .checked_sub(transcript_supplied_root_count)
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let distinct_shared_query_vector_count = rows
+        .iter()
+        .map(|row| (row.query_owner, row.dependent_query_operation_ordinal))
+        .collect::<BTreeSet<_>>()
+        .len();
+    let semantic_opened_leaf_count = rows.iter().try_fold(0_u64, |count, row| {
+        count
+            .checked_add(
+                u64::try_from(row.query_count)
+                    .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+            )
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+    })?;
+    let underlying_leaf_hash_query_count = rows.iter().try_fold(0_u64, |count, row| {
+        count
+            .checked_add(
+                row.leaf_hash_query_count()
+                    .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+            )
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+    })?;
+    let parent_hash_query_count = rows.iter().try_fold(0_u64, |count, row| {
+        count
+            .checked_add(row.parent_hash_query_count)
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+    })?;
+    let complete_merkle_hash_query_count = underlying_leaf_hash_query_count
+        .checked_add(parent_hash_query_count)
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let certificate = NonlinearCommitmentBindingCertificate {
+        construction_plan_identity_hash,
+        proof_privacy_mode: plan.proof_privacy_mode,
+        rows,
+        transcript_supplied_root_count,
+        verifier_owned_root_count,
+        distinct_shared_query_vector_count,
+        semantic_opened_leaf_count,
+        underlying_leaf_hash_query_count,
+        parent_hash_query_count,
+        complete_merkle_hash_query_count,
+        whole_database_hash_query_count: whole_database_support.mapped_hash_query_count,
+        whole_database_accepting_equation_count: whole_database_support
+            .mapped_accepting_database_equation_count,
+        collision_free_fixed_root_yields_unique_partial_tree: true,
+        extracted_values_are_exact_semantic_verifier_inputs: true,
+        changed_opening_under_same_root_requires_collision_or_half_preimage: true,
+        arbitrary_changed_root_is_not_charged_as_collision: true,
+        unopened_leaves_remain_undefined: true,
+        queried_missing_leaves_are_rejected: true,
+        canonical_response_digests_are_recomputed: true,
+    };
+    if !certificate.is_complete_for(whole_database_support, subtree_extraction)
+        || !certificate.is_bound_to_plan(plan)
+    {
+        return Err(WhirTheoremCertificateError::IncompleteNonlinearCommitmentBinding);
     }
     Ok(certificate)
 }
@@ -18328,6 +19279,269 @@ fn one_transition_collision_propagates_through_the_shared_suffix_and_final_diges
         leaf(&second),
         "deterministic later transitions and finalization cannot repair a collided state",
     );
+}
+
+#[test]
+#[ignore = "owned by test:rust:kernel:theorem-evidence"]
+fn selected_nonlinear_commitment_binding_covers_every_root_and_shared_query() {
+    let plan = selected_same_secret_construction_plan();
+    let certificate = checked_row_code_whir_failure_partition(&plan)
+        .expect("the selected theorem certificate derives");
+    let binding = &certificate.nonlinear_commitment_binding;
+    let is_complete = |candidate: &NonlinearCommitmentBindingCertificate| {
+        candidate.is_complete_for(
+            &certificate.cms19_whole_database_support,
+            &certificate.commitment_subtree_extraction,
+        )
+    };
+
+    assert!(is_complete(binding));
+    assert!(binding.is_bound_to_plan(&plan));
+    assert!(certificate.has_complete_construction_theorem_for(&plan));
+    assert_eq!(binding.rows.len(), 23);
+    assert_eq!(binding.transcript_supplied_root_count, 12);
+    assert_eq!(binding.verifier_owned_root_count, 11);
+    assert_eq!(binding.distinct_shared_query_vector_count, 9);
+    assert_eq!(binding.semantic_opened_leaf_count, 5_061);
+    assert_eq!(binding.underlying_leaf_hash_query_count, 22_756);
+    assert_eq!(binding.parent_hash_query_count, 67_986);
+    assert_eq!(binding.complete_merkle_hash_query_count, 90_742);
+    assert_eq!(binding.whole_database_hash_query_count, 105_437);
+    assert_eq!(binding.whole_database_accepting_equation_count, 105_428);
+    assert_eq!(
+        binding
+            .rows
+            .iter()
+            .filter(|row| {
+                row.query_owner == NonlinearCommitmentQueryOwner::Bound
+                    && row.query_count == 40
+                    && row.sampled_query_vector_length == 266
+            })
+            .count(),
+        8,
+    );
+    assert_eq!(
+        binding
+            .rows
+            .iter()
+            .filter(|row| {
+                row.query_owner == NonlinearCommitmentQueryOwner::Bound
+                    && row.query_count == 266
+                    && row.sampled_query_vector_length == 266
+            })
+            .count(),
+        3,
+    );
+    assert!(binding.rows.iter().all(|row| {
+        match row.root_authority {
+            NonlinearCommitmentRootAuthority::TranscriptSupplied {
+                response_operation_ordinal,
+                ..
+            } => response_operation_ordinal < row.dependent_query_operation_ordinal,
+            NonlinearCommitmentRootAuthority::CanonicalApplicationStatement { .. } => true,
+        }
+    }));
+    assert!(binding.rows.iter().all(|row| {
+        row.parent_output_bit_length == CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH
+            && match row.leaf_construction {
+                NonlinearCommitmentLeafConstruction::AggregateColumnStreamable512 {
+                    intermediate_output_bit_length,
+                    final_output_bit_length,
+                    ..
+                } => {
+                    intermediate_output_bit_length == CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH
+                        && final_output_bit_length == CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH
+                }
+                NonlinearCommitmentLeafConstruction::PhaseColumnSingleCall512 { .. }
+                | NonlinearCommitmentLeafConstruction::BoundMaterializedSingleCall512 { .. } => {
+                    true
+                }
+            }
+    }));
+
+    let mut missing_root = binding.clone();
+    missing_root.rows.pop();
+    assert!(!is_complete(&missing_root));
+
+    let mut challenge_before_commitment = binding.clone();
+    let transcript_row = challenge_before_commitment
+        .rows
+        .iter_mut()
+        .find(|row| {
+            matches!(
+                row.root_authority,
+                NonlinearCommitmentRootAuthority::TranscriptSupplied { .. }
+            )
+        })
+        .expect("a transcript-supplied commitment exists");
+    let NonlinearCommitmentRootAuthority::TranscriptSupplied {
+        commitment_role, ..
+    } = transcript_row.root_authority
+    else {
+        unreachable!("the selected row is transcript supplied");
+    };
+    transcript_row.root_authority = NonlinearCommitmentRootAuthority::TranscriptSupplied {
+        commitment_role,
+        response_operation_ordinal: transcript_row.dependent_query_operation_ordinal,
+    };
+    assert!(!is_complete(&challenge_before_commitment));
+
+    let mut narrowed_streaming_output = binding.clone();
+    let streaming_row = narrowed_streaming_output
+        .rows
+        .iter_mut()
+        .find(|row| {
+            matches!(
+                row.leaf_construction,
+                NonlinearCommitmentLeafConstruction::AggregateColumnStreamable512 { .. }
+            )
+        })
+        .expect("an aggregate streaming commitment exists");
+    let NonlinearCommitmentLeafConstruction::AggregateColumnStreamable512 {
+        column_count,
+        private_leaf_salt_byte_length,
+        intermediate_output_bit_length,
+        ..
+    } = streaming_row.leaf_construction
+    else {
+        unreachable!("the selected row is aggregate streaming");
+    };
+    streaming_row.leaf_construction =
+        NonlinearCommitmentLeafConstruction::AggregateColumnStreamable512 {
+            column_count,
+            private_leaf_salt_byte_length,
+            intermediate_output_bit_length,
+            final_output_bit_length: 256,
+        };
+    assert!(!is_complete(&narrowed_streaming_output));
+
+    let mut coherently_narrowed_streaming_width = binding.clone();
+    let removed_transition_count = {
+        let streaming_row = coherently_narrowed_streaming_width
+            .rows
+            .iter_mut()
+            .find(|row| {
+                matches!(
+                    row.leaf_construction,
+                    NonlinearCommitmentLeafConstruction::AggregateColumnStreamable512 {
+                        column_count: 8,
+                        ..
+                    }
+                )
+            })
+            .expect("an eight-column aggregate commitment exists");
+        let NonlinearCommitmentLeafConstruction::AggregateColumnStreamable512 {
+            private_leaf_salt_byte_length,
+            intermediate_output_bit_length,
+            final_output_bit_length,
+            ..
+        } = streaming_row.leaf_construction
+        else {
+            unreachable!("the selected row is aggregate streaming");
+        };
+        streaming_row.leaf_construction =
+            NonlinearCommitmentLeafConstruction::AggregateColumnStreamable512 {
+                column_count: 7,
+                private_leaf_salt_byte_length,
+                intermediate_output_bit_length,
+                final_output_bit_length,
+            };
+        let removed_transition_count =
+            u64::try_from(streaming_row.query_count).expect("the query count fits u64");
+        streaming_row.transition_hash_query_count -= removed_transition_count;
+        removed_transition_count
+    };
+    coherently_narrowed_streaming_width.underlying_leaf_hash_query_count -=
+        removed_transition_count;
+    coherently_narrowed_streaming_width.complete_merkle_hash_query_count -=
+        removed_transition_count;
+    assert!(is_complete(&coherently_narrowed_streaming_width));
+    assert!(!coherently_narrowed_streaming_width.is_bound_to_plan(&plan));
+
+    let mut split_shared_query = binding.clone();
+    split_shared_query.rows[1].dependent_query_operation_ordinal += 1;
+    assert!(!is_complete(&split_shared_query));
+    assert!(!split_shared_query.is_bound_to_plan(&plan));
+
+    let mut shortened_shared_bound_query = binding.clone();
+    let prefix_bound_row = shortened_shared_bound_query
+        .rows
+        .iter_mut()
+        .find(|row| {
+            row.query_owner == NonlinearCommitmentQueryOwner::Bound
+                && row.query_count < row.sampled_query_vector_length
+        })
+        .expect("a bound input consumes a strict prefix of the shared query vector");
+    prefix_bound_row.sampled_query_vector_length = prefix_bound_row.query_count;
+    assert!(!shortened_shared_bound_query.is_bound_to_plan(&plan));
+
+    let mut changed_statement_root = certificate.clone();
+    let statement_row = changed_statement_root
+        .nonlinear_commitment_binding
+        .rows
+        .iter_mut()
+        .find(|row| {
+            matches!(
+                row.root_authority,
+                NonlinearCommitmentRootAuthority::CanonicalApplicationStatement { .. }
+            )
+        })
+        .expect("a statement-owned bound-tree root exists");
+    let NonlinearCommitmentRootAuthority::CanonicalApplicationStatement {
+        bound_tree_ordinal,
+        construction_kind,
+        expected_root_source_ordinal,
+        root_use,
+    } = statement_row.root_authority
+    else {
+        unreachable!("the selected row is statement owned");
+    };
+    statement_row.root_authority =
+        NonlinearCommitmentRootAuthority::CanonicalApplicationStatement {
+            bound_tree_ordinal,
+            construction_kind,
+            expected_root_source_ordinal: expected_root_source_ordinal + 1,
+            root_use,
+        };
+    assert!(
+        !changed_statement_root
+            .nonlinear_commitment_binding
+            .is_bound_to_plan(&plan)
+    );
+    assert!(!changed_statement_root.has_complete_construction_theorem_for(&plan));
+
+    let mut mismatched_bound_construction = binding.clone();
+    let bound_row = mismatched_bound_construction
+        .rows
+        .iter_mut()
+        .find(|row| {
+            matches!(
+                row.parent_construction,
+                NonlinearCommitmentParentConstruction::BoundMaterializedMerkle512 { .. }
+            )
+        })
+        .expect("a bound-tree commitment exists");
+    let NonlinearCommitmentParentConstruction::BoundMaterializedMerkle512 { construction_kind } =
+        bound_row.parent_construction
+    else {
+        unreachable!("the selected row is a bound-tree commitment");
+    };
+    bound_row.parent_construction =
+        NonlinearCommitmentParentConstruction::BoundMaterializedMerkle512 {
+            construction_kind: match construction_kind {
+                BoundTreeConstructionKind::CommittedMaterial => {
+                    BoundTreeConstructionKind::SetupPolynomial
+                }
+                BoundTreeConstructionKind::SetupPolynomial => {
+                    BoundTreeConstructionKind::CommittedMaterial
+                }
+            },
+        };
+    assert!(!is_complete(&mismatched_bound_construction));
+
+    let mut collision_scope_overclaim = binding.clone();
+    collision_scope_overclaim.arbitrary_changed_root_is_not_charged_as_collision = false;
+    assert!(!is_complete(&collision_scope_overclaim));
 }
 
 #[test]

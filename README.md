@@ -91,10 +91,20 @@ Works today:
   every plan-derived verifier and response address, recover every exact round
   prefix plus its next verifier message, and connect all `2,059` response
   digests to the complete verifier database and coordinate-derived commitment
-  subtrees. Hostile width, domain, slot, address, response-owner, identity,
-  leaf-call, frontier, and message-shape mutations refuse. This is focused
-  same-secret construction evidence; construction-wide nonlinear composition,
-  suite-wide reduction, and ceremony-level reduction evidence remain open.
+  subtrees. A separate soundness-only certificate joins all 23 commitment roles
+  by role rather than relying on ledger order: 12 roots are fixed by earlier
+  transcript responses and 11 bound-tree roots come from the canonical
+  application statement. It preserves nine shared query vectors, including the
+  40-coordinate bound-input prefix of the 266-coordinate bound vector, and
+  derives 5,061 semantic opened leaves, 22,756 underlying leaf calls, 67,986
+  parent calls, and 90,742 complete Merkle calls. Conditional on an already
+  fixed root and a collision-free oracle database, the accepted compact
+  frontier yields one verifier-consumed partial tree. Choosing another root is
+  a different statement or transcript and is not charged as a collision.
+  Hostile width, domain, slot, address, response-owner, root-authority,
+  shared-query, leaf-call, frontier, and message-shape mutations refuse. This
+  is focused same-secret soundness evidence; nonlinear privacy, suite-wide
+  reduction, and ceremony-level reduction evidence remain open.
 - Secret-bearing phase-row padding now uses three KMAC-derived 512-bit seeds.
   The selected same-secret certificate inventories 62 framed SHAKE streams,
   130,023,424 accepted field outputs, seed collision, bounded rejection
@@ -149,8 +159,9 @@ Works today:
   generator hybrids. It refuses deficient ranks, omitted coordinates, changed
   authorities or query schedules, challenge-dependent or publicly recomputable
   masks, and zero-knowledge claims outside its scope. This establishes the
-  selected construction's affine masking composition, not the still-open
-  nonlinear commitment reduction, emitted-proof instantiation, complete
+  selected construction's affine masking composition. The separate
+  soundness-only fixed-root commitment certificate does not turn this affine
+  result into nonlinear privacy, emitted-proof instantiation, complete
   Fiat-Shamir soundness, or ceremony composition.
 - The exact same-secret transport correspondence now walks all 22
   construction-plan proof sections through their production decoder and
@@ -162,7 +173,7 @@ Works today:
   digest, and mutation tests refuse omitted or reordered sections, stale
   identities, incomplete binding or refusal catalogs, and altered byte
   ledgers. This is a static parser-to-verifier correspondence. It does not
-  establish acceptance of an emitted proof or discharge the nonlinear and
+  establish acceptance of an emitted proof or discharge nonlinear privacy and
   ceremony-level reductions.
 - Checked construction-geometry certificates have derived for all 31
   production identities: 27 width-64, log-inverse-rate-two
@@ -255,8 +266,9 @@ Not yet:
   product-challenge ledger. All 27 width-64 and four width-8 identities pass
   the complete constructor. The exact same-secret codec now has a complete
   static section-to-decoder-to-verifier correspondence, while its instantiation
-  by one emitted and freshly transported proof, the nonlinear commitment
-  reduction, and ceremony-level failure composition remain open.
+  by one emitted and freshly transported proof, nonlinear privacy and
+  composition across commitments, and ceremony-level failure composition
+  remain open.
 - The static liveness model has not yet been confirmed by a completed native
   proof or release-WebAssembly browser measurement. Complete participant
   transport accounting is also open. Production-derived sizes for 73 of the

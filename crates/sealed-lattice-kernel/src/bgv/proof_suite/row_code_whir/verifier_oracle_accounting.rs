@@ -489,7 +489,7 @@ fn whir_opening_geometry(
     ))
 }
 
-fn streaming_opening_width(
+pub(super) fn streaming_opening_width(
     construction_plan: &RowCodeWhirConstructionPlan,
     role: LinearBcsCommittedOracleRole,
     owner: LinearBcsSuppliedCommitmentOpeningOwner,

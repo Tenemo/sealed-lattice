@@ -63,6 +63,7 @@ export const theoremEvidenceRustTests = [
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::cms19_whole_state_and_database_support_are_exact_and_mutation_sensitive',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::ballot_width_eight_has_complete_semantic_state_and_database_support',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::one_transition_collision_propagates_through_the_shared_suffix_and_final_digest',
+    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::selected_nonlinear_commitment_binding_covers_every_root_and_shared_query',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::selected_same_secret_affine_masking_composition_is_exact_and_hostile_mutations_refuse',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::independent_unique_decoder_and_explicit_constraint_filter_cover_hostile_words',
