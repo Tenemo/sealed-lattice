@@ -151,11 +151,16 @@ Works today:
 - Production-derived phase-liveness accounting covers source ownership, replay
   readers, DFTs, Merkle frontiers, proof material, transcript state, private
   material, browser-bridge copies, a WebAssembly runtime reserve, and allocator
-  overhead. Its last pre-salt maximum was `556,008,657` bytes. The new private
-  salt key, derivation state, transported-salt buffers, and duplicate-detection
-  set still need to be incorporated before that value is again a complete live
-  set. Bound-tree authentication uses one in-place DFT and one evaluated stripe
-  instead of retaining complete evaluated columns.
+  overhead. It now also accounts for the private-salt key, adapter state, KMAC
+  and row-conversion workspaces, `504,704` transported salt bytes, canonical
+  duplicate detection, and the three materialized direct commitments. The
+  exact static maximum is `556,576,413` bytes during aggregate-source
+  materialization: `153,923,229` bytes above the nominal target,
+  `47,403,363` bytes below the automatic ceiling, and `114,512,227` bytes below
+  the hard WebAssembly bound. Bound-tree authentication uses one in-place DFT
+  and one evaluated stripe instead of retaining complete evaluated columns;
+  its complete static phase row is `289,681,611` bytes. These are conservative
+  production-derived live-set bounds, not native or browser measurements.
 - The production VSS prerequisite now has a dedicated guarded generation and
   transported-verification test. It durably seals each canonical safe boundary,
   rejects stale or malformed retained state, and resumes by deterministic
@@ -200,8 +205,8 @@ Not yet:
 - The static liveness model has not yet been confirmed by a completed native
   proof or release-WebAssembly browser measurement. Complete participant
   transport accounting is also open. Production-derived sizes for 73 of the
-  103 physical proof objects already total `1,988,841,710` bytes
-  (`1.852253181860` GiB), before the ten public-key-share proofs and twenty
+  103 physical proof objects already total `2,024,248,558` bytes
+  (`1.885228378698` GiB), before the ten public-key-share proofs and twenty
   ballot proofs. That is a partial corpus lower bound, not a completed traffic
   estimate; the two-GiB corpus and network values are soft planning targets.
 - No full-width exact proof has completed on the current implementation, and no

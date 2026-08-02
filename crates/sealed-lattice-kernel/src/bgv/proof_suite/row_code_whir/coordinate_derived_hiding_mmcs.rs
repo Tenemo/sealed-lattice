@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use p3_commit::{BatchOpening, BatchOpeningRef, Mmcs};
 use p3_field::{BasedVectorSpace, PrimeCharacteristicRing, PrimeField64};
 use p3_goldilocks::Goldilocks;
-use p3_matrix::{Dimensions, Matrix, stack::HorizontalPair};
+use p3_matrix::{Dimensions, Matrix, dense::RowMajorMatrix, stack::HorizontalPair};
 use p3_merkle_tree::{MerkleTreeError, MerkleTreeMmcs};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
@@ -41,6 +41,7 @@ const MATERIALIZED_COMMITMENT_ROLES: [AggregateLeafSaltRole; 3] = [
     AggregateLeafSaltRole::FreshSource,
     AggregateLeafSaltRole::FreshPad,
 ];
+const BTREE_ENTRY_LINK_WORD_COUNT: usize = 6;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum AggregateLeafSaltRole {
@@ -192,6 +193,95 @@ impl AggregateLeafSaltDerivationContext {
 struct MaterializedCommitmentScheduleState {
     key: AggregatePrivateLeafSaltKey,
     next_role_ordinal: usize,
+}
+
+/// Additional resident allocation owned by the private aggregate salt adapter.
+/// The 80 key bytes are already charged as private material. This bound adds
+/// their Arc header and the one shared schedule allocation. Coordinate contexts
+/// retained by materialized trees are charged in those trees' dynamic payloads;
+/// other handles are inline in the generation-engine control structure.
+pub(super) fn aggregate_private_leaf_salt_resident_state_byte_length() -> Result<usize, String> {
+    let arc_header_byte_length = 2_usize
+        .checked_mul(core::mem::size_of::<usize>())
+        .ok_or_else(|| "aggregate private leaf-salt Arc header overflowed".to_owned())?;
+    let schedule_allocation_byte_length = arc_header_byte_length
+        .checked_add(core::mem::size_of::<
+            Mutex<MaterializedCommitmentScheduleState>,
+        >())
+        .ok_or_else(|| "aggregate private leaf-salt schedule allocation overflowed".to_owned())?;
+    arc_header_byte_length
+        .checked_add(schedule_allocation_byte_length)
+        .ok_or_else(|| "aggregate private leaf-salt resident state overflowed".to_owned())
+}
+
+/// Peak temporary row allocation while the MMCS injectively converts one raw
+/// salt into its seven extension-field suffix elements.
+pub(super) const fn aggregate_private_leaf_salt_row_workspace_byte_length() -> usize {
+    2 * core::mem::size_of::<[ChallengeField; AGGREGATE_PRIVATE_LEAF_SALT_EXTENSION_ELEMENT_COUNT]>(
+    ) + core::mem::size_of::<Vec<ChallengeField>>()
+}
+
+/// Conservative B-tree allocation for canonical duplicate-salt refusal.
+pub(super) fn transported_private_leaf_salt_uniqueness_set_byte_length(
+    entry_count: usize,
+) -> Result<usize, String> {
+    let entry_byte_length = core::mem::size_of::<TransportedPrivateLeafSalt>()
+        .checked_add(
+            BTREE_ENTRY_LINK_WORD_COUNT
+                .checked_mul(core::mem::size_of::<usize>())
+                .ok_or_else(|| "private leaf-salt B-tree link size overflowed".to_owned())?,
+        )
+        .ok_or_else(|| "private leaf-salt B-tree entry size overflowed".to_owned())?;
+    entry_count
+        .checked_mul(entry_byte_length)
+        .and_then(|payload| {
+            payload.checked_add(core::mem::size_of::<
+                std::collections::BTreeSet<TransportedPrivateLeafSalt>,
+            >())
+        })
+        .ok_or_else(|| "private leaf-salt uniqueness set size overflowed".to_owned())
+}
+
+/// Exact dynamic payload retained by one single-column materialized aggregate
+/// commitment. The containing Rust structs are part of the generation-engine
+/// control allocation; this function accounts for every backing allocation:
+/// the matrix, salted-matrix catalog, digest-layer catalog and payloads, and
+/// arity schedule.
+pub(super) fn materialized_single_column_commitment_payload_byte_length(
+    leaf_count: usize,
+) -> Result<usize, String> {
+    if leaf_count == 0 || !leaf_count.is_power_of_two() {
+        return Err("materialized aggregate commitment leaf count is invalid".to_owned());
+    }
+    type MaterializedMatrix = SaltedMatrix<RowMajorMatrix<ChallengeField>>;
+    let digest_count = leaf_count
+        .checked_mul(2)
+        .and_then(|count| count.checked_sub(1))
+        .ok_or_else(|| "materialized aggregate digest count overflowed".to_owned())?;
+    let layer_count = usize::try_from(leaf_count.ilog2())
+        .map_err(|_| "materialized aggregate layer count exceeds usize".to_owned())?
+        .checked_add(1)
+        .ok_or_else(|| "materialized aggregate layer count overflowed".to_owned())?;
+    leaf_count
+        .checked_mul(core::mem::size_of::<ChallengeField>())
+        .and_then(|total| total.checked_add(core::mem::size_of::<MaterializedMatrix>()))
+        .and_then(|total| {
+            layer_count
+                .checked_mul(core::mem::size_of::<Vec<[u64; MERKLE_DIGEST_WORD_LENGTH]>>())
+                .and_then(|catalog| total.checked_add(catalog))
+        })
+        .and_then(|total| {
+            digest_count
+                .checked_mul(core::mem::size_of::<[u64; MERKLE_DIGEST_WORD_LENGTH]>())
+                .and_then(|digests| total.checked_add(digests))
+        })
+        .and_then(|total| {
+            layer_count
+                .checked_sub(1)
+                .and_then(|arity_count| arity_count.checked_mul(core::mem::size_of::<usize>()))
+                .and_then(|arity| total.checked_add(arity))
+        })
+        .ok_or_else(|| "materialized aggregate commitment payload overflowed".to_owned())
 }
 
 /// Shared handle that binds cloned P3 adapters to one fixed commit chronology.
@@ -632,6 +722,27 @@ mod tests {
                     BatchOpeningRef::new(&values, &reused),
                 )
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn private_salt_adapter_resident_bounds_cover_keys_contexts_rows_and_uniqueness() {
+        assert_eq!(
+            aggregate_private_leaf_salt_resident_state_byte_length(),
+            Ok(56),
+        );
+        assert_eq!(aggregate_private_leaf_salt_row_workspace_byte_length(), 584);
+        assert_eq!(
+            transported_private_leaf_salt_uniqueness_set_byte_length(2_782),
+            Ok(489_656),
+        );
+        assert_eq!(
+            materialized_single_column_commitment_payload_byte_length(8_192),
+            Ok(1_376_720),
+        );
+        assert_eq!(
+            materialized_single_column_commitment_payload_byte_length(262_144),
+            Ok(44_040_816),
         );
     }
 }

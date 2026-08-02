@@ -2600,17 +2600,17 @@ fn derive_generation_liveness(
 
     let hiding_configuration = super::hiding_whir::selected_hiding_whir_config(parameters)
         .map_err(|_| CommonProofProverError::InvalidMask)?;
-    let private_material_byte_length = u64::try_from(
-        AggregateWideHidingMaterialShape::derive(&hiding_configuration)
-            .map_err(|_| CommonProofProverError::InvalidMask)?
-            .total_extension_element_count(),
-    )
-    .ok()
-    .and_then(|count| count.checked_mul(extension_element_byte_length))
-    .and_then(|byte_length| {
-        byte_length.checked_add(u64::try_from(PRIVATE_ROW_PAD_SEED_MATERIAL_BYTE_LENGTH).ok()?)
-    })
-    .ok_or(CommonProofProverError::CountOverflow)?;
+    let private_material_shape = AggregateWideHidingMaterialShape::derive(&hiding_configuration)
+        .map_err(|_| CommonProofProverError::InvalidMask)?;
+    let private_material_byte_length =
+        u64::try_from(private_material_shape.total_extension_element_count())
+            .ok()
+            .and_then(|count| count.checked_mul(extension_element_byte_length))
+            .and_then(|byte_length| {
+                byte_length
+                    .checked_add(u64::try_from(PRIVATE_ROW_PAD_SEED_MATERIAL_BYTE_LENGTH).ok()?)
+            })
+            .ok_or(CommonProofProverError::CountOverflow)?;
 
     derive_complete_generation_liveness(
         construction_plan,
@@ -2623,9 +2623,15 @@ fn derive_generation_liveness(
             aggregate_source_batch_byte_length,
             aggregate_source_row_byte_length,
             aggregate_opening_preparation_byte_length: aggregate_column_byte_length,
-            proof_accumulator_byte_length,
+            proof_encoder_byte_length: proof_accumulator_byte_length,
             transcript_byte_length,
             private_material_byte_length,
+            private_material_partition_transition_byte_length: u64::try_from(
+                private_material_shape
+                    .partitioned_material_dynamic_payload_byte_length()
+                    .map_err(|_| CommonProofProverError::CountOverflow)?,
+            )
+            .map_err(|_| CommonProofProverError::CountOverflow)?,
             proof_transport_bridge_byte_length: u64::try_from(proof_transport_bridge_byte_length)
                 .map_err(|_| {
                 CommonProofProverError::CountOverflow
@@ -8073,18 +8079,16 @@ mod tests {
         assert_eq!(canonical_statement.len(), 884);
         assert_eq!(relation_variant_payload_byte_length, 4_986_144);
         assert_eq!(relation_context_payload_byte_length, 736);
-        // The streaming-leaf frame tags and the complete row-pad XOF geometry
-        // are part of the construction identity.
-        assert_eq!(construction_identity_byte_length, 1_046_143);
-        assert_eq!(size_of::<RowCodeWhirGenerationStateMachine>(), 19_712);
-        assert_eq!(size_of::<super::super::RowCodeWhirChallenger>(), 528);
+        assert_eq!(construction_identity_byte_length, 959_789);
+        assert_eq!(size_of::<RowCodeWhirGenerationStateMachine>(), 19_664);
+        assert_eq!(size_of::<super::super::RowCodeWhirChallenger>(), 464);
         assert_eq!(
             accounting.loading_persistent_resident_byte_length(),
             5_529_036
         );
         assert_eq!(
             accounting.post_source_polynomial_finish_persistent_resident_byte_length(),
-            5_004_748
+            5_004_748,
         );
         assert_eq!(
             accounting.additional_loading_transient_byte_length(),
@@ -8201,7 +8205,10 @@ mod tests {
                 0,
                 0,
                 0,
-                65_179_608,
+                0,
+                0,
+                0,
+                65_179_572,
             ),
             (
                 GenerationPhaseLivenessKind::SourceReplay,
@@ -8209,71 +8216,120 @@ mod tests {
                 0,
                 0,
                 0,
-                158_172_315,
+                0,
+                0,
+                0,
+                158_740_071,
             ),
             (
                 GenerationPhaseLivenessKind::RelationMaterialization,
                 84_934_656,
                 0,
                 0,
+                0,
+                0,
+                0,
                 1_185_104,
-                159_505_557,
+                160_073_313,
             ),
             (
                 GenerationPhaseLivenessKind::PhaseCommitment,
                 0,
                 134_217_728,
-                210_195_392,
+                210_244_928,
                 0,
-                450_085_587,
+                392,
+                0,
+                0,
+                450_709_512,
             ),
             (
                 GenerationPhaseLivenessKind::QuotientPreparation,
                 84_934_656,
                 0,
                 0,
+                0,
+                0,
+                0,
                 7_280_808,
-                166_363_224,
+                166_930_980,
             ),
             (
                 GenerationPhaseLivenessKind::AggregateSource,
                 84_934_656,
                 0,
                 0,
+                0,
+                0,
+                0,
                 353_632_304,
-                556_008_657,
+                556_576_413,
+            ),
+            (
+                GenerationPhaseLivenessKind::PrivateMaterialSampling,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                721_320,
+                64_000_068,
             ),
             (
                 GenerationPhaseLivenessKind::AggregateOpeningPreparation,
                 0,
                 0,
                 0,
+                0,
+                0,
+                0,
                 167_772_160,
-                251_364_507,
+                251_932_263,
             ),
             (
                 GenerationPhaseLivenessKind::AggregateCommitment,
                 0,
                 335_544_320,
                 67_108_864,
+                56,
+                976,
                 0,
-                515_605_659,
+                0,
+                516_174_576,
             ),
             (
                 GenerationPhaseLivenessKind::BoundTreeAuthentication,
                 0,
                 134_217_728,
-                67_108_864,
+                67_109_408,
                 0,
-                289_113_243,
+                0,
+                0,
+                0,
+                289_681_611,
             ),
             (
                 GenerationPhaseLivenessKind::WhirOpening,
                 0,
                 335_544_320,
                 67_108_864,
+                56,
+                976,
                 0,
-                515_605_659,
+                1_376_720,
+                517_723_386,
+            ),
+            (
+                GenerationPhaseLivenessKind::BaseCaseOpening,
+                0,
+                10_485_760,
+                16_777_216,
+                56,
+                976,
+                0,
+                46_794_256,
+                146_504_130,
             ),
             (
                 GenerationPhaseLivenessKind::CanonicalEncoding,
@@ -8281,16 +8337,31 @@ mod tests {
                 0,
                 0,
                 0,
-                62_620_827,
+                0,
+                489_656,
+                0,
+                63_739_446,
             ),
         ];
         assert_eq!(complete_liveness.rows().len(), expected_rows.len());
-        for (row, (phase, replay, dft, merkle, specialized, total)) in
-            complete_liveness.rows().iter().zip(expected_rows)
+        for (
+            row,
+            (
+                phase,
+                replay,
+                dft,
+                merkle,
+                private_salt_state,
+                private_salt_workspace,
+                private_salt_uniqueness,
+                specialized,
+                total,
+            ),
+        ) in complete_liveness.rows().iter().zip(expected_rows)
         {
             assert_eq!(row.phase(), phase);
             assert_eq!(row.wasm_runtime_baseline_byte_length(), 33_554_432);
-            assert_eq!(row.engine_control_byte_length(), 10_200_033);
+            assert_eq!(row.engine_control_byte_length(), 10_199_985);
             assert_eq!(
                 row.source_provider_byte_length(),
                 if phase == GenerationPhaseLivenessKind::LoadingAuthenticatedSources {
@@ -8303,15 +8374,35 @@ mod tests {
             assert_eq!(row.dft_buffer_byte_length(), dft);
             assert_eq!(row.merkle_and_frontier_byte_length(), merkle);
             assert_eq!(
-                row.proof_accumulator_byte_length(),
+                row.proof_encoder_non_salt_byte_length(),
                 if phase == GenerationPhaseLivenessKind::LoadingAuthenticatedSources {
                     0
                 } else {
                     7_605_914
                 },
             );
-            assert_eq!(row.transcript_byte_length(), 207_400);
-            assert_eq!(row.private_material_byte_length(), 721_192);
+            assert_eq!(
+                row.transported_private_leaf_salt_byte_length(),
+                if phase == GenerationPhaseLivenessKind::LoadingAuthenticatedSources {
+                    0
+                } else {
+                    504_704
+                },
+            );
+            assert_eq!(row.transcript_byte_length(), 207_336);
+            assert_eq!(row.private_material_byte_length(), 721_272);
+            assert_eq!(
+                row.private_leaf_salt_state_byte_length(),
+                private_salt_state
+            );
+            assert_eq!(
+                row.private_leaf_salt_workspace_byte_length(),
+                private_salt_workspace,
+            );
+            assert_eq!(
+                row.private_leaf_salt_uniqueness_set_byte_length(),
+                private_salt_uniqueness,
+            );
             assert_eq!(row.bridge_copy_byte_length(), 2_097_508);
             assert_eq!(row.specialized_workspace_byte_length(), specialized);
             let owned_byte_length = row
@@ -8320,9 +8411,17 @@ mod tests {
                 .and_then(|owned| owned.checked_add(row.replay_reader_byte_length()))
                 .and_then(|owned| owned.checked_add(row.dft_buffer_byte_length()))
                 .and_then(|owned| owned.checked_add(row.merkle_and_frontier_byte_length()))
-                .and_then(|owned| owned.checked_add(row.proof_accumulator_byte_length()))
+                .and_then(|owned| owned.checked_add(row.proof_encoder_non_salt_byte_length()))
+                .and_then(|owned| {
+                    owned.checked_add(row.transported_private_leaf_salt_byte_length())
+                })
                 .and_then(|owned| owned.checked_add(row.transcript_byte_length()))
                 .and_then(|owned| owned.checked_add(row.private_material_byte_length()))
+                .and_then(|owned| owned.checked_add(row.private_leaf_salt_state_byte_length()))
+                .and_then(|owned| owned.checked_add(row.private_leaf_salt_workspace_byte_length()))
+                .and_then(|owned| {
+                    owned.checked_add(row.private_leaf_salt_uniqueness_set_byte_length())
+                })
                 .and_then(|owned| owned.checked_add(row.bridge_copy_byte_length()))
                 .and_then(|owned| owned.checked_add(row.specialized_workspace_byte_length()))
                 .expect("the independently reconciled phase total adds");
@@ -8340,7 +8439,7 @@ mod tests {
         }
         assert_eq!(
             complete_liveness.maximum_live_set_byte_length(),
-            556_008_657,
+            556_576_413,
         );
         assert_eq!(
             complete_liveness
@@ -8348,17 +8447,17 @@ mod tests {
                 .saturating_sub(
                     crate::bgv::proof_suite::prover::NOMINAL_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
                 ),
-            153_355_473,
+            153_923_229,
         );
         assert_eq!(
             crate::bgv::proof_suite::prover::AUTOMATIC_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
                 .checked_sub(complete_liveness.maximum_live_set_byte_length()),
-            Some(47_971_119),
+            Some(47_403_363),
         );
         assert_eq!(
             MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
                 .checked_sub(complete_liveness.maximum_live_set_byte_length()),
-            Some(115_079_983),
+            Some(114_512_227),
         );
     }
 

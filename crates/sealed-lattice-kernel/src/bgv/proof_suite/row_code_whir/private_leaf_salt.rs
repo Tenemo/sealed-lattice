@@ -1,11 +1,23 @@
 //! Attempt-private salts for secret-bearing Merkle leaves.
 
+use core::mem::size_of;
+
 use tiny_keccak::{Hasher, Kmac};
 
 pub(super) const PRIVATE_LEAF_SALT_BYTE_LENGTH: usize = 128;
 pub(super) type PrivateLeafSalt = [u8; PRIVATE_LEAF_SALT_BYTE_LENGTH];
 
 const PRIVATE_LEAF_SALT_CUSTOMIZATION: &[u8] = b"sealed-lattice/row-code-whir/private-leaf-salt/v1";
+
+/// Complete design-owned stack workspace for one coordinate derivation.
+///
+/// One KMAC state, one output salt, and all five length frames form a
+/// conservative simultaneous upper bound. The implementation consumes the
+/// frames sequentially, so this bound does not depend on compiler stack-slot
+/// reuse.
+pub(super) const fn private_leaf_salt_derivation_workspace_byte_length() -> usize {
+    size_of::<Kmac>() + size_of::<PrivateLeafSalt>() + 5 * size_of::<u64>()
+}
 
 /// Derives one coordinate salt from an attempt-private seed.
 ///
@@ -96,5 +108,11 @@ mod tests {
         assert!(derive_private_leaf_salt(&seed, b"phase/base", 63, 1, 0, 0).is_err());
         assert!(derive_private_leaf_salt(&seed, b"phase/base", 64, 0, 0, 0).is_err());
         assert!(derive_private_leaf_salt(&seed, b"phase/base", 64, 1, 0, 64).is_err());
+    }
+
+    #[test]
+    fn private_leaf_salt_workspace_covers_kmac_output_and_every_frame() {
+        assert_eq!(size_of::<Kmac>(), 224);
+        assert_eq!(private_leaf_salt_derivation_workspace_byte_length(), 392);
     }
 }

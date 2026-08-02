@@ -4,15 +4,28 @@ use core::mem::size_of;
 
 use super::{
     ChallengeField, ColumnStreamableLeafState, MERKLE_DIGEST_WORD_LENGTH,
+    aggregate_wide_hiding::{AGGREGATE_WIDE_PAD_LOG_INVERSE_RATE, AggregateWidePadLayout},
     column_commitment::StreamingColumnHasher,
     construction_plan::RowCodeWhirConstructionPlan,
+    coordinate_derived_hiding_mmcs::{
+        aggregate_private_leaf_salt_resident_state_byte_length,
+        aggregate_private_leaf_salt_row_workspace_byte_length,
+        materialized_single_column_commitment_payload_byte_length,
+        transported_private_leaf_salt_uniqueness_set_byte_length,
+    },
+    private_leaf_salt::{
+        PRIVATE_LEAF_SALT_BYTE_LENGTH, private_leaf_salt_derivation_workspace_byte_length,
+    },
     recomputable_oracle::{
         AGGREGATE_ORACLE_LEAF_STATE_STRIPE_ROW_COUNT, aggregate_oracle_leaf_state_stripe_count,
     },
 };
-use crate::bgv::proof_suite::relation_plan::{BoundTreeConstructionKind, RelationColumnValueType};
+use crate::bgv::proof_suite::relation_plan::{
+    BoundTreeConstructionKind, ProofPrivacyMode, RelationColumnValueType,
+};
 use crate::bgv::proof_suite::{
-    MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, ProofBaseFieldElement,
+    COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
+    ProofBaseFieldElement, ProofTreeValue,
     external_memory::MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_BOUNDARY_TRANSFER_LIVE_BYTE_LENGTH,
     merkle::maximum_minimal_frontier_node_count, prover::CommonProofSourceProviderMemoryAccounting,
 };
@@ -57,7 +70,8 @@ pub(super) struct AggregateCommitmentLiveness {
     maximum_leaf_state_stripe_byte_length: u64,
     maximum_algorithm_live_set_byte_length: u64,
     full_column_dft_count: u64,
-    cached_initial_hash_query_count: u64,
+    initial_hash_query_count: u64,
+    private_leaf_salt_derivation_count: u64,
     transition_hash_query_count: u64,
     final_hash_query_count: u64,
     merkle_parent_hash_query_count: u64,
@@ -90,8 +104,13 @@ impl AggregateCommitmentLiveness {
     }
 
     #[cfg(test)]
-    pub(super) const fn cached_initial_hash_query_count(&self) -> u64 {
-        self.cached_initial_hash_query_count
+    pub(super) const fn initial_hash_query_count(&self) -> u64 {
+        self.initial_hash_query_count
+    }
+
+    #[cfg(test)]
+    pub(super) const fn private_leaf_salt_derivation_count(&self) -> u64 {
+        self.private_leaf_salt_derivation_count
     }
 
     #[cfg(test)]
@@ -111,7 +130,7 @@ impl AggregateCommitmentLiveness {
 
     #[cfg(test)]
     pub(super) fn aggregate_hash_query_count(&self) -> Result<u64, String> {
-        self.cached_initial_hash_query_count
+        self.initial_hash_query_count
             .checked_add(self.transition_hash_query_count)
             .and_then(|count| count.checked_add(self.final_hash_query_count))
             .and_then(|count| count.checked_add(self.merkle_parent_hash_query_count))
@@ -142,6 +161,8 @@ pub(super) fn derive_aggregate_commitment_liveness(
     let mut accounting_rows = Vec::with_capacity(epochs.len());
     let mut maximum_leaf_count = 0_usize;
     let mut stripe_count_sum = 0_u64;
+    let mut initial_hash_query_count = 0_u64;
+    let mut private_leaf_salt_derivation_count = 0_u64;
     let mut transition_hash_query_count = 0_u64;
     let mut final_hash_query_count = 0_u64;
     let mut merkle_parent_hash_query_count = 0_u64;
@@ -168,6 +189,18 @@ pub(super) fn derive_aggregate_commitment_liveness(
         let pass_leaf_count = leaf_count
             .checked_mul(ROOT_AND_OPENING_PASS_COUNT)
             .ok_or_else(|| "aggregate pass leaf count overflowed".to_owned())?;
+        let epoch_initial_hash_query_count = match construction_plan.proof_privacy_mode {
+            ProofPrivacyMode::SecretBearing => pass_leaf_count,
+            ProofPrivacyMode::PublicOnly => ROOT_AND_OPENING_PASS_COUNT,
+        };
+        initial_hash_query_count = initial_hash_query_count
+            .checked_add(epoch_initial_hash_query_count)
+            .ok_or_else(|| "aggregate initial count overflowed".to_owned())?;
+        if construction_plan.proof_privacy_mode == ProofPrivacyMode::SecretBearing {
+            private_leaf_salt_derivation_count = private_leaf_salt_derivation_count
+                .checked_add(pass_leaf_count)
+                .ok_or_else(|| "aggregate private salt count overflowed".to_owned())?;
+        }
         transition_hash_query_count = transition_hash_query_count
             .checked_add(
                 pass_leaf_count
@@ -210,17 +243,25 @@ pub(super) fn derive_aggregate_commitment_liveness(
             .ok()
             .and_then(|count| count.checked_mul(size_of::<ColumnStreamableLeafState>() as u64))
             .ok_or_else(|| "aggregate leaf-state liveness overflowed".to_owned())?;
+    let private_leaf_salt_workspace_byte_length = match construction_plan.proof_privacy_mode {
+        ProofPrivacyMode::PublicOnly => 0,
+        ProofPrivacyMode::SecretBearing => u64::try_from(
+            aggregate_private_leaf_salt_resident_state_byte_length()?
+                .checked_add(private_leaf_salt_derivation_workspace_byte_length())
+                .and_then(|byte_length| {
+                    byte_length.checked_add(aggregate_private_leaf_salt_row_workspace_byte_length())
+                })
+                .ok_or_else(|| "aggregate private salt workspace overflowed".to_owned())?,
+        )
+        .map_err(|_| "aggregate private salt workspace exceeds u64".to_owned())?,
+    };
     let maximum_algorithm_live_set_byte_length = maximum_dft_buffer_byte_length
         .checked_add(maximum_leaf_state_stripe_byte_length)
+        .and_then(|byte_length| byte_length.checked_add(private_leaf_salt_workspace_byte_length))
         .ok_or_else(|| "aggregate algorithm liveness overflowed".to_owned())?;
     if maximum_algorithm_live_set_byte_length > MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH {
         return Err("aggregate algorithm live set exceeds the hard WASM bound".to_owned());
     }
-    let epoch_count = u64::try_from(accounting_rows.len())
-        .map_err(|_| "aggregate epoch count exceeds u64".to_owned())?;
-    let cached_initial_hash_query_count = epoch_count
-        .checked_mul(ROOT_AND_OPENING_PASS_COUNT)
-        .ok_or_else(|| "aggregate initial hash count overflowed".to_owned())?;
     let full_column_dft_count = stripe_count_sum
         .checked_mul(ROOT_AND_OPENING_PASS_COUNT)
         .and_then(|count| count.checked_mul(8))
@@ -232,10 +273,135 @@ pub(super) fn derive_aggregate_commitment_liveness(
         maximum_leaf_state_stripe_byte_length,
         maximum_algorithm_live_set_byte_length,
         full_column_dft_count,
-        cached_initial_hash_query_count,
+        initial_hash_query_count,
+        private_leaf_salt_derivation_count,
         transition_hash_query_count,
         final_hash_query_count,
         merkle_parent_hash_query_count,
+    })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PrivateLeafSaltLiveness {
+    phase_opening_salt_count: u64,
+    aggregate_opening_salt_count: u64,
+    transported_salt_byte_length: u64,
+    aggregate_resident_state_byte_length: u64,
+    derivation_workspace_byte_length: u64,
+    aggregate_row_workspace_byte_length: u64,
+    canonical_uniqueness_set_byte_length: u64,
+    retained_pad_commitment_payload_byte_length: u64,
+    base_case_commitment_payload_byte_length: u64,
+}
+
+fn derive_private_leaf_salt_liveness(
+    construction_plan: &RowCodeWhirConstructionPlan,
+) -> Result<PrivateLeafSaltLiveness, String> {
+    if construction_plan.proof_privacy_mode == ProofPrivacyMode::PublicOnly {
+        return Ok(PrivateLeafSaltLiveness {
+            phase_opening_salt_count: 0,
+            aggregate_opening_salt_count: 0,
+            transported_salt_byte_length: 0,
+            aggregate_resident_state_byte_length: 0,
+            derivation_workspace_byte_length: 0,
+            aggregate_row_workspace_byte_length: 0,
+            canonical_uniqueness_set_byte_length: 0,
+            retained_pad_commitment_payload_byte_length: 0,
+            base_case_commitment_payload_byte_length: 0,
+        });
+    }
+    let aggregate = derive_aggregate_commitment_liveness(construction_plan)?;
+    let hiding_configuration =
+        super::hiding_whir::selected_hiding_whir_config(construction_plan.parameters)
+            .map_err(|error| format!("derive private leaf-salt configuration: {error}"))?;
+    let pad_layout = AggregateWidePadLayout::derive(&hiding_configuration)?;
+    let pad_domain_size = p3_whir::MaskCodeShape::new(
+        pad_layout.message_length(),
+        hiding_configuration.sumcheck_mask.randomness_len,
+        AGGREGATE_WIDE_PAD_LOG_INVERSE_RATE,
+    )
+    .domain_size;
+    let phase_opening_salt_count = u64::try_from(construction_plan.phase_order.len())
+        .ok()
+        .and_then(|phase_count| {
+            u64::try_from(construction_plan.parameters.outer_query_count)
+                .ok()
+                .and_then(|query_count| phase_count.checked_mul(query_count))
+        })
+        .ok_or_else(|| "phase private leaf-salt count overflowed".to_owned())?;
+    let aggregate_opening_salt_count = aggregate
+        .epochs
+        .iter()
+        .try_fold(0_u64, |total, epoch| {
+            u64::try_from(epoch.query_count)
+                .ok()
+                .and_then(|query_count| total.checked_add(query_count))
+                .ok_or_else(|| "aggregate private leaf-salt count overflowed".to_owned())
+        })?
+        .checked_add(
+            u64::try_from(hiding_configuration.mask_queries)
+                .ok()
+                .and_then(|query_count| query_count.checked_mul(2))
+                .ok_or_else(|| "aggregate pad salt count overflowed".to_owned())?,
+        )
+        .and_then(|total| {
+            u64::try_from(construction_plan.whir.final_round.query_epoch.query_count)
+                .ok()
+                .and_then(|query_count| total.checked_add(query_count))
+        })
+        .ok_or_else(|| "aggregate private leaf-salt count overflowed".to_owned())?;
+    let total_salt_count = phase_opening_salt_count
+        .checked_add(aggregate_opening_salt_count)
+        .ok_or_else(|| "transported private leaf-salt count overflowed".to_owned())?;
+    let transported_salt_byte_length = total_salt_count
+        .checked_mul(
+            u64::try_from(PRIVATE_LEAF_SALT_BYTE_LENGTH)
+                .map_err(|_| "private leaf-salt width exceeds u64".to_owned())?,
+        )
+        .ok_or_else(|| "transported private leaf-salt bytes overflowed".to_owned())?;
+    let retained_pad_commitment_payload_byte_length =
+        materialized_single_column_commitment_payload_byte_length(pad_domain_size)?;
+    let fresh_source_commitment_payload_byte_length =
+        materialized_single_column_commitment_payload_byte_length(
+            construction_plan.whir.final_round.encoded_oracle.leaf_count,
+        )?;
+    let fresh_pad_commitment_payload_byte_length =
+        materialized_single_column_commitment_payload_byte_length(pad_domain_size)?;
+    let base_case_commitment_payload_byte_length = retained_pad_commitment_payload_byte_length
+        .checked_add(fresh_source_commitment_payload_byte_length)
+        .and_then(|total| total.checked_add(fresh_pad_commitment_payload_byte_length))
+        .ok_or_else(|| "base-case commitment liveness overflowed".to_owned())?;
+    Ok(PrivateLeafSaltLiveness {
+        phase_opening_salt_count,
+        aggregate_opening_salt_count,
+        transported_salt_byte_length,
+        aggregate_resident_state_byte_length: u64::try_from(
+            aggregate_private_leaf_salt_resident_state_byte_length()?,
+        )
+        .map_err(|_| "aggregate private leaf-salt state exceeds u64".to_owned())?,
+        derivation_workspace_byte_length: u64::try_from(
+            private_leaf_salt_derivation_workspace_byte_length(),
+        )
+        .map_err(|_| "private leaf-salt workspace exceeds u64".to_owned())?,
+        aggregate_row_workspace_byte_length: u64::try_from(
+            aggregate_private_leaf_salt_row_workspace_byte_length(),
+        )
+        .map_err(|_| "aggregate private leaf-salt row workspace exceeds u64".to_owned())?,
+        canonical_uniqueness_set_byte_length: u64::try_from(
+            transported_private_leaf_salt_uniqueness_set_byte_length(
+                usize::try_from(aggregate_opening_salt_count)
+                    .map_err(|_| "aggregate salt count exceeds usize".to_owned())?,
+            )?,
+        )
+        .map_err(|_| "private leaf-salt uniqueness set exceeds u64".to_owned())?,
+        retained_pad_commitment_payload_byte_length: u64::try_from(
+            retained_pad_commitment_payload_byte_length,
+        )
+        .map_err(|_| "retained pad commitment payload exceeds u64".to_owned())?,
+        base_case_commitment_payload_byte_length: u64::try_from(
+            base_case_commitment_payload_byte_length,
+        )
+        .map_err(|_| "base-case commitment payload exceeds u64".to_owned())?,
     })
 }
 
@@ -248,6 +414,7 @@ pub(super) struct BoundTreeAuthenticationLiveness {
     maximum_stripe_count: u64,
     maximum_dft_buffer_byte_length: u64,
     maximum_evaluated_stripe_byte_length: u64,
+    maximum_leaf_workspace_byte_length: u64,
     maximum_algorithm_live_set_byte_length: u64,
     full_column_dft_count: u64,
     leaf_hash_query_count: u64,
@@ -289,6 +456,11 @@ impl BoundTreeAuthenticationLiveness {
     #[cfg(test)]
     pub(super) const fn maximum_evaluated_stripe_byte_length(self) -> u64 {
         self.maximum_evaluated_stripe_byte_length
+    }
+
+    #[cfg(test)]
+    pub(super) const fn maximum_leaf_workspace_byte_length(self) -> u64 {
+        self.maximum_leaf_workspace_byte_length
     }
 
     #[cfg(test)]
@@ -335,6 +507,7 @@ pub(super) fn derive_bound_tree_authentication_liveness(
     let mut maximum_stripe_count = 0_u64;
     let mut maximum_dft_buffer_byte_length = 0_u64;
     let mut maximum_evaluated_stripe_byte_length = 0_u64;
+    let mut maximum_leaf_workspace_byte_length = 0_u64;
     let mut maximum_algorithm_live_set_byte_length = 0_u64;
     let mut full_column_dft_count = 0_u64;
     let mut leaf_hash_query_count = 0_u64;
@@ -382,8 +555,35 @@ pub(super) fn derive_bound_tree_authentication_liveness(
                     .checked_mul(size_of::<crate::bgv::proof_suite::ProofBaseFieldElement>() as u64)
             })
             .ok_or_else(|| "bound-tree stripe byte length overflows".to_owned())?;
+        let leaf_workspace_byte_length = row_width
+            .checked_mul(2)
+            .and_then(|value_count| {
+                value_count.checked_mul(
+                    u64::try_from(size_of::<ProofBaseFieldElement>()).ok()?
+                        + u64::try_from(size_of::<ProofTreeValue>()).ok()?,
+                )
+            })
+            .and_then(|byte_length| {
+                byte_length.checked_add(
+                    4_u64.checked_mul(u64::try_from(size_of::<Vec<ProofTreeValue>>()).ok()?)?,
+                )
+            })
+            .and_then(|byte_length| {
+                byte_length.checked_add(
+                    if tree.construction_kind == BoundTreeConstructionKind::CommittedMaterial {
+                        u64::try_from(COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH)
+                            .ok()?
+                            .checked_mul(2)?
+                    } else {
+                        0
+                    },
+                )
+            })
+            .and_then(|byte_length| byte_length.checked_add(MERKLE_DIGEST_BYTE_LENGTH))
+            .ok_or_else(|| "bound-tree leaf workspace overflows".to_owned())?;
         let algorithm_live_byte_length = evaluation_byte_length
             .checked_add(stripe_byte_length)
+            .and_then(|byte_length| byte_length.checked_add(leaf_workspace_byte_length))
             .ok_or_else(|| "bound-tree algorithm live set overflows".to_owned())?;
         if algorithm_live_byte_length > MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH {
             return Err("bound-tree algorithm live set exceeds the hard WASM bound".to_owned());
@@ -394,6 +594,8 @@ pub(super) fn derive_bound_tree_authentication_liveness(
         maximum_dft_buffer_byte_length = maximum_dft_buffer_byte_length.max(evaluation_byte_length);
         maximum_evaluated_stripe_byte_length =
             maximum_evaluated_stripe_byte_length.max(stripe_byte_length);
+        maximum_leaf_workspace_byte_length =
+            maximum_leaf_workspace_byte_length.max(leaf_workspace_byte_length);
         maximum_algorithm_live_set_byte_length =
             maximum_algorithm_live_set_byte_length.max(algorithm_live_byte_length);
         full_column_dft_count = full_column_dft_count
@@ -431,6 +633,7 @@ pub(super) fn derive_bound_tree_authentication_liveness(
         maximum_stripe_count,
         maximum_dft_buffer_byte_length,
         maximum_evaluated_stripe_byte_length,
+        maximum_leaf_workspace_byte_length,
         maximum_algorithm_live_set_byte_length,
         full_column_dft_count,
         leaf_hash_query_count,
@@ -452,10 +655,12 @@ pub(super) enum GenerationPhaseLivenessKind {
     PhaseCommitment,
     QuotientPreparation,
     AggregateSource,
+    PrivateMaterialSampling,
     AggregateOpeningPreparation,
     AggregateCommitment,
     BoundTreeAuthentication,
     WhirOpening,
+    BaseCaseOpening,
     CanonicalEncoding,
 }
 
@@ -468,9 +673,13 @@ pub(super) struct GenerationPhaseLivenessRow {
     replay_reader_byte_length: u64,
     dft_buffer_byte_length: u64,
     merkle_and_frontier_byte_length: u64,
-    proof_accumulator_byte_length: u64,
+    proof_encoder_non_salt_byte_length: u64,
+    transported_private_leaf_salt_byte_length: u64,
     transcript_byte_length: u64,
     private_material_byte_length: u64,
+    private_leaf_salt_state_byte_length: u64,
+    private_leaf_salt_workspace_byte_length: u64,
+    private_leaf_salt_uniqueness_set_byte_length: u64,
     bridge_copy_byte_length: u64,
     specialized_workspace_byte_length: u64,
     allocator_overhead_byte_length: u64,
@@ -514,8 +723,13 @@ impl GenerationPhaseLivenessRow {
     }
 
     #[cfg(test)]
-    pub(super) const fn proof_accumulator_byte_length(self) -> u64 {
-        self.proof_accumulator_byte_length
+    pub(super) const fn proof_encoder_non_salt_byte_length(self) -> u64 {
+        self.proof_encoder_non_salt_byte_length
+    }
+
+    #[cfg(test)]
+    pub(super) const fn transported_private_leaf_salt_byte_length(self) -> u64 {
+        self.transported_private_leaf_salt_byte_length
     }
 
     #[cfg(test)]
@@ -526,6 +740,21 @@ impl GenerationPhaseLivenessRow {
     #[cfg(test)]
     pub(super) const fn private_material_byte_length(self) -> u64 {
         self.private_material_byte_length
+    }
+
+    #[cfg(test)]
+    pub(super) const fn private_leaf_salt_state_byte_length(self) -> u64 {
+        self.private_leaf_salt_state_byte_length
+    }
+
+    #[cfg(test)]
+    pub(super) const fn private_leaf_salt_workspace_byte_length(self) -> u64 {
+        self.private_leaf_salt_workspace_byte_length
+    }
+
+    #[cfg(test)]
+    pub(super) const fn private_leaf_salt_uniqueness_set_byte_length(self) -> u64 {
+        self.private_leaf_salt_uniqueness_set_byte_length
     }
 
     #[cfg(test)]
@@ -580,9 +809,10 @@ pub(super) struct CompleteGenerationLivenessInput {
     pub(super) aggregate_source_batch_byte_length: u64,
     pub(super) aggregate_source_row_byte_length: u64,
     pub(super) aggregate_opening_preparation_byte_length: u64,
-    pub(super) proof_accumulator_byte_length: u64,
+    pub(super) proof_encoder_byte_length: u64,
     pub(super) transcript_byte_length: u64,
     pub(super) private_material_byte_length: u64,
+    pub(super) private_material_partition_transition_byte_length: u64,
     pub(super) proof_transport_bridge_byte_length: u64,
 }
 
@@ -604,14 +834,22 @@ pub(super) fn derive_complete_generation_liveness(
             .maximum_returned_source_polynomial_byte_length()
             == 0
         || input.maximum_replay_reader_byte_length == 0
-        || input.proof_accumulator_byte_length == 0
+        || input.proof_encoder_byte_length == 0
         || input.transcript_byte_length == 0
         || input.proof_transport_bridge_byte_length == 0
+        || (construction_plan.proof_privacy_mode == ProofPrivacyMode::SecretBearing
+            && (input.private_material_byte_length == 0
+                || input.private_material_partition_transition_byte_length == 0))
     {
         return Err("complete proof-generation liveness omitted a required allocation".to_owned());
     }
     let aggregate = derive_aggregate_commitment_liveness(construction_plan)?;
     let bound = derive_bound_tree_authentication_liveness(construction_plan)?;
+    let private_leaf_salt = derive_private_leaf_salt_liveness(construction_plan)?;
+    let proof_encoder_non_salt_byte_length = input
+        .proof_encoder_byte_length
+        .checked_sub(private_leaf_salt.transported_salt_byte_length)
+        .ok_or_else(|| "proof encoder is smaller than its transported private salts".to_owned())?;
     let (phase_dft_byte_length, phase_merkle_byte_length) =
         maximum_phase_commitment_algorithm_liveness(construction_plan)?;
     let common_bridge_byte_length =
@@ -626,7 +864,10 @@ pub(super) fn derive_complete_generation_liveness(
                   replay_reader_byte_length,
                   dft_buffer_byte_length,
                   merkle_and_frontier_byte_length,
-                  proof_accumulator_byte_length,
+                  include_proof_encoder,
+                  private_leaf_salt_state_byte_length,
+                  private_leaf_salt_workspace_byte_length,
+                  private_leaf_salt_uniqueness_set_byte_length,
                   specialized_workspace_byte_length| {
         generation_phase_liveness_row(
             phase,
@@ -635,9 +876,21 @@ pub(super) fn derive_complete_generation_liveness(
             replay_reader_byte_length,
             dft_buffer_byte_length,
             merkle_and_frontier_byte_length,
-            proof_accumulator_byte_length,
+            if include_proof_encoder {
+                proof_encoder_non_salt_byte_length
+            } else {
+                0
+            },
+            if include_proof_encoder {
+                private_leaf_salt.transported_salt_byte_length
+            } else {
+                0
+            },
             input.transcript_byte_length,
             input.private_material_byte_length,
+            private_leaf_salt_state_byte_length,
+            private_leaf_salt_workspace_byte_length,
+            private_leaf_salt_uniqueness_set_byte_length,
             common_bridge_byte_length,
             specialized_workspace_byte_length,
         )
@@ -666,6 +919,9 @@ pub(super) fn derive_complete_generation_liveness(
                 .maximum_returned_source_polynomial_byte_length(),
             0,
             0,
+            false,
+            0,
+            0,
             0,
             0,
         )?,
@@ -675,7 +931,10 @@ pub(super) fn derive_complete_generation_liveness(
             input.maximum_replay_reader_byte_length,
             0,
             0,
-            input.proof_accumulator_byte_length,
+            true,
+            0,
+            0,
+            0,
             0,
         )?,
         common(
@@ -684,7 +943,10 @@ pub(super) fn derive_complete_generation_liveness(
             input.maximum_replay_reader_byte_length,
             0,
             0,
-            input.proof_accumulator_byte_length,
+            true,
+            0,
+            0,
+            0,
             input.auxiliary_materialization_byte_length,
         )?,
         common(
@@ -693,7 +955,10 @@ pub(super) fn derive_complete_generation_liveness(
             0,
             phase_dft_byte_length,
             phase_merkle_byte_length,
-            input.proof_accumulator_byte_length,
+            true,
+            0,
+            private_leaf_salt.derivation_workspace_byte_length,
+            0,
             0,
         )?,
         common(
@@ -702,7 +967,10 @@ pub(super) fn derive_complete_generation_liveness(
             input.maximum_replay_reader_byte_length,
             0,
             0,
-            input.proof_accumulator_byte_length,
+            true,
+            0,
+            0,
+            0,
             input.quotient_preparation_byte_length,
         )?,
         common(
@@ -711,11 +979,26 @@ pub(super) fn derive_complete_generation_liveness(
             input.maximum_replay_reader_byte_length,
             0,
             0,
-            input.proof_accumulator_byte_length,
+            true,
+            0,
+            0,
+            0,
             input
                 .aggregate_source_batch_byte_length
                 .checked_add(input.aggregate_source_row_byte_length)
                 .ok_or_else(|| "aggregate source liveness overflowed".to_owned())?,
+        )?,
+        common(
+            GenerationPhaseLivenessKind::PrivateMaterialSampling,
+            post_source_provider_byte_length,
+            0,
+            0,
+            0,
+            true,
+            0,
+            0,
+            0,
+            input.private_material_partition_transition_byte_length,
         )?,
         common(
             GenerationPhaseLivenessKind::AggregateOpeningPreparation,
@@ -723,7 +1006,10 @@ pub(super) fn derive_complete_generation_liveness(
             0,
             0,
             0,
-            input.proof_accumulator_byte_length,
+            true,
+            0,
+            0,
+            0,
             input.aggregate_opening_preparation_byte_length,
         )?,
         common(
@@ -732,7 +1018,13 @@ pub(super) fn derive_complete_generation_liveness(
             0,
             aggregate.maximum_dft_buffer_byte_length,
             aggregate.maximum_leaf_state_stripe_byte_length,
-            input.proof_accumulator_byte_length,
+            true,
+            private_leaf_salt.aggregate_resident_state_byte_length,
+            private_leaf_salt
+                .derivation_workspace_byte_length
+                .checked_add(private_leaf_salt.aggregate_row_workspace_byte_length)
+                .ok_or_else(|| "aggregate private salt workspace overflowed".to_owned())?,
+            0,
             0,
         )?,
         common(
@@ -740,8 +1032,14 @@ pub(super) fn derive_complete_generation_liveness(
             post_source_provider_byte_length,
             0,
             bound.maximum_dft_buffer_byte_length,
-            bound.maximum_evaluated_stripe_byte_length,
-            input.proof_accumulator_byte_length,
+            bound
+                .maximum_evaluated_stripe_byte_length
+                .checked_add(bound.maximum_leaf_workspace_byte_length)
+                .ok_or_else(|| "bound-tree Merkle workspace overflowed".to_owned())?,
+            true,
+            0,
+            0,
+            0,
             0,
         )?,
         common(
@@ -750,8 +1048,51 @@ pub(super) fn derive_complete_generation_liveness(
             0,
             aggregate.maximum_dft_buffer_byte_length,
             aggregate.maximum_leaf_state_stripe_byte_length,
-            input.proof_accumulator_byte_length,
+            true,
+            private_leaf_salt.aggregate_resident_state_byte_length,
+            private_leaf_salt
+                .derivation_workspace_byte_length
+                .checked_add(private_leaf_salt.aggregate_row_workspace_byte_length)
+                .ok_or_else(|| "WHIR private salt workspace overflowed".to_owned())?,
             0,
+            private_leaf_salt.retained_pad_commitment_payload_byte_length,
+        )?,
+        common(
+            GenerationPhaseLivenessKind::BaseCaseOpening,
+            post_source_provider_byte_length,
+            0,
+            u64::try_from(
+                aggregate
+                    .epochs
+                    .last()
+                    .ok_or_else(|| "aggregate liveness has no final epoch".to_owned())?
+                    .leaf_count,
+            )
+            .ok()
+            .and_then(|leaf_count| {
+                leaf_count.checked_mul(u64::try_from(size_of::<ChallengeField>()).ok()?)
+            })
+            .ok_or_else(|| "base-case DFT liveness overflowed".to_owned())?,
+            u64::try_from(
+                aggregate
+                    .epochs
+                    .last()
+                    .ok_or_else(|| "aggregate liveness has no final epoch".to_owned())?
+                    .leaf_count,
+            )
+            .ok()
+            .and_then(|leaf_count| {
+                leaf_count.checked_mul(u64::try_from(size_of::<ColumnStreamableLeafState>()).ok()?)
+            })
+            .ok_or_else(|| "base-case leaf-state liveness overflowed".to_owned())?,
+            true,
+            private_leaf_salt.aggregate_resident_state_byte_length,
+            private_leaf_salt
+                .derivation_workspace_byte_length
+                .checked_add(private_leaf_salt.aggregate_row_workspace_byte_length)
+                .ok_or_else(|| "base-case private salt workspace overflowed".to_owned())?,
+            0,
+            private_leaf_salt.base_case_commitment_payload_byte_length,
         )?,
         common(
             GenerationPhaseLivenessKind::CanonicalEncoding,
@@ -759,7 +1100,10 @@ pub(super) fn derive_complete_generation_liveness(
             0,
             0,
             0,
-            input.proof_accumulator_byte_length,
+            true,
+            0,
+            0,
+            private_leaf_salt.canonical_uniqueness_set_byte_length,
             0,
         )?,
     ];
@@ -788,9 +1132,13 @@ fn generation_phase_liveness_row(
     replay_reader_byte_length: u64,
     dft_buffer_byte_length: u64,
     merkle_and_frontier_byte_length: u64,
-    proof_accumulator_byte_length: u64,
+    proof_encoder_non_salt_byte_length: u64,
+    transported_private_leaf_salt_byte_length: u64,
     transcript_byte_length: u64,
     private_material_byte_length: u64,
+    private_leaf_salt_state_byte_length: u64,
+    private_leaf_salt_workspace_byte_length: u64,
+    private_leaf_salt_uniqueness_set_byte_length: u64,
     bridge_copy_byte_length: u64,
     specialized_workspace_byte_length: u64,
 ) -> Result<GenerationPhaseLivenessRow, String> {
@@ -800,9 +1148,13 @@ fn generation_phase_liveness_row(
         replay_reader_byte_length,
         dft_buffer_byte_length,
         merkle_and_frontier_byte_length,
-        proof_accumulator_byte_length,
+        proof_encoder_non_salt_byte_length,
+        transported_private_leaf_salt_byte_length,
         transcript_byte_length,
         private_material_byte_length,
+        private_leaf_salt_state_byte_length,
+        private_leaf_salt_workspace_byte_length,
+        private_leaf_salt_uniqueness_set_byte_length,
         bridge_copy_byte_length,
         specialized_workspace_byte_length,
     ]
@@ -826,9 +1178,13 @@ fn generation_phase_liveness_row(
         replay_reader_byte_length,
         dft_buffer_byte_length,
         merkle_and_frontier_byte_length,
-        proof_accumulator_byte_length,
+        proof_encoder_non_salt_byte_length,
+        transported_private_leaf_salt_byte_length,
         transcript_byte_length,
         private_material_byte_length,
+        private_leaf_salt_state_byte_length,
+        private_leaf_salt_workspace_byte_length,
+        private_leaf_salt_uniqueness_set_byte_length,
         bridge_copy_byte_length,
         specialized_workspace_byte_length,
         allocator_overhead_byte_length,
@@ -865,8 +1221,20 @@ fn maximum_phase_commitment_algorithm_liveness(
             construction_plan
                 .parameters
                 .outer_query_count
-                .checked_mul(geometry.row_count)
-                .and_then(|count| count.checked_mul(size_of::<ProofBaseFieldElement>()))
+                .checked_mul(
+                    geometry
+                        .row_count
+                        .checked_mul(size_of::<ProofBaseFieldElement>())
+                        .and_then(|byte_length| {
+                            byte_length.checked_add(
+                                usize::from(
+                                    construction_plan.proof_privacy_mode
+                                        == ProofPrivacyMode::SecretBearing,
+                                ) * PRIVATE_LEAF_SALT_BYTE_LENGTH,
+                            )
+                        })
+                        .ok_or_else(|| "phase opening row liveness overflowed".to_owned())?,
+                )
                 .ok_or_else(|| "phase opening liveness overflowed".to_owned())?,
         )
         .map_err(|_| "phase opening liveness exceeds u64".to_owned())?;
@@ -925,8 +1293,7 @@ mod tests {
     use super::super::canonical_row_code_whir_family_body_byte_length_ceiling;
     use super::*;
     use crate::bgv::proof_suite::{
-        AUTOMATIC_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
-        NOMINAL_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, ValidatedRelationPlanArtifact,
+        AUTOMATIC_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, ValidatedRelationPlanArtifact,
         build_relation_bound_public_tree_catalog_entries,
         canonical_selected_application_statement_for_ceiling, compile_same_secret_relation_plan,
         external_memory::MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
@@ -1050,14 +1417,15 @@ mod tests {
         );
         assert_eq!(
             accounting.maximum_algorithm_live_set_byte_length(),
-            NOMINAL_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
+            402_654_216,
         );
         assert!(
             accounting.maximum_algorithm_live_set_byte_length()
                 <= AUTOMATIC_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
         );
         assert_eq!(accounting.full_column_dft_count(), 272);
-        assert_eq!(accounting.cached_initial_hash_query_count(), 12);
+        assert_eq!(accounting.initial_hash_query_count(), 33_030_144);
+        assert_eq!(accounting.private_leaf_salt_derivation_count(), 33_030_144);
         assert_eq!(accounting.transition_hash_query_count(), 264_241_152);
         assert_eq!(accounting.final_hash_query_count(), 33_030_144);
         assert_eq!(accounting.merkle_parent_hash_query_count(), 33_030_132);
@@ -1065,18 +1433,40 @@ mod tests {
             accounting
                 .aggregate_hash_query_count()
                 .expect("the hash count adds"),
-            330_301_440,
+            363_331_572,
         );
         assert_eq!(
             accounting
                 .aggregate_hash_query_count()
                 .expect("the hash count adds")
                 + DIRECT_SINGLE_COLUMN_COMMITMENT_HASH_QUERY_COUNT,
-            331_415_549,
+            364_445_681,
         );
         assert_eq!(
             selected_same_secret_proof_byte_length(&plan, &validated),
-            5_309_850
+            5_814_554
+        );
+    }
+
+    #[test]
+    fn selected_private_leaf_salt_liveness_covers_every_transport_and_resident_owner() {
+        let (plan, _) = selected_same_secret_construction();
+        let accounting =
+            derive_private_leaf_salt_liveness(&plan).expect("private salt liveness derives");
+        assert_eq!(accounting.phase_opening_salt_count, 1_161);
+        assert_eq!(accounting.aggregate_opening_salt_count, 2_782);
+        assert_eq!(accounting.transported_salt_byte_length, 504_704);
+        assert_eq!(accounting.aggregate_resident_state_byte_length, 56);
+        assert_eq!(accounting.derivation_workspace_byte_length, 392);
+        assert_eq!(accounting.aggregate_row_workspace_byte_length, 584);
+        assert_eq!(accounting.canonical_uniqueness_set_byte_length, 489_656);
+        assert_eq!(
+            accounting.retained_pad_commitment_payload_byte_length,
+            1_376_720,
+        );
+        assert_eq!(
+            accounting.base_case_commitment_payload_byte_length,
+            46_794_256,
         );
     }
 
@@ -1114,7 +1504,7 @@ mod tests {
                 + epoch_count * 7 * MERKLE_DIGEST_BYTE_LENGTH
                 + epoch_count * 7 * CANONICAL_COUNT_BYTE_LENGTH;
         assert_eq!(extra_frontier_node_count, 151_326);
-        assert_eq!(column_separated_proof_byte_length, 14_997_570);
+        assert_eq!(column_separated_proof_byte_length, 15_502_274);
 
         let leaf_count_sum = accounting
             .epochs()
@@ -1173,8 +1563,9 @@ mod tests {
         );
         assert_eq!(
             accounting.maximum_algorithm_live_set_byte_length(),
-            201_326_592
+            201_327_136
         );
+        assert_eq!(accounting.maximum_leaf_workspace_byte_length(), 544);
         assert_eq!(accounting.full_column_dft_count(), 352);
         assert_eq!(accounting.leaf_hash_query_count(), 92_274_688);
         assert_eq!(accounting.merkle_parent_hash_query_count(), 92_274_677);
@@ -1197,9 +1588,10 @@ mod tests {
             aggregate_source_batch_byte_length: 0,
             aggregate_source_row_byte_length: 0,
             aggregate_opening_preparation_byte_length: 0,
-            proof_accumulator_byte_length: 1,
+            proof_encoder_byte_length: 1_000_000,
             transcript_byte_length: 1,
-            private_material_byte_length: 0,
+            private_material_byte_length: 1,
+            private_material_partition_transition_byte_length: 1,
             proof_transport_bridge_byte_length: 1,
         }
     }

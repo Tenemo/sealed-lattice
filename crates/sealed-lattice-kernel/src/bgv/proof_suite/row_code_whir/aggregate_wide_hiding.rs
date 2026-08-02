@@ -7,7 +7,7 @@
 //! is derived from one precommitted full-coordinate mask. The pad itself is
 //! never published or recomputed from public data.
 
-use core::ops::Range;
+use core::{mem::size_of, ops::Range};
 
 use p3_challenger::{CanObserve, FieldChallenger, GrindingChallenger};
 use p3_commit::{ExtensionMmcs, Mmcs};
@@ -268,6 +268,30 @@ impl AggregateWideHidingMaterialShape {
 
     pub(super) const fn total_extension_element_count(&self) -> usize {
         self.total_extension_element_count
+    }
+
+    /// Dynamic destination payload allocated while the completed sampling
+    /// vector is partitioned into production material. The source sampling
+    /// vector remains live until partitioning returns, so complete liveness
+    /// charges this destination beside the full source payload.
+    pub(super) fn partitioned_material_dynamic_payload_byte_length(&self) -> Result<usize, String> {
+        self.total_extension_element_count
+            .checked_mul(size_of::<ChallengeField>())
+            .and_then(|payload| {
+                self.oracle_randomness_lengths
+                    .len()
+                    .checked_mul(size_of::<Vec<ChallengeField>>())
+                    .and_then(|catalog| payload.checked_add(catalog))
+            })
+            .and_then(|payload| {
+                payload.checked_add(size_of::<BaseCaseFreshMaskGroup<ChallengeField>>())
+            })
+            .and_then(|payload| {
+                2_usize
+                    .checked_mul(size_of::<Vec<ChallengeField>>())
+                    .and_then(|catalog| payload.checked_add(catalog))
+            })
+            .ok_or_else(|| "aggregate-wide partitioned material size overflowed".to_owned())
     }
 
     #[cfg(test)]
@@ -2703,7 +2727,7 @@ mod tests {
         assert_eq!(certificate.pad_randomness_length(), 393);
         assert_eq!(certificate.pad_domain_size(), 8_192);
         assert_eq!(certificate.private_extension_element_count(), 18_027);
-        assert_eq!(certificate.joint_affine_view_summary().0, 18_025);
+        assert_eq!(certificate.affine_private_extension_element_count, 18_025);
         assert_eq!(certificate.total_joint_affine_view_rank, 18_013);
         assert_eq!(certificate.total_conditional_entropy_dimension, 12);
         assert_eq!(certificate.joint_affine_view_rows.len(), 15);

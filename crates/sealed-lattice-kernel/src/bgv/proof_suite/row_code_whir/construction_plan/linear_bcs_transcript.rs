@@ -297,6 +297,7 @@ impl LinearBcsTranscriptPlan {
     }
 }
 
+#[cfg(feature = "theorem-evidence")]
 pub(in crate::bgv::proof_suite) fn checked_linear_bcs_transcript_plan_hash_from_parts(
     round_ranges: &[LinearBcsRoundRangePlan],
     supplied_commitment_openings: &[LinearBcsSuppliedCommitmentOpeningPlan],
@@ -349,6 +350,7 @@ pub(in crate::bgv::proof_suite) fn linear_bcs_atomic_challenge_address_encoding(
     encoded
 }
 
+#[cfg(feature = "theorem-evidence")]
 pub(in crate::bgv::proof_suite) fn linear_bcs_response_address_encoding(
     round_ordinal: u64,
     response_operation_ordinal: u32,
