@@ -73,6 +73,8 @@ use std::collections::BTreeMap;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 use super::NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH;
 #[cfg(all(test, not(target_arch = "wasm32")))]
+use super::construction_plan::RowCodeWhirPhase;
+#[cfg(all(test, not(target_arch = "wasm32")))]
 use super::row_encoding::{
     PRIVATE_ROW_PAD_PHASE_COUNT, PRIVATE_ROW_PAD_SEED_BYTE_LENGTH,
     PRIVATE_ROW_PAD_SEED_MATERIAL_BYTE_LENGTH, PrivateRowPadSeed, PrivateRowPadSeeds,
@@ -1775,7 +1777,10 @@ mod native_checkpoint {
     use p3_field::PrimeCharacteristicRing;
     use p3_goldilocks::Goldilocks;
 
-    use super::super::{column_commitment::StreamingColumnHasher, row_encoding::encode_row};
+    use super::super::{
+        column_commitment::{PrivateColumnLeafSaltContext, StreamingColumnHasher},
+        row_encoding::encode_row,
+    };
     use super::*;
     use crate::bgv::proof_suite::{
         PROOF_CHALLENGE_EXTENSION_DEGREE, ProofBaseFieldElement, ProofChallengeExtensionElement,
@@ -1801,10 +1806,21 @@ mod native_checkpoint {
     pub(super) fn commit_phase_rows<Source: RecomputableRowSource>(
         source: &Source,
         geometry: RowEncodingGeometry,
+        phase: RowCodeWhirPhase,
         secret_row_pad_seed: &PrivateRowPadSeed,
     ) -> Result<ColumnDigest, String> {
-        let mut column_hasher =
-            StreamingColumnHasher::new(geometry.row_count, geometry.encoded_column_count)?;
+        let commitment_role: &'static [u8] = match phase {
+            RowCodeWhirPhase::Base => b"relation-phase/base",
+            RowCodeWhirPhase::Auxiliary => b"relation-phase/auxiliary",
+            RowCodeWhirPhase::Quotient => b"relation-phase/quotient",
+        };
+        let private_leaf_salt =
+            PrivateColumnLeafSaltContext::new(secret_row_pad_seed, commitment_role);
+        let mut column_hasher = StreamingColumnHasher::new_with_private_salt(
+            geometry.row_count,
+            geometry.encoded_column_count,
+            &private_leaf_salt,
+        )?;
         for row_index in 0..geometry.row_count {
             let mut witness_values = source.read_row(row_index)?;
             if witness_values.len() != geometry.witness_values_per_row {
@@ -4058,8 +4074,13 @@ mod tests {
 
         let base_source = CheckpointBasePhaseSource::new(&store, &base_layout);
         let base_geometry = base_layout.geometry().expect("derive base geometry");
-        let base_root = commit_phase_rows(&base_source, base_geometry, &row_pad_seeds[0])
-            .expect("commit exact base phase");
+        let base_root = commit_phase_rows(
+            &base_source,
+            base_geometry,
+            RowCodeWhirPhase::Base,
+            &row_pad_seeds[0],
+        )
+        .expect("commit exact base phase");
 
         let request_context = sources
             .source_polynomials
@@ -4180,9 +4201,13 @@ mod tests {
         let auxiliary_geometry = auxiliary_layout
             .geometry()
             .expect("derive auxiliary geometry");
-        let auxiliary_root =
-            commit_phase_rows(&auxiliary_source, auxiliary_geometry, &row_pad_seeds[1])
-                .expect("commit exact auxiliary phase");
+        let auxiliary_root = commit_phase_rows(
+            &auxiliary_source,
+            auxiliary_geometry,
+            RowCodeWhirPhase::Auxiliary,
+            &row_pad_seeds[1],
+        )
+        .expect("commit exact auxiliary phase");
         absorb_exact_relation_roots(
             &mut transcript,
             schedule.ordered_auxiliary_tree_ordinals(),
@@ -4322,6 +4347,7 @@ mod tests {
         let quotient_root = commit_phase_rows(
             &quotient_source,
             quotient_geometry,
+            RowCodeWhirPhase::Quotient,
             &derive_exact_row_pad_seeds(&mut sources).expect("derive exact row-pad seeds")[2],
         )
         .expect("commit exact quotient phase");

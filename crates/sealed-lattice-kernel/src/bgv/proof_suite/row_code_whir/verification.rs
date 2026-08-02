@@ -16,7 +16,7 @@ use super::aggregate_wide_pcs::{
     aggregate_wide_pcs_for_construction_plan,
 };
 use super::column_commitment::{
-    ColumnDigest, hash_opened_column, verify_prehashed_column_frontier,
+    ColumnDigest, hash_opened_column_with_salt, verify_prehashed_column_frontier,
 };
 use super::compact_merkle_frontier::verify_materialized_bound_frontier;
 use super::construction_plan::{
@@ -30,6 +30,7 @@ use super::opening_schedule::{
     ensure_bound_opening_points_are_outside_evaluation_domains,
     expected_out_of_domain_aggregate_evaluations, opening_schedule_continuation, phase_index,
 };
+use super::private_leaf_salt::{PRIVATE_LEAF_SALT_BYTE_LENGTH, PrivateLeafSalt};
 use super::{ChallengeField, ExtensionFieldChallenger, RowCodeWhirChallengerProofStreamAbsorber};
 use crate::bgv::proof_suite::{
     COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, CommonProofRelationPlanCapability,
@@ -1061,6 +1062,7 @@ impl RowCodeWhirIncrementalSemanticVerifier {
         &mut self,
         phase: RowCodeWhirPhase,
         column_ordinal: usize,
+        persistent_salt: Option<PrivateLeafSalt>,
         values: Vec<Goldilocks>,
     ) -> Result<(), String> {
         let ordered_phase = self
@@ -1089,7 +1091,14 @@ impl RowCodeWhirIncrementalSemanticVerifier {
             .construction_plan
             .phase_encoded_column_count(phase)
             .ok_or_else(|| "authenticated phase is absent from the construction".to_owned())?;
-        let digest = hash_opened_column(&values, encoded_column_count);
+        if persistent_salt.is_some()
+            != (self.prepared_relation.construction_plan.proof_privacy_mode
+                == ProofPrivacyMode::SecretBearing)
+        {
+            return Err("authenticated phase column has the wrong leaf-salt shape".to_owned());
+        }
+        let digest =
+            hash_opened_column_with_salt(&values, encoded_column_count, persistent_salt.as_ref());
         self.pending_phase_column_digests[phase_index].push((authenticated_column_index, digest));
         accumulate_phase_query_column_evaluations(
             &self.prepared_relation.construction_plan,
@@ -1765,8 +1774,15 @@ impl RowCodeWhirIncrementalDecoder {
             .construction_plan
             .phase_row_count(phase)
             .ok_or_else(|| "phase row count is absent".to_owned())?;
+        let leaf_salt_byte_length =
+            if self.construction_plan.proof_privacy_mode == ProofPrivacyMode::SecretBearing {
+                PRIVATE_LEAF_SALT_BYTE_LENGTH
+            } else {
+                0
+            };
         let section_byte_length = row_count
             .checked_mul(core::mem::size_of::<u64>())
+            .and_then(|length| length.checked_add(leaf_salt_byte_length))
             .ok_or_else(|| "phase column length overflowed".to_owned())?;
         let Some(canonical) = self.copy_available_section(
             source,
@@ -1778,6 +1794,11 @@ impl RowCodeWhirIncrementalDecoder {
             return Ok(false);
         };
         let mut reader = RowCodeWhirCanonicalReader::new(&canonical);
+        let persistent_salt = if leaf_salt_byte_length == 0 {
+            None
+        } else {
+            Some(reader.read_array::<PRIVATE_LEAF_SALT_BYTE_LENGTH>()?)
+        };
         let values = (0..row_count)
             .map(|_| reader.read_goldilocks())
             .collect::<Result<Vec<_>, _>>()?;
@@ -1787,7 +1808,7 @@ impl RowCodeWhirIncrementalDecoder {
         self.semantic_verifier
             .as_mut()
             .ok_or_else(|| "semantic verifier is absent".to_owned())?
-            .consume_phase_column(phase, next_column_index, values)?;
+            .consume_phase_column(phase, next_column_index, persistent_salt, values)?;
         self.phase = RowCodeWhirDecoderPhase::PhaseColumns {
             phase_order_index,
             next_column_index: next_column_index + 1,

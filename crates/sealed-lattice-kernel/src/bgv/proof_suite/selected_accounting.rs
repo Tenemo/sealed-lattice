@@ -2123,7 +2123,7 @@ pub(crate) mod resource_accounting {
                 .map(|frontier| frontier.canonical_opening_byte_length())
                 .sum::<u64>();
             assert_eq!(construction.compact_frontiers().len(), 14);
-            assert_eq!(phase_opening_byte_length, 1_330_524);
+            assert_eq!(phase_opening_byte_length, 1_479_132);
             assert_eq!(prior_proof_bound_opening_byte_length, 421_920);
             assert_eq!(direct_bound_opening_byte_length, 813_324);
 
@@ -2159,19 +2159,19 @@ pub(crate) mod resource_accounting {
                 .iter()
                 .map(|section| section.byte_length())
                 .sum::<u64>();
-            assert_eq!(aggregate_opening_byte_length, 2_586_008);
+            assert_eq!(aggregate_opening_byte_length, 2_942_104);
             let independently_reconciled_family_body_byte_length = non_opening_prefix_byte_length
                 + phase_opening_byte_length
                 + prior_proof_bound_opening_byte_length
                 + direct_bound_opening_byte_length
                 + aggregate_opening_byte_length;
-            assert_eq!(independently_reconciled_family_body_byte_length, 5_308_948);
+            assert_eq!(independently_reconciled_family_body_byte_length, 5_813_652);
             assert_eq!(
                 same_secret.canonical_family_body_byte_length(),
                 independently_reconciled_family_body_byte_length
             );
-            assert_eq!(same_secret.canonical_proof_byte_length(), 5_309_850);
-            assert_eq!(same_secret.nominal_proof_overage_byte_length(), 66_970);
+            assert_eq!(same_secret.canonical_proof_byte_length(), 5_814_554);
+            assert_eq!(same_secret.nominal_proof_overage_byte_length(), 571_674);
             assert_eq!(same_secret.nominal_proof_headroom_byte_length(), 0);
             assert_eq!(same_secret.automatic_acceptance_overage_byte_length(), 0);
 
@@ -2190,11 +2190,11 @@ pub(crate) mod resource_accounting {
                 })
                 .collect::<Vec<_>>();
             let mut expected_engineering_review_rows = vec![
-                (0x1213, None, None, 1, 7_916_724, 52_404),
-                (0x1214, Some(0), None, 10, 18_747_444, 10_883_124),
-                (0x1215, Some(0), None, 1, 47_855_714, 39_991_394),
-                (0x1216, Some(0), None, 10, 37_289_242, 29_424_922),
-                (0x1217, Some(0), None, 10, 34_402_548, 26_538_228),
+                (0x1213, None, None, 1, 8_272_820, 408_500),
+                (0x1214, Some(0), None, 10, 19_252_148, 11_387_828),
+                (0x1215, Some(0), None, 1, 48_211_810, 40_347_490),
+                (0x1216, Some(0), None, 10, 37_793_946, 29_929_626),
+                (0x1217, Some(0), None, 10, 34_907_252, 27_042_932),
             ];
             expected_engineering_review_rows.extend((1_u16..=20).map(|top_count| {
                 (
@@ -2202,14 +2202,14 @@ pub(crate) mod resource_accounting {
                     None,
                     Some(top_count),
                     u32::from(top_count == FOUNDATION_PROFILE.option_count),
-                    28_749_492,
-                    20_885_172,
+                    29_105_588,
+                    21_241_268,
                 )
             }));
             expected_engineering_review_rows.extend([
-                (0x1621, None, None, 10, 20_365_522, 12_501_202),
-                (0x2110, None, None, 10, 41_388_818, 33_524_498),
-                (0x2111, None, None, 10, 32_928_554, 25_064_234),
+                (0x1621, None, None, 10, 20_870_226, 13_005_906),
+                (0x2110, None, None, 10, 41_843_986, 33_979_666),
+                (0x2111, None, None, 10, 33_383_722, 25_519_402),
             ]);
             assert_eq!(engineering_review_rows, expected_engineering_review_rows);
 
@@ -2226,7 +2226,7 @@ pub(crate) mod resource_accounting {
             );
             assert_eq!(
                 active_evaluator_row.canonical_proof_byte_length(),
-                28_749_492
+                29_105_588
             );
             assert!(
                 active_evaluator_row.canonical_proof_byte_length()

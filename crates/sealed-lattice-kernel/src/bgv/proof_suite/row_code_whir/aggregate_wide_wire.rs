@@ -9,13 +9,19 @@ use p3_goldilocks::Goldilocks;
 use p3_sumcheck::{OpeningBatch, zk::ZkSumcheckData};
 use p3_symmetric::MerkleCap;
 use p3_whir::{BaseCaseZkProof, BlindedMask, MaskOpeningPair, QueryOpening};
+use std::collections::BTreeSet;
 
 #[cfg(test)]
 use core::ops::Range;
 
 use super::aggregate_wide_hiding::{AggregateWideOpeningProof, AggregateWidePadLayout};
 use super::aggregate_wide_pcs::AggregateWideCommitment;
+use super::coordinate_derived_hiding_mmcs::{
+    CoordinateDerivedLeafSaltProof, TransportedPrivateLeafSalt,
+};
 use super::hiding_whir::SelectedHidingWhirConfig;
+#[cfg(test)]
+use super::private_leaf_salt::PRIVATE_LEAF_SALT_BYTE_LENGTH;
 use super::{
     ChallengeField, MERKLE_DIGEST_WORD_LENGTH,
     compact_merkle_frontier::{
@@ -30,11 +36,13 @@ const CHALLENGE_FIELD_LIMB_COUNT: usize = 5;
 const ENCODER_CHUNK_BYTE_LENGTH: usize = 4_096;
 
 type MerkleNode = [u64; MERKLE_DIGEST_WORD_LENGTH];
-type AggregateQueryOpening = QueryOpening<ChallengeField, ChallengeField, Vec<MerkleNode>>;
+type AggregateQueryOpening =
+    QueryOpening<ChallengeField, ChallengeField, CoordinateDerivedLeafSaltProof>;
 type AggregateBaseCase = BaseCaseZkProof<ChallengeField, ChallengeField, super::CommitmentScheme>;
 
 pub(super) struct CompactAggregateWideQueryBatch {
     rows: Vec<Vec<ChallengeField>>,
+    private_leaf_salts: Vec<TransportedPrivateLeafSalt>,
     frontier: Vec<MerkleNode>,
     leaf_count: usize,
     row_width: usize,
@@ -48,6 +56,7 @@ impl CompactAggregateWideQueryBatch {
         expected_commitment: &AggregateWideCommitment,
     ) -> Result<Vec<AggregateQueryOpening>, String> {
         if self.rows.len() != query_indices.len()
+            || self.private_leaf_salts.len() != query_indices.len()
             || self.rows.iter().any(|row| row.len() != self.row_width)
         {
             return Err("aggregate-wide compact query batch has the wrong shape".to_owned());
@@ -64,6 +73,7 @@ impl CompactAggregateWideQueryBatch {
             self.leaf_count,
             query_indices,
             &row_slices,
+            Some(&self.private_leaf_salts),
             &self.frontier,
             Some(commitment_root(expected_commitment)?),
         )?;
@@ -71,11 +81,26 @@ impl CompactAggregateWideQueryBatch {
             .rows
             .iter()
             .cloned()
+            .zip(self.private_leaf_salts.iter().cloned())
             .zip(paths)
-            .map(|(values, proof)| match self.variant {
-                QueryVariant::Base => QueryOpening::Base { values, proof },
-                QueryVariant::Extension => QueryOpening::Extension { values, proof },
-            })
+            .map(
+                |((values, private_leaf_salt), siblings)| match self.variant {
+                    QueryVariant::Base => QueryOpening::Base {
+                        values,
+                        proof: CoordinateDerivedLeafSaltProof {
+                            private_leaf_salts: vec![private_leaf_salt],
+                            siblings,
+                        },
+                    },
+                    QueryVariant::Extension => QueryOpening::Extension {
+                        values,
+                        proof: CoordinateDerivedLeafSaltProof {
+                            private_leaf_salts: vec![private_leaf_salt],
+                            siblings,
+                        },
+                    },
+                },
+            )
             .collect())
     }
 
@@ -85,6 +110,10 @@ impl CompactAggregateWideQueryBatch {
             .map(|row| row.capacity() * core::mem::size_of::<ChallengeField>())
             .sum::<usize>()
             .saturating_add(self.rows.capacity() * core::mem::size_of::<Vec<ChallengeField>>())
+            .saturating_add(
+                self.private_leaf_salts.capacity()
+                    * core::mem::size_of::<TransportedPrivateLeafSalt>(),
+            )
             .saturating_add(self.frontier.capacity() * core::mem::size_of::<MerkleNode>())
     }
 }
@@ -439,6 +468,7 @@ pub(super) enum AggregateWideHostileMutationTargetKind {
     Field,
     Frontier,
     Root,
+    Salt,
 }
 
 #[cfg(test)]
@@ -569,13 +599,26 @@ impl<'a> AggregateWideMutationScanner<'a> {
                 "aggregate-wide mutation query geometry is invalid at {label}"
             ));
         }
-        self.take_field_vector(
-            query_count.checked_mul(row_width).ok_or_else(|| {
-                format!("aggregate-wide mutation row count overflowed at {label}")
-            })?,
-            &format!("{label} opening values"),
-            true,
-        )?;
+        for query_ordinal in 0..query_count {
+            let salt_label = format!("{label} opening {query_ordinal} private leaf salt");
+            if query_ordinal == 0 || query_ordinal + 1 == query_count {
+                self.record_bytes(
+                    super::private_leaf_salt::PRIVATE_LEAF_SALT_BYTE_LENGTH,
+                    salt_label,
+                    AggregateWideHostileMutationTargetKind::Salt,
+                )?;
+            } else {
+                self.take_bytes(
+                    super::private_leaf_salt::PRIVATE_LEAF_SALT_BYTE_LENGTH,
+                    &salt_label,
+                )?;
+            }
+            self.take_field_vector(
+                row_width,
+                &format!("{label} opening {query_ordinal} values"),
+                query_ordinal == 0 || query_ordinal + 1 == query_count,
+            )?;
+        }
         let frontier_count = self.read_count(format!("{label} frontier count"))?;
         let maximum_frontier_count = query_count
             .checked_mul(leaf_count.ilog2() as usize)
@@ -882,11 +925,26 @@ enum QueryVariant {
 fn query_parts(
     opening: &AggregateQueryOpening,
     expected_variant: QueryVariant,
-) -> Result<(&[ChallengeField], &[MerkleNode]), String> {
+) -> Result<
+    (
+        &[ChallengeField],
+        &TransportedPrivateLeafSalt,
+        &[MerkleNode],
+    ),
+    String,
+> {
     match (expected_variant, opening) {
         (QueryVariant::Base, QueryOpening::Base { values, proof })
         | (QueryVariant::Extension, QueryOpening::Extension { values, proof }) => {
-            Ok((values, proof))
+            let private_leaf_salt = proof
+                .private_leaf_salts
+                .as_slice()
+                .first()
+                .filter(|_| proof.private_leaf_salts.len() == 1)
+                .ok_or_else(|| {
+                    "aggregate-wide query opening has the wrong private leaf-salt count".to_owned()
+                })?;
+            Ok((values, private_leaf_salt, &proof.siblings))
         }
         _ => Err("aggregate-wide query opening has the wrong field variant".to_owned()),
     }
@@ -905,10 +963,11 @@ fn encode_query_batch(
     }
     let mut paths = Vec::with_capacity(queries.len());
     for query in queries {
-        let (values, path) = query_parts(query, expected_variant)?;
+        let (values, private_leaf_salt, path) = query_parts(query, expected_variant)?;
         if values.len() != row_width {
             return Err("aggregate-wide query row has the wrong width".to_owned());
         }
+        writer.write_private_leaf_salt(private_leaf_salt)?;
         writer.write_fields(values)?;
         paths.push(path);
     }
@@ -935,9 +994,12 @@ fn decode_compact_query_batch(
     {
         return Err("aggregate-wide compact query geometry is invalid".to_owned());
     }
-    let rows = (0..query_count)
-        .map(|_| reader.read_fields(row_width))
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut rows = Vec::with_capacity(query_count);
+    let mut private_leaf_salts = Vec::with_capacity(query_count);
+    for _ in 0..query_count {
+        private_leaf_salts.push(reader.read_private_leaf_salt()?);
+        rows.push(reader.read_fields(row_width)?);
+    }
     let frontier_count = reader.read_u32_as_usize()?;
     let maximum_frontier_count = query_count
         .checked_mul(leaf_count.ilog2() as usize)
@@ -952,6 +1014,7 @@ fn decode_compact_query_batch(
         .collect::<Result<Vec<_>, _>>()?;
     Ok(CompactAggregateWideQueryBatch {
         rows,
+        private_leaf_salts,
         frontier,
         leaf_count,
         row_width,
@@ -1163,11 +1226,15 @@ fn checked_u32(value: usize, label: &str) -> Result<u32, String> {
 
 struct CanonicalWriter {
     bytes: Vec<u8>,
+    private_leaf_salts: BTreeSet<TransportedPrivateLeafSalt>,
 }
 
 impl CanonicalWriter {
     fn new() -> Self {
-        Self { bytes: Vec::new() }
+        Self {
+            bytes: Vec::new(),
+            private_leaf_salts: BTreeSet::new(),
+        }
     }
 
     fn write_bytes(&mut self, bytes: &[u8]) -> Result<(), String> {
@@ -1207,6 +1274,13 @@ impl CanonicalWriter {
         Ok(())
     }
 
+    fn write_private_leaf_salt(&mut self, salt: &TransportedPrivateLeafSalt) -> Result<(), String> {
+        if !self.private_leaf_salts.insert(salt.clone()) {
+            return Err("aggregate-wide proof reuses a private leaf salt".to_owned());
+        }
+        self.write_bytes(&salt.bytes())
+    }
+
     fn write_merkle_node(&mut self, node: &MerkleNode) -> Result<(), String> {
         for word in node {
             self.write_bytes(&word.to_le_bytes())?;
@@ -1230,11 +1304,16 @@ impl CanonicalWriter {
 struct CanonicalReader<'a> {
     bytes: &'a [u8],
     offset: usize,
+    private_leaf_salts: BTreeSet<TransportedPrivateLeafSalt>,
 }
 
 impl<'a> CanonicalReader<'a> {
     fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes, offset: 0 }
+        Self {
+            bytes,
+            offset: 0,
+            private_leaf_salts: BTreeSet::new(),
+        }
     }
 
     fn read_array<const BYTE_COUNT: usize>(&mut self) -> Result<[u8; BYTE_COUNT], String> {
@@ -1289,6 +1368,14 @@ impl<'a> CanonicalReader<'a> {
         (0..count).map(|_| self.read_field()).collect()
     }
 
+    fn read_private_leaf_salt(&mut self) -> Result<TransportedPrivateLeafSalt, String> {
+        let salt = TransportedPrivateLeafSalt::from_bytes(self.read_array()?);
+        if !self.private_leaf_salts.insert(salt.clone()) {
+            return Err("aggregate-wide proof reuses a private leaf salt".to_owned());
+        }
+        Ok(salt)
+    }
+
     fn read_merkle_node(&mut self) -> Result<MerkleNode, String> {
         let mut node = [0_u64; MERKLE_DIGEST_WORD_LENGTH];
         for word in &mut node {
@@ -1336,5 +1423,28 @@ mod tests {
         )
         .expect_err("nonzero disabled witness must be rejected");
         assert!(error.contains("nonzero"));
+    }
+
+    #[test]
+    fn canonical_wire_refuses_reused_private_leaf_salts_across_batches() {
+        let first = TransportedPrivateLeafSalt::from_bytes([0x31; PRIVATE_LEAF_SALT_BYTE_LENGTH]);
+        let second = TransportedPrivateLeafSalt::from_bytes([0x92; PRIVATE_LEAF_SALT_BYTE_LENGTH]);
+        let mut writer = CanonicalWriter::new();
+        writer
+            .write_private_leaf_salt(&first)
+            .expect("the first salt is accepted");
+        writer
+            .write_private_leaf_salt(&second)
+            .expect("a distinct salt is accepted");
+        assert!(writer.write_private_leaf_salt(&first).is_err());
+
+        let mut canonical = Vec::new();
+        canonical.extend_from_slice(&first.bytes());
+        canonical.extend_from_slice(&second.bytes());
+        canonical.extend_from_slice(&first.bytes());
+        let mut reader = CanonicalReader::new(&canonical);
+        assert_eq!(reader.read_private_leaf_salt(), Ok(first.clone()));
+        assert_eq!(reader.read_private_leaf_salt(), Ok(second));
+        assert!(reader.read_private_leaf_salt().is_err());
     }
 }

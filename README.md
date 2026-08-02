@@ -54,9 +54,10 @@ Works today:
   development tests.
 - The live 64-way same-secret geometry and full-coordinate, inverse-rate-four
   aggregate-wide mask have production-derived static plans. Static accounting
-  places the same-secret proof at `5,309,850` bytes. The complete evaluator-key
-  proof is `28,749,492` bytes: it requires engineering review against the
-  nominal target but remains below the absolute proof bound.
+  places the same-secret proof at `5,814,554` bytes, `571,674` bytes above the
+  nominal target and within its automatic variance band. The complete
+  evaluator-key proof is `29,105,588` bytes: it requires engineering review
+  against the nominal target but remains below the absolute proof bound.
 - Aggregate-wide oracle commitments now use uniform 512-bit leaf transitions
   in aligned `2^20`-row stripes. The selected construction derives a
   `402,653,184`-byte DFT-plus-leaf-state core and preserves the canonical roots
@@ -68,7 +69,10 @@ Works today:
   construction and supplied-opening plans. Every class uses a
   coordinate-derived compact frontier. The nine column-streamed classes expand
   into their exact initial, ordered-column, and final SHAKE calls, deriving
-  `105,437` verifier hash queries and `102,648` accepting equations. The
+  `105,437` verifier hash queries and `105,428` accepting equations. Every
+  secret-bearing initial call absorbs a distinct transported 128-byte private
+  salt; canonical encoding and decoding reject a reused salt across opening
+  batches. The
   census derives and binds the 512-bit output width for transcript, fixed,
   ordinary-leaf, streamed-leaf, and parent calls. The construction and
   hash-profile identities also bind the 512-bit streamed state and three
@@ -82,8 +86,8 @@ Works today:
   digests to the complete verifier database and coordinate-derived commitment
   subtrees. Hostile width, domain, slot, address, response-owner, identity,
   leaf-call, frontier, and message-shape mutations refuse. This is focused
-  same-secret construction evidence; suite-wide and ceremony-level reduction
-  evidence remains open.
+  same-secret construction evidence; private-salt PRF composition, suite-wide
+  reduction, and ceremony-level reduction evidence remain open.
 - Secret-bearing phase-row padding now uses three KMAC-derived 512-bit seeds.
   The selected same-secret certificate inventories 62 framed SHAKE streams,
   130,023,424 accepted field outputs, seed collision, bounded rejection
@@ -97,7 +101,10 @@ Works today:
   source encoders plus the aggregate pad and two fresh encoders, and checks the
   exact message, randomness, zero-suffix, two-adic evaluation, shared-query,
   code-switch, and lexicographic fold maps. The selected joint view has 18,025
-  private extension coordinates, rank 18,013, and residual conditional entropy 12. This is component correspondence; it does not establish construction-wide
+  affine private extension coordinates, rank 18,013, and residual conditional
+  entropy 12. Two additional private extension elements form the nonlinear
+  aggregate leaf-salt key, for 18,027 complete private elements. This is
+  component correspondence; it does not establish construction-wide
   Fiat-Shamir privacy or soundness.
 - The pre-aggregate construction masking certificate independently rebuilds the
   private-view graph from the physical production layout. It covers every phase
@@ -141,14 +148,14 @@ Works today:
   multiplicity bindings, altered VSS product or algebraic denominators, and an
   invented aggregate-threshold product row. Families with no bound tree or
   verifier-sequence source do not acquire an invented ledger row.
-- Production-derived phase-liveness accounting now covers the complete
-  same-secret prover live set, including source ownership, replay readers,
-  DFTs, Merkle frontiers, proof material, transcript state, private material,
-  browser-bridge copies, a WebAssembly runtime reserve, and allocator overhead.
-  Its maximum is `556,008,657` bytes, within the automatic planning band and
-  `115,079,983` bytes below the hard WebAssembly bound. Bound-tree
-  authentication uses one in-place DFT and one evaluated stripe instead of
-  retaining complete evaluated columns.
+- Production-derived phase-liveness accounting covers source ownership, replay
+  readers, DFTs, Merkle frontiers, proof material, transcript state, private
+  material, browser-bridge copies, a WebAssembly runtime reserve, and allocator
+  overhead. Its last pre-salt maximum was `556,008,657` bytes. The new private
+  salt key, derivation state, transported-salt buffers, and duplicate-detection
+  set still need to be incorporated before that value is again a complete live
+  set. Bound-tree authentication uses one in-place DFT and one evaluated stripe
+  instead of retaining complete evaluated columns.
 - The production VSS prerequisite now has a dedicated guarded generation and
   transported-verification test. It durably seals each canonical safe boundary,
   rejects stale or malformed retained state, and resumes by deterministic

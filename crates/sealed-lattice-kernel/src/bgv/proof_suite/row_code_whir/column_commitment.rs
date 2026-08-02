@@ -10,8 +10,13 @@ use sha3::{
     digest::{ExtendableOutput, Update, XofReader},
 };
 use tiny_keccak::keccakf;
+use zeroize::Zeroizing;
 
 use crate::bgv::proof_suite::ProofBaseFieldElement;
+
+use super::private_leaf_salt::{
+    PRIVATE_LEAF_SALT_BYTE_LENGTH, PrivateLeafSalt, derive_private_leaf_salt,
+};
 
 // The project security ledger models Fiat-Shamir with 512-bit random-oracle
 // outputs. Keep the outer matrix commitment at the same width: truncating it
@@ -25,6 +30,36 @@ const SHAKE256_DELIMITER: u64 = 0x1f;
 const SHAKE256_FINAL_RATE_BYTE: u64 = 0x80_u64 << 56;
 
 pub(super) type ColumnDigest = [u64; COLUMN_DIGEST_WORD_LENGTH];
+
+pub(super) struct PrivateColumnLeafSaltContext {
+    private_seed: Zeroizing<[u8; 64]>,
+    commitment_role: &'static [u8],
+}
+
+impl PrivateColumnLeafSaltContext {
+    pub(super) fn new(private_seed: &[u8; 64], commitment_role: &'static [u8]) -> Self {
+        Self {
+            private_seed: Zeroizing::new(*private_seed),
+            commitment_role,
+        }
+    }
+
+    pub(super) fn salt(
+        &self,
+        leaf_count: usize,
+        logical_leaf_width: usize,
+        leaf_index: usize,
+    ) -> Result<PrivateLeafSalt, String> {
+        derive_private_leaf_salt(
+            self.private_seed.as_slice(),
+            self.commitment_role,
+            leaf_count,
+            logical_leaf_width,
+            0,
+            leaf_index,
+        )
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct StreamingColumnCommitment {
@@ -64,6 +99,23 @@ impl StreamingColumnHasher {
             expected_row_count,
             encoded_column_count,
             encoded_column_count,
+            0,
+            None,
+        )
+    }
+
+    #[cfg(test)]
+    pub(super) fn new_with_private_salt(
+        expected_row_count: usize,
+        encoded_column_count: usize,
+        private_leaf_salt: &PrivateColumnLeafSaltContext,
+    ) -> Result<Self, String> {
+        Self::new_stripe(
+            expected_row_count,
+            encoded_column_count,
+            encoded_column_count,
+            0,
+            Some(private_leaf_salt),
         )
     }
 
@@ -71,6 +123,8 @@ impl StreamingColumnHasher {
         expected_row_count: usize,
         encoded_column_count: usize,
         stripe_column_count: usize,
+        stripe_start_column_index: usize,
+        private_leaf_salt: Option<&PrivateColumnLeafSaltContext>,
     ) -> Result<Self, String> {
         if expected_row_count == 0 {
             return Err("column commitment requires at least one row".to_owned());
@@ -85,17 +139,34 @@ impl StreamingColumnHasher {
                 "column commitment stripe has {stripe_column_count} columns for an encoded width of {encoded_column_count}"
             ));
         }
-
-        let mut base_state = [0_u64; SHAKE256_STATE_WORD_LENGTH];
-        let mut next_rate_word = 0_usize;
-        for word in column_hash_preamble(expected_row_count, encoded_column_count) {
-            absorb_word(&mut base_state, &mut next_rate_word, word);
+        let stripe_end_column_index = stripe_start_column_index
+            .checked_add(stripe_column_count)
+            .ok_or_else(|| "column commitment stripe coordinate overflowed".to_owned())?;
+        if stripe_end_column_index > encoded_column_count {
+            return Err("column commitment stripe is outside the encoded width".to_owned());
         }
+
         let mut states = Vec::new();
         states
             .try_reserve_exact(stripe_column_count)
             .map_err(|_| "column commitment stripe state allocation failed".to_owned())?;
-        states.resize(stripe_column_count, base_state);
+        for column_index in stripe_start_column_index..stripe_end_column_index {
+            let salt = private_leaf_salt
+                .map(|context| context.salt(encoded_column_count, expected_row_count, column_index))
+                .transpose()?;
+            let (state, next_rate_word) = initialized_column_hash_state(
+                expected_row_count,
+                encoded_column_count,
+                salt.as_ref(),
+            );
+            if states.is_empty() {
+                states.push(state);
+                debug_assert_eq!(next_rate_word, column_hash_next_rate_word(salt.is_some()));
+            } else {
+                states.push(state);
+            }
+        }
+        let next_rate_word = column_hash_next_rate_word(private_leaf_salt.is_some());
         Ok(Self {
             states,
             next_rate_word,
@@ -233,6 +304,7 @@ pub(super) struct StripedColumnCommitmentBuilder {
     encoded_column_count: usize,
     maximum_stripe_column_count: usize,
     next_column_index: usize,
+    private_leaf_salt: Option<PrivateColumnLeafSaltContext>,
     active_stripe_hasher: Option<StreamingColumnHasher>,
     merkle_builder: StreamingMerkleBuilder,
 }
@@ -252,11 +324,28 @@ impl StripedColumnCommitmentBuilder {
         )
     }
 
+    #[cfg(test)]
     pub(super) fn new_with_opened_columns(
         expected_row_count: usize,
         encoded_column_count: usize,
         maximum_stripe_column_count: usize,
         opened_column_indices: &[usize],
+    ) -> Result<Self, String> {
+        Self::new_with_opened_columns_and_private_salt(
+            expected_row_count,
+            encoded_column_count,
+            maximum_stripe_column_count,
+            opened_column_indices,
+            None,
+        )
+    }
+
+    pub(super) fn new_with_opened_columns_and_private_salt(
+        expected_row_count: usize,
+        encoded_column_count: usize,
+        maximum_stripe_column_count: usize,
+        opened_column_indices: &[usize],
+        private_leaf_salt: Option<PrivateColumnLeafSaltContext>,
     ) -> Result<Self, String> {
         if maximum_stripe_column_count == 0 {
             return Err("column commitment stripe width must be positive".to_owned());
@@ -268,12 +357,15 @@ impl StripedColumnCommitmentBuilder {
             expected_row_count,
             encoded_column_count,
             first_stripe_column_count,
+            0,
+            private_leaf_salt.as_ref(),
         )?;
         Ok(Self {
             expected_row_count,
             encoded_column_count,
             maximum_stripe_column_count,
             next_column_index: 0,
+            private_leaf_salt,
             active_stripe_hasher: Some(active_stripe_hasher),
             merkle_builder,
         })
@@ -355,6 +447,8 @@ impl StripedColumnCommitmentBuilder {
             self.expected_row_count,
             self.encoded_column_count,
             self.maximum_stripe_column_count.min(remaining_column_count),
+            self.next_column_index,
+            self.private_leaf_salt.as_ref(),
         )?);
         Ok(false)
     }
@@ -505,8 +599,12 @@ impl StreamingMerkleBuilder {
     }
 }
 
-fn column_hash_preamble(expected_row_count: usize, encoded_column_count: usize) -> [u64; 6] {
-    let mut words = [0_u64; 6];
+fn column_hash_preamble(
+    expected_row_count: usize,
+    encoded_column_count: usize,
+    salt_byte_length: usize,
+) -> [u64; 7] {
+    let mut words = [0_u64; 7];
     for (word_index, chunk) in super::ROW_CODE_WHIR_PHASE_COLUMN_LEAF_DOMAIN
         .chunks_exact(8)
         .enumerate()
@@ -515,7 +613,42 @@ fn column_hash_preamble(expected_row_count: usize, encoded_column_count: usize) 
     }
     words[4] = expected_row_count as u64;
     words[5] = encoded_column_count as u64;
+    words[6] = salt_byte_length as u64;
     words
+}
+
+fn initialized_column_hash_state(
+    expected_row_count: usize,
+    encoded_column_count: usize,
+    salt: Option<&PrivateLeafSalt>,
+) -> ([u64; SHAKE256_STATE_WORD_LENGTH], usize) {
+    let mut state = [0_u64; SHAKE256_STATE_WORD_LENGTH];
+    let mut next_rate_word = 0_usize;
+    for word in column_hash_preamble(
+        expected_row_count,
+        encoded_column_count,
+        salt.map_or(0, |_| PRIVATE_LEAF_SALT_BYTE_LENGTH),
+    ) {
+        absorb_word(&mut state, &mut next_rate_word, word);
+    }
+    if let Some(salt) = salt {
+        for chunk in salt.chunks_exact(size_of::<u64>()) {
+            absorb_word(
+                &mut state,
+                &mut next_rate_word,
+                u64::from_le_bytes(chunk.try_into().expect("eight-byte salt word")),
+            );
+        }
+    }
+    (state, next_rate_word)
+}
+
+const fn column_hash_next_rate_word(has_salt: bool) -> usize {
+    (7 + if has_salt {
+        PRIVATE_LEAF_SALT_BYTE_LENGTH / size_of::<u64>()
+    } else {
+        0
+    }) % SHAKE256_RATE_WORD_LENGTH
 }
 
 fn absorb_word(
@@ -531,13 +664,29 @@ fn absorb_word(
     }
 }
 
+#[cfg(test)]
 pub(super) fn hash_opened_column(
     values: &[Goldilocks],
     encoded_column_count: usize,
 ) -> ColumnDigest {
+    hash_opened_column_with_salt(values, encoded_column_count, None)
+}
+
+pub(super) fn hash_opened_column_with_salt(
+    values: &[Goldilocks],
+    encoded_column_count: usize,
+    salt: Option<&PrivateLeafSalt>,
+) -> ColumnDigest {
     let mut state = Shake256::default();
-    for word in column_hash_preamble(values.len(), encoded_column_count) {
+    for word in column_hash_preamble(
+        values.len(),
+        encoded_column_count,
+        salt.map_or(0, |_| PRIVATE_LEAF_SALT_BYTE_LENGTH),
+    ) {
         state.update(&word.to_le_bytes());
+    }
+    if let Some(salt) = salt {
+        state.update(salt);
     }
     for value in values {
         state.update(&value.as_canonical_u64().to_le_bytes());
@@ -916,6 +1065,39 @@ mod tests {
             .expect("complete striped commitment")
     }
 
+    fn build_privately_salted_striped_commitment(
+        rows: &[Vec<Goldilocks>],
+        maximum_stripe_column_count: usize,
+        opened_column_indices: &[usize],
+        private_seed: &[u8; 64],
+        commitment_role: &'static [u8],
+    ) -> StreamingColumnCommitment {
+        let mut builder = StripedColumnCommitmentBuilder::new_with_opened_columns_and_private_salt(
+            rows.len(),
+            rows[0].len(),
+            maximum_stripe_column_count,
+            opened_column_indices,
+            Some(PrivateColumnLeafSaltContext::new(
+                private_seed,
+                commitment_role,
+            )),
+        )
+        .expect("valid privately salted stripe geometry");
+        while let Some(active_range) = builder.active_column_range() {
+            for (row_index, row) in rows.iter().enumerate() {
+                builder
+                    .absorb_active_stripe_row(row_index, &row[active_range.clone()])
+                    .expect("valid privately salted stripe row");
+            }
+            builder
+                .complete_active_stripe()
+                .expect("complete privately salted stripe");
+        }
+        builder
+            .finish_commitment()
+            .expect("complete privately salted commitment")
+    }
+
     #[test]
     fn base_field_stripes_match_the_canonical_goldilocks_commitment_and_frontier() {
         let rows = sample_rows(7, 32);
@@ -972,6 +1154,127 @@ mod tests {
                 hash_opened_column(&column, rows[0].len())
             );
         }
+    }
+
+    #[test]
+    fn private_coordinate_salts_authenticate_compact_frontiers_and_refuse_substitution() {
+        const COMMITMENT_ROLE: &[u8] = b"phase/base";
+        let rows = sample_rows(19, 64);
+        let private_seed = [0x43_u8; 64];
+        let changed_private_seed = [0x44_u8; 64];
+        let opened_column_indices = [0, 1, 9, 31, 32, 61];
+        let commitment = build_privately_salted_striped_commitment(
+            &rows,
+            7,
+            &opened_column_indices,
+            &private_seed,
+            COMMITMENT_ROLE,
+        );
+        let complete_width_commitment = build_privately_salted_striped_commitment(
+            &rows,
+            rows[0].len(),
+            &opened_column_indices,
+            &private_seed,
+            COMMITMENT_ROLE,
+        );
+        assert_eq!(commitment, complete_width_commitment);
+        assert_ne!(
+            commitment.root,
+            build_striped_commitment(&rows, 7, &opened_column_indices).root
+        );
+        assert_ne!(
+            commitment.root,
+            build_privately_salted_striped_commitment(
+                &rows,
+                7,
+                &opened_column_indices,
+                &changed_private_seed,
+                COMMITMENT_ROLE,
+            )
+            .root
+        );
+
+        let opened_values = opened_column_indices
+            .iter()
+            .map(|column_index| {
+                rows.iter()
+                    .map(|row| row[*column_index])
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let salts = opened_column_indices
+            .iter()
+            .map(|column_index| {
+                derive_private_leaf_salt(
+                    &private_seed,
+                    COMMITMENT_ROLE,
+                    rows[0].len(),
+                    rows.len(),
+                    0,
+                    *column_index,
+                )
+                .expect("opened coordinate salt derives")
+            })
+            .collect::<Vec<_>>();
+        let opened_digests = opened_column_indices
+            .iter()
+            .zip(&opened_values)
+            .zip(&salts)
+            .map(|((column_index, values), salt)| {
+                (
+                    *column_index,
+                    hash_opened_column_with_salt(values, rows[0].len(), Some(salt)),
+                )
+            })
+            .collect::<Vec<_>>();
+        verify_prehashed_column_frontier(
+            &commitment.root,
+            rows[0].len(),
+            &opened_digests,
+            &commitment.frontier,
+        )
+        .expect("genuine privately salted frontier verifies");
+
+        let mut changed_salt = salts[2];
+        changed_salt[0] ^= 1;
+        let mut changed_salt_digests = opened_digests.clone();
+        changed_salt_digests[2].1 =
+            hash_opened_column_with_salt(&opened_values[2], rows[0].len(), Some(&changed_salt));
+        assert!(
+            verify_prehashed_column_frontier(
+                &commitment.root,
+                rows[0].len(),
+                &changed_salt_digests,
+                &commitment.frontier,
+            )
+            .is_err()
+        );
+
+        let mut reused_salt_digests = opened_digests.clone();
+        reused_salt_digests[2].1 =
+            hash_opened_column_with_salt(&opened_values[2], rows[0].len(), Some(&salts[1]));
+        assert!(
+            verify_prehashed_column_frontier(
+                &commitment.root,
+                rows[0].len(),
+                &reused_salt_digests,
+                &commitment.frontier,
+            )
+            .is_err()
+        );
+
+        let mut missing_salt_digests = opened_digests.clone();
+        missing_salt_digests[2].1 =
+            hash_opened_column_with_salt(&opened_values[2], rows[0].len(), None);
+        assert!(
+            verify_prehashed_column_frontier(
+                &commitment.root,
+                rows[0].len(),
+                &missing_salt_digests,
+                &commitment.frontier,
+            )
+            .is_err()
+        );
     }
 
     #[test]

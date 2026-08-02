@@ -36,6 +36,8 @@ use crate::bgv::proof_suite::row_code_whir::{
         AggregateWideJointAffineViewRow, AggregateWideMaskingCertificate,
         AggregateWideNonlinearViewBoundary, checked_fold_limb_affine_map,
     },
+    coordinate_derived_hiding_mmcs::AGGREGATE_PRIVATE_LEAF_SALT_KEY_EXTENSION_ELEMENT_COUNT,
+    private_leaf_salt::PRIVATE_LEAF_SALT_BYTE_LENGTH,
     recomputable_oracle::{
         RecomputableOracleAffineMapDescriptor, checked_recomputable_oracle_affine_map,
     },
@@ -1626,6 +1628,7 @@ struct CompleteVerifierOracleLedger {
 struct AggregateLeafOracleCallInventoryRow {
     role: MerkleOracleEquationRole,
     interleaving_width: usize,
+    private_leaf_salt_byte_length: usize,
     opened_leaf_count: u64,
     initial_hash_query_count: u64,
     transition_hash_query_count: u64,
@@ -1637,6 +1640,9 @@ struct AggregateLeafOracleCallInventoryRow {
 enum AggregateLeafSemanticTransition {
     SharedInitial {
         interleaving_width: usize,
+    },
+    PrivateInitial {
+        role: MerkleOracleEquationRole,
     },
     Column {
         role: MerkleOracleEquationRole,
@@ -1652,6 +1658,9 @@ enum AggregateLeafSemanticPredecessor {
     None,
     SharedInitial {
         interleaving_width: usize,
+    },
+    PrivateInitial {
+        role: MerkleOracleEquationRole,
     },
     Column {
         role: MerkleOracleEquationRole,
@@ -1672,11 +1681,13 @@ struct AggregateLeafSemanticTransitionRow {
 ///
 /// One row represents each semantic equation class, not merely each call
 /// count. In a collision-free accepting database the terminal leaf reverses
-/// through the final frame, every ordered column transition, and the
-/// width-specific shared initial frame. The recovered transition inputs carry
-/// the canonical field coefficients that the verifier hashed.
+/// through the final frame, every ordered column transition, and either the
+/// width-specific public initial frame or the role-specific private initial
+/// frame. The recovered transition inputs carry the canonical field
+/// coefficients and private salt bytes that the verifier hashed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct AggregateLeafSemanticTransitionCertificate {
+    private_leaf_salt_byte_length: usize,
     frame_descriptors: [ColumnStreamableLeafOracleFrameDescriptor; 3],
     rows: Vec<AggregateLeafSemanticTransitionRow>,
     hash_query_count: u64,
@@ -1686,7 +1697,16 @@ struct AggregateLeafSemanticTransitionCertificate {
 
 impl AggregateLeafSemanticTransitionCertificate {
     fn is_complete_for_inventory(&self, inventory: &[AggregateLeafOracleCallInventoryRow]) -> bool {
-        let Ok(production_frame_descriptors) = aggregate_leaf_frame_descriptors() else {
+        if inventory.is_empty()
+            || inventory
+                .iter()
+                .any(|row| row.private_leaf_salt_byte_length != self.private_leaf_salt_byte_length)
+        {
+            return false;
+        }
+        let Ok(production_frame_descriptors) =
+            aggregate_leaf_frame_descriptors(self.private_leaf_salt_byte_length)
+        else {
             return false;
         };
         let Ok(expected_rows) =
@@ -1728,8 +1748,10 @@ impl AggregateLeafSemanticTransitionCertificate {
 ///
 /// The abstract Merkle ledger treats a leaf hash as one oracle call. Production
 /// instead makes one initial call, one transition call per encoded column, and
-/// one final call. The initial input is repeated for every opened row and is
-/// identical for every commitment with the same interleaving width; transition
+/// one final call. A public construction shares the canonical initial input for
+/// every commitment with the same interleaving width. A secret-bearing
+/// construction includes one 128-byte private salt in every opened initial
+/// input, so each deployed initial call is represented separately. Transition
 /// and final inputs are conservatively distinct.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct DeployedAggregateLeafOracleCertificate {
@@ -1761,12 +1783,39 @@ impl DeployedAggregateLeafOracleCertificate {
     }
 
     fn has_complete_call_inventory(&self) -> bool {
+        let initial_hash_query_count = self.rows.iter().try_fold(0_u64, |count, row| {
+            count.checked_add(row.initial_hash_query_count)
+        });
+        let private_leaf_salt_byte_lengths = self
+            .rows
+            .iter()
+            .map(|row| row.private_leaf_salt_byte_length)
+            .collect::<BTreeSet<_>>();
+        let unsalted_initial_width_count = self
+            .rows
+            .iter()
+            .filter(|row| row.private_leaf_salt_byte_length == 0)
+            .map(|row| row.interleaving_width)
+            .collect::<BTreeSet<_>>()
+            .len();
+        let expected_distinct_initial_equation_count = if private_leaf_salt_byte_lengths
+            == BTreeSet::from([0])
+        {
+            u64::try_from(unsalted_initial_width_count).ok()
+        } else if private_leaf_salt_byte_lengths == BTreeSet::from([PRIVATE_LEAF_SALT_BYTE_LENGTH])
+        {
+            initial_hash_query_count
+        } else {
+            None
+        };
         !self.rows.is_empty()
             && self.rows.iter().all(|row| {
                 let Ok(interleaving_width) = u64::try_from(row.interleaving_width) else {
                     return false;
                 };
                 row.interleaving_width > 0
+                    && (row.private_leaf_salt_byte_length == 0
+                        || row.private_leaf_salt_byte_length == PRIVATE_LEAF_SALT_BYTE_LENGTH)
                     && row.opened_leaf_count > 0
                     && row.initial_hash_query_count == row.opened_leaf_count
                     && row.transition_hash_query_count
@@ -1775,7 +1824,12 @@ impl DeployedAggregateLeafOracleCertificate {
                     && row.parent_hash_query_count > 0
             })
             && self.distinct_initial_equation_count > 0
-            && self.repeated_initial_hash_query_count > 0
+            && Some(self.distinct_initial_equation_count)
+                == expected_distinct_initial_equation_count
+            && self
+                .distinct_initial_equation_count
+                .checked_add(self.repeated_initial_hash_query_count)
+                == initial_hash_query_count
             && self.deployed_verifier_hash_query_count > 0
             && self.deployed_accepting_database_equation_count > 0
             && self.intermediate_oracle_output_bit_length > 0
@@ -3235,7 +3289,8 @@ impl Cms19WholeStateTransitionCertificate {
 enum Cms19DatabaseSupportRole {
     TypedTranscript { role: OracleEquationRole },
     OrdinaryMerkleLeaf { role: MerkleOracleEquationRole },
-    AggregateLeafInitial { interleaving_width: usize },
+    AggregateLeafSharedInitial { interleaving_width: usize },
+    AggregateLeafPrivateInitial { role: MerkleOracleEquationRole },
     AggregateLeafTransitionAndFinal { role: MerkleOracleEquationRole },
     MerkleParents { role: MerkleOracleEquationRole },
     FixedVerifierHash { role: FixedVerifierHashRole },
@@ -3251,11 +3306,12 @@ struct Cms19DatabaseSupportRow {
 
 /// Complete support census for the accepting random-oracle database.
 ///
-/// This expands the deployed aggregate leaf calls, keeps repeated initial
-/// states distinct from cached equations, and separately accounts for typed
-/// transcript, Merkle-parent, ordinary-leaf, and construction-bound fixed
-/// hashes. The mapped totals must equal the deployed verifier ledger; no
-/// uncovered count is supplied by the producer or assigned as a status flag.
+/// This expands the deployed aggregate leaf calls, distinguishes cached public
+/// initial states from coordinate-salted private initial inputs, and separately
+/// accounts for typed transcript, Merkle-parent, ordinary-leaf, and
+/// construction-bound fixed hashes. The mapped totals must equal the deployed
+/// verifier ledger; no uncovered count is supplied by the producer or assigned
+/// as a status flag.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Cms19WholeDatabaseSupportCertificate {
     construction_plan_identity_hash: [u8; 64],
@@ -5889,6 +5945,10 @@ fn derive_production_aggregate_wide_view_correspondence(
         compact_frontier_count: supplied_commitment_roles.len(),
         code_switch_image_count: round_count,
         fold_image_count: primary_source_commitment_roles.len(),
+        private_leaf_salt_key_extension_element_count:
+            AGGREGATE_PRIVATE_LEAF_SALT_KEY_EXTENSION_ELEMENT_COUNT,
+        private_leaf_salt_derivation_role_count: supplied_commitment_roles.len(),
+        private_leaf_salt_byte_length: PRIVATE_LEAF_SALT_BYTE_LENGTH,
         hash_output_bit_length: CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH,
     };
 
@@ -9747,9 +9807,15 @@ fn aggregate_leaf_interleaving_width(
     Ok(Some(expected_geometry.2))
 }
 
-fn aggregate_leaf_frame_descriptors()
--> Result<[ColumnStreamableLeafOracleFrameDescriptor; 3], WhirTheoremCertificateError> {
-    let hasher = aggregate_leaf_hasher();
+fn aggregate_leaf_frame_descriptors(
+    private_leaf_salt_byte_length: usize,
+) -> Result<[ColumnStreamableLeafOracleFrameDescriptor; 3], WhirTheoremCertificateError> {
+    let privacy_mode = match private_leaf_salt_byte_length {
+        0 => ProofPrivacyMode::PublicOnly,
+        PRIVATE_LEAF_SALT_BYTE_LENGTH => ProofPrivacyMode::SecretBearing,
+        _ => return Err(WhirTheoremCertificateError::InvalidSelectedGeometry),
+    };
+    let hasher = aggregate_leaf_hasher(privacy_mode);
     let descriptors = [
         hasher.frame_descriptor(ColumnStreamableLeafOracleFrame::Initial),
         hasher.frame_descriptor(ColumnStreamableLeafOracleFrame::Column),
@@ -9764,6 +9830,8 @@ fn aggregate_leaf_frame_descriptors()
     let expected_input_byte_lengths = [
         framed_prefix_byte_length
             .checked_add(size_of::<u64>())
+            .and_then(|length| length.checked_add(size_of::<u64>()))
+            .and_then(|length| length.checked_add(private_leaf_salt_byte_length))
             .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
         framed_prefix_byte_length
             .checked_add(size_of::<u64>())
@@ -9831,23 +9899,45 @@ fn aggregate_leaf_semantic_transition_rows(
         aggregate_leaf_frame_descriptor(descriptors, ColumnStreamableLeafOracleFrame::Column)?;
     let final_frame =
         aggregate_leaf_frame_descriptor(descriptors, ColumnStreamableLeafOracleFrame::Final)?;
-    let interleaving_widths = inventory
+    let private_leaf_salt_byte_lengths = inventory
         .iter()
+        .map(|row| row.private_leaf_salt_byte_length)
+        .collect::<BTreeSet<_>>();
+    if private_leaf_salt_byte_lengths.len() != 1 {
+        return Err(WhirTheoremCertificateError::IncompleteOracleEquationMapping);
+    }
+    let private_leaf_salt_byte_length = *private_leaf_salt_byte_lengths
+        .first()
+        .ok_or(WhirTheoremCertificateError::IncompleteOracleEquationMapping)?;
+    if private_leaf_salt_byte_length != 0
+        && private_leaf_salt_byte_length != PRIVATE_LEAF_SALT_BYTE_LENGTH
+    {
+        return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
+    }
+    let shared_initial_widths = inventory
+        .iter()
+        .filter(|row| row.private_leaf_salt_byte_length == 0)
         .map(|row| row.interleaving_width)
         .collect::<BTreeSet<_>>();
-    let capacity = interleaving_widths
+    let private_initial_row_count = inventory
+        .iter()
+        .filter(|row| row.private_leaf_salt_byte_length != 0)
+        .count();
+    let semantic_transition_row_count = inventory.iter().try_fold(0_usize, |count, row| {
+        count
+            .checked_add(row.interleaving_width)
+            .and_then(|value| value.checked_add(1))
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+    })?;
+    let capacity = shared_initial_widths
         .len()
-        .checked_add(inventory.iter().try_fold(0_usize, |count, row| {
-            count
-                .checked_add(row.interleaving_width)
-                .and_then(|value| value.checked_add(1))
-                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
-        })?)
+        .checked_add(private_initial_row_count)
+        .and_then(|count| count.checked_add(semantic_transition_row_count))
         .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
     let mut rows = Vec::new();
     rows.try_reserve_exact(capacity)
         .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
-    for interleaving_width in interleaving_widths {
+    for interleaving_width in shared_initial_widths {
         let hash_query_count = inventory
             .iter()
             .filter(|row| row.interleaving_width == interleaving_width)
@@ -9864,11 +9954,31 @@ fn aggregate_leaf_semantic_transition_rows(
             accepting_database_equation_count_ceiling: 1,
         });
     }
+    for inventory_row in inventory
+        .iter()
+        .filter(|row| row.private_leaf_salt_byte_length != 0)
+    {
+        rows.push(AggregateLeafSemanticTransitionRow {
+            transition: AggregateLeafSemanticTransition::PrivateInitial {
+                role: inventory_row.role,
+            },
+            predecessor: AggregateLeafSemanticPredecessor::None,
+            frame: initial_frame,
+            hash_query_count: inventory_row.initial_hash_query_count,
+            accepting_database_equation_count_ceiling: inventory_row.initial_hash_query_count,
+        });
+    }
     for inventory_row in inventory {
         for column_index in 0..inventory_row.interleaving_width {
             let predecessor = if column_index == 0 {
-                AggregateLeafSemanticPredecessor::SharedInitial {
-                    interleaving_width: inventory_row.interleaving_width,
+                if inventory_row.private_leaf_salt_byte_length == 0 {
+                    AggregateLeafSemanticPredecessor::SharedInitial {
+                        interleaving_width: inventory_row.interleaving_width,
+                    }
+                } else {
+                    AggregateLeafSemanticPredecessor::PrivateInitial {
+                        role: inventory_row.role,
+                    }
                 }
             } else {
                 AggregateLeafSemanticPredecessor::Column {
@@ -9909,7 +10019,17 @@ fn aggregate_leaf_semantic_transition_rows(
 fn derive_aggregate_leaf_semantic_transition_certificate(
     inventory: &[AggregateLeafOracleCallInventoryRow],
 ) -> Result<AggregateLeafSemanticTransitionCertificate, WhirTheoremCertificateError> {
-    let frame_descriptors = aggregate_leaf_frame_descriptors()?;
+    let private_leaf_salt_byte_lengths = inventory
+        .iter()
+        .map(|row| row.private_leaf_salt_byte_length)
+        .collect::<BTreeSet<_>>();
+    if private_leaf_salt_byte_lengths.len() != 1 {
+        return Err(WhirTheoremCertificateError::IncompleteOracleEquationMapping);
+    }
+    let private_leaf_salt_byte_length = *private_leaf_salt_byte_lengths
+        .first()
+        .ok_or(WhirTheoremCertificateError::IncompleteOracleEquationMapping)?;
+    let frame_descriptors = aggregate_leaf_frame_descriptors(private_leaf_salt_byte_length)?;
     let rows = aggregate_leaf_semantic_transition_rows(inventory, &frame_descriptors)?;
     let hash_query_count = rows.iter().try_fold(0_u64, |count, row| {
         count
@@ -9932,6 +10052,7 @@ fn derive_aggregate_leaf_semantic_transition_certificate(
         .max()
         .ok_or(WhirTheoremCertificateError::IncompleteOracleEquationMapping)?;
     let certificate = AggregateLeafSemanticTransitionCertificate {
+        private_leaf_salt_byte_length,
         frame_descriptors,
         rows,
         hash_query_count,
@@ -10102,9 +10223,11 @@ fn validate_production_deployed_oracle_correspondence(
         .copied()
         .filter_map(|row| match row.leaf_hash_construction() {
             VerifierLeafHashConstruction::SingleCall { .. } => None,
-            VerifierLeafHashConstruction::ColumnStreamable { column_count, .. } => {
-                Some((row, column_count))
-            }
+            VerifierLeafHashConstruction::ColumnStreamable {
+                column_count,
+                private_leaf_salt_byte_length,
+                ..
+            } => Some((row, column_count, private_leaf_salt_byte_length)),
         })
         .collect::<Vec<_>>();
     if production_streaming_rows.len() != certificate.rows.len()
@@ -10120,7 +10243,7 @@ fn validate_production_deployed_oracle_correspondence(
         return Err(WhirTheoremCertificateError::IncompleteOracleEquationMapping);
     }
     let mut matched_theorem_streaming_rows = vec![false; certificate.rows.len()];
-    for (production_row, column_count) in production_streaming_rows {
+    for (production_row, column_count, private_leaf_salt_byte_length) in production_streaming_rows {
         let production_role = theorem_merkle_role_for_production_row(production_row.role())?;
         let matching_rows = certificate
             .rows
@@ -10139,6 +10262,7 @@ fn validate_production_deployed_oracle_correspondence(
             != usize::try_from(theorem_row.opened_leaf_count)
                 .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?
             || column_count != theorem_row.interleaving_width
+            || private_leaf_salt_byte_length != theorem_row.private_leaf_salt_byte_length
             || production_row.initial_hash_query_count() != theorem_row.initial_hash_query_count
             || production_row.transition_hash_query_count()
                 != theorem_row.transition_hash_query_count
@@ -10168,7 +10292,12 @@ fn derive_deployed_aggregate_leaf_oracle_certificate_with_output_widths(
         return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
     }
     let mut rows = Vec::new();
-    let mut initial_input_widths = BTreeSet::new();
+    let private_leaf_salt_byte_length = match plan.proof_privacy_mode {
+        ProofPrivacyMode::PublicOnly => 0,
+        ProofPrivacyMode::SecretBearing => PRIVATE_LEAF_SALT_BYTE_LENGTH,
+    };
+    let mut unsalted_initial_input_widths = BTreeSet::new();
+    let mut salted_initial_equation_count = 0_u64;
     let mut abstract_leaf_hash_query_count = 0_u64;
     let mut deployed_leaf_hash_query_count = 0_u64;
     let mut deployed_noninitial_equation_count = 0_u64;
@@ -10190,13 +10319,20 @@ fn derive_deployed_aggregate_leaf_oracle_certificate_with_output_widths(
         let inventory_row = AggregateLeafOracleCallInventoryRow {
             role: row.role,
             interleaving_width,
+            private_leaf_salt_byte_length,
             opened_leaf_count,
             initial_hash_query_count: opened_leaf_count,
             transition_hash_query_count,
             final_hash_query_count: opened_leaf_count,
             parent_hash_query_count: row.parent_hash_query_count,
         };
-        initial_input_widths.insert(interleaving_width);
+        if private_leaf_salt_byte_length == 0 {
+            unsalted_initial_input_widths.insert(interleaving_width);
+        } else {
+            salted_initial_equation_count = salted_initial_equation_count
+                .checked_add(inventory_row.initial_hash_query_count)
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+        }
         abstract_leaf_hash_query_count = abstract_leaf_hash_query_count
             .checked_add(row.leaf_hash_query_count)
             .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
@@ -10220,8 +10356,12 @@ fn derive_deployed_aggregate_leaf_oracle_certificate_with_output_widths(
             .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
         rows.push(inventory_row);
     }
-    let distinct_initial_equation_count = u64::try_from(initial_input_widths.len())
-        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let distinct_initial_equation_count = salted_initial_equation_count
+        .checked_add(
+            u64::try_from(unsalted_initial_input_widths.len())
+                .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+        )
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
     let repeated_initial_hash_query_count = initial_hash_query_count
         .checked_sub(distinct_initial_equation_count)
         .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
@@ -10378,12 +10518,27 @@ fn derive_cms19_whole_database_support_certificate(
                 {
                     return Err(WhirTheoremCertificateError::IncompleteOracleEquationMapping);
                 }
-                let initial_hash_queries = initial_hash_queries_by_width
-                    .entry(deployed_row.interleaving_width)
-                    .or_default();
-                *initial_hash_queries = initial_hash_queries
-                    .checked_add(deployed_row.initial_hash_query_count)
-                    .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+                if deployed_row.private_leaf_salt_byte_length == 0 {
+                    let initial_hash_queries = initial_hash_queries_by_width
+                        .entry(deployed_row.interleaving_width)
+                        .or_default();
+                    *initial_hash_queries = initial_hash_queries
+                        .checked_add(deployed_row.initial_hash_query_count)
+                        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+                } else if deployed_row.private_leaf_salt_byte_length
+                    == PRIVATE_LEAF_SALT_BYTE_LENGTH
+                {
+                    rows.push(Cms19DatabaseSupportRow {
+                        role: Cms19DatabaseSupportRole::AggregateLeafPrivateInitial {
+                            role: merkle_row.role,
+                        },
+                        hash_query_count: deployed_row.initial_hash_query_count,
+                        accepting_database_equation_count: deployed_row.initial_hash_query_count,
+                        predecessor_support_count: 0,
+                    });
+                } else {
+                    return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
+                }
                 let transition_and_final_hash_query_count = deployed_row
                     .transition_hash_query_count
                     .checked_add(deployed_row.final_hash_query_count)
@@ -10413,23 +10568,57 @@ fn derive_cms19_whole_database_support_certificate(
     }
     for (interleaving_width, hash_query_count) in initial_hash_queries_by_width {
         rows.push(Cms19DatabaseSupportRow {
-            role: Cms19DatabaseSupportRole::AggregateLeafInitial { interleaving_width },
+            role: Cms19DatabaseSupportRole::AggregateLeafSharedInitial { interleaving_width },
             hash_query_count,
             accepting_database_equation_count: 1,
             predecessor_support_count: 0,
         });
     }
-    if rows
+    let initial_support_rows = rows
         .iter()
         .filter(|row| {
             matches!(
                 row.role,
-                Cms19DatabaseSupportRole::AggregateLeafInitial { .. }
+                Cms19DatabaseSupportRole::AggregateLeafSharedInitial { .. }
+                    | Cms19DatabaseSupportRole::AggregateLeafPrivateInitial { .. }
             )
         })
+        .collect::<Vec<_>>();
+    let expected_initial_support_row_count = deployed_leaf_oracle
+        .rows
+        .iter()
+        .filter(|row| row.private_leaf_salt_byte_length != 0)
         .count()
-        != usize::try_from(deployed_leaf_oracle.distinct_initial_equation_count)
-            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?
+        .checked_add(
+            deployed_leaf_oracle
+                .rows
+                .iter()
+                .filter(|row| row.private_leaf_salt_byte_length == 0)
+                .map(|row| row.interleaving_width)
+                .collect::<BTreeSet<_>>()
+                .len(),
+        )
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let mapped_initial_hash_query_count = initial_support_rows
+        .iter()
+        .try_fold(0_u64, |count, row| count.checked_add(row.hash_query_count))
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let mapped_initial_equation_count = initial_support_rows
+        .iter()
+        .try_fold(0_u64, |count, row| {
+            count.checked_add(row.accepting_database_equation_count)
+        })
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let expected_initial_hash_query_count = deployed_leaf_oracle
+        .rows
+        .iter()
+        .try_fold(0_u64, |count, row| {
+            count.checked_add(row.initial_hash_query_count)
+        })
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    if initial_support_rows.len() != expected_initial_support_row_count
+        || mapped_initial_hash_query_count != expected_initial_hash_query_count
+        || mapped_initial_equation_count != deployed_leaf_oracle.distinct_initial_equation_count
     {
         return Err(WhirTheoremCertificateError::IncompleteOracleEquationMapping);
     }
@@ -13362,6 +13551,9 @@ fn production_aggregate_wide_views_bind_every_affine_and_nonlinear_catalog() {
             compact_frontier_count: 9,
             code_switch_image_count: 5,
             fold_image_count: 6,
+            private_leaf_salt_key_extension_element_count: 2,
+            private_leaf_salt_derivation_role_count: 9,
+            private_leaf_salt_byte_length: 128,
             hash_output_bit_length: 512,
         }
     );
@@ -13872,7 +14064,7 @@ fn width_64_same_secret_through_rkg_round_one_aggregate_have_complete_geometry_c
     assert_eq!(same_secret.deployed_verifier_hash_query_count, 105_437,);
     assert_eq!(
         same_secret.deployed_accepting_database_equation_count,
-        102_648,
+        105_428,
     );
 }
 
@@ -14595,6 +14787,10 @@ fn deployed_streaming_leaf_chain_uses_uniform_512_bit_oracle_outputs() {
         .expect("the production semantic predecessor graph derives");
     assert!(semantic.is_complete_for_inventory(&deployed.rows));
     assert_eq!(
+        semantic.private_leaf_salt_byte_length,
+        PRIVATE_LEAF_SALT_BYTE_LENGTH
+    );
+    assert_eq!(
         semantic.frame_descriptors.map(|row| row.frame_tag),
         [0, 1, 2]
     );
@@ -14602,11 +14798,11 @@ fn deployed_streaming_leaf_chain_uses_uniform_512_bit_oracle_outputs() {
         semantic
             .frame_descriptors
             .map(|row| row.canonical_input_byte_length),
-        [90, 194, 154],
+        [226, 194, 154],
     );
-    assert_eq!(semantic.rows.len(), 62);
+    assert_eq!(semantic.rows.len(), 69);
     assert_eq!(semantic.hash_query_count, 20_477);
-    assert_eq!(semantic.accepting_database_equation_count_ceiling, 17_697);
+    assert_eq!(semantic.accepting_database_equation_count_ceiling, 20_477);
     assert_eq!(semantic.maximum_predecessor_support_count, 1);
 
     let mut missing_transition = deployed.clone();
@@ -15331,18 +15527,14 @@ fn cms19_whole_state_and_database_support_are_exact_and_mutation_sensitive() {
         .filter(|row| {
             matches!(
                 row.role,
-                Cms19DatabaseSupportRole::AggregateLeafInitial { .. }
+                Cms19DatabaseSupportRole::AggregateLeafSharedInitial { .. }
+                    | Cms19DatabaseSupportRole::AggregateLeafPrivateInitial { .. }
             )
         })
         .collect::<Vec<_>>();
     assert_eq!(
         aggregate_initial_rows.len(),
-        usize::try_from(
-            certificate
-                .deployed_aggregate_leaf_oracle
-                .distinct_initial_equation_count,
-        )
-        .expect("the initial-equation count fits usize"),
+        certificate.deployed_aggregate_leaf_oracle.rows.len(),
     );
     assert_eq!(
         aggregate_initial_rows
@@ -15370,19 +15562,19 @@ fn cms19_whole_state_and_database_support_are_exact_and_mutation_sensitive() {
     omitted_database_role.rows.pop();
     assert!(!omitted_database_role.is_complete());
 
-    let mut repeated_initial_as_distinct_equations = database_support.clone();
-    let initial_row = repeated_initial_as_distinct_equations
+    let mut omitted_private_initial_equation = database_support.clone();
+    let initial_row = omitted_private_initial_equation
         .rows
         .iter_mut()
         .find(|row| {
             matches!(
                 row.role,
-                Cms19DatabaseSupportRole::AggregateLeafInitial { .. }
+                Cms19DatabaseSupportRole::AggregateLeafPrivateInitial { .. }
             )
         })
         .expect("the database support has an aggregate initial row");
-    initial_row.accepting_database_equation_count = initial_row.hash_query_count;
-    assert!(!repeated_initial_as_distinct_equations.is_complete());
+    initial_row.accepting_database_equation_count -= 1;
+    assert!(!omitted_private_initial_equation.is_complete());
 
     let mut changed_response_root_count = database_support.clone();
     let response_root_row = changed_response_root_count
@@ -16365,7 +16557,7 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
         certificate
             .cms19_arithmetic
             .accepting_database_equation_count,
-        102_648,
+        105_428,
     );
     assert_eq!(
         certificate.cms19_arithmetic.classical_soundness_multiplier,
@@ -16379,7 +16571,7 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
             * &certificate.cms19_arithmetic.compiler_query_bound
             * &certificate.cms19_arithmetic.compiler_query_bound
             * &certificate.cms19_arithmetic.compiler_query_bound
-            + BigUint::from(2_u8) * BigUint::from(102_648_u64),
+            + BigUint::from(2_u8) * BigUint::from(105_428_u64),
     );
     assert_eq!(
         certificate
@@ -16403,7 +16595,7 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
         certificate
             .cms19_applicability
             .claimed_complete_equation_count,
-        102_648,
+        105_428,
     );
     assert_eq!(
         certificate
@@ -16483,18 +16675,15 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
             .sum::<u64>(),
         2_782,
     );
-    assert_eq!(deployed_leaf_oracle.distinct_initial_equation_count, 2);
-    assert_eq!(
-        deployed_leaf_oracle.repeated_initial_hash_query_count,
-        2_780
-    );
+    assert_eq!(deployed_leaf_oracle.distinct_initial_equation_count, 2_782);
+    assert_eq!(deployed_leaf_oracle.repeated_initial_hash_query_count, 0);
     assert_eq!(
         deployed_leaf_oracle.deployed_verifier_hash_query_count,
         105_437
     );
     assert_eq!(
         deployed_leaf_oracle.deployed_accepting_database_equation_count,
-        102_648
+        105_428
     );
     assert_eq!(
         deployed_leaf_oracle.intermediate_oracle_output_bit_length,
@@ -16595,7 +16784,7 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
         certificate
             .aggregate_wide_masking
             .generator_sample_summary(),
-        (18_025, 90_125, 64, 10),
+        (18_027, 90_135, 64, 10),
     );
     assert!(
         certificate

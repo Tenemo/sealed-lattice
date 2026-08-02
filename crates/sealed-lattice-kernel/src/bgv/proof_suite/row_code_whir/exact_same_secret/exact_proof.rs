@@ -18,7 +18,9 @@ use p3_symmetric::MerkleCap;
 use zeroize::Zeroizing;
 
 use super::super::GOLDILOCKS_MODULUS;
-use super::super::column_commitment::{hash_opened_column, verify_prehashed_column_frontier};
+use super::super::column_commitment::{
+    hash_opened_column_with_salt, verify_prehashed_column_frontier,
+};
 use super::super::compact_merkle_frontier::verify_materialized_bound_frontier;
 use super::super::construction_plan::{
     RowCodeWhirAggregateColumnRole, RowCodeWhirBoundLowDegreeMode, RowCodeWhirConstructionPlan,
@@ -26,6 +28,7 @@ use super::super::construction_plan::{
     RowCodeWhirProofSectionRole, RowCodeWhirSoundnessAssumption, RowCodeWhirTracePhasePlan,
 };
 use super::super::opening_schedule::phase_index;
+use super::super::private_leaf_salt::{PRIVATE_LEAF_SALT_BYTE_LENGTH, PrivateLeafSalt};
 use super::super::row_encoding::RowEncodingGeometry;
 #[cfg(test)]
 use super::super::verifier_oracle_accounting::derive_deployed_verifier_oracle_accounting;
@@ -297,6 +300,7 @@ struct ExactProofShape {
     prior_proof_bound_query_count: usize,
     direct_bound_query_count: usize,
     aggregate_table_width: usize,
+    phase_leaf_salt_byte_length: usize,
 }
 
 impl ExactProofShape {
@@ -762,6 +766,11 @@ fn validate_exact_same_secret_construction_plan(
         prior_proof_bound_query_count: parameters.prior_proof_bound_query_count,
         direct_bound_query_count: parameters.direct_bound_query_count,
         aggregate_table_width: plan.aggregate_table_width(),
+        phase_leaf_salt_byte_length: if plan.proof_privacy_mode == ProofPrivacyMode::SecretBearing {
+            PRIVATE_LEAF_SALT_BYTE_LENGTH
+        } else {
+            0
+        },
     })
 }
 
@@ -2812,6 +2821,7 @@ impl ExactSameSecretIncrementalSemanticVerifier {
         &mut self,
         phase_index: usize,
         column_index: usize,
+        persistent_salt: Option<PrivateLeafSalt>,
         values: Vec<Goldilocks>,
     ) -> Result<(), String> {
         if phase_index >= self.next_phase_column_indices.len()
@@ -2832,7 +2842,16 @@ impl ExactSameSecretIncrementalSemanticVerifier {
             .query_indices
             .get(column_index)
             .ok_or_else(|| "exact phase column has no derived query index".to_owned())?;
-        let digest = hash_opened_column(&values, shape.encoded_column_count);
+        if persistent_salt.is_some()
+            != (shape.phase_leaf_salt_byte_length == PRIVATE_LEAF_SALT_BYTE_LENGTH)
+        {
+            return Err("exact authenticated phase column has the wrong salt shape".to_owned());
+        }
+        let digest = hash_opened_column_with_salt(
+            &values,
+            shape.encoded_column_count,
+            persistent_salt.as_ref(),
+        );
         self.pending_phase_column_digests[phase_index].push((authenticated_column_index, digest));
         accumulate_phase_query_column_whir_evaluations(
             shape,
@@ -3608,6 +3627,14 @@ fn encode_exact_same_secret_prefix(
             .as_ref()
             .ok_or_else(|| "scheduled proof phase has no compact frontier".to_owned())?;
         for column in columns {
+            if column.persistent_salt.is_some()
+                != (construction_plan.proof_privacy_mode == ProofPrivacyMode::SecretBearing)
+            {
+                return Err("scheduled proof phase has the wrong leaf-salt shape".to_owned());
+            }
+            if let Some(salt) = column.persistent_salt {
+                canonical.extend_from_slice(&salt);
+            }
             for value in &column.values {
                 canonical.extend_from_slice(&value.as_canonical_u64().to_le_bytes());
             }
@@ -3685,6 +3712,19 @@ fn checked_exact_proof_prefix_byte_length(
         })?;
         byte_length = byte_length
             .checked_add(
+                columns
+                    .len()
+                    .checked_mul(
+                        if construction_plan.proof_privacy_mode == ProofPrivacyMode::SecretBearing {
+                            PRIVATE_LEAF_SALT_BYTE_LENGTH
+                        } else {
+                            0
+                        },
+                    )
+                    .ok_or_else(|| "exact phase salt byte length overflowed".to_owned())?,
+            )
+            .ok_or_else(|| "exact phase prefix length overflowed".to_owned())?
+            .checked_add(
                 value_count
                     .checked_mul(core::mem::size_of::<u64>())
                     .ok_or_else(|| "exact phase value byte length overflowed".to_owned())?,
@@ -3739,6 +3779,7 @@ pub(super) enum ExactProofHostileMutationTargetKind {
     Frontier,
     Header,
     Root,
+    Salt,
 }
 
 #[cfg(test)]
@@ -3937,10 +3978,13 @@ pub(super) fn exact_same_secret_hostile_mutation_targets(
             RowCodeWhirPhase::Auxiliary => shape.auxiliary_row_count,
             RowCodeWhirPhase::Quotient => shape.quotient_row_count,
         };
+        let per_column_byte_length = row_count
+            .checked_mul(core::mem::size_of::<u64>())
+            .and_then(|length| length.checked_add(shape.phase_leaf_salt_byte_length))
+            .ok_or_else(|| format!("exact {phase_label} opening length overflowed"))?;
         let opening_byte_length = shape
             .outer_query_count
-            .checked_mul(row_count)
-            .and_then(|count| count.checked_mul(core::mem::size_of::<u64>()))
+            .checked_mul(per_column_byte_length)
             .ok_or_else(|| format!("exact {phase_label} opening length overflowed"))?;
         scanner.record_field_bytes(
             opening_byte_length,
@@ -4026,6 +4070,9 @@ pub(super) fn exact_same_secret_hostile_mutation_targets(
             super::super::aggregate_wide_wire::AggregateWideHostileMutationTargetKind::Root => {
                 ExactProofHostileMutationTargetKind::Root
             }
+            super::super::aggregate_wide_wire::AggregateWideHostileMutationTargetKind::Salt => {
+                ExactProofHostileMutationTargetKind::Salt
+            }
         };
         scanner.targets.push(ExactProofHostileMutationTarget {
             label: target.label,
@@ -4108,6 +4155,16 @@ pub(in crate::bgv::proof_suite) fn canonical_row_code_whir_family_body_byte_leng
             .checked_mul(row_count)
             .and_then(|count| count.checked_mul(core::mem::size_of::<u64>()))
             .ok_or_else(|| "row-code WHIR phase opening byte length overflowed".to_owned())?;
+        let salt_byte_length = construction_plan
+            .outer_query_count()
+            .checked_mul(
+                if construction_plan.proof_privacy_mode == ProofPrivacyMode::SecretBearing {
+                    PRIVATE_LEAF_SALT_BYTE_LENGTH
+                } else {
+                    0
+                },
+            )
+            .ok_or_else(|| "row-code WHIR phase salt byte length overflowed".to_owned())?;
         let frontier_node_count =
             crate::bgv::proof_suite::merkle::maximum_minimal_frontier_node_count(
                 encoded_column_count,
@@ -4116,6 +4173,7 @@ pub(in crate::bgv::proof_suite) fn canonical_row_code_whir_family_body_byte_leng
             .map_err(|error| format!("derive row-code WHIR phase frontier ceiling: {error:?}"))?;
         family_body_byte_length = family_body_byte_length
             .checked_add(value_byte_length)
+            .and_then(|length| length.checked_add(salt_byte_length))
             .and_then(|length| length.checked_add(core::mem::size_of::<u32>()))
             .and_then(|length| {
                 frontier_node_count
@@ -4531,8 +4589,11 @@ impl ExactSameSecretIncrementalDecoder {
             .phase_row_counts()
             .get(phase_index)
             .ok_or_else(|| "exact phase index is outside the fixed shape".to_owned())?;
-        let section_byte_length = row_count
+        let value_byte_length = row_count
             .checked_mul(core::mem::size_of::<u64>())
+            .ok_or_else(|| "exact phase column length overflowed".to_owned())?;
+        let section_byte_length = value_byte_length
+            .checked_add(self.shape.phase_leaf_salt_byte_length)
             .ok_or_else(|| "exact phase column length overflowed".to_owned())?;
         let Some(canonical) = self.copy_available_section(
             source,
@@ -4544,6 +4605,13 @@ impl ExactSameSecretIncrementalDecoder {
             return Ok(false);
         };
         let mut reader = ExactCanonicalReader::new(&canonical);
+        let persistent_salt = if self.shape.phase_leaf_salt_byte_length == 0 {
+            None
+        } else if self.shape.phase_leaf_salt_byte_length == PRIVATE_LEAF_SALT_BYTE_LENGTH {
+            Some(reader.read_array::<PRIVATE_LEAF_SALT_BYTE_LENGTH>()?)
+        } else {
+            return Err("exact phase leaf-salt length is invalid".to_owned());
+        };
         let values = (0..row_count)
             .map(|_| reader.read_goldilocks())
             .collect::<Result<Vec<_>, _>>()?;
@@ -4553,7 +4621,7 @@ impl ExactSameSecretIncrementalDecoder {
         self.semantic_verifier
             .as_mut()
             .ok_or_else(|| "exact semantic verifier is absent".to_owned())?
-            .consume_phase_column(phase_index, next_column_index, values)?;
+            .consume_phase_column(phase_index, next_column_index, persistent_salt, values)?;
         self.phase = ExactSameSecretDecoderPhase::PhaseColumns {
             phase_index,
             next_column_index: next_column_index + 1,
@@ -5007,9 +5075,11 @@ fn validate_row_code_whir_proof_shape(
             .map_err(|error| format!("derive phase frontier bound: {error:?}"))?;
         if expected_row_count == 0
             || columns.len() != construction_plan.outer_query_count()
-            || columns
-                .iter()
-                .any(|column| column.values.len() != expected_row_count)
+            || columns.iter().any(|column| {
+                column.values.len() != expected_row_count
+                    || column.persistent_salt.is_some()
+                        != (construction_plan.proof_privacy_mode == ProofPrivacyMode::SecretBearing)
+            })
             || frontier.len() > maximum_frontier_count
         {
             return Err("row-code/WHIR phase opening has the wrong shape".to_owned());

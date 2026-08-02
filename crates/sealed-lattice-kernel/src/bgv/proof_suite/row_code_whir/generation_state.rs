@@ -49,7 +49,9 @@ use super::{
     aggregate_wide_pcs::{AggregateWideCommitment, aggregate_wide_pcs_for_construction_plan},
     bounded_dft::BoundedBaseCosetDft,
     canonical_row_code_whir_family_body_byte_length_ceiling,
-    column_commitment::{ColumnDigest, StripedColumnCommitmentBuilder},
+    column_commitment::{
+        ColumnDigest, PrivateColumnLeafSaltContext, StripedColumnCommitmentBuilder,
+    },
     commitment_liveness::{
         BOUND_TREE_AUTHENTICATION_STRIPE_LEAF_COUNT, CompleteGenerationLiveness,
         CompleteGenerationLivenessInput, derive_complete_generation_liveness,
@@ -6274,6 +6276,31 @@ impl RowCodeWhirGenerationStateMachine {
         Ok(section.item_count)
     }
 
+    fn private_column_leaf_salt_context(
+        &self,
+        phase: RowCodeWhirPhase,
+    ) -> Result<Option<PrivateColumnLeafSaltContext>, CommonProofProverError> {
+        match self.construction_plan.proof_privacy_mode {
+            ProofPrivacyMode::SecretBearing => {
+                let seed = self
+                    .row_pad_seeds
+                    .as_ref()
+                    .and_then(|seeds| seeds.get(row_code_whir_phase_index(phase)))
+                    .ok_or(CommonProofProverError::InvalidMask)?;
+                Ok(Some(PrivateColumnLeafSaltContext::new(
+                    seed,
+                    private_column_leaf_salt_role(phase),
+                )))
+            }
+            ProofPrivacyMode::PublicOnly => {
+                if self.row_pad_seeds.is_some() {
+                    return Err(CommonProofProverError::InvalidMask);
+                }
+                Ok(None)
+            }
+        }
+    }
+
     fn prepare_relation_phase_materialization(
         &mut self,
         phase_role: RowCodeWhirPhase,
@@ -6344,11 +6371,12 @@ impl RowCodeWhirGenerationStateMachine {
         }
         let opened_column_indices =
             self.phase_opening_traversal_indices(purpose, phase.geometry.encoded_column_count)?;
-        let builder = StripedColumnCommitmentBuilder::new_with_opened_columns(
+        let builder = StripedColumnCommitmentBuilder::new_with_opened_columns_and_private_salt(
             phase.geometry.row_count,
             phase.geometry.encoded_column_count,
             MAXIMUM_PHASE_COMMITMENT_STRIPE_COLUMN_COUNT,
             &opened_column_indices,
+            self.private_column_leaf_salt_context(phase_role)?,
         )
         .map_err(|_| CommonProofProverError::InvalidTree)?;
         let authenticated_opening_byte_length = opened_column_indices
@@ -6387,8 +6415,10 @@ impl RowCodeWhirGenerationStateMachine {
             RowCodeWhirPhaseMaterializationPurpose::InitialCommitment => None,
             RowCodeWhirPhaseMaterializationPurpose::AuthenticatedOpenings => {
                 Some(allocate_authenticated_phase_columns(
-                    opened_column_indices.len(),
+                    &opened_column_indices,
                     phase.geometry.row_count,
+                    phase.geometry.encoded_column_count,
+                    self.private_column_leaf_salt_context(phase_role)?.as_ref(),
                 )?)
             }
         };
@@ -6665,11 +6695,12 @@ impl RowCodeWhirGenerationStateMachine {
         }
         let opened_column_indices =
             self.phase_opening_traversal_indices(purpose, phase.geometry.encoded_column_count)?;
-        let builder = StripedColumnCommitmentBuilder::new_with_opened_columns(
+        let builder = StripedColumnCommitmentBuilder::new_with_opened_columns_and_private_salt(
             phase.geometry.row_count,
             phase.geometry.encoded_column_count,
             MAXIMUM_PHASE_COMMITMENT_STRIPE_COLUMN_COUNT,
             &opened_column_indices,
+            self.private_column_leaf_salt_context(RowCodeWhirPhase::Quotient)?,
         )
         .map_err(|_| CommonProofProverError::InvalidTree)?;
         let authenticated_opening_byte_length = opened_column_indices
@@ -6708,8 +6739,11 @@ impl RowCodeWhirGenerationStateMachine {
             RowCodeWhirPhaseMaterializationPurpose::InitialCommitment => None,
             RowCodeWhirPhaseMaterializationPurpose::AuthenticatedOpenings => {
                 Some(allocate_authenticated_phase_columns(
-                    opened_column_indices.len(),
+                    &opened_column_indices,
                     phase.geometry.row_count,
+                    phase.geometry.encoded_column_count,
+                    self.private_column_leaf_salt_context(RowCodeWhirPhase::Quotient)?
+                        .as_ref(),
                 )?)
             }
         };
@@ -7210,9 +7244,12 @@ impl RowCodeWhirGenerationStateMachine {
 /// Reserves the exact retained-column capacity for one authenticated-openings
 /// pass. Lengths stay zero so the row loop can assert canonical row order.
 fn allocate_authenticated_phase_columns(
-    opened_column_count: usize,
+    opened_column_indices: &[usize],
     row_count: usize,
+    encoded_column_count: usize,
+    private_leaf_salt: Option<&PrivateColumnLeafSaltContext>,
 ) -> Result<Vec<AuthenticatedColumn>, CommonProofProverError> {
+    let opened_column_count = opened_column_indices.len();
     if opened_column_count == 0 || row_count == 0 {
         return Err(CommonProofProverError::InvalidOpening);
     }
@@ -7220,12 +7257,19 @@ fn allocate_authenticated_phase_columns(
     authenticated_columns
         .try_reserve_exact(opened_column_count)
         .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
-    for _ in 0..opened_column_count {
+    for column_index in opened_column_indices {
         let mut values = Vec::new();
         values
             .try_reserve_exact(row_count)
             .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
-        authenticated_columns.push(AuthenticatedColumn { values });
+        let persistent_salt = private_leaf_salt
+            .map(|context| context.salt(encoded_column_count, row_count, *column_index))
+            .transpose()
+            .map_err(|_| CommonProofProverError::InvalidTree)?;
+        authenticated_columns.push(AuthenticatedColumn {
+            persistent_salt,
+            values,
+        });
     }
     Ok(authenticated_columns)
 }
@@ -7477,6 +7521,14 @@ const fn row_code_whir_phase_index(phase: RowCodeWhirPhase) -> usize {
         RowCodeWhirPhase::Base => 0,
         RowCodeWhirPhase::Auxiliary => 1,
         RowCodeWhirPhase::Quotient => 2,
+    }
+}
+
+const fn private_column_leaf_salt_role(phase: RowCodeWhirPhase) -> &'static [u8] {
+    match phase {
+        RowCodeWhirPhase::Base => b"relation-phase/base",
+        RowCodeWhirPhase::Auxiliary => b"relation-phase/auxiliary",
+        RowCodeWhirPhase::Quotient => b"relation-phase/quotient",
     }
 }
 

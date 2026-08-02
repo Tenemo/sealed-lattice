@@ -33,6 +33,10 @@ use super::aggregate_wide_hiding::{
     PrecommittedMaskedSumcheck, fold_limb_randomness, switch_mask_delta,
 };
 use super::aggregate_wide_pcs::{AggregateLayout, AggregateWideCommitment, AggregateWidePcs};
+use super::coordinate_derived_hiding_mmcs::{
+    AggregateLeafSaltRole, AggregatePrivateLeafSaltKey, CoordinateDerivedLeafSaltProof,
+    MaterializedCommitmentSchedule,
+};
 use super::hiding_whir::SelectedHidingWhirConfig;
 use super::oracle_geometry::{checked_power_of_two, sample_distinct_query_indices};
 use super::recomputable_oracle::{
@@ -42,6 +46,7 @@ use super::recomputable_oracle::{
 use super::source_compression::{ExternalSourceCompression, ExternalSourceCompressionPoll};
 use super::{ChallengeField, CommitmentScheme, DiscreteFourierTransform, ExtensionFieldChallenger};
 use crate::bgv::proof_suite::external_polynomial::ExternalPolynomialVector;
+use crate::bgv::proof_suite::relation_plan::ProofPrivacyMode;
 use crate::bgv::proof_suite::{
     ProofExternalMemory, ProofExternalMemoryError, ProofExternalMemoryExecutor,
     ProofExternalMemoryExecutorError,
@@ -62,6 +67,8 @@ enum StreamingAggregateWideCommitmentStage {
 pub(in crate::bgv::proof_suite::row_code_whir) struct StreamingAggregateWideCommitmentGeneration {
     config: SelectedHidingWhirConfig,
     extension_mmcs: ExtensionMmcs<ChallengeField, ChallengeField, CommitmentScheme>,
+    private_leaf_salt_key: AggregatePrivateLeafSaltKey,
+    materialized_commitment_schedule: MaterializedCommitmentSchedule,
     dft: DiscreteFourierTransform,
     source_table: AggregateSourceTable,
     residuals: Vec<ExternalPolynomialVector>,
@@ -82,6 +89,8 @@ pub(in crate::bgv::proof_suite::row_code_whir) struct StreamingAggregateWideComm
 pub(in crate::bgv::proof_suite::row_code_whir) struct StreamingAggregateWideProverData {
     config: SelectedHidingWhirConfig,
     extension_mmcs: ExtensionMmcs<ChallengeField, ChallengeField, CommitmentScheme>,
+    private_leaf_salt_key: AggregatePrivateLeafSaltKey,
+    materialized_commitment_schedule: MaterializedCommitmentSchedule,
     dft: DiscreteFourierTransform,
     source_table: AggregateSourceTable,
     residuals: Vec<ExternalPolynomialVector>,
@@ -320,6 +329,8 @@ pub(in crate::bgv::proof_suite::row_code_whir) enum StreamingAggregateWideError<
 pub(in crate::bgv::proof_suite::row_code_whir) struct StreamingAggregateWideProofGeneration {
     config: SelectedHidingWhirConfig,
     extension_mmcs: ExtensionMmcs<ChallengeField, ChallengeField, CommitmentScheme>,
+    private_leaf_salt_key: AggregatePrivateLeafSaltKey,
+    materialized_commitment_schedule: MaterializedCommitmentSchedule,
     dft: DiscreteFourierTransform,
     source_table: AggregateSourceTable,
     residuals: Vec<ExternalPolynomialVector>,
@@ -403,6 +414,13 @@ impl StreamingAggregateWideCommitmentGeneration {
         {
             return Err("aggregate-wide pad material has the wrong shape".to_owned());
         }
+        let private_leaf_salt_key = material.private_leaf_salt_key;
+        let materialized_commitment_schedule =
+            MaterializedCommitmentSchedule::new(private_leaf_salt_key.clone());
+        let extension_mmcs = ExtensionMmcs::new(CommitmentScheme::prover(
+            ProofPrivacyMode::SecretBearing,
+            materialized_commitment_schedule.clone(),
+        ));
         let oracle_pass = RecomputableOraclePass::new(
             RecomputableOracleSource::ExternalTable(source_table.clone()),
             config.num_variables,
@@ -410,6 +428,8 @@ impl StreamingAggregateWideCommitmentGeneration {
             checked_power_of_two(config.starting_log_inv_rate, "starting inverse rate")?,
             material.oracle_randomness[0].clone(),
             &[],
+            private_leaf_salt_key.clone(),
+            AggregateLeafSaltRole::InitialSource,
         )
         .map_err(|error| format!("construct aggregate-wide initial oracle pass: {error}"))?;
         let detached_layout = AggregateLayout::new_detached(
@@ -423,7 +443,9 @@ impl StreamingAggregateWideCommitmentGeneration {
 
         Ok(Self {
             config,
-            extension_mmcs: pcs.extension_mmcs.clone(),
+            extension_mmcs,
+            private_leaf_salt_key,
+            materialized_commitment_schedule,
             dft: pcs.dft.clone(),
             source_table,
             residuals,
@@ -544,6 +566,10 @@ impl StreamingAggregateWideCommitmentGeneration {
                         self.prepared_prover_data = Some(StreamingAggregateWideProverData {
                             config: self.config.clone(),
                             extension_mmcs: self.extension_mmcs.clone(),
+                            private_leaf_salt_key: self.private_leaf_salt_key.clone(),
+                            materialized_commitment_schedule: self
+                                .materialized_commitment_schedule
+                                .clone(),
                             dft: self.dft.clone(),
                             source_table: self.source_table.clone(),
                             residuals: core::mem::take(&mut self.residuals),
@@ -644,6 +670,8 @@ impl StreamingAggregateWideProofGeneration {
         Ok(Self {
             config: prover_data.config,
             extension_mmcs: prover_data.extension_mmcs,
+            private_leaf_salt_key: prover_data.private_leaf_salt_key,
+            materialized_commitment_schedule: prover_data.materialized_commitment_schedule,
             dft: prover_data.dft,
             source_table: prover_data.source_table,
             residuals: prover_data.residuals,
@@ -814,6 +842,10 @@ impl StreamingAggregateWideProofGeneration {
                         self.config.inv_rate(self.current_round_ordinal),
                         self.oracle_randomness[self.current_round_ordinal + 1].clone(),
                         &[],
+                        self.private_leaf_salt_key.clone(),
+                        AggregateLeafSaltRole::FoldedSource {
+                            epoch_ordinal: self.current_round_ordinal + 1,
+                        },
                     )
                     .map_err(Self::geometry_error)?,
                 );
@@ -944,6 +976,14 @@ impl StreamingAggregateWideProofGeneration {
                         inverse_rate,
                         self.oracle_randomness[oracle_ordinal].clone(),
                         &self.round_query_indices,
+                        self.private_leaf_salt_key.clone(),
+                        if oracle_ordinal == 0 {
+                            AggregateLeafSaltRole::InitialSource
+                        } else {
+                            AggregateLeafSaltRole::FoldedSource {
+                                epoch_ordinal: oracle_ordinal,
+                            }
+                        },
                     )
                     .map_err(Self::geometry_error)?,
                 );
@@ -1069,6 +1109,9 @@ impl StreamingAggregateWideProofGeneration {
                 ))
             }
             StreamingAggregateWideProofStage::Complete => {
+                self.materialized_commitment_schedule
+                    .ensure_complete()
+                    .map_err(Self::geometry_error)?;
                 let query_index_schedule = challenger
                     .sampled_query_index_schedule()
                     .map_err(Self::geometry_error)?;
@@ -1200,6 +1243,7 @@ impl StreamingAggregateWideProofGeneration {
             .ok_or_else(|| Self::geometry_error("aggregate-wide prior oracle root is missing"))?;
         if &openings.root != expected_root
             || openings.rows.len() != self.round_query_indices.len()
+            || openings.private_leaf_salts.len() != self.round_query_indices.len()
             || openings.paths.len() != self.round_query_indices.len()
         {
             return Err(Self::geometry_error(
@@ -1224,11 +1268,12 @@ impl StreamingAggregateWideProofGeneration {
         let mut query_points = Vec::with_capacity(self.round_query_indices.len());
         let mut queries = Vec::with_capacity(self.round_query_indices.len());
         let query_value_is_base = self.current_round_ordinal == 0;
-        for ((query_index, values), path) in self
+        for (((query_index, values), private_leaf_salt), path) in self
             .round_query_indices
             .iter()
             .copied()
             .zip(openings.rows)
+            .zip(openings.private_leaf_salts)
             .zip(openings.paths)
         {
             if values.len()
@@ -1261,12 +1306,18 @@ impl StreamingAggregateWideProofGeneration {
             queries.push(if query_value_is_base {
                 QueryOpening::Base {
                     values,
-                    proof: path,
+                    proof: CoordinateDerivedLeafSaltProof {
+                        private_leaf_salts: vec![private_leaf_salt],
+                        siblings: path,
+                    },
                 }
             } else {
                 QueryOpening::Extension {
                     values,
-                    proof: path,
+                    proof: CoordinateDerivedLeafSaltProof {
+                        private_leaf_salts: vec![private_leaf_salt],
+                        siblings: path,
+                    },
                 }
             });
         }
@@ -1404,6 +1455,10 @@ impl StreamingAggregateWideProofGeneration {
                 self.config.inv_rate(final_oracle_ordinal - 1),
                 self.oracle_randomness[final_oracle_ordinal].clone(),
                 prepared.source_positions(),
+                self.private_leaf_salt_key.clone(),
+                AggregateLeafSaltRole::FoldedSource {
+                    epoch_ordinal: final_oracle_ordinal,
+                },
             )
             .map_err(Self::geometry_error)?,
         );
@@ -1425,6 +1480,7 @@ impl StreamingAggregateWideProofGeneration {
             .ok_or_else(|| Self::geometry_error("aggregate-wide prepared base case is missing"))?;
         if &openings.root != expected_root
             || openings.rows.len() != prepared.source_positions().len()
+            || openings.private_leaf_salts.len() != prepared.source_positions().len()
             || openings.paths.len() != prepared.source_positions().len()
         {
             return Err(Self::geometry_error(
@@ -1434,8 +1490,17 @@ impl StreamingAggregateWideProofGeneration {
         let source_queries = openings
             .rows
             .into_iter()
+            .zip(openings.private_leaf_salts)
             .zip(openings.paths)
-            .map(|(values, proof)| QueryOpening::Extension { values, proof })
+            .map(
+                |((values, private_leaf_salt), siblings)| QueryOpening::Extension {
+                    values,
+                    proof: CoordinateDerivedLeafSaltProof {
+                        private_leaf_salts: vec![private_leaf_salt],
+                        siblings,
+                    },
+                },
+            )
             .collect();
         self.base_case = Some(
             prepared

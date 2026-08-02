@@ -1192,9 +1192,11 @@ impl RowCodeWhirConstructionPlan {
         }
         phase_order.push(RowCodeWhirPhase::Quotient);
         let bound_opening_column_ordinals = bound_opening_column_ordinals(variant)?;
-        let (whir, protocol_schedule) =
-            super::aggregate_wide_pcs::derive_aggregate_wide_whir_plan(parameters)
-                .map_err(|_| RowCodeWhirConstructionPlanError::InvalidVariantGeometry)?;
+        let (whir, protocol_schedule) = super::aggregate_wide_pcs::derive_aggregate_wide_whir_plan(
+            parameters,
+            variant.proof_privacy_mode(),
+        )
+        .map_err(|_| RowCodeWhirConstructionPlanError::InvalidVariantGeometry)?;
         let opening_batches =
             opening_batch_plans(&aggregate_column_roles, &bound_reduction_blocks, parameters)?;
         let transcript_operations =
@@ -1720,8 +1722,18 @@ impl RowCodeWhirConstructionPlan {
                 .ok_or(RowCodeWhirConstructionPlanError::InvalidVariantGeometry)?;
             let opened_value_byte_length = self
                 .outer_query_count()
-                .checked_mul(row_count)
-                .and_then(|count| count.checked_mul(core::mem::size_of::<u64>()))
+                .checked_mul(
+                    row_count
+                        .checked_mul(core::mem::size_of::<u64>())
+                        .and_then(|length| {
+                            length.checked_add(
+                                usize::from(
+                                    self.proof_privacy_mode == ProofPrivacyMode::SecretBearing,
+                                ) * super::private_leaf_salt::PRIVATE_LEAF_SALT_BYTE_LENGTH,
+                            )
+                        })
+                        .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?,
+                )
                 .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?;
             geometries.push(RowCodeWhirOpeningFrontierGeometry {
                 role: RowCodeWhirOpeningFrontierRole::Phase { phase: *phase },

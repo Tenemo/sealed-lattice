@@ -16,6 +16,7 @@ use crate::bgv::proof_suite::field::PROOF_CHALLENGE_EXTENSION_DEGREE;
 use super::super::{
     MERKLE_DIGEST_BYTE_LENGTH,
     aggregate_wide_hiding::{AGGREGATE_WIDE_PAD_LOG_INVERSE_RATE, AggregateWidePadLayout},
+    private_leaf_salt::PRIVATE_LEAF_SALT_BYTE_LENGTH,
 };
 use super::SelectedHidingWhirConfig;
 #[cfg(test)]
@@ -56,14 +57,20 @@ impl AuthenticatedOpeningBatch {
         SECTION_COUNT_WIRE_BYTE_LENGTH + self.frontier_node_count() * MERKLE_DIGEST_BYTE_LENGTH
     }
 
-    fn opened_value_byte_length(&self) -> usize {
+    fn opened_value_byte_length(&self, includes_private_leaf_salt: bool) -> usize {
+        let private_leaf_salt_byte_length = if includes_private_leaf_salt {
+            PRIVATE_LEAF_SALT_BYTE_LENGTH
+        } else {
+            0
+        };
         self.opening_count
-            * (self.challenge_values_per_opening * CHALLENGE_FIELD_WIRE_BYTE_LENGTH
+            * (private_leaf_salt_byte_length
+                + self.challenge_values_per_opening * CHALLENGE_FIELD_WIRE_BYTE_LENGTH
                 + self.base_values_per_opening * BASE_FIELD_WIRE_BYTE_LENGTH)
     }
 
-    fn byte_length(&self) -> usize {
-        self.frontier_byte_length() + self.opened_value_byte_length()
+    fn byte_length(&self, includes_private_leaf_salt: bool) -> usize {
+        self.frontier_byte_length() + self.opened_value_byte_length(includes_private_leaf_salt)
     }
 }
 
@@ -247,10 +254,10 @@ impl AggregateOpeningRoundGeometry {
         }
     }
 
-    fn round_query_byte_length(&self) -> usize {
+    fn round_query_byte_length(&self, includes_private_leaf_salt: bool) -> usize {
         self.round_query_batches
             .iter()
-            .map(AuthenticatedOpeningBatch::byte_length)
+            .map(|batch| batch.byte_length(includes_private_leaf_salt))
             .sum()
     }
 }
@@ -294,7 +301,7 @@ pub(in crate::bgv::proof_suite::row_code_whir) fn unmasked_aggregate_opening_byt
             ),
             (
                 AggregateOpeningSection::RoundQueryOpenings,
-                geometry.round_query_byte_length(),
+                geometry.round_query_byte_length(false),
             ),
             (
                 AggregateOpeningSection::SumcheckWires,
@@ -306,7 +313,7 @@ pub(in crate::bgv::proof_suite::row_code_whir) fn unmasked_aggregate_opening_byt
             ),
             (
                 AggregateOpeningSection::PlainFinalQueryOpenings,
-                geometry.terminal_query_batch.byte_length(),
+                geometry.terminal_query_batch.byte_length(false),
             ),
         ],
     }
@@ -356,7 +363,7 @@ pub(in crate::bgv::proof_suite::row_code_whir) fn hiding_aggregate_opening_byte_
                 challenge_values_per_opening: group.width,
                 base_values_per_opening: 0,
             };
-            2 * batch.byte_length()
+            2 * batch.byte_length(true)
         })
         .sum();
 
@@ -391,7 +398,7 @@ pub(in crate::bgv::proof_suite::row_code_whir) fn hiding_aggregate_opening_byte_
             ),
             (
                 AggregateOpeningSection::RoundQueryOpenings,
-                geometry.round_query_byte_length(),
+                geometry.round_query_byte_length(true),
             ),
             (
                 AggregateOpeningSection::SumcheckWires,
@@ -427,11 +434,11 @@ pub(in crate::bgv::proof_suite::row_code_whir) fn hiding_aggregate_opening_byte_
             ),
             (
                 AggregateOpeningSection::BaseCaseSourceOpenings,
-                source_openings.byte_length(),
+                source_openings.byte_length(true),
             ),
             (
                 AggregateOpeningSection::BaseCaseFreshMainOpenings,
-                fresh_main_openings.byte_length(),
+                fresh_main_openings.byte_length(true),
             ),
             (
                 AggregateOpeningSection::BaseCaseMaskGroupOpenings,
@@ -603,7 +610,7 @@ fn masking_pad_opening_byte_ledger(
             ),
             (
                 AggregateOpeningSection::RoundQueryOpenings,
-                geometry.round_query_byte_length(),
+                geometry.round_query_byte_length(true),
             ),
             (
                 AggregateOpeningSection::SumcheckWires,
@@ -633,15 +640,15 @@ fn masking_pad_opening_byte_ledger(
             ),
             (
                 AggregateOpeningSection::BaseCaseSourceOpenings,
-                source_openings.byte_length(),
+                source_openings.byte_length(true),
             ),
             (
                 AggregateOpeningSection::BaseCaseFreshMainOpenings,
-                fresh_main_openings.byte_length(),
+                fresh_main_openings.byte_length(true),
             ),
             (
                 AggregateOpeningSection::BaseCaseAggregateWidePadOpenings,
-                2 * pad_openings.byte_length(),
+                2 * pad_openings.byte_length(true),
             ),
         ],
     }
@@ -725,7 +732,6 @@ mod tests {
             AggregateOpeningSection::CommitmentOutOfDomainAnswers,
             AggregateOpeningSection::RoundCommitments,
             AggregateOpeningSection::RoundOutOfDomainAnswers,
-            AggregateOpeningSection::RoundQueryOpenings,
         ] {
             assert_eq!(
                 plain.section_byte_length(shared),
@@ -734,6 +740,18 @@ mod tests {
                 shared.identifier(),
             );
         }
+        let round_query_salt_byte_length = configuration
+            .inner
+            .round_parameters
+            .iter()
+            .map(|parameters| parameters.num_queries)
+            .sum::<usize>()
+            * PRIVATE_LEAF_SALT_BYTE_LENGTH;
+        assert_eq!(
+            hiding.section_byte_length(AggregateOpeningSection::RoundQueryOpenings)
+                - plain.section_byte_length(AggregateOpeningSection::RoundQueryOpenings),
+            round_query_salt_byte_length,
+        );
 
         // The plain terminal phase is exactly what the base case replaces.
         let replaced_plain_terminal_byte_length = plain
@@ -758,10 +776,10 @@ mod tests {
                 > hiding.section_byte_length(AggregateOpeningSection::RoundQueryOpenings),
         );
 
-        // The exact ledgers. The rounds are identical, so the difference is the
-        // mask layer alone.
+        // The exact ledgers. Secret-bearing query leaves transport their
+        // construction-bound private salts; the public comparator does not.
         assert_eq!(plain.byte_length(), 2_014_236);
-        assert_eq!(hiding.byte_length(), 4_875_464);
+        assert_eq!(hiding.byte_length(), 6_237_640);
         let migration_byte_cost = hiding.byte_length() - plain.byte_length();
         assert_eq!(migration_byte_cost, HIDING_MIGRATION_BYTE_COST);
 
@@ -772,16 +790,19 @@ mod tests {
             PRODUCTION_SHARED_PROOF_PREFIX_BYTE_LENGTH + plain.byte_length();
         let complete_hiding_proof_byte_length =
             PRODUCTION_SHARED_PROOF_PREFIX_BYTE_LENGTH + hiding.byte_length();
-        assert_eq!(complete_plain_proof_byte_length, 4_738_078);
-        assert_eq!(complete_hiding_proof_byte_length, 7_599_306);
-        assert!(hiding.byte_length() < NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH);
+        assert_eq!(complete_plain_proof_byte_length, 4_886_686);
+        assert_eq!(complete_hiding_proof_byte_length, 9_110_090);
         assert!(
             complete_hiding_proof_byte_length > NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH,
             "complete hiding proof is {complete_hiding_proof_byte_length} bytes",
         );
         assert!(
             complete_hiding_proof_byte_length
-                <= AUTOMATIC_ROW_CODE_WHIR_PROOF_ACCEPTANCE_BYTE_LENGTH
+                > AUTOMATIC_ROW_CODE_WHIR_PROOF_ACCEPTANCE_BYTE_LENGTH
+        );
+        assert!(
+            complete_hiding_proof_byte_length
+                < crate::bgv::proof_suite::MAXIMUM_COMMON_PROOF_BYTE_LENGTH
         );
         assert!(complete_plain_proof_byte_length < NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH);
 
@@ -823,7 +844,6 @@ mod tests {
             AggregateOpeningSection::CommitmentOutOfDomainAnswers,
             AggregateOpeningSection::RoundCommitments,
             AggregateOpeningSection::RoundOutOfDomainAnswers,
-            AggregateOpeningSection::RoundQueryOpenings,
         ] {
             assert_eq!(
                 plain.section_byte_length(shared),
@@ -832,6 +852,18 @@ mod tests {
                 shared.identifier(),
             );
         }
+        let round_query_salt_byte_length = configuration
+            .inner
+            .round_parameters
+            .iter()
+            .map(|parameters| parameters.num_queries)
+            .sum::<usize>()
+            * PRIVATE_LEAF_SALT_BYTE_LENGTH;
+        assert_eq!(
+            aggregate_wide.section_byte_length(AggregateOpeningSection::RoundQueryOpenings)
+                - plain.section_byte_length(AggregateOpeningSection::RoundQueryOpenings),
+            round_query_salt_byte_length,
+        );
 
         assert_eq!(
             aggregate_wide.section_byte_length(AggregateOpeningSection::CodeSwitchMaskDeltas),
@@ -846,23 +878,23 @@ mod tests {
         assert_eq!(
             aggregate_wide
                 .section_byte_length(AggregateOpeningSection::BaseCaseAggregateWidePadOpenings,),
-            247_896,
+            348_504,
         );
-        assert_eq!(aggregate_wide.byte_length(), 2_586_008);
+        assert_eq!(aggregate_wide.byte_length(), 2_942_104);
 
         let complete_proof_byte_length =
             PRODUCTION_SHARED_PROOF_PREFIX_BYTE_LENGTH + aggregate_wide.byte_length();
-        assert_eq!(complete_proof_byte_length, 5_309_850);
+        assert_eq!(complete_proof_byte_length, 5_814_554);
         assert_eq!(
             complete_proof_byte_length - NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH,
-            66_970,
+            571_674,
         );
         assert!(complete_proof_byte_length > NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH);
         assert!(complete_proof_byte_length <= AUTOMATIC_ROW_CODE_WHIR_PROOF_ACCEPTANCE_BYTE_LENGTH);
     }
 
     /// Bytes the hiding mask layer adds to the plain aggregate opening.
-    const HIDING_MIGRATION_BYTE_COST: usize = 2_861_228;
+    const HIDING_MIGRATION_BYTE_COST: usize = 4_223_404;
 
     /// Production same-secret proof bytes outside the aggregate opening.
     ///
@@ -870,14 +902,14 @@ mod tests {
     /// the canonical header, transcript evaluations, and every phase and bound
     /// compact frontier. Keeping the shared value here makes alternative
     /// masking ledgers directly comparable to the selected construction.
-    const PRODUCTION_SHARED_PROOF_PREFIX_BYTE_LENGTH: usize = 2_723_842;
+    const PRODUCTION_SHARED_PROOF_PREFIX_BYTE_LENGTH: usize = 2_872_450;
 
     /// Margin the recorded plain same-secret proof leaves under the gate.
     ///
-    /// The plain baseline is `4,738,078` bytes against the `5,242,880`-byte
+    /// The salted-phase plain baseline is `4,886,686` bytes against the `5,242,880`-byte
     /// selection gate. Any masking layer has to fit inside that margin, because
     /// every other section of the stream is unchanged by the masking choice.
-    const PLAIN_PROOF_MARGIN_BELOW_SELECTION_GATE: usize = 504_802;
+    const PLAIN_PROOF_MARGIN_BELOW_SELECTION_GATE: usize = 356_194;
 
     /// One searched hiding-parameter candidate.
     #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -962,11 +994,11 @@ mod tests {
                 cheapest.sumcheck_mask_message_length,
                 cheapest.mask_log_inverse_rate,
             ),
-            (5, 3, 3),
+            (6, 3, 3),
         );
-        assert_eq!(cheapest.hiding_opening_byte_length, 4_713_688);
-        assert_eq!(cheapest.migration_byte_cost, 2_266_756);
-        assert_eq!(cheapest.complete_proof_byte_length, 7_437_530);
+        assert_eq!(cheapest.hiding_opening_byte_length, 5_416_316);
+        assert_eq!(cheapest.migration_byte_cost, 2_364_716);
+        assert_eq!(cheapest.complete_proof_byte_length, 8_288_766);
 
         // The selected geometry is not an outlier inside the searched family:
         // its cost is within a small factor of the cheapest one, so the refusal
@@ -990,7 +1022,7 @@ mod tests {
             selected_candidate.migration_byte_cost,
             HIDING_MIGRATION_BYTE_COST
         );
-        assert_eq!(selected_candidate.complete_proof_byte_length, 7_599_306);
+        assert_eq!(selected_candidate.complete_proof_byte_length, 9_110_090);
         assert!(
             selected_candidate.complete_proof_byte_length > cheapest.complete_proof_byte_length
         );

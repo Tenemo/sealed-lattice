@@ -205,6 +205,7 @@ impl AggregateWidePadLayout {
 /// Exact private-material geometry for the aggregate-wide hiding argument.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct AggregateWideHidingMaterialShape {
+    private_leaf_salt_key_extension_element_count: usize,
     pad_message_length: usize,
     pad_randomness_length: usize,
     oracle_randomness_lengths: Vec<usize>,
@@ -238,8 +239,10 @@ impl AggregateWideHidingMaterialShape {
             .ok_or_else(|| "aggregate-wide final message length overflowed".to_owned())?;
         let fresh_source_randomness_length =
             configuration.oracle_randomness[configuration.n_rounds()];
-        let mut total_extension_element_count = pad_message_length
-            .checked_add(pad_randomness_length)
+        let private_leaf_salt_key_extension_element_count = super::coordinate_derived_hiding_mmcs::AGGREGATE_PRIVATE_LEAF_SALT_KEY_EXTENSION_ELEMENT_COUNT;
+        let mut total_extension_element_count = private_leaf_salt_key_extension_element_count
+            .checked_add(pad_message_length)
+            .and_then(|count| count.checked_add(pad_randomness_length))
             .ok_or_else(|| "aggregate-wide private-material count overflowed".to_owned())?;
         for count in &oracle_randomness_lengths {
             total_extension_element_count = total_extension_element_count
@@ -253,6 +256,7 @@ impl AggregateWideHidingMaterialShape {
             .and_then(|count| count.checked_add(pad_randomness_length))
             .ok_or_else(|| "aggregate-wide private-material count overflowed".to_owned())?;
         Ok(Self {
+            private_leaf_salt_key_extension_element_count,
             pad_message_length,
             pad_randomness_length,
             oracle_randomness_lengths,
@@ -520,6 +524,9 @@ pub(super) struct AggregateWideNonlinearViewBoundary {
     pub(super) compact_frontier_count: usize,
     pub(super) code_switch_image_count: usize,
     pub(super) fold_image_count: usize,
+    pub(super) private_leaf_salt_key_extension_element_count: usize,
+    pub(super) private_leaf_salt_derivation_role_count: usize,
+    pub(super) private_leaf_salt_byte_length: usize,
     pub(super) hash_output_bit_length: usize,
 }
 
@@ -1002,6 +1009,11 @@ fn aggregate_wide_nonlinear_view_boundary(
         compact_frontier_count: configuration.n_rounds() + 4,
         code_switch_image_count: configuration.n_rounds(),
         fold_image_count: configuration.n_rounds() + 1,
+        private_leaf_salt_key_extension_element_count:
+            super::coordinate_derived_hiding_mmcs::AGGREGATE_PRIVATE_LEAF_SALT_KEY_EXTENSION_ELEMENT_COUNT,
+        private_leaf_salt_derivation_role_count: configuration.n_rounds() + 4,
+        private_leaf_salt_byte_length:
+            super::private_leaf_salt::PRIVATE_LEAF_SALT_BYTE_LENGTH,
         hash_output_bit_length: 512,
     }
 }
@@ -1010,6 +1022,7 @@ fn aggregate_wide_nonlinear_view_boundary(
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg(test)]
 enum AggregateWidePrivateMaterialRole {
+    PrivateLeafSaltKey,
     PadMessage,
     PadEncodingRandomness,
     OracleRandomness { epoch_ordinal: u32 },
@@ -1070,6 +1083,7 @@ pub(super) struct AggregateWideMaskingCertificate {
     nonlinear_view_boundary: AggregateWideNonlinearViewBoundary,
     generator_hybrid: AggregateWideGeneratorHybridCertificate,
     private_material_partition: Vec<AggregateWidePrivateMaterialPartitionRow>,
+    affine_private_extension_element_count: usize,
     private_extension_element_count: usize,
     base_case_mask_group_count: usize,
     switch_delta_logical_coefficient: i8,
@@ -1214,7 +1228,7 @@ impl AggregateWideMaskingCertificate {
             material_shape
                 .oracle_randomness_lengths
                 .len()
-                .checked_add(6)
+                .checked_add(7)
                 .ok_or_else(|| "aggregate-wide private partition count overflowed".to_owned())?,
         );
         let mut next_private_offset = 0_usize;
@@ -1230,6 +1244,10 @@ impl AggregateWideMaskingCertificate {
                 next_private_offset = end;
                 Ok(())
             };
+        push_private_partition(
+            AggregateWidePrivateMaterialRole::PrivateLeafSaltKey,
+            material_shape.private_leaf_salt_key_extension_element_count,
+        )?;
         push_private_partition(
             AggregateWidePrivateMaterialRole::PadMessage,
             material_shape.pad_message_length,
@@ -1294,6 +1312,14 @@ impl AggregateWideMaskingCertificate {
                             "aggregate-wide conditional entropy dimension overflowed".to_owned()
                         })
                 })?;
+        let affine_private_extension_element_count =
+            joint_affine_view_rows
+                .iter()
+                .try_fold(0_usize, |count, row| {
+                    count
+                        .checked_add(row.private_coordinate_count)
+                        .ok_or_else(|| "aggregate-wide affine private count overflowed".to_owned())
+                })?;
         let sumcheck_minor_column_ordinals = [0, 1, 2, 4, 5, 7, 8];
         let derived_affine_identities = aggregate_wide_derived_affine_identities(configuration)?;
         let chronology = aggregate_wide_chronology(configuration)?;
@@ -1323,6 +1349,7 @@ impl AggregateWideMaskingCertificate {
             nonlinear_view_boundary,
             generator_hybrid,
             private_material_partition,
+            affine_private_extension_element_count,
             private_extension_element_count: next_private_offset,
             base_case_mask_group_count: 1,
             switch_delta_logical_coefficient: 1,
@@ -1496,10 +1523,15 @@ impl AggregateWideMaskingCertificate {
         if self.joint_affine_view_rows != expected_joint_affine_view_rows
             || self.total_joint_affine_view_rank != expected_joint_affine_view_rank
             || self.total_conditional_entropy_dimension != expected_conditional_entropy_dimension
-            || expected_joint_private_coordinate_count != self.private_extension_element_count
+            || expected_joint_private_coordinate_count
+                != self.affine_private_extension_element_count
             || self
                 .total_joint_affine_view_rank
                 .checked_add(self.total_conditional_entropy_dimension)
+                != Some(self.affine_private_extension_element_count)
+            || self
+                .affine_private_extension_element_count
+                .checked_add(material_shape.private_leaf_salt_key_extension_element_count)
                 != Some(self.private_extension_element_count)
         {
             return Err("aggregate-wide complete joint affine view is inconsistent".to_owned());
@@ -1567,7 +1599,12 @@ impl AggregateWideMaskingCertificate {
             || self.private_extension_element_count
                 != material_shape.total_extension_element_count()
             || self.private_material_partition.len()
-                != material_shape.oracle_randomness_lengths.len() + 6
+                != material_shape.oracle_randomness_lengths.len() + 7
+            || self.private_material_partition.first().is_none_or(|row| {
+                row.role != AggregateWidePrivateMaterialRole::PrivateLeafSaltKey
+                    || row.range
+                        != (0..material_shape.private_leaf_salt_key_extension_element_count)
+            })
         {
             return Err("aggregate-wide private material partition is incomplete".to_owned());
         }
@@ -1585,7 +1622,8 @@ impl AggregateWideMaskingCertificate {
 
     pub(super) fn is_complete(&self) -> bool {
         self.base_case_mask_group_count == 1
-            && self.private_extension_element_count == 18_025
+            && self.private_extension_element_count == 18_027
+            && self.affine_private_extension_element_count == 18_025
             && self.total_joint_affine_view_rank == 18_013
             && self.total_conditional_entropy_dimension == 12
             && self.joint_affine_view_rows.len() == 15
@@ -1617,7 +1655,7 @@ impl AggregateWideMaskingCertificate {
     #[cfg(feature = "theorem-evidence")]
     pub(super) const fn joint_affine_view_summary(&self) -> (usize, usize, usize) {
         (
-            self.private_extension_element_count,
+            self.affine_private_extension_element_count,
             self.total_joint_affine_view_rank,
             self.total_conditional_entropy_dimension,
         )
@@ -1666,6 +1704,8 @@ impl AggregateWideMaskingCertificate {
 
 /// Secret values used exactly once by one aggregate-wide hiding proof.
 pub(super) struct AggregateWideHidingMaterial {
+    pub(super) private_leaf_salt_key:
+        super::coordinate_derived_hiding_mmcs::AggregatePrivateLeafSaltKey,
     pub(super) pad_message: Vec<ChallengeField>,
     pub(super) pad_randomness: Vec<ChallengeField>,
     pub(super) oracle_randomness: Vec<Vec<ChallengeField>>,
@@ -1843,6 +1883,18 @@ impl AggregateWideHidingMaterialGeneration {
         })?;
         let mut values = values.into_iter();
         let mut take_values = |count: usize| values.by_ref().take(count).collect::<Vec<_>>();
+        let private_leaf_salt_key_elements =
+            take_values(self.shape.private_leaf_salt_key_extension_element_count)
+                .try_into()
+                .map_err(|_| {
+                    AggregateWideHidingMaterialGenerationError::Geometry(
+                        "aggregate-wide private leaf-salt key has the wrong width".to_owned(),
+                    )
+                })?;
+        let private_leaf_salt_key =
+            super::coordinate_derived_hiding_mmcs::AggregatePrivateLeafSaltKey::from_extension_elements(
+                private_leaf_salt_key_elements,
+            );
         let pad_message = take_values(self.shape.pad_message_length);
         let pad_randomness = take_values(self.shape.pad_randomness_length);
         let oracle_randomness = self
@@ -1862,6 +1914,7 @@ impl AggregateWideHidingMaterialGeneration {
         }
         Ok(AggregateWideHidingMaterialGenerationPoll::Complete(
             AggregateWideHidingMaterial {
+                private_leaf_salt_key,
                 pad_message,
                 pad_randomness,
                 oracle_randomness,
@@ -2625,7 +2678,7 @@ mod tests {
         );
         assert_eq!(shape.fresh_source_message_length, 64);
         assert_eq!(shape.fresh_source_randomness_length, 263);
-        assert_eq!(shape.total_extension_element_count(), 18_025);
+        assert_eq!(shape.total_extension_element_count(), 18_027);
         assert_eq!(shape.pad_shape().message_len, 1_524);
         assert_eq!(shape.pad_shape().randomness_len, 393);
         assert_eq!(shape.pad_shape().domain_size, 8_192);
@@ -2649,7 +2702,8 @@ mod tests {
         assert_eq!(certificate.pad_message_length(), 1_524);
         assert_eq!(certificate.pad_randomness_length(), 393);
         assert_eq!(certificate.pad_domain_size(), 8_192);
-        assert_eq!(certificate.private_extension_element_count(), 18_025);
+        assert_eq!(certificate.private_extension_element_count(), 18_027);
+        assert_eq!(certificate.joint_affine_view_summary().0, 18_025);
         assert_eq!(certificate.total_joint_affine_view_rank, 18_013);
         assert_eq!(certificate.total_conditional_entropy_dimension, 12);
         assert_eq!(certificate.joint_affine_view_rows.len(), 15);
@@ -2693,14 +2747,32 @@ mod tests {
             certificate.nonlinear_view_boundary.compact_frontier_count,
             9
         );
-        assert_eq!(certificate.generator_hybrid.base_field_sample_count, 90_125);
+        assert_eq!(
+            certificate
+                .nonlinear_view_boundary
+                .private_leaf_salt_key_extension_element_count,
+            2
+        );
+        assert_eq!(
+            certificate
+                .nonlinear_view_boundary
+                .private_leaf_salt_derivation_role_count,
+            9
+        );
+        assert_eq!(
+            certificate
+                .nonlinear_view_boundary
+                .private_leaf_salt_byte_length,
+            128
+        );
+        assert_eq!(certificate.generator_hybrid.base_field_sample_count, 90_135);
         assert_eq!(
             certificate
                 .generator_hybrid
                 .ceremony_application_multiplicity,
             10
         );
-        assert_eq!(certificate.private_material_partition.len(), 12);
+        assert_eq!(certificate.private_material_partition.len(), 13);
         assert_eq!(certificate.base_case_mask_group_count, 1);
         assert_eq!(
             certificate
@@ -2818,7 +2890,7 @@ mod tests {
         );
 
         let mut reused_private_role = certificate.clone();
-        reused_private_role.private_material_partition[1].role =
+        reused_private_role.private_material_partition[2].role =
             AggregateWidePrivateMaterialRole::PadMessage;
         assert!(
             reused_private_role
@@ -2903,7 +2975,7 @@ mod tests {
             }
         };
 
-        assert_eq!(coins.sample_count, 90_125);
+        assert_eq!(coins.sample_count, 90_135);
         assert_eq!(material.pad_message.len(), 1_524);
         assert_eq!(material.pad_randomness.len(), 393);
         assert_eq!(

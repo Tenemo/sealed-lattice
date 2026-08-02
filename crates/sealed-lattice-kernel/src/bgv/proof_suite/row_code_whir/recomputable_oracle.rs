@@ -18,12 +18,16 @@ use super::aggregate_source_storage::{
 };
 use super::aggregate_wide_pcs::AggregateWideCommitment;
 use super::bounded_dft::BoundedRadix2Dft;
+use super::coordinate_derived_hiding_mmcs::{
+    AggregateLeafSaltRole, AggregatePrivateLeafSaltKey, TransportedPrivateLeafSalt,
+};
 use super::oracle_geometry::logical_column_selector_index;
 use super::{
     ChallengeField, ColumnStreamableLeafHasher, ColumnStreamableLeafState,
     MERKLE_DIGEST_WORD_LENGTH, NodeCompressor, aggregate_leaf_hasher, aggregate_node_compressor,
 };
 use crate::bgv::proof_suite::external_polynomial::ExternalPolynomialVector;
+use crate::bgv::proof_suite::relation_plan::ProofPrivacyMode;
 use crate::bgv::proof_suite::{
     ProofExternalMemory, ProofExternalMemoryExecutor, ProofExternalMemoryExecutorError,
 };
@@ -157,6 +161,7 @@ enum RecomputableOracleStage {
 pub(super) struct RecomputableOracleOutput {
     pub(super) root: AggregateWideCommitment,
     pub(super) rows: Vec<Vec<ChallengeField>>,
+    pub(super) private_leaf_salts: Vec<TransportedPrivateLeafSalt>,
     pub(super) paths: Vec<Vec<MerkleDigest>>,
 }
 
@@ -190,8 +195,10 @@ pub(super) struct RecomputableOraclePass {
     randomness: Vec<ChallengeField>,
     query_indices: Vec<usize>,
     opened_rows: Vec<Vec<ChallengeField>>,
+    opened_private_leaf_salts: Vec<TransportedPrivateLeafSalt>,
+    private_leaf_salt_key: AggregatePrivateLeafSaltKey,
+    private_leaf_salt_role: AggregateLeafSaltRole,
     leaf_hasher: ColumnStreamableLeafHasher,
-    initial_leaf_state: ColumnStreamableLeafState,
     leaf_states: Vec<ColumnStreamableLeafState>,
     merkle_builder: Option<StreamingMerkleBuilder>,
     current_column_index: usize,
@@ -217,6 +224,8 @@ impl RecomputableOraclePass {
         inverse_rate: usize,
         randomness: Vec<ChallengeField>,
         query_indices: &[usize],
+        private_leaf_salt_key: AggregatePrivateLeafSaltKey,
+        private_leaf_salt_role: AggregateLeafSaltRole,
     ) -> Result<Self, String> {
         Self::new_with_maximum_stripe_row_count(
             source,
@@ -225,6 +234,8 @@ impl RecomputableOraclePass {
             inverse_rate,
             randomness,
             query_indices,
+            private_leaf_salt_key,
+            private_leaf_salt_role,
             AGGREGATE_ORACLE_LEAF_STATE_STRIPE_ROW_COUNT,
         )
     }
@@ -237,6 +248,8 @@ impl RecomputableOraclePass {
         inverse_rate: usize,
         randomness: Vec<ChallengeField>,
         query_indices: &[usize],
+        private_leaf_salt_key: AggregatePrivateLeafSaltKey,
+        private_leaf_salt_role: AggregateLeafSaltRole,
         maximum_stripe_row_count: usize,
     ) -> Result<Self, String> {
         if maximum_stripe_row_count == 0 || !maximum_stripe_row_count.is_power_of_two() {
@@ -277,8 +290,21 @@ impl RecomputableOraclePass {
             RecomputableOracleSource::ResidentPolynomial => {}
         }
 
-        let leaf_hasher = aggregate_leaf_hasher();
-        let initial_leaf_state = leaf_hasher.initial_state(ENCODED_ORACLE_WIDTH);
+        let leaf_hasher = aggregate_leaf_hasher(ProofPrivacyMode::SecretBearing);
+        let opened_private_leaf_salts = query_indices
+            .iter()
+            .map(|query_index| {
+                private_leaf_salt_key
+                    .derive(
+                        private_leaf_salt_role,
+                        encoded_height,
+                        ENCODED_ORACLE_WIDTH,
+                        0,
+                        *query_index,
+                    )
+                    .map(TransportedPrivateLeafSalt::from_bytes)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let capture_targets = if query_indices.is_empty() {
             None
         } else {
@@ -296,8 +322,10 @@ impl RecomputableOraclePass {
                 vec![ChallengeField::ZERO; ENCODED_ORACLE_WIDTH];
                 query_indices.len()
             ],
+            opened_private_leaf_salts,
+            private_leaf_salt_key,
+            private_leaf_salt_role,
             leaf_hasher,
-            initial_leaf_state,
             leaf_states: Vec::with_capacity(maximum_stripe_row_count.min(encoded_height)),
             merkle_builder: Some(StreamingMerkleBuilder::new(
                 encoded_height,
@@ -410,10 +438,25 @@ impl RecomputableOraclePass {
                         "recomputable oracle stripe state is invalid",
                     ));
                 }
-                self.leaf_states.resize(
-                    self.current_stripe_end - self.current_stripe_start,
-                    self.initial_leaf_state,
-                );
+                self.leaf_states
+                    .try_reserve_exact(self.current_stripe_end - self.current_stripe_start)
+                    .map_err(|_| Self::geometry("recomputable leaf-state allocation failed"))?;
+                for leaf_index in self.current_stripe_start..self.current_stripe_end {
+                    let private_leaf_salt = self
+                        .private_leaf_salt_key
+                        .derive(
+                            self.private_leaf_salt_role,
+                            self.encoded_height,
+                            ENCODED_ORACLE_WIDTH,
+                            0,
+                            leaf_index,
+                        )
+                        .map_err(Self::geometry)?;
+                    self.leaf_states.push(
+                        self.leaf_hasher
+                            .initial_state(ENCODED_ORACLE_WIDTH, Some(&private_leaf_salt)),
+                    );
+                }
                 self.current_column_index = 0;
                 self.stage = RecomputableOracleStage::PrepareColumn;
                 Ok(RecomputableOraclePoll::ArithmeticStepCompleted)
@@ -573,6 +616,7 @@ impl RecomputableOraclePass {
                 Ok(RecomputableOraclePoll::Complete(RecomputableOracleOutput {
                     root: MerkleCap::new(vec![root]),
                     rows: core::mem::take(&mut self.opened_rows),
+                    private_leaf_salts: core::mem::take(&mut self.opened_private_leaf_salts),
                     paths: paths.unwrap_or_default(),
                 }))
             }
@@ -718,6 +762,9 @@ impl Drop for RecomputableOraclePass {
         self.decoded_storage_chunk.fill(ChallengeField::ZERO);
         for row in &mut self.opened_rows {
             row.fill(ChallengeField::ZERO);
+        }
+        for salt in &mut self.opened_private_leaf_salts {
+            salt.zeroize();
         }
     }
 }
@@ -907,6 +954,13 @@ mod tests {
     use crate::bgv::proof_suite::relation_plan::RelationColumnValueType;
     use crate::bgv::proof_suite::row_code_whir::CommitmentScheme;
 
+    fn sample_private_leaf_salt_key(marker: u64) -> AggregatePrivateLeafSaltKey {
+        AggregatePrivateLeafSaltKey::from_extension_elements([
+            ChallengeField::from_u64(marker),
+            ChallengeField::from_u64(marker + 1),
+        ])
+    }
+
     #[test]
     fn recomputable_oracle_rows_match_the_independent_coefficient_evaluation_map() {
         const SOURCE_VARIABLE_COUNT: usize = 7;
@@ -938,6 +992,7 @@ mod tests {
             .map(|coordinate| ChallengeField::from_u64(1_000 + coordinate as u64 * 37))
             .collect::<Vec<_>>();
         let query_indices = [0, 1, 7, 19, 31];
+        let private_leaf_salt_key = sample_private_leaf_salt_key(11);
         let mut pass = RecomputableOraclePass::new_with_maximum_stripe_row_count(
             RecomputableOracleSource::ResidentPolynomial,
             SOURCE_VARIABLE_COUNT,
@@ -945,6 +1000,8 @@ mod tests {
             INVERSE_RATE,
             randomness.clone(),
             &query_indices,
+            private_leaf_salt_key,
+            AggregateLeafSaltRole::InitialSource,
             8,
         )
         .expect("the focused recomputable pass is valid");
@@ -996,6 +1053,7 @@ mod tests {
             .map(|index| ChallengeField::from_u64(1_000 + index as u64))
             .collect::<Vec<_>>();
         let query_indices = [0, 3, 17, 31];
+        let private_leaf_salt_key = sample_private_leaf_salt_key(23);
 
         let source_height = 1 << (source_variable_count - folding_factor);
         let encoded_height = source_height * inverse_rate;
@@ -1014,7 +1072,11 @@ mod tests {
                 matrix_values[row_index * ENCODED_ORACLE_WIDTH + column_index] = value;
             }
         }
-        let mmcs = CommitmentScheme::new(aggregate_leaf_hasher(), aggregate_node_compressor(), 0);
+        let materialized_schedule =
+            super::super::coordinate_derived_hiding_mmcs::MaterializedCommitmentSchedule::new(
+                private_leaf_salt_key.clone(),
+            );
+        let mmcs = CommitmentScheme::prover(ProofPrivacyMode::SecretBearing, materialized_schedule);
         let matrix = RowMajorMatrix::new(matrix_values, ENCODED_ORACLE_WIDTH);
         let (expected_root, prover_data) = mmcs.commit(vec![matrix]);
         let expected_openings = query_indices
@@ -1029,6 +1091,8 @@ mod tests {
             inverse_rate,
             randomness,
             &query_indices,
+            private_leaf_salt_key,
+            AggregateLeafSaltRole::AggregateWidePad,
             8,
         )
         .expect("the recomputable pass is valid");
@@ -1048,7 +1112,11 @@ mod tests {
         assert_eq!(output.root, expected_root);
         for (query_ordinal, opening) in expected_openings.into_iter().enumerate() {
             assert_eq!(output.rows[query_ordinal], opening.opened_values[0]);
-            assert_eq!(output.paths[query_ordinal], opening.opening_proof);
+            assert_eq!(
+                output.private_leaf_salts[query_ordinal],
+                opening.opening_proof.private_leaf_salts[0]
+            );
+            assert_eq!(output.paths[query_ordinal], opening.opening_proof.siblings);
         }
     }
 
@@ -1056,6 +1124,7 @@ mod tests {
     fn stripe_geometry_rejects_ambiguous_or_unbounded_sizes() {
         let source = RecomputableOracleSource::ResidentPolynomial;
         for maximum_stripe_row_count in [0, 3] {
+            let private_leaf_salt_key = sample_private_leaf_salt_key(31);
             assert!(
                 RecomputableOraclePass::new_with_maximum_stripe_row_count(
                     source.clone(),
@@ -1064,6 +1133,8 @@ mod tests {
                     2,
                     Vec::new(),
                     &[],
+                    private_leaf_salt_key,
+                    AggregateLeafSaltRole::InitialSource,
                     maximum_stripe_row_count,
                 )
                 .is_err(),
@@ -1115,6 +1186,7 @@ mod tests {
             .map(|index| ChallengeField::from_u64(20_000 + index as u64))
             .collect::<Vec<_>>();
         let query_indices = [0, 3, 17, 31];
+        let private_leaf_salt_key = sample_private_leaf_salt_key(47);
 
         let mut resident_pass = RecomputableOraclePass::new(
             RecomputableOracleSource::ResidentPolynomial,
@@ -1123,6 +1195,8 @@ mod tests {
             INVERSE_RATE,
             randomness.clone(),
             &query_indices,
+            private_leaf_salt_key.clone(),
+            AggregateLeafSaltRole::InitialSource,
         )
         .expect("the resident pass is valid");
         let resident_polynomial = p3_multilinear_util::poly::Poly::new(resident_source);
@@ -1207,6 +1281,8 @@ mod tests {
             INVERSE_RATE,
             randomness,
             &query_indices,
+            private_leaf_salt_key,
+            AggregateLeafSaltRole::InitialSource,
         )
         .expect("the external pass is valid");
         let external_output = loop {

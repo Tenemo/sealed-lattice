@@ -18,11 +18,13 @@ mod column_commitment;
 mod commitment_liveness;
 mod compact_merkle_frontier;
 pub(super) mod construction_plan;
+mod coordinate_derived_hiding_mmcs;
 mod exact_same_secret;
 mod generation_state;
 mod hiding_whir;
 mod opening_schedule;
 mod oracle_geometry;
+mod private_leaf_salt;
 mod quotient_transform_storage;
 mod recomputable_oracle;
 mod relation_materialization;
@@ -116,11 +118,11 @@ const GOLDILOCKS_MODULUS: u64 = 0xffff_ffff_0000_0001;
 pub(in crate::bgv::proof_suite) const ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN: &[u8] =
     b"sealed-lattice/row-code-whir/shake256/v1";
 pub(in crate::bgv::proof_suite) const ROW_CODE_WHIR_PHASE_COLUMN_LEAF_DOMAIN: &[u8; 32] =
-    b"sealed-lattice/column-hash/v1\0\0\0";
+    b"sealed-lattice/column-hash/v2\0\0\0";
 pub(in crate::bgv::proof_suite) const ROW_CODE_WHIR_PHASE_COLUMN_NODE_DOMAIN: &[u8] =
     b"sealed-lattice/column-merkle-node/v1";
 pub(in crate::bgv::proof_suite) const ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN: &[u8] =
-    b"aggregate-wide-pcs/merkle-leaf/v2";
+    b"aggregate-wide-pcs/merkle-leaf/v3";
 pub(in crate::bgv::proof_suite) const ROW_CODE_WHIR_AGGREGATE_NODE_DOMAIN: &[u8] =
     b"aggregate-wide-pcs/merkle-node/v1";
 pub(in crate::bgv::proof_suite) const ROW_CODE_WHIR_AGGREGATE_LEAF_FRAME_TAGS: [u8; 3] = [0, 1, 2];
@@ -130,8 +132,9 @@ type ExtensionFieldChallenger = RowCodeWhirChallenger;
 type LeafHasher = ColumnStreamableLeafHasher;
 type NodeCompressor =
     CompressionFunctionFromHasher<DomainSeparatedShake256, 2, MERKLE_DIGEST_WORD_LENGTH>;
-type CommitmentScheme =
+type PlainCommitmentScheme =
     MerkleTreeMmcs<ChallengeField, u64, LeafHasher, NodeCompressor, 2, MERKLE_DIGEST_WORD_LENGTH>;
+type CommitmentScheme = coordinate_derived_hiding_mmcs::CoordinateDerivedHidingMmcs;
 type DiscreteFourierTransform = Radix2DFTSmallBatch<ChallengeField>;
 
 const COLUMN_STREAMING_LEAF_STATE_WORD_LENGTH: usize = MERKLE_DIGEST_WORD_LENGTH;
@@ -140,6 +143,7 @@ pub(in crate::bgv::proof_suite) const ROW_CODE_WHIR_AGGREGATE_LEAF_STATE_BYTE_LE
 
 #[derive(Clone)]
 struct AuthenticatedColumn {
+    persistent_salt: Option<private_leaf_salt::PrivateLeafSalt>,
     values: Vec<Goldilocks>,
 }
 
@@ -159,6 +163,7 @@ struct DomainSeparatedShake256 {
 #[derive(Clone, Copy, Debug)]
 struct ColumnStreamableLeafHasher {
     domain: &'static [u8],
+    private_leaf_salt: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -172,6 +177,7 @@ impl ColumnStreamableLeafState {
 enum ColumnStreamableLeafOracleInput {
     Initial {
         column_count: u64,
+        private_leaf_salt: Option<private_leaf_salt::PrivateLeafSalt>,
     },
     Column {
         column_index: u64,
@@ -195,7 +201,20 @@ impl ColumnStreamableLeafOracleInput {
 
     fn visit_payload(self, mut visit: impl FnMut(&[u8])) {
         match self {
-            Self::Initial { column_count } => visit(&column_count.to_le_bytes()),
+            Self::Initial {
+                column_count,
+                private_leaf_salt,
+            } => {
+                visit(&column_count.to_le_bytes());
+                visit(
+                    &u64::try_from(private_leaf_salt.as_ref().map_or(0, |salt| salt.len()))
+                        .expect("private aggregate leaf salt length fits u64")
+                        .to_le_bytes(),
+                );
+                if let Some(salt) = private_leaf_salt {
+                    visit(&salt);
+                }
+            }
             Self::Column {
                 column_index,
                 predecessor,
@@ -245,10 +264,15 @@ struct ColumnStreamableLeafOracleFrameDescriptor {
     output_bit_length: usize,
 }
 
-fn aggregate_leaf_hasher() -> LeafHasher {
-    LeafHasher::new(DomainSeparatedShake256 {
-        domain: ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN,
-    })
+fn aggregate_leaf_hasher(
+    privacy_mode: crate::bgv::proof_suite::relation_plan::ProofPrivacyMode,
+) -> LeafHasher {
+    LeafHasher::new(
+        DomainSeparatedShake256 {
+            domain: ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN,
+        },
+        privacy_mode == crate::bgv::proof_suite::relation_plan::ProofPrivacyMode::SecretBearing,
+    )
 }
 
 fn aggregate_node_compressor() -> NodeCompressor {
@@ -262,9 +286,10 @@ impl ColumnStreamableLeafHasher {
     const COLUMN_FRAME: u8 = ROW_CODE_WHIR_AGGREGATE_LEAF_FRAME_TAGS[1];
     const FINAL_FRAME: u8 = ROW_CODE_WHIR_AGGREGATE_LEAF_FRAME_TAGS[2];
 
-    const fn new(hasher: DomainSeparatedShake256) -> Self {
+    const fn new(hasher: DomainSeparatedShake256, private_leaf_salt: bool) -> Self {
         Self {
             domain: hasher.domain,
+            private_leaf_salt,
         }
     }
 
@@ -304,10 +329,20 @@ impl ColumnStreamableLeafHasher {
         })
     }
 
-    fn initial_state(&self, column_count: usize) -> ColumnStreamableLeafState {
+    fn initial_state(
+        &self,
+        column_count: usize,
+        private_leaf_salt: Option<&private_leaf_salt::PrivateLeafSalt>,
+    ) -> ColumnStreamableLeafState {
+        assert_eq!(
+            private_leaf_salt.is_some(),
+            self.private_leaf_salt,
+            "aggregate leaf salt presence diverges from the construction"
+        );
         ColumnStreamableLeafState(self.hash_oracle_input(
             ColumnStreamableLeafOracleInput::Initial {
                 column_count: column_count as u64,
+                private_leaf_salt: private_leaf_salt.copied(),
             },
         ))
     }
@@ -355,9 +390,14 @@ impl ColumnStreamableLeafHasher {
         frame: ColumnStreamableLeafOracleFrame,
     ) -> ColumnStreamableLeafOracleFrameDescriptor {
         let input = match frame {
-            ColumnStreamableLeafOracleFrame::Initial => {
-                ColumnStreamableLeafOracleInput::Initial { column_count: 1 }
-            }
+            ColumnStreamableLeafOracleFrame::Initial => ColumnStreamableLeafOracleInput::Initial {
+                column_count: 1,
+                private_leaf_salt: if self.private_leaf_salt {
+                    Some([0_u8; private_leaf_salt::PRIVATE_LEAF_SALT_BYTE_LENGTH])
+                } else {
+                    None
+                },
+            },
             ColumnStreamableLeafOracleFrame::Column => ColumnStreamableLeafOracleInput::Column {
                 column_index: 0,
                 predecessor: ColumnStreamableLeafState::ZERO,
@@ -392,9 +432,24 @@ impl CryptographicHasher<ChallengeField, [u64; MERKLE_DIGEST_WORD_LENGTH]>
     where
         Input: IntoIterator<Item = ChallengeField>,
     {
-        let values = input.into_iter().collect::<Vec<_>>();
+        let mut values = input.into_iter().collect::<Vec<_>>();
+        let private_leaf_salt = if self.private_leaf_salt {
+            let suffix_start = values
+                .len()
+                .checked_sub(
+                    coordinate_derived_hiding_mmcs::AGGREGATE_PRIVATE_LEAF_SALT_EXTENSION_ELEMENT_COUNT,
+                )
+                .expect("secret-bearing aggregate leaf contains its salt suffix");
+            let encoded_salt = values.split_off(suffix_start);
+            Some(
+                coordinate_derived_hiding_mmcs::decode_private_leaf_salt(&encoded_salt)
+                    .expect("secret-bearing aggregate leaf salt is injectively encoded"),
+            )
+        } else {
+            None
+        };
         let column_count = values.len();
-        let mut state = self.initial_state(column_count);
+        let mut state = self.initial_state(column_count, private_leaf_salt.as_ref());
         for (column_index, value) in values.into_iter().enumerate() {
             state = self.absorb_column(state, column_index, value);
         }
@@ -950,12 +1005,14 @@ mod tests {
 
     #[test]
     fn aggregate_leaf_hash_matches_column_streaming_and_binds_order() {
-        let hasher = aggregate_leaf_hasher();
+        let hasher = aggregate_leaf_hasher(
+            crate::bgv::proof_suite::relation_plan::ProofPrivacyMode::PublicOnly,
+        );
         let values = (1_u64..=8)
             .map(ChallengeField::from_u64)
             .collect::<Vec<_>>();
         let direct = hasher.hash_iter(values.iter().copied());
-        let mut state = hasher.initial_state(values.len());
+        let mut state = hasher.initial_state(values.len(), None);
         for (column_index, value) in values.iter().copied().enumerate() {
             state = hasher.absorb_column(state, column_index, value);
         }
@@ -968,7 +1025,9 @@ mod tests {
 
     #[test]
     fn aggregate_leaf_oracle_frames_bind_every_canonical_input_coordinate() {
-        let hasher = aggregate_leaf_hasher();
+        let hasher = aggregate_leaf_hasher(
+            crate::bgv::proof_suite::relation_plan::ProofPrivacyMode::PublicOnly,
+        );
         let column_index = 0x0102_0304_0506_0708_u64;
         let predecessor = ColumnStreamableLeafState([
             0x1112_1314_1516_1718,
@@ -1047,16 +1106,22 @@ mod tests {
             }),
         );
 
-        let initial_input = ColumnStreamableLeafOracleInput::Initial { column_count: 8 };
+        let initial_input = ColumnStreamableLeafOracleInput::Initial {
+            column_count: 8,
+            private_leaf_salt: None,
+        };
         let final_input = ColumnStreamableLeafOracleInput::Final {
             column_count: 8,
             predecessor,
         };
-        assert_eq!(hasher.canonical_oracle_input_bytes(initial_input).len(), 90,);
+        assert_eq!(hasher.canonical_oracle_input_bytes(initial_input).len(), 98,);
         assert_eq!(hasher.canonical_oracle_input_bytes(final_input).len(), 154);
         assert_ne!(
             hasher.hash_oracle_input(initial_input),
-            hasher.hash_oracle_input(ColumnStreamableLeafOracleInput::Initial { column_count: 7 }),
+            hasher.hash_oracle_input(ColumnStreamableLeafOracleInput::Initial {
+                column_count: 7,
+                private_leaf_salt: None,
+            }),
         );
         assert_ne!(
             hasher.hash_oracle_input(final_input),
@@ -1180,9 +1245,12 @@ mod tests {
         ];
         let values = coefficient_rows
             .map(|coefficients| ChallengeField::new(coefficients.map(Goldilocks::from_u64)));
-        let hasher = aggregate_leaf_hasher();
+        let hasher = aggregate_leaf_hasher(
+            crate::bgv::proof_suite::relation_plan::ProofPrivacyMode::PublicOnly,
+        );
         let initial_input = ColumnStreamableLeafOracleInput::Initial {
             column_count: values.len() as u64,
+            private_leaf_salt: None,
         };
         let mut database = std::collections::BTreeMap::new();
         let mut state = ColumnStreamableLeafState(hasher.hash_oracle_input(initial_input));

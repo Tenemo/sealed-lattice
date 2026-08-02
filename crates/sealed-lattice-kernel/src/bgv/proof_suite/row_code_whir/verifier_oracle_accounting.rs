@@ -19,9 +19,12 @@ use super::construction_plan::{
         LinearBcsSuppliedCommitmentOpeningOwner,
     },
 };
+use super::private_leaf_salt::PRIVATE_LEAF_SALT_BYTE_LENGTH;
 use super::{ColumnStreamableLeafHasher, MERKLE_DIGEST_BYTE_LENGTH, MERKLE_DIGEST_WORD_LENGTH};
 use crate::bgv::proof_suite::merkle::maximum_minimal_frontier_parent_hash_count;
-use crate::bgv::proof_suite::relation_plan::{RelationColumnOrigin, RelationPlanVariant};
+use crate::bgv::proof_suite::relation_plan::{
+    ProofPrivacyMode, RelationColumnOrigin, RelationPlanVariant,
+};
 use crate::foundation::Hash512;
 
 const FOUNDATION_HASH_OUTPUT_BIT_LENGTH: usize = Hash512::BYTE_LENGTH * u8::BITS as usize;
@@ -41,6 +44,7 @@ pub(super) enum VerifierLeafHashConstruction {
     },
     ColumnStreamable {
         column_count: usize,
+        private_leaf_salt_byte_length: usize,
         intermediate_output_bit_length: usize,
         final_output_bit_length: usize,
     },
@@ -224,8 +228,10 @@ impl DeployedVerifierOracleAccounting {
             return Err("deployed verifier oracle accounting is incomplete".to_owned());
         }
 
-        let mut streaming_initial_widths = BTreeSet::new();
+        let mut unsalted_streaming_initial_widths = BTreeSet::new();
+        let mut streaming_private_leaf_salt_byte_lengths = BTreeSet::new();
         let mut seen_merkle_roles = Vec::new();
+        let mut salted_streaming_initial_equation_count = 0_u64;
         let mut streaming_initial_hash_query_count = 0_u64;
         let mut merkle_hash_query_count = 0_u64;
         let mut merkle_equation_count = 0_u64;
@@ -261,6 +267,7 @@ impl DeployedVerifierOracleAccounting {
                 }
                 VerifierLeafHashConstruction::ColumnStreamable {
                     column_count,
+                    private_leaf_salt_byte_length,
                     intermediate_output_bit_length,
                     final_output_bit_length,
                 } => {
@@ -275,6 +282,8 @@ impl DeployedVerifierOracleAccounting {
                                     "streaming verifier transition count overflowed".to_owned()
                                 })?
                         || row.final_hash_query_count != opened_leaf_count
+                        || (private_leaf_salt_byte_length != 0
+                            && private_leaf_salt_byte_length != PRIVATE_LEAF_SALT_BYTE_LENGTH)
                         || intermediate_output_bit_length != FOUNDATION_HASH_OUTPUT_BIT_LENGTH
                         || final_output_bit_length != FOUNDATION_HASH_OUTPUT_BIT_LENGTH
                     {
@@ -283,7 +292,17 @@ impl DeployedVerifierOracleAccounting {
                                 .to_owned(),
                         );
                     }
-                    streaming_initial_widths.insert(column_count);
+                    streaming_private_leaf_salt_byte_lengths.insert(private_leaf_salt_byte_length);
+                    if private_leaf_salt_byte_length == 0 {
+                        unsalted_streaming_initial_widths.insert(column_count);
+                    } else {
+                        salted_streaming_initial_equation_count =
+                            salted_streaming_initial_equation_count
+                                .checked_add(row.initial_hash_query_count)
+                                .ok_or_else(|| {
+                                    "salted streaming initial-equation count overflowed".to_owned()
+                                })?;
+                    }
                     streaming_initial_hash_query_count = streaming_initial_hash_query_count
                         .checked_add(row.initial_hash_query_count)
                         .ok_or_else(|| {
@@ -303,9 +322,17 @@ impl DeployedVerifierOracleAccounting {
                 .ok_or_else(|| "verifier parent equation count overflowed".to_owned())?;
         }
 
-        let distinct_streaming_initial_equation_count =
-            u64::try_from(streaming_initial_widths.len())
-                .map_err(|_| "streaming initial-equation count exceeds u64".to_owned())?;
+        if streaming_private_leaf_salt_byte_lengths.len() != 1 {
+            return Err(
+                "deployed verifier streaming leaves mix incompatible salt constructions".to_owned(),
+            );
+        }
+        let distinct_streaming_initial_equation_count = salted_streaming_initial_equation_count
+            .checked_add(
+                u64::try_from(unsalted_streaming_initial_widths.len())
+                    .map_err(|_| "streaming initial-equation count exceeds u64".to_owned())?,
+            )
+            .ok_or_else(|| "streaming initial-equation count overflowed".to_owned())?;
         merkle_equation_count = merkle_equation_count
             .checked_add(distinct_streaming_initial_equation_count)
             .ok_or_else(|| "streaming initial-equation count overflowed".to_owned())?;
@@ -561,6 +588,10 @@ fn derive_merkle_rows(
             },
             |column_count| VerifierLeafHashConstruction::ColumnStreamable {
                 column_count,
+                private_leaf_salt_byte_length: match construction_plan.proof_privacy_mode {
+                    ProofPrivacyMode::PublicOnly => 0,
+                    ProofPrivacyMode::SecretBearing => PRIVATE_LEAF_SALT_BYTE_LENGTH,
+                },
                 intermediate_output_bit_length:
                     ColumnStreamableLeafHasher::intermediate_output_bit_length(),
                 final_output_bit_length: ColumnStreamableLeafHasher::final_output_bit_length(),
@@ -843,7 +874,7 @@ mod tests {
         assert_eq!(accounting.maximum_verifier_hash_query_count(), 105_437);
         assert_eq!(
             accounting.maximum_accepting_database_equation_count(),
-            102_648
+            105_428
         );
         assert_eq!(accounting.merkle_rows().len(), 23);
         assert_eq!(accounting.fixed_hash_rows().len(), 5);
@@ -885,18 +916,18 @@ mod tests {
                 .sum::<u64>(),
             20_477
         );
-        assert_eq!(accounting.distinct_streaming_initial_equation_count(), 2);
         assert_eq!(
-            accounting.repeated_streaming_initial_hash_query_count(),
-            2_780
+            accounting.distinct_streaming_initial_equation_count(),
+            2_782
         );
+        assert_eq!(accounting.repeated_streaming_initial_hash_query_count(), 0);
         assert_eq!(
             streaming_rows
                 .iter()
                 .map(|row| { row.transition_hash_query_count() + row.final_hash_query_count() })
                 .sum::<u64>()
                 + accounting.distinct_streaming_initial_equation_count(),
-            17_697
+            20_477
         );
         assert!(accounting.merkle_rows().iter().all(|row| {
             row.parent_output_bit_length() == 512
@@ -965,6 +996,7 @@ mod tests {
         wrong_width.merkle_rows[streaming_row_index].leaf_hash_construction =
             VerifierLeafHashConstruction::ColumnStreamable {
                 column_count: 4,
+                private_leaf_salt_byte_length: PRIVATE_LEAF_SALT_BYTE_LENGTH,
                 intermediate_output_bit_length:
                     ColumnStreamableLeafHasher::intermediate_output_bit_length(),
                 final_output_bit_length: ColumnStreamableLeafHasher::final_output_bit_length(),
@@ -994,6 +1026,18 @@ mod tests {
         *final_output_bit_length = 256;
         assert!(wrong_final_output_width.validate().is_err());
 
+        let mut wrong_private_leaf_salt_length = accounting.clone();
+        let VerifierLeafHashConstruction::ColumnStreamable {
+            private_leaf_salt_byte_length,
+            ..
+        } = &mut wrong_private_leaf_salt_length.merkle_rows[streaming_row_index]
+            .leaf_hash_construction
+        else {
+            unreachable!()
+        };
+        *private_leaf_salt_byte_length = PRIVATE_LEAF_SALT_BYTE_LENGTH / 2;
+        assert!(wrong_private_leaf_salt_length.validate().is_err());
+
         let mut wrong_single_call_output_width = accounting.clone();
         let VerifierLeafHashConstruction::SingleCall { output_bit_length } =
             &mut wrong_single_call_output_width.merkle_rows[single_call_row_index]
@@ -1017,7 +1061,7 @@ mod tests {
         assert!(wrong_fixed_output_width.validate().is_err());
 
         let mut collapsed_initial_equations = accounting;
-        collapsed_initial_equations.distinct_streaming_initial_equation_count = 1;
+        collapsed_initial_equations.distinct_streaming_initial_equation_count -= 1;
         assert!(collapsed_initial_equations.validate().is_err());
     }
 

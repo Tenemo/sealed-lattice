@@ -2,9 +2,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use p3_symmetric::{CryptographicHasher, PseudoCompressionFunction};
 
+use super::coordinate_derived_hiding_mmcs::{TransportedPrivateLeafSalt, encode_private_leaf_salt};
 use super::{
     ChallengeField, MERKLE_DIGEST_WORD_LENGTH, aggregate_leaf_hasher, aggregate_node_compressor,
 };
+use crate::bgv::proof_suite::relation_plan::ProofPrivacyMode;
 
 pub(super) type CompactMerkleDigest = [u64; MERKLE_DIGEST_WORD_LENGTH];
 
@@ -114,11 +116,15 @@ pub(super) fn reconstruct_query_paths_from_compact_frontier(
     leaf_count: usize,
     query_indices: &[usize],
     opened_rows: &[&[ChallengeField]],
+    opened_private_leaf_salts: Option<&[TransportedPrivateLeafSalt]>,
     frontier: &[CompactMerkleDigest],
     expected_root: Option<CompactMerkleDigest>,
 ) -> Result<Vec<Vec<CompactMerkleDigest>>, String> {
     checked_query_indices(leaf_count, query_indices)?;
-    if opened_rows.len() != query_indices.len() || opened_rows.iter().any(|row| row.is_empty()) {
+    if opened_rows.len() != query_indices.len()
+        || opened_rows.iter().any(|row| row.is_empty())
+        || opened_private_leaf_salts.is_some_and(|salts| salts.len() != query_indices.len())
+    {
         return Err("aggregate-wide WHIR opened-row schedule has the wrong shape".to_owned());
     }
     let frontier_coordinates = compact_frontier_coordinates(leaf_count, query_indices)?;
@@ -130,7 +136,11 @@ pub(super) fn reconstruct_query_paths_from_compact_frontier(
         ));
     }
 
-    let leaf_hasher = aggregate_leaf_hasher();
+    let leaf_hasher = aggregate_leaf_hasher(if opened_private_leaf_salts.is_some() {
+        ProofPrivacyMode::SecretBearing
+    } else {
+        ProofPrivacyMode::PublicOnly
+    });
     let node_compressor = aggregate_node_compressor();
     let maximum_derived_node_count = query_indices
         .len()
@@ -161,14 +171,25 @@ pub(super) fn reconstruct_query_paths_from_compact_frontier(
             .ok()
             .map(|node_index| nodes[node_index].1)
     };
-    for (query_index, opened_row) in query_indices.iter().copied().zip(opened_rows) {
+    for (query_ordinal, (query_index, opened_row)) in
+        query_indices.iter().copied().zip(opened_rows).enumerate()
+    {
+        let encoded_private_leaf_salt = opened_private_leaf_salts
+            .and_then(|salts| salts.get(query_ordinal))
+            .map(|salt| encode_private_leaf_salt(&salt.bytes()));
         insert_derived_node(
             &mut derived_nodes,
             CompactMerkleCoordinate {
                 level: 0,
                 node_index: query_index,
             },
-            leaf_hasher.hash_iter(opened_row.iter().copied()),
+            leaf_hasher.hash_iter(
+                opened_row.iter().copied().chain(
+                    encoded_private_leaf_salt
+                        .into_iter()
+                        .flat_map(|elements| elements.into_iter()),
+                ),
+            ),
         )?;
     }
     for (coordinate, digest) in frontier_coordinates
@@ -362,7 +383,7 @@ mod tests {
                 ]
             })
             .collect::<Vec<_>>();
-        let leaf_hasher = aggregate_leaf_hasher();
+        let leaf_hasher = aggregate_leaf_hasher(ProofPrivacyMode::PublicOnly);
         let node_compressor = aggregate_node_compressor();
         let mut levels = vec![
             rows.iter()
@@ -409,6 +430,7 @@ mod tests {
                 8,
                 &indices,
                 &selected_rows,
+                None,
                 &frontier,
                 Some(root),
             )
@@ -436,6 +458,7 @@ mod tests {
                 8,
                 &indices,
                 &rows.iter().map(Vec::as_slice).collect::<Vec<_>>(),
+                None,
                 &frontier,
                 Some(root),
             )
@@ -464,6 +487,7 @@ mod tests {
                 8,
                 &indices,
                 &selected_rows,
+                None,
                 &frontier[..frontier.len() - 1],
                 Some(root),
             )
@@ -476,6 +500,7 @@ mod tests {
                 8,
                 &indices,
                 &selected_rows,
+                None,
                 &frontier,
                 Some(wrong_root),
             )

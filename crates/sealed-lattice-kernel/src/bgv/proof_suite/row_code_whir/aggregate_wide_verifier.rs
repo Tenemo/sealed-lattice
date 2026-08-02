@@ -463,7 +463,11 @@ fn verify_and_fold_opening(
     active_oracle: &ActiveOracle<'_>,
     dimensions: &[Dimensions],
     position: usize,
-    opening: &QueryOpening<ChallengeField, ChallengeField, Vec<[u64; 8]>>,
+    opening: &QueryOpening<
+        ChallengeField,
+        ChallengeField,
+        super::coordinate_derived_hiding_mmcs::CoordinateDerivedLeafSaltProof,
+    >,
     round_ordinal: usize,
     randomness: &Point<ChallengeField>,
 ) -> Result<ChallengeField, String> {

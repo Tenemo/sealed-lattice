@@ -18,10 +18,7 @@ use super::construction_plan::{
     RowCodeWhirQueryEpochPlan, RowCodeWhirRoundPlan, RowCodeWhirSelectedParameters,
     RowCodeWhirSoundnessAssumption, RowCodeWhirWhirPlan,
 };
-use super::{
-    ChallengeField, CommitmentScheme, DiscreteFourierTransform, ExtensionFieldChallenger,
-    aggregate_leaf_hasher, aggregate_node_compressor,
-};
+use super::{ChallengeField, CommitmentScheme, DiscreteFourierTransform, ExtensionFieldChallenger};
 
 pub(super) type AggregateLayout = PrefixProver<ChallengeField, ChallengeField>;
 pub(super) type AggregateWidePcs = WhirProver<
@@ -81,13 +78,17 @@ impl GrindingChallenger for ProtocolScheduleRecorder {
 pub(super) fn aggregate_wide_pcs_for_construction_plan(
     construction_plan: &RowCodeWhirConstructionPlan,
 ) -> Result<AggregateWidePcs, String> {
-    let pcs = aggregate_wide_pcs_from_selected_parameters(construction_plan.selected_parameters())?;
+    let pcs = aggregate_wide_pcs_from_selected_parameters(
+        construction_plan.selected_parameters(),
+        construction_plan.proof_privacy_mode,
+    )?;
     ensure_aggregate_wide_pcs_matches_construction_plan(&pcs, construction_plan)?;
     Ok(pcs)
 }
 
 fn aggregate_wide_pcs_from_selected_parameters(
     parameters: RowCodeWhirSelectedParameters,
+    privacy_mode: crate::bgv::proof_suite::relation_plan::ProofPrivacyMode,
 ) -> Result<AggregateWidePcs, String> {
     let configuration =
         WhirConfig::<ChallengeField, ChallengeField, ExtensionFieldChallenger>::new(
@@ -102,8 +103,7 @@ fn aggregate_wide_pcs_from_selected_parameters(
             },
         )
         .map_err(|error| format!("construct aggregate-wide WHIR configuration: {error}"))?;
-    let commitment_scheme =
-        CommitmentScheme::new(aggregate_leaf_hasher(), aggregate_node_compressor(), 0);
+    let commitment_scheme = CommitmentScheme::verifier(privacy_mode);
     Ok(WhirProver::new(
         configuration,
         DiscreteFourierTransform::default(),
@@ -240,6 +240,7 @@ pub(super) fn aggregate_wide_encoded_oracle_geometries(
 
 pub(super) fn derive_aggregate_wide_whir_plan(
     parameters: RowCodeWhirSelectedParameters,
+    privacy_mode: crate::bgv::proof_suite::relation_plan::ProofPrivacyMode,
 ) -> Result<
     (
         RowCodeWhirWhirPlan,
@@ -247,7 +248,7 @@ pub(super) fn derive_aggregate_wide_whir_plan(
     ),
     String,
 > {
-    let pcs = aggregate_wide_pcs_from_selected_parameters(parameters)?;
+    let pcs = aggregate_wide_pcs_from_selected_parameters(parameters, privacy_mode)?;
     derive_aggregate_wide_whir_plan_from_pcs(&pcs)
 }
 
