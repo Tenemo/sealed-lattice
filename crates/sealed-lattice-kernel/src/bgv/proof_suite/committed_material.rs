@@ -41,6 +41,74 @@ const MERKLE_NODE_HASH_DOMAIN: &str = "sealed-lattice/setup/vss-committed-materi
 const COLUMN_MASK_PURPOSE: &str = "column-mask";
 const LEAF_SALT_PURPOSE: &str = "leaf-salt";
 
+#[cfg(all(test, feature = "theorem-evidence"))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CommittedMaterialPrivateDerivationDescription {
+    pub(crate) material_seed_byte_length: usize,
+    pub(crate) kmac_security_bit_length: usize,
+    pub(crate) derived_block_byte_length: usize,
+    pub(crate) leaf_salt_byte_length: usize,
+    pub(crate) leaf_salt_block_count: usize,
+    pub(crate) physical_column_count: usize,
+    pub(crate) mask_coefficient_count_per_column: usize,
+    pub(crate) maximum_candidate_draws_per_output: u32,
+    pub(crate) derivation_input_schema_identifier: u16,
+    pub(crate) derivation_input_schema_version: u16,
+    pub(crate) customization: Vec<u8>,
+    pub(crate) column_mask_purpose: Vec<u8>,
+    pub(crate) leaf_salt_purpose: Vec<u8>,
+    pub(crate) canonical_frame_coordinates_are_injective: bool,
+    pub(crate) requires_private_material_seed: bool,
+}
+
+#[cfg(all(test, feature = "theorem-evidence"))]
+pub(crate) fn committed_material_private_derivation_description(
+    profile: CommittedMaterialProfile,
+) -> Result<CommittedMaterialPrivateDerivationDescription, CommittedMaterialError> {
+    profile.validate()?;
+    let leaf_salt_block_count = COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH
+        .checked_div(DERIVED_BLOCK_BYTE_LENGTH)
+        .filter(|count| {
+            *count > 0
+                && *count * DERIVED_BLOCK_BYTE_LENGTH == COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH
+        })
+        .ok_or(CommittedMaterialError::InvalidProfile)?;
+    let mut representative_frames = Vec::new();
+    for purpose in [COLUMN_MASK_PURPOSE, LEAF_SALT_PURPOSE] {
+        for physical_index in 0..2 {
+            for counter in 0..2 {
+                representative_frames.push(material_private_derivation_input_bytes(
+                    [0x51; 64],
+                    purpose,
+                    physical_index,
+                    counter,
+                )?);
+            }
+        }
+    }
+    let unique_representative_frames = representative_frames
+        .iter()
+        .collect::<std::collections::BTreeSet<_>>();
+    Ok(CommittedMaterialPrivateDerivationDescription {
+        material_seed_byte_length: size_of::<[u8; 64]>(),
+        kmac_security_bit_length: 256,
+        derived_block_byte_length: DERIVED_BLOCK_BYTE_LENGTH,
+        leaf_salt_byte_length: COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH,
+        leaf_salt_block_count,
+        physical_column_count: MATERIAL_COLUMN_COUNT,
+        mask_coefficient_count_per_column: profile.masking_polynomial_maximum_degree() + 1,
+        maximum_candidate_draws_per_output: PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
+        derivation_input_schema_identifier: MATERIAL_DERIVATION_INPUT_SCHEMA_IDENTIFIER,
+        derivation_input_schema_version: SCHEMA_VERSION,
+        customization: PRIVATE_DERIVATION_CUSTOMIZATION.to_vec(),
+        column_mask_purpose: COLUMN_MASK_PURPOSE.as_bytes().to_vec(),
+        leaf_salt_purpose: LEAF_SALT_PURPOSE.as_bytes().to_vec(),
+        canonical_frame_coordinates_are_injective: unique_representative_frames.len()
+            == representative_frames.len(),
+        requires_private_material_seed: true,
+    })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CommittedMaterialError {
     InvalidProfile,
@@ -999,6 +1067,26 @@ struct MaterialPrivateDerivation<'seed> {
     next_counter: u64,
 }
 
+fn material_private_derivation_input_bytes(
+    material_context_hash: [u8; 64],
+    purpose: &'static str,
+    physical_index: u64,
+    counter: u64,
+) -> Result<Vec<u8>, CommittedMaterialError> {
+    CanonicalTuple::new(
+        MATERIAL_DERIVATION_INPUT_SCHEMA_IDENTIFIER,
+        SCHEMA_VERSION,
+        vec![
+            CanonicalItem::hash512(material_context_hash),
+            CanonicalItem::ascii(purpose).map_err(canonical_encoding_error)?,
+            CanonicalItem::unsigned64(physical_index),
+            CanonicalItem::unsigned64(counter),
+        ],
+    )
+    .encode()
+    .map_err(canonical_encoding_error)
+}
+
 impl<'seed> MaterialPrivateDerivation<'seed> {
     fn new(
         material_seed: &'seed [u8; 64],
@@ -1023,18 +1111,12 @@ impl<'seed> MaterialPrivateDerivation<'seed> {
             .next_counter
             .checked_add(1)
             .ok_or(CommittedMaterialError::CountOverflow)?;
-        let input = CanonicalTuple::new(
-            MATERIAL_DERIVATION_INPUT_SCHEMA_IDENTIFIER,
-            SCHEMA_VERSION,
-            vec![
-                CanonicalItem::hash512(self.material_context_hash),
-                CanonicalItem::ascii(self.purpose).map_err(canonical_encoding_error)?,
-                CanonicalItem::unsigned64(self.physical_index),
-                CanonicalItem::unsigned64(counter),
-            ],
-        )
-        .encode()
-        .map_err(canonical_encoding_error)?;
+        let input = material_private_derivation_input_bytes(
+            self.material_context_hash,
+            self.purpose,
+            self.physical_index,
+            counter,
+        )?;
         let mut output = Zeroizing::new([0_u8; DERIVED_BLOCK_BYTE_LENGTH]);
         let mut kmac = Kmac::v256(self.material_seed, PRIVATE_DERIVATION_CUSTOMIZATION);
         kmac.update(&input);

@@ -32,9 +32,10 @@ use crate::bgv::proof_suite::row_code_whir::{
         AGGREGATE_WIDE_PAD_LOG_INVERSE_RATE, AggregateWideChronologyEvent,
         AggregateWideChronologyRow, AggregateWideDerivedAffineIdentity,
         AggregateWideFoldAffineMapDescriptor, AggregateWideFoldLimbOrder,
-        AggregateWideJointAffineRankVerification, AggregateWideJointAffineViewKind,
-        AggregateWideJointAffineViewRow, AggregateWideMaskingCertificate,
-        AggregateWideNonlinearViewBoundary, checked_fold_limb_affine_map,
+        AggregateWideHidingMaterialShape, AggregateWideJointAffineRankVerification,
+        AggregateWideJointAffineViewKind, AggregateWideJointAffineViewRow,
+        AggregateWideMaskingCertificate, AggregateWideNonlinearViewBoundary,
+        checked_fold_limb_affine_map,
     },
     commitment_liveness::derive_aggregate_commitment_liveness,
     coordinate_derived_hiding_mmcs::{
@@ -61,18 +62,24 @@ use crate::bgv::proof_suite::row_code_whir::{
     },
 };
 use crate::bgv::proof_suite::{
-    CollectivePublicKeyAggregatePlanInput, ConstructionMaskDependency, ConstructionMaskResumeRule,
-    ConstructionMaskSourceAuthority, ConstructionMaskSourceDescriptor,
+    CollectivePublicKeyAggregatePlanInput, CommittedMaterialPrivateDerivationDescription,
+    CommonProofPrivateCoinCoordinate, CommonProofPrivateCoinSamplingCatalog,
+    CommonProofPrivateCoinSamplingOperation, ConstructionMaskDependency,
+    ConstructionMaskResumeRule, ConstructionMaskSourceAuthority, ConstructionMaskSourceDescriptor,
     ConstructionMaskSourceIdentifier, ConstructionMaskSourceLifetime,
     ConstructionMaskingCertificate, ConstructionMaskingCorrespondence, ConstructionMaskingPhase,
     ConstructionMaskingRankKind, ConstructionMaskingRankRequirement,
     ConstructionMaskingRankVerification, ConstructionSecretViewAlgebra,
     ConstructionSecretViewDescriptor, ConstructionSecretViewIdentifier,
-    PROOF_CHALLENGE_EXTENSION_DEGREE, PublicAggregateRelationGeometry, SuiteModulusReference,
+    PROOF_CHALLENGE_EXTENSION_DEGREE, PublicAggregateRelationGeometry,
+    SelectedSameSecretPersistentMaskImageAccounting, SuiteModulusReference,
+    TraceMaskObservationCoordinateCatalog, TraceMaskSurjectivityCertificate,
     ValidatedRelationPlanArtifact, checked_construction_masking_correspondence_for_parameters,
     checked_zero_knowledge_mask_image_for_parameters,
+    committed_material_private_derivation_description,
     compile_collective_public_key_aggregate_relation_plan, compile_same_secret_relation_plan,
-    selected_ballot_validity_relation_compilation, selected_relation_plans,
+    selected_ballot_validity_relation_compilation, selected_committed_material_profile,
+    selected_relation_plans, selected_same_secret_persistent_mask_image_accounting,
     selected_same_secret_relation_plan_input,
 };
 use crate::foundation::{
@@ -6852,6 +6859,997 @@ fn derive_production_aggregate_wide_view_correspondence(
     Ok(certificate)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ConstructionAffineMaskSourceClass {
+    RelationTraceMasks,
+    QuotientTelescopingMasks,
+    OpeningBatchMask,
+    PhaseRowPads,
+    PriorVssCommittedMaterialMasks,
+    AggregateWidePad,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ConstructionAffineRankKind {
+    Exact,
+    ConservativeCeiling,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ConstructionAffineSourceAuthority {
+    CurrentAttemptPrivateCoin,
+    CurrentAttemptRowPadStream,
+    AuthenticatedPersistentObject,
+    CurrentAttemptAggregateWidePad,
+}
+
+/// One disjoint private-coordinate block in the exact same-secret affine
+/// masking game. Counts are base-field coordinates. A conservative rank
+/// ceiling is used only for a persistent polynomial seen by separate proof
+/// invocations, where repeated evaluation points can reduce rank but cannot
+/// increase it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ConstructionAffineCompositionRow {
+    source_class: ConstructionAffineMaskSourceClass,
+    source_authority: ConstructionAffineSourceAuthority,
+    source_instance_count: usize,
+    private_base_coordinate_count: u64,
+    revealed_base_coordinate_count: u64,
+    joint_view_rank: u64,
+    rank_kind: ConstructionAffineRankKind,
+    derived_linear_identity_base_coordinate_count: u64,
+    residual_conditional_entropy_lower_bound: u64,
+}
+
+impl ConstructionAffineCompositionRow {
+    fn is_complete(self) -> bool {
+        let source_authority_is_exact = matches!(
+            (self.source_class, self.source_authority),
+            (
+                ConstructionAffineMaskSourceClass::RelationTraceMasks
+                    | ConstructionAffineMaskSourceClass::QuotientTelescopingMasks
+                    | ConstructionAffineMaskSourceClass::OpeningBatchMask,
+                ConstructionAffineSourceAuthority::CurrentAttemptPrivateCoin,
+            ) | (
+                ConstructionAffineMaskSourceClass::PhaseRowPads,
+                ConstructionAffineSourceAuthority::CurrentAttemptRowPadStream,
+            ) | (
+                ConstructionAffineMaskSourceClass::PriorVssCommittedMaterialMasks,
+                ConstructionAffineSourceAuthority::AuthenticatedPersistentObject,
+            ) | (
+                ConstructionAffineMaskSourceClass::AggregateWidePad,
+                ConstructionAffineSourceAuthority::CurrentAttemptAggregateWidePad,
+            )
+        );
+        let rank_kind_is_exact = matches!(
+            (self.source_class, self.rank_kind),
+            (
+                ConstructionAffineMaskSourceClass::PriorVssCommittedMaterialMasks,
+                ConstructionAffineRankKind::ConservativeCeiling,
+            ) | (
+                ConstructionAffineMaskSourceClass::RelationTraceMasks
+                    | ConstructionAffineMaskSourceClass::QuotientTelescopingMasks
+                    | ConstructionAffineMaskSourceClass::OpeningBatchMask
+                    | ConstructionAffineMaskSourceClass::PhaseRowPads
+                    | ConstructionAffineMaskSourceClass::AggregateWidePad,
+                ConstructionAffineRankKind::Exact,
+            )
+        );
+        self.source_instance_count > 0
+            && self.private_base_coordinate_count > 0
+            && source_authority_is_exact
+            && rank_kind_is_exact
+            && self.revealed_base_coordinate_count >= self.joint_view_rank
+            && self.private_base_coordinate_count >= self.joint_view_rank
+            && self
+                .private_base_coordinate_count
+                .checked_sub(self.joint_view_rank)
+                == Some(self.residual_conditional_entropy_lower_bound)
+            && self
+                .joint_view_rank
+                .checked_add(self.derived_linear_identity_base_coordinate_count)
+                == Some(self.revealed_base_coordinate_count)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CommonProofPrivateCoinGeneratorHybridCertificate {
+    deployed_private_stream_hybrid: [(MaskGeneratorHybridHop, MaskGeneratorHybridLoss); 4],
+    quantum_private_stream_hybrid: [(MaskGeneratorHybridHop, MaskGeneratorHybridLoss); 4],
+    catalog_entry_count: usize,
+    relation_mask_coordinate_count: usize,
+    relation_mask_base_field_output_count: u64,
+    aggregate_affine_base_field_output_count: u64,
+    aggregate_leaf_salt_key_base_field_output_count: u64,
+    total_modulo_output_count: u64,
+    row_pad_seed_material_byte_count: u64,
+    maximum_candidate_draws_per_output: u32,
+    ceremony_application_multiplicity: u32,
+    rejection_sampler_exhaustion_is_at_most_inverse_two_to_128: bool,
+    source_authority: ConstructionAffineSourceAuthority,
+    masks_are_publicly_recomputable: bool,
+}
+
+impl CommonProofPrivateCoinGeneratorHybridCertificate {
+    fn is_complete(&self) -> bool {
+        self.deployed_private_stream_hybrid == deployed_private_stream_hybrid()
+            && self.quantum_private_stream_hybrid == quantum_private_stream_hybrid()
+            && matches!(
+                self.deployed_private_stream_hybrid[1].1,
+                MaskGeneratorHybridLoss::ComputationalReduction {
+                    assumption: MaskGeneratorHybridAssumption::Kmac256PseudorandomFunction,
+                    key_bit_length: 512,
+                    classical_query_budget: DECLARED_ADVERSARIAL_QUERY_BUDGET,
+                }
+            )
+            && matches!(
+                self.quantum_private_stream_hybrid[1].1,
+                MaskGeneratorHybridLoss::ComputationalReduction {
+                    assumption: MaskGeneratorHybridAssumption::Kmac256QuantumPseudorandomFunction,
+                    key_bit_length: 512,
+                    classical_query_budget: DECLARED_ADVERSARIAL_QUERY_BUDGET,
+                }
+            )
+            && self.catalog_entry_count == self.relation_mask_coordinate_count + 2
+            && self.relation_mask_coordinate_count > 0
+            && self.relation_mask_base_field_output_count > 0
+            && self.aggregate_affine_base_field_output_count > 0
+            && self.aggregate_leaf_salt_key_base_field_output_count > 0
+            && self
+                .relation_mask_base_field_output_count
+                .checked_add(self.aggregate_affine_base_field_output_count)
+                .and_then(|count| {
+                    count.checked_add(self.aggregate_leaf_salt_key_base_field_output_count)
+                })
+                == Some(self.total_modulo_output_count)
+            && self.row_pad_seed_material_byte_count
+                == u64::try_from(PRIVATE_ROW_PAD_SEED_MATERIAL_BYTE_LENGTH).unwrap_or(u64::MAX)
+            && self.maximum_candidate_draws_per_output
+                == PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT
+            && self.ceremony_application_multiplicity
+                == u32::from(crate::foundation::FOUNDATION_PROFILE.participant_count)
+            && self.rejection_sampler_exhaustion_is_at_most_inverse_two_to_128
+            && self.source_authority == ConstructionAffineSourceAuthority::CurrentAttemptPrivateCoin
+            && !self.masks_are_publicly_recomputable
+    }
+}
+
+fn derive_common_proof_private_coin_generator_hybrid(
+    plan: &RowCodeWhirConstructionPlan,
+    relation_variant: &RelationPlanVariant,
+    relation_mask_base_field_output_count: u64,
+    aggregate_affine_base_field_output_count: u64,
+    aggregate_leaf_salt_key_base_field_output_count: u64,
+) -> Result<CommonProofPrivateCoinGeneratorHybridCertificate, WhirTheoremCertificateError> {
+    let mut catalog = CommonProofPrivateCoinSamplingCatalog::from_relation_plan_variant(
+        relation_variant,
+        plan.parameters
+            .maximum_fiat_shamir_candidate_draws_per_output,
+    )
+    .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+    catalog
+        .record_raw_byte_fill(
+            CommonProofPrivateCoinCoordinate::proof_salt(),
+            PRIVATE_ROW_PAD_SEED_MATERIAL_BYTE_LENGTH,
+        )
+        .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+    let hiding_configuration =
+        super::super::hiding_whir::selected_hiding_whir_config(plan.selected_parameters())
+            .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+    let hiding_shape = AggregateWideHidingMaterialShape::derive(&hiding_configuration)
+        .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+    let aggregate_base_field_output_count = hiding_shape
+        .total_extension_element_count()
+        .checked_mul(PROOF_CHALLENGE_EXTENSION_DEGREE)
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    catalog
+        .record_modulo_samples(
+            CommonProofPrivateCoinCoordinate::hiding_argument(),
+            PROOF_BASE_FIELD_MODULUS,
+            plan.parameters
+                .maximum_fiat_shamir_candidate_draws_per_output,
+            aggregate_base_field_output_count,
+        )
+        .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+
+    let mut observed_relation_mask_output_count = 0_u64;
+    let mut observed_aggregate_output_count = None;
+    let mut observed_raw_byte_count = None;
+    let mut total_modulo_output_count = 0_u64;
+    for (coordinate, operation) in catalog.entries() {
+        match operation {
+            CommonProofPrivateCoinSamplingOperation::ModuloSamples {
+                modulus,
+                maximum_candidate_draws_per_output,
+                output_count,
+            } => {
+                if modulus != PROOF_BASE_FIELD_MODULUS
+                    || maximum_candidate_draws_per_output
+                        != plan
+                            .parameters
+                            .maximum_fiat_shamir_candidate_draws_per_output
+                {
+                    return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+                }
+                total_modulo_output_count = total_modulo_output_count
+                    .checked_add(output_count)
+                    .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+                if coordinate == CommonProofPrivateCoinCoordinate::hiding_argument() {
+                    if observed_aggregate_output_count
+                        .replace(output_count)
+                        .is_some()
+                    {
+                        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+                    }
+                } else if coordinate == CommonProofPrivateCoinCoordinate::proof_salt() {
+                    return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+                } else {
+                    observed_relation_mask_output_count = observed_relation_mask_output_count
+                        .checked_add(output_count)
+                        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+                }
+            }
+            CommonProofPrivateCoinSamplingOperation::RawByteFill { byte_count } => {
+                if coordinate != CommonProofPrivateCoinCoordinate::proof_salt()
+                    || observed_raw_byte_count.replace(byte_count).is_some()
+                {
+                    return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+                }
+            }
+        }
+    }
+    let expected_aggregate_output_count = aggregate_affine_base_field_output_count
+        .checked_add(aggregate_leaf_salt_key_base_field_output_count)
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    if observed_relation_mask_output_count != relation_mask_base_field_output_count
+        || observed_aggregate_output_count != Some(expected_aggregate_output_count)
+        || usize::try_from(expected_aggregate_output_count).ok()
+            != Some(aggregate_base_field_output_count)
+        || observed_raw_byte_count != u64::try_from(PRIVATE_ROW_PAD_SEED_MATERIAL_BYTE_LENGTH).ok()
+    {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    let ceremony_application_multiplicity =
+        u32::from(crate::foundation::FOUNDATION_PROFILE.participant_count);
+    let exhaustion = catalog
+        .exhaustion_union_bound(ceremony_application_multiplicity)
+        .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+    let certificate = CommonProofPrivateCoinGeneratorHybridCertificate {
+        deployed_private_stream_hybrid: deployed_private_stream_hybrid(),
+        quantum_private_stream_hybrid: quantum_private_stream_hybrid(),
+        catalog_entry_count: catalog.entry_count(),
+        relation_mask_coordinate_count: relation_variant.ordered_masks().len(),
+        relation_mask_base_field_output_count,
+        aggregate_affine_base_field_output_count,
+        aggregate_leaf_salt_key_base_field_output_count,
+        total_modulo_output_count,
+        row_pad_seed_material_byte_count: observed_raw_byte_count
+            .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?,
+        maximum_candidate_draws_per_output: plan
+            .parameters
+            .maximum_fiat_shamir_candidate_draws_per_output,
+        ceremony_application_multiplicity,
+        rejection_sampler_exhaustion_is_at_most_inverse_two_to_128: exhaustion
+            .is_at_most_inverse_power_of_two(128),
+        source_authority: ConstructionAffineSourceAuthority::CurrentAttemptPrivateCoin,
+        masks_are_publicly_recomputable: false,
+    };
+    if !certificate.is_complete() {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    Ok(certificate)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CommittedMaterialKmacModel {
+    Kmac256PseudorandomFunction,
+    Kmac256QuantumPseudorandomFunction,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PersistentCommittedMaterialGeneratorHybridCertificate {
+    description: CommittedMaterialPrivateDerivationDescription,
+    ceremony_material_root_count: usize,
+    accepted_mask_base_field_output_count: u64,
+    maximum_mask_kmac_call_count: u64,
+    leaf_salt_count: u64,
+    leaf_salt_kmac_call_count: u64,
+    maximum_total_kmac_call_count: u64,
+    classical_kmac_model: CommittedMaterialKmacModel,
+    quantum_kmac_model: CommittedMaterialKmacModel,
+    deployed_seed_stream_hybrid: [(MaskGeneratorHybridHop, MaskGeneratorHybridLoss); 4],
+    quantum_seed_stream_hybrid: [(MaskGeneratorHybridHop, MaskGeneratorHybridLoss); 4],
+    classical_seed_guessing_advantage: ExactBigFraction,
+    quantum_seed_search_advantage: ExactBigFraction,
+    seed_collision_probability: ExactBigFraction,
+    material_context_hash_collision_probability: ExactBigFraction,
+    leaf_salt_collision_probability: ExactBigFraction,
+    rejection_sampler_exhaustion_probability: ExactBigFraction,
+    source_authority: ConstructionAffineSourceAuthority,
+    masks_are_publicly_recomputable: bool,
+}
+
+impl PersistentCommittedMaterialGeneratorHybridCertificate {
+    fn is_complete_for(
+        &self,
+        accounting: &SelectedSameSecretPersistentMaskImageAccounting,
+    ) -> bool {
+        let expected_root_count = accounting
+            .ceremony_proof_count
+            .checked_mul(accounting.logical_root_count_per_proof);
+        let expected_mask_output_count = expected_root_count.and_then(|root_count| {
+            root_count
+                .checked_mul(accounting.physical_column_count_per_root)
+                .and_then(|column_count| {
+                    column_count.checked_mul(
+                        usize::try_from(accounting.mask_coefficient_count_per_column).ok()?,
+                    )
+                })
+                .and_then(|count| u64::try_from(count).ok())
+        });
+        self.description.material_seed_byte_length == 64
+            && self.description.kmac_security_bit_length == 256
+            && self.description.derived_block_byte_length == 64
+            && self.description.leaf_salt_byte_length == PRIVATE_LEAF_SALT_BYTE_LENGTH
+            && self.description.leaf_salt_block_count == 2
+            && self.description.physical_column_count == accounting.physical_column_count_per_root
+            && u64::try_from(self.description.mask_coefficient_count_per_column).ok()
+                == Some(accounting.mask_coefficient_count_per_column)
+            && self.description.maximum_candidate_draws_per_output
+                == PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT
+            && self.description.derivation_input_schema_identifier != 0
+            && self.description.derivation_input_schema_version != 0
+            && !self.description.customization.is_empty()
+            && self.description.column_mask_purpose != self.description.leaf_salt_purpose
+            && self.description.canonical_frame_coordinates_are_injective
+            && self.description.requires_private_material_seed
+            && expected_root_count == Some(self.ceremony_material_root_count)
+            && expected_mask_output_count == Some(self.accepted_mask_base_field_output_count)
+            && self
+                .maximum_mask_kmac_call_count
+                .checked_add(self.leaf_salt_kmac_call_count)
+                == Some(self.maximum_total_kmac_call_count)
+            && self.classical_kmac_model == CommittedMaterialKmacModel::Kmac256PseudorandomFunction
+            && self.quantum_kmac_model
+                == CommittedMaterialKmacModel::Kmac256QuantumPseudorandomFunction
+            && self.deployed_seed_stream_hybrid == deployed_private_stream_hybrid()
+            && self.quantum_seed_stream_hybrid == quantum_private_stream_hybrid()
+            && self
+                .classical_seed_guessing_advantage
+                .is_at_most_inverse_power_of_two(CMS19_ADVERSARIAL_QUERY_EXPONENT)
+            && self
+                .quantum_seed_search_advantage
+                .is_at_most_inverse_power_of_two(CMS19_ADVERSARIAL_QUERY_EXPONENT)
+            && self
+                .seed_collision_probability
+                .is_at_most_inverse_power_of_two(CMS19_ADVERSARIAL_QUERY_EXPONENT)
+            && self
+                .material_context_hash_collision_probability
+                .is_at_most_inverse_power_of_two(CMS19_ADVERSARIAL_QUERY_EXPONENT)
+            && self
+                .leaf_salt_collision_probability
+                .is_at_most_inverse_power_of_two(CMS19_ADVERSARIAL_QUERY_EXPONENT)
+            && self
+                .rejection_sampler_exhaustion_probability
+                .is_at_most_inverse_power_of_two(128)
+            && self.source_authority
+                == ConstructionAffineSourceAuthority::AuthenticatedPersistentObject
+            && !self.masks_are_publicly_recomputable
+    }
+}
+
+fn unordered_pair_count(count: u64) -> Result<BigUint, WhirTheoremCertificateError> {
+    let count = BigUint::from(count);
+    Ok((&count * (&count - BigUint::one())) / BigUint::from(2_u8))
+}
+
+fn derive_persistent_committed_material_generator_hybrid(
+    accounting: &SelectedSameSecretPersistentMaskImageAccounting,
+) -> Result<PersistentCommittedMaterialGeneratorHybridCertificate, WhirTheoremCertificateError> {
+    let profile = selected_committed_material_profile()
+        .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+    let description = committed_material_private_derivation_description(profile)
+        .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+    let ceremony_material_root_count = accounting
+        .ceremony_proof_count
+        .checked_mul(accounting.logical_root_count_per_proof)
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let accepted_mask_base_field_output_count = ceremony_material_root_count
+        .checked_mul(accounting.physical_column_count_per_root)
+        .and_then(|count| count.checked_mul(description.mask_coefficient_count_per_column))
+        .and_then(|count| u64::try_from(count).ok())
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let maximum_mask_kmac_call_count = accepted_mask_base_field_output_count
+        .checked_mul(u64::from(description.maximum_candidate_draws_per_output))
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let leaf_salt_count = u64::try_from(ceremony_material_root_count)
+        .ok()
+        .and_then(|root_count| {
+            u64::try_from(accounting.leaf_count_per_root)
+                .ok()
+                .and_then(|leaf_count| root_count.checked_mul(leaf_count))
+        })
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let leaf_salt_kmac_call_count = leaf_salt_count
+        .checked_mul(
+            u64::try_from(description.leaf_salt_block_count)
+                .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+        )
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let maximum_total_kmac_call_count = maximum_mask_kmac_call_count
+        .checked_add(leaf_salt_kmac_call_count)
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+
+    let material_root_count_u64 = u64::try_from(ceremony_material_root_count)
+        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let declared_queries = BigUint::from(DECLARED_ADVERSARIAL_QUERY_BUDGET);
+    let seed_space = BigUint::one() << (description.material_seed_byte_length * u8::BITS as usize);
+    let classical_seed_guessing_advantage = ExactBigFraction::new(
+        BigUint::from(material_root_count_u64) * &declared_queries,
+        seed_space.clone(),
+    )?;
+    let quantum_search_amplitude = BigUint::from(2_u8) * &declared_queries + BigUint::one();
+    let quantum_seed_search_advantage = ExactBigFraction::new(
+        BigUint::from(material_root_count_u64)
+            * &quantum_search_amplitude
+            * &quantum_search_amplitude,
+        seed_space.clone(),
+    )?;
+    let seed_collision_probability = ExactBigFraction::new(
+        unordered_pair_count(material_root_count_u64)?,
+        seed_space.clone(),
+    )?;
+    let material_context_hash_collision_probability = ExactBigFraction::new(
+        unordered_pair_count(material_root_count_u64)?,
+        BigUint::one() << 512_usize,
+    )?;
+    let leaf_salt_collision_probability = ExactBigFraction::new(
+        unordered_pair_count(leaf_salt_count)?,
+        BigUint::one() << (description.leaf_salt_byte_length * u8::BITS as usize),
+    )?;
+    let candidate_space = BigUint::one() << u64::BITS as usize;
+    let rejected_candidate_count = &candidate_space % BigUint::from(PROOF_BASE_FIELD_MODULUS);
+    let rejection_sampler_exhaustion_probability = ExactBigFraction::new(
+        rejected_candidate_count.pow(description.maximum_candidate_draws_per_output)
+            * BigUint::from(accepted_mask_base_field_output_count),
+        candidate_space.pow(description.maximum_candidate_draws_per_output),
+    )?;
+    let certificate = PersistentCommittedMaterialGeneratorHybridCertificate {
+        description,
+        ceremony_material_root_count,
+        accepted_mask_base_field_output_count,
+        maximum_mask_kmac_call_count,
+        leaf_salt_count,
+        leaf_salt_kmac_call_count,
+        maximum_total_kmac_call_count,
+        classical_kmac_model: CommittedMaterialKmacModel::Kmac256PseudorandomFunction,
+        quantum_kmac_model: CommittedMaterialKmacModel::Kmac256QuantumPseudorandomFunction,
+        deployed_seed_stream_hybrid: deployed_private_stream_hybrid(),
+        quantum_seed_stream_hybrid: quantum_private_stream_hybrid(),
+        classical_seed_guessing_advantage,
+        quantum_seed_search_advantage,
+        seed_collision_probability,
+        material_context_hash_collision_probability,
+        leaf_salt_collision_probability,
+        rejection_sampler_exhaustion_probability,
+        source_authority: ConstructionAffineSourceAuthority::AuthenticatedPersistentObject,
+        masks_are_publicly_recomputable: false,
+    };
+    if !certificate.is_complete_for(accounting) {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    Ok(certificate)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ConstructionMaskingAffineCompositionCertificate {
+    construction_plan_identity_hash: [u8; 64],
+    relation_plan_variant_hash: [u8; 64],
+    rows: Vec<ConstructionAffineCompositionRow>,
+    private_coin_generator_hybrid: CommonProofPrivateCoinGeneratorHybridCertificate,
+    persistent_mask_image: SelectedSameSecretPersistentMaskImageAccounting,
+    persistent_material_generator_hybrid: PersistentCommittedMaterialGeneratorHybridCertificate,
+    row_pad_accepted_base_field_output_count: u64,
+    aggregate_leaf_salt_key_base_coordinate_count: u64,
+    production_preaggregate_correspondence_is_complete: bool,
+    production_aggregate_correspondence_is_complete: bool,
+    finite_population_agreement_term_is_soundness_only: bool,
+    claims_family_simulation: bool,
+    claims_malicious_verifier_zero_knowledge: bool,
+    claims_quantum_random_oracle_zero_knowledge: bool,
+}
+
+#[derive(Clone, Copy)]
+struct ConstructionMaskingAffineCompositionInput<'a> {
+    plan: &'a RowCodeWhirConstructionPlan,
+    relation_variant: &'a RelationPlanVariant,
+    relation_context: &'a RelationPlanCheckContext,
+    production_preaggregate: &'a ProductionConstructionMaskingCorrespondenceCertificate,
+    aggregate_wide_masking: &'a AggregateWideMaskingCertificate,
+    production_aggregate: &'a ProductionAggregateWideViewCorrespondenceCertificate,
+    row_pad_generator: &'a PrivateRowPadGeneratorHybridCertificate,
+}
+
+impl ConstructionMaskingAffineCompositionCertificate {
+    fn is_complete(&self) -> bool {
+        let expected_classes = [
+            ConstructionAffineMaskSourceClass::RelationTraceMasks,
+            ConstructionAffineMaskSourceClass::QuotientTelescopingMasks,
+            ConstructionAffineMaskSourceClass::OpeningBatchMask,
+            ConstructionAffineMaskSourceClass::PhaseRowPads,
+            ConstructionAffineMaskSourceClass::PriorVssCommittedMaterialMasks,
+            ConstructionAffineMaskSourceClass::AggregateWidePad,
+        ];
+        let relation_mask_private_coordinate_count = self.rows.get(..3).and_then(|rows| {
+            rows.iter().try_fold(0_u64, |count, row| {
+                count.checked_add(row.private_base_coordinate_count)
+            })
+        });
+        let row_pad_private_coordinate_count = self
+            .rows
+            .get(3)
+            .map(|row| row.private_base_coordinate_count);
+        let persistent_column_count = self
+            .persistent_mask_image
+            .logical_root_count_per_proof
+            .checked_mul(self.persistent_mask_image.physical_column_count_per_root);
+        let persistent_private_coordinate_count = persistent_column_count.and_then(|count| {
+            u64::try_from(count)
+                .ok()?
+                .checked_mul(self.persistent_mask_image.mask_coefficient_count_per_column)
+        });
+        let persistent_rank_ceiling = persistent_column_count.and_then(|count| {
+            u64::try_from(count).ok()?.checked_mul(
+                self.persistent_mask_image
+                    .joint_evaluation_image_rank_ceiling_per_column,
+            )
+        });
+        let persistent_residual_entropy = persistent_column_count.and_then(|count| {
+            u64::try_from(count).ok()?.checked_mul(
+                self.persistent_mask_image
+                    .residual_conditional_entropy_lower_bound_per_column,
+            )
+        });
+        let persistent_row_matches_image = self.rows.get(4).is_some_and(|row| {
+            row.source_instance_count == persistent_column_count.unwrap_or(usize::MAX)
+                && Some(row.private_base_coordinate_count) == persistent_private_coordinate_count
+                && Some(row.revealed_base_coordinate_count) == persistent_rank_ceiling
+                && Some(row.joint_view_rank) == persistent_rank_ceiling
+                && Some(row.residual_conditional_entropy_lower_bound) == persistent_residual_entropy
+        });
+        let aggregate_private_coordinate_count = self
+            .rows
+            .get(5)
+            .map(|row| row.private_base_coordinate_count);
+        self.construction_plan_identity_hash != [0_u8; 64]
+            && self.relation_plan_variant_hash != [0_u8; 64]
+            && self.rows.len() == expected_classes.len()
+            && self
+                .rows
+                .iter()
+                .copied()
+                .map(|row| row.source_class)
+                .eq(expected_classes)
+            && self
+                .rows
+                .iter()
+                .copied()
+                .all(ConstructionAffineCompositionRow::is_complete)
+            && self.private_coin_generator_hybrid.is_complete()
+            && self
+                .persistent_material_generator_hybrid
+                .is_complete_for(&self.persistent_mask_image)
+            && relation_mask_private_coordinate_count
+                == Some(
+                    self.private_coin_generator_hybrid
+                        .relation_mask_base_field_output_count,
+                )
+            && aggregate_private_coordinate_count
+                == Some(
+                    self.private_coin_generator_hybrid
+                        .aggregate_affine_base_field_output_count,
+                )
+            && self.aggregate_leaf_salt_key_base_coordinate_count
+                == self
+                    .private_coin_generator_hybrid
+                    .aggregate_leaf_salt_key_base_field_output_count
+            && row_pad_private_coordinate_count
+                == Some(self.row_pad_accepted_base_field_output_count)
+            && persistent_row_matches_image
+            && self.aggregate_leaf_salt_key_base_coordinate_count > 0
+            && self.production_preaggregate_correspondence_is_complete
+            && self.production_aggregate_correspondence_is_complete
+            && self.finite_population_agreement_term_is_soundness_only
+            && !self.claims_family_simulation
+            && !self.claims_malicious_verifier_zero_knowledge
+            && !self.claims_quantum_random_oracle_zero_knowledge
+    }
+
+    fn is_complete_for(&self, input: ConstructionMaskingAffineCompositionInput<'_>) -> bool {
+        self.is_complete()
+            && derive_construction_masking_affine_composition(input)
+                .is_ok_and(|expected| expected == *self)
+    }
+}
+
+fn checked_multiply_u64(left: u64, right: u64) -> Result<u64, WhirTheoremCertificateError> {
+    left.checked_mul(right)
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+}
+
+fn checked_count_u64(count: usize) -> Result<u64, WhirTheoremCertificateError> {
+    u64::try_from(count).map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)
+}
+
+fn derive_construction_masking_affine_composition(
+    input: ConstructionMaskingAffineCompositionInput<'_>,
+) -> Result<ConstructionMaskingAffineCompositionCertificate, WhirTheoremCertificateError> {
+    let ConstructionMaskingAffineCompositionInput {
+        plan,
+        relation_variant,
+        relation_context,
+        production_preaggregate,
+        aggregate_wide_masking,
+        production_aggregate,
+        row_pad_generator,
+    } = input;
+    if plan.application_statement_schema_identifier
+        != ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER
+        || plan.proof_privacy_mode != ProofPrivacyMode::SecretBearing
+        || !production_preaggregate.is_complete_for(plan, relation_variant, relation_context)
+        || !production_aggregate.is_complete_for(plan, aggregate_wide_masking)
+        || !row_pad_generator.is_complete_for_plan(plan)
+    {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    let extension_degree = u64::from(relation_context.challenge_extension_degree);
+    if usize::try_from(extension_degree).ok() != Some(PROOF_CHALLENGE_EXTENSION_DEGREE) {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+
+    let trace_masks = relation_variant
+        .ordered_masks()
+        .iter()
+        .copied()
+        .filter(|mask| {
+            mask.mask_kind() == RelationMaskKind::Trace
+                && mask.target_class() == RelationMaskTargetClass::Column
+        })
+        .collect::<Vec<_>>();
+    let mut trace_private_coordinate_count = 0_u64;
+    let mut trace_rank = 0_u64;
+    for mask in &trace_masks {
+        let catalog = TraceMaskObservationCoordinateCatalog::derive(
+            relation_variant,
+            mask.target_ordinal(),
+            relation_context.challenge_extension_degree,
+            0,
+        )
+        .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+        let surjectivity = TraceMaskSurjectivityCertificate::derive(
+            mask.mask_degree_bound_exclusive(),
+            &[catalog],
+        )
+        .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+        trace_private_coordinate_count = trace_private_coordinate_count
+            .checked_add(surjectivity.mask_coefficient_count())
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+        trace_rank = trace_rank
+            .checked_add(surjectivity.evaluation_image_rank_ceiling())
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    }
+    let trace_row = ConstructionAffineCompositionRow {
+        source_class: ConstructionAffineMaskSourceClass::RelationTraceMasks,
+        source_authority: ConstructionAffineSourceAuthority::CurrentAttemptPrivateCoin,
+        source_instance_count: trace_masks.len(),
+        private_base_coordinate_count: trace_private_coordinate_count,
+        revealed_base_coordinate_count: trace_rank,
+        joint_view_rank: trace_rank,
+        rank_kind: ConstructionAffineRankKind::Exact,
+        derived_linear_identity_base_coordinate_count: 0,
+        residual_conditional_entropy_lower_bound: trace_private_coordinate_count
+            .checked_sub(trace_rank)
+            .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?,
+    };
+
+    let telescoping_masks = relation_variant
+        .ordered_masks()
+        .iter()
+        .copied()
+        .filter(|mask| {
+            mask.mask_kind() == RelationMaskKind::Telescoping
+                && mask.target_class() == RelationMaskTargetClass::QuotientComponent
+        })
+        .collect::<Vec<_>>();
+    let quotient_points_by_component = relation_variant
+        .ordered_opening_claims()
+        .iter()
+        .filter(|claim| claim.source_class() == RelationOpeningSourceClass::Quotient)
+        .fold(
+            BTreeMap::<u32, BTreeSet<u32>>::new(),
+            |mut points, claim| {
+                points
+                    .entry(claim.source_ordinal())
+                    .or_default()
+                    .insert(claim.opening_point_ordinal());
+                points
+            },
+        );
+    let mut quotient_point_sets = quotient_points_by_component.values();
+    let quotient_points = quotient_point_sets
+        .next()
+        .cloned()
+        .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+    if quotient_points.is_empty()
+        || quotient_point_sets.any(|points| *points != quotient_points)
+        || quotient_points_by_component.len()
+            != usize::try_from(relation_context.quotient_component_count)
+                .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?
+        || telescoping_masks.len() + 1 != quotient_points_by_component.len()
+    {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    let telescoping_private_coordinate_count =
+        telescoping_masks.iter().try_fold(0_u64, |count, mask| {
+            count
+                .checked_add(checked_multiply_u64(
+                    mask.mask_degree_bound_exclusive(),
+                    extension_degree,
+                )?)
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+        })?;
+    let quotient_point_count = checked_count_u64(quotient_points.len())?;
+    let telescoping_rank = checked_multiply_u64(
+        checked_multiply_u64(
+            checked_count_u64(telescoping_masks.len())?,
+            quotient_point_count,
+        )?,
+        extension_degree,
+    )?;
+    let telescoping_revealed = checked_multiply_u64(
+        checked_multiply_u64(
+            u64::from(relation_context.quotient_component_count),
+            quotient_point_count,
+        )?,
+        extension_degree,
+    )?;
+    let telescoping_row = ConstructionAffineCompositionRow {
+        source_class: ConstructionAffineMaskSourceClass::QuotientTelescopingMasks,
+        source_authority: ConstructionAffineSourceAuthority::CurrentAttemptPrivateCoin,
+        source_instance_count: telescoping_masks.len(),
+        private_base_coordinate_count: telescoping_private_coordinate_count,
+        revealed_base_coordinate_count: telescoping_revealed,
+        joint_view_rank: telescoping_rank,
+        rank_kind: ConstructionAffineRankKind::Exact,
+        derived_linear_identity_base_coordinate_count: telescoping_revealed
+            .checked_sub(telescoping_rank)
+            .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?,
+        residual_conditional_entropy_lower_bound: telescoping_private_coordinate_count
+            .checked_sub(telescoping_rank)
+            .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?,
+    };
+
+    let opening_batch_masks = relation_variant
+        .ordered_masks()
+        .iter()
+        .copied()
+        .filter(|mask| {
+            mask.mask_kind() == RelationMaskKind::OpeningBatch
+                && mask.target_class() == RelationMaskTargetClass::Batch
+        })
+        .collect::<Vec<_>>();
+    let [opening_batch_mask] = opening_batch_masks.as_slice() else {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    };
+    let opening_batch_points = relation_variant
+        .ordered_opening_claims()
+        .iter()
+        .filter(|claim| claim.source_class() == RelationOpeningSourceClass::BatchMask)
+        .map(|claim| claim.opening_point_ordinal())
+        .collect::<BTreeSet<_>>();
+    let opening_batch_rank = checked_multiply_u64(
+        checked_count_u64(opening_batch_points.len())?,
+        extension_degree,
+    )?;
+    let opening_batch_private_coordinate_count = checked_multiply_u64(
+        opening_batch_mask.mask_degree_bound_exclusive(),
+        extension_degree,
+    )?;
+    let opening_batch_row = ConstructionAffineCompositionRow {
+        source_class: ConstructionAffineMaskSourceClass::OpeningBatchMask,
+        source_authority: ConstructionAffineSourceAuthority::CurrentAttemptPrivateCoin,
+        source_instance_count: 1,
+        private_base_coordinate_count: opening_batch_private_coordinate_count,
+        revealed_base_coordinate_count: opening_batch_rank,
+        joint_view_rank: opening_batch_rank,
+        rank_kind: ConstructionAffineRankKind::Exact,
+        derived_linear_identity_base_coordinate_count: 0,
+        residual_conditional_entropy_lower_bound: opening_batch_private_coordinate_count
+            .checked_sub(opening_batch_rank)
+            .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?,
+    };
+
+    let row_pad_count = plan
+        .base_phase
+        .iter()
+        .chain(plan.auxiliary_phase.iter())
+        .map(|phase| phase.rows.len())
+        .chain(std::iter::once(plan.quotient_phase.rows.len()))
+        .try_fold(0_usize, |count, row_count| count.checked_add(row_count))
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let [row_pad_requirement] = production_preaggregate
+        .production_rank_requirements
+        .as_slice()
+    else {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    };
+    let row_pad_private_coordinate_count = checked_multiply_u64(
+        checked_count_u64(row_pad_count)?,
+        row_pad_requirement.source_dimension,
+    )?;
+    let row_pad_rank = checked_multiply_u64(
+        checked_count_u64(row_pad_count)?,
+        row_pad_requirement.required_rank,
+    )?;
+    if checked_count_u64(row_pad_generator.accepted_field_output_count)?
+        != row_pad_private_coordinate_count
+    {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    let row_pad_row = ConstructionAffineCompositionRow {
+        source_class: ConstructionAffineMaskSourceClass::PhaseRowPads,
+        source_authority: ConstructionAffineSourceAuthority::CurrentAttemptRowPadStream,
+        source_instance_count: row_pad_count,
+        private_base_coordinate_count: row_pad_private_coordinate_count,
+        revealed_base_coordinate_count: row_pad_rank,
+        joint_view_rank: row_pad_rank,
+        rank_kind: ConstructionAffineRankKind::Exact,
+        derived_linear_identity_base_coordinate_count: 0,
+        residual_conditional_entropy_lower_bound: row_pad_private_coordinate_count
+            .checked_sub(row_pad_rank)
+            .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?,
+    };
+
+    let persistent_mask_image = selected_same_secret_persistent_mask_image_accounting()
+        .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+    let construction_plan_identity_hash = plan
+        .canonical_identity_hash()
+        .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+    if persistent_mask_image.same_secret_construction_plan_identity_hash
+        != construction_plan_identity_hash
+        || persistent_mask_image.vss_construction_plan_identity_hash == [0_u8; 64]
+    {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    let persistent_column_count = persistent_mask_image
+        .logical_root_count_per_proof
+        .checked_mul(persistent_mask_image.physical_column_count_per_root)
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let persistent_private_coordinate_count = checked_multiply_u64(
+        checked_count_u64(persistent_column_count)?,
+        persistent_mask_image.mask_coefficient_count_per_column,
+    )?;
+    let persistent_rank_ceiling = checked_multiply_u64(
+        checked_count_u64(persistent_column_count)?,
+        persistent_mask_image.joint_evaluation_image_rank_ceiling_per_column,
+    )?;
+    let persistent_row = ConstructionAffineCompositionRow {
+        source_class: ConstructionAffineMaskSourceClass::PriorVssCommittedMaterialMasks,
+        source_authority: ConstructionAffineSourceAuthority::AuthenticatedPersistentObject,
+        source_instance_count: persistent_column_count,
+        private_base_coordinate_count: persistent_private_coordinate_count,
+        revealed_base_coordinate_count: persistent_rank_ceiling,
+        joint_view_rank: persistent_rank_ceiling,
+        rank_kind: ConstructionAffineRankKind::ConservativeCeiling,
+        derived_linear_identity_base_coordinate_count: 0,
+        residual_conditional_entropy_lower_bound: persistent_private_coordinate_count
+            .checked_sub(persistent_rank_ceiling)
+            .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?,
+    };
+    if persistent_row.residual_conditional_entropy_lower_bound
+        != checked_multiply_u64(
+            checked_count_u64(persistent_column_count)?,
+            persistent_mask_image.residual_conditional_entropy_lower_bound_per_column,
+        )?
+    {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+
+    let (aggregate_private_extension_count, aggregate_rank_extension_count, aggregate_entropy) =
+        aggregate_wide_masking.joint_affine_view_summary();
+    let aggregate_private_coordinate_count = checked_multiply_u64(
+        checked_count_u64(aggregate_private_extension_count)?,
+        extension_degree,
+    )?;
+    let aggregate_rank = checked_multiply_u64(
+        checked_count_u64(aggregate_rank_extension_count)?,
+        extension_degree,
+    )?;
+    let aggregate_entropy =
+        checked_multiply_u64(checked_count_u64(aggregate_entropy)?, extension_degree)?;
+    let aggregate_derived_alias_count = production_aggregate
+        .derived_opened_affine_coordinate_count
+        .checked_add(production_aggregate.delegated_opening_evaluation_coordinate_count)
+        .and_then(|count| {
+            count.checked_add(production_aggregate.transcript_derived_affine_coordinate_count)
+        })
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let aggregate_derived_alias_count = checked_multiply_u64(
+        checked_count_u64(aggregate_derived_alias_count)?,
+        extension_degree,
+    )?;
+    let aggregate_row = ConstructionAffineCompositionRow {
+        source_class: ConstructionAffineMaskSourceClass::AggregateWidePad,
+        source_authority: ConstructionAffineSourceAuthority::CurrentAttemptAggregateWidePad,
+        source_instance_count: production_aggregate.affine_rows.len(),
+        private_base_coordinate_count: aggregate_private_coordinate_count,
+        revealed_base_coordinate_count: aggregate_rank
+            .checked_add(aggregate_derived_alias_count)
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+        joint_view_rank: aggregate_rank,
+        rank_kind: ConstructionAffineRankKind::Exact,
+        derived_linear_identity_base_coordinate_count: aggregate_derived_alias_count,
+        residual_conditional_entropy_lower_bound: aggregate_entropy,
+    };
+
+    let relation_mask_base_field_output_count = trace_private_coordinate_count
+        .checked_add(telescoping_private_coordinate_count)
+        .and_then(|count| count.checked_add(opening_batch_private_coordinate_count))
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let aggregate_leaf_salt_key_base_coordinate_count = checked_multiply_u64(
+        checked_count_u64(
+            production_aggregate
+                .nonlinear_view_boundary
+                .private_leaf_salt_key_extension_element_count,
+        )?,
+        extension_degree,
+    )?;
+    let private_coin_generator_hybrid = derive_common_proof_private_coin_generator_hybrid(
+        plan,
+        relation_variant,
+        relation_mask_base_field_output_count,
+        aggregate_private_coordinate_count,
+        aggregate_leaf_salt_key_base_coordinate_count,
+    )?;
+    let persistent_material_generator_hybrid =
+        derive_persistent_committed_material_generator_hybrid(&persistent_mask_image)?;
+    let rows = vec![
+        trace_row,
+        telescoping_row,
+        opening_batch_row,
+        row_pad_row,
+        persistent_row,
+        aggregate_row,
+    ];
+    if rows.iter().copied().any(|row| !row.is_complete()) {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    let certificate = ConstructionMaskingAffineCompositionCertificate {
+        construction_plan_identity_hash,
+        relation_plan_variant_hash: relation_variant
+            .canonical_hash()
+            .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?,
+        rows,
+        private_coin_generator_hybrid,
+        persistent_mask_image,
+        persistent_material_generator_hybrid,
+        row_pad_accepted_base_field_output_count: checked_count_u64(
+            row_pad_generator.accepted_field_output_count,
+        )?,
+        aggregate_leaf_salt_key_base_coordinate_count,
+        production_preaggregate_correspondence_is_complete: true,
+        production_aggregate_correspondence_is_complete: true,
+        finite_population_agreement_term_is_soundness_only: true,
+        claims_family_simulation: false,
+        claims_malicious_verifier_zero_knowledge: false,
+        claims_quantum_random_oracle_zero_knowledge: false,
+    };
+    if !certificate.is_complete() {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    Ok(certificate)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::bgv::proof_suite) struct RowCodeWhirFailurePartitionCertificate {
     code_state_rows: Vec<WhirCodeStateRow>,
@@ -6883,6 +7881,7 @@ pub(in crate::bgv::proof_suite) struct RowCodeWhirFailurePartitionCertificate {
     aggregate_wide_masking: AggregateWideMaskingCertificate,
     production_aggregate_wide_views: ProductionAggregateWideViewCorrespondenceCertificate,
     private_row_pad_generator_hybrid: PrivateRowPadGeneratorHybridCertificate,
+    affine_masking_composition: ConstructionMaskingAffineCompositionCertificate,
     private_leaf_salt_prf: PrivateLeafSaltPrfCertificate,
     relation_compiler_interpreter_semantics: RelationCompilerInterpreterSemanticCertificate,
     polynomial_protocol_extractor: ProductionPolynomialProtocolExtractorCertificate,
@@ -6949,6 +7948,17 @@ impl RowCodeWhirFailurePartitionCertificate {
                 .relation_plan_variant_hash()
                 == self.point_constraint_extractor.relation_plan_variant_hash()
             && self.private_row_pad_generator_hybrid.is_complete()
+            && self.affine_masking_composition.is_complete()
+            && self
+                .affine_masking_composition
+                .construction_plan_identity_hash
+                == self
+                    .production_aggregate_wide_views
+                    .construction_plan_identity_hash
+            && self.affine_masking_composition.relation_plan_variant_hash
+                == self
+                    .production_construction_masking
+                    .relation_plan_variant_hash
             && self.private_leaf_salt_prf.has_complete_for_bound_geometry(
                 self.production_aggregate_wide_views
                     .construction_plan_identity_hash,
@@ -8375,6 +9385,17 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
     if !private_row_pad_generator_hybrid.is_complete_for_plan(plan) {
         return Err(WhirTheoremCertificateError::IncompleteRowPadGeneratorHybrid);
     }
+    let affine_masking_composition = derive_construction_masking_affine_composition(
+        ConstructionMaskingAffineCompositionInput {
+            plan,
+            relation_variant,
+            relation_context: &relation_context,
+            production_preaggregate: &production_construction_masking,
+            aggregate_wide_masking: &aggregate_wide_masking,
+            production_aggregate: &production_aggregate_wide_views,
+            row_pad_generator: &private_row_pad_generator_hybrid,
+        },
+    )?;
     let private_leaf_salt_prf = PrivateLeafSaltPrfCertificate::derive(
         plan,
         &aggregate_wide_masking,
@@ -8790,6 +9811,7 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
         aggregate_wide_masking,
         production_aggregate_wide_views,
         private_row_pad_generator_hybrid,
+        affine_masking_composition,
         private_leaf_salt_prf,
         relation_compiler_interpreter_semantics,
         polynomial_protocol_extractor,
@@ -17197,6 +18219,165 @@ fn one_transition_collision_propagates_through_the_shared_suffix_and_final_diges
 
 #[test]
 #[ignore = "owned by test:rust:kernel:theorem-evidence"]
+fn selected_same_secret_affine_masking_composition_is_exact_and_hostile_mutations_refuse() {
+    let relation_context = selected_relation_plan_check_context(
+        ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+    )
+    .expect("the selected same-secret relation context exists");
+    let compiled_plan = compile_same_secret_relation_plan(
+        &selected_same_secret_relation_plan_input()
+            .expect("the selected same-secret relation input derives"),
+        &relation_context,
+    )
+    .expect("the selected same-secret relation compiles");
+    let relation_artifact =
+        ValidatedRelationPlanArtifact::from_owned_compiled_plan(compiled_plan, &relation_context)
+            .expect("the selected same-secret relation validates");
+    let relation_variant = relation_artifact
+        .compiled_plan()
+        .select_variant(None, None)
+        .expect("the selected same-secret relation variant exists");
+    let plan = RowCodeWhirConstructionPlan::for_selected_variant(&relation_artifact, None, None)
+        .expect("the selected same-secret construction derives");
+    let production_preaggregate = derive_production_construction_masking_correspondence(
+        &plan,
+        relation_variant,
+        &relation_context,
+    )
+    .expect("the production pre-aggregate correspondence derives");
+    let hiding_configuration =
+        super::super::hiding_whir::selected_hiding_whir_config(plan.selected_parameters())
+            .expect("the selected hiding configuration derives");
+    let aggregate_wide_masking = AggregateWideMaskingCertificate::derive(&hiding_configuration)
+        .expect("the selected aggregate masking certificate derives");
+    let production_aggregate =
+        derive_production_aggregate_wide_view_correspondence(&plan, &aggregate_wide_masking)
+            .expect("the production aggregate correspondence derives");
+    let row_pad_generator = PrivateRowPadGeneratorHybridCertificate::derive(&plan)
+        .expect("the production row-pad generator derives");
+    let derivation_input = ConstructionMaskingAffineCompositionInput {
+        plan: &plan,
+        relation_variant,
+        relation_context: &relation_context,
+        production_preaggregate: &production_preaggregate,
+        aggregate_wide_masking: &aggregate_wide_masking,
+        production_aggregate: &production_aggregate,
+        row_pad_generator: &row_pad_generator,
+    };
+    let certificate = derive_construction_masking_affine_composition(derivation_input)
+        .expect("the exact same-secret affine masking composition derives");
+
+    assert!(certificate.is_complete_for(derivation_input));
+    assert_eq!(
+        certificate
+            .rows
+            .iter()
+            .map(|row| row.source_class)
+            .collect::<Vec<_>>(),
+        [
+            ConstructionAffineMaskSourceClass::RelationTraceMasks,
+            ConstructionAffineMaskSourceClass::QuotientTelescopingMasks,
+            ConstructionAffineMaskSourceClass::OpeningBatchMask,
+            ConstructionAffineMaskSourceClass::PhaseRowPads,
+            ConstructionAffineMaskSourceClass::PriorVssCommittedMaterialMasks,
+            ConstructionAffineMaskSourceClass::AggregateWidePad,
+        ],
+    );
+    assert_eq!(
+        certificate
+            .rows
+            .iter()
+            .map(|row| row.private_base_coordinate_count)
+            .sum::<u64>(),
+        certificate
+            .rows
+            .iter()
+            .map(|row| { row.joint_view_rank + row.residual_conditional_entropy_lower_bound })
+            .sum::<u64>(),
+    );
+    assert_eq!(
+        certificate.rows[3].private_base_coordinate_count,
+        130_023_424
+    );
+    assert_eq!(certificate.rows[4].joint_view_rank, 19_904);
+    assert_eq!(
+        certificate.rows[4].residual_conditional_entropy_lower_bound,
+        45_632,
+    );
+    assert_eq!(certificate.rows[5].joint_view_rank, 90_065);
+    assert_eq!(
+        certificate
+            .persistent_material_generator_hybrid
+            .maximum_total_kmac_call_count,
+        1_426_063_360,
+    );
+    assert!(
+        !certificate
+            .private_coin_generator_hybrid
+            .masks_are_publicly_recomputable
+    );
+    assert!(
+        !certificate
+            .persistent_material_generator_hybrid
+            .masks_are_publicly_recomputable
+    );
+
+    let mut deficient_rank = certificate.clone();
+    deficient_rank.rows[0].joint_view_rank -= 1;
+    deficient_rank.rows[0].derived_linear_identity_base_coordinate_count += 1;
+    deficient_rank.rows[0].residual_conditional_entropy_lower_bound += 1;
+    assert!(deficient_rank.is_complete());
+    assert!(!deficient_rank.is_complete_for(derivation_input));
+
+    let mut omitted_coordinate = certificate.clone();
+    omitted_coordinate.rows[5].private_base_coordinate_count -= 1;
+    omitted_coordinate.rows[5].residual_conditional_entropy_lower_bound -= 1;
+    assert!(!omitted_coordinate.is_complete());
+
+    let mut wrong_authority = certificate.clone();
+    wrong_authority.rows[0].source_authority =
+        ConstructionAffineSourceAuthority::AuthenticatedPersistentObject;
+    assert!(!wrong_authority.is_complete());
+
+    let mut public_attempt_masks = certificate.clone();
+    public_attempt_masks
+        .private_coin_generator_hybrid
+        .masks_are_publicly_recomputable = true;
+    assert!(!public_attempt_masks.is_complete());
+
+    let mut public_persistent_masks = certificate.clone();
+    public_persistent_masks
+        .persistent_material_generator_hybrid
+        .masks_are_publicly_recomputable = true;
+    assert!(!public_persistent_masks.is_complete());
+
+    let mut challenge_dependent_aggregate = production_aggregate.clone();
+    challenge_dependent_aggregate.chronology.swap(2, 3);
+    assert!(
+        !certificate.is_complete_for(ConstructionMaskingAffineCompositionInput {
+            production_aggregate: &challenge_dependent_aggregate,
+            ..derivation_input
+        })
+    );
+
+    let mut changed_query_schedule = plan.clone();
+    changed_query_schedule.whir.rounds[0]
+        .query_epoch
+        .query_count -= 1;
+    assert!(
+        !certificate.is_complete_for(ConstructionMaskingAffineCompositionInput {
+            plan: &changed_query_schedule,
+            ..derivation_input
+        })
+    );
+
+    let mut overclaimed_scope = certificate;
+    overclaimed_scope.claims_quantum_random_oracle_zero_knowledge = true;
+    assert!(!overclaimed_scope.is_complete());
+}
+
+#[test]
+#[ignore = "owned by test:rust:kernel:theorem-evidence"]
 fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
     let plan = selected_same_secret_construction_plan();
     let direct_bound_blocks = plan
@@ -18201,6 +19382,338 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
     let extractor_variant_hash = extractor_variant
         .canonical_hash()
         .expect("the selected same-secret variant hashes");
+    let affine_masking = &certificate.affine_masking_composition;
+    let affine_masking_input = ConstructionMaskingAffineCompositionInput {
+        plan: &plan,
+        relation_variant: extractor_variant,
+        relation_context: &extractor_context,
+        production_preaggregate: &certificate.production_construction_masking,
+        aggregate_wide_masking: &certificate.aggregate_wide_masking,
+        production_aggregate: &certificate.production_aggregate_wide_views,
+        row_pad_generator: &certificate.private_row_pad_generator_hybrid,
+    };
+    assert!(affine_masking.is_complete_for(affine_masking_input));
+
+    let trace_masks = extractor_variant
+        .ordered_masks()
+        .iter()
+        .copied()
+        .filter(|mask| {
+            mask.mask_kind() == RelationMaskKind::Trace
+                && mask.target_class() == RelationMaskTargetClass::Column
+        })
+        .collect::<Vec<_>>();
+    let trace_mask_column_ordinals = trace_masks
+        .iter()
+        .map(|mask| mask.target_ordinal())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(trace_mask_column_ordinals.len(), trace_masks.len());
+    assert_eq!(
+        trace_masks.len(),
+        extractor_variant
+            .ordered_columns()
+            .iter()
+            .filter(|column| matches!(column.origin(), RelationColumnOrigin::Prover))
+            .count(),
+        "every private relation column owns exactly one trace mask",
+    );
+    let independently_censused_trace_opening_coordinates = extractor_variant
+        .ordered_opening_claims()
+        .iter()
+        .filter(|claim| {
+            claim.source_class() == RelationOpeningSourceClass::TreeColumn
+                && claim
+                    .column_ordinal()
+                    .is_some_and(|column| trace_mask_column_ordinals.contains(&column))
+        })
+        .map(|claim| {
+            (
+                claim
+                    .column_ordinal()
+                    .expect("the filtered claim has a column"),
+                claim.opening_point_ordinal(),
+            )
+        })
+        .collect::<BTreeSet<_>>();
+    let independently_censused_trace_private_coordinates = trace_masks
+        .iter()
+        .try_fold(0_u64, |count, mask| {
+            count.checked_add(mask.mask_degree_bound_exclusive())
+        })
+        .expect("the trace-mask coordinate census fits u64");
+    let independently_censused_trace_rank =
+        u64::try_from(independently_censused_trace_opening_coordinates.len())
+            .expect("the trace-opening census fits u64")
+            .checked_mul(u64::from(extractor_context.challenge_extension_degree))
+            .expect("the trace-opening base-coordinate census fits u64");
+    assert_eq!(
+        affine_masking
+            .rows
+            .iter()
+            .map(|row| (
+                row.source_class,
+                row.source_instance_count,
+                row.private_base_coordinate_count,
+                row.revealed_base_coordinate_count,
+                row.joint_view_rank,
+                row.rank_kind,
+                row.derived_linear_identity_base_coordinate_count,
+                row.residual_conditional_entropy_lower_bound,
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                ConstructionAffineMaskSourceClass::RelationTraceMasks,
+                trace_masks.len(),
+                independently_censused_trace_private_coordinates,
+                independently_censused_trace_rank,
+                independently_censused_trace_rank,
+                ConstructionAffineRankKind::Exact,
+                0,
+                independently_censused_trace_private_coordinates
+                    - independently_censused_trace_rank,
+            ),
+            (
+                ConstructionAffineMaskSourceClass::QuotientTelescopingMasks,
+                7,
+                591_430,
+                40,
+                35,
+                ConstructionAffineRankKind::Exact,
+                5,
+                591_395,
+            ),
+            (
+                ConstructionAffineMaskSourceClass::OpeningBatchMask,
+                1,
+                10_485_755,
+                5,
+                5,
+                ConstructionAffineRankKind::Exact,
+                0,
+                10_485_750,
+            ),
+            (
+                ConstructionAffineMaskSourceClass::PhaseRowPads,
+                62,
+                130_023_424,
+                215_946,
+                215_946,
+                ConstructionAffineRankKind::Exact,
+                0,
+                129_807_478,
+            ),
+            (
+                ConstructionAffineMaskSourceClass::PriorVssCommittedMaterialMasks,
+                32,
+                65_536,
+                19_904,
+                19_904,
+                ConstructionAffineRankKind::ConservativeCeiling,
+                0,
+                45_632,
+            ),
+            (
+                ConstructionAffineMaskSourceClass::AggregateWidePad,
+                15,
+                90_125,
+                102_285,
+                90_065,
+                ConstructionAffineRankKind::Exact,
+                12_220,
+                60,
+            ),
+        ],
+    );
+
+    let private_coin_hybrid = &affine_masking.private_coin_generator_hybrid;
+    assert_eq!(
+        private_coin_hybrid.catalog_entry_count,
+        trace_masks.len() + 10
+    );
+    assert_eq!(
+        private_coin_hybrid.relation_mask_coordinate_count,
+        trace_masks.len() + 8,
+    );
+    assert_eq!(
+        private_coin_hybrid.relation_mask_base_field_output_count,
+        independently_censused_trace_private_coordinates + 11_077_185,
+    );
+    assert_eq!(
+        private_coin_hybrid.aggregate_affine_base_field_output_count,
+        90_125,
+    );
+    assert_eq!(
+        private_coin_hybrid.aggregate_leaf_salt_key_base_field_output_count,
+        10,
+    );
+    assert_eq!(
+        private_coin_hybrid.total_modulo_output_count,
+        independently_censused_trace_private_coordinates + 11_167_320,
+    );
+    assert_eq!(private_coin_hybrid.row_pad_seed_material_byte_count, 192);
+    assert_eq!(private_coin_hybrid.ceremony_application_multiplicity, 10);
+    assert!(private_coin_hybrid.rejection_sampler_exhaustion_is_at_most_inverse_two_to_128);
+    assert!(!private_coin_hybrid.masks_are_publicly_recomputable);
+    assert_eq!(
+        affine_masking.row_pad_accepted_base_field_output_count,
+        130_023_424
+    );
+
+    let persistent_mask_image = &affine_masking.persistent_mask_image;
+    assert_ne!(
+        persistent_mask_image.vss_construction_plan_identity_hash,
+        [0_u8; 64]
+    );
+    assert_eq!(
+        persistent_mask_image.same_secret_construction_plan_identity_hash,
+        plan.canonical_identity_hash()
+            .expect("the selected plan identity derives"),
+    );
+    assert_eq!(persistent_mask_image.ceremony_proof_count, 10);
+    assert_eq!(persistent_mask_image.logical_root_count_per_proof, 8);
+    assert_eq!(persistent_mask_image.physical_column_count_per_root, 4);
+    assert_eq!(
+        persistent_mask_image.producer_base_coordinate_count_per_column,
+        537
+    );
+    assert_eq!(
+        persistent_mask_image.consumer_base_coordinate_count_per_column,
+        85
+    );
+    assert_eq!(
+        persistent_mask_image.joint_evaluation_image_rank_ceiling_per_column,
+        622,
+    );
+    assert_eq!(
+        persistent_mask_image.mask_coefficient_count_per_column,
+        2_048
+    );
+    assert_eq!(
+        persistent_mask_image.residual_conditional_entropy_lower_bound_per_column,
+        1_426,
+    );
+    assert_eq!(persistent_mask_image.leaf_count_per_root, 8_388_608);
+    let persistent_generator = &affine_masking.persistent_material_generator_hybrid;
+    assert_eq!(persistent_generator.ceremony_material_root_count, 80);
+    assert_eq!(
+        persistent_generator.accepted_mask_base_field_output_count,
+        655_360
+    );
+    assert_eq!(
+        persistent_generator.maximum_mask_kmac_call_count,
+        83_886_080
+    );
+    assert_eq!(persistent_generator.leaf_salt_count, 671_088_640);
+    assert_eq!(
+        persistent_generator.leaf_salt_kmac_call_count,
+        1_342_177_280
+    );
+    assert_eq!(
+        persistent_generator.maximum_total_kmac_call_count,
+        1_426_063_360
+    );
+    assert_eq!(
+        persistent_generator.description.material_seed_byte_length,
+        64
+    );
+    assert_eq!(
+        persistent_generator.description.kmac_security_bit_length,
+        256
+    );
+    assert_eq!(
+        persistent_generator.description.derived_block_byte_length,
+        64
+    );
+    assert_eq!(persistent_generator.description.leaf_salt_byte_length, 128);
+    assert_eq!(persistent_generator.description.leaf_salt_block_count, 2);
+    assert!(
+        persistent_generator
+            .description
+            .canonical_frame_coordinates_are_injective
+    );
+    assert!(
+        persistent_generator
+            .description
+            .requires_private_material_seed
+    );
+    assert!(!persistent_generator.masks_are_publicly_recomputable);
+    assert!(
+        persistent_generator
+            .rejection_sampler_exhaustion_probability
+            .is_at_most_inverse_power_of_two(128),
+    );
+
+    let mut self_consistent_deficient_rank = affine_masking.clone();
+    self_consistent_deficient_rank.rows[0].joint_view_rank -= 1;
+    self_consistent_deficient_rank.rows[0].derived_linear_identity_base_coordinate_count += 1;
+    self_consistent_deficient_rank.rows[0].residual_conditional_entropy_lower_bound += 1;
+    assert!(self_consistent_deficient_rank.is_complete());
+    assert!(!self_consistent_deficient_rank.is_complete_for(affine_masking_input));
+
+    let mut omitted_private_coordinate = affine_masking.clone();
+    omitted_private_coordinate.rows[5].private_base_coordinate_count -= 1;
+    omitted_private_coordinate.rows[5].residual_conditional_entropy_lower_bound -= 1;
+    assert!(!omitted_private_coordinate.is_complete());
+    assert!(!omitted_private_coordinate.is_complete_for(affine_masking_input));
+
+    let mut wrong_source_authority = affine_masking.clone();
+    wrong_source_authority.rows[0].source_authority =
+        ConstructionAffineSourceAuthority::AuthenticatedPersistentObject;
+    assert!(!wrong_source_authority.is_complete());
+
+    let mut publicly_recomputable_attempt_masks = affine_masking.clone();
+    publicly_recomputable_attempt_masks
+        .private_coin_generator_hybrid
+        .masks_are_publicly_recomputable = true;
+    assert!(!publicly_recomputable_attempt_masks.is_complete());
+
+    let mut publicly_recomputable_persistent_masks = affine_masking.clone();
+    publicly_recomputable_persistent_masks
+        .persistent_material_generator_hybrid
+        .masks_are_publicly_recomputable = true;
+    assert!(!publicly_recomputable_persistent_masks.is_complete());
+
+    let mut challenge_dependent_aggregate_pad = certificate.production_aggregate_wide_views.clone();
+    challenge_dependent_aggregate_pad.chronology.swap(2, 3);
+    assert!(
+        !affine_masking.is_complete_for(ConstructionMaskingAffineCompositionInput {
+            production_aggregate: &challenge_dependent_aggregate_pad,
+            ..affine_masking_input
+        },)
+    );
+
+    let mut altered_code_map = certificate.production_aggregate_wide_views.clone();
+    altered_code_map.code_affine_maps[0].shared_query_count -= 1;
+    assert!(
+        !affine_masking.is_complete_for(ConstructionMaskingAffineCompositionInput {
+            production_aggregate: &altered_code_map,
+            ..affine_masking_input
+        },)
+    );
+
+    let mut changed_masking_query_schedule = plan.clone();
+    changed_masking_query_schedule.whir.rounds[0]
+        .query_epoch
+        .query_count -= 1;
+    assert!(
+        !affine_masking.is_complete_for(ConstructionMaskingAffineCompositionInput {
+            plan: &changed_masking_query_schedule,
+            ..affine_masking_input
+        },)
+    );
+
+    for stronger_claim in 0..3 {
+        let mut overclaimed_scope = affine_masking.clone();
+        match stronger_claim {
+            0 => overclaimed_scope.claims_family_simulation = true,
+            1 => overclaimed_scope.claims_malicious_verifier_zero_knowledge = true,
+            2 => overclaimed_scope.claims_quantum_random_oracle_zero_knowledge = true,
+            _ => unreachable!("the closed scope-claim census has three rows"),
+        }
+        assert!(!overclaimed_scope.is_complete());
+    }
+
     let failure_catalog = plan
         .oracle_equation_catalog()
         .expect("the exact failure catalog derives");

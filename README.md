@@ -115,9 +115,9 @@ Works today:
   code-switch, and lexicographic fold maps. The selected joint view has 18,025
   affine private extension coordinates, rank 18,013, and residual conditional
   entropy 12. Two additional private extension elements form the nonlinear
-  aggregate leaf-salt key, for 18,027 complete private elements. This is
-  component correspondence; it does not establish construction-wide
-  Fiat-Shamir privacy or soundness.
+  aggregate leaf-salt key, for 18,027 complete private elements. This
+  correspondence is one input to the construction-wide affine composition
+  below; it does not by itself establish Fiat-Shamir privacy or soundness.
 - The pre-aggregate construction masking certificate independently rebuilds the
   private-view graph from the physical production layout. It covers every phase
   row, quotient extension coordinate, bound-tree opening, opening-point role,
@@ -130,6 +130,21 @@ Works today:
   to relation-owned points 0, 1, and 11. Focused mutation tests refuse omitted
   or altered coordinates, dependencies, authorities, ranks, and query
   schedules.
+- The selected same-secret construction now composes every private affine
+  source into one production-derived masking certificate. Its six disjoint
+  classes are relation trace masks, quotient telescoping masks, the opening
+  batch mask, 62 phase-row pads, 32 prior-VSS committed-material columns, and
+  the 15-block aggregate-wide pad. The certificate binds each class to its
+  actual current-attempt or authenticated persistent authority, uses exact
+  joint ranks except for the conservative persistent-material rank ceiling,
+  reconciles every residual conditional-entropy count, and links the deployed
+  KMAC, framed SHAKE, rejection-sampling, leaf-salt, and aggregate-salt-key
+  generator hybrids. It refuses deficient ranks, omitted coordinates, changed
+  authorities or query schedules, challenge-dependent or publicly recomputable
+  masks, and zero-knowledge claims outside its scope. This establishes the
+  selected construction's affine masking composition, not the still-open
+  nonlinear commitment reduction, transported-byte reduction, complete
+  Fiat-Shamir soundness, or ceremony composition.
 - Checked construction-geometry certificates have derived for all 31
   production identities: 27 width-64, log-inverse-rate-two
   (inverse-rate-four) identities, including evaluator top counts 1 through 20,
@@ -198,12 +213,13 @@ Not yet:
 
 - The generic construction certificate does not establish family simulation,
   malicious-verifier zero knowledge, or quantum-random-oracle zero knowledge.
-- Exact construction-wide classical and quantum-random-oracle soundness is not
-  established. The selected same-secret aggregate-leaf predecessor
-  correspondence, collision arithmetic, aggregate-wide production affine
-  correspondence, pre-aggregate physical masking correspondence, and all
-  production geometry certificates now derive. The selected same-secret path
-  now also derives the live `8,192`-coordinate, `5,055`-agreement, `393`-query
+- Exact complete construction-wide classical and quantum-random-oracle
+  soundness is not established. The selected same-secret aggregate-leaf
+  predecessor correspondence, collision arithmetic, aggregate-wide production
+  affine correspondence, pre-aggregate physical masking correspondence, exact
+  six-source affine masking composition, and all production geometry
+  certificates now derive. The selected same-secret path now also derives the
+  live `8,192`-coordinate, `5,055`-agreement, `393`-query
   event under one atomic fixed-width verifier message, an executable
   predecessor-state evaluator, and an exact next-message database extractor.
   The reusable atomic predecessor and database-extraction layer is now enforced
@@ -212,8 +228,9 @@ Not yet:
   rejection now derive for every production geometry. The VSS geometry
   additionally derives its heterogeneous application-modulus
   product-challenge ledger. All 27 width-64 and four width-8 identities pass
-  the complete constructor. The final theorem-to-transported-bytes
-  correspondence and ceremony-level failure composition remain open.
+  the complete constructor. The nonlinear commitment reduction, final
+  theorem-to-transported-bytes correspondence, and ceremony-level failure
+  composition remain open.
 - The static liveness model has not yet been confirmed by a completed native
   proof or release-WebAssembly browser measurement. Complete participant
   transport accounting is also open. Production-derived sizes for 73 of the

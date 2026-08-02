@@ -92,6 +92,11 @@ pub(crate) use committed_material::{
     CommittedMaterialSharedAllocationMemoryAccounting, CompactCommittedMaterialSource,
     authenticated_committed_material_shared_allocation_byte_lengths,
 };
+#[cfg(all(test, feature = "theorem-evidence"))]
+pub(crate) use committed_material::{
+    CommittedMaterialPrivateDerivationDescription,
+    committed_material_private_derivation_description,
+};
 pub(crate) use component_material_stream::{
     ComponentMaterialOwnershipBinding, KeySwitchComponentMaterialTopology,
     KeySwitchComponentTraceColumn, VerifiedKeySwitchComponentMaterial,
@@ -147,6 +152,11 @@ pub(crate) use profile::{
     PROOF_NON_NATIVE_ALPHA_REPETITION_COUNT, PROOF_NON_NATIVE_THETA_REPETITION_COUNT,
     PROOF_OUT_OF_DOMAIN_POINT_COUNT, ProofProfileError, ValidatedRelationPlanArtifact,
     verify_canonical_proof_profile_set,
+};
+#[cfg(all(test, feature = "theorem-evidence"))]
+pub(crate) use profile::{
+    SelectedSameSecretPersistentMaskImageAccounting,
+    selected_same_secret_persistent_mask_image_accounting,
 };
 #[cfg(test)]
 pub(crate) use prover::common_proof_checkpoint_cursor_manifest_requirement_for_variant;
@@ -348,7 +358,8 @@ pub(in crate::bgv::proof_suite) use zero_knowledge::{
     ConstructionMaskingCorrespondence, ConstructionMaskingPhase, ConstructionMaskingRankKind,
     ConstructionMaskingRankRequirement, ConstructionMaskingRankVerification,
     ConstructionSecretViewAlgebra, ConstructionSecretViewDescriptor,
-    ConstructionSecretViewIdentifier, checked_construction_masking_correspondence_for_parameters,
+    ConstructionSecretViewIdentifier, TraceMaskObservationCoordinateCatalog,
+    TraceMaskSurjectivityCertificate, checked_construction_masking_correspondence_for_parameters,
     checked_zero_knowledge_mask_image_for_parameters,
 };
 

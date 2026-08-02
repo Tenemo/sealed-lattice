@@ -1438,6 +1438,12 @@ use canonical_profile_artifact::canonical_u64_list;
 #[cfg(test)]
 pub(crate) use canonical_profile_artifact::ProofProfileSet;
 
+#[cfg(all(test, feature = "theorem-evidence"))]
+pub(crate) use canonical_profile_artifact::{
+    SelectedSameSecretPersistentMaskImageAccounting,
+    selected_same_secret_persistent_mask_image_accounting,
+};
+
 #[cfg(test)]
 mod canonical_profile_artifact {
     use super::*;
@@ -3245,6 +3251,283 @@ mod canonical_profile_artifact {
         evaluation_image_rank_ceiling: u64,
     }
 
+    /// Exact selected-profile bridge from the VSS producer proof to one
+    /// same-secret consumer proof. The underlying accounting remains rooted in
+    /// the complete persistent-root topology and the two production
+    /// construction plans; this compact row merely exposes the facts needed by
+    /// the construction theorem without duplicating that derivation.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub(crate) struct SelectedSameSecretPersistentMaskImageAccounting {
+        pub(crate) vss_construction_plan_identity_hash: [u8; 64],
+        pub(crate) same_secret_construction_plan_identity_hash: [u8; 64],
+        pub(crate) ceremony_proof_count: usize,
+        pub(crate) logical_root_count_per_proof: usize,
+        pub(crate) physical_column_count_per_root: usize,
+        pub(crate) producer_base_coordinate_count_per_column: u64,
+        pub(crate) consumer_base_coordinate_count_per_column: u64,
+        pub(crate) joint_evaluation_image_rank_ceiling_per_column: u64,
+        pub(crate) mask_coefficient_count_per_column: u64,
+        pub(crate) residual_conditional_entropy_lower_bound_per_column: u64,
+        pub(crate) leaf_count_per_root: usize,
+    }
+
+    fn selected_persistent_committed_material_relation_plans()
+    -> Result<Vec<ValidatedRelationPlanArtifact>, ProofProfileError> {
+        let ordinary_context = selected_relation_plan_check_context(
+            ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        .ok_or(ProofProfileError::InvalidSchedule)?;
+        let committed_material_context = selected_relation_plan_check_context(
+            ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        .ok_or(ProofProfileError::InvalidSchedule)?;
+        let committed_material_input = crate::bgv::proof_suite::selected_profile::
+            selected_committed_material_relation_plan_input()?;
+        let compiled_plans = vec![
+            crate::bgv::proof_suite::compile_same_secret_relation_plan(
+                &crate::bgv::proof_suite::selected_same_secret_relation_plan_input()?,
+                &ordinary_context,
+            )?,
+            crate::bgv::proof_suite::selected_profile::selected_target_release_relation()?
+                .relation_plan()
+                .clone(),
+            crate::bgv::proof_suite::compile_vss_share_linkage_relation_plan(
+                &committed_material_input,
+                &committed_material_context,
+            )?,
+            crate::bgv::proof_suite::compile_aggregate_threshold_share_relation_plan(
+                &committed_material_input,
+                &committed_material_context,
+            )?,
+        ];
+        compiled_plans
+            .into_iter()
+            .map(|plan| {
+                let context = selected_relation_plan_check_context(
+                    plan.application_statement_schema_identifier(),
+                )
+                .ok_or(ProofProfileError::InvalidSchedule)?;
+                ValidatedRelationPlanArtifact::from_owned_compiled_plan(plan, &context)
+            })
+            .collect()
+    }
+
+    pub(crate) fn selected_same_secret_persistent_mask_image_accounting()
+    -> Result<SelectedSameSecretPersistentMaskImageAccounting, ProofProfileError> {
+        let relation_plans = selected_persistent_committed_material_relation_plans()?;
+        let construction_plans = row_code_whir_construction_plans_by_coordinates(&relation_plans)?;
+        let topology = FirstProfileRootTopology::selected(
+            crate::foundation::SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT,
+        )?;
+        let edges = derive_persistent_committed_material_root_compatibility_edges(
+            &relation_plans,
+            &topology,
+        )?;
+        let accounting = persistent_committed_material_mask_image_accounting(
+            &relation_plans,
+            &topology,
+            &edges,
+        )?;
+
+        let vss_coordinates = (
+            ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+            None,
+            None,
+        );
+        let same_secret_coordinates = (
+            ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+            None,
+            None,
+        );
+        let vss_plan = construction_plans
+            .get(&vss_coordinates)
+            .ok_or(ProofProfileError::InvalidConstructionProfile)?;
+        let same_secret_plan = construction_plans
+            .get(&same_secret_coordinates)
+            .ok_or(ProofProfileError::InvalidConstructionProfile)?;
+
+        let mut roots_by_consumer_roster_position = BTreeMap::<u16, BTreeSet<u32>>::new();
+        let mut physical_column_count_per_root = BTreeSet::new();
+        let mut producer_base_coordinate_counts = BTreeSet::new();
+        let mut consumer_base_coordinate_counts = BTreeSet::new();
+        let mut joint_rank_ceilings = BTreeSet::new();
+        let mut mask_coefficient_counts = BTreeSet::new();
+        let mut leaf_counts = BTreeSet::new();
+        let mut selected_root_count = 0_usize;
+
+        for root_accounting in &accounting {
+            let same_secret_consumers = root_accounting
+                .consumer_endpoints
+                .iter()
+                .copied()
+                .filter(|endpoint| {
+                    endpoint.application_statement_schema_identifier
+                        == ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER
+                })
+                .collect::<Vec<_>>();
+            if same_secret_consumers.is_empty() {
+                continue;
+            }
+            let [same_secret_consumer] = same_secret_consumers.as_slice() else {
+                return Err(ProofProfileError::AmbiguousRootProducer);
+            };
+            if root_accounting
+                .producer_endpoint
+                .application_statement_schema_identifier
+                != ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+                || root_accounting.producer_endpoint.roster_position
+                    != same_secret_consumer.roster_position
+            {
+                return Err(ProofProfileError::IncompatibleRoot);
+            }
+            let roster_position = same_secret_consumer
+                .roster_position
+                .ok_or(ProofProfileError::InvalidRootTopology)?;
+            if !roots_by_consumer_roster_position
+                .entry(roster_position)
+                .or_default()
+                .insert(same_secret_consumer.verifier_source_ordinal)
+            {
+                return Err(ProofProfileError::DuplicateRootEdge);
+            }
+
+            let producer_catalogs = committed_material_root_view_catalogs(
+                &relation_plans,
+                &construction_plans,
+                root_accounting.producer_endpoint,
+                BoundTreeRootUse::Output,
+            )?;
+            let consumer_catalogs = committed_material_root_view_catalogs(
+                &relation_plans,
+                &construction_plans,
+                *same_secret_consumer,
+                BoundTreeRootUse::Input,
+            )?;
+            if producer_catalogs.len() != consumer_catalogs.len()
+                || producer_catalogs.len() != root_accounting.physical_column_demands.len()
+            {
+                return Err(ProofProfileError::IncompatibleRoot);
+            }
+            physical_column_count_per_root.insert(producer_catalogs.len());
+            for ((producer_catalog, consumer_catalog), demand) in producer_catalogs
+                .iter()
+                .zip(&consumer_catalogs)
+                .zip(&root_accounting.physical_column_demands)
+            {
+                let producer_count = producer_catalog.base_coordinate_count()?;
+                let consumer_count = consumer_catalog.base_coordinate_count()?;
+                if producer_count
+                    .checked_add(consumer_count)
+                    .ok_or(ProofProfileError::CountOverflow)?
+                    != demand.evaluation_image_rank_ceiling
+                {
+                    return Err(ProofProfileError::InsufficientRootMaskImage);
+                }
+                producer_base_coordinate_counts.insert(producer_count);
+                consumer_base_coordinate_counts.insert(consumer_count);
+                joint_rank_ceilings.insert(demand.evaluation_image_rank_ceiling);
+                mask_coefficient_counts.insert(demand.mask_coefficient_count);
+            }
+            let producer_root = bound_root_slot_for_endpoint(
+                &relation_plans,
+                root_accounting.producer_endpoint,
+                RelationRootConstructionKind::CommittedMaterial,
+                BoundTreeRootUse::Output,
+            )?;
+            let leaf_count = producer_root
+                .shape
+                .evaluation_domain_size
+                .checked_div(2)
+                .and_then(|count| usize::try_from(count).ok())
+                .filter(|count| *count > 0)
+                .ok_or(ProofProfileError::InvalidRootTopology)?;
+            leaf_counts.insert(leaf_count);
+            selected_root_count = selected_root_count
+                .checked_add(1)
+                .ok_or(ProofProfileError::CountOverflow)?;
+        }
+
+        let ceremony_proof_count = roots_by_consumer_roster_position.len();
+        let logical_root_counts = roots_by_consumer_roster_position
+            .values()
+            .map(BTreeSet::len)
+            .collect::<BTreeSet<_>>();
+        let mut logical_root_counts = logical_root_counts.into_iter();
+        let logical_root_count_per_proof = logical_root_counts
+            .next()
+            .filter(|count| *count > 0)
+            .ok_or(ProofProfileError::InvalidRootTopology)?;
+        if logical_root_counts.next().is_some() {
+            return Err(ProofProfileError::InvalidRootTopology);
+        }
+        if ceremony_proof_count != usize::from(topology.roster_size())
+            || selected_root_count
+                != ceremony_proof_count
+                    .checked_mul(logical_root_count_per_proof)
+                    .ok_or(ProofProfileError::CountOverflow)?
+        {
+            return Err(ProofProfileError::InvalidRootTopology);
+        }
+
+        let singleton = |values: &BTreeSet<u64>| {
+            let mut values = values.iter().copied();
+            let value = values
+                .next()
+                .ok_or(ProofProfileError::InvalidRootTopology)?;
+            if values.next().is_some() {
+                return Err(ProofProfileError::InvalidRootTopology);
+            }
+            Ok(value)
+        };
+        let physical_column_count_per_root = {
+            let mut values = physical_column_count_per_root.iter().copied();
+            let value = values
+                .next()
+                .ok_or(ProofProfileError::InvalidRootTopology)?;
+            if value == 0 || values.next().is_some() {
+                return Err(ProofProfileError::InvalidRootTopology);
+            }
+            value
+        };
+        let producer_base_coordinate_count_per_column =
+            singleton(&producer_base_coordinate_counts)?;
+        let consumer_base_coordinate_count_per_column =
+            singleton(&consumer_base_coordinate_counts)?;
+        let joint_evaluation_image_rank_ceiling_per_column = singleton(&joint_rank_ceilings)?;
+        let mask_coefficient_count_per_column = singleton(&mask_coefficient_counts)?;
+        let residual_conditional_entropy_lower_bound_per_column = mask_coefficient_count_per_column
+            .checked_sub(joint_evaluation_image_rank_ceiling_per_column)
+            .ok_or(ProofProfileError::InsufficientRootMaskImage)?;
+        let leaf_count_per_root = {
+            let mut values = leaf_counts.iter().copied();
+            let value = values
+                .next()
+                .ok_or(ProofProfileError::InvalidRootTopology)?;
+            if value == 0 || values.next().is_some() {
+                return Err(ProofProfileError::InvalidRootTopology);
+            }
+            value
+        };
+
+        Ok(SelectedSameSecretPersistentMaskImageAccounting {
+            vss_construction_plan_identity_hash: vss_plan
+                .canonical_identity_hash()
+                .map_err(|_| ProofProfileError::InvalidConstructionProfile)?,
+            same_secret_construction_plan_identity_hash: same_secret_plan
+                .canonical_identity_hash()
+                .map_err(|_| ProofProfileError::InvalidConstructionProfile)?,
+            ceremony_proof_count,
+            logical_root_count_per_proof,
+            physical_column_count_per_root,
+            producer_base_coordinate_count_per_column,
+            consumer_base_coordinate_count_per_column,
+            joint_evaluation_image_rank_ceiling_per_column,
+            mask_coefficient_count_per_column,
+            residual_conditional_entropy_lower_bound_per_column,
+            leaf_count_per_root,
+        })
+    }
+
     fn persistent_committed_material_mask_image_accounting(
         relation_plans: &[ValidatedRelationPlanArtifact],
         topology: &FirstProfileRootTopology,
@@ -3824,47 +4107,6 @@ mod canonical_profile_artifact {
                     }],
                 },
             }
-        }
-
-        fn selected_persistent_committed_material_relation_plans()
-        -> Result<Vec<ValidatedRelationPlanArtifact>, ProofProfileError> {
-            let ordinary_context = selected_relation_plan_check_context(
-                ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
-            )
-            .ok_or(ProofProfileError::InvalidSchedule)?;
-            let committed_material_context = selected_relation_plan_check_context(
-                ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
-            )
-            .ok_or(ProofProfileError::InvalidSchedule)?;
-            let committed_material_input =
-                crate::bgv::proof_suite::selected_profile::selected_committed_material_relation_plan_input()?;
-            let compiled_plans = vec![
-                crate::bgv::proof_suite::compile_same_secret_relation_plan(
-                    &crate::bgv::proof_suite::selected_same_secret_relation_plan_input()?,
-                    &ordinary_context,
-                )?,
-                crate::bgv::proof_suite::selected_profile::selected_target_release_relation()?
-                    .relation_plan()
-                    .clone(),
-                crate::bgv::proof_suite::compile_vss_share_linkage_relation_plan(
-                    &committed_material_input,
-                    &committed_material_context,
-                )?,
-                crate::bgv::proof_suite::compile_aggregate_threshold_share_relation_plan(
-                    &committed_material_input,
-                    &committed_material_context,
-                )?,
-            ];
-            compiled_plans
-                .into_iter()
-                .map(|plan| {
-                    let context = selected_relation_plan_check_context(
-                        plan.application_statement_schema_identifier(),
-                    )
-                    .ok_or(ProofProfileError::InvalidSchedule)?;
-                    ValidatedRelationPlanArtifact::from_owned_compiled_plan(plan, &context)
-                })
-                .collect()
         }
 
         #[test]
