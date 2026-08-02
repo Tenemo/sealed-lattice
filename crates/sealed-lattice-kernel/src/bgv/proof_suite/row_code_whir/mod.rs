@@ -1182,8 +1182,15 @@ mod tests {
                 .checked_add(size_of::<u64>())?
                 .checked_add(ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN.len())?;
             let payload_offset = frame_offset.checked_add(size_of::<u8>())?;
+            let counted_input_byte_length = payload_offset.checked_add(size_of::<u64>())?;
+            let public_initial_input_byte_length =
+                counted_input_byte_length.checked_add(size_of::<u64>())?;
+            let final_input_byte_length =
+                counted_input_byte_length.checked_add(MERKLE_DIGEST_BYTE_LENGTH)?;
+            let column_input_byte_length =
+                final_input_byte_length.checked_add(5_usize.checked_mul(size_of::<u64>())?)?;
             let final_input = database.get(&final_digest)?;
-            if final_input.len() != 154
+            if final_input.len() != final_input_byte_length
                 || !has_canonical_prefix(final_input)
                 || final_input.get(frame_offset)
                     != Some(&ROW_CODE_WHIR_AGGREGATE_LEAF_FRAME_TAGS[2])
@@ -1196,7 +1203,7 @@ mod tests {
             let mut reversed_coefficients = Vec::with_capacity(column_count);
             for expected_column_index in (0..column_count).rev() {
                 let column_input = database.get(&predecessor)?;
-                if column_input.len() != 194
+                if column_input.len() != column_input_byte_length
                     || !has_canonical_prefix(column_input)
                     || column_input.get(frame_offset)
                         != Some(&ROW_CODE_WHIR_AGGREGATE_LEAF_FRAME_TAGS[1])
@@ -1224,7 +1231,7 @@ mod tests {
                 reversed_coefficients.push(coefficients);
             }
             let initial_input = database.get(&predecessor)?;
-            if initial_input.len() != 90
+            if initial_input.len() != public_initial_input_byte_length
                 || !has_canonical_prefix(initial_input)
                 || initial_input.get(frame_offset)
                     != Some(&ROW_CODE_WHIR_AGGREGATE_LEAF_FRAME_TAGS[0])

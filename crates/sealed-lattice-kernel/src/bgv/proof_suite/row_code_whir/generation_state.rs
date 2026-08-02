@@ -1198,6 +1198,8 @@ enum RowCodeWhirPhasePolynomialBinding {
 
 struct RowCodeWhirGenerationStoragePlan {
     external_memory_plan: ProofExternalMemoryPlan,
+    external_memory_read_traffic: RowCodeWhirExternalMemoryReadTraffic,
+    external_memory_transaction_traffic: RowCodeWhirExternalMemoryTransactionTraffic,
     relation_polynomial_shapes: BTreeMap<u32, (RelationColumnValueType, usize)>,
     auxiliary_reconstruction_catalog: CommonProofAuxiliaryColumnReconstructionCatalog,
     opened_polynomial_plans:
@@ -1206,6 +1208,40 @@ struct RowCodeWhirGenerationStoragePlan {
         BTreeMap<CommonProofQuotientConstraintTransformKey, RowCodeWhirQuotientColumnTransformPlan>,
     aggregate_source_table: AggregateSourceTable,
     aggregate_residuals: Vec<ExternalPolynomialVector>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RowCodeWhirExternalMemoryReadTraffic {
+    opened_polynomial_replay_byte_length: u64,
+    quotient_transform_byte_length: u64,
+    aggregate_source_byte_length: u64,
+}
+
+impl RowCodeWhirExternalMemoryReadTraffic {
+    fn total_byte_length(self) -> Option<u64> {
+        self.opened_polynomial_replay_byte_length
+            .checked_add(self.quotient_transform_byte_length)?
+            .checked_add(self.aggregate_source_byte_length)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RowCodeWhirExternalMemoryTransactionTraffic {
+    initialization_count: u64,
+    opened_polynomial_replay_count: u64,
+    quotient_transform_count: u64,
+    pre_retained_deletion_count: u64,
+    aggregate_source_count: u64,
+}
+
+impl RowCodeWhirExternalMemoryTransactionTraffic {
+    fn total_count(self) -> Option<u64> {
+        self.initialization_count
+            .checked_add(self.opened_polynomial_replay_count)?
+            .checked_add(self.quotient_transform_count)?
+            .checked_add(self.pre_retained_deletion_count)?
+            .checked_add(self.aggregate_source_count)
+    }
 }
 
 const MAXIMUM_PACKED_REPLAY_OBJECT_BYTE_LENGTH: u64 =
@@ -1490,8 +1526,9 @@ impl RowCodeWhirGenerationStoragePlan {
             u64::from(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH);
         let mut object_plans = Vec::new();
         let mut maximum_total_written_byte_length = 0_u64;
-        let mut maximum_total_read_byte_length = 0_u64;
-        let mut maximum_transaction_count = 1_u64;
+        let mut opened_polynomial_replay_read_byte_length = 0_u64;
+        let initialization_transaction_count = 1_u64;
+        let mut maximum_transaction_count = initialization_transaction_count;
 
         let ordered_auxiliary_columns = ordered_integer_lift_auxiliary_column_ordinals(variant)
             .map_err(CommonProofGenerationInitializationError::Prover)?;
@@ -1676,7 +1713,7 @@ impl RowCodeWhirGenerationStoragePlan {
             &mut object_plans,
             &mut opened_polynomial_plans,
             &mut maximum_total_written_byte_length,
-            &mut maximum_total_read_byte_length,
+            &mut opened_polynomial_replay_read_byte_length,
             &mut maximum_transaction_count,
         )?;
         if opened_polynomial_plans
@@ -1689,6 +1726,11 @@ impl RowCodeWhirGenerationStoragePlan {
                 CommonProofProverError::InvalidColumn,
             ));
         }
+        let opened_polynomial_replay_transaction_count = maximum_transaction_count
+            .checked_sub(initialization_transaction_count)
+            .ok_or(CommonProofGenerationInitializationError::StoragePlan(
+                ProofExternalMemoryError::InvalidPlan,
+            ))?;
         let replay_object_plan_count = object_plans.len();
         let evaluation_domain = construction_plan
             .quotient_computation_evaluation_domain(relation_context)
@@ -1783,16 +1825,6 @@ impl RowCodeWhirGenerationStoragePlan {
             .ok_or(CommonProofGenerationInitializationError::StoragePlan(
                 ProofExternalMemoryError::ResourceLimitExceeded,
             ))?;
-        maximum_total_read_byte_length = maximum_total_read_byte_length
-            .checked_add(quotient_transform_storage_plan.total_read_byte_length)
-            .ok_or(CommonProofGenerationInitializationError::StoragePlan(
-                ProofExternalMemoryError::ResourceLimitExceeded,
-            ))?;
-        maximum_transaction_count = maximum_transaction_count
-            .checked_add(quotient_transform_storage_plan.transaction_count_excluding_deletions)
-            .ok_or(CommonProofGenerationInitializationError::StoragePlan(
-                ProofExternalMemoryError::ResourceLimitExceeded,
-            ))?;
         object_plans.extend_from_slice(&quotient_transform_storage_plan.object_plans);
         let pre_retained_deletion_transaction_count = u64::try_from(
             object_plans
@@ -1806,12 +1838,6 @@ impl RowCodeWhirGenerationStoragePlan {
                 ProofExternalMemoryError::ResourceLimitExceeded,
             )
         })?;
-        maximum_transaction_count = maximum_transaction_count
-            .checked_add(pre_retained_deletion_transaction_count)
-            .ok_or(CommonProofGenerationInitializationError::StoragePlan(
-                ProofExternalMemoryError::ResourceLimitExceeded,
-            ))?;
-
         let aggregate_pcs =
             aggregate_wide_pcs_for_construction_plan(construction_plan).map_err(|_| {
                 CommonProofGenerationInitializationError::Prover(
@@ -1850,16 +1876,30 @@ impl RowCodeWhirGenerationStoragePlan {
             .ok_or(CommonProofGenerationInitializationError::StoragePlan(
                 ProofExternalMemoryError::ResourceLimitExceeded,
             ))?;
-        maximum_total_read_byte_length = maximum_total_read_byte_length
-            .checked_add(aggregate_external_memory_plan.maximum_total_read_byte_length())
+        let external_memory_read_traffic = RowCodeWhirExternalMemoryReadTraffic {
+            opened_polynomial_replay_byte_length: opened_polynomial_replay_read_byte_length,
+            quotient_transform_byte_length: quotient_transform_storage_plan.total_read_byte_length,
+            aggregate_source_byte_length: aggregate_external_memory_plan
+                .maximum_total_read_byte_length(),
+        };
+        let maximum_total_read_byte_length = external_memory_read_traffic
+            .total_byte_length()
             .ok_or(CommonProofGenerationInitializationError::StoragePlan(
                 ProofExternalMemoryError::ResourceLimitExceeded,
             ))?;
-        maximum_transaction_count = maximum_transaction_count
-            .checked_add(aggregate_external_memory_plan.maximum_transaction_count())
-            .ok_or(CommonProofGenerationInitializationError::StoragePlan(
+        let external_memory_transaction_traffic = RowCodeWhirExternalMemoryTransactionTraffic {
+            initialization_count: initialization_transaction_count,
+            opened_polynomial_replay_count: opened_polynomial_replay_transaction_count,
+            quotient_transform_count: quotient_transform_storage_plan
+                .transaction_count_excluding_deletions,
+            pre_retained_deletion_count: pre_retained_deletion_transaction_count,
+            aggregate_source_count: aggregate_external_memory_plan.maximum_transaction_count(),
+        };
+        let maximum_transaction_count = external_memory_transaction_traffic.total_count().ok_or(
+            CommonProofGenerationInitializationError::StoragePlan(
                 ProofExternalMemoryError::ResourceLimitExceeded,
-            ))?;
+            ),
+        )?;
         for object_plan in aggregate_external_memory_plan.into_object_plans() {
             object_plans.push(
                 ProofExternalMemoryObjectPlan::new_with_maximum_append_count(
@@ -1922,6 +1962,8 @@ impl RowCodeWhirGenerationStoragePlan {
         .map_err(CommonProofGenerationInitializationError::StoragePlan)?;
         Ok(Self {
             external_memory_plan,
+            external_memory_read_traffic,
+            external_memory_transaction_traffic,
             relation_polynomial_shapes,
             auxiliary_reconstruction_catalog,
             opened_polynomial_plans,
@@ -2187,6 +2229,32 @@ pub(in crate::bgv::proof_suite) fn planned_row_code_whir_external_memory_require
         relation_context,
         &reversed_column_bindings,
     )?;
+    if storage_plan
+        .external_memory_read_traffic
+        .total_byte_length()
+        != Some(
+            storage_plan
+                .external_memory_plan
+                .maximum_total_read_byte_length(),
+        )
+    {
+        return Err(CommonProofGenerationInitializationError::StoragePlan(
+            ProofExternalMemoryError::InvalidPlan,
+        ));
+    }
+    if storage_plan
+        .external_memory_transaction_traffic
+        .total_count()
+        != Some(
+            storage_plan
+                .external_memory_plan
+                .maximum_transaction_count(),
+        )
+    {
+        return Err(CommonProofGenerationInitializationError::StoragePlan(
+            ProofExternalMemoryError::InvalidPlan,
+        ));
+    }
     CommonProofExternalMemoryRequirement::from_external_memory_plan(
         &storage_plan.external_memory_plan,
     )
@@ -8219,20 +8287,56 @@ mod tests {
             variant.top_count(),
         )
         .expect("the selected same-secret construction plan derives");
-        let requirement = planned_row_code_whir_external_memory_requirement(
+        let reversed_column_bindings = relation_reversed_column_bindings(variant)
+            .expect("the selected same-secret reversed-column bindings derive");
+        let storage_plan = RowCodeWhirGenerationStoragePlan::new(
             &construction_plan,
             variant,
             artifact.checked_context(),
+            &reversed_column_bindings,
         )
         .expect("the selected same-secret storage plan stays within absolute custody bounds");
+        let requirement = CommonProofExternalMemoryRequirement::from_external_memory_plan(
+            &storage_plan.external_memory_plan,
+        )
+        .expect("the selected same-secret external-memory requirement derives");
+        let read_traffic = storage_plan.external_memory_read_traffic;
+        let derived_total_read_byte_length = read_traffic
+            .total_byte_length()
+            .expect("the selected same-secret read traffic sums without overflow");
+        let derived_quotient_transform_read_byte_length = storage_plan
+            .quotient_transform_plans
+            .values()
+            .try_fold(0_u64, |total_byte_length, transform_plan| {
+                total_byte_length.checked_add(transform_plan.total_read_byte_length())
+            })
+            .expect("the quotient-transform read traffic sums without overflow");
+        let transaction_traffic = storage_plan.external_memory_transaction_traffic;
+        let derived_transaction_count = transaction_traffic
+            .total_count()
+            .expect("the selected same-secret transaction traffic sums without overflow");
 
         assert_eq!(requirement.step_count(), 14_276);
         assert_eq!(requirement.distinct_physical_object_count(), 29);
         assert_eq!(requirement.object_lifecycle_count(), 10_231);
         assert_eq!(requirement.peak_stored_byte_length(), 849_756_760);
         assert_eq!(requirement.total_written_byte_length(), 6_219_960_920);
-        assert_eq!(requirement.total_read_byte_length(), 30_497_655_240);
-        assert_eq!(requirement.transaction_count(), 67_156);
+        assert!(read_traffic.opened_polynomial_replay_byte_length > 0);
+        assert!(read_traffic.aggregate_source_byte_length > 0);
+        assert_eq!(
+            read_traffic.quotient_transform_byte_length,
+            derived_quotient_transform_read_byte_length,
+        );
+        assert_eq!(
+            requirement.total_read_byte_length(),
+            derived_total_read_byte_length,
+        );
+        assert_eq!(transaction_traffic.initialization_count, 1);
+        assert!(transaction_traffic.opened_polynomial_replay_count > 0);
+        assert!(transaction_traffic.quotient_transform_count > 0);
+        assert!(transaction_traffic.pre_retained_deletion_count > 0);
+        assert!(transaction_traffic.aggregate_source_count > 0);
+        assert_eq!(requirement.transaction_count(), derived_transaction_count);
         assert_eq!(requirement.local_record_seal_invocation_count(), 31_518);
         assert_eq!(
             requirement.local_record_sealed_plaintext_byte_length(),

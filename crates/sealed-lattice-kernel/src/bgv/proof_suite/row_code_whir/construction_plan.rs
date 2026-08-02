@@ -6460,7 +6460,7 @@ mod tests {
 
         assert_eq!(
             ROW_CODE_WHIR_CONSTRUCTION_PLAN_IDENTITY_ENCODING_VERSION,
-            11
+            12
         );
         assert_eq!(expected_prefix.len(), 84);
         assert_eq!(&identity[..expected_prefix.len()], expected_prefix,);
