@@ -64,6 +64,13 @@ Works today:
   and proof-size ledger. These are contiguous commitment-row stripes in
   canonical leaf order, with 64-byte chaining values; they are not
   subgroup-coset DFT stripes.
+- Phase-column commitments retain their original whole-column SHAKE leaves and
+  canonical ascending Merkle coordinates, but now evaluate each row through
+  `2^19`-column subgroup-coset lanes. A five-level digest-plane carry restores
+  each group of 32 interleaved coordinates before the upper tree consumes it.
+  Focused production-schedule tests prove exact row-value, private-salt, root,
+  compact-frontier, and opening-coordinate parity with the prior natural-order
+  commitment bytes.
 - The selected same-secret verifier census and theorem certificate
   independently derive all 23 Merkle opening classes from the canonical
   construction and supplied-opening plans. Every class uses a
@@ -181,13 +188,17 @@ Works today:
   overhead. It now also accounts for the private-salt key, adapter state, KMAC
   and row-conversion workspaces, `545,664` transported salt bytes, the
   `750,312`-byte proof-wide uniqueness set, and the three materialized direct
-  commitments. The exact static maximum is `556,576,413` bytes during aggregate-source
-  materialization: `153,923,229` bytes above the nominal target,
-  `47,403,363` bytes below the automatic ceiling, and `114,512,227` bytes below
-  the hard WebAssembly bound. Bound-tree authentication uses one in-place DFT
-  and one evaluated stripe instead of retaining complete evaluated columns;
-  its complete static phase row is `289,681,611` bytes. These are conservative
-  production-derived live-set bounds, not native or browser measurements.
+  commitments. The phase-commitment row includes its live `84,934,656`-byte
+  replay reader and coordinate-bearing Merkle metadata and totals
+  `504,267,459` bytes. The exact static maximum remains aggregate-source
+  materialization at `556,576,629` bytes: `153,923,445` bytes above the nominal
+  target, `47,403,147` bytes below the automatic ceiling, and `114,512,011`
+  bytes below the hard WebAssembly bound. This is not a native or browser
+  measurement. Bound-tree authentication uses
+  one in-place DFT and one evaluated stripe instead of retaining complete
+  evaluated columns; its complete static phase row is `289,681,827` bytes.
+  These are conservative production-derived live-set bounds, not native or
+  browser measurements.
 - The production VSS prerequisite now has a dedicated guarded generation and
   transported-verification test. It durably seals each canonical safe boundary,
   rejects stale or malformed retained state, and resumes by deterministic
@@ -197,17 +208,19 @@ Works today:
   peak process-tree RSS was `3,554,246,656` bytes and the guard did not report a
   memory violation. A later focused VSS diagnostic generated the browser-owned
   setup authority and reached base-tree materialization before being stopped
-  after `9,195,256` ms. The selected VSS
-  geometry has 1,128 base rows and 16 commitment stripes, while the current
-  builder repeats a complete `2^24`-point DFT for every row in every stripe:
-  18,048 full transforms before auxiliary or quotient work. Peak process-tree
-  RSS was `3,541,450,752` bytes, and the guard confirmed no memory-limit
-  violation. The phase commitment also keeps one 200-byte incremental SHAKE
-  state for each of the `2^20` encoded columns in a stripe, or `209,715,200`
-  bytes before other live data. Its Merkle frontier is already logarithmic;
-  changing the tree container alone does not remove either cost. One
-  authenticated pre-base checkpoint remains resumable. This runner has not
-  completed a production proof.
+  after `9,195,256` ms. Peak process-tree RSS was `3,541,450,752` bytes, and the
+  guard confirmed no memory-limit violation. That diagnostic used the retired
+  repeated-full-transform schedule. The selected VSS base geometry still has
+  1,128 rows and 32 lanes, but one pass now performs 36,096 `2^19`-point lane
+  DFTs rather than 18,048 complete `2^24`-point DFTs. Production accounting
+  derives `179,784,646,656` butterflies, `18,924,699,648` coset
+  multiplications and value deliveries, zero coefficient folds, a
+  `104,857,600`-byte SHAKE-state lane, five `33,554,432`-byte digest planes,
+  and a `4,194,304`-byte row buffer. Its algorithm live set is `276,824,064`
+  bytes before common phase categories. Small-geometry tests reproduce the
+  exact old root and compact frontier. One authenticated pre-base checkpoint remains
+  available for current decoder-and-verifier resume validation, but the focused
+  guarded VSS prerequisite and any complete proof run have not been resumed.
 
 Not yet:
 

@@ -119,6 +119,7 @@ impl StreamingColumnHasher {
         )
     }
 
+    #[cfg(test)]
     fn new_stripe(
         expected_row_count: usize,
         encoded_column_count: usize,
@@ -146,11 +147,64 @@ impl StreamingColumnHasher {
             return Err("column commitment stripe is outside the encoded width".to_owned());
         }
 
+        Self::new_for_column_indices(
+            expected_row_count,
+            encoded_column_count,
+            stripe_start_column_index..stripe_end_column_index,
+            private_leaf_salt,
+        )
+    }
+
+    fn new_interleaved_lane(
+        expected_row_count: usize,
+        encoded_column_count: usize,
+        lane_count: usize,
+        lane_ordinal: usize,
+        private_leaf_salt: Option<&PrivateColumnLeafSaltContext>,
+    ) -> Result<Self, String> {
+        if lane_count == 0
+            || !lane_count.is_power_of_two()
+            || !encoded_column_count.is_multiple_of(lane_count)
+            || lane_ordinal >= lane_count
+        {
+            return Err("column commitment interleaved lane geometry is invalid".to_owned());
+        }
+        let lane_column_count = encoded_column_count / lane_count;
+        Self::new_for_column_indices(
+            expected_row_count,
+            encoded_column_count,
+            (0..lane_column_count)
+                .map(|within_lane_index| within_lane_index * lane_count + lane_ordinal),
+            private_leaf_salt,
+        )
+    }
+
+    fn new_for_column_indices(
+        expected_row_count: usize,
+        encoded_column_count: usize,
+        column_indices: impl ExactSizeIterator<Item = usize>,
+        private_leaf_salt: Option<&PrivateColumnLeafSaltContext>,
+    ) -> Result<Self, String> {
+        if expected_row_count == 0
+            || !encoded_column_count.is_power_of_two()
+            || column_indices.len() == 0
+            || column_indices.len() > encoded_column_count
+        {
+            return Err("column commitment coordinate geometry is invalid".to_owned());
+        }
+
         let mut states = Vec::new();
         states
-            .try_reserve_exact(stripe_column_count)
+            .try_reserve_exact(column_indices.len())
             .map_err(|_| "column commitment stripe state allocation failed".to_owned())?;
-        for column_index in stripe_start_column_index..stripe_end_column_index {
+        let mut previous_column_index = None;
+        for column_index in column_indices {
+            if column_index >= encoded_column_count
+                || previous_column_index.is_some_and(|previous| previous >= column_index)
+            {
+                return Err("column commitment coordinates are not canonical".to_owned());
+            }
+            previous_column_index = Some(column_index);
             let salt = private_leaf_salt
                 .map(|context| context.salt(encoded_column_count, expected_row_count, column_index))
                 .transpose()?;
@@ -299,6 +353,7 @@ impl StreamingColumnHasher {
 /// Builds the canonical column commitment with a bounded number of live
 /// SHAKE256 states. The caller replays the encoded rows once per stripe; the
 /// stripe width is an implementation choice and does not enter the root.
+#[cfg(test)]
 pub(super) struct StripedColumnCommitmentBuilder {
     expected_row_count: usize,
     encoded_column_count: usize,
@@ -309,6 +364,7 @@ pub(super) struct StripedColumnCommitmentBuilder {
     merkle_builder: StreamingMerkleBuilder,
 }
 
+#[cfg(test)]
 impl StripedColumnCommitmentBuilder {
     #[cfg(test)]
     pub(super) fn new(
@@ -476,6 +532,492 @@ impl StripedColumnCommitmentBuilder {
     }
 }
 
+/// Builds the canonical ascending column commitment from interleaved DFT
+/// lanes.
+///
+/// A lane contains columns `r, r + lane_count, ...`. Once each lane digest is
+/// available, one digest plane per occupied low tree level carries the
+/// interleaved leaves back into their original consecutive blocks. The upper
+/// tree receives those completed blocks in ascending order, so the root and
+/// compact frontier are byte-identical to direct natural-order construction.
+pub(super) struct InterleavedColumnCommitmentBuilder {
+    expected_row_count: usize,
+    encoded_column_count: usize,
+    lane_column_count: usize,
+    lane_count: usize,
+    next_lane_ordinal: usize,
+    private_leaf_salt: Option<PrivateColumnLeafSaltContext>,
+    active_lane_hasher: Option<StreamingColumnHasher>,
+    opened_column_indices: Vec<usize>,
+    lower_subtree_digest_planes: Vec<Option<Vec<ColumnDigest>>>,
+    lower_frontier_by_level_and_index: Vec<(usize, usize, ColumnDigest)>,
+    expected_frontier_node_count: usize,
+    upper_merkle_builder: StreamingMerkleBuilder,
+}
+
+impl InterleavedColumnCommitmentBuilder {
+    pub(super) fn new_with_opened_columns_and_private_salt(
+        expected_row_count: usize,
+        encoded_column_count: usize,
+        maximum_lane_column_count: usize,
+        opened_column_indices: &[usize],
+        private_leaf_salt: Option<PrivateColumnLeafSaltContext>,
+    ) -> Result<Self, String> {
+        if expected_row_count == 0
+            || !encoded_column_count.is_power_of_two()
+            || maximum_lane_column_count == 0
+            || !maximum_lane_column_count.is_power_of_two()
+        {
+            return Err("interleaved column commitment geometry is invalid".to_owned());
+        }
+        let expected_frontier_node_count = canonical_frontier_node_count_from_sorted_indices(
+            opened_column_indices,
+            encoded_column_count,
+        )?;
+        let lane_column_count = maximum_lane_column_count.min(encoded_column_count);
+        let lane_count = encoded_column_count / lane_column_count;
+        if !lane_count.is_power_of_two() {
+            return Err("interleaved column commitment lane count is invalid".to_owned());
+        }
+        let mut opened_columns = Vec::new();
+        opened_columns
+            .try_reserve_exact(opened_column_indices.len())
+            .map_err(|_| "interleaved opening-index allocation failed".to_owned())?;
+        opened_columns.extend_from_slice(opened_column_indices);
+        let mut opened_block_indices = Vec::new();
+        opened_block_indices
+            .try_reserve_exact(opened_column_indices.len())
+            .map_err(|_| "interleaved opened-block allocation failed".to_owned())?;
+        for column_index in opened_column_indices {
+            let block_index = *column_index / lane_count;
+            if opened_block_indices.last().copied() != Some(block_index) {
+                opened_block_indices.push(block_index);
+            }
+        }
+        let upper_merkle_builder =
+            StreamingMerkleBuilder::new(lane_column_count, &opened_block_indices)?;
+        let active_lane_hasher = StreamingColumnHasher::new_interleaved_lane(
+            expected_row_count,
+            encoded_column_count,
+            lane_count,
+            0,
+            private_leaf_salt.as_ref(),
+        )?;
+        let lower_tree_depth = lane_count.ilog2() as usize;
+        let mut lower_subtree_digest_planes = Vec::new();
+        lower_subtree_digest_planes
+            .try_reserve_exact(lower_tree_depth)
+            .map_err(|_| "interleaved digest-plane catalog allocation failed".to_owned())?;
+        lower_subtree_digest_planes.resize_with(lower_tree_depth, || None);
+        let mut lower_frontier_by_level_and_index = Vec::new();
+        lower_frontier_by_level_and_index
+            .try_reserve_exact(expected_frontier_node_count)
+            .map_err(|_| "interleaved frontier allocation failed".to_owned())?;
+
+        Ok(Self {
+            expected_row_count,
+            encoded_column_count,
+            lane_column_count,
+            lane_count,
+            next_lane_ordinal: 0,
+            private_leaf_salt,
+            active_lane_hasher: Some(active_lane_hasher),
+            opened_column_indices: opened_columns,
+            lower_subtree_digest_planes,
+            lower_frontier_by_level_and_index,
+            expected_frontier_node_count,
+            upper_merkle_builder,
+        })
+    }
+
+    pub(super) const fn lane_count(&self) -> usize {
+        self.lane_count
+    }
+
+    pub(super) const fn lane_column_count(&self) -> usize {
+        self.lane_column_count
+    }
+
+    pub(super) const fn active_lane_ordinal(&self) -> Option<usize> {
+        if self.active_lane_hasher.is_some() {
+            Some(self.next_lane_ordinal)
+        } else {
+            None
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn absorb_active_lane_row(
+        &mut self,
+        row_index: usize,
+        encoded_row_lane: &[Goldilocks],
+    ) -> Result<(), String> {
+        let hasher = self
+            .active_lane_hasher
+            .as_mut()
+            .ok_or_else(|| "interleaved column commitment has no active lane".to_owned())?;
+        if row_index != hasher.absorbed_row_count {
+            return Err(format!(
+                "interleaved column commitment received row {row_index}, expected {}",
+                hasher.absorbed_row_count
+            ));
+        }
+        hasher.absorb_row(encoded_row_lane)
+    }
+
+    pub(super) fn absorb_active_lane_base_row(
+        &mut self,
+        row_index: usize,
+        encoded_row_lane: &[ProofBaseFieldElement],
+    ) -> Result<(), String> {
+        let hasher = self
+            .active_lane_hasher
+            .as_mut()
+            .ok_or_else(|| "interleaved column commitment has no active lane".to_owned())?;
+        if row_index != hasher.absorbed_row_count {
+            return Err(format!(
+                "interleaved column commitment received row {row_index}, expected {}",
+                hasher.absorbed_row_count
+            ));
+        }
+        hasher.absorb_base_row(encoded_row_lane)
+    }
+
+    /// Completes one interleaved lane. Returns `true` only after every natural
+    /// column entered the original binary Merkle tree.
+    pub(super) fn complete_active_lane(&mut self) -> Result<bool, String> {
+        let hasher = self
+            .active_lane_hasher
+            .take()
+            .ok_or_else(|| "interleaved column commitment has no active lane".to_owned())?;
+        let lane_ordinal = self.next_lane_ordinal;
+        if lane_ordinal >= self.lane_count {
+            return Err("interleaved column commitment lane ordinal overflowed".to_owned());
+        }
+        let lower_tree_depth = self.lower_subtree_digest_planes.len();
+        let completed_lower_level_count = lane_ordinal.trailing_ones() as usize;
+        if completed_lower_level_count > lower_tree_depth {
+            return Err("interleaved column commitment carry depth is invalid".to_owned());
+        }
+        for level in 0..completed_lower_level_count {
+            let plane = self
+                .lower_subtree_digest_planes
+                .get(level)
+                .and_then(Option::as_ref)
+                .ok_or_else(|| "interleaved column commitment carry plane is absent".to_owned())?;
+            if plane.len() != self.lane_column_count {
+                return Err(
+                    "interleaved column commitment carry plane has the wrong size".to_owned(),
+                );
+            }
+        }
+        let output_level =
+            (completed_lower_level_count < lower_tree_depth).then_some(completed_lower_level_count);
+        if output_level.is_some_and(|level| {
+            self.lower_subtree_digest_planes
+                .get(level)
+                .is_some_and(Option::is_some)
+        }) {
+            return Err("interleaved column commitment output plane is occupied".to_owned());
+        }
+        let mut output_plane = output_level
+            .map(|_| allocate_digest_plane(self.lane_column_count))
+            .transpose()?;
+        let lane_count = self.lane_count;
+        let lane_column_count = self.lane_column_count;
+        let opened_column_indices = &self.opened_column_indices;
+        let lower_subtree_digest_planes = &self.lower_subtree_digest_planes;
+        let lower_frontier = &mut self.lower_frontier_by_level_and_index;
+        let upper_merkle_builder = &mut self.upper_merkle_builder;
+        let mut block_index = 0_usize;
+        hasher.finalize_digests(|digest| {
+            if block_index >= lane_column_count {
+                return Err(
+                    "interleaved column commitment emitted too many lane digests".to_owned(),
+                );
+            }
+            let mut carried_digest = digest;
+            for (level, digest_plane) in lower_subtree_digest_planes
+                .iter()
+                .take(completed_lower_level_count)
+                .enumerate()
+            {
+                let left_digest = digest_plane
+                    .as_ref()
+                    .and_then(|plane| plane.get(block_index))
+                    .copied()
+                    .ok_or_else(|| {
+                        "interleaved column commitment left digest is absent".to_owned()
+                    })?;
+                capture_interleaved_frontier_sibling(
+                    opened_column_indices,
+                    lane_count,
+                    block_index,
+                    lane_ordinal,
+                    level,
+                    left_digest,
+                    carried_digest,
+                    lower_frontier,
+                )?;
+                carried_digest = hash_merkle_parent(&left_digest, &carried_digest);
+            }
+            if let Some(plane) = output_plane.as_mut() {
+                *plane.get_mut(block_index).ok_or_else(|| {
+                    "interleaved column commitment output coordinate is absent".to_owned()
+                })? = carried_digest;
+            } else {
+                upper_merkle_builder.push_leaf(block_index, carried_digest)?;
+            }
+            block_index += 1;
+            Ok(())
+        })?;
+        if block_index != lane_column_count {
+            return Err("interleaved column commitment emitted the wrong lane width".to_owned());
+        }
+        for level in 0..completed_lower_level_count {
+            if let Some(mut completed_plane) = self.lower_subtree_digest_planes[level].take() {
+                completed_plane.fill([0_u64; COLUMN_DIGEST_WORD_LENGTH]);
+            }
+        }
+        if let Some(level) = output_level {
+            self.lower_subtree_digest_planes[level] = output_plane;
+        }
+
+        self.next_lane_ordinal = self
+            .next_lane_ordinal
+            .checked_add(1)
+            .ok_or_else(|| "interleaved column commitment lane ordinal overflowed".to_owned())?;
+        if self.next_lane_ordinal == self.lane_count {
+            if self.lower_subtree_digest_planes.iter().any(Option::is_some) {
+                return Err(
+                    "interleaved column commitment retained a completed carry plane".to_owned(),
+                );
+            }
+            return Ok(true);
+        }
+        self.active_lane_hasher = Some(StreamingColumnHasher::new_interleaved_lane(
+            self.expected_row_count,
+            self.encoded_column_count,
+            self.lane_count,
+            self.next_lane_ordinal,
+            self.private_leaf_salt.as_ref(),
+        )?);
+        Ok(false)
+    }
+
+    pub(super) fn finish_commitment(self) -> Result<StreamingColumnCommitment, String> {
+        if self.active_lane_hasher.is_some()
+            || self.next_lane_ordinal != self.lane_count
+            || self.lower_subtree_digest_planes.iter().any(Option::is_some)
+        {
+            return Err("interleaved column commitment is incomplete".to_owned());
+        }
+        let lower_tree_depth = self.lane_count.ilog2() as usize;
+        let upper = self.upper_merkle_builder.finish_with_coordinates()?;
+        let mut frontier_by_level_and_index = self.lower_frontier_by_level_and_index;
+        frontier_by_level_and_index
+            .try_reserve_exact(upper.frontier_by_level_and_index.len())
+            .map_err(|_| "interleaved result frontier allocation failed".to_owned())?;
+        frontier_by_level_and_index.extend(
+            upper
+                .frontier_by_level_and_index
+                .into_iter()
+                .map(|(level, index, digest)| (level + lower_tree_depth, index, digest)),
+        );
+        frontier_by_level_and_index.sort_unstable_by_key(|(level, index, _)| (*level, *index));
+        if frontier_by_level_and_index.len() != self.expected_frontier_node_count {
+            return Err("interleaved column commitment frontier has the wrong size".to_owned());
+        }
+        Ok(StreamingColumnCommitment {
+            root: upper.root,
+            frontier: frontier_by_level_and_index
+                .into_iter()
+                .map(|(_, _, digest)| digest)
+                .collect(),
+        })
+    }
+
+    pub(super) fn maximum_hash_state_byte_length(&self) -> Result<usize, String> {
+        StreamingColumnHasher::exact_state_byte_length(self.lane_column_count)
+            .ok_or_else(|| "interleaved hash-state byte length overflowed".to_owned())
+    }
+
+    pub(super) fn maximum_digest_plane_byte_length(&self) -> Result<usize, String> {
+        self.lane_column_count
+            .checked_mul(self.lane_count.ilog2() as usize)
+            .and_then(|digest_count| digest_count.checked_mul(COLUMN_DIGEST_BYTE_LENGTH))
+            .ok_or_else(|| "interleaved digest-plane byte length overflowed".to_owned())
+    }
+
+    pub(super) fn metadata_allocation_byte_length(&self) -> Result<usize, String> {
+        self.opened_column_indices
+            .capacity()
+            .checked_mul(size_of::<usize>())
+            .and_then(|total| {
+                self.lower_subtree_digest_planes
+                    .capacity()
+                    .checked_mul(size_of::<Option<Vec<ColumnDigest>>>())
+                    .and_then(|byte_length| total.checked_add(byte_length))
+            })
+            .and_then(|total| {
+                self.lower_frontier_by_level_and_index
+                    .capacity()
+                    .checked_mul(size_of::<(usize, usize, ColumnDigest)>())
+                    .and_then(|byte_length| total.checked_add(byte_length))
+            })
+            .and_then(|total| {
+                self.upper_merkle_builder
+                    .opened_columns
+                    .capacity()
+                    .checked_mul(size_of::<usize>())
+                    .and_then(|byte_length| total.checked_add(byte_length))
+            })
+            .and_then(|total| {
+                self.upper_merkle_builder
+                    .stack
+                    .capacity()
+                    .checked_mul(size_of::<StreamingMerkleNode>())
+                    .and_then(|byte_length| total.checked_add(byte_length))
+            })
+            .and_then(|total| {
+                self.upper_merkle_builder
+                    .frontier_by_level_and_index
+                    .capacity()
+                    .checked_mul(size_of::<(usize, usize, ColumnDigest)>())
+                    .and_then(|byte_length| total.checked_add(byte_length))
+            })
+            .ok_or_else(|| "interleaved commitment metadata byte length overflowed".to_owned())
+    }
+}
+
+/// Maximum heap payload retained by the interleaved Merkle scheduler apart
+/// from column-hash states, digest planes, and transported opening values.
+///
+/// The lower frontier reserves the complete canonical frontier because the
+/// split between low and upper levels depends on the sampled coordinates. The
+/// upper builder simultaneously retains its own coordinate-bearing frontier,
+/// opened-block indices, and logarithmic stack.
+pub(super) fn maximum_interleaved_commitment_metadata_byte_length(
+    encoded_column_count: usize,
+    maximum_lane_column_count: usize,
+    opened_column_count: usize,
+    opened_block_count: usize,
+    complete_frontier_node_count: usize,
+    upper_frontier_node_count: usize,
+) -> Result<usize, String> {
+    if !encoded_column_count.is_power_of_two()
+        || maximum_lane_column_count == 0
+        || !maximum_lane_column_count.is_power_of_two()
+        || opened_column_count > encoded_column_count
+    {
+        return Err("interleaved commitment metadata geometry is invalid".to_owned());
+    }
+    let lane_column_count = maximum_lane_column_count.min(encoded_column_count);
+    let lane_count = encoded_column_count / lane_column_count;
+    if !lane_count.is_power_of_two() {
+        return Err("interleaved commitment metadata lane count is invalid".to_owned());
+    }
+    if (opened_column_count == 0) != (opened_block_count == 0)
+        || opened_block_count > opened_column_count.min(lane_column_count)
+    {
+        return Err("interleaved commitment opened-block count is invalid".to_owned());
+    }
+    let opened_index_byte_length = opened_column_count
+        .checked_add(opened_block_count)
+        .and_then(|count| count.checked_mul(size_of::<usize>()))
+        .ok_or_else(|| "interleaved commitment opening-index liveness overflowed".to_owned())?;
+    let frontier_byte_length = complete_frontier_node_count
+        .checked_add(upper_frontier_node_count)
+        .and_then(|count| count.checked_mul(size_of::<(usize, usize, ColumnDigest)>()))
+        .ok_or_else(|| "interleaved commitment frontier liveness overflowed".to_owned())?;
+    let stack_byte_length = (lane_column_count.ilog2() as usize)
+        .checked_add(1)
+        .and_then(|count| count.checked_mul(size_of::<StreamingMerkleNode>()))
+        .ok_or_else(|| "interleaved commitment stack liveness overflowed".to_owned())?;
+    let plane_catalog_byte_length = (lane_count.ilog2() as usize)
+        .checked_mul(size_of::<Option<Vec<ColumnDigest>>>())
+        .ok_or_else(|| "interleaved commitment plane-catalog liveness overflowed".to_owned())?;
+    opened_index_byte_length
+        .checked_add(frontier_byte_length)
+        .and_then(|total| total.checked_add(stack_byte_length))
+        .and_then(|total| total.checked_add(plane_catalog_byte_length))
+        .ok_or_else(|| "interleaved commitment metadata liveness overflowed".to_owned())
+}
+
+fn allocate_digest_plane(column_count: usize) -> Result<Vec<ColumnDigest>, String> {
+    let mut plane = Vec::new();
+    plane
+        .try_reserve_exact(column_count)
+        .map_err(|_| "interleaved digest-plane allocation failed".to_owned())?;
+    plane.resize(column_count, [0_u64; COLUMN_DIGEST_WORD_LENGTH]);
+    Ok(plane)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn capture_interleaved_frontier_sibling(
+    opened_column_indices: &[usize],
+    lane_count: usize,
+    block_index: usize,
+    lane_ordinal: usize,
+    level: usize,
+    left_digest: ColumnDigest,
+    right_digest: ColumnDigest,
+    frontier_by_level_and_index: &mut Vec<(usize, usize, ColumnDigest)>,
+) -> Result<(), String> {
+    let subtree_column_count = 1_usize
+        .checked_shl(
+            u32::try_from(level)
+                .map_err(|_| "interleaved frontier level exceeds u32".to_owned())?,
+        )
+        .ok_or_else(|| "interleaved frontier subtree size overflowed".to_owned())?;
+    let right_offset = lane_ordinal
+        .checked_add(1)
+        .and_then(|end| end.checked_sub(subtree_column_count))
+        .ok_or_else(|| "interleaved frontier right coordinate underflowed".to_owned())?;
+    let left_offset = right_offset
+        .checked_sub(subtree_column_count)
+        .ok_or_else(|| "interleaved frontier left coordinate underflowed".to_owned())?;
+    let block_start = block_index
+        .checked_mul(lane_count)
+        .ok_or_else(|| "interleaved frontier block coordinate overflowed".to_owned())?;
+    let left_start = block_start
+        .checked_add(left_offset)
+        .ok_or_else(|| "interleaved frontier left coordinate overflowed".to_owned())?;
+    let right_start = block_start
+        .checked_add(right_offset)
+        .ok_or_else(|| "interleaved frontier right coordinate overflowed".to_owned())?;
+    let left_contains_opening = sorted_indices_intersect_range(
+        opened_column_indices,
+        left_start,
+        left_start + subtree_column_count,
+    );
+    let right_contains_opening = sorted_indices_intersect_range(
+        opened_column_indices,
+        right_start,
+        right_start + subtree_column_count,
+    );
+    if left_contains_opening != right_contains_opening {
+        let (sibling_start, sibling_digest) = if left_contains_opening {
+            (right_start, right_digest)
+        } else {
+            (left_start, left_digest)
+        };
+        frontier_by_level_and_index.push((level, sibling_start >> level, sibling_digest));
+    }
+    Ok(())
+}
+
+fn sorted_indices_intersect_range(
+    sorted_indices: &[usize],
+    range_start: usize,
+    range_end: usize,
+) -> bool {
+    let first_possible = sorted_indices.partition_point(|index| *index < range_start);
+    sorted_indices
+        .get(first_possible)
+        .is_some_and(|index| *index < range_end)
+}
+
 struct StreamingMerkleNode {
     level: usize,
     index: usize,
@@ -490,6 +1032,11 @@ struct StreamingMerkleBuilder {
     frontier_by_level_and_index: Vec<(usize, usize, ColumnDigest)>,
     expected_frontier_node_count: usize,
     next_leaf_index: usize,
+}
+
+struct StreamingMerkleCommitmentWithCoordinates {
+    root: ColumnDigest,
+    frontier_by_level_and_index: Vec<(usize, usize, ColumnDigest)>,
 }
 
 impl StreamingMerkleBuilder {
@@ -570,7 +1117,22 @@ impl StreamingMerkleBuilder {
         Ok(())
     }
 
-    fn finish(mut self) -> Result<StreamingColumnCommitment, String> {
+    #[cfg(test)]
+    fn finish(self) -> Result<StreamingColumnCommitment, String> {
+        let commitment = self.finish_with_coordinates()?;
+        Ok(StreamingColumnCommitment {
+            root: commitment.root,
+            frontier: commitment
+                .frontier_by_level_and_index
+                .into_iter()
+                .map(|(_, _, digest)| digest)
+                .collect(),
+        })
+    }
+
+    fn finish_with_coordinates(
+        mut self,
+    ) -> Result<StreamingMerkleCommitmentWithCoordinates, String> {
         if self.next_leaf_index != self.leaf_count
             || self.stack.len() != 1
             || self.stack[0].level != self.leaf_count.ilog2() as usize
@@ -580,21 +1142,12 @@ impl StreamingMerkleBuilder {
         }
         self.frontier_by_level_and_index
             .sort_unstable_by_key(|(level, index, _)| (*level, *index));
-        let mut frontier = Vec::new();
-        frontier
-            .try_reserve_exact(self.frontier_by_level_and_index.len())
-            .map_err(|_| "streaming Merkle result frontier allocation failed".to_owned())?;
-        frontier.extend(
-            self.frontier_by_level_and_index
-                .into_iter()
-                .map(|(_, _, digest)| digest),
-        );
-        if frontier.len() != self.expected_frontier_node_count {
+        if self.frontier_by_level_and_index.len() != self.expected_frontier_node_count {
             return Err("streaming Merkle frontier has the wrong size".to_owned());
         }
-        Ok(StreamingColumnCommitment {
+        Ok(StreamingMerkleCommitmentWithCoordinates {
             root: self.stack.pop().expect("root exists").digest,
-            frontier,
+            frontier_by_level_and_index: self.frontier_by_level_and_index,
         })
     }
 }
@@ -1098,6 +1651,47 @@ mod tests {
             .expect("complete privately salted commitment")
     }
 
+    fn build_interleaved_commitment(
+        rows: &[Vec<Goldilocks>],
+        maximum_lane_column_count: usize,
+        opened_column_indices: &[usize],
+        private_salt: Option<(&[u8; 64], &'static [u8])>,
+    ) -> StreamingColumnCommitment {
+        let mut builder =
+            InterleavedColumnCommitmentBuilder::new_with_opened_columns_and_private_salt(
+                rows.len(),
+                rows[0].len(),
+                maximum_lane_column_count,
+                opened_column_indices,
+                private_salt.map(|(private_seed, commitment_role)| {
+                    PrivateColumnLeafSaltContext::new(private_seed, commitment_role)
+                }),
+            )
+            .expect("valid interleaved commitment geometry");
+        let lane_count = builder.lane_count();
+        let lane_column_count = builder.lane_column_count();
+        while let Some(lane_ordinal) = builder.active_lane_ordinal() {
+            for (row_index, row) in rows.iter().enumerate() {
+                let lane = row
+                    .iter()
+                    .skip(lane_ordinal)
+                    .step_by(lane_count)
+                    .copied()
+                    .collect::<Vec<_>>();
+                assert_eq!(lane.len(), lane_column_count);
+                builder
+                    .absorb_active_lane_row(row_index, &lane)
+                    .expect("valid interleaved row lane");
+            }
+            builder
+                .complete_active_lane()
+                .expect("complete interleaved lane");
+        }
+        builder
+            .finish_commitment()
+            .expect("complete interleaved commitment")
+    }
+
     #[test]
     fn base_field_stripes_match_the_canonical_goldilocks_commitment_and_frontier() {
         let rows = sample_rows(7, 32);
@@ -1518,6 +2112,167 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn interleaved_lanes_preserve_natural_roots_and_compact_frontiers() {
+        for row_count in [1, 2, 7, 31] {
+            for column_count in [2, 8, 64, 256] {
+                let rows = sample_rows(row_count, column_count);
+                let opened_column_indices = (0..column_count)
+                    .filter(|column_index| {
+                        *column_index == 0
+                            || *column_index + 1 == column_count
+                            || column_index % 11 == 3
+                    })
+                    .collect::<Vec<_>>();
+                let expected =
+                    build_striped_commitment(&rows, column_count, &opened_column_indices);
+                for maximum_lane_column_count in [1, 2, 4, 16, 64, 256] {
+                    let commitment = build_interleaved_commitment(
+                        &rows,
+                        maximum_lane_column_count,
+                        &opened_column_indices,
+                        None,
+                    );
+                    assert_eq!(
+                        commitment, expected,
+                        "row count {row_count}, column count {column_count}, lane width {maximum_lane_column_count}",
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn interleaved_lanes_preserve_private_salts_and_refuse_wrong_progress() {
+        const COMMITMENT_ROLE: &[u8] = b"phase/interleaved";
+        let rows = sample_rows(19, 64);
+        let private_seed = [0x57_u8; 64];
+        let opened_column_indices = [0, 1, 7, 8, 17, 31, 32, 63];
+        let expected = build_privately_salted_striped_commitment(
+            &rows,
+            rows[0].len(),
+            &opened_column_indices,
+            &private_seed,
+            COMMITMENT_ROLE,
+        );
+        let commitment = build_interleaved_commitment(
+            &rows,
+            16,
+            &opened_column_indices,
+            Some((&private_seed, COMMITMENT_ROLE)),
+        );
+        assert_eq!(commitment, expected);
+
+        let mut builder =
+            InterleavedColumnCommitmentBuilder::new_with_opened_columns_and_private_salt(
+                rows.len(),
+                rows[0].len(),
+                16,
+                &opened_column_indices,
+                Some(PrivateColumnLeafSaltContext::new(
+                    &private_seed,
+                    COMMITMENT_ROLE,
+                )),
+            )
+            .expect("valid interleaved geometry");
+        let first_lane = rows[0]
+            .iter()
+            .step_by(builder.lane_count())
+            .copied()
+            .collect::<Vec<_>>();
+        assert!(builder.absorb_active_lane_row(1, &first_lane).is_err());
+        assert!(builder.complete_active_lane().is_err());
+        assert!(builder.finish_commitment().is_err());
+
+        assert!(
+            InterleavedColumnCommitmentBuilder::new_with_opened_columns_and_private_salt(
+                rows.len(),
+                rows[0].len(),
+                3,
+                &opened_column_indices,
+                None,
+            )
+            .is_err()
+        );
+        assert!(
+            InterleavedColumnCommitmentBuilder::new_with_opened_columns_and_private_salt(
+                rows.len(),
+                rows[0].len(),
+                16,
+                &[8, 7],
+                None,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn interleaved_metadata_liveness_matches_every_owned_coordinate_allocation() {
+        let encoded_column_count = 256;
+        let lane_column_count = 8;
+        let opened_column_indices = [0, 1, 7, 8, 31, 32, 127, 191, 255];
+        let builder = InterleavedColumnCommitmentBuilder::new_with_opened_columns_and_private_salt(
+            19,
+            encoded_column_count,
+            lane_column_count,
+            &opened_column_indices,
+            None,
+        )
+        .expect("the focused interleaved geometry is valid");
+        let complete_frontier_node_count = canonical_frontier_node_count_from_sorted_indices(
+            &opened_column_indices,
+            encoded_column_count,
+        )
+        .expect("the focused complete frontier derives");
+        let opened_block_indices = opened_column_indices
+            .iter()
+            .map(|column_index| column_index / builder.lane_count())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let upper_frontier_node_count = canonical_frontier_node_count_from_sorted_indices(
+            &opened_block_indices,
+            builder.lane_column_count(),
+        )
+        .expect("the focused upper frontier derives");
+        assert_eq!(
+            builder
+                .metadata_allocation_byte_length()
+                .expect("the live metadata allocation derives"),
+            maximum_interleaved_commitment_metadata_byte_length(
+                encoded_column_count,
+                lane_column_count,
+                opened_column_indices.len(),
+                opened_block_indices.len(),
+                complete_frontier_node_count,
+                upper_frontier_node_count,
+            )
+            .expect("the static metadata allocation derives"),
+        );
+        assert!(
+            maximum_interleaved_commitment_metadata_byte_length(
+                encoded_column_count,
+                3,
+                opened_column_indices.len(),
+                opened_block_indices.len(),
+                complete_frontier_node_count,
+                upper_frontier_node_count,
+            )
+            .is_err()
+        );
+        assert!(
+            maximum_interleaved_commitment_metadata_byte_length(
+                encoded_column_count,
+                lane_column_count,
+                encoded_column_count + 1,
+                opened_block_indices.len(),
+                complete_frontier_node_count,
+                upper_frontier_node_count,
+            )
+            .is_err()
+        );
     }
 
     #[test]

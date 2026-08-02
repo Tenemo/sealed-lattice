@@ -47,10 +47,10 @@ use super::{
     PreparedExactSameSecretTranscriptPrefix, RowCodeWhirConstructionPlan,
     RowCodeWhirQuotientColumnSourcePlan, RowCodeWhirQuotientColumnTransformPlan,
     aggregate_wide_pcs::{AggregateWideCommitment, aggregate_wide_pcs_for_construction_plan},
-    bounded_dft::BoundedBaseCosetDft,
+    bounded_dft::{BoundedBaseCosetDft, BoundedBaseCosetLaneDft},
     canonical_row_code_whir_family_body_byte_length_ceiling,
     column_commitment::{
-        ColumnDigest, PrivateColumnLeafSaltContext, StripedColumnCommitmentBuilder,
+        ColumnDigest, InterleavedColumnCommitmentBuilder, PrivateColumnLeafSaltContext,
     },
     commitment_liveness::{
         BOUND_TREE_AUTHENTICATION_STRIPE_LEAF_COUNT, CompleteGenerationLiveness,
@@ -185,7 +185,7 @@ enum RowCodeWhirGenerationPhase {
 
 const AUXILIARY_REPLAY_ISSUED_STEP: u32 = 1;
 const FIRST_QUOTIENT_TRANSFORM_STEP: u32 = 2;
-pub(super) const MAXIMUM_PHASE_COMMITMENT_STRIPE_COLUMN_COUNT: usize = 1 << 20;
+pub(super) const MAXIMUM_PHASE_COMMITMENT_LANE_COLUMN_COUNT: usize = 1 << 19;
 const MAXIMUM_ROW_CODE_WHIR_TRANSCRIPT_CHECKPOINT_CURSOR_BYTE_LENGTH: usize = 16 * 1_024;
 const ROW_CODE_WHIR_CHECKPOINT_COMMITTED_STATE_HASH_DOMAIN: &str =
     "sealed-lattice/row-code-whir/checkpoint-committed-state/v1";
@@ -1543,12 +1543,12 @@ impl RowCodeWhirGenerationStoragePlan {
                 coefficient_count,
             ))
         };
-        let quotient_phase_stripe_count = u64::try_from(
+        let quotient_phase_lane_count = u64::try_from(
             construction_plan
                 .quotient_phase
                 .geometry
                 .encoded_column_count
-                .div_ceil(MAXIMUM_PHASE_COMMITMENT_STRIPE_COLUMN_COUNT),
+                .div_ceil(MAXIMUM_PHASE_COMMITMENT_LANE_COLUMN_COUNT),
         )
         .map_err(|_| {
             CommonProofGenerationInitializationError::Prover(CommonProofProverError::CountOverflow)
@@ -1635,7 +1635,7 @@ impl RowCodeWhirGenerationStoragePlan {
                 .ok_or(CommonProofGenerationInitializationError::Prover(
                     CommonProofProverError::InvalidColumn,
                 ))?
-                .checked_mul(quotient_phase_stripe_count)
+                .checked_mul(quotient_phase_lane_count)
                 .and_then(|count| count.checked_mul(2))
                 .ok_or(CommonProofGenerationInitializationError::Prover(
                     CommonProofProverError::CountOverflow,
@@ -2699,14 +2699,14 @@ pub(in crate::bgv::proof_suite) struct RowCodeWhirGenerationStateMachine {
     active_replay_polynomial_writer: Option<CommonProofReplayPolynomialWriter>,
     active_replay_polynomial_reader: Option<ActiveRowCodeWhirReplayPolynomialReader>,
     row_pad_seeds: Option<Zeroizing<Box<[PrivateRowPadSeed]>>>,
-    phase_commitment_builder: Option<StripedColumnCommitmentBuilder>,
+    phase_commitment_builder: Option<InterleavedColumnCommitmentBuilder>,
     active_phase_commitment: Option<RowCodeWhirPhase>,
     active_phase_materialization_purpose: Option<RowCodeWhirPhaseMaterializationPurpose>,
     active_phase_authenticated_columns: Option<Vec<AuthenticatedColumn>>,
     active_phase_polynomial_reader: Option<RowCodeWhirRelationPolynomialReader>,
     active_phase_polynomial_binding: Option<RowCodeWhirPhasePolynomialBinding>,
     phase_row_witness: Zeroizing<Vec<ProofBaseFieldElement>>,
-    active_phase_row_dft: Option<BoundedBaseCosetDft>,
+    active_phase_row_dft: Option<BoundedBaseCosetLaneDft>,
     next_phase_row_index: usize,
     next_phase_logical_chunk_index: usize,
     phase_roots: [Option<ColumnDigest>; 3],
@@ -6390,14 +6390,15 @@ impl RowCodeWhirGenerationStateMachine {
         )?;
         let opened_column_indices =
             self.phase_opening_traversal_indices(purpose, phase.geometry.encoded_column_count)?;
-        let builder = StripedColumnCommitmentBuilder::new_with_opened_columns_and_private_salt(
+        let builder = InterleavedColumnCommitmentBuilder::new_with_opened_columns_and_private_salt(
             phase.geometry.row_count,
             phase.geometry.encoded_column_count,
-            MAXIMUM_PHASE_COMMITMENT_STRIPE_COLUMN_COUNT,
+            MAXIMUM_PHASE_COMMITMENT_LANE_COLUMN_COUNT,
             &opened_column_indices,
             self.private_column_leaf_salt_context(phase_role)?,
         )
         .map_err(|_| CommonProofProverError::InvalidTree)?;
+        let phase_row_working_capacity = phase_row_working_capacity(phase.geometry)?;
         let authenticated_opening_byte_length = opened_column_indices
             .len()
             .checked_mul(phase.geometry.row_count)
@@ -6415,12 +6416,21 @@ impl RowCodeWhirGenerationStateMachine {
             .maximum_hash_state_byte_length()
             .ok()
             .and_then(|byte_length| {
-                phase
-                    .geometry
-                    .encoded_column_count
+                builder.maximum_digest_plane_byte_length().ok().and_then(
+                    |digest_plane_byte_length| byte_length.checked_add(digest_plane_byte_length),
+                )
+            })
+            .and_then(|byte_length| {
+                builder
+                    .metadata_allocation_byte_length()
+                    .ok()
+                    .and_then(|metadata_byte_length| byte_length.checked_add(metadata_byte_length))
+            })
+            .and_then(|byte_length| {
+                phase_row_working_capacity
                     .checked_mul(size_of::<ProofBaseFieldElement>())
-                    .and_then(|encoded_row_byte_length| {
-                        byte_length.checked_add(encoded_row_byte_length)
+                    .and_then(|working_row_byte_length| {
+                        byte_length.checked_add(working_row_byte_length)
                     })
             })
             .and_then(|byte_length| byte_length.checked_add(authenticated_opening_byte_length))
@@ -6443,7 +6453,7 @@ impl RowCodeWhirGenerationStateMachine {
         };
         self.phase_row_witness = allocate_phase_row_witness(
             phase.geometry.witness_values_per_row,
-            phase.geometry.encoded_column_count,
+            phase_row_working_capacity,
         )?;
         self.phase_commitment_builder = Some(builder);
         self.active_phase_commitment = Some(phase_role);
@@ -6541,7 +6551,7 @@ impl RowCodeWhirGenerationStateMachine {
                 .phase_commitment_builder
                 .as_mut()
                 .ok_or(CommonProofProverError::InvalidInput)?
-                .complete_active_stripe()
+                .complete_active_lane()
                 .map_err(|_| CommonProofProverError::InvalidTree)?;
             if complete {
                 let (purpose, root) =
@@ -6707,14 +6717,15 @@ impl RowCodeWhirGenerationStateMachine {
         )?;
         let opened_column_indices =
             self.phase_opening_traversal_indices(purpose, phase.geometry.encoded_column_count)?;
-        let builder = StripedColumnCommitmentBuilder::new_with_opened_columns_and_private_salt(
+        let builder = InterleavedColumnCommitmentBuilder::new_with_opened_columns_and_private_salt(
             phase.geometry.row_count,
             phase.geometry.encoded_column_count,
-            MAXIMUM_PHASE_COMMITMENT_STRIPE_COLUMN_COUNT,
+            MAXIMUM_PHASE_COMMITMENT_LANE_COLUMN_COUNT,
             &opened_column_indices,
             self.private_column_leaf_salt_context(RowCodeWhirPhase::Quotient)?,
         )
         .map_err(|_| CommonProofProverError::InvalidTree)?;
+        let phase_row_working_capacity = phase_row_working_capacity(phase.geometry)?;
         let authenticated_opening_byte_length = opened_column_indices
             .len()
             .checked_mul(phase.geometry.row_count)
@@ -6732,12 +6743,21 @@ impl RowCodeWhirGenerationStateMachine {
             .maximum_hash_state_byte_length()
             .ok()
             .and_then(|byte_length| {
-                phase
-                    .geometry
-                    .encoded_column_count
+                builder.maximum_digest_plane_byte_length().ok().and_then(
+                    |digest_plane_byte_length| byte_length.checked_add(digest_plane_byte_length),
+                )
+            })
+            .and_then(|byte_length| {
+                builder
+                    .metadata_allocation_byte_length()
+                    .ok()
+                    .and_then(|metadata_byte_length| byte_length.checked_add(metadata_byte_length))
+            })
+            .and_then(|byte_length| {
+                phase_row_working_capacity
                     .checked_mul(size_of::<ProofBaseFieldElement>())
-                    .and_then(|encoded_row_byte_length| {
-                        byte_length.checked_add(encoded_row_byte_length)
+                    .and_then(|working_row_byte_length| {
+                        byte_length.checked_add(working_row_byte_length)
                     })
             })
             .and_then(|byte_length| byte_length.checked_add(authenticated_opening_byte_length))
@@ -6761,7 +6781,7 @@ impl RowCodeWhirGenerationStateMachine {
         };
         self.phase_row_witness = allocate_phase_row_witness(
             phase.geometry.witness_values_per_row,
-            phase.geometry.encoded_column_count,
+            phase_row_working_capacity,
         )?;
         self.phase_commitment_builder = Some(builder);
         self.active_phase_commitment = Some(RowCodeWhirPhase::Quotient);
@@ -6853,7 +6873,7 @@ impl RowCodeWhirGenerationStateMachine {
                 .phase_commitment_builder
                 .as_mut()
                 .ok_or(CommonProofProverError::InvalidInput)?
-                .complete_active_stripe()
+                .complete_active_lane()
                 .map_err(|_| CommonProofProverError::InvalidTree)?;
             if complete {
                 let (purpose, root) = self.finish_active_phase_materialization(
@@ -6945,12 +6965,12 @@ impl RowCodeWhirGenerationStateMachine {
         )
     }
 
-    /// Advances one phase row through the allocation-stable coset DFT and
-    /// streams only the active encoded-column stripe into the commitment.
+    /// Advances one phase row through one allocation-stable interleaved coset
+    /// lane and streams it into the root-preserving commitment transpose.
     ///
     /// The witness, padded coefficients, and evaluations reuse one owned
-    /// domain-capacity allocation. No cached twiddle table or second encoded
-    /// row overlaps the stripe hasher.
+    /// lane-or-coefficient-capacity allocation. No cached twiddle table or second encoded
+    /// row overlaps the lane hasher.
     fn poll_active_phase_row_dft(
         &mut self,
         phase_role: RowCodeWhirPhase,
@@ -6967,11 +6987,21 @@ impl RowCodeWhirGenerationStateMachine {
             return Err(CommonProofProverError::InvalidInput);
         }
         if self.active_phase_row_dft.is_none() {
+            let working_capacity = phase_row_working_capacity(geometry)?;
             if self.phase_row_witness.len() != geometry.witness_values_per_row
-                || self.phase_row_witness.capacity() < geometry.encoded_column_count
+                || self.phase_row_witness.capacity() < working_capacity
             {
                 return Err(CommonProofProverError::InvalidColumn);
             }
+            let (lane_column_count, lane_ordinal) = self
+                .phase_commitment_builder
+                .as_ref()
+                .and_then(|builder| {
+                    builder
+                        .active_lane_ordinal()
+                        .map(|lane_ordinal| (builder.lane_column_count(), lane_ordinal))
+                })
+                .ok_or(CommonProofProverError::InvalidInput)?;
             let witness =
                 core::mem::replace(&mut self.phase_row_witness, Zeroizing::new(Vec::new()));
             let coefficients = padded_base_row_coefficients(
@@ -6987,8 +7017,13 @@ impl RowCodeWhirGenerationStateMachine {
             )
             .map_err(|_| CommonProofProverError::InvalidColumn)?;
             self.active_phase_row_dft = Some(
-                BoundedBaseCosetDft::new(coefficients, evaluation_domain)
-                    .map_err(|_| CommonProofProverError::InvalidColumn)?,
+                BoundedBaseCosetLaneDft::new(
+                    coefficients,
+                    evaluation_domain,
+                    lane_column_count,
+                    lane_ordinal,
+                )
+                .map_err(|_| CommonProofProverError::InvalidColumn)?,
             );
             return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
         }
@@ -7007,28 +7042,36 @@ impl RowCodeWhirGenerationStateMachine {
             .ok_or(CommonProofProverError::InvalidInput)?
             .into_values()
             .map_err(|_| CommonProofProverError::InvalidColumn)?;
-        let active_column_range = self
+        let (lane_count, lane_column_count, lane_ordinal) = self
             .phase_commitment_builder
             .as_ref()
-            .and_then(StripedColumnCommitmentBuilder::active_column_range)
+            .and_then(|builder| {
+                builder.active_lane_ordinal().map(|lane_ordinal| {
+                    (
+                        builder.lane_count(),
+                        builder.lane_column_count(),
+                        lane_ordinal,
+                    )
+                })
+            })
             .ok_or(CommonProofProverError::InvalidInput)?;
+        if encoded_row.len() != lane_column_count {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
         self.capture_active_phase_authenticated_row(
             self.next_phase_row_index,
-            active_column_range.clone(),
+            geometry.encoded_column_count,
+            lane_count,
+            lane_ordinal,
             &encoded_row,
         )?;
         self.phase_commitment_builder
             .as_mut()
             .ok_or(CommonProofProverError::InvalidInput)?
-            .absorb_active_stripe_base_row(
-                self.next_phase_row_index,
-                encoded_row
-                    .get(active_column_range)
-                    .ok_or(CommonProofProverError::InvalidColumn)?,
-            )
+            .absorb_active_lane_base_row(self.next_phase_row_index, &encoded_row)
             .map_err(|_| CommonProofProverError::InvalidTree)?;
         encoded_row.fill(ProofBaseFieldElement::ZERO);
-        encoded_row.truncate(geometry.witness_values_per_row);
+        encoded_row.resize(geometry.witness_values_per_row, ProofBaseFieldElement::ZERO);
         self.phase_row_witness = encoded_row;
         self.next_phase_row_index = self
             .next_phase_row_index
@@ -7076,13 +7119,15 @@ impl RowCodeWhirGenerationStateMachine {
     }
 
     /// Retains the opened coordinates of one encoded row while the row is still
-    /// live. Only the columns inside the active stripe are captured, so the
+    /// live. Only the columns inside the active lane are captured, so the
     /// caller never needs a second encoding pass or a resident codeword.
     fn capture_active_phase_authenticated_row(
         &mut self,
         row_index: usize,
-        active_column_range: core::ops::Range<usize>,
-        encoded_row: &[ProofBaseFieldElement],
+        encoded_column_count: usize,
+        lane_count: usize,
+        lane_ordinal: usize,
+        encoded_row_lane: &[ProofBaseFieldElement],
     ) -> Result<(), CommonProofProverError> {
         let Some(authenticated_columns) = self.active_phase_authenticated_columns.as_mut() else {
             if self.active_phase_materialization_purpose
@@ -7100,22 +7145,24 @@ impl RowCodeWhirGenerationStateMachine {
         if traversal_indices.len() != authenticated_columns.len() {
             return Err(CommonProofProverError::InvalidOpening);
         }
-        let first_active_position = traversal_indices
-            .partition_point(|column_index| *column_index < active_column_range.start);
-        let following_active_position = traversal_indices
-            .partition_point(|column_index| *column_index < active_column_range.end);
-        for (active_position, column_index) in traversal_indices
-            .iter()
-            .copied()
-            .enumerate()
-            .take(following_active_position)
-            .skip(first_active_position)
+        if lane_count == 0
+            || !lane_count.is_power_of_two()
+            || lane_ordinal >= lane_count
+            || encoded_row_lane.len().checked_mul(lane_count) != Some(encoded_column_count)
         {
-            let value = encoded_row
-                .get(column_index)
-                .copied()
-                .map(|value| Goldilocks::new(value.canonical()))
-                .ok_or(CommonProofProverError::InvalidColumn)?;
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        for (active_position, column_index) in traversal_indices.iter().copied().enumerate() {
+            let Some(value) = phase_commitment_lane_opening_value(
+                encoded_column_count,
+                lane_count,
+                lane_ordinal,
+                column_index,
+                encoded_row_lane,
+            )?
+            else {
+                continue;
+            };
             let authenticated_column = authenticated_columns
                 .get_mut(active_position)
                 .ok_or(CommonProofProverError::InvalidOpening)?;
@@ -7286,19 +7333,64 @@ fn allocate_authenticated_phase_columns(
     Ok(authenticated_columns)
 }
 
+fn phase_commitment_lane_opening_value(
+    encoded_column_count: usize,
+    lane_count: usize,
+    lane_ordinal: usize,
+    column_index: usize,
+    encoded_row_lane: &[ProofBaseFieldElement],
+) -> Result<Option<Goldilocks>, CommonProofProverError> {
+    if encoded_column_count == 0
+        || !encoded_column_count.is_power_of_two()
+        || lane_count == 0
+        || !lane_count.is_power_of_two()
+        || lane_ordinal >= lane_count
+        || column_index >= encoded_column_count
+        || encoded_row_lane.len().checked_mul(lane_count) != Some(encoded_column_count)
+    {
+        return Err(CommonProofProverError::InvalidColumn);
+    }
+    if column_index % lane_count != lane_ordinal {
+        return Ok(None);
+    }
+    encoded_row_lane
+        .get(column_index / lane_count)
+        .copied()
+        .map(|value| Some(Goldilocks::new(value.canonical())))
+        .ok_or(CommonProofProverError::InvalidColumn)
+}
+
+fn phase_row_working_capacity(
+    geometry: RowEncodingGeometry,
+) -> Result<usize, CommonProofProverError> {
+    let lane_column_count = geometry
+        .encoded_column_count
+        .min(MAXIMUM_PHASE_COMMITMENT_LANE_COLUMN_COUNT);
+    if lane_column_count == 0
+        || !lane_column_count.is_power_of_two()
+        || !geometry
+            .encoded_column_count
+            .is_multiple_of(lane_column_count)
+        || geometry.padded_coefficient_count > geometry.encoded_column_count
+    {
+        return Err(CommonProofProverError::InvalidColumn);
+    }
+    Ok(geometry.padded_coefficient_count.max(lane_column_count))
+}
+
 fn allocate_phase_row_witness(
     witness_value_count: usize,
-    encoded_column_count: usize,
+    working_capacity: usize,
 ) -> Result<Zeroizing<Vec<ProofBaseFieldElement>>, CommonProofProverError> {
     if witness_value_count == 0
-        || encoded_column_count < witness_value_count
-        || !encoded_column_count.is_power_of_two()
+        || working_capacity < witness_value_count
+        || !working_capacity.is_power_of_two()
     {
         return Err(CommonProofProverError::InvalidColumn);
     }
     let mut witness = Vec::new();
     witness
-        .try_reserve_exact(encoded_column_count)
+        .try_reserve_exact(working_capacity)
         .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
     witness.resize(witness_value_count, ProofBaseFieldElement::ZERO);
     Ok(Zeroizing::new(witness))
@@ -7590,7 +7682,9 @@ fn aggregate_commitment_digest_bytes(
 
 #[cfg(test)]
 mod tests {
-    use super::super::commitment_liveness::GenerationPhaseLivenessKind;
+    use super::super::commitment_liveness::{
+        GenerationPhaseLivenessKind, derive_phase_commitment_geometry_accounting,
+    };
     use super::*;
     use crate::{
         bgv::proof_suite::{
@@ -7922,6 +8016,55 @@ mod tests {
         )
         .expect("the production quotient-materialization guard accepts the width-eight VSS plan");
 
+        let base_commitment_accounting =
+            derive_phase_commitment_geometry_accounting(base_phase.geometry)
+                .expect("the production VSS base commitment accounting derives");
+        assert_eq!(base_commitment_accounting.row_count, 1_128);
+        assert_eq!(base_commitment_accounting.encoded_column_count, 16_777_216);
+        assert_eq!(base_commitment_accounting.lane_column_count, 524_288);
+        assert_eq!(base_commitment_accounting.lane_count, 32);
+        assert_eq!(
+            base_commitment_accounting.working_buffer_byte_length,
+            4_194_304,
+        );
+        assert_eq!(
+            base_commitment_accounting.hash_state_byte_length,
+            104_857_600,
+        );
+        assert_eq!(
+            base_commitment_accounting.digest_plane_byte_length,
+            167_772_160,
+        );
+        assert_eq!(
+            base_commitment_accounting.algorithm_live_set_byte_length,
+            276_824_064,
+        );
+        assert_eq!(base_commitment_accounting.lane_dft_count_per_pass, 36_096);
+        assert_eq!(
+            base_commitment_accounting.butterfly_count_per_pass,
+            179_784_646_656,
+        );
+        assert_eq!(
+            base_commitment_accounting.coefficient_fold_count_per_pass,
+            0,
+        );
+        assert_eq!(
+            base_commitment_accounting.coset_multiplication_count_per_pass,
+            18_924_699_648,
+        );
+        assert_eq!(
+            base_commitment_accounting.column_value_delivery_count_per_pass,
+            18_924_699_648,
+        );
+        assert_eq!(
+            base_commitment_accounting.leaf_hash_query_count_per_pass,
+            16_777_216,
+        );
+        assert_eq!(
+            base_commitment_accounting.merkle_parent_hash_query_count_per_pass,
+            16_777_215,
+        );
+
         let stale_same_secret_row_width =
             super::super::construction_plan::ROW_CODE_WHIR_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW;
         assert_eq!(stale_same_secret_row_width, 64);
@@ -7986,6 +8129,43 @@ mod tests {
             ),
             Err(CommonProofProverError::CountOverflow),
         );
+    }
+
+    #[test]
+    fn phase_commitment_lane_opening_mapping_restores_natural_coordinates() {
+        let encoded_column_count = 64;
+        let lane_count = 4;
+        for lane_ordinal in 0..lane_count {
+            let lane = (0..encoded_column_count / lane_count)
+                .map(|within_lane_index| {
+                    ProofBaseFieldElement::from_canonical(
+                        u64::try_from(within_lane_index * lane_count + lane_ordinal)
+                            .expect("the focused column index fits u64"),
+                    )
+                    .expect("the focused column index is canonical")
+                })
+                .collect::<Vec<_>>();
+            for column_index in 0..encoded_column_count {
+                let value = phase_commitment_lane_opening_value(
+                    encoded_column_count,
+                    lane_count,
+                    lane_ordinal,
+                    column_index,
+                    &lane,
+                )
+                .expect("the focused lane mapping is valid");
+                if column_index % lane_count == lane_ordinal {
+                    assert_eq!(value, Some(Goldilocks::new(column_index as u64)),);
+                } else {
+                    assert_eq!(value, None);
+                }
+            }
+        }
+        let valid_lane = vec![ProofBaseFieldElement::ZERO; 16];
+        assert!(phase_commitment_lane_opening_value(64, 3, 0, 0, &valid_lane).is_err());
+        assert!(phase_commitment_lane_opening_value(64, 4, 4, 0, &valid_lane).is_err());
+        assert!(phase_commitment_lane_opening_value(64, 4, 0, 64, &valid_lane).is_err());
+        assert!(phase_commitment_lane_opening_value(64, 4, 0, 0, &valid_lane[..15]).is_err());
     }
 
     #[test]
@@ -8181,7 +8361,7 @@ mod tests {
         assert_eq!(relation_variant_payload_byte_length, 4_986_144);
         assert_eq!(relation_context_payload_byte_length, 736);
         assert_eq!(construction_identity_byte_length, 959_789);
-        assert_eq!(size_of::<RowCodeWhirGenerationStateMachine>(), 19_664);
+        assert_eq!(size_of::<RowCodeWhirGenerationStateMachine>(), 19_856);
         assert_eq!(size_of::<super::super::RowCodeWhirChallenger>(), 464);
         assert_eq!(
             accounting.loading_persistent_resident_byte_length(),
@@ -8299,6 +8479,29 @@ mod tests {
             MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
         )
         .expect("the complete selected live set derives");
+        let phase_commitment_work = complete_liveness.phase_commitment_work();
+        assert_eq!(phase_commitment_work.geometry_count, 3);
+        assert_eq!(phase_commitment_work.materialization_pass_count, 2);
+        assert_eq!(phase_commitment_work.lane_dft_count, 3_968);
+        assert_eq!(phase_commitment_work.butterfly_count, 19_763_560_448);
+        assert_eq!(phase_commitment_work.coefficient_fold_count, 14_562_623_488,);
+        assert_eq!(
+            phase_commitment_work.coset_multiplication_count,
+            2_080_374_784,
+        );
+        assert_eq!(
+            phase_commitment_work.column_value_delivery_count,
+            2_080_374_784,
+        );
+        assert_eq!(phase_commitment_work.leaf_hash_query_count, 100_663_296);
+        assert_eq!(
+            phase_commitment_work.merkle_parent_hash_query_count,
+            100_663_290,
+        );
+        assert_eq!(
+            phase_commitment_work.private_leaf_salt_derivation_count,
+            100_663_296,
+        );
         let expected_rows = [
             (
                 GenerationPhaseLivenessKind::LoadingAuthenticatedSources,
@@ -8309,7 +8512,7 @@ mod tests {
                 0,
                 0,
                 0,
-                65_179_572,
+                65_179_788,
             ),
             (
                 GenerationPhaseLivenessKind::SourceReplay,
@@ -8320,7 +8523,7 @@ mod tests {
                 0,
                 0,
                 0,
-                158_740_071,
+                158_740_287,
             ),
             (
                 GenerationPhaseLivenessKind::RelationMaterialization,
@@ -8331,18 +8534,18 @@ mod tests {
                 0,
                 0,
                 1_185_104,
-                160_073_313,
+                160_073_529,
             ),
             (
                 GenerationPhaseLivenessKind::PhaseCommitment,
-                0,
-                134_217_728,
-                210_244_928,
+                84_934_656,
+                33_554_432,
+                273_580_440,
                 0,
                 392,
                 0,
                 0,
-                450_709_512,
+                504_267_459,
             ),
             (
                 GenerationPhaseLivenessKind::QuotientPreparation,
@@ -8353,7 +8556,7 @@ mod tests {
                 0,
                 0,
                 7_280_808,
-                166_930_980,
+                166_931_196,
             ),
             (
                 GenerationPhaseLivenessKind::AggregateSource,
@@ -8364,7 +8567,7 @@ mod tests {
                 0,
                 0,
                 353_632_304,
-                556_576_413,
+                556_576_629,
             ),
             (
                 GenerationPhaseLivenessKind::PrivateMaterialSampling,
@@ -8375,7 +8578,7 @@ mod tests {
                 0,
                 0,
                 721_320,
-                64_000_068,
+                64_000_284,
             ),
             (
                 GenerationPhaseLivenessKind::AggregateOpeningPreparation,
@@ -8386,7 +8589,7 @@ mod tests {
                 0,
                 0,
                 167_772_160,
-                251_932_263,
+                251_932_479,
             ),
             (
                 GenerationPhaseLivenessKind::AggregateCommitment,
@@ -8397,7 +8600,7 @@ mod tests {
                 976,
                 0,
                 0,
-                516_174_576,
+                516_174_792,
             ),
             (
                 GenerationPhaseLivenessKind::BoundTreeAuthentication,
@@ -8408,7 +8611,7 @@ mod tests {
                 0,
                 0,
                 0,
-                289_681_611,
+                289_681_827,
             ),
             (
                 GenerationPhaseLivenessKind::WhirOpening,
@@ -8419,7 +8622,7 @@ mod tests {
                 976,
                 0,
                 1_376_720,
-                517_723_386,
+                517_723_602,
             ),
             (
                 GenerationPhaseLivenessKind::BaseCaseOpening,
@@ -8430,7 +8633,7 @@ mod tests {
                 976,
                 0,
                 46_794_256,
-                146_504_130,
+                146_504_346,
             ),
             (
                 GenerationPhaseLivenessKind::CanonicalEncoding,
@@ -8441,7 +8644,7 @@ mod tests {
                 0,
                 750_312,
                 0,
-                64_032_684,
+                64_032_900,
             ),
         ];
         assert_eq!(complete_liveness.rows().len(), expected_rows.len());
@@ -8462,7 +8665,7 @@ mod tests {
         {
             assert_eq!(row.phase(), phase);
             assert_eq!(row.wasm_runtime_baseline_byte_length(), 33_554_432);
-            assert_eq!(row.engine_control_byte_length(), 10_199_985);
+            assert_eq!(row.engine_control_byte_length(), 10_200_177);
             assert_eq!(
                 row.source_provider_byte_length(),
                 if phase == GenerationPhaseLivenessKind::LoadingAuthenticatedSources {
@@ -8540,7 +8743,7 @@ mod tests {
         }
         assert_eq!(
             complete_liveness.maximum_live_set_byte_length(),
-            556_576_413,
+            556_576_629,
         );
         assert_eq!(
             complete_liveness
@@ -8548,17 +8751,17 @@ mod tests {
                 .saturating_sub(
                     crate::bgv::proof_suite::prover::NOMINAL_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
                 ),
-            153_923_229,
+            153_923_445,
         );
         assert_eq!(
             crate::bgv::proof_suite::prover::AUTOMATIC_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
-                .checked_sub(complete_liveness.maximum_live_set_byte_length()),
-            Some(47_403_363),
+                .checked_sub(complete_liveness.maximum_live_set_byte_length(),),
+            Some(47_403_147),
         );
         assert_eq!(
             MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
                 .checked_sub(complete_liveness.maximum_live_set_byte_length()),
-            Some(114_512_227),
+            Some(114_512_011),
         );
     }
 

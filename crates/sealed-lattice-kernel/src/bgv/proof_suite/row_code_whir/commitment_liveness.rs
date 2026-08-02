@@ -5,7 +5,9 @@ use core::mem::size_of;
 use super::{
     ChallengeField, ColumnStreamableLeafState, MERKLE_DIGEST_WORD_LENGTH,
     aggregate_wide_hiding::{AGGREGATE_WIDE_PAD_LOG_INVERSE_RATE, AggregateWidePadLayout},
-    column_commitment::StreamingColumnHasher,
+    column_commitment::{
+        StreamingColumnHasher, maximum_interleaved_commitment_metadata_byte_length,
+    },
     construction_plan::RowCodeWhirConstructionPlan,
     coordinate_derived_hiding_mmcs::{
         aggregate_private_leaf_salt_resident_state_byte_length,
@@ -19,6 +21,7 @@ use super::{
     recomputable_oracle::{
         AGGREGATE_ORACLE_LEAF_STATE_STRIPE_ROW_COUNT, aggregate_oracle_leaf_state_stripe_count,
     },
+    row_encoding::RowEncodingGeometry,
 };
 use crate::bgv::proof_suite::relation_plan::{
     BoundTreeConstructionKind, ProofPrivacyMode, RelationColumnValueType,
@@ -671,7 +674,6 @@ pub(super) fn derive_bound_tree_authentication_liveness(
 const WASM_RUNTIME_BASELINE_RESERVE_BYTE_LENGTH: u64 = 32 * 1_024 * 1_024;
 const ALLOCATOR_OVERHEAD_DENOMINATOR: u64 = 8;
 const MERKLE_DIGEST_BYTE_LENGTH: u64 = 64;
-const PHASE_MERKLE_NODE_RESERVE_BYTE_LENGTH: u64 = 64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum GenerationPhaseLivenessKind {
@@ -805,9 +807,24 @@ impl GenerationPhaseLivenessRow {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct PhaseCommitmentWorkAccounting {
+    pub(super) geometry_count: u64,
+    pub(super) materialization_pass_count: u64,
+    pub(super) lane_dft_count: u64,
+    pub(super) butterfly_count: u64,
+    pub(super) coefficient_fold_count: u64,
+    pub(super) coset_multiplication_count: u64,
+    pub(super) column_value_delivery_count: u64,
+    pub(super) leaf_hash_query_count: u64,
+    pub(super) merkle_parent_hash_query_count: u64,
+    pub(super) private_leaf_salt_derivation_count: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct CompleteGenerationLiveness {
     rows: Vec<GenerationPhaseLivenessRow>,
     maximum_live_set_byte_length: u64,
+    phase_commitment_work: PhaseCommitmentWorkAccounting,
 }
 
 impl CompleteGenerationLiveness {
@@ -822,6 +839,11 @@ impl CompleteGenerationLiveness {
 
     pub(super) fn phase_count(&self) -> usize {
         self.rows.len()
+    }
+
+    #[cfg(test)]
+    pub(super) const fn phase_commitment_work(&self) -> &PhaseCommitmentWorkAccounting {
+        &self.phase_commitment_work
     }
 }
 
@@ -878,6 +900,7 @@ pub(super) fn derive_complete_generation_liveness(
         .ok_or_else(|| "proof encoder is smaller than its transported private salts".to_owned())?;
     let (phase_dft_byte_length, phase_merkle_byte_length) =
         maximum_phase_commitment_algorithm_liveness(construction_plan)?;
+    let phase_commitment_work = derive_phase_commitment_work_accounting(construction_plan)?;
     let common_bridge_byte_length =
         MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_BOUNDARY_TRANSFER_LIVE_BYTE_LENGTH
             .checked_add(input.proof_transport_bridge_byte_length)
@@ -978,7 +1001,7 @@ pub(super) fn derive_complete_generation_liveness(
         common(
             GenerationPhaseLivenessKind::PhaseCommitment,
             post_source_provider_byte_length,
-            0,
+            input.maximum_replay_reader_byte_length,
             phase_dft_byte_length,
             phase_merkle_byte_length,
             true,
@@ -1147,6 +1170,7 @@ pub(super) fn derive_complete_generation_liveness(
     Ok(CompleteGenerationLiveness {
         rows,
         maximum_live_set_byte_length,
+        phase_commitment_work,
     })
 }
 
@@ -1218,6 +1242,207 @@ fn generation_phase_liveness_row(
     })
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct PhaseCommitmentGeometryAccounting {
+    pub(super) row_count: u64,
+    pub(super) encoded_column_count: u64,
+    pub(super) lane_column_count: u64,
+    pub(super) lane_count: u64,
+    pub(super) working_buffer_byte_length: u64,
+    pub(super) hash_state_byte_length: u64,
+    pub(super) digest_plane_byte_length: u64,
+    pub(super) algorithm_live_set_byte_length: u64,
+    pub(super) lane_dft_count_per_pass: u64,
+    pub(super) butterfly_count_per_pass: u64,
+    pub(super) coefficient_fold_count_per_pass: u64,
+    pub(super) coset_multiplication_count_per_pass: u64,
+    pub(super) column_value_delivery_count_per_pass: u64,
+    pub(super) leaf_hash_query_count_per_pass: u64,
+    pub(super) merkle_parent_hash_query_count_per_pass: u64,
+}
+
+pub(super) fn derive_phase_commitment_geometry_accounting(
+    geometry: RowEncodingGeometry,
+) -> Result<PhaseCommitmentGeometryAccounting, String> {
+    let encoded_column_count = geometry.encoded_column_count;
+    let lane_column_count = encoded_column_count
+        .min(super::generation_state::MAXIMUM_PHASE_COMMITMENT_LANE_COLUMN_COUNT);
+    if geometry.row_count == 0
+        || lane_column_count < 2
+        || !lane_column_count.is_power_of_two()
+        || !encoded_column_count.is_multiple_of(lane_column_count)
+        || geometry.padded_coefficient_count > encoded_column_count
+    {
+        return Err("phase commitment lane geometry is invalid".to_owned());
+    }
+    let lane_count = encoded_column_count / lane_column_count;
+    let lane_tree_depth = u64::from(lane_count.ilog2());
+    let working_capacity = geometry.padded_coefficient_count.max(lane_column_count);
+    let hash_state_byte_length = u64::try_from(
+        StreamingColumnHasher::exact_state_byte_length(lane_column_count)
+            .ok_or_else(|| "phase hash-state liveness overflowed".to_owned())?,
+    )
+    .map_err(|_| "phase hash-state liveness exceeds u64".to_owned())?;
+    let row_count =
+        u64::try_from(geometry.row_count).map_err(|_| "phase row count exceeds u64".to_owned())?;
+    let encoded_column_count = u64::try_from(encoded_column_count)
+        .map_err(|_| "phase encoded column count exceeds u64".to_owned())?;
+    let lane_column_count = u64::try_from(lane_column_count)
+        .map_err(|_| "phase lane column count exceeds u64".to_owned())?;
+    let lane_count =
+        u64::try_from(lane_count).map_err(|_| "phase lane count exceeds u64".to_owned())?;
+    let working_buffer_byte_length = u64::try_from(working_capacity)
+        .ok()
+        .and_then(|count| count.checked_mul(size_of::<ProofBaseFieldElement>() as u64))
+        .ok_or_else(|| "phase working-buffer liveness overflowed".to_owned())?;
+    let digest_plane_byte_length = lane_column_count
+        .checked_mul(lane_tree_depth)
+        .and_then(|digest_count| digest_count.checked_mul(MERKLE_DIGEST_BYTE_LENGTH))
+        .ok_or_else(|| "phase digest-plane liveness overflowed".to_owned())?;
+    let algorithm_live_set_byte_length = working_buffer_byte_length
+        .checked_add(hash_state_byte_length)
+        .and_then(|total| total.checked_add(digest_plane_byte_length))
+        .ok_or_else(|| "phase algorithm live set overflowed".to_owned())?;
+    let lane_dft_count_per_pass = row_count
+        .checked_mul(lane_count)
+        .ok_or_else(|| "phase lane DFT count overflowed".to_owned())?;
+    let butterfly_count_per_dft = lane_column_count
+        .checked_div(2)
+        .and_then(|count| count.checked_mul(u64::from(lane_column_count.ilog2())))
+        .ok_or_else(|| "phase butterfly count overflowed".to_owned())?;
+    let butterfly_count_per_pass = lane_dft_count_per_pass
+        .checked_mul(butterfly_count_per_dft)
+        .ok_or_else(|| "phase butterfly count overflowed".to_owned())?;
+    let folded_coefficient_count_per_dft = geometry.padded_coefficient_count.saturating_sub(
+        usize::try_from(lane_column_count)
+            .map_err(|_| "phase lane column count exceeds usize".to_owned())?,
+    );
+    let coefficient_fold_count_per_pass = lane_dft_count_per_pass
+        .checked_mul(
+            u64::try_from(folded_coefficient_count_per_dft)
+                .map_err(|_| "phase coefficient-fold count exceeds u64".to_owned())?,
+        )
+        .ok_or_else(|| "phase coefficient-fold count overflowed".to_owned())?;
+    let coset_multiplication_count_per_pass = lane_dft_count_per_pass
+        .checked_mul(lane_column_count)
+        .ok_or_else(|| "phase coset multiplication count overflowed".to_owned())?;
+    let column_value_delivery_count_per_pass = row_count
+        .checked_mul(encoded_column_count)
+        .ok_or_else(|| "phase value-delivery count overflowed".to_owned())?;
+    Ok(PhaseCommitmentGeometryAccounting {
+        row_count,
+        encoded_column_count,
+        lane_column_count,
+        lane_count,
+        working_buffer_byte_length,
+        hash_state_byte_length,
+        digest_plane_byte_length,
+        algorithm_live_set_byte_length,
+        lane_dft_count_per_pass,
+        butterfly_count_per_pass,
+        coefficient_fold_count_per_pass,
+        coset_multiplication_count_per_pass,
+        column_value_delivery_count_per_pass,
+        leaf_hash_query_count_per_pass: encoded_column_count,
+        merkle_parent_hash_query_count_per_pass: encoded_column_count - 1,
+    })
+}
+
+fn derive_phase_commitment_work_accounting(
+    construction_plan: &RowCodeWhirConstructionPlan,
+) -> Result<PhaseCommitmentWorkAccounting, String> {
+    const MATERIALIZATION_PASS_COUNT: u64 = 2;
+    let geometries = construction_plan
+        .base_phase
+        .iter()
+        .chain(construction_plan.auxiliary_phase.iter())
+        .map(|phase| phase.geometry)
+        .chain(core::iter::once(construction_plan.quotient_phase.geometry));
+    let mut geometry_count = 0_u64;
+    let mut lane_dft_count_per_pass = 0_u64;
+    let mut butterfly_count_per_pass = 0_u64;
+    let mut coefficient_fold_count_per_pass = 0_u64;
+    let mut coset_multiplication_count_per_pass = 0_u64;
+    let mut column_value_delivery_count_per_pass = 0_u64;
+    let mut leaf_hash_query_count_per_pass = 0_u64;
+    let mut merkle_parent_hash_query_count_per_pass = 0_u64;
+    for geometry in geometries {
+        let accounting = derive_phase_commitment_geometry_accounting(geometry)?;
+        if accounting.lane_dft_count_per_pass
+            != accounting
+                .row_count
+                .checked_mul(accounting.lane_count)
+                .ok_or_else(|| "phase lane DFT identity overflowed".to_owned())?
+            || accounting.column_value_delivery_count_per_pass
+                != accounting
+                    .row_count
+                    .checked_mul(accounting.encoded_column_count)
+                    .ok_or_else(|| "phase value-delivery identity overflowed".to_owned())?
+            || accounting.coset_multiplication_count_per_pass
+                != accounting
+                    .lane_dft_count_per_pass
+                    .checked_mul(accounting.lane_column_count)
+                    .ok_or_else(|| "phase coset-work identity overflowed".to_owned())?
+        {
+            return Err("phase commitment work identities are inconsistent".to_owned());
+        }
+        geometry_count = geometry_count
+            .checked_add(1)
+            .ok_or_else(|| "phase geometry count overflowed".to_owned())?;
+        lane_dft_count_per_pass = lane_dft_count_per_pass
+            .checked_add(accounting.lane_dft_count_per_pass)
+            .ok_or_else(|| "phase lane DFT count overflowed".to_owned())?;
+        butterfly_count_per_pass = butterfly_count_per_pass
+            .checked_add(accounting.butterfly_count_per_pass)
+            .ok_or_else(|| "phase butterfly count overflowed".to_owned())?;
+        coefficient_fold_count_per_pass = coefficient_fold_count_per_pass
+            .checked_add(accounting.coefficient_fold_count_per_pass)
+            .ok_or_else(|| "phase coefficient-fold count overflowed".to_owned())?;
+        coset_multiplication_count_per_pass = coset_multiplication_count_per_pass
+            .checked_add(accounting.coset_multiplication_count_per_pass)
+            .ok_or_else(|| "phase coset multiplication count overflowed".to_owned())?;
+        column_value_delivery_count_per_pass = column_value_delivery_count_per_pass
+            .checked_add(accounting.column_value_delivery_count_per_pass)
+            .ok_or_else(|| "phase value-delivery count overflowed".to_owned())?;
+        leaf_hash_query_count_per_pass = leaf_hash_query_count_per_pass
+            .checked_add(accounting.leaf_hash_query_count_per_pass)
+            .ok_or_else(|| "phase leaf-hash count overflowed".to_owned())?;
+        merkle_parent_hash_query_count_per_pass = merkle_parent_hash_query_count_per_pass
+            .checked_add(accounting.merkle_parent_hash_query_count_per_pass)
+            .ok_or_else(|| "phase parent-hash count overflowed".to_owned())?;
+    }
+    let scale = |count: u64, role: &str| {
+        count
+            .checked_mul(MATERIALIZATION_PASS_COUNT)
+            .ok_or_else(|| format!("phase {role} count overflowed"))
+    };
+    let leaf_hash_query_count = scale(leaf_hash_query_count_per_pass, "leaf-hash")?;
+    Ok(PhaseCommitmentWorkAccounting {
+        geometry_count,
+        materialization_pass_count: MATERIALIZATION_PASS_COUNT,
+        lane_dft_count: scale(lane_dft_count_per_pass, "lane DFT")?,
+        butterfly_count: scale(butterfly_count_per_pass, "butterfly")?,
+        coefficient_fold_count: scale(coefficient_fold_count_per_pass, "coefficient-fold")?,
+        coset_multiplication_count: scale(
+            coset_multiplication_count_per_pass,
+            "coset multiplication",
+        )?,
+        column_value_delivery_count: scale(column_value_delivery_count_per_pass, "value-delivery")?,
+        leaf_hash_query_count,
+        merkle_parent_hash_query_count: scale(
+            merkle_parent_hash_query_count_per_pass,
+            "parent-hash",
+        )?,
+        private_leaf_salt_derivation_count: if construction_plan.proof_privacy_mode
+            == ProofPrivacyMode::SecretBearing
+        {
+            leaf_hash_query_count
+        } else {
+            0
+        },
+    })
+}
+
 fn maximum_phase_commitment_algorithm_liveness(
     construction_plan: &RowCodeWhirConstructionPlan,
 ) -> Result<(u64, u64), String> {
@@ -1232,17 +1457,18 @@ fn maximum_phase_commitment_algorithm_liveness(
     let mut maximum_merkle_byte_length = 0_u64;
     for geometry in geometries {
         let encoded_column_count = geometry.encoded_column_count;
-        let dft_byte_length = u64::try_from(encoded_column_count)
-            .ok()
-            .and_then(|count| count.checked_mul(size_of::<ProofBaseFieldElement>() as u64))
-            .ok_or_else(|| "phase DFT liveness overflowed".to_owned())?;
-        let stripe_column_count = encoded_column_count
-            .min(super::generation_state::MAXIMUM_PHASE_COMMITMENT_STRIPE_COLUMN_COUNT);
-        let hash_state_byte_length = u64::try_from(
-            StreamingColumnHasher::exact_state_byte_length(stripe_column_count)
-                .ok_or_else(|| "phase hash-state liveness overflowed".to_owned())?,
-        )
-        .map_err(|_| "phase hash-state liveness exceeds u64".to_owned())?;
+        let accounting = derive_phase_commitment_geometry_accounting(geometry)?;
+        let dft_byte_length = accounting.working_buffer_byte_length;
+        let hash_state_byte_length = accounting.hash_state_byte_length;
+        let digest_plane_byte_length = accounting.digest_plane_byte_length;
+        if accounting.algorithm_live_set_byte_length
+            != dft_byte_length
+                .checked_add(hash_state_byte_length)
+                .and_then(|total| total.checked_add(digest_plane_byte_length))
+                .ok_or_else(|| "phase algorithm live-set identity overflowed".to_owned())?
+        {
+            return Err("phase algorithm live-set identity is inconsistent".to_owned());
+        }
         let opening_value_byte_length = u64::try_from(
             construction_plan
                 .parameters
@@ -1269,17 +1495,33 @@ fn maximum_phase_commitment_algorithm_liveness(
             construction_plan.parameters.outer_query_count,
         )
         .map_err(|_| "phase frontier liveness geometry is invalid".to_owned())?;
-        let frontier_byte_length = u64::try_from(frontier_node_count)
-            .ok()
-            .and_then(|count| count.checked_mul(MERKLE_DIGEST_BYTE_LENGTH))
-            .ok_or_else(|| "phase frontier liveness overflowed".to_owned())?;
-        let stack_byte_length = u64::from(encoded_column_count.ilog2() + 1)
-            .checked_mul(PHASE_MERKLE_NODE_RESERVE_BYTE_LENGTH)
-            .ok_or_else(|| "phase Merkle stack liveness overflowed".to_owned())?;
+        let lane_column_count = encoded_column_count
+            .min(super::generation_state::MAXIMUM_PHASE_COMMITMENT_LANE_COLUMN_COUNT);
+        let upper_frontier_node_count = maximum_minimal_frontier_node_count(
+            lane_column_count,
+            construction_plan
+                .parameters
+                .outer_query_count
+                .min(lane_column_count),
+        )
+        .map_err(|_| "phase upper-frontier liveness geometry is invalid".to_owned())?;
+        let commitment_metadata_byte_length =
+            u64::try_from(maximum_interleaved_commitment_metadata_byte_length(
+                encoded_column_count,
+                super::generation_state::MAXIMUM_PHASE_COMMITMENT_LANE_COLUMN_COUNT,
+                construction_plan.parameters.outer_query_count,
+                construction_plan
+                    .parameters
+                    .outer_query_count
+                    .min(lane_column_count),
+                frontier_node_count,
+                upper_frontier_node_count,
+            )?)
+            .map_err(|_| "phase commitment metadata liveness exceeds u64".to_owned())?;
         let merkle_byte_length = hash_state_byte_length
-            .checked_add(opening_value_byte_length)
-            .and_then(|count| count.checked_add(frontier_byte_length))
-            .and_then(|count| count.checked_add(stack_byte_length))
+            .checked_add(digest_plane_byte_length)
+            .and_then(|count| count.checked_add(opening_value_byte_length))
+            .and_then(|count| count.checked_add(commitment_metadata_byte_length))
             .ok_or_else(|| "phase Merkle liveness overflowed".to_owned())?;
         maximum_dft_byte_length = maximum_dft_byte_length.max(dft_byte_length);
         maximum_merkle_byte_length = maximum_merkle_byte_length.max(merkle_byte_length);

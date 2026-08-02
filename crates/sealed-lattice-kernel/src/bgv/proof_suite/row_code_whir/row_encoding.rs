@@ -89,7 +89,7 @@ impl core::fmt::Display for RowEncodingError {
                 required_capacity,
             } => write!(
                 formatter,
-                "row buffer capacity {actual_capacity} is below encoded-domain capacity {required_capacity}"
+                "row buffer capacity {actual_capacity} is below padded-coefficient capacity {required_capacity}"
             ),
             Self::PrivateHighHalfCandidateDrawsExhausted { output_index } => write!(
                 formatter,
@@ -258,9 +258,10 @@ pub(super) fn padded_row_coefficients<'seed>(
 /// Extends an owned base-field witness into the exact padded row message
 /// without allocating a second witness-sized vector.
 ///
-/// The caller is expected to reserve the encoded-domain capacity before
-/// loading the witness. The same allocation can then be extended here and
-/// handed to the bounded in-place coset DFT.
+/// The caller is expected to reserve the padded-coefficient capacity before
+/// loading the witness. A bounded full-domain DFT may reserve more, while an
+/// interleaved lane DFT reuses exactly the larger of this message and one
+/// output lane.
 pub(super) fn padded_base_row_coefficients<'seed>(
     geometry: RowEncodingGeometry,
     row_index: usize,
@@ -280,10 +281,10 @@ pub(super) fn padded_base_row_coefficients<'seed>(
             expected_value_count: geometry.witness_values_per_row,
         });
     }
-    if witness_values.capacity() < geometry.encoded_column_count {
+    if witness_values.capacity() < geometry.padded_coefficient_count {
         return Err(RowEncodingError::EncodedRowCapacityInsufficient {
             actual_capacity: witness_values.capacity(),
-            required_capacity: geometry.encoded_column_count,
+            required_capacity: geometry.padded_coefficient_count,
         });
     }
 
@@ -768,7 +769,7 @@ mod tests {
     }
 
     #[test]
-    fn bounded_base_row_requires_and_reuses_the_encoded_domain_capacity() {
+    fn bounded_base_row_requires_and_reuses_the_padded_coefficient_capacity() {
         let geometry = RowEncodingGeometry::new_weighted_batch_with_log_inverse_rate(4, 4, 2)
             .expect("the focused geometry is valid");
         let undersized = Zeroizing::new(vec![
@@ -785,13 +786,13 @@ mod tests {
             Err(RowEncodingError::EncodedRowCapacityInsufficient {
                 required_capacity,
                 ..
-            }) if required_capacity == geometry.encoded_column_count
+            }) if required_capacity == geometry.padded_coefficient_count
         ));
 
         let mut reserved = Vec::new();
         reserved
-            .try_reserve_exact(geometry.encoded_column_count)
-            .expect("the focused encoded row reservation succeeds");
+            .try_reserve_exact(geometry.padded_coefficient_count)
+            .expect("the focused coefficient reservation succeeds");
         reserved.resize(geometry.witness_values_per_row, ProofBaseFieldElement::ONE);
         let reserved_capacity = reserved.capacity();
         let padded = padded_base_row_coefficients(
