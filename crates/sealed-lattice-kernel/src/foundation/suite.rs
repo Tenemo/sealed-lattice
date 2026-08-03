@@ -8,8 +8,9 @@ use super::schemas::{
 };
 use super::{
     CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple, FOUNDATION_PROFILE,
-    FoundationRosterParameters, FoundationSchemaError, Hash512, RefusalReason,
-    derive_foundation_roster_parameters, hash_foundation_tuple_512,
+    FoundationRosterParameters, FoundationSchemaError, Hash512, MAXIMUM_CONFIGURABLE_OPTION_COUNT,
+    MINIMUM_CONFIGURABLE_OPTION_COUNT, RefusalReason, derive_foundation_roster_parameters,
+    hash_foundation_tuple_512,
 };
 use crate::bgv::{
     evaluator::top_k::{
@@ -27,7 +28,7 @@ pub const ARTIFACT_REFERENCE_SCHEMA_IDENTIFIER: u16 = 0x0117;
 pub const SUITE_RECORD_SCHEMA_IDENTIFIER: u16 = 0x0118;
 
 const FOUNDATION_SCHEMA_VERSION: u16 = 1;
-const SUITE_RECORD_VERSION: u16 = 2;
+const SUITE_RECORD_VERSION: u16 = 3;
 const KEY_SWITCH_METHOD: u16 = 1;
 const KEY_SWITCH_BASIS_CONVERTER: u16 = 1;
 const SUITE_HASH_DOMAIN: &str = "sealed-lattice/foundation/suite/v1";
@@ -529,6 +530,7 @@ impl SuiteCountLimits {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SuiteRecord {
     roster_parameters: FoundationRosterParameters,
+    option_count: u16,
     count_limits: SuiteCountLimits,
     artifacts: Vec<ArtifactReference>,
 }
@@ -542,16 +544,35 @@ impl SuiteRecord {
         let roster_parameters =
             derive_foundation_roster_parameters(FOUNDATION_PROFILE.participant_count)
                 .ok_or_else(unsupported_roster_size)?;
-        Self::new_for_roster(roster_parameters, count_limits, artifacts)
+        Self::new_for_roster(
+            roster_parameters,
+            FOUNDATION_PROFILE.option_count,
+            count_limits,
+            artifacts,
+        )
+    }
+
+    #[cfg(test)]
+    pub(super) fn new_for_option_count(
+        option_count: u16,
+        count_limits: SuiteCountLimits,
+        artifacts: Vec<ArtifactReference>,
+    ) -> SchemaResult<Self> {
+        let roster_parameters =
+            derive_foundation_roster_parameters(FOUNDATION_PROFILE.participant_count)
+                .ok_or_else(unsupported_roster_size)?;
+        Self::new_for_roster(roster_parameters, option_count, count_limits, artifacts)
     }
 
     fn new_for_roster(
         roster_parameters: FoundationRosterParameters,
+        option_count: u16,
         count_limits: SuiteCountLimits,
         artifacts: Vec<ArtifactReference>,
     ) -> SchemaResult<Self> {
         let record = Self {
             roster_parameters,
+            option_count,
             count_limits,
             artifacts,
         };
@@ -577,6 +598,10 @@ impl SuiteRecord {
 
     pub const fn finality_quorum(&self) -> u16 {
         self.roster_parameters.finality_quorum
+    }
+
+    pub const fn option_count(&self) -> u16 {
+        self.option_count
     }
 
     pub const fn polynomial_degree(&self) -> u32 {
@@ -638,20 +663,20 @@ impl SuiteRecord {
     pub fn decode(bytes: &[u8], limits: &CanonicalDecodeLimits) -> SchemaResult<Self> {
         let mut budget = CanonicalDecodeBudget::new(limits);
         let tuple = CanonicalTuple::decode_with_budget(bytes, limits, &mut budget)?;
-        require_header(&tuple, SUITE_RECORD_SCHEMA_IDENTIFIER, 22)?;
-        let roster_parameters = validate_suite_items(&tuple)?;
+        require_header(&tuple, SUITE_RECORD_SCHEMA_IDENTIFIER, 23)?;
+        let (roster_parameters, option_count) = validate_suite_items(&tuple)?;
 
         let count_limits = SuiteCountLimits::new_for_roster(
-            read_u16(&tuple.items[14])?,
             read_u16(&tuple.items[15])?,
-            read_u32(&tuple.items[16])?,
+            read_u16(&tuple.items[16])?,
             read_u32(&tuple.items[17])?,
             read_u32(&tuple.items[18])?,
             read_u32(&tuple.items[19])?,
+            read_u32(&tuple.items[20])?,
             roster_parameters.participant_count,
         )?;
         let distributions =
-            read_nested_tuple_list_with_budget(&tuple.items[20], limits, &mut budget)?
+            read_nested_tuple_list_with_budget(&tuple.items[21], limits, &mut budget)?
                 .iter()
                 .map(DistributionRecord::from_tuple)
                 .collect::<SchemaResult<Vec<_>>>()?;
@@ -661,11 +686,11 @@ impl SuiteRecord {
                 "distribution catalog does not match the supported suite",
             ));
         }
-        let artifacts = read_nested_tuple_list_with_budget(&tuple.items[21], limits, &mut budget)?
+        let artifacts = read_nested_tuple_list_with_budget(&tuple.items[22], limits, &mut budget)?
             .iter()
             .map(ArtifactReference::from_tuple)
             .collect::<SchemaResult<Vec<_>>>()?;
-        Self::new_for_roster(roster_parameters, count_limits, artifacts)
+        Self::new_for_roster(roster_parameters, option_count, count_limits, artifacts)
     }
 
     pub fn suite_id(&self) -> SchemaResult<Hash512> {
@@ -681,6 +706,14 @@ impl SuiteRecord {
                 .ok_or_else(unsupported_roster_size)?;
         if derived_roster_parameters != self.roster_parameters {
             return Err(invalid_roster_parameters());
+        }
+        if !(MINIMUM_CONFIGURABLE_OPTION_COUNT..=MAXIMUM_CONFIGURABLE_OPTION_COUNT)
+            .contains(&self.option_count)
+        {
+            return Err(FoundationSchemaError::new(
+                RefusalReason::OutsideSupportedProfile,
+                "suite option count is outside the configurable range",
+            ));
         }
         self.count_limits
             .validate_for_roster(self.roster_parameters.participant_count)?;
@@ -715,6 +748,7 @@ impl SuiteRecord {
                 CanonicalItem::unsigned16(self.roster_parameters.active_fault_bound),
                 CanonicalItem::unsigned16(self.roster_parameters.reconstruction_threshold),
                 CanonicalItem::unsigned16(self.roster_parameters.finality_quorum),
+                CanonicalItem::unsigned16(self.option_count),
                 CanonicalItem::unsigned32(fixed_polynomial_degree()?),
                 CanonicalItem::unsigned64(PLAINTEXT_MODULUS),
                 unsigned64_list(&DATA_PRIMES)?,
@@ -748,7 +782,7 @@ impl SuiteRecord {
     }
 }
 
-fn validate_suite_items(tuple: &CanonicalTuple) -> SchemaResult<FoundationRosterParameters> {
+fn validate_suite_items(tuple: &CanonicalTuple) -> SchemaResult<(FoundationRosterParameters, u16)> {
     let participant_count = read_u16(&tuple.items[1])?;
     let roster_parameters = derive_foundation_roster_parameters(participant_count)
         .ok_or_else(unsupported_roster_size)?;
@@ -759,23 +793,26 @@ fn validate_suite_items(tuple: &CanonicalTuple) -> SchemaResult<FoundationRoster
         return Err(invalid_roster_parameters());
     }
 
+    let option_count = read_u16(&tuple.items[5])?;
     let fixed_fields_match = read_u16(&tuple.items[0])? == SUITE_RECORD_VERSION
-        && read_u32(&tuple.items[5])? == fixed_polynomial_degree()?
-        && read_u64(&tuple.items[6])? == PLAINTEXT_MODULUS
-        && read_unsigned64_list(&tuple.items[7])? == DATA_PRIMES
-        && read_unsigned64_list(&tuple.items[8])? == ORDERED_SPECIAL_PRIMES
-        && read_unsigned16_list(&tuple.items[9])? == ORDERED_TARGET_DATA_PRIME_INDEXES
-        && read_unsigned16_list(&tuple.items[10])? == ORDERED_SHARING_DATA_PRIME_INDEXES
-        && read_u16(&tuple.items[11])? == KEY_SWITCH_METHOD
-        && read_u16(&tuple.items[12])? == fixed_key_switch_data_primes_per_block()?
-        && read_u16(&tuple.items[13])? == KEY_SWITCH_BASIS_CONVERTER;
+        && (MINIMUM_CONFIGURABLE_OPTION_COUNT..=MAXIMUM_CONFIGURABLE_OPTION_COUNT)
+            .contains(&option_count)
+        && read_u32(&tuple.items[6])? == fixed_polynomial_degree()?
+        && read_u64(&tuple.items[7])? == PLAINTEXT_MODULUS
+        && read_unsigned64_list(&tuple.items[8])? == DATA_PRIMES
+        && read_unsigned64_list(&tuple.items[9])? == ORDERED_SPECIAL_PRIMES
+        && read_unsigned16_list(&tuple.items[10])? == ORDERED_TARGET_DATA_PRIME_INDEXES
+        && read_unsigned16_list(&tuple.items[11])? == ORDERED_SHARING_DATA_PRIME_INDEXES
+        && read_u16(&tuple.items[12])? == KEY_SWITCH_METHOD
+        && read_u16(&tuple.items[13])? == fixed_key_switch_data_primes_per_block()?
+        && read_u16(&tuple.items[14])? == KEY_SWITCH_BASIS_CONVERTER;
     if !fixed_fields_match {
         return Err(FoundationSchemaError::new(
             RefusalReason::UnsupportedVersionOrSuite,
             "suite record does not match the supported fixed algebra",
         ));
     }
-    Ok(roster_parameters)
+    Ok((roster_parameters, option_count))
 }
 
 fn validate_fixed_algebra() -> SchemaResult<()> {
@@ -1087,13 +1124,14 @@ mod tests {
     }
 
     #[test]
-    fn suite_round_trip_preserves_the_exact_twenty_two_item_record_and_identifier() {
+    fn suite_round_trip_preserves_the_exact_twenty_three_item_record_and_identifier() {
         let suite = sample_suite();
         let encoded = suite.encode().expect("suite encodes");
         let tuple = CanonicalTuple::decode(&encoded, &CanonicalDecodeLimits::default())
             .expect("suite tuple decodes");
         assert_eq!(tuple.schema_identifier, SUITE_RECORD_SCHEMA_IDENTIFIER);
-        assert_eq!(tuple.items.len(), 22);
+        assert_eq!(tuple.items.len(), 23);
+        assert_eq!(suite.option_count(), FOUNDATION_PROFILE.option_count);
 
         let decoded = SuiteRecord::decode(&encoded, &CanonicalDecodeLimits::default())
             .expect("suite decodes");
@@ -1127,8 +1165,8 @@ mod tests {
         tuple.items[2] = CanonicalItem::unsigned16(roster_parameters.active_fault_bound);
         tuple.items[3] = CanonicalItem::unsigned16(roster_parameters.reconstruction_threshold);
         tuple.items[4] = CanonicalItem::unsigned16(roster_parameters.finality_quorum);
-        tuple.items[15] = CanonicalItem::unsigned16(roster_parameters.participant_count);
-        tuple.items[18] = CanonicalItem::unsigned32(6);
+        tuple.items[16] = CanonicalItem::unsigned16(roster_parameters.participant_count);
+        tuple.items[19] = CanonicalItem::unsigned32(6);
         let encoded = tuple.encode().expect("candidate suite encodes");
         let decoded = SuiteRecord::decode(&encoded, &CanonicalDecodeLimits::default())
             .expect("candidate suite is structural");
@@ -1140,6 +1178,39 @@ mod tests {
             decoded.encode().expect("candidate suite re-encodes"),
             encoded
         );
+    }
+
+    #[test]
+    fn suite_schema_derives_every_configurable_option_count() {
+        for option_count in MINIMUM_CONFIGURABLE_OPTION_COUNT..=MAXIMUM_CONFIGURABLE_OPTION_COUNT {
+            let suite = SuiteRecord::new_for_option_count(
+                option_count,
+                sample_count_limits(),
+                sample_artifacts(),
+            )
+            .expect("bounded option-count suite is structural");
+            let encoded = suite.encode().expect("bounded suite encodes");
+            let decoded = SuiteRecord::decode(&encoded, &CanonicalDecodeLimits::default())
+                .expect("bounded suite decodes");
+            assert_eq!(decoded.option_count(), option_count);
+            assert_eq!(decoded.encode().expect("bounded suite re-encodes"), encoded);
+        }
+
+        for invalid_option_count in [
+            MINIMUM_CONFIGURABLE_OPTION_COUNT - 1,
+            MAXIMUM_CONFIGURABLE_OPTION_COUNT + 1,
+        ] {
+            assert_eq!(
+                SuiteRecord::new_for_option_count(
+                    invalid_option_count,
+                    sample_count_limits(),
+                    sample_artifacts(),
+                )
+                .expect_err("out-of-range option count must refuse")
+                .refusal_reason,
+                RefusalReason::OutsideSupportedProfile
+            );
+        }
     }
 
     #[test]
@@ -1178,7 +1249,7 @@ mod tests {
         let mut wrong_degree = sample_suite()
             .canonical_tuple()
             .expect("suite tuple derives");
-        wrong_degree.items[5] = CanonicalItem::unsigned32(fixed_polynomial_degree().unwrap() / 2);
+        wrong_degree.items[6] = CanonicalItem::unsigned32(fixed_polynomial_degree().unwrap() / 2);
         let wrong_degree_bytes = wrong_degree.encode().expect("mutated suite encodes");
         assert_eq!(
             SuiteRecord::decode(&wrong_degree_bytes, &CanonicalDecodeLimits::default())
@@ -1191,7 +1262,7 @@ mod tests {
             .canonical_tuple()
             .expect("suite tuple derives");
         let mut distribution_tuples = read_nested_tuple_list_with_budget(
-            &wrong_distributions.items[20],
+            &wrong_distributions.items[21],
             &CanonicalDecodeLimits::default(),
             &mut CanonicalDecodeBudget::new(&CanonicalDecodeLimits::default()),
         )
@@ -1201,7 +1272,7 @@ mod tests {
             .iter()
             .map(|tuple| CanonicalItem::nested_tuple(tuple).expect("nested tuple encodes"))
             .collect::<Vec<_>>();
-        wrong_distributions.items[20] =
+        wrong_distributions.items[21] =
             CanonicalItem::homogeneous_list(CanonicalItemType::NestedTuple, &nested_distributions)
                 .expect("distribution list encodes");
         let wrong_distribution_bytes = wrong_distributions.encode().expect("mutated suite encodes");
@@ -1220,14 +1291,14 @@ mod tests {
             .expect("suite tuple derives");
 
         let mut wrong_plaintext_modulus = selected_tuple.clone();
-        wrong_plaintext_modulus.items[6] = CanonicalItem::unsigned64(PLAINTEXT_MODULUS + 2);
+        wrong_plaintext_modulus.items[7] = CanonicalItem::unsigned64(PLAINTEXT_MODULUS + 2);
         assert_fixed_algebra_mutation_refuses(
             wrong_plaintext_modulus,
             "wrong plaintext modulus must refuse",
         );
 
         let selected_data_primes =
-            read_unsigned64_list(&selected_tuple.items[7]).expect("data basis decodes");
+            read_unsigned64_list(&selected_tuple.items[8]).expect("data basis decodes");
         let mut substituted_data_primes = selected_data_primes.clone();
         substituted_data_primes[0] = substituted_data_primes[0]
             .checked_add(2)
@@ -1242,13 +1313,13 @@ mod tests {
             ("reordered data basis must refuse", reordered_data_primes),
         ] {
             let mut wrong_data_basis = selected_tuple.clone();
-            wrong_data_basis.items[7] =
+            wrong_data_basis.items[8] =
                 unsigned64_list(&data_primes).expect("mutated data basis encodes");
             assert_fixed_algebra_mutation_refuses(wrong_data_basis, description);
         }
 
         let selected_special_primes =
-            read_unsigned64_list(&selected_tuple.items[8]).expect("special basis decodes");
+            read_unsigned64_list(&selected_tuple.items[9]).expect("special basis decodes");
         let mut substituted_special_primes = selected_special_primes.clone();
         substituted_special_primes[0] = substituted_special_primes[0]
             .checked_add(2)
@@ -1266,7 +1337,7 @@ mod tests {
             ),
         ] {
             let mut wrong_special_basis = selected_tuple.clone();
-            wrong_special_basis.items[8] =
+            wrong_special_basis.items[9] =
                 unsigned64_list(&special_primes).expect("mutated special basis encodes");
             assert_fixed_algebra_mutation_refuses(wrong_special_basis, description);
         }
@@ -1274,12 +1345,12 @@ mod tests {
         for (description, item_ordinal, replacement) in [
             (
                 "wrong key-switch method must refuse",
-                11,
+                12,
                 CanonicalItem::unsigned16(KEY_SWITCH_METHOD + 1),
             ),
             (
                 "wrong key-switch block size must refuse",
-                12,
+                13,
                 CanonicalItem::unsigned16(
                     u16::try_from(KEY_SWITCH_DATA_PRIMES_PER_BLOCK + 1)
                         .expect("mutated key-switch block size fits u16"),
@@ -1287,7 +1358,7 @@ mod tests {
             ),
             (
                 "wrong key-switch converter must refuse",
-                13,
+                14,
                 CanonicalItem::unsigned16(KEY_SWITCH_BASIS_CONVERTER + 1),
             ),
         ] {
@@ -1299,7 +1370,7 @@ mod tests {
 
     #[test]
     fn suite_decode_refuses_target_and_sharing_coordinate_mutations() {
-        for (basis_name, item_ordinal) in [("target", 9), ("sharing", 10)] {
+        for (basis_name, item_ordinal) in [("target", 10), ("sharing", 11)] {
             for invalid_indexes in [
                 vec![0, 1, 2, 3, 4, 5, 6],
                 vec![0, 1, 2, 3, 4, 5, 6, 7, 8],

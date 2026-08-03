@@ -5,6 +5,7 @@ use crate::{
         plaintext_extension_lane_root,
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
+    foundation::{MAXIMUM_CONFIGURABLE_OPTION_COUNT, MINIMUM_CONFIGURABLE_OPTION_COUNT},
 };
 
 use super::{MAXIMUM_SCORE, MINIMUM_SCORE, OPTION_COUNT};
@@ -17,9 +18,7 @@ pub(crate) const PAIR_CHARACTER_CIPHERTEXT_COUNT: usize = 2;
 pub(crate) const PAIR_CHARACTER_AUXILIARY_COUNT: usize = 3;
 pub(crate) const SCORE_BUCKET_COUNT: usize = (MAXIMUM_SCORE - MINIMUM_SCORE + 1) as usize;
 
-const PAIR_COUNT: usize = OPTION_COUNT * (OPTION_COUNT - 1) / 2;
 const PAIR_CHARACTER_BANK_LANE_COUNT: usize = PAIR_CHARACTER_LANE_COUNT / 2;
-const EXPECTED_ACTIVE_LANE_COUNTS: [usize; PAIR_CHARACTER_CIPHERTEXT_COUNT] = [93, 97];
 
 /// One suite-fixed placement of every pair at a given option separation.
 /// The start is local to one 64-lane Frobenius-orbit bank.
@@ -32,7 +31,8 @@ struct PairCharacterShiftPlacement {
 
 /// The topology-audited pair catalog. Entry `d - 1` places every pair
 /// `(lower, lower + d)` in increasing `lower` order.
-const PAIR_CHARACTER_SHIFT_PLACEMENTS: [PairCharacterShiftPlacement; OPTION_COUNT - 1] = [
+const PAIR_CHARACTER_SHIFT_PLACEMENTS: [PairCharacterShiftPlacement;
+    MAXIMUM_CONFIGURABLE_OPTION_COUNT as usize - 1] = [
     PairCharacterShiftPlacement {
         ciphertext_ordinal: 1,
         bank_ordinal: 0,
@@ -201,12 +201,23 @@ impl PairCharacterPlaintext {
     }
 }
 
-pub(crate) fn selected_pair_character_lane_assignments()
--> CanonicalResult<Vec<PairCharacterLaneAssignment>> {
-    let mut assignments = Vec::with_capacity(PAIR_COUNT);
-    for (shift_index, placement) in PAIR_CHARACTER_SHIFT_PLACEMENTS.iter().copied().enumerate() {
+pub(crate) fn pair_character_lane_assignments(
+    option_count: usize,
+) -> CanonicalResult<Vec<PairCharacterLaneAssignment>> {
+    validate_option_count(option_count)?;
+    let pair_count = option_count
+        .checked_mul(option_count - 1)
+        .map(|product| product / 2)
+        .ok_or_else(pair_character_geometry_error)?;
+    let mut assignments = Vec::with_capacity(pair_count);
+    for (shift_index, placement) in PAIR_CHARACTER_SHIFT_PLACEMENTS
+        .iter()
+        .copied()
+        .take(option_count - 1)
+        .enumerate()
+    {
         let shift = shift_index + 1;
-        for lower_option_ordinal in 0..OPTION_COUNT - shift {
+        for lower_option_ordinal in 0..option_count - shift {
             let lane_within_bank = (usize::from(placement.lane_start) + lower_option_ordinal)
                 % PAIR_CHARACTER_BANK_LANE_COUNT;
             let lane_ordinal = usize::from(placement.bank_ordinal)
@@ -224,7 +235,7 @@ pub(crate) fn selected_pair_character_lane_assignments()
             });
         }
     }
-    validate_pair_character_lane_assignments(&assignments)?;
+    validate_pair_character_lane_assignments(option_count, &assignments)?;
     Ok(assignments)
 }
 
@@ -234,12 +245,12 @@ pub(crate) fn pair_character_plaintexts(
     ring_degree: usize,
 ) -> CanonicalResult<[PairCharacterPlaintext; PAIR_CHARACTER_CIPHERTEXT_COUNT]> {
     validate_pair_character_geometry(plaintext_modulus, ring_degree)?;
-    if scores.len() != OPTION_COUNT {
-        return Err(CanonicalError::new(
+    validate_option_count(scores.len()).map_err(|_| {
+        CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "pair-character ballot requires exactly twenty scores",
-        ));
-    }
+            "pair-character ballot score count is outside the configurable range",
+        )
+    })?;
     if scores
         .iter()
         .any(|score| !(MINIMUM_SCORE..=MAXIMUM_SCORE).contains(score))
@@ -250,7 +261,7 @@ pub(crate) fn pair_character_plaintexts(
         ));
     }
 
-    let assignments = selected_pair_character_lane_assignments()?;
+    let assignments = pair_character_lane_assignments(scores.len())?;
     let mut plaintexts = core::array::from_fn(|_| PairCharacterPlaintext {
         auxiliary_left_coefficients: vec![0_u64; ring_degree],
         auxiliary_right_coefficients: vec![0_u64; ring_degree],
@@ -348,7 +359,12 @@ pub(crate) fn pair_character_encoder_profile_terms(
         return Err(pair_character_geometry_error());
     }
     let mut coefficient_by_lane_block = [0_u64; PAIR_CHARACTER_LANE_COUNT];
-    for (shift_index, placement) in PAIR_CHARACTER_SHIFT_PLACEMENTS.iter().copied().enumerate() {
+    for (shift_index, placement) in PAIR_CHARACTER_SHIFT_PLACEMENTS
+        .iter()
+        .copied()
+        .take(OPTION_COUNT - 1)
+        .enumerate()
+    {
         if placement.ciphertext_ordinal != ciphertext_ordinal {
             continue;
         }
@@ -486,16 +502,21 @@ fn validate_pair_character_geometry(
 }
 
 fn validate_pair_character_lane_assignments(
+    option_count: usize,
     assignments: &[PairCharacterLaneAssignment],
 ) -> CanonicalResult<()> {
-    if assignments.len() != PAIR_COUNT {
+    let pair_count = option_count
+        .checked_mul(option_count - 1)
+        .map(|product| product / 2)
+        .ok_or_else(pair_character_geometry_error)?;
+    if assignments.len() != pair_count {
         return Err(pair_character_geometry_error());
     }
     let mut occupied = [[false; PAIR_CHARACTER_LANE_COUNT]; PAIR_CHARACTER_CIPHERTEXT_COUNT];
     let mut active_counts = [0_usize; PAIR_CHARACTER_CIPHERTEXT_COUNT];
     let mut assignment_ordinal = 0_usize;
-    for shift in 1..OPTION_COUNT {
-        for lower_option_ordinal in 0..OPTION_COUNT - shift {
+    for shift in 1..option_count {
+        for lower_option_ordinal in 0..option_count - shift {
             let assignment = assignments[assignment_ordinal];
             let ciphertext_index = usize::from(assignment.ciphertext_ordinal);
             let lane_index = usize::from(assignment.lane_ordinal);
@@ -512,7 +533,17 @@ fn validate_pair_character_lane_assignments(
             assignment_ordinal += 1;
         }
     }
-    if active_counts != EXPECTED_ACTIVE_LANE_COUNTS {
+    if active_counts.iter().sum::<usize>() != pair_count {
+        return Err(pair_character_geometry_error());
+    }
+    Ok(())
+}
+
+fn validate_option_count(option_count: usize) -> CanonicalResult<()> {
+    if !(usize::from(MINIMUM_CONFIGURABLE_OPTION_COUNT)
+        ..=usize::from(MAXIMUM_CONFIGURABLE_OPTION_COUNT))
+        .contains(&option_count)
+    {
         return Err(pair_character_geometry_error());
     }
     Ok(())

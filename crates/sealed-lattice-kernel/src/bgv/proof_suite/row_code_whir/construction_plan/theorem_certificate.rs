@@ -27,7 +27,9 @@ use crate::bgv::proof_suite::row_code_whir::{
     ChallengeField, ColumnStreamableLeafHasher, ColumnStreamableLeafOracleFrame,
     ColumnStreamableLeafOracleFrameDescriptor, ExactSameSecretTransportCorrespondenceCertificate,
     MERKLE_DIGEST_WORD_LENGTH, ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN,
-    ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN, aggregate_leaf_hasher,
+    ROW_CODE_WHIR_AGGREGATE_NODE_DOMAIN, ROW_CODE_WHIR_PHASE_COLUMN_LEAF_DOMAIN,
+    ROW_CODE_WHIR_PHASE_COLUMN_NODE_DOMAIN, ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN,
+    aggregate_leaf_hasher,
     aggregate_wide_hiding::{
         AGGREGATE_WIDE_PAD_LOG_INVERSE_RATE, AggregateWideChronologyEvent,
         AggregateWideChronologyRow, AggregateWideDerivedAffineIdentity,
@@ -38,6 +40,7 @@ use crate::bgv::proof_suite::row_code_whir::{
         checked_fold_limb_affine_map,
     },
     checked_exact_same_secret_transport_correspondence,
+    checked_row_code_whir_transport_correspondence,
     commitment_liveness::derive_aggregate_commitment_liveness,
     coordinate_derived_hiding_mmcs::{
         AGGREGATE_PRIVATE_LEAF_SALT_KEY_EXTENSION_ELEMENT_COUNT, AggregateLeafSaltRole,
@@ -73,23 +76,28 @@ use crate::bgv::proof_suite::{
     ConstructionMaskingRankVerification, ConstructionSecretViewAlgebra,
     ConstructionSecretViewDescriptor, ConstructionSecretViewIdentifier,
     PROOF_CHALLENGE_EXTENSION_DEGREE, PublicAggregateRelationGeometry,
-    SelectedSameSecretPersistentMaskImageAccounting, SuiteModulusReference,
+    SelectedPersistentCommittedMaterialEndpoint,
+    SelectedPersistentCommittedMaterialMaskImageInventory,
+    SelectedPersistentCommittedMaterialPhysicalColumnDemand, SuiteModulusReference,
     TraceMaskObservationCoordinateCatalog, TraceMaskSurjectivityCertificate,
     ValidatedRelationPlanArtifact, checked_construction_masking_correspondence_for_parameters,
     checked_zero_knowledge_mask_image_for_parameters,
     committed_material_private_derivation_description,
     compile_collective_public_key_aggregate_relation_plan, compile_public_key_share_relation_plan,
     compile_same_secret_relation_plan, selected_ballot_validity_relation_compilation,
-    selected_committed_material_profile, selected_public_key_share_relation_plan_input,
-    selected_relation_plan_for_schema, selected_relation_plans,
-    selected_same_secret_persistent_mask_image_accounting,
-    selected_same_secret_relation_plan_input,
+    selected_committed_material_profile,
+    selected_persistent_committed_material_mask_image_inventory,
+    selected_public_key_share_relation_plan_input, selected_relation_plan_for_schema,
+    selected_relation_plans, selected_same_secret_relation_plan_input,
 };
 use crate::foundation::{
-    DECLARED_ADVERSARIAL_QUERY_BUDGET, MaskGeneratorHybridAssumption, MaskGeneratorHybridHop,
-    MaskGeneratorHybridLoss, PRIVATE_RANDOMNESS_BLOCK_BYTE_LENGTH, deployed_private_stream_hybrid,
-    quantum_private_stream_hybrid,
+    CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalItem, CanonicalItemType,
+    DECLARED_ADVERSARIAL_QUERY_BUDGET, Hash512, MaskGeneratorHybridAssumption,
+    MaskGeneratorHybridHop, MaskGeneratorHybridLoss, PRIVATE_RANDOMNESS_BLOCK_BYTE_LENGTH,
+    ProofApplicationSlotCeilings, canonical_foundation_tuple_hash_preimage,
+    deployed_private_stream_hybrid, quantum_private_stream_hybrid,
 };
+use crate::hashing::HASH512_PREIMAGE_PREFIX;
 
 mod production_extractor;
 mod soundness_composition;
@@ -114,18 +122,16 @@ const SAME_SECRET_SCALAR_OPENING_COUNT: u64 = 1_782;
 /// response bindings                    2,034      =     2,034
 /// supplied-response absorptions        2,071      =     2,071
 /// deterministic empty absorptions      4,235      =     4,235
-/// atomic challenge XOF queries         4,272      =     4,272
-/// total                                                14,673
+/// fixed 512-bit challenge seeds         4,272      =     4,272
+/// fixed 512-bit challenge blocks      590,128      =   590,128
+/// total                                               604,801
 /// ~~~
 ///
-/// The `4,272` atomic challenges partition as `4,260` extension challenges
-/// plus `9` distinct-index samplers plus `3` product-space samplers, which is
-/// also the logical verifier-message count below. Each challenge is one
-/// plan-sized XOF invocation whose output covers every candidate slot,
-/// including slots discarded after the first accepted value. Those output
-/// lengths are not uniformly 512 bits and therefore do not by themselves fit
-/// the fixed-output oracle used by the conditional CMS19 arithmetic below.
-const SELECTED_TRANSCRIPT_HASH_QUERY_COUNT: u64 = 14_673;
+/// The `4,272` seeded streams partition as `4,260` extension challenges, `9`
+/// distinct-index samplers, and `3` product-space samplers. The independently
+/// derived fixed-call subtotals are `549,540`, `44,473`, and `387`; they include
+/// one seed per logical message and every discarded rejection slot.
+const SELECTED_TRANSCRIPT_HASH_QUERY_COUNT: u64 = 604_801;
 const SELECTED_LOGICAL_VERIFIER_MESSAGE_COUNT: u64 = 4_272;
 const CMS19_ADVERSARIAL_QUERY_EXPONENT: usize = 80;
 const CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH: usize = 512;
@@ -145,6 +151,7 @@ pub(in crate::bgv::proof_suite) enum WhirTheoremCertificateError {
     IncompleteFailureMagnitudeCorrespondence,
     IncompleteTransportedProofCorrespondence,
     IncompleteNonlinearCommitmentBinding,
+    IncompleteNonlinearCommitmentPrivacy,
     SelectedProductionGeometry {
         application_statement_schema_identifier: u16,
         schedule_position: Option<u32>,
@@ -171,7 +178,7 @@ pub(in crate::bgv::proof_suite) enum ProductionGeometryCertificateStage {
     WholeStateCorrespondence,
     StrongStateHashChain,
     TranscriptOracleOutputInventory,
-    TypedVariableOutputOracleModel,
+    FixedOutputSeededSamplerModel,
     VerifierLedger,
     DeployedLeafOracle,
     WholeDatabaseSupport,
@@ -199,6 +206,7 @@ pub(in crate::bgv::proof_suite) enum ProductionGeometryCertificateFailure {
     IncompleteFailureMagnitudeCorrespondence,
     IncompleteTransportedProofCorrespondence,
     IncompleteNonlinearCommitmentBinding,
+    IncompleteNonlinearCommitmentPrivacy,
     InvalidCoordinateOrIdentity,
     InvalidWitnessGeometry,
     IncompleteRelationOrMaskingCertificate,
@@ -251,6 +259,9 @@ impl From<WhirTheoremCertificateError> for ProductionGeometryCertificateFailure 
             }
             WhirTheoremCertificateError::IncompleteNonlinearCommitmentBinding => {
                 Self::IncompleteNonlinearCommitmentBinding
+            }
+            WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy => {
+                Self::IncompleteNonlinearCommitmentPrivacy
             }
             WhirTheoremCertificateError::SelectedProductionGeometry { failure, .. } => failure,
         }
@@ -540,6 +551,13 @@ impl ExactBigFraction {
 
     fn multiply_integer(&self, factor: &BigUint) -> Result<Self, WhirTheoremCertificateError> {
         Self::new(&self.numerator * factor, self.denominator.clone())
+    }
+
+    fn multiply_fraction(&self, factor: &Self) -> Result<Self, WhirTheoremCertificateError> {
+        Self::new(
+            &self.numerator * &factor.numerator,
+            &self.denominator * &factor.denominator,
+        )
     }
 
     fn multiply_u64(&self, factor: u64) -> Result<Self, WhirTheoremCertificateError> {
@@ -1119,6 +1137,28 @@ struct PrivateLeafSaltPrfCertificate {
     ceremony_pairwise_collision_union_bound: ExactBigFraction,
 }
 
+fn selected_complete_action_variant_application_multiplicity(
+    plan: &RowCodeWhirConstructionPlan,
+) -> Result<u32, WhirTheoremCertificateError> {
+    let mut matching_rows = crate::bgv::proof_suite::selected_accounting::resource_accounting::
+        selected_proof_variant_resource_inventory()
+        .map_err(|_| WhirTheoremCertificateError::InvalidSelectedGeometry)?
+        .iter()
+        .filter(|row| {
+            row.application_statement_schema_identifier()
+                == plan.application_statement_schema_identifier
+                && row.schedule_position() == plan.schedule_position
+                && row.top_count() == plan.top_count
+        });
+    let row = matching_rows
+        .next()
+        .ok_or(WhirTheoremCertificateError::InvalidSelectedGeometry)?;
+    if matching_rows.next().is_some() {
+        return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
+    }
+    Ok(row.complete_action_application_multiplicity())
+}
+
 impl PrivateLeafSaltPrfCertificate {
     fn derive(
         plan: &RowCodeWhirConstructionPlan,
@@ -1129,10 +1169,8 @@ impl PrivateLeafSaltPrfCertificate {
             .canonical_identity_hash()
             .map_err(|_| WhirTheoremCertificateError::IncompletePrivateLeafSaltPrf)?;
         let family_application_multiplicity =
-            crate::bgv::proof_suite::selected_profile::selected_proof_application_slot_ceilings()
-                .map_err(|_| WhirTheoremCertificateError::IncompletePrivateLeafSaltPrf)?
-                .family_ceiling(plan.application_statement_schema_identifier)
-                .ok_or(WhirTheoremCertificateError::IncompletePrivateLeafSaltPrf)?;
+            selected_complete_action_variant_application_multiplicity(plan)
+                .map_err(|_| WhirTheoremCertificateError::IncompletePrivateLeafSaltPrf)?;
         let secret_bearing = plan.proof_privacy_mode == ProofPrivacyMode::SecretBearing;
         let mut commitment_rows = Vec::new();
 
@@ -1405,11 +1443,7 @@ impl PrivateLeafSaltPrfCertificate {
         private_row_pad_generator_hybrid: &PrivateRowPadGeneratorHybridCertificate,
     ) -> bool {
         let expected_family_application_multiplicity =
-            crate::bgv::proof_suite::selected_profile::selected_proof_application_slot_ceilings()
-                .ok()
-                .and_then(|ceilings| {
-                    ceilings.family_ceiling(plan.application_statement_schema_identifier)
-                });
+            selected_complete_action_variant_application_multiplicity(plan).ok();
         self.has_complete_for_bound_geometry(
             self.construction_plan_identity_hash,
             plan.proof_privacy_mode,
@@ -1565,7 +1599,7 @@ impl PrivateLeafSaltPrfCertificate {
         self.customization == PRIVATE_LEAF_SALT_CUSTOMIZATION
             && self.output_byte_length == PRIVATE_LEAF_SALT_BYTE_LENGTH
             && self.output_bit_length == PRIVATE_LEAF_SALT_BYTE_LENGTH * u8::BITS as usize
-            && self.family_application_multiplicity > 0
+            && (!secret_bearing || self.family_application_multiplicity > 0)
             && expected_distinct_input_count == Some(self.distinct_framed_input_count)
             && expected_derivation_call_count == Some(self.clean_prover_derivation_call_count)
             && expected_repeated_call_count == Some(self.repeated_or_cached_call_count)
@@ -1951,11 +1985,17 @@ struct ExactFailureMagnitudeCertificate {
     extension_field_cardinality: BigUint,
     query_failure_probability_ceiling: ExactBigFraction,
     algebraic_failure_probability_ceiling: ExactBigFraction,
+    ideal_public_coin_classical_failure_probability_ceiling: ExactBigFraction,
+    precommitted_sampler_table: Cms19PrecommittedSamplerTableCertificate,
     classical_failure_probability_ceiling: ExactBigFraction,
+    cms19_primary_oracle_qrom_failure_probability_ceiling: ExactBigFraction,
+    auxiliary_table_bad_event_probability_ceiling: ExactBigFraction,
     qrom_failure_probability_ceiling: ExactBigFraction,
     family_application_multiplicity: u64,
     cms19_verifier_hash_query_count: u64,
     cms19_accepting_database_equation_count: u64,
+    cms19_classical_soundness_multiplier: BigUint,
+    cms19_ideal_oracle_penalty_probability_ceiling: ExactBigFraction,
     all_failure_owners_mapped_once: bool,
     exact_query_products_bounded: bool,
     ordinary_family_mass_gate_holds: bool,
@@ -1964,6 +2004,76 @@ struct ExactFailureMagnitudeCertificate {
 }
 
 impl ExactFailureMagnitudeCertificate {
+    fn has_self_consistent_probability_arithmetic(&self) -> bool {
+        (|| -> Result<bool, WhirTheoremCertificateError> {
+            let expected_query = sum_query_probability_ceiling(&self.query_rows)?;
+            let expected_algebraic = sum_algebraic_probability_ceiling(&self.algebraic_rows)?;
+            let expected_ideal_public_coin = expected_query.add(&expected_algebraic)?;
+            let expected_sampler_adjusted = expected_ideal_public_coin
+                .multiply_fraction(
+                    &self
+                        .precommitted_sampler_table
+                        .logical_failure_density_expansion_factor,
+                )?
+                .add(
+                    &self
+                        .precommitted_sampler_table
+                        .seed_collision_probability_ceiling,
+                )?
+                .add(
+                    &self
+                        .precommitted_sampler_table
+                        .conditioned_exhaustion_probability_ceiling,
+                )?;
+            let expected_primary_qrom = expected_sampler_adjusted
+                .multiply_integer(&self.cms19_classical_soundness_multiplier)?
+                .add(&self.cms19_ideal_oracle_penalty_probability_ceiling)?;
+            let expected_auxiliary_table_bad_event = self
+                .precommitted_sampler_table
+                .complete_auxiliary_table_bad_event_probability_ceiling
+                .clone();
+            let expected_complete_qrom =
+                expected_primary_qrom.add(&expected_auxiliary_table_bad_event)?;
+            let one = ExactBigFraction::from_u64(1, 1)?;
+            let expected_ordinary_gate = expected_sampler_adjusted
+                .multiply_integer(
+                    &(BigUint::from(self.family_application_multiplicity)
+                        << CMS19_ADVERSARIAL_QUERY_EXPONENT),
+                )?
+                .less_than_or_equal(&one);
+            let expected_transformed_gate = expected_sampler_adjusted
+                .multiply_integer(
+                    &(BigUint::from(
+                        self.family_application_multiplicity
+                            .checked_mul(12)
+                            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+                    ) << 176_usize),
+                )?
+                .less_than_or_equal(&one);
+            let expected_qrom_gate = expected_complete_qrom
+                .multiply_u64(
+                    self.family_application_multiplicity
+                        .checked_mul(4)
+                        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+                )?
+                .less_than_or_equal(&one);
+            Ok(self.query_failure_probability_ceiling == expected_query
+                && self.algebraic_failure_probability_ceiling == expected_algebraic
+                && self.ideal_public_coin_classical_failure_probability_ceiling
+                    == expected_ideal_public_coin
+                && self.classical_failure_probability_ceiling == expected_sampler_adjusted
+                && self.cms19_primary_oracle_qrom_failure_probability_ceiling
+                    == expected_primary_qrom
+                && self.auxiliary_table_bad_event_probability_ceiling
+                    == expected_auxiliary_table_bad_event
+                && self.qrom_failure_probability_ceiling == expected_complete_qrom
+                && self.ordinary_family_mass_gate_holds == expected_ordinary_gate
+                && self.transformed_initial_mass_gate_holds == expected_transformed_gate
+                && self.complete_qrom_mass_gate_holds == expected_qrom_gate)
+        })()
+        .unwrap_or(false)
+    }
+
     fn is_complete(&self) -> bool {
         let has_product_challenge_owner = self.owner_rows.iter().any(|row| {
             matches!(
@@ -1981,8 +2091,19 @@ impl ExactFailureMagnitudeCertificate {
             && has_product_challenge_owner != self.product_challenge_rows.is_empty()
             && !self.algebraic_rows.is_empty()
             && self.family_application_multiplicity > 0
+            && !self.cms19_classical_soundness_multiplier.is_zero()
+            && self.has_self_consistent_probability_arithmetic()
             && self.all_failure_owners_mapped_once
             && self.exact_query_products_bounded
+            && self
+                .precommitted_sampler_table
+                .table_goodness_is_universal_over_adaptive_failure_sets
+            && self
+                .precommitted_sampler_table
+                .primary_oracle_reduction_relativizes_to_fixed_auxiliary_unitaries
+            && !self
+                .precommitted_sampler_table
+                .claims_fixed_shake256_is_an_ideal_oracle
             && self.ordinary_family_mass_gate_holds
             && self.transformed_initial_mass_gate_holds
             && self.complete_qrom_mass_gate_holds
@@ -2001,6 +2122,9 @@ enum ExactFailureMagnitudeFault {
     DropRelationCompositionOwner,
     ReduceAggregateWideBaseNumerator,
     ChangeVerifierHashQueryCount,
+    ChangeSamplerDensityExpansion,
+    ChangeAuxiliaryTableBadEvent,
+    ChangeCms19ClassicalSoundnessMultiplier,
     ChangeApplicationStatementSchemaIdentifier,
     ChangeFamilyApplicationMultiplicity,
 }
@@ -2219,7 +2343,8 @@ enum OracleEquationRole {
     ResponseBinding,
     ResponseAbsorption,
     EmptyProverResponseAbsorption,
-    AtomicChallengeXof,
+    AtomicChallengeSeed,
+    AtomicChallengeOutputBlock,
 }
 
 impl OracleEquationRole {
@@ -2229,8 +2354,8 @@ impl OracleEquationRole {
             Self::InitialAbsorption
             | Self::ResponseBinding
             | Self::EmptyProverResponseAbsorption
-            | Self::AtomicChallengeXof => 1,
-            Self::ResponseAbsorption => 2,
+            | Self::AtomicChallengeSeed => 1,
+            Self::ResponseAbsorption | Self::AtomicChallengeOutputBlock => 2,
         }
     }
 }
@@ -2238,12 +2363,50 @@ impl OracleEquationRole {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum OracleEquationRolePattern {
     Single(OracleEquationRole),
+    SeededHashStream {
+        seed_query_count: u64,
+        output_block_query_count: u64,
+    },
 }
 
 impl OracleEquationRolePattern {
     fn maximum_predecessor_support_count(self) -> u8 {
         match self {
             Self::Single(role) => role.predecessor_support_count(),
+            Self::SeededHashStream {
+                output_block_query_count,
+                ..
+            } => {
+                if output_block_query_count == 0 {
+                    OracleEquationRole::AtomicChallengeSeed.predecessor_support_count()
+                } else {
+                    OracleEquationRole::AtomicChallengeOutputBlock.predecessor_support_count()
+                }
+            }
+        }
+    }
+
+    fn equation_count_for(self, role: OracleEquationRole) -> u64 {
+        match self {
+            Self::Single(actual_role) => u64::from(actual_role == role),
+            Self::SeededHashStream {
+                seed_query_count,
+                output_block_query_count,
+            } => match role {
+                OracleEquationRole::AtomicChallengeSeed => seed_query_count,
+                OracleEquationRole::AtomicChallengeOutputBlock => output_block_query_count,
+                _ => 0,
+            },
+        }
+    }
+
+    fn equation_count(self) -> Option<u64> {
+        match self {
+            Self::Single(_) => Some(1),
+            Self::SeededHashStream {
+                seed_query_count,
+                output_block_query_count,
+            } => seed_query_count.checked_add(output_block_query_count),
         }
     }
 }
@@ -2440,7 +2603,6 @@ enum FixedVerifierHashRole {
     RelationPlanVariantIdentity,
     ConstructionPlanIdentity,
     ApplicationStatement,
-    PublicSetupVerifierSequence,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -3377,6 +3539,871 @@ impl NonlinearCommitmentBindingCertificate {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NonlinearCommitmentPrivacySaltSource {
+    AttemptPrivate(PrivateLeafSaltCommitmentRole),
+    AuthenticatedPersistentMaterial,
+    PublicSetupPolynomial,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct NonlinearCommitmentPrivacyRow {
+    role: MerkleOracleEquationRole,
+    salt_source: NonlinearCommitmentPrivacySaltSource,
+    leaf_count: usize,
+    query_count: usize,
+    private_salt_byte_length: usize,
+    salted_start_or_single_call_count: u64,
+    streaming_state_call_count: u64,
+    fully_hidden_parent_replacement_count_ceiling: u64,
+    commitment_is_fixed_before_dependent_query: bool,
+}
+
+impl NonlinearCommitmentPrivacyRow {
+    const fn is_private(self) -> bool {
+        !matches!(
+            self.salt_source,
+            NonlinearCommitmentPrivacySaltSource::PublicSetupPolynomial
+        )
+    }
+
+    fn complete_private_commitment_hash_call_count_ceiling(self) -> Option<u64> {
+        self.salted_start_or_single_call_count
+            .checked_add(self.streaming_state_call_count)
+            .and_then(|count| count.checked_add(self.fully_hidden_parent_replacement_count_ceiling))
+    }
+}
+
+#[derive(Clone, Copy)]
+struct NonlinearCommitmentPrivacyInput<'a> {
+    plan: &'a RowCodeWhirConstructionPlan,
+    nonlinear_binding: &'a NonlinearCommitmentBindingCertificate,
+    whole_database_support: &'a Cms19WholeDatabaseSupportCertificate,
+    subtree_extraction: &'a CommitmentSubtreeExtractionCertificate,
+    aggregate_wide_masking: &'a AggregateWideMaskingCertificate,
+    private_row_pad_generator: &'a PrivateRowPadGeneratorHybridCertificate,
+    private_leaf_salt_prf: &'a PrivateLeafSaltPrfCertificate,
+    affine_masking_composition: &'a ConstructionMaskingAffineCompositionCertificate,
+    persistent_material_masking: &'a ProductionPersistentCommittedMaterialMaskingCertificate,
+}
+
+/// Query-bounded pre-opening hiding bridge for the exact privately salted
+/// commitment roots consumed by the selected verifier.
+///
+/// BCS16 Lemma 3.4 is retained as a conservative comparator, not as the
+/// selected argument: its direct-leaf hypothesis does not match the deployed
+/// aggregate state chain and its generic unbounded statistical bound does not
+/// meet the selected 128-bit allocation. The selected hybrid instead exposes
+/// every deployed call. A salted start or single-call leaf has 1,024 bits of
+/// fresh input after the KMAC replacements. Each aggregate transition and
+/// finalization has one fresh 512-bit predecessor. A parent is replaced only
+/// when both children are already marked, giving 1,024 fresh input bits.
+/// Compact frontiers are deterministic canonical encodings of the resulting
+/// truncated trees, so postprocessing cannot increase distinguishing distance.
+///
+/// This is a classical, query-bounded, domain-separated ideal-XOF commitment-
+/// root theorem. Opened leaf values and their transported salts are outside
+/// the replacement argument: their privacy still requires the exact affine
+/// image inclusion and one joint sequential simulator. It does not claim
+/// either missing result, a concrete SHAKE256 reduction, Fiat--Shamir zero
+/// knowledge, malicious-verifier zero knowledge, family simulation, or QROM
+/// zero knowledge.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct NonlinearCommitmentPrivacyCertificate {
+    construction_plan_identity_hash: [u8; 64],
+    proof_privacy_mode: ProofPrivacyMode,
+    rows: Vec<NonlinearCommitmentPrivacyRow>,
+    attempt_private_tree_count: usize,
+    persistent_private_tree_count: usize,
+    public_tree_count: usize,
+    private_leaf_count_per_proof: u64,
+    attempt_private_leaf_count_per_proof: u64,
+    opened_private_leaf_count_per_proof: u64,
+    salted_start_or_single_call_count_per_proof: u64,
+    streaming_state_call_count_per_proof: u64,
+    fully_hidden_parent_replacement_count_ceiling_per_proof: u64,
+    complete_private_commitment_hash_call_count_ceiling_per_proof: u64,
+    family_application_multiplicity: u32,
+    ceremony_private_leaf_count: u64,
+    ceremony_salted_start_or_single_call_count: u64,
+    ceremony_streaming_state_call_count: u64,
+    ceremony_fully_hidden_parent_replacement_count_ceiling: u64,
+    declared_adversarial_query_budget: u128,
+    streaming_state_entropy_bit_length: usize,
+    salted_or_marked_input_entropy_bit_length: usize,
+    streaming_state_fresh_input_bad_event: ExactBigFraction,
+    salted_or_marked_fresh_input_bad_event: ExactBigFraction,
+    leaf_salt_collision_bad_event: ExactBigFraction,
+    selected_numeric_bad_event: ExactBigFraction,
+    hypothetical_bcs16_direct_leaf_statistical_bound: ExactBigFraction,
+    bcs16_direct_leaf_hypothesis_matches_deployed_chain: bool,
+    bcs16_direct_leaf_bound_meets_128_bit_allocation: bool,
+    all_attempt_private_salt_roles_are_covered_once: bool,
+    all_persistent_material_roots_are_covered_once: bool,
+    persistent_material_endpoint_count_for_family: usize,
+    persistent_material_masking_is_bound_root_globally: bool,
+    persistent_material_bad_event_is_charged_once_outside_family: bool,
+    affine_component_catalog_is_bound: bool,
+    affine_image_inclusion_is_proved: bool,
+    opened_leaf_sequential_simulator_is_proved: bool,
+    commitment_before_dependent_query_chronology_is_complete: bool,
+    compact_frontier_is_canonical_truncated_tree_postprocessing: bool,
+    adaptive_post_commitment_query_sets_are_supported: bool,
+    concrete_shake256_reduction_is_available: bool,
+    claims_fiat_shamir_zero_knowledge: bool,
+    claims_malicious_verifier_zero_knowledge: bool,
+    claims_family_simulation: bool,
+    claims_quantum_random_oracle_zero_knowledge: bool,
+}
+
+impl NonlinearCommitmentPrivacyCertificate {
+    fn is_complete_for(&self, input: NonlinearCommitmentPrivacyInput<'_>) -> bool {
+        self.has_complete_standalone_theorem()
+            && derive_nonlinear_commitment_privacy_certificate(input)
+                .is_ok_and(|expected| expected == *self)
+    }
+
+    fn has_complete_standalone_theorem(&self) -> bool {
+        let private_rows = self
+            .rows
+            .iter()
+            .copied()
+            .filter(|row| row.is_private())
+            .collect::<Vec<_>>();
+        let attempt_private_tree_count = private_rows
+            .iter()
+            .filter(|row| {
+                matches!(
+                    row.salt_source,
+                    NonlinearCommitmentPrivacySaltSource::AttemptPrivate(_)
+                )
+            })
+            .count();
+        let persistent_private_tree_count = private_rows
+            .iter()
+            .filter(|row| {
+                row.salt_source
+                    == NonlinearCommitmentPrivacySaltSource::AuthenticatedPersistentMaterial
+            })
+            .count();
+        let public_tree_count = self.rows.len().checked_sub(private_rows.len());
+        let private_leaf_count_per_proof = private_rows.iter().try_fold(0_u64, |count, row| {
+            count.checked_add(u64::try_from(row.leaf_count).ok()?)
+        });
+        let attempt_private_rows = private_rows
+            .iter()
+            .copied()
+            .filter(|row| {
+                matches!(
+                    row.salt_source,
+                    NonlinearCommitmentPrivacySaltSource::AttemptPrivate(_)
+                )
+            })
+            .collect::<Vec<_>>();
+        let attempt_private_leaf_count_per_proof =
+            attempt_private_rows.iter().try_fold(0_u64, |count, row| {
+                count.checked_add(u64::try_from(row.leaf_count).ok()?)
+            });
+        let opened_private_leaf_count_per_proof =
+            private_rows.iter().try_fold(0_u64, |count, row| {
+                count.checked_add(u64::try_from(row.query_count).ok()?)
+            });
+        let salted_start_or_single_call_count_per_proof =
+            attempt_private_rows.iter().try_fold(0_u64, |count, row| {
+                count.checked_add(row.salted_start_or_single_call_count)
+            });
+        let streaming_state_call_count_per_proof =
+            attempt_private_rows.iter().try_fold(0_u64, |count, row| {
+                count.checked_add(row.streaming_state_call_count)
+            });
+        let fully_hidden_parent_replacement_count_ceiling_per_proof =
+            attempt_private_rows.iter().try_fold(0_u64, |count, row| {
+                count.checked_add(row.fully_hidden_parent_replacement_count_ceiling)
+            });
+        let complete_private_commitment_hash_call_count_ceiling_per_proof =
+            attempt_private_rows.iter().try_fold(0_u64, |count, row| {
+                count.checked_add(row.complete_private_commitment_hash_call_count_ceiling()?)
+            });
+        let expected_ceremony_private_leaf_count = attempt_private_leaf_count_per_proof
+            .and_then(|count| count.checked_mul(u64::from(self.family_application_multiplicity)));
+        let expected_ceremony_salted_call_count = salted_start_or_single_call_count_per_proof
+            .and_then(|count| count.checked_mul(u64::from(self.family_application_multiplicity)));
+        let expected_ceremony_streaming_call_count = streaming_state_call_count_per_proof
+            .and_then(|count| count.checked_mul(u64::from(self.family_application_multiplicity)));
+        let expected_ceremony_parent_count =
+            fully_hidden_parent_replacement_count_ceiling_per_proof.and_then(|count| {
+                count.checked_mul(u64::from(self.family_application_multiplicity))
+            });
+        let expected_streaming_bad_event = query_bounded_fresh_input_bad_event(
+            self.ceremony_streaming_state_call_count,
+            self.streaming_state_entropy_bit_length,
+        );
+        let ceremony_salted_or_marked_call_count = self
+            .ceremony_salted_start_or_single_call_count
+            .checked_add(self.ceremony_fully_hidden_parent_replacement_count_ceiling);
+        let expected_salted_or_marked_bad_event =
+            ceremony_salted_or_marked_call_count.and_then(|count| {
+                query_bounded_fresh_input_bad_event(
+                    count,
+                    self.salted_or_marked_input_entropy_bit_length,
+                )
+                .ok()
+            });
+        let expected_selected_bad_event = expected_streaming_bad_event
+            .as_ref()
+            .ok()
+            .and_then(|streaming| {
+                expected_salted_or_marked_bad_event
+                    .as_ref()
+                    .and_then(|salted| streaming.add(salted).ok())
+            })
+            .and_then(|replacement| replacement.add(&self.leaf_salt_collision_bad_event).ok());
+        let expected_bcs16_bound = ExactBigFraction::new(
+            BigUint::from(self.ceremony_private_leaf_count),
+            BigUint::one() << 126_usize,
+        );
+        self.construction_plan_identity_hash != [0_u8; 64]
+            && self.proof_privacy_mode == ProofPrivacyMode::SecretBearing
+            && !private_rows.is_empty()
+            && self.rows.iter().enumerate().all(|(row_index, row)| {
+                self.rows[..row_index]
+                    .iter()
+                    .all(|prior| prior.role != row.role)
+                    && row.leaf_count.is_power_of_two()
+                    && row.query_count > 0
+                    && row.query_count < row.leaf_count
+                    && row.commitment_is_fixed_before_dependent_query
+                    && if row.is_private() {
+                        row.private_salt_byte_length == PRIVATE_LEAF_SALT_BYTE_LENGTH
+                            && row.salted_start_or_single_call_count
+                                == u64::try_from(row.leaf_count).unwrap_or(u64::MAX)
+                            && row.fully_hidden_parent_replacement_count_ceiling
+                                == u64::try_from(row.leaf_count - 1).unwrap_or(u64::MAX)
+                    } else {
+                        row.private_salt_byte_length == 0
+                            && row.salted_start_or_single_call_count == 0
+                            && row.streaming_state_call_count == 0
+                            && row.fully_hidden_parent_replacement_count_ceiling == 0
+                    }
+            })
+            && self.attempt_private_tree_count == attempt_private_tree_count
+            && self.persistent_private_tree_count == persistent_private_tree_count
+            && public_tree_count == Some(self.public_tree_count)
+            && Some(self.private_leaf_count_per_proof) == private_leaf_count_per_proof
+            && Some(self.attempt_private_leaf_count_per_proof)
+                == attempt_private_leaf_count_per_proof
+            && Some(self.opened_private_leaf_count_per_proof) == opened_private_leaf_count_per_proof
+            && Some(self.salted_start_or_single_call_count_per_proof)
+                == salted_start_or_single_call_count_per_proof
+            && Some(self.streaming_state_call_count_per_proof)
+                == streaming_state_call_count_per_proof
+            && Some(self.fully_hidden_parent_replacement_count_ceiling_per_proof)
+                == fully_hidden_parent_replacement_count_ceiling_per_proof
+            && Some(self.complete_private_commitment_hash_call_count_ceiling_per_proof)
+                == complete_private_commitment_hash_call_count_ceiling_per_proof
+            && self.family_application_multiplicity > 0
+            && expected_ceremony_private_leaf_count == Some(self.ceremony_private_leaf_count)
+            && expected_ceremony_salted_call_count
+                == Some(self.ceremony_salted_start_or_single_call_count)
+            && expected_ceremony_streaming_call_count
+                == Some(self.ceremony_streaming_state_call_count)
+            && expected_ceremony_parent_count
+                == Some(self.ceremony_fully_hidden_parent_replacement_count_ceiling)
+            && self.declared_adversarial_query_budget == DECLARED_ADVERSARIAL_QUERY_BUDGET
+            && self.streaming_state_entropy_bit_length == CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH
+            && self.salted_or_marked_input_entropy_bit_length
+                == PRIVATE_LEAF_SALT_BYTE_LENGTH * u8::BITS as usize
+            && expected_streaming_bad_event.as_ref().ok()
+                == Some(&self.streaming_state_fresh_input_bad_event)
+            && expected_salted_or_marked_bad_event.as_ref()
+                == Some(&self.salted_or_marked_fresh_input_bad_event)
+            && expected_selected_bad_event.as_ref() == Some(&self.selected_numeric_bad_event)
+            && expected_bcs16_bound.as_ref().ok()
+                == Some(&self.hypothetical_bcs16_direct_leaf_statistical_bound)
+            && self
+                .selected_numeric_bad_event
+                .is_at_most_inverse_power_of_two(128)
+            && !self.bcs16_direct_leaf_hypothesis_matches_deployed_chain
+            && !self.bcs16_direct_leaf_bound_meets_128_bit_allocation
+            && self.all_attempt_private_salt_roles_are_covered_once
+            && self.all_persistent_material_roots_are_covered_once
+            && self.persistent_material_endpoint_count_for_family
+                == self
+                    .persistent_private_tree_count
+                    .checked_mul(
+                        usize::try_from(self.family_application_multiplicity).unwrap_or(usize::MAX),
+                    )
+                    .unwrap_or(usize::MAX)
+            && self.persistent_material_masking_is_bound_root_globally
+            && self.persistent_material_bad_event_is_charged_once_outside_family
+            && self.affine_component_catalog_is_bound
+            && !self.affine_image_inclusion_is_proved
+            && !self.opened_leaf_sequential_simulator_is_proved
+            && self.commitment_before_dependent_query_chronology_is_complete
+            && self.compact_frontier_is_canonical_truncated_tree_postprocessing
+            && self.adaptive_post_commitment_query_sets_are_supported
+            && !self.concrete_shake256_reduction_is_available
+            && !self.claims_fiat_shamir_zero_knowledge
+            && !self.claims_malicious_verifier_zero_knowledge
+            && !self.claims_family_simulation
+            && !self.claims_quantum_random_oracle_zero_knowledge
+    }
+}
+
+fn query_bounded_fresh_input_bad_event(
+    call_count: u64,
+    entropy_bit_length: usize,
+) -> Result<ExactBigFraction, WhirTheoremCertificateError> {
+    if call_count == 0 || entropy_bit_length == 0 {
+        return Err(WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy);
+    }
+    let call_count_big = BigUint::from(call_count);
+    let adversarial_query_count = BigUint::from(DECLARED_ADVERSARIAL_QUERY_BUDGET);
+    ExactBigFraction::new(
+        &call_count_big * adversarial_query_count + unordered_pair_count(call_count)?,
+        BigUint::one() << entropy_bit_length,
+    )
+}
+
+fn attempt_private_salt_role(
+    role: MerkleOracleEquationRole,
+) -> Result<Option<PrivateLeafSaltCommitmentRole>, WhirTheoremCertificateError> {
+    match role {
+        MerkleOracleEquationRole::RelationPhase { phase } => {
+            Ok(Some(PrivateLeafSaltCommitmentRole::RelationPhase(phase)))
+        }
+        MerkleOracleEquationRole::WhirEpoch { epoch_ordinal: 0 } => {
+            Ok(Some(PrivateLeafSaltCommitmentRole::InitialSource))
+        }
+        MerkleOracleEquationRole::WhirEpoch { epoch_ordinal } => {
+            Ok(Some(PrivateLeafSaltCommitmentRole::FoldedSource {
+                epoch_ordinal,
+            }))
+        }
+        MerkleOracleEquationRole::AggregateWideMask { commitment_role } => match commitment_role {
+            linear_bcs_transcript::LinearBcsCommittedOracleRole::AggregateWidePad => {
+                Ok(Some(PrivateLeafSaltCommitmentRole::CarriedPad))
+            }
+            linear_bcs_transcript::LinearBcsCommittedOracleRole::BaseFreshSource => {
+                Ok(Some(PrivateLeafSaltCommitmentRole::FreshSource))
+            }
+            linear_bcs_transcript::LinearBcsCommittedOracleRole::BaseFreshPad => {
+                Ok(Some(PrivateLeafSaltCommitmentRole::FreshPad))
+            }
+            _ => Err(WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy),
+        },
+        MerkleOracleEquationRole::BoundTree { .. } => Ok(None),
+    }
+}
+
+fn nonlinear_privacy_root_precedes_query(row: NonlinearCommitmentBindingRow) -> bool {
+    match row.root_authority {
+        NonlinearCommitmentRootAuthority::TranscriptSupplied {
+            response_operation_ordinal,
+            ..
+        } => response_operation_ordinal < row.dependent_query_operation_ordinal,
+        NonlinearCommitmentRootAuthority::CanonicalApplicationStatement { .. } => true,
+    }
+}
+
+fn persistent_endpoint_matches_construction(
+    endpoint: SelectedPersistentCommittedMaterialEndpoint,
+    plan: &RowCodeWhirConstructionPlan,
+    construction_plan_identity_hash: [u8; 64],
+    expected_root_source_ordinal: u32,
+) -> bool {
+    endpoint.application_statement_schema_identifier == plan.application_statement_schema_identifier
+        && endpoint.schedule_position == plan.schedule_position
+        && endpoint.top_count == plan.top_count
+        && endpoint.verifier_source_ordinal == expected_root_source_ordinal
+        && endpoint.construction_plan_identity_hash == construction_plan_identity_hash
+}
+
+fn validate_persistent_material_plan_coverage(
+    plan: &RowCodeWhirConstructionPlan,
+    construction_plan_identity_hash: [u8; 64],
+    family_application_multiplicity: u32,
+    certificate: &ProductionPersistentCommittedMaterialMaskingCertificate,
+) -> Result<usize, WhirTheoremCertificateError> {
+    if !certificate.is_complete_for_selected_profile() {
+        return Err(WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy);
+    }
+    let expected_endpoint_count_per_tree = usize::try_from(family_application_multiplicity)
+        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let mut matched_endpoint_count = 0_usize;
+    let committed_material_trees = plan
+        .bound_trees
+        .iter()
+        .filter(|tree| tree.construction_kind == BoundTreeConstructionKind::CommittedMaterial)
+        .collect::<Vec<_>>();
+    for tree in &committed_material_trees {
+        let mut matching_endpoint_count = 0_usize;
+        for root in &certificate.inventory.roots {
+            let root_shape_matches = root.leaf_count == tree.leaf_count
+                && root.physical_column_demands.len() == tree.ordered_columns.len();
+            match tree.root_use {
+                BoundTreeRootUse::Output => {
+                    if persistent_endpoint_matches_construction(
+                        root.producer,
+                        plan,
+                        construction_plan_identity_hash,
+                        tree.expected_root_source_ordinal,
+                    ) {
+                        if !root_shape_matches {
+                            return Err(
+                                WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy,
+                            );
+                        }
+                        matching_endpoint_count = matching_endpoint_count
+                            .checked_add(1)
+                            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+                    }
+                }
+                BoundTreeRootUse::Input => {
+                    for consumer in root.ordered_consumers.iter().copied().filter(|consumer| {
+                        persistent_endpoint_matches_construction(
+                            *consumer,
+                            plan,
+                            construction_plan_identity_hash,
+                            tree.expected_root_source_ordinal,
+                        )
+                    }) {
+                        let _ = consumer;
+                        if !root_shape_matches {
+                            return Err(
+                                WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy,
+                            );
+                        }
+                        matching_endpoint_count = matching_endpoint_count
+                            .checked_add(1)
+                            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+                    }
+                }
+            }
+        }
+        if matching_endpoint_count != expected_endpoint_count_per_tree {
+            return Err(WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy);
+        }
+        matched_endpoint_count = matched_endpoint_count
+            .checked_add(matching_endpoint_count)
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    }
+
+    let inventory_endpoint_count = certificate
+        .inventory
+        .roots
+        .iter()
+        .try_fold(0_usize, |count, root| {
+            let producer_count = usize::from(
+                root.producer.application_statement_schema_identifier
+                    == plan.application_statement_schema_identifier
+                    && root.producer.schedule_position == plan.schedule_position
+                    && root.producer.top_count == plan.top_count
+                    && root.producer.construction_plan_identity_hash
+                        == construction_plan_identity_hash,
+            );
+            let consumer_count = root
+                .ordered_consumers
+                .iter()
+                .filter(|consumer| {
+                    consumer.application_statement_schema_identifier
+                        == plan.application_statement_schema_identifier
+                        && consumer.schedule_position == plan.schedule_position
+                        && consumer.top_count == plan.top_count
+                        && consumer.construction_plan_identity_hash
+                            == construction_plan_identity_hash
+                })
+                .count();
+            count
+                .checked_add(producer_count)
+                .and_then(|subtotal| subtotal.checked_add(consumer_count))
+        })
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    if inventory_endpoint_count != matched_endpoint_count
+        || matched_endpoint_count
+            != committed_material_trees
+                .len()
+                .checked_mul(expected_endpoint_count_per_tree)
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?
+    {
+        return Err(WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy);
+    }
+    Ok(matched_endpoint_count)
+}
+
+fn derive_nonlinear_commitment_privacy_certificate(
+    input: NonlinearCommitmentPrivacyInput<'_>,
+) -> Result<NonlinearCommitmentPrivacyCertificate, WhirTheoremCertificateError> {
+    let NonlinearCommitmentPrivacyInput {
+        plan,
+        nonlinear_binding,
+        whole_database_support,
+        subtree_extraction,
+        aggregate_wide_masking,
+        private_row_pad_generator,
+        private_leaf_salt_prf,
+        affine_masking_composition,
+        persistent_material_masking,
+    } = input;
+    let construction_plan_identity_hash = plan
+        .canonical_identity_hash()
+        .map_err(|_| WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy)?;
+    if plan.proof_privacy_mode != ProofPrivacyMode::SecretBearing
+        || !nonlinear_binding.is_bound_to_plan(plan)
+        || !nonlinear_binding.is_complete_for(whole_database_support, subtree_extraction)
+        || !subtree_extraction.compact_frontiers_are_coordinate_derived
+        || !private_leaf_salt_prf.is_complete_for(
+            plan,
+            aggregate_wide_masking,
+            private_row_pad_generator,
+        )
+        || !affine_masking_composition.is_complete()
+        || affine_masking_composition.construction_plan_identity_hash
+            != construction_plan_identity_hash
+        || affine_masking_composition.claims_family_simulation
+        || affine_masking_composition.claims_malicious_verifier_zero_knowledge
+        || affine_masking_composition.claims_quantum_random_oracle_zero_knowledge
+    {
+        return Err(WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy);
+    }
+    let family_application_multiplicity = private_leaf_salt_prf.family_application_multiplicity;
+    let persistent_material_endpoint_count_for_family = validate_persistent_material_plan_coverage(
+        plan,
+        construction_plan_identity_hash,
+        family_application_multiplicity,
+        persistent_material_masking,
+    )?;
+
+    let mut rows = Vec::new();
+    let mut used_attempt_roles = BTreeSet::new();
+    for binding_row in nonlinear_binding.rows.iter().copied() {
+        let attempt_role = attempt_private_salt_role(binding_row.role)?;
+        let (
+            salt_source,
+            private_salt_byte_length,
+            salted_start_or_single_call_count,
+            streaming_state_call_count,
+            fully_hidden_parent_replacement_count_ceiling,
+        ) = if let Some(attempt_role) = attempt_role {
+            let mut matching_rows = private_leaf_salt_prf
+                .commitment_rows
+                .iter()
+                .filter(|row| row.role == attempt_role);
+            let private_salt_row = matching_rows
+                .next()
+                .ok_or(WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy)?;
+            if matching_rows.next().is_some()
+                || private_salt_row.leaf_count != binding_row.leaf_count
+                || private_salt_row.transported_salt_count
+                    != u64::try_from(binding_row.query_count)
+                        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?
+                || !used_attempt_roles.insert(attempt_role)
+            {
+                return Err(WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy);
+            }
+            let leaf_count = u64::try_from(binding_row.leaf_count)
+                .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+            let streaming_state_call_count = match binding_row.leaf_construction {
+                NonlinearCommitmentLeafConstruction::AggregateColumnStreamable512 {
+                    column_count,
+                    private_leaf_salt_byte_length,
+                    intermediate_output_bit_length,
+                    final_output_bit_length,
+                } => {
+                    if private_leaf_salt_byte_length != PRIVATE_LEAF_SALT_BYTE_LENGTH
+                        || intermediate_output_bit_length != CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH
+                        || final_output_bit_length != CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH
+                        || private_salt_row.logical_leaf_width != column_count
+                    {
+                        return Err(
+                            WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy,
+                        );
+                    }
+                    leaf_count
+                        .checked_mul(
+                            u64::try_from(column_count)
+                                .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?
+                                .checked_add(1)
+                                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+                        )
+                        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?
+                }
+                NonlinearCommitmentLeafConstruction::PhaseColumnSingleCall512 {
+                    private_leaf_salt_byte_length,
+                } if private_leaf_salt_byte_length == PRIVATE_LEAF_SALT_BYTE_LENGTH => 0,
+                _ => {
+                    return Err(WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy);
+                }
+            };
+            (
+                NonlinearCommitmentPrivacySaltSource::AttemptPrivate(attempt_role),
+                PRIVATE_LEAF_SALT_BYTE_LENGTH,
+                leaf_count,
+                streaming_state_call_count,
+                leaf_count
+                    .checked_sub(1)
+                    .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+            )
+        } else {
+            let NonlinearCommitmentLeafConstruction::BoundMaterializedSingleCall512 {
+                construction_kind,
+                private_leaf_salt_byte_length,
+            } = binding_row.leaf_construction
+            else {
+                return Err(WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy);
+            };
+            match construction_kind {
+                BoundTreeConstructionKind::CommittedMaterial => {
+                    if private_leaf_salt_byte_length != PRIVATE_LEAF_SALT_BYTE_LENGTH {
+                        return Err(
+                            WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy,
+                        );
+                    }
+                    let leaf_count = u64::try_from(binding_row.leaf_count)
+                        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+                    (
+                        NonlinearCommitmentPrivacySaltSource::AuthenticatedPersistentMaterial,
+                        PRIVATE_LEAF_SALT_BYTE_LENGTH,
+                        leaf_count,
+                        0,
+                        leaf_count
+                            .checked_sub(1)
+                            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+                    )
+                }
+                BoundTreeConstructionKind::SetupPolynomial => {
+                    if private_leaf_salt_byte_length != 0 {
+                        return Err(
+                            WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy,
+                        );
+                    }
+                    (
+                        NonlinearCommitmentPrivacySaltSource::PublicSetupPolynomial,
+                        0,
+                        0,
+                        0,
+                        0,
+                    )
+                }
+            }
+        };
+        rows.push(NonlinearCommitmentPrivacyRow {
+            role: binding_row.role,
+            salt_source,
+            leaf_count: binding_row.leaf_count,
+            query_count: binding_row.query_count,
+            private_salt_byte_length,
+            salted_start_or_single_call_count,
+            streaming_state_call_count,
+            fully_hidden_parent_replacement_count_ceiling,
+            commitment_is_fixed_before_dependent_query: nonlinear_privacy_root_precedes_query(
+                binding_row,
+            ),
+        });
+    }
+    if used_attempt_roles.len() != private_leaf_salt_prf.commitment_rows.len() {
+        return Err(WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy);
+    }
+
+    let attempt_private_tree_count = rows
+        .iter()
+        .filter(|row| {
+            matches!(
+                row.salt_source,
+                NonlinearCommitmentPrivacySaltSource::AttemptPrivate(_)
+            )
+        })
+        .count();
+    let persistent_private_tree_count = rows
+        .iter()
+        .filter(|row| {
+            row.salt_source == NonlinearCommitmentPrivacySaltSource::AuthenticatedPersistentMaterial
+        })
+        .count();
+    let public_tree_count = rows
+        .len()
+        .checked_sub(attempt_private_tree_count)
+        .and_then(|count| count.checked_sub(persistent_private_tree_count))
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let private_rows = rows
+        .iter()
+        .copied()
+        .filter(|row| row.is_private())
+        .collect::<Vec<_>>();
+    let attempt_private_rows = private_rows
+        .iter()
+        .copied()
+        .filter(|row| {
+            matches!(
+                row.salt_source,
+                NonlinearCommitmentPrivacySaltSource::AttemptPrivate(_)
+            )
+        })
+        .collect::<Vec<_>>();
+    let private_leaf_count_per_proof = private_rows.iter().try_fold(0_u64, |count, row| {
+        count
+            .checked_add(
+                u64::try_from(row.leaf_count)
+                    .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+            )
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+    })?;
+    let attempt_private_leaf_count_per_proof =
+        attempt_private_rows.iter().try_fold(0_u64, |count, row| {
+            count
+                .checked_add(
+                    u64::try_from(row.leaf_count)
+                        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+                )
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+        })?;
+    let opened_private_leaf_count_per_proof =
+        private_rows.iter().try_fold(0_u64, |count, row| {
+            count
+                .checked_add(
+                    u64::try_from(row.query_count)
+                        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+                )
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+        })?;
+    let salted_start_or_single_call_count_per_proof =
+        attempt_private_rows.iter().try_fold(0_u64, |count, row| {
+            count
+                .checked_add(row.salted_start_or_single_call_count)
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+        })?;
+    let streaming_state_call_count_per_proof =
+        attempt_private_rows.iter().try_fold(0_u64, |count, row| {
+            count
+                .checked_add(row.streaming_state_call_count)
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+        })?;
+    let fully_hidden_parent_replacement_count_ceiling_per_proof =
+        attempt_private_rows.iter().try_fold(0_u64, |count, row| {
+            count
+                .checked_add(row.fully_hidden_parent_replacement_count_ceiling)
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+        })?;
+    let complete_private_commitment_hash_call_count_ceiling_per_proof =
+        attempt_private_rows.iter().try_fold(0_u64, |count, row| {
+            count
+                .checked_add(
+                    row.complete_private_commitment_hash_call_count_ceiling()
+                        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+                )
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+        })?;
+    let multiply_by_family = |count: u64| {
+        count
+            .checked_mul(u64::from(family_application_multiplicity))
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+    };
+    let ceremony_private_leaf_count = multiply_by_family(attempt_private_leaf_count_per_proof)?;
+    let ceremony_salted_start_or_single_call_count =
+        multiply_by_family(salted_start_or_single_call_count_per_proof)?;
+    let ceremony_streaming_state_call_count =
+        multiply_by_family(streaming_state_call_count_per_proof)?;
+    let ceremony_fully_hidden_parent_replacement_count_ceiling =
+        multiply_by_family(fully_hidden_parent_replacement_count_ceiling_per_proof)?;
+
+    if persistent_material_endpoint_count_for_family
+        != persistent_private_tree_count
+            .checked_mul(
+                usize::try_from(family_application_multiplicity)
+                    .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+            )
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?
+        || !persistent_material_masking.is_complete_for_selected_profile()
+    {
+        return Err(WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy);
+    }
+
+    let streaming_state_fresh_input_bad_event = query_bounded_fresh_input_bad_event(
+        ceremony_streaming_state_call_count,
+        CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH,
+    )?;
+    let ceremony_salted_or_marked_call_count = ceremony_salted_start_or_single_call_count
+        .checked_add(ceremony_fully_hidden_parent_replacement_count_ceiling)
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let salted_or_marked_fresh_input_bad_event = query_bounded_fresh_input_bad_event(
+        ceremony_salted_or_marked_call_count,
+        PRIVATE_LEAF_SALT_BYTE_LENGTH * u8::BITS as usize,
+    )?;
+    let leaf_salt_collision_bad_event = private_leaf_salt_prf
+        .ceremony_pairwise_collision_union_bound
+        .clone();
+    let selected_numeric_bad_event = streaming_state_fresh_input_bad_event
+        .add(&salted_or_marked_fresh_input_bad_event)?
+        .add(&leaf_salt_collision_bad_event)?;
+    let hypothetical_bcs16_direct_leaf_statistical_bound = ExactBigFraction::new(
+        BigUint::from(ceremony_private_leaf_count),
+        BigUint::one() << 126_usize,
+    )?;
+    let bcs16_direct_leaf_hypothesis_matches_deployed_chain = !rows.iter().any(|row| {
+        row.streaming_state_call_count > 0
+            || matches!(
+                nonlinear_binding
+                    .rows
+                    .iter()
+                    .find(|binding_row| binding_row.role == row.role)
+                    .map(|binding_row| binding_row.leaf_construction),
+                Some(NonlinearCommitmentLeafConstruction::AggregateColumnStreamable512 { .. })
+            )
+    });
+    let certificate = NonlinearCommitmentPrivacyCertificate {
+        construction_plan_identity_hash,
+        proof_privacy_mode: plan.proof_privacy_mode,
+        rows,
+        attempt_private_tree_count,
+        persistent_private_tree_count,
+        public_tree_count,
+        private_leaf_count_per_proof,
+        attempt_private_leaf_count_per_proof,
+        opened_private_leaf_count_per_proof,
+        salted_start_or_single_call_count_per_proof,
+        streaming_state_call_count_per_proof,
+        fully_hidden_parent_replacement_count_ceiling_per_proof,
+        complete_private_commitment_hash_call_count_ceiling_per_proof,
+        family_application_multiplicity,
+        ceremony_private_leaf_count,
+        ceremony_salted_start_or_single_call_count,
+        ceremony_streaming_state_call_count,
+        ceremony_fully_hidden_parent_replacement_count_ceiling,
+        declared_adversarial_query_budget: DECLARED_ADVERSARIAL_QUERY_BUDGET,
+        streaming_state_entropy_bit_length: CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH,
+        salted_or_marked_input_entropy_bit_length: PRIVATE_LEAF_SALT_BYTE_LENGTH
+            * u8::BITS as usize,
+        streaming_state_fresh_input_bad_event,
+        salted_or_marked_fresh_input_bad_event,
+        leaf_salt_collision_bad_event,
+        selected_numeric_bad_event,
+        bcs16_direct_leaf_hypothesis_matches_deployed_chain,
+        bcs16_direct_leaf_bound_meets_128_bit_allocation:
+            hypothetical_bcs16_direct_leaf_statistical_bound.is_at_most_inverse_power_of_two(128),
+        hypothetical_bcs16_direct_leaf_statistical_bound,
+        all_attempt_private_salt_roles_are_covered_once: true,
+        all_persistent_material_roots_are_covered_once: true,
+        persistent_material_endpoint_count_for_family,
+        persistent_material_masking_is_bound_root_globally: true,
+        persistent_material_bad_event_is_charged_once_outside_family: true,
+        affine_component_catalog_is_bound: true,
+        affine_image_inclusion_is_proved: false,
+        opened_leaf_sequential_simulator_is_proved: false,
+        commitment_before_dependent_query_chronology_is_complete: true,
+        compact_frontier_is_canonical_truncated_tree_postprocessing: true,
+        adaptive_post_commitment_query_sets_are_supported: true,
+        concrete_shake256_reduction_is_available: false,
+        claims_fiat_shamir_zero_knowledge: false,
+        claims_malicious_verifier_zero_knowledge: false,
+        claims_family_simulation: false,
+        claims_quantum_random_oracle_zero_knowledge: false,
+    };
+    if !certificate.has_complete_standalone_theorem() {
+        return Err(WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy);
+    }
+    Ok(certificate)
+}
+
 impl CompleteVerifierOracleLedger {
     fn merkle_hash_query_count(&self) -> Result<u64, WhirTheoremCertificateError> {
         self.merkle_rows.iter().try_fold(0_u64, |total, row| {
@@ -3413,12 +4440,108 @@ impl CompleteVerifierOracleLedger {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Cms19ArithmeticOracleModelRequirement {
-    TypedVariableOutputIdealXof { minimum_output_bit_length: usize },
+    FixedOutputRandomOracle { output_bit_length: usize },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Cms19ConcreteShake256OracleRestriction {
+    PrimaryCms19Database,
+    PrecommittedAuxiliarySamplerTable,
+}
+
+/// Exact SHAKE256 preimage family used by one row of the verifier census.
+///
+/// The auxiliary family is deliberately not represented by the generic
+/// foundation-tuple variant. It has one closed grammar: schema/version 1, five
+/// canonical items including the domain, and argument types
+/// `(Hash512, Hash512, Unsigned64, Unsigned64)`. All generic foundation tuples
+/// are primary and must use a different first domain item.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Cms19ConcreteShake256PreimageFamily {
+    CanonicalFoundationTuplePrimary { domain: &'static str },
+    AtomicChallengeOutputBlockFoundationTuple512,
+    LegacyFramedHash512Primary { domain: &'static str },
+    PhaseColumnLeafPrimary,
+    PhaseColumnParentPrimary,
+    AggregateColumnStreamableLeafPrimary,
+    AggregateWideParentPrimary,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Cms19ConcreteShake256OraclePartitionRow {
+    database_role: Cms19DatabaseSupportRole,
+    preimage_family: Cms19ConcreteShake256PreimageFamily,
+    restriction: Cms19ConcreteShake256OracleRestriction,
+    hash_query_count: u64,
+    accepting_database_equation_count: u64,
+    output_bit_length: usize,
+}
+
+/// Construction-level correspondence from the complete verifier census to
+/// two disjoint restrictions of the one deployed fixed-output SHAKE256
+/// interface.
+///
+/// This certificate is conditional on modeling SHAKE256 as one 512-bit QRO.
+/// It does not infer fixed-output random-oracle security from SHAKE256's
+/// capacity and does not claim a standard-model proof for concrete SHAKE256.
+/// The separate sampler-table theorem conditions on the auxiliary restriction
+/// before applying the CMS19 reduction to the primary restriction.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Cms19ConcreteShake256OraclePartitionCertificate {
+    construction_plan_identity_hash: [u8; 64],
+    rows: Vec<Cms19ConcreteShake256OraclePartitionRow>,
+    auxiliary_domain: &'static str,
+    auxiliary_canonical_tuple_schema_identifier: u16,
+    auxiliary_canonical_tuple_version: u16,
+    auxiliary_canonical_item_count_including_domain: u32,
+    auxiliary_argument_item_types: [CanonicalItemType; 4],
+    auxiliary_fixed_preimage_prefix: Vec<u8>,
+    primary_hash_query_count: u64,
+    auxiliary_hash_query_count: u64,
+    primary_accepting_database_equation_count: u64,
+    auxiliary_accepting_database_equation_count: u64,
+    every_call_returns_exactly_512_bits: bool,
+    auxiliary_membership_is_canonically_decidable: bool,
+    primary_foundation_domains_exclude_auxiliary_domain: bool,
+    raw_primary_prefixes_exclude_auxiliary_grammar: bool,
+    one_random_function_distribution_factors_over_disjoint_restrictions: bool,
+    full_oracle_unitary_is_the_composition_of_commuting_restriction_unitaries: bool,
+    uses_shake256_capacity_as_the_oracle_output_denominator: bool,
+    claims_concrete_shake256_is_proved_ideal: bool,
+}
+
+/// Exact partition between the random-oracle restriction recorded by the
+/// CMS19 database extractor and the disjoint, precommitted sampler-table
+/// restriction.
+///
+/// The concrete verifier still evaluates every call in both partitions.  The
+/// sampler output-block domain is excluded only from the CMS19 database: for a
+/// fixed auxiliary table, those evaluations are ordinary verifier computation.
+/// The seed domain and every other transcript, Merkle, leaf, and fixed-verifier
+/// hash remain in the primary restriction of the same random oracle.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Cms19SeparatedOracleProjectionCertificate {
+    concrete_shake256_partition: Cms19ConcreteShake256OraclePartitionCertificate,
+    concrete_transcript_hash_query_count: u64,
+    primary_transcript_hash_query_count: u64,
+    primary_seed_hash_query_count: u64,
+    primary_ordinary_transcript_hash_query_count: u64,
+    auxiliary_sampler_table_hash_query_count: u64,
+    concrete_verifier_hash_query_count: u64,
+    primary_verifier_hash_query_count: u64,
+    concrete_accepting_database_equation_count: u64,
+    primary_accepting_database_equation_count: u64,
+    auxiliary_accepting_database_equation_count: u64,
+    auxiliary_database_role_count: usize,
+    canonical_domain_partition_is_disjoint: bool,
+    claims_precommitted_table_goodness: bool,
+    claims_relativized_cms19_reduction: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Cms19ArithmeticCertificate {
     oracle_model_requirement: Cms19ArithmeticOracleModelRequirement,
+    separated_oracle_projection: Cms19SeparatedOracleProjectionCertificate,
     adversarial_query_bound: BigUint,
     verifier_hash_query_count: u64,
     accepting_database_equation_count: u64,
@@ -3499,13 +4622,11 @@ struct Cms19StatePredicateCertificate {
 /// Structural census of the live typed oracle graph needed by the original
 /// BCS hash chain described in CMS19 Section 8.6.
 ///
-/// Each logical challenge is one plan-sized XOF invocation at the abstract IOP
-/// layer, and every BCS round has one verifier-message edge and one
-/// response-absorption edge. The census distinguishes actual atomic
-/// challenges, transform-owned unused verifier messages, and deterministic
-/// empty responses so none can disappear into a combined hash count. A
-/// separate output inventory decides whether those variable-sized invocations
-/// match the oracle interface required by a concrete transform.
+/// Each logical challenge has one fixed 512-bit seed and a complete catalog of
+/// predecessor-linked 512-bit output blocks. Every BCS round still has one
+/// logical verifier-message edge and one response-absorption edge. The census
+/// distinguishes those semantic edges from the underlying fixed hash calls,
+/// transform-owned unused messages, and deterministic empty responses.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Cms19StrongStateHashChainCertificate {
     logical_verifier_message_count: u64,
@@ -3518,7 +4639,6 @@ struct Cms19StrongStateHashChainCertificate {
     response_absorption_edge_count: u64,
     deterministic_empty_response_edge_count: u64,
     transcript_predecessor_support_ceiling: u8,
-    undefined_message_inherits_predecessor_state: bool,
     atomic_challenges_are_separate_from_response_absorption: bool,
     typed_oracle_domains_are_pairwise_distinct: bool,
     canonical_oracle_plan_hash: [u8; 64],
@@ -3546,7 +4666,6 @@ impl Cms19StrongStateHashChainCertificate {
                     .checked_mul(2)
                     .unwrap_or(0)
             && self.transcript_predecessor_support_ceiling <= 2
-            && self.undefined_message_inherits_predecessor_state
             && self.atomic_challenges_are_separate_from_response_absorption
             && self.typed_oracle_domains_are_pairwise_distinct
             && self.canonical_oracle_plan_hash != [0_u8; 64]
@@ -3555,7 +4674,7 @@ impl Cms19StrongStateHashChainCertificate {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Cms19VerifierMessageSamplingShape {
-    AtomicPlanSizedXofOutput,
+    AtomicFixedHashSeededStream,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -3564,21 +4683,19 @@ struct Cms19LogicalChallengeOutputRow {
     failure_event_owner: SelectedPlanFailureEventOwner,
     accepted_value_count: u64,
     output_byte_length: u64,
+    fixed_hash_query_count: u64,
 }
 
-/// Exact inventory of the plan-sized logical challenge outputs consumed by
-/// the production transcript.
-///
-/// The inventory is deliberately separate from the fixed 512-bit leaf and
-/// Merkle call inventory. It can establish the live sampler geometry without
-/// upgrading a multi-block SHAKE stream into one fixed-output QROM answer.
+/// Exact inventory of the fixed-output hash calls used by every logical
+/// transcript challenge.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Cms19TranscriptOracleOutputInventory {
     construction_plan_identity_hash: [u8; 64],
     required_fixed_output_byte_length: u64,
     logical_verifier_message_count: u64,
-    fixed_output_message_count: u64,
-    variable_output_message_count: u64,
+    seed_hash_query_count: u64,
+    output_block_hash_query_count: u64,
+    fixed_hash_query_count: u64,
     minimum_output_byte_length: u64,
     maximum_output_byte_length: u64,
     distinct_output_byte_lengths: Vec<u64>,
@@ -3590,12 +4707,13 @@ impl Cms19TranscriptOracleOutputInventory {
         let required_fixed_output_byte_length =
             u64::try_from(CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH / 8).ok();
         let row_count = u64::try_from(self.rows.len()).ok();
-        let fixed_output_message_count = self
-            .rows
-            .iter()
-            .filter(|row| row.output_byte_length == self.required_fixed_output_byte_length)
-            .count();
-        let variable_output_message_count = self.rows.len().checked_sub(fixed_output_message_count);
+        let fixed_hash_query_count = self.rows.iter().try_fold(0_u64, |total, row| {
+            total.checked_add(row.fixed_hash_query_count)
+        });
+        let seed_hash_query_count = row_count;
+        let output_block_hash_query_count = fixed_hash_query_count
+            .zip(seed_hash_query_count)
+            .and_then(|(total, seeds)| total.checked_sub(seeds));
         let minimum_output_byte_length = self.rows.iter().map(|row| row.output_byte_length).min();
         let maximum_output_byte_length = self.rows.iter().map(|row| row.output_byte_length).max();
         let distinct_output_byte_lengths = self
@@ -3608,14 +4726,13 @@ impl Cms19TranscriptOracleOutputInventory {
         self.construction_plan_identity_hash != [0_u8; 64]
             && required_fixed_output_byte_length == Some(self.required_fixed_output_byte_length)
             && row_count == Some(self.logical_verifier_message_count)
-            && u64::try_from(fixed_output_message_count).ok()
-                == Some(self.fixed_output_message_count)
-            && variable_output_message_count.and_then(|count| u64::try_from(count).ok())
-                == Some(self.variable_output_message_count)
+            && seed_hash_query_count == Some(self.seed_hash_query_count)
+            && output_block_hash_query_count == Some(self.output_block_hash_query_count)
+            && fixed_hash_query_count == Some(self.fixed_hash_query_count)
             && self
-                .fixed_output_message_count
-                .checked_add(self.variable_output_message_count)
-                == Some(self.logical_verifier_message_count)
+                .seed_hash_query_count
+                .checked_add(self.output_block_hash_query_count)
+                == Some(self.fixed_hash_query_count)
             && minimum_output_byte_length == Some(self.minimum_output_byte_length)
             && maximum_output_byte_length == Some(self.maximum_output_byte_length)
             && distinct_output_byte_lengths == self.distinct_output_byte_lengths
@@ -3623,10 +4740,12 @@ impl Cms19TranscriptOracleOutputInventory {
                 .rows
                 .windows(2)
                 .all(|rows| rows[0].operation_ordinal < rows[1].operation_ordinal)
-            && self
-                .rows
-                .iter()
-                .all(|row| row.accepted_value_count > 0 && row.output_byte_length > 0)
+            && self.rows.iter().all(|row| {
+                row.accepted_value_count > 0
+                    && row.output_byte_length > 0
+                    && atomic_challenge_fixed_hash_query_count(row.output_byte_length).ok()
+                        == Some(row.fixed_hash_query_count)
+            })
     }
 
     fn is_complete_for(
@@ -3639,136 +4758,624 @@ impl Cms19TranscriptOracleOutputInventory {
                 .is_ok_and(|expected| &expected == self)
     }
 
-    fn is_eligible_for_uniform_fixed_output(&self) -> bool {
+    fn all_underlying_oracle_answers_are_fixed_output(&self) -> bool {
         self.is_self_consistent()
-            && self.variable_output_message_count == 0
-            && self.fixed_output_message_count == self.logical_verifier_message_count
-            && self.distinct_output_byte_lengths == [self.required_fixed_output_byte_length]
+            && self.required_fixed_output_byte_length
+                == u64::try_from(CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH / 8).unwrap_or(0)
+            && self.seed_hash_query_count == self.logical_verifier_message_count
+            && self.fixed_hash_query_count > self.seed_hash_query_count
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Cms19VariableOutputCompressedOracleTheorem {
-    OrthogonalWidthIndexedDirectSum,
+enum Cms19SeededSamplerTheoremScope {
+    ClassicalIdealFixedOutputOracleDistributionAndChronology,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Cms19ConcreteXofMappingScope {
-    DomainSeparatedShake256IdealXofQroAssumption,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Cms19OutputWidthPreimageBinding {
-    FoundationTupleCanonicalUnsigned64FinalItem,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Cms19VariableOutputRegisterEmbedding {
-    OrthogonalWidthControlWithZeroPaddedAnswerRegister,
-}
-
-/// Exact application certificate for the width-indexed extension of the
-/// CMS19 compressed-phase and conditional-instability lemmas.
-///
-/// The theorem works over the orthogonal direct sum of one uniformly random
-/// function per output-width sector. One oracle query selects one sector and
-/// adds at most one complete typed answer to that sector's database. Because
-/// the query operator is block diagonal in the width register, the CMS19
-/// commutator bound keeps its constant six. Collision, half-preimage, and
-/// programming terms use the smallest uniform output projection, while a
-/// round failure is evaluated over the complete plan-sized answer in its own
-/// sector. The production tuple XOF binds the requested byte length as its
-/// final canonical unsigned-64 item. The theorem embeds shorter phase-answer
-/// registers into the maximum-width register with zero padding; the explicit
-/// width control keeps those subspaces orthogonal. Giving an adversary the
-/// complete declared prefix dominates fragment access, while an ideal XOF's
-/// unused suffix factors into independent adversary workspace. Repeated reads
-/// reuse the same typed database entry. Squeeze blocks are implementation work,
-/// not separately fillable verifier messages.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct Cms19TypedVariableOutputOracleModelCertificate {
-    construction_plan_identity_hash: [u8; 64],
-    canonical_oracle_plan_hash: [u8; 64],
-    theorem: Cms19VariableOutputCompressedOracleTheorem,
-    concrete_xof_mapping_scope: Cms19ConcreteXofMappingScope,
-    output_width_preimage_binding: Cms19OutputWidthPreimageBinding,
-    variable_output_register_embedding: Cms19VariableOutputRegisterEmbedding,
-    logical_challenge_query_count: u64,
-    variable_output_challenge_query_count: u64,
-    minimum_output_bit_length: u64,
-    maximum_output_bit_length: u64,
-    distinct_output_bit_lengths: Vec<u64>,
-    collision_projection_bit_length: u64,
-    compressed_database_entries_added_per_query: u8,
-    conditional_lifting_constant: u8,
-    output_width_control_sectors_are_orthogonal: bool,
-    complete_logical_answer_is_atomic: bool,
-    partial_squeeze_blocks_are_not_state_transitions: bool,
-    adversarial_fragment_access_is_dominated_by_complete_prefix_access: bool,
-    unused_xof_suffix_is_independent_adversary_workspace: bool,
-    repeated_reads_reuse_one_typed_database_entry: bool,
-    full_output_distribution_owns_round_failure: bool,
-    claims_concrete_sponge_indifferentiability: bool,
+enum Cms19SeededSamplerDistributionKind {
+    ProductResidueVector {
+        modulus: u64,
+        coordinate_count: u16,
+        candidate_byte_length: u64,
+        target_cardinality: BigUint,
+        candidate_space_cardinality: BigUint,
+        rejected_candidate_count: BigUint,
+    },
+    ExtensionElement {
+        field_cardinality: BigUint,
+        forbidden_candidate_count_ceiling: BigUint,
+        accepted_candidate_count_floor: BigUint,
+        candidate_space_cardinality: BigUint,
+        accepted_preimage_multiplicity: BigUint,
+        rejected_candidate_count_ceiling: BigUint,
+    },
+    DistinctIndexVector {
+        domain_cardinality: u64,
+        output_count: u32,
+        candidate_space_cardinality: BigUint,
+        index_preimage_multiplicity: BigUint,
+        ordered_output_cardinality: BigUint,
+    },
 }
 
-impl Cms19TypedVariableOutputOracleModelCertificate {
-    fn has_complete_direct_sum_application(
-        &self,
-        output_inventory: &Cms19TranscriptOracleOutputInventory,
-    ) -> bool {
-        let required_output_bit_length =
-            u64::try_from(CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH).ok();
-        let expected_distinct_output_bit_lengths = output_inventory
-            .distinct_output_byte_lengths
-            .iter()
-            .copied()
-            .map(|byte_length| byte_length.checked_mul(8))
-            .collect::<Option<BTreeSet<_>>>()
-            .and_then(|mut output_bit_lengths| {
-                output_bit_lengths.insert(required_output_bit_length?);
-                Some(output_bit_lengths.into_iter().collect::<Vec<_>>())
-            });
-        let expected_minimum_output_bit_length = expected_distinct_output_bit_lengths
-            .as_ref()
-            .and_then(|output_bit_lengths| output_bit_lengths.first().copied());
-        let expected_maximum_output_bit_length = expected_distinct_output_bit_lengths
-            .as_ref()
-            .and_then(|output_bit_lengths| output_bit_lengths.last().copied());
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Cms19SeededSamplerDistributionRow {
+    operation_ordinal: u32,
+    failure_event_owner: SelectedPlanFailureEventOwner,
+    oracle_tag: String,
+    maximum_candidate_draws_per_output: u32,
+    candidate_slot_count: u64,
+    candidate_slot_byte_length: u64,
+    output_byte_length: u64,
+    output_block_hash_query_count: u64,
+    fixed_hash_query_count: u64,
+    conditional_uniform_output_cardinality_floor: BigUint,
+    kind: Cms19SeededSamplerDistributionKind,
+}
 
-        self.construction_plan_identity_hash == output_inventory.construction_plan_identity_hash
+impl Cms19SeededSamplerDistributionRow {
+    fn has_valid_arithmetic(&self) -> bool {
+        let expected_output_byte_length = self
+            .candidate_slot_count
+            .checked_mul(self.candidate_slot_byte_length);
+        let expected_output_block_hash_query_count = self
+            .output_byte_length
+            .checked_add(u64::try_from(Hash512::BYTE_LENGTH).unwrap_or(u64::MAX) - 1)
+            .and_then(|rounded| {
+                rounded.checked_div(u64::try_from(Hash512::BYTE_LENGTH).unwrap_or(u64::MAX))
+            });
+        if self.oracle_tag.is_empty()
+            || self.maximum_candidate_draws_per_output == 0
+            || self.candidate_slot_count == 0
+            || self.candidate_slot_byte_length == 0
+            || expected_output_byte_length != Some(self.output_byte_length)
+            || expected_output_block_hash_query_count != Some(self.output_block_hash_query_count)
+            || self.output_block_hash_query_count.checked_add(1)
+                != Some(self.fixed_hash_query_count)
+            || atomic_challenge_fixed_hash_query_count(self.output_byte_length).ok()
+                != Some(self.fixed_hash_query_count)
+        {
+            return false;
+        }
+
+        match &self.kind {
+            Cms19SeededSamplerDistributionKind::ProductResidueVector {
+                modulus,
+                coordinate_count,
+                candidate_byte_length,
+                target_cardinality,
+                candidate_space_cardinality,
+                rejected_candidate_count,
+            } => {
+                let expected_target = BigUint::from(*modulus).pow(u32::from(*coordinate_count));
+                let Some(candidate_bit_length) = candidate_byte_length.checked_mul(8) else {
+                    return false;
+                };
+                let Ok(candidate_bit_length) = usize::try_from(candidate_bit_length) else {
+                    return false;
+                };
+                let expected_candidate_space = BigUint::one() << candidate_bit_length;
+                *modulus > 1
+                    && *coordinate_count > 0
+                    && *candidate_byte_length == self.candidate_slot_byte_length
+                    && self.candidate_slot_count
+                        == u64::from(self.maximum_candidate_draws_per_output)
+                    && *target_cardinality == expected_target
+                    && *candidate_space_cardinality == expected_candidate_space
+                    && *rejected_candidate_count == candidate_space_cardinality % target_cardinality
+                    && self.conditional_uniform_output_cardinality_floor == *target_cardinality
+            }
+            Cms19SeededSamplerDistributionKind::ExtensionElement {
+                field_cardinality,
+                forbidden_candidate_count_ceiling,
+                accepted_candidate_count_floor,
+                candidate_space_cardinality,
+                accepted_preimage_multiplicity,
+                rejected_candidate_count_ceiling,
+            } => {
+                let expected_field_cardinality = BigUint::from(PROOF_BASE_FIELD_MODULUS)
+                    .pow(u32::try_from(PROOF_CHALLENGE_EXTENSION_DEGREE).unwrap_or(u32::MAX));
+                let expected_candidate_space = BigUint::one() << 512_usize;
+                let expected_preimage_multiplicity =
+                    &expected_candidate_space / &expected_field_cardinality;
+                let expected_accepted_floor =
+                    &expected_field_cardinality - forbidden_candidate_count_ceiling;
+                let expected_rejected_ceiling = &expected_candidate_space
+                    - &expected_preimage_multiplicity * &expected_accepted_floor;
+                self.candidate_slot_byte_length
+                    == u64::try_from(EXTENSION_CHALLENGE_CANDIDATE_BYTE_LENGTH).unwrap_or(u64::MAX)
+                    && self.candidate_slot_count
+                        == u64::from(self.maximum_candidate_draws_per_output)
+                    && *field_cardinality == expected_field_cardinality
+                    && forbidden_candidate_count_ceiling < field_cardinality
+                    && *accepted_candidate_count_floor == expected_accepted_floor
+                    && !accepted_candidate_count_floor.is_zero()
+                    && *candidate_space_cardinality == expected_candidate_space
+                    && *accepted_preimage_multiplicity == expected_preimage_multiplicity
+                    && *rejected_candidate_count_ceiling == expected_rejected_ceiling
+                    && self.conditional_uniform_output_cardinality_floor
+                        == *accepted_candidate_count_floor
+            }
+            Cms19SeededSamplerDistributionKind::DistinctIndexVector {
+                domain_cardinality,
+                output_count,
+                candidate_space_cardinality,
+                index_preimage_multiplicity,
+                ordered_output_cardinality,
+            } => {
+                let expected_candidate_space = BigUint::one() << u64::BITS as usize;
+                let expected_ordered_output_cardinality =
+                    falling_factorial(*domain_cardinality, u64::from(*output_count));
+                *domain_cardinality > 0
+                    && domain_cardinality.is_power_of_two()
+                    && *output_count > 0
+                    && u64::from(*output_count) <= *domain_cardinality
+                    && self.candidate_slot_byte_length
+                        == u64::try_from(size_of::<u64>()).unwrap_or(u64::MAX)
+                    && self.candidate_slot_count
+                        == u64::from(*output_count)
+                            .checked_mul(u64::from(self.maximum_candidate_draws_per_output))
+                            .unwrap_or(u64::MAX)
+                    && *candidate_space_cardinality == expected_candidate_space
+                    && *index_preimage_multiplicity
+                        == &expected_candidate_space / BigUint::from(*domain_cardinality)
+                    && expected_ordered_output_cardinality.as_ref()
+                        == Ok(ordered_output_cardinality)
+                    && self.conditional_uniform_output_cardinality_floor
+                        == *ordered_output_cardinality
+            }
+        }
+    }
+
+    fn append_exhaustion_terms(
+        &self,
+        terms: &mut BTreeMap<(BigUint, BigUint, u32), u64>,
+    ) -> Result<(), WhirTheoremCertificateError> {
+        let mut append = |rejected_count: BigUint,
+                          candidate_space: BigUint,
+                          draw_count: u32|
+         -> Result<(), WhirTheoremCertificateError> {
+            if rejected_count.is_zero() {
+                return Ok(());
+            }
+            let multiplicity = terms
+                .entry((rejected_count, candidate_space, draw_count))
+                .or_default();
+            *multiplicity = multiplicity
+                .checked_add(1)
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+            Ok(())
+        };
+        match &self.kind {
+            Cms19SeededSamplerDistributionKind::ProductResidueVector {
+                candidate_space_cardinality,
+                rejected_candidate_count,
+                ..
+            } => append(
+                rejected_candidate_count.clone(),
+                candidate_space_cardinality.clone(),
+                self.maximum_candidate_draws_per_output,
+            ),
+            Cms19SeededSamplerDistributionKind::ExtensionElement {
+                candidate_space_cardinality,
+                rejected_candidate_count_ceiling,
+                ..
+            } => append(
+                rejected_candidate_count_ceiling.clone(),
+                candidate_space_cardinality.clone(),
+                self.maximum_candidate_draws_per_output,
+            ),
+            Cms19SeededSamplerDistributionKind::DistinctIndexVector {
+                domain_cardinality,
+                output_count,
+                ..
+            } => {
+                for accepted_count in 1..u64::from(*output_count) {
+                    append(
+                        BigUint::from(accepted_count),
+                        BigUint::from(*domain_cardinality),
+                        self.maximum_candidate_draws_per_output,
+                    )?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Cms19SamplerExhaustionTerm {
+    rejected_candidate_count_ceiling: BigUint,
+    candidate_space_cardinality: BigUint,
+    draw_count: u32,
+    event_multiplicity: u64,
+}
+
+impl Cms19SamplerExhaustionTerm {
+    fn probability_ceiling(&self) -> Result<ExactBigFraction, WhirTheoremCertificateError> {
+        ExactBigFraction::new(
+            self.rejected_candidate_count_ceiling.pow(self.draw_count)
+                * BigUint::from(self.event_multiplicity),
+            self.candidate_space_cardinality.pow(self.draw_count),
+        )
+    }
+}
+
+/// Exact classical induced-distribution theorem for the production sampler.
+///
+/// The theorem is deliberately scoped to a classical ideal fixed-output
+/// oracle. It proves the rejection maps, conditional uniformity, exact
+/// without-replacement query distribution, full bounded-slot consumption, and
+/// atomic chronology of the emitted sampler. It does not claim the separate
+/// CMS19/QROM composition for the public seed/block oracle graph.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Cms19FixedOutputSeededSamplerDistributionCertificate {
+    construction_plan_identity_hash: [u8; 64],
+    relation_plan_variant_hash: [u8; 64],
+    canonical_oracle_plan_hash: [u8; 64],
+    scope: Cms19SeededSamplerTheoremScope,
+    rows: Vec<Cms19SeededSamplerDistributionRow>,
+    product_sampler_count: u64,
+    extension_sampler_count: u64,
+    distinct_index_sampler_count: u64,
+    total_output_block_hash_query_count: u64,
+    seed_preimages_are_pairwise_distinct: bool,
+    seed_and_block_domains_are_distinct: bool,
+    block_preimages_are_pairwise_distinct_conditioned_on_distinct_seeds: bool,
+    forbidden_sets_are_fixed_before_seed_sampling: bool,
+    every_bounded_candidate_slot_is_consumed_before_finish: bool,
+    prover_responses_cannot_interleave_an_active_sampler: bool,
+    seed_collision_union_bound: ExactBigFraction,
+    exhaustion_terms: Vec<Cms19SamplerExhaustionTerm>,
+    exhaustion_union_bound: ExactBigFraction,
+    claims_qrom_sampler_composition: bool,
+}
+
+impl Cms19FixedOutputSeededSamplerDistributionCertificate {
+    fn is_self_consistent(&self) -> bool {
+        let mut tags = BTreeSet::new();
+        let mut product_sampler_count = 0_u64;
+        let mut extension_sampler_count = 0_u64;
+        let mut distinct_index_sampler_count = 0_u64;
+        let mut total_output_block_hash_query_count = 0_u64;
+        let mut exhaustion_terms = BTreeMap::new();
+        if self
+            .rows
+            .first()
+            .is_none_or(|row| row.operation_ordinal == 0)
+            || !self
+                .rows
+                .windows(2)
+                .all(|rows| rows[0].operation_ordinal < rows[1].operation_ordinal)
+        {
+            return false;
+        }
+        for row in &self.rows {
+            if !row.has_valid_arithmetic() || !tags.insert(row.oracle_tag.as_str()) {
+                return false;
+            }
+            let sampler_count = match row.kind {
+                Cms19SeededSamplerDistributionKind::ProductResidueVector { .. } => {
+                    &mut product_sampler_count
+                }
+                Cms19SeededSamplerDistributionKind::ExtensionElement { .. } => {
+                    &mut extension_sampler_count
+                }
+                Cms19SeededSamplerDistributionKind::DistinctIndexVector { .. } => {
+                    &mut distinct_index_sampler_count
+                }
+            };
+            *sampler_count = match sampler_count.checked_add(1) {
+                Some(count) => count,
+                None => return false,
+            };
+            total_output_block_hash_query_count = match total_output_block_hash_query_count
+                .checked_add(row.output_block_hash_query_count)
+            {
+                Some(count) => count,
+                None => return false,
+            };
+            if row.append_exhaustion_terms(&mut exhaustion_terms).is_err() {
+                return false;
+            }
+        }
+        let expected_exhaustion_terms = exhaustion_terms
+            .into_iter()
+            .map(
+                |(
+                    (rejected_candidate_count_ceiling, candidate_space_cardinality, draw_count),
+                    event_multiplicity,
+                )| Cms19SamplerExhaustionTerm {
+                    rejected_candidate_count_ceiling,
+                    candidate_space_cardinality,
+                    draw_count,
+                    event_multiplicity,
+                },
+            )
+            .collect::<Vec<_>>();
+        let expected_exhaustion_union_bound = expected_exhaustion_terms
+            .iter()
+            .try_fold(ExactBigFraction::zero(), |total, term| {
+                total.add(&term.probability_ceiling()?)
+            });
+        let row_count = match u64::try_from(self.rows.len()) {
+            Ok(count) => count,
+            Err(_) => return false,
+        };
+        let categorized_sampler_count = product_sampler_count
+            .checked_add(extension_sampler_count)
+            .and_then(|count| count.checked_add(distinct_index_sampler_count));
+        let expected_seed_collision_union_bound = ExactBigFraction::new(
+            BigUint::from(row_count) * BigUint::from(row_count.saturating_sub(1))
+                / BigUint::from(2_u8),
+            BigUint::one() << CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH,
+        );
+        self.construction_plan_identity_hash != [0_u8; 64]
+            && self.relation_plan_variant_hash != [0_u8; 64]
             && self.canonical_oracle_plan_hash != [0_u8; 64]
-            && self.theorem
-                == Cms19VariableOutputCompressedOracleTheorem::OrthogonalWidthIndexedDirectSum
-            && self.concrete_xof_mapping_scope
-                == Cms19ConcreteXofMappingScope::DomainSeparatedShake256IdealXofQroAssumption
-            && self.output_width_preimage_binding
-                == Cms19OutputWidthPreimageBinding::FoundationTupleCanonicalUnsigned64FinalItem
-            && self.variable_output_register_embedding
-                == Cms19VariableOutputRegisterEmbedding::OrthogonalWidthControlWithZeroPaddedAnswerRegister
-            && self.logical_challenge_query_count == output_inventory.logical_verifier_message_count
-            && self.variable_output_challenge_query_count
-                == output_inventory.variable_output_message_count
-            && expected_minimum_output_bit_length == Some(self.minimum_output_bit_length)
-            && expected_maximum_output_bit_length == Some(self.maximum_output_bit_length)
-            && expected_distinct_output_bit_lengths
-                == Some(self.distinct_output_bit_lengths.clone())
-            && Some(self.collision_projection_bit_length) == required_output_bit_length
-            && self.minimum_output_bit_length == self.collision_projection_bit_length
-            && self.compressed_database_entries_added_per_query == 1
-            && self.conditional_lifting_constant == 6
-            && self.output_width_control_sectors_are_orthogonal
-            && self.complete_logical_answer_is_atomic
-            && self.partial_squeeze_blocks_are_not_state_transitions
-            && self.adversarial_fragment_access_is_dominated_by_complete_prefix_access
-            && self.unused_xof_suffix_is_independent_adversary_workspace
-            && self.repeated_reads_reuse_one_typed_database_entry
-            && self.full_output_distribution_owns_round_failure
-            && !self.claims_concrete_sponge_indifferentiability
+            && self.scope
+                == Cms19SeededSamplerTheoremScope::ClassicalIdealFixedOutputOracleDistributionAndChronology
+            && !self.rows.is_empty()
+            && product_sampler_count == self.product_sampler_count
+            && extension_sampler_count == self.extension_sampler_count
+            && distinct_index_sampler_count == self.distinct_index_sampler_count
+            && categorized_sampler_count == Some(row_count)
+            && total_output_block_hash_query_count
+                == self.total_output_block_hash_query_count
+            && self.seed_preimages_are_pairwise_distinct
+            && self.seed_and_block_domains_are_distinct
+            && self.block_preimages_are_pairwise_distinct_conditioned_on_distinct_seeds
+            && self.forbidden_sets_are_fixed_before_seed_sampling
+            && self.every_bounded_candidate_slot_is_consumed_before_finish
+            && self.prover_responses_cannot_interleave_an_active_sampler
+            && expected_seed_collision_union_bound.as_ref() == Ok(&self.seed_collision_union_bound)
+            && expected_exhaustion_terms == self.exhaustion_terms
+            && expected_exhaustion_union_bound.as_ref() == Ok(&self.exhaustion_union_bound)
+            && !self.claims_qrom_sampler_composition
     }
 
     fn is_complete_for(
         &self,
         plan: &RowCodeWhirConstructionPlan,
+        relation_variant: &RelationPlanVariant,
+        relation_context: &RelationPlanCheckContext,
+        catalog: &RowCodeWhirOracleEquationCatalog,
+        output_inventory: &Cms19TranscriptOracleOutputInventory,
+    ) -> bool {
+        self.is_self_consistent()
+            && derive_cms19_fixed_output_seeded_sampler_distribution_certificate(
+                plan,
+                relation_variant,
+                relation_context,
+                catalog,
+                output_inventory,
+            )
+            .is_ok_and(|expected| &expected == self)
+    }
+}
+
+const CMS19_AUXILIARY_TABLE_DENSITY_EXPANSION_NUMERATOR: u64 = 3;
+const CMS19_AUXILIARY_TABLE_DENSITY_BAD_EVENT_SECURITY_BITS: usize = 512;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Cms19PrecommittedSamplerTablePointKind {
+    ProductResidueVector,
+    ExtensionElement,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Cms19PrecommittedSamplerTablePointConcentrationRow {
+    operation_ordinal: u32,
+    kind: Cms19PrecommittedSamplerTablePointKind,
+    possible_output_point_count: BigUint,
+    conditional_uniform_output_cardinality_floor: BigUint,
+    seed_space_to_output_mean_floor: BigUint,
+    output_family_log2_count_ceiling: u64,
+    table_bad_event_inverse_power_of_two_exponent_floor: BigUint,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Cms19PrecommittedSamplerQueryProjection {
+    CompleteOrderedVector,
+    CanonicalPrefixOfOrderedVector,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Cms19PrecommittedSamplerTableQueryConcentrationRow {
+    event: ExactQueryFailureEvent,
+    sampler_operation_ordinal: u32,
+    projection: Cms19PrecommittedSamplerQueryProjection,
+    population: u64,
+    agreement_ceiling: u64,
+    query_count: u64,
+    sampler_output_count: u64,
+    exact_bad_vector_probability_ceiling: ExactBigFraction,
+    seed_space_bad_vector_mean_floor: BigUint,
+    agreement_family_log2_count_ceiling: u64,
+    table_bad_event_inverse_power_of_two_exponent_floor: BigUint,
+}
+
+/// Universal goodness theorem for the precommitted sampler-table restriction.
+///
+/// One 512-bit primary-oracle seed indexes a deterministic row in the fixed
+/// output-block table. For every product or extension point, and for every
+/// agreement set used by a without-replacement query theorem, the row count is
+/// bounded simultaneously. The bounds therefore continue to hold when a
+/// prover sees and queries the complete auxiliary restriction before choosing its
+/// commitments or bad sets. Sampler exhaustion is handled separately by an
+/// exact Markov conditioning step whose threshold is balanced against the
+/// CMS19 classical-soundness multiplier.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Cms19PrecommittedSamplerTableCertificate {
+    construction_plan_identity_hash: [u8; 64],
+    canonical_oracle_plan_hash: [u8; 64],
+    oracle_output_bit_length: usize,
+    seed_space_cardinality: BigUint,
+    point_rows: Vec<Cms19PrecommittedSamplerTablePointConcentrationRow>,
+    query_rows: Vec<Cms19PrecommittedSamplerTableQueryConcentrationRow>,
+    distinct_query_sampler_operation_count: usize,
+    canonical_prefix_projection_count: usize,
+    density_event_count: usize,
+    density_event_count_log2_ceiling: usize,
+    minimum_density_bad_event_exponent_floor: BigUint,
+    charged_density_bad_event_probability_ceiling: ExactBigFraction,
+    logical_failure_density_expansion_factor: ExactBigFraction,
+    average_exhaustion_probability_ceiling: ExactBigFraction,
+    exhaustion_average_inverse_power_of_two_exponent_floor: usize,
+    cms19_multiplier_log2_ceiling: usize,
+    conditioned_exhaustion_probability_exponent: usize,
+    conditioned_exhaustion_probability_ceiling: ExactBigFraction,
+    exhaustion_table_bad_event_probability_ceiling: ExactBigFraction,
+    complete_auxiliary_table_bad_event_probability_ceiling: ExactBigFraction,
+    seed_collision_probability_ceiling: ExactBigFraction,
+    canonical_domain_restrictions_are_disjoint: bool,
+    every_seed_index_owns_an_independent_fixed_width_block_chain: bool,
+    every_query_failure_uses_a_production_owned_sampler_projection: bool,
+    shared_query_vectors_are_not_charged_as_independent_samples: bool,
+    table_goodness_is_universal_over_adaptive_failure_sets: bool,
+    primary_oracle_reduction_relativizes_to_fixed_auxiliary_unitaries: bool,
+    claims_fixed_shake256_is_an_ideal_oracle: bool,
+}
+
+impl Cms19PrecommittedSamplerTableCertificate {
+    fn is_complete_for(
+        &self,
+        sampler_distribution: &Cms19FixedOutputSeededSamplerDistributionCertificate,
+        query_failure_rows: &[ExactQueryFailureRow],
+        cms19_arithmetic: &Cms19ArithmeticCertificate,
+    ) -> bool {
+        derive_cms19_precommitted_sampler_table_certificate(
+            sampler_distribution,
+            query_failure_rows,
+            cms19_arithmetic,
+        )
+        .is_ok_and(|expected| expected == *self)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Cms19FixedOutputSeededSamplerReduction {
+    DomainSeparatedPredecessorLinkedFixedHashSamplerV1,
+}
+
+impl Cms19FixedOutputSeededSamplerReduction {
+    const EVIDENCE_IDENTIFIER: &'static str =
+        "domain-separated-predecessor-linked-fixed-hash-sampler-v1";
+
+    const fn evidence_identifier(self) -> &'static str {
+        match self {
+            Self::DomainSeparatedPredecessorLinkedFixedHashSamplerV1 => Self::EVIDENCE_IDENTIFIER,
+        }
+    }
+
+    fn from_evidence_identifier(identifier: &str) -> Option<Self> {
+        match identifier {
+            Self::EVIDENCE_IDENTIFIER => {
+                Some(Self::DomainSeparatedPredecessorLinkedFixedHashSamplerV1)
+            }
+            _ => None,
+        }
+    }
+
+    const fn database_lifting_constant(self) -> u8 {
+        match self {
+            Self::DomainSeparatedPredecessorLinkedFixedHashSamplerV1 => 6,
+        }
+    }
+
+    const fn database_collision_coefficient(self) -> u8 {
+        match self {
+            Self::DomainSeparatedPredecessorLinkedFixedHashSamplerV1 => 4,
+        }
+    }
+
+    const fn oracle_square_relaxation_constant(self) -> u8 {
+        match self {
+            Self::DomainSeparatedPredecessorLinkedFixedHashSamplerV1 => 2,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Cms19ConcreteHashMappingScope {
+    DomainSeparatedShake256Fixed512BitQroAssumption,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Cms19SeededStreamPreimageBinding {
+    CanonicalWidthSeedOrdinalAndPredecessor,
+}
+
+/// Production correspondence for the fixed-output seeded sampler. This record
+/// binds the emitted hash graph; the separate sampler theorem must still prove
+/// the induced logical-message distributions and QROM composition.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Cms19FixedOutputSeededSamplerModelCertificate {
+    construction_plan_identity_hash: [u8; 64],
+    canonical_oracle_plan_hash: [u8; 64],
+    reduction: Cms19FixedOutputSeededSamplerReduction,
+    concrete_hash_mapping_scope: Cms19ConcreteHashMappingScope,
+    preimage_binding: Cms19SeededStreamPreimageBinding,
+    logical_challenge_query_count: u64,
+    seed_hash_query_count: u64,
+    output_block_hash_query_count: u64,
+    fixed_hash_query_count: u64,
+    oracle_output_bit_length: u64,
+    maximum_blocks_per_logical_challenge: u64,
+    collision_projection_bit_length: u64,
+    classical_sampler_distribution: Cms19FixedOutputSeededSamplerDistributionCertificate,
+}
+
+impl Cms19FixedOutputSeededSamplerModelCertificate {
+    fn matches_production_width_inventory(
+        &self,
+        output_inventory: &Cms19TranscriptOracleOutputInventory,
+    ) -> bool {
+        let required_output_bit_length =
+            u64::try_from(CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH).ok();
+        let maximum_blocks_per_logical_challenge = output_inventory
+            .rows
+            .iter()
+            .map(|row| row.fixed_hash_query_count)
+            .max();
+
+        self.construction_plan_identity_hash == output_inventory.construction_plan_identity_hash
+            && self.canonical_oracle_plan_hash != [0_u8; 64]
+            && self.reduction
+                == Cms19FixedOutputSeededSamplerReduction::DomainSeparatedPredecessorLinkedFixedHashSamplerV1
+            && self.concrete_hash_mapping_scope
+                == Cms19ConcreteHashMappingScope::DomainSeparatedShake256Fixed512BitQroAssumption
+            && self.preimage_binding
+                == Cms19SeededStreamPreimageBinding::CanonicalWidthSeedOrdinalAndPredecessor
+            && self.logical_challenge_query_count == output_inventory.logical_verifier_message_count
+            && self.logical_challenge_query_count > 0
+            && self.seed_hash_query_count == output_inventory.seed_hash_query_count
+            && self.output_block_hash_query_count
+                == output_inventory.output_block_hash_query_count
+            && self.fixed_hash_query_count == output_inventory.fixed_hash_query_count
+            && Some(self.maximum_blocks_per_logical_challenge)
+                == maximum_blocks_per_logical_challenge
+            && Some(self.oracle_output_bit_length) == required_output_bit_length
+            && Some(self.collision_projection_bit_length) == required_output_bit_length
+            && self.oracle_output_bit_length == self.collision_projection_bit_length
+            && output_inventory.all_underlying_oracle_answers_are_fixed_output()
+            && self.classical_sampler_distribution.is_self_consistent()
+            && self.classical_sampler_distribution.construction_plan_identity_hash
+                == self.construction_plan_identity_hash
+            && self.classical_sampler_distribution.canonical_oracle_plan_hash
+                == self.canonical_oracle_plan_hash
+            && self
+                .classical_sampler_distribution
+                .total_output_block_hash_query_count
+                == self.output_block_hash_query_count
+    }
+
+    fn is_complete_for(
+        &self,
+        plan: &RowCodeWhirConstructionPlan,
+        relation_variant: &RelationPlanVariant,
+        relation_context: &RelationPlanCheckContext,
         catalog: &RowCodeWhirOracleEquationCatalog,
         output_inventory: &Cms19TranscriptOracleOutputInventory,
     ) -> bool {
@@ -3779,7 +5386,14 @@ impl Cms19TypedVariableOutputOracleModelCertificate {
             && expected_plan_identity_hash == Some(self.construction_plan_identity_hash)
             && expected_oracle_plan_hash == Some(self.canonical_oracle_plan_hash)
             && expected_logical_challenge_query_count == Some(self.logical_challenge_query_count)
-            && self.has_complete_direct_sum_application(output_inventory)
+            && self.matches_production_width_inventory(output_inventory)
+            && self.classical_sampler_distribution.is_complete_for(
+                plan,
+                relation_variant,
+                relation_context,
+                catalog,
+                output_inventory,
+            )
     }
 }
 
@@ -4366,7 +5980,7 @@ struct Cms19AtomicRoundSemanticCertificate {
 
 impl Cms19AtomicRoundSemanticCertificate {
     fn is_complete(&self) -> bool {
-        self.sampling_shape == Cms19VerifierMessageSamplingShape::AtomicPlanSizedXofOutput
+        self.sampling_shape == Cms19VerifierMessageSamplingShape::AtomicFixedHashSeededStream
             && self.logical_verifier_message_count > 0
             && self.multi_output_verifier_message_count == 0
             && self.maximum_output_count_per_verifier_message == 1
@@ -4399,7 +6013,7 @@ impl Cms19AtomicRoundSemanticCertificate {
                 .iter()
                 .zip(&selected_plan_state_predicate.transition_rows)
                 .filter(|(_, state_row)| state_row.failure_event_owner.is_some())
-                .all(|(operation, _)| cms19_atomic_challenge_output_byte_length(operation).is_ok())
+                .all(|(operation, _)| cms19_atomic_challenge_stream_geometry(operation).is_ok())
             && whole_state_transitions.is_complete_for(plan, catalog, selected_plan_state_predicate)
             && self
                 .state_transitions
@@ -4433,10 +6047,9 @@ struct Cms19AggregateWideAtomicEventBinding {
 /// evaluator must agree with every production transition, and collision-free
 /// database extraction must recover the exact BCS prefix plus its next
 /// verifier message at the abstract IOP layer. The aggregate-wide query vector
-/// is therefore bound to one plan-sized XOF output containing its complete draw
-/// budget; no coordinate can be filled after the others are exposed in that
-/// abstraction. This certificate does not establish that a multi-block SHAKE
-/// stream is one fixed-output QROM answer.
+/// is bound to one seed and a predecessor-linked fixed-hash stream containing
+/// its complete draw budget; no prover response can interleave the blocks.
+/// The separate sampler theorem owns the induced-distribution argument.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Cms19StrongRoundByRoundSemanticCertificate {
     sampling_shape: Cms19VerifierMessageSamplingShape,
@@ -4455,7 +6068,7 @@ struct Cms19StrongRoundByRoundSemanticCertificate {
 
 impl Cms19StrongRoundByRoundSemanticCertificate {
     fn is_complete(&self) -> bool {
-        self.sampling_shape == Cms19VerifierMessageSamplingShape::AtomicPlanSizedXofOutput
+        self.sampling_shape == Cms19VerifierMessageSamplingShape::AtomicFixedHashSeededStream
             && self.multi_output_verifier_message_count == 0
             && self.maximum_output_count_per_verifier_message == 1
             && self.aggregate_wide_population > self.aggregate_wide_agreement_ceiling
@@ -5097,7 +6710,6 @@ struct Cms19ApplicabilityCertificate {
     generated_state_transition_rows_reconciled: bool,
     deployed_leaf_oracle_output_geometry_established: bool,
     transcript_oracle_output_inventory_reconciled: bool,
-    typed_variable_output_oracle_model_established: bool,
 }
 
 impl Cms19ApplicabilityCertificate {
@@ -5113,11 +6725,6 @@ impl Cms19ApplicabilityCertificate {
             && self.generated_state_transition_rows_reconciled
             && self.deployed_leaf_oracle_output_geometry_established
             && self.transcript_oracle_output_inventory_reconciled
-    }
-
-    fn is_selected_transform_eligible(&self) -> bool {
-        self.has_complete_structural_correspondence()
-            && self.typed_variable_output_oracle_model_established
     }
 }
 
@@ -7720,14 +9327,12 @@ enum ConstructionAffineMaskSourceClass {
     QuotientTelescopingMasks,
     OpeningBatchMask,
     PhaseRowPads,
-    PriorVssCommittedMaterialMasks,
     AggregateWidePad,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ConstructionAffineRankKind {
     Exact,
-    ConservativeCeiling,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -7738,11 +9343,10 @@ enum ConstructionAffineSourceAuthority {
     CurrentAttemptAggregateWidePad,
 }
 
-/// One disjoint private-coordinate block in the exact same-secret affine
+/// One disjoint private-coordinate block in a secret-bearing construction's affine
 /// masking game. Counts are base-field coordinates. A conservative rank
-/// ceiling is used only for a persistent polynomial seen by separate proof
-/// invocations, where repeated evaluation points can reduce rank but cannot
-/// increase it.
+/// ceiling for persistent polynomials is owned by the root-global committed-
+/// material certificate rather than duplicated in these attempt-local rows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ConstructionAffineCompositionRow {
     source_class: ConstructionAffineMaskSourceClass,
@@ -7769,27 +9373,11 @@ impl ConstructionAffineCompositionRow {
                 ConstructionAffineMaskSourceClass::PhaseRowPads,
                 ConstructionAffineSourceAuthority::CurrentAttemptRowPadStream,
             ) | (
-                ConstructionAffineMaskSourceClass::PriorVssCommittedMaterialMasks,
-                ConstructionAffineSourceAuthority::AuthenticatedPersistentObject,
-            ) | (
                 ConstructionAffineMaskSourceClass::AggregateWidePad,
                 ConstructionAffineSourceAuthority::CurrentAttemptAggregateWidePad,
             )
         );
-        let rank_kind_is_exact = matches!(
-            (self.source_class, self.rank_kind),
-            (
-                ConstructionAffineMaskSourceClass::PriorVssCommittedMaterialMasks,
-                ConstructionAffineRankKind::ConservativeCeiling,
-            ) | (
-                ConstructionAffineMaskSourceClass::RelationTraceMasks
-                    | ConstructionAffineMaskSourceClass::QuotientTelescopingMasks
-                    | ConstructionAffineMaskSourceClass::OpeningBatchMask
-                    | ConstructionAffineMaskSourceClass::PhaseRowPads
-                    | ConstructionAffineMaskSourceClass::AggregateWidePad,
-                ConstructionAffineRankKind::Exact,
-            )
-        );
+        let rank_kind_is_exact = self.rank_kind == ConstructionAffineRankKind::Exact;
         self.source_instance_count > 0
             && self.private_base_coordinate_count > 0
             && source_authority_is_exact
@@ -7861,8 +9449,7 @@ impl CommonProofPrivateCoinGeneratorHybridCertificate {
                 == u64::try_from(PRIVATE_ROW_PAD_SEED_MATERIAL_BYTE_LENGTH).unwrap_or(u64::MAX)
             && self.maximum_candidate_draws_per_output
                 == PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT
-            && self.ceremony_application_multiplicity
-                == u32::from(crate::foundation::FOUNDATION_PROFILE.participant_count)
+            && self.ceremony_application_multiplicity > 0
             && self.rejection_sampler_exhaustion_is_at_most_inverse_two_to_128
             && self.source_authority == ConstructionAffineSourceAuthority::CurrentAttemptPrivateCoin
             && !self.masks_are_publicly_recomputable
@@ -7965,7 +9552,10 @@ fn derive_common_proof_private_coin_generator_hybrid(
         return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
     }
     let ceremony_application_multiplicity =
-        u32::from(crate::foundation::FOUNDATION_PROFILE.participant_count);
+        selected_complete_action_variant_application_multiplicity(plan)?;
+    if ceremony_application_multiplicity == 0 {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
     let exhaustion = catalog
         .exhaustion_union_bound(ceremony_application_multiplicity)
         .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
@@ -8027,29 +9617,32 @@ struct PersistentCommittedMaterialGeneratorHybridCertificate {
 impl PersistentCommittedMaterialGeneratorHybridCertificate {
     fn is_complete_for(
         &self,
-        accounting: &SelectedSameSecretPersistentMaskImageAccounting,
+        inventory: &SelectedPersistentCommittedMaterialMaskImageInventory,
     ) -> bool {
-        let expected_root_count = accounting
-            .ceremony_proof_count
-            .checked_mul(accounting.logical_root_count_per_proof);
-        let expected_mask_output_count = expected_root_count.and_then(|root_count| {
-            root_count
-                .checked_mul(accounting.physical_column_count_per_root)
-                .and_then(|column_count| {
-                    column_count.checked_mul(
-                        usize::try_from(accounting.mask_coefficient_count_per_column).ok()?,
-                    )
+        let expected_root_count = inventory.roots.len();
+        let expected_mask_output_count = inventory.roots.iter().try_fold(0_u64, |total, root| {
+            root.physical_column_demands
+                .iter()
+                .try_fold(total, |subtotal, demand| {
+                    subtotal.checked_add(demand.mask_coefficient_count)
                 })
-                .and_then(|count| u64::try_from(count).ok())
+        });
+        let expected_leaf_salt_count = inventory.roots.iter().try_fold(0_u64, |total, root| {
+            total.checked_add(u64::try_from(root.leaf_count).ok()?)
+        });
+        let description_matches_every_root = inventory.roots.iter().all(|root| {
+            self.description.physical_column_count == root.physical_column_demands.len()
+                && root.physical_column_demands.iter().all(|demand| {
+                    u64::try_from(self.description.mask_coefficient_count_per_column).ok()
+                        == Some(demand.mask_coefficient_count)
+                })
         });
         self.description.material_seed_byte_length == 64
             && self.description.kmac_security_bit_length == 256
             && self.description.derived_block_byte_length == 64
             && self.description.leaf_salt_byte_length == PRIVATE_LEAF_SALT_BYTE_LENGTH
             && self.description.leaf_salt_block_count == 2
-            && self.description.physical_column_count == accounting.physical_column_count_per_root
-            && u64::try_from(self.description.mask_coefficient_count_per_column).ok()
-                == Some(accounting.mask_coefficient_count_per_column)
+            && description_matches_every_root
             && self.description.maximum_candidate_draws_per_output
                 == PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT
             && self.description.derivation_input_schema_identifier != 0
@@ -8058,8 +9651,9 @@ impl PersistentCommittedMaterialGeneratorHybridCertificate {
             && self.description.column_mask_purpose != self.description.leaf_salt_purpose
             && self.description.canonical_frame_coordinates_are_injective
             && self.description.requires_private_material_seed
-            && expected_root_count == Some(self.ceremony_material_root_count)
+            && expected_root_count == self.ceremony_material_root_count
             && expected_mask_output_count == Some(self.accepted_mask_base_field_output_count)
+            && expected_leaf_salt_count == Some(self.leaf_salt_count)
             && self
                 .maximum_mask_kmac_call_count
                 .checked_add(self.leaf_salt_kmac_call_count)
@@ -8099,32 +9693,34 @@ fn unordered_pair_count(count: u64) -> Result<BigUint, WhirTheoremCertificateErr
 }
 
 fn derive_persistent_committed_material_generator_hybrid(
-    accounting: &SelectedSameSecretPersistentMaskImageAccounting,
+    inventory: &SelectedPersistentCommittedMaterialMaskImageInventory,
 ) -> Result<PersistentCommittedMaterialGeneratorHybridCertificate, WhirTheoremCertificateError> {
     let profile = selected_committed_material_profile()
         .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
     let description = committed_material_private_derivation_description(profile)
         .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
-    let ceremony_material_root_count = accounting
-        .ceremony_proof_count
-        .checked_mul(accounting.logical_root_count_per_proof)
-        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
-    let accepted_mask_base_field_output_count = ceremony_material_root_count
-        .checked_mul(accounting.physical_column_count_per_root)
-        .and_then(|count| count.checked_mul(description.mask_coefficient_count_per_column))
-        .and_then(|count| u64::try_from(count).ok())
-        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let ceremony_material_root_count = inventory.roots.len();
+    let accepted_mask_base_field_output_count =
+        inventory.roots.iter().try_fold(0_u64, |total, root| {
+            root.physical_column_demands
+                .iter()
+                .try_fold(total, |subtotal, demand| {
+                    subtotal
+                        .checked_add(demand.mask_coefficient_count)
+                        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+                })
+        })?;
     let maximum_mask_kmac_call_count = accepted_mask_base_field_output_count
         .checked_mul(u64::from(description.maximum_candidate_draws_per_output))
         .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
-    let leaf_salt_count = u64::try_from(ceremony_material_root_count)
-        .ok()
-        .and_then(|root_count| {
-            u64::try_from(accounting.leaf_count_per_root)
-                .ok()
-                .and_then(|leaf_count| root_count.checked_mul(leaf_count))
-        })
-        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let leaf_salt_count = inventory.roots.iter().try_fold(0_u64, |total, root| {
+        total
+            .checked_add(
+                u64::try_from(root.leaf_count)
+                    .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+            )
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+    })?;
     let leaf_salt_kmac_call_count = leaf_salt_count
         .checked_mul(
             u64::try_from(description.leaf_salt_block_count)
@@ -8190,25 +9786,404 @@ fn derive_persistent_committed_material_generator_hybrid(
         source_authority: ConstructionAffineSourceAuthority::AuthenticatedPersistentObject,
         masks_are_publicly_recomputable: false,
     };
-    if !certificate.is_complete_for(accounting) {
+    if !certificate.is_complete_for(inventory) {
         return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
     }
     Ok(certificate)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PersistentCommittedMaterialLeafHashConstruction {
+    SaltedMaterializedSingleCall512,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PersistentCommittedMaterialParentHashConstruction {
+    TwoMarked512BitChildren,
+}
+
+/// Root-global hiding accounting for the unique persistent committed-material
+/// trees. The producer tree is charged once even when its root is imported by
+/// a later proof. After the KMAC leaf-salt replacement, every materialized
+/// leaf has one fresh 1,024-bit salt input and every replaced parent has two
+/// already-marked 512-bit children. The numeric event is relative to the
+/// declared classical ideal-XOF assumption; it is not a standard-model claim
+/// for fixed SHAKE256 and does not assert QROM zero knowledge.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PersistentCommittedMaterialCommitmentPrivacyCertificate {
+    material_root_count: usize,
+    salted_leaf_hash_call_count: u64,
+    fully_hidden_parent_hash_call_count: u64,
+    complete_commitment_hash_call_count: u64,
+    leaf_hash_construction: PersistentCommittedMaterialLeafHashConstruction,
+    parent_hash_construction: PersistentCommittedMaterialParentHashConstruction,
+    fresh_input_entropy_bit_length: usize,
+    declared_adversarial_query_budget: u128,
+    fresh_input_bad_event: ExactBigFraction,
+    leaf_salt_collision_bad_event: ExactBigFraction,
+    selected_numeric_bad_event: ExactBigFraction,
+    every_tree_is_charged_once_at_its_producer: bool,
+    imported_consumer_roots_are_not_recharged: bool,
+    classical_ideal_xof_assumption_is_explicit: bool,
+    claims_concrete_shake256_reduction: bool,
+    claims_quantum_random_oracle_zero_knowledge: bool,
+}
+
+impl PersistentCommittedMaterialCommitmentPrivacyCertificate {
+    fn is_complete_for(
+        &self,
+        inventory: &SelectedPersistentCommittedMaterialMaskImageInventory,
+        generator_hybrid: &PersistentCommittedMaterialGeneratorHybridCertificate,
+    ) -> bool {
+        let expected_salted_leaf_hash_call_count =
+            inventory.roots.iter().try_fold(0_u64, |total, root| {
+                total.checked_add(u64::try_from(root.leaf_count).ok()?)
+            });
+        let expected_fully_hidden_parent_hash_call_count =
+            inventory.roots.iter().try_fold(0_u64, |total, root| {
+                total.checked_add(u64::try_from(root.leaf_count.checked_sub(1)?).ok()?)
+            });
+        let expected_complete_commitment_hash_call_count = expected_salted_leaf_hash_call_count
+            .and_then(|leaf_count| {
+                expected_fully_hidden_parent_hash_call_count
+                    .and_then(|parent_count| leaf_count.checked_add(parent_count))
+            });
+        let expected_fresh_input_bad_event =
+            expected_complete_commitment_hash_call_count.and_then(|call_count| {
+                query_bounded_fresh_input_bad_event(
+                    call_count,
+                    PRIVATE_LEAF_SALT_BYTE_LENGTH * u8::BITS as usize,
+                )
+                .ok()
+            });
+        let expected_selected_numeric_bad_event =
+            expected_fresh_input_bad_event
+                .as_ref()
+                .and_then(|fresh_input| {
+                    fresh_input
+                        .add(&generator_hybrid.leaf_salt_collision_probability)
+                        .ok()
+                });
+        inventory.is_complete()
+            && generator_hybrid.is_complete_for(inventory)
+            && self.material_root_count == inventory.roots.len()
+            && self.material_root_count > 0
+            && expected_salted_leaf_hash_call_count == Some(self.salted_leaf_hash_call_count)
+            && self.salted_leaf_hash_call_count == generator_hybrid.leaf_salt_count
+            && expected_fully_hidden_parent_hash_call_count
+                == Some(self.fully_hidden_parent_hash_call_count)
+            && expected_complete_commitment_hash_call_count
+                == Some(self.complete_commitment_hash_call_count)
+            && self.leaf_hash_construction
+                == PersistentCommittedMaterialLeafHashConstruction::SaltedMaterializedSingleCall512
+            && self.parent_hash_construction
+                == PersistentCommittedMaterialParentHashConstruction::TwoMarked512BitChildren
+            && self.fresh_input_entropy_bit_length
+                == PRIVATE_LEAF_SALT_BYTE_LENGTH * u8::BITS as usize
+            && self.declared_adversarial_query_budget == DECLARED_ADVERSARIAL_QUERY_BUDGET
+            && expected_fresh_input_bad_event.as_ref() == Some(&self.fresh_input_bad_event)
+            && self.leaf_salt_collision_bad_event
+                == generator_hybrid.leaf_salt_collision_probability
+            && expected_selected_numeric_bad_event.as_ref()
+                == Some(&self.selected_numeric_bad_event)
+            && self
+                .selected_numeric_bad_event
+                .is_at_most_inverse_power_of_two(128)
+            && self.every_tree_is_charged_once_at_its_producer
+            && self.imported_consumer_roots_are_not_recharged
+            && self.classical_ideal_xof_assumption_is_explicit
+            && !self.claims_concrete_shake256_reduction
+            && !self.claims_quantum_random_oracle_zero_knowledge
+    }
+}
+
+fn derive_persistent_committed_material_commitment_privacy(
+    inventory: &SelectedPersistentCommittedMaterialMaskImageInventory,
+    generator_hybrid: &PersistentCommittedMaterialGeneratorHybridCertificate,
+) -> Result<PersistentCommittedMaterialCommitmentPrivacyCertificate, WhirTheoremCertificateError> {
+    let material_root_count = inventory.roots.len();
+    let salted_leaf_hash_call_count = inventory.roots.iter().try_fold(0_u64, |total, root| {
+        total
+            .checked_add(
+                u64::try_from(root.leaf_count)
+                    .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+            )
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+    })?;
+    let fully_hidden_parent_hash_call_count =
+        inventory.roots.iter().try_fold(0_u64, |total, root| {
+            total
+                .checked_add(
+                    u64::try_from(
+                        root.leaf_count
+                            .checked_sub(1)
+                            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+                    )
+                    .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+                )
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+        })?;
+    let complete_commitment_hash_call_count = salted_leaf_hash_call_count
+        .checked_add(fully_hidden_parent_hash_call_count)
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let fresh_input_bad_event = query_bounded_fresh_input_bad_event(
+        complete_commitment_hash_call_count,
+        PRIVATE_LEAF_SALT_BYTE_LENGTH * u8::BITS as usize,
+    )?;
+    let leaf_salt_collision_bad_event = generator_hybrid.leaf_salt_collision_probability.clone();
+    let selected_numeric_bad_event = fresh_input_bad_event.add(&leaf_salt_collision_bad_event)?;
+    let certificate = PersistentCommittedMaterialCommitmentPrivacyCertificate {
+        material_root_count,
+        salted_leaf_hash_call_count,
+        fully_hidden_parent_hash_call_count,
+        complete_commitment_hash_call_count,
+        leaf_hash_construction:
+            PersistentCommittedMaterialLeafHashConstruction::SaltedMaterializedSingleCall512,
+        parent_hash_construction:
+            PersistentCommittedMaterialParentHashConstruction::TwoMarked512BitChildren,
+        fresh_input_entropy_bit_length: PRIVATE_LEAF_SALT_BYTE_LENGTH * u8::BITS as usize,
+        declared_adversarial_query_budget: DECLARED_ADVERSARIAL_QUERY_BUDGET,
+        fresh_input_bad_event,
+        leaf_salt_collision_bad_event,
+        selected_numeric_bad_event,
+        every_tree_is_charged_once_at_its_producer: true,
+        imported_consumer_roots_are_not_recharged: true,
+        classical_ideal_xof_assumption_is_explicit: true,
+        claims_concrete_shake256_reduction: false,
+        claims_quantum_random_oracle_zero_knowledge: false,
+    };
+    if !certificate.is_complete_for(inventory, generator_hybrid) {
+        return Err(WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy);
+    }
+    Ok(certificate)
+}
+
+/// Root-global affine image accounting for every selected persistent
+/// committed-material mask. Each private producer polynomial is charged once
+/// against the union of its producer opening catalog and every authorized
+/// consumer catalog. No independence between proof challenges is assumed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ProductionPersistentCommittedMaterialMaskingCertificate {
+    inventory: SelectedPersistentCommittedMaterialMaskImageInventory,
+    generator_hybrid: PersistentCommittedMaterialGeneratorHybridCertificate,
+    commitment_privacy: PersistentCommittedMaterialCommitmentPrivacyCertificate,
+    producer_root_count: usize,
+    consumer_edge_count: usize,
+    producer_root_without_consumer_count: usize,
+    physical_column_count: usize,
+    private_base_coordinate_count: u64,
+    generic_joint_view_base_coordinate_count: u64,
+    joint_view_rank_ceiling: u64,
+    residual_conditional_entropy_lower_bound: u64,
+    producer_construction_plan_identities: Vec<[u8; 64]>,
+    consumer_construction_plan_identities: Vec<[u8; 64]>,
+    source_authority: ConstructionAffineSourceAuthority,
+    producer_and_consumer_views_are_accounted_jointly: bool,
+    assumes_independent_consumer_queries: bool,
+    masks_are_publicly_recomputable: bool,
+}
+
+impl ProductionPersistentCommittedMaterialMaskingCertificate {
+    fn is_complete(&self) -> bool {
+        let producer_root_count = self.inventory.roots.len();
+        let consumer_edge_count = self
+            .inventory
+            .roots
+            .iter()
+            .try_fold(0_usize, |count, root| {
+                count.checked_add(root.ordered_consumers.len())
+            });
+        let producer_root_without_consumer_count = self
+            .inventory
+            .roots
+            .iter()
+            .filter(|root| root.ordered_consumers.is_empty())
+            .count();
+        let physical_column_count = self
+            .inventory
+            .roots
+            .iter()
+            .try_fold(0_usize, |count, root| {
+                count.checked_add(root.physical_column_demands.len())
+            });
+        let sum_demand =
+            |select: fn(&SelectedPersistentCommittedMaterialPhysicalColumnDemand) -> u64| {
+                self.inventory.roots.iter().try_fold(0_u64, |total, root| {
+                    root.physical_column_demands
+                        .iter()
+                        .try_fold(total, |subtotal, demand| {
+                            subtotal.checked_add(select(demand))
+                        })
+                })
+            };
+        let producer_construction_plan_identities = self
+            .inventory
+            .roots
+            .iter()
+            .map(|root| root.producer.construction_plan_identity_hash)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let consumer_construction_plan_identities = self
+            .inventory
+            .roots
+            .iter()
+            .flat_map(|root| {
+                root.ordered_consumers
+                    .iter()
+                    .map(|consumer| consumer.construction_plan_identity_hash)
+            })
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        self.inventory.is_complete()
+            && self.generator_hybrid.is_complete_for(&self.inventory)
+            && self
+                .commitment_privacy
+                .is_complete_for(&self.inventory, &self.generator_hybrid)
+            && self.producer_root_count == producer_root_count
+            && consumer_edge_count == Some(self.consumer_edge_count)
+            && self.consumer_edge_count > 0
+            && self.producer_root_without_consumer_count == producer_root_without_consumer_count
+            && physical_column_count == Some(self.physical_column_count)
+            && self.physical_column_count > 0
+            && sum_demand(|demand| demand.mask_coefficient_count)
+                == Some(self.private_base_coordinate_count)
+            && sum_demand(|demand| demand.generic_joint_base_coordinate_count)
+                == Some(self.generic_joint_view_base_coordinate_count)
+            && sum_demand(|demand| demand.joint_evaluation_image_rank_ceiling)
+                == Some(self.joint_view_rank_ceiling)
+            && sum_demand(|demand| demand.residual_conditional_entropy_lower_bound)
+                == Some(self.residual_conditional_entropy_lower_bound)
+            && self.private_base_coordinate_count >= self.joint_view_rank_ceiling
+            && self.generic_joint_view_base_coordinate_count >= self.joint_view_rank_ceiling
+            && self
+                .private_base_coordinate_count
+                .checked_sub(self.joint_view_rank_ceiling)
+                == Some(self.residual_conditional_entropy_lower_bound)
+            && self.producer_construction_plan_identities == producer_construction_plan_identities
+            && self.consumer_construction_plan_identities == consumer_construction_plan_identities
+            && !self.producer_construction_plan_identities.is_empty()
+            && !self.consumer_construction_plan_identities.is_empty()
+            && self.source_authority
+                == ConstructionAffineSourceAuthority::AuthenticatedPersistentObject
+            && self.producer_and_consumer_views_are_accounted_jointly
+            && !self.assumes_independent_consumer_queries
+            && !self.masks_are_publicly_recomputable
+    }
+
+    fn is_complete_for_selected_profile(&self) -> bool {
+        self.is_complete()
+            && derive_production_persistent_committed_material_masking_certificate()
+                .is_ok_and(|expected| expected == *self)
+    }
+}
+
+fn derive_production_persistent_committed_material_masking_certificate()
+-> Result<ProductionPersistentCommittedMaterialMaskingCertificate, WhirTheoremCertificateError> {
+    let inventory = selected_persistent_committed_material_mask_image_inventory()
+        .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+    if !inventory.is_complete() {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    let producer_root_count = inventory.roots.len();
+    let consumer_edge_count = inventory.roots.iter().try_fold(0_usize, |count, root| {
+        count
+            .checked_add(root.ordered_consumers.len())
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+    })?;
+    let producer_root_without_consumer_count = inventory
+        .roots
+        .iter()
+        .filter(|root| root.ordered_consumers.is_empty())
+        .count();
+    let physical_column_count = inventory.roots.iter().try_fold(0_usize, |count, root| {
+        count
+            .checked_add(root.physical_column_demands.len())
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+    })?;
+    let sum_demand =
+        |select: fn(&SelectedPersistentCommittedMaterialPhysicalColumnDemand) -> u64| {
+            inventory.roots.iter().try_fold(0_u64, |total, root| {
+                root.physical_column_demands
+                    .iter()
+                    .try_fold(total, |subtotal, demand| {
+                        subtotal
+                            .checked_add(select(demand))
+                            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+                    })
+            })
+        };
+    let private_base_coordinate_count = sum_demand(|demand| demand.mask_coefficient_count)?;
+    let generic_joint_view_base_coordinate_count =
+        sum_demand(|demand| demand.generic_joint_base_coordinate_count)?;
+    let joint_view_rank_ceiling = sum_demand(|demand| demand.joint_evaluation_image_rank_ceiling)?;
+    let residual_conditional_entropy_lower_bound =
+        sum_demand(|demand| demand.residual_conditional_entropy_lower_bound)?;
+    let producer_construction_plan_identities = inventory
+        .roots
+        .iter()
+        .map(|root| root.producer.construction_plan_identity_hash)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let consumer_construction_plan_identities = inventory
+        .roots
+        .iter()
+        .flat_map(|root| {
+            root.ordered_consumers
+                .iter()
+                .map(|consumer| consumer.construction_plan_identity_hash)
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let generator_hybrid = derive_persistent_committed_material_generator_hybrid(&inventory)?;
+    let commitment_privacy =
+        derive_persistent_committed_material_commitment_privacy(&inventory, &generator_hybrid)?;
+    let certificate = ProductionPersistentCommittedMaterialMaskingCertificate {
+        inventory,
+        generator_hybrid,
+        commitment_privacy,
+        producer_root_count,
+        consumer_edge_count,
+        producer_root_without_consumer_count,
+        physical_column_count,
+        private_base_coordinate_count,
+        generic_joint_view_base_coordinate_count,
+        joint_view_rank_ceiling,
+        residual_conditional_entropy_lower_bound,
+        producer_construction_plan_identities,
+        consumer_construction_plan_identities,
+        source_authority: ConstructionAffineSourceAuthority::AuthenticatedPersistentObject,
+        producer_and_consumer_views_are_accounted_jointly: true,
+        assumes_independent_consumer_queries: false,
+        masks_are_publicly_recomputable: false,
+    };
+    if !certificate.is_complete() {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    Ok(certificate)
+}
+
+/// Exact source, view, rank, entropy, and generator accounting for the five
+/// attempt-local private-material classes. Persistent committed material is
+/// accounted once across producer and consumer views by the root-global
+/// certificate. This certificate deliberately does
+/// not assert the witness-to-mask image inclusion; that requires a separate
+/// factorization over the real conditioned view maps.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ConstructionMaskingAffineCompositionCertificate {
     construction_plan_identity_hash: [u8; 64],
     relation_plan_variant_hash: [u8; 64],
     rows: Vec<ConstructionAffineCompositionRow>,
     private_coin_generator_hybrid: CommonProofPrivateCoinGeneratorHybridCertificate,
-    persistent_mask_image: SelectedSameSecretPersistentMaskImageAccounting,
-    persistent_material_generator_hybrid: PersistentCommittedMaterialGeneratorHybridCertificate,
     row_pad_accepted_base_field_output_count: u64,
     aggregate_leaf_salt_key_base_coordinate_count: u64,
     production_preaggregate_correspondence_is_complete: bool,
     production_aggregate_correspondence_is_complete: bool,
     finite_population_agreement_term_is_soundness_only: bool,
+    claims_affine_image_inclusion: bool,
     claims_family_simulation: bool,
     claims_malicious_verifier_zero_knowledge: bool,
     claims_quantum_random_oracle_zero_knowledge: bool,
@@ -8232,7 +10207,6 @@ impl ConstructionMaskingAffineCompositionCertificate {
             ConstructionAffineMaskSourceClass::QuotientTelescopingMasks,
             ConstructionAffineMaskSourceClass::OpeningBatchMask,
             ConstructionAffineMaskSourceClass::PhaseRowPads,
-            ConstructionAffineMaskSourceClass::PriorVssCommittedMaterialMasks,
             ConstructionAffineMaskSourceClass::AggregateWidePad,
         ];
         let relation_mask_private_coordinate_count = self.rows.get(..3).and_then(|rows| {
@@ -8244,37 +10218,9 @@ impl ConstructionMaskingAffineCompositionCertificate {
             .rows
             .get(3)
             .map(|row| row.private_base_coordinate_count);
-        let persistent_column_count = self
-            .persistent_mask_image
-            .logical_root_count_per_proof
-            .checked_mul(self.persistent_mask_image.physical_column_count_per_root);
-        let persistent_private_coordinate_count = persistent_column_count.and_then(|count| {
-            u64::try_from(count)
-                .ok()?
-                .checked_mul(self.persistent_mask_image.mask_coefficient_count_per_column)
-        });
-        let persistent_rank_ceiling = persistent_column_count.and_then(|count| {
-            u64::try_from(count).ok()?.checked_mul(
-                self.persistent_mask_image
-                    .joint_evaluation_image_rank_ceiling_per_column,
-            )
-        });
-        let persistent_residual_entropy = persistent_column_count.and_then(|count| {
-            u64::try_from(count).ok()?.checked_mul(
-                self.persistent_mask_image
-                    .residual_conditional_entropy_lower_bound_per_column,
-            )
-        });
-        let persistent_row_matches_image = self.rows.get(4).is_some_and(|row| {
-            row.source_instance_count == persistent_column_count.unwrap_or(usize::MAX)
-                && Some(row.private_base_coordinate_count) == persistent_private_coordinate_count
-                && Some(row.revealed_base_coordinate_count) == persistent_rank_ceiling
-                && Some(row.joint_view_rank) == persistent_rank_ceiling
-                && Some(row.residual_conditional_entropy_lower_bound) == persistent_residual_entropy
-        });
         let aggregate_private_coordinate_count = self
             .rows
-            .get(5)
+            .get(4)
             .map(|row| row.private_base_coordinate_count);
         self.construction_plan_identity_hash != [0_u8; 64]
             && self.relation_plan_variant_hash != [0_u8; 64]
@@ -8291,9 +10237,6 @@ impl ConstructionMaskingAffineCompositionCertificate {
                 .copied()
                 .all(ConstructionAffineCompositionRow::is_complete)
             && self.private_coin_generator_hybrid.is_complete()
-            && self
-                .persistent_material_generator_hybrid
-                .is_complete_for(&self.persistent_mask_image)
             && relation_mask_private_coordinate_count
                 == Some(
                     self.private_coin_generator_hybrid
@@ -8310,11 +10253,11 @@ impl ConstructionMaskingAffineCompositionCertificate {
                     .aggregate_leaf_salt_key_base_field_output_count
             && row_pad_private_coordinate_count
                 == Some(self.row_pad_accepted_base_field_output_count)
-            && persistent_row_matches_image
             && self.aggregate_leaf_salt_key_base_coordinate_count > 0
             && self.production_preaggregate_correspondence_is_complete
             && self.production_aggregate_correspondence_is_complete
             && self.finite_population_agreement_term_is_soundness_only
+            && !self.claims_affine_image_inclusion
             && !self.claims_family_simulation
             && !self.claims_malicious_verifier_zero_knowledge
             && !self.claims_quantum_random_oracle_zero_knowledge
@@ -8348,9 +10291,7 @@ fn derive_construction_masking_affine_composition(
         production_aggregate,
         row_pad_generator,
     } = input;
-    if plan.application_statement_schema_identifier
-        != ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER
-        || plan.proof_privacy_mode != ProofPrivacyMode::SecretBearing
+    if plan.proof_privacy_mode != ProofPrivacyMode::SecretBearing
         || !production_preaggregate.is_complete_for(plan, relation_variant, relation_context)
         || !production_aggregate.is_complete_for(plan, aggregate_wide_masking)
         || !row_pad_generator.is_complete_for_plan(plan)
@@ -8565,50 +10506,9 @@ fn derive_construction_masking_affine_composition(
             .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?,
     };
 
-    let persistent_mask_image = selected_same_secret_persistent_mask_image_accounting()
-        .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
     let construction_plan_identity_hash = plan
         .canonical_identity_hash()
         .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
-    if persistent_mask_image.same_secret_construction_plan_identity_hash
-        != construction_plan_identity_hash
-        || persistent_mask_image.vss_construction_plan_identity_hash == [0_u8; 64]
-    {
-        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
-    }
-    let persistent_column_count = persistent_mask_image
-        .logical_root_count_per_proof
-        .checked_mul(persistent_mask_image.physical_column_count_per_root)
-        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
-    let persistent_private_coordinate_count = checked_multiply_u64(
-        checked_count_u64(persistent_column_count)?,
-        persistent_mask_image.mask_coefficient_count_per_column,
-    )?;
-    let persistent_rank_ceiling = checked_multiply_u64(
-        checked_count_u64(persistent_column_count)?,
-        persistent_mask_image.joint_evaluation_image_rank_ceiling_per_column,
-    )?;
-    let persistent_row = ConstructionAffineCompositionRow {
-        source_class: ConstructionAffineMaskSourceClass::PriorVssCommittedMaterialMasks,
-        source_authority: ConstructionAffineSourceAuthority::AuthenticatedPersistentObject,
-        source_instance_count: persistent_column_count,
-        private_base_coordinate_count: persistent_private_coordinate_count,
-        revealed_base_coordinate_count: persistent_rank_ceiling,
-        joint_view_rank: persistent_rank_ceiling,
-        rank_kind: ConstructionAffineRankKind::ConservativeCeiling,
-        derived_linear_identity_base_coordinate_count: 0,
-        residual_conditional_entropy_lower_bound: persistent_private_coordinate_count
-            .checked_sub(persistent_rank_ceiling)
-            .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?,
-    };
-    if persistent_row.residual_conditional_entropy_lower_bound
-        != checked_multiply_u64(
-            checked_count_u64(persistent_column_count)?,
-            persistent_mask_image.residual_conditional_entropy_lower_bound_per_column,
-        )?
-    {
-        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
-    }
 
     let (aggregate_private_extension_count, aggregate_rank_extension_count, aggregate_entropy) =
         aggregate_wide_masking.joint_affine_view_summary();
@@ -8666,14 +10566,11 @@ fn derive_construction_masking_affine_composition(
         aggregate_private_coordinate_count,
         aggregate_leaf_salt_key_base_coordinate_count,
     )?;
-    let persistent_material_generator_hybrid =
-        derive_persistent_committed_material_generator_hybrid(&persistent_mask_image)?;
     let rows = vec![
         trace_row,
         telescoping_row,
         opening_batch_row,
         row_pad_row,
-        persistent_row,
         aggregate_row,
     ];
     if rows.iter().copied().any(|row| !row.is_complete()) {
@@ -8686,8 +10583,6 @@ fn derive_construction_masking_affine_composition(
             .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?,
         rows,
         private_coin_generator_hybrid,
-        persistent_mask_image,
-        persistent_material_generator_hybrid,
         row_pad_accepted_base_field_output_count: checked_count_u64(
             row_pad_generator.accepted_field_output_count,
         )?,
@@ -8695,12 +10590,1550 @@ fn derive_construction_masking_affine_composition(
         production_preaggregate_correspondence_is_complete: true,
         production_aggregate_correspondence_is_complete: true,
         finite_population_agreement_term_is_soundness_only: true,
+        claims_affine_image_inclusion: false,
         claims_family_simulation: false,
         claims_malicious_verifier_zero_knowledge: false,
         claims_quantum_random_oracle_zero_knowledge: false,
     };
     if !certificate.is_complete() {
         return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    Ok(certificate)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ConstructionAffineImageFactorization {
+    /// For every trace-mask source, the real map is evaluation of
+    /// `(X^H - 1) r(X)` on the complete Frobenius-closed opening catalog.
+    /// Every catalog point is outside `H`; multiplication by `X^H - 1` is
+    /// therefore an invertible diagonal map and interpolation by `r` is
+    /// surjective on the conditioned catalog.
+    VanishingScaledTraceEvaluation {
+        trace_domain_size: u64,
+        challenge_extension_degree: u16,
+        source_count: usize,
+        total_observation_coordinate_count: u64,
+        minimum_source_coordinate_surplus: u64,
+    },
+    /// After the already simulated trace openings fix the sum of the quotient
+    /// components, witness differences lie in the sum-zero kernel. The
+    /// deployed telescoping map `[I; -1 ... -1]`, independently at each point,
+    /// spans exactly that kernel.
+    ConditionedTelescopingKernel {
+        quotient_component_count: u32,
+        telescoping_source_count: usize,
+        opening_point_count: usize,
+        challenge_extension_degree: u16,
+        dependency_matrix_rank: u64,
+        conditioned_identity_coordinate_count: u64,
+    },
+    /// The opening-batch mask is an independently sampled extension-field
+    /// polynomial. Its own revealed evaluations contain no witness summand;
+    /// the associated PCS batch is conditioned on the already simulated
+    /// relation openings.
+    IndependentOpeningBatchMask {
+        opening_point_count: usize,
+        challenge_extension_degree: u16,
+        mask_coefficient_count: u64,
+    },
+    /// Each physical phase row adds an independent high-half polynomial. The
+    /// production rank requirement is the distinct-point generalized
+    /// Vandermonde map used by the actual row encoder and shared query vector.
+    PhaseRowPadVandermonde {
+        physical_row_count: usize,
+        source_dimension_per_row: u64,
+        conditioned_view_rank_per_row: u64,
+        verification: ConstructionMaskingRankVerification,
+    },
+    /// The aggregate-wide production walk binds a block-diagonal conditioned
+    /// map. Sumcheck blocks have the constant nonzero `7 x 7` minor; query
+    /// blocks have square generalized Vandermonde factors; fresh reveals have
+    /// coordinate-identity factors. All remaining affine coordinates are
+    /// checked deterministic aliases of those primary blocks.
+    AggregateBlockDiagonal {
+        challenge_extension_degree: u16,
+        affine_block_count: usize,
+        block_kind_counts: [usize; 6],
+        private_extension_coordinate_count: usize,
+        conditioned_image_rank_extension: usize,
+        derived_alias_extension_coordinate_count: usize,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ConstructionAffineImageInclusionRow {
+    source_class: ConstructionAffineMaskSourceClass,
+    private_base_coordinate_count: u64,
+    conditioned_view_base_coordinate_count: u64,
+    mask_image_rank_or_generic_rank: u64,
+    joined_mask_and_witness_image_rank_or_generic_rank: u64,
+    derived_alias_base_coordinate_count: u64,
+    factorization: ConstructionAffineImageFactorization,
+}
+
+impl ConstructionAffineImageInclusionRow {
+    fn is_complete(self) -> bool {
+        if self.private_base_coordinate_count == 0
+            || self.conditioned_view_base_coordinate_count == 0
+            || self.mask_image_rank_or_generic_rank == 0
+            || self.mask_image_rank_or_generic_rank
+                != self.joined_mask_and_witness_image_rank_or_generic_rank
+            || self.conditioned_view_base_coordinate_count != self.mask_image_rank_or_generic_rank
+        {
+            return false;
+        }
+        match (self.source_class, self.factorization) {
+            (
+                ConstructionAffineMaskSourceClass::RelationTraceMasks,
+                ConstructionAffineImageFactorization::VanishingScaledTraceEvaluation {
+                    trace_domain_size,
+                    challenge_extension_degree,
+                    source_count,
+                    total_observation_coordinate_count,
+                    minimum_source_coordinate_surplus,
+                },
+            ) => {
+                trace_domain_size > 0
+                    && trace_domain_size.is_power_of_two()
+                    && usize::from(challenge_extension_degree) == PROOF_CHALLENGE_EXTENSION_DEGREE
+                    && source_count > 0
+                    && total_observation_coordinate_count
+                        == self.conditioned_view_base_coordinate_count
+                    && minimum_source_coordinate_surplus <= self.private_base_coordinate_count
+                    && self.derived_alias_base_coordinate_count == 0
+            }
+            (
+                ConstructionAffineMaskSourceClass::QuotientTelescopingMasks,
+                ConstructionAffineImageFactorization::ConditionedTelescopingKernel {
+                    quotient_component_count,
+                    telescoping_source_count,
+                    opening_point_count,
+                    challenge_extension_degree,
+                    dependency_matrix_rank,
+                    conditioned_identity_coordinate_count,
+                },
+            ) => {
+                quotient_component_count >= 2
+                    && telescoping_source_count + 1
+                        == usize::try_from(quotient_component_count).unwrap_or(usize::MAX)
+                    && opening_point_count > 0
+                    && usize::from(challenge_extension_degree) == PROOF_CHALLENGE_EXTENSION_DEGREE
+                    && dependency_matrix_rank
+                        == u64::try_from(telescoping_source_count).unwrap_or(u64::MAX)
+                    && conditioned_identity_coordinate_count
+                        == u64::try_from(opening_point_count)
+                            .ok()
+                            .and_then(|count| {
+                                count.checked_mul(u64::from(challenge_extension_degree))
+                            })
+                            .unwrap_or(u64::MAX)
+                    && self.derived_alias_base_coordinate_count
+                        == conditioned_identity_coordinate_count
+            }
+            (
+                ConstructionAffineMaskSourceClass::OpeningBatchMask,
+                ConstructionAffineImageFactorization::IndependentOpeningBatchMask {
+                    opening_point_count,
+                    challenge_extension_degree,
+                    mask_coefficient_count,
+                },
+            ) => {
+                opening_point_count > 0
+                    && usize::from(challenge_extension_degree) == PROOF_CHALLENGE_EXTENSION_DEGREE
+                    && mask_coefficient_count.checked_mul(u64::from(challenge_extension_degree))
+                        == Some(self.private_base_coordinate_count)
+                    && mask_coefficient_count
+                        >= u64::try_from(opening_point_count).unwrap_or(u64::MAX)
+                    && self.derived_alias_base_coordinate_count == 0
+            }
+            (
+                ConstructionAffineMaskSourceClass::PhaseRowPads,
+                ConstructionAffineImageFactorization::PhaseRowPadVandermonde {
+                    physical_row_count,
+                    source_dimension_per_row,
+                    conditioned_view_rank_per_row,
+                    verification,
+                },
+            ) => {
+                physical_row_count > 0
+                    && source_dimension_per_row >= conditioned_view_rank_per_row
+                    && verification == ConstructionMaskingRankVerification::DistinctPointVandermonde
+                    && u64::try_from(physical_row_count)
+                        .ok()
+                        .and_then(|count| count.checked_mul(source_dimension_per_row))
+                        == Some(self.private_base_coordinate_count)
+                    && u64::try_from(physical_row_count)
+                        .ok()
+                        .and_then(|count| count.checked_mul(conditioned_view_rank_per_row))
+                        == Some(self.conditioned_view_base_coordinate_count)
+                    && self.derived_alias_base_coordinate_count == 0
+            }
+            (
+                ConstructionAffineMaskSourceClass::AggregateWidePad,
+                ConstructionAffineImageFactorization::AggregateBlockDiagonal {
+                    challenge_extension_degree,
+                    affine_block_count,
+                    block_kind_counts,
+                    private_extension_coordinate_count,
+                    conditioned_image_rank_extension,
+                    derived_alias_extension_coordinate_count,
+                },
+            ) => {
+                usize::from(challenge_extension_degree) == PROOF_CHALLENGE_EXTENSION_DEGREE
+                    && affine_block_count > 0
+                    && block_kind_counts.iter().sum::<usize>() == affine_block_count
+                    && block_kind_counts.iter().all(|count| *count > 0)
+                    && conditioned_image_rank_extension <= private_extension_coordinate_count
+                    && u64::try_from(private_extension_coordinate_count)
+                        .ok()
+                        .and_then(|count| count.checked_mul(u64::from(challenge_extension_degree)))
+                        == Some(self.private_base_coordinate_count)
+                    && u64::try_from(conditioned_image_rank_extension)
+                        .ok()
+                        .and_then(|count| count.checked_mul(u64::from(challenge_extension_degree)))
+                        == Some(self.conditioned_view_base_coordinate_count)
+                    && u64::try_from(derived_alias_extension_coordinate_count)
+                        .ok()
+                        .and_then(|count| count.checked_mul(u64::from(challenge_extension_degree)))
+                        == Some(self.derived_alias_base_coordinate_count)
+            }
+            _ => false,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ConstructionAffineConditioningStage {
+    AuthenticatedPersistentObjectsFixed,
+    TraceAndPhaseRows,
+    QuotientGivenMaskedTrace,
+    OpeningBatchGivenRelationOpenings,
+    AggregateGivenMaskedOpenings,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ConstructionAffineImageInclusionCertificate {
+    construction_plan_identity_hash: [u8; 64],
+    relation_plan_variant_hash: [u8; 64],
+    rows: Vec<ConstructionAffineImageInclusionRow>,
+    total_private_base_coordinate_count: u64,
+    total_conditioned_view_base_coordinate_count: u64,
+    total_mask_image_rank_or_generic_rank: u64,
+    total_joined_image_rank_or_generic_rank: u64,
+    total_derived_alias_base_coordinate_count: u64,
+    conditioning_order: Vec<ConstructionAffineConditioningStage>,
+    claims_unconditioned_independence: bool,
+    claims_nonlinear_simulation: bool,
+    claims_family_simulation: bool,
+    claims_quantum_random_oracle_zero_knowledge: bool,
+}
+
+impl ConstructionAffineImageInclusionCertificate {
+    fn is_complete(&self) -> bool {
+        let expected_classes = [
+            ConstructionAffineMaskSourceClass::RelationTraceMasks,
+            ConstructionAffineMaskSourceClass::QuotientTelescopingMasks,
+            ConstructionAffineMaskSourceClass::OpeningBatchMask,
+            ConstructionAffineMaskSourceClass::PhaseRowPads,
+            ConstructionAffineMaskSourceClass::AggregateWidePad,
+        ];
+        let sum = |select: fn(&ConstructionAffineImageInclusionRow) -> u64| {
+            self.rows
+                .iter()
+                .try_fold(0_u64, |total, row| total.checked_add(select(row)))
+        };
+        self.construction_plan_identity_hash != [0_u8; 64]
+            && self.relation_plan_variant_hash != [0_u8; 64]
+            && self.rows.len() == expected_classes.len()
+            && self
+                .rows
+                .iter()
+                .map(|row| row.source_class)
+                .eq(expected_classes)
+            && self
+                .rows
+                .iter()
+                .copied()
+                .all(ConstructionAffineImageInclusionRow::is_complete)
+            && sum(|row| row.private_base_coordinate_count)
+                == Some(self.total_private_base_coordinate_count)
+            && sum(|row| row.conditioned_view_base_coordinate_count)
+                == Some(self.total_conditioned_view_base_coordinate_count)
+            && sum(|row| row.mask_image_rank_or_generic_rank)
+                == Some(self.total_mask_image_rank_or_generic_rank)
+            && sum(|row| row.joined_mask_and_witness_image_rank_or_generic_rank)
+                == Some(self.total_joined_image_rank_or_generic_rank)
+            && sum(|row| row.derived_alias_base_coordinate_count)
+                == Some(self.total_derived_alias_base_coordinate_count)
+            && self.total_mask_image_rank_or_generic_rank
+                == self.total_joined_image_rank_or_generic_rank
+            && self.conditioning_order
+                == [
+                    ConstructionAffineConditioningStage::AuthenticatedPersistentObjectsFixed,
+                    ConstructionAffineConditioningStage::TraceAndPhaseRows,
+                    ConstructionAffineConditioningStage::QuotientGivenMaskedTrace,
+                    ConstructionAffineConditioningStage::OpeningBatchGivenRelationOpenings,
+                    ConstructionAffineConditioningStage::AggregateGivenMaskedOpenings,
+                ]
+            && !self.claims_unconditioned_independence
+            && !self.claims_nonlinear_simulation
+            && !self.claims_family_simulation
+            && !self.claims_quantum_random_oracle_zero_knowledge
+    }
+
+    fn is_complete_for(&self, input: ConstructionMaskingAffineCompositionInput<'_>) -> bool {
+        self.is_complete()
+            && derive_construction_affine_image_inclusion(input)
+                .is_ok_and(|expected| expected == *self)
+    }
+}
+
+fn derive_construction_affine_image_inclusion(
+    input: ConstructionMaskingAffineCompositionInput<'_>,
+) -> Result<ConstructionAffineImageInclusionCertificate, WhirTheoremCertificateError> {
+    let accounting = derive_construction_masking_affine_composition(input)?;
+    let ConstructionMaskingAffineCompositionInput {
+        plan,
+        relation_variant,
+        relation_context,
+        production_preaggregate,
+        aggregate_wide_masking,
+        production_aggregate,
+        row_pad_generator: _,
+    } = input;
+    if !accounting.is_complete()
+        || accounting.claims_affine_image_inclusion
+        || !production_preaggregate.is_complete_for(plan, relation_variant, relation_context)
+        || !production_aggregate.is_complete(aggregate_wide_masking)
+    {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    let extension_degree = relation_context.challenge_extension_degree;
+    if usize::from(extension_degree) != PROOF_CHALLENGE_EXTENSION_DEGREE {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+
+    let trace_masks = relation_variant
+        .ordered_masks()
+        .iter()
+        .copied()
+        .filter(|mask| {
+            mask.mask_kind() == RelationMaskKind::Trace
+                && mask.target_class() == RelationMaskTargetClass::Column
+        })
+        .collect::<Vec<_>>();
+    let mut trace_coordinate_count = 0_u64;
+    let mut minimum_trace_surplus = u64::MAX;
+    for mask in &trace_masks {
+        let catalog = TraceMaskObservationCoordinateCatalog::derive(
+            relation_variant,
+            mask.target_ordinal(),
+            extension_degree,
+            0,
+        )
+        .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+        let coordinate_count = catalog
+            .base_coordinate_count()
+            .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+        let surplus = mask
+            .mask_degree_bound_exclusive()
+            .checked_sub(coordinate_count)
+            .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+        trace_coordinate_count = trace_coordinate_count
+            .checked_add(coordinate_count)
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+        minimum_trace_surplus = minimum_trace_surplus.min(surplus);
+    }
+    if trace_masks.is_empty() || minimum_trace_surplus == u64::MAX {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+
+    let quotient_component_count = relation_context.quotient_component_count;
+    let telescoping_source_count = usize::try_from(
+        quotient_component_count
+            .checked_sub(1)
+            .ok_or(WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?,
+    )
+    .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let quotient_opening_points = relation_variant
+        .ordered_opening_claims()
+        .iter()
+        .filter(|claim| claim.source_class() == RelationOpeningSourceClass::Quotient)
+        .map(|claim| claim.opening_point_ordinal())
+        .collect::<BTreeSet<_>>();
+    let opening_point_count = quotient_opening_points.len();
+    if opening_point_count == 0 {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+
+    let opening_batch_masks = relation_variant
+        .ordered_masks()
+        .iter()
+        .copied()
+        .filter(|mask| {
+            mask.mask_kind() == RelationMaskKind::OpeningBatch
+                && mask.target_class() == RelationMaskTargetClass::Batch
+        })
+        .collect::<Vec<_>>();
+    let [opening_batch_mask] = opening_batch_masks.as_slice() else {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    };
+    let opening_batch_point_count = relation_variant
+        .ordered_opening_claims()
+        .iter()
+        .filter(|claim| claim.source_class() == RelationOpeningSourceClass::BatchMask)
+        .map(|claim| claim.opening_point_ordinal())
+        .collect::<BTreeSet<_>>()
+        .len();
+
+    let [row_pad_requirement] = production_preaggregate
+        .production_rank_requirements
+        .as_slice()
+    else {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    };
+    let physical_row_count = accounting.rows[3].source_instance_count;
+    if row_pad_requirement.required_rank == 0
+        || accounting.rows[3].joint_view_rank
+            != u64::try_from(physical_row_count)
+                .ok()
+                .and_then(|count| count.checked_mul(row_pad_requirement.required_rank))
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?
+    {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+
+    let mut aggregate_block_kind_counts = [0_usize; 6];
+    for row in &production_aggregate.affine_rows {
+        let kind_index = match row.kind {
+            AggregateWideJointAffineViewKind::SumcheckTranscript { .. } => 0,
+            AggregateWideJointAffineViewKind::SourceQueriesAndSwitchDelta { .. } => 1,
+            AggregateWideJointAffineViewKind::TerminalSourceQueries { .. } => 2,
+            AggregateWideJointAffineViewKind::PadQueries => 3,
+            AggregateWideJointAffineViewKind::FreshSourceReveal => 4,
+            AggregateWideJointAffineViewKind::FreshPadReveal => 5,
+        };
+        aggregate_block_kind_counts[kind_index] = aggregate_block_kind_counts[kind_index]
+            .checked_add(1)
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    }
+    let aggregate_derived_alias_extension_coordinate_count = production_aggregate
+        .derived_opened_affine_coordinate_count
+        .checked_add(production_aggregate.delegated_opening_evaluation_coordinate_count)
+        .and_then(|count| {
+            count.checked_add(production_aggregate.transcript_derived_affine_coordinate_count)
+        })
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let (aggregate_private_extension_count, aggregate_rank_extension_count, _) =
+        aggregate_wide_masking.joint_affine_view_summary();
+
+    let factorization_rows = [
+        ConstructionAffineImageFactorization::VanishingScaledTraceEvaluation {
+            trace_domain_size: relation_variant.trace_domain_size(),
+            challenge_extension_degree: extension_degree,
+            source_count: trace_masks.len(),
+            total_observation_coordinate_count: trace_coordinate_count,
+            minimum_source_coordinate_surplus: minimum_trace_surplus,
+        },
+        ConstructionAffineImageFactorization::ConditionedTelescopingKernel {
+            quotient_component_count,
+            telescoping_source_count,
+            opening_point_count,
+            challenge_extension_degree: extension_degree,
+            dependency_matrix_rank: u64::try_from(telescoping_source_count)
+                .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+            conditioned_identity_coordinate_count: u64::try_from(opening_point_count)
+                .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?
+                .checked_mul(u64::from(extension_degree))
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+        },
+        ConstructionAffineImageFactorization::IndependentOpeningBatchMask {
+            opening_point_count: opening_batch_point_count,
+            challenge_extension_degree: extension_degree,
+            mask_coefficient_count: opening_batch_mask.mask_degree_bound_exclusive(),
+        },
+        ConstructionAffineImageFactorization::PhaseRowPadVandermonde {
+            physical_row_count,
+            source_dimension_per_row: row_pad_requirement.source_dimension,
+            conditioned_view_rank_per_row: row_pad_requirement.required_rank,
+            verification: row_pad_requirement.verification,
+        },
+        ConstructionAffineImageFactorization::AggregateBlockDiagonal {
+            challenge_extension_degree: extension_degree,
+            affine_block_count: production_aggregate.affine_rows.len(),
+            block_kind_counts: aggregate_block_kind_counts,
+            private_extension_coordinate_count: aggregate_private_extension_count,
+            conditioned_image_rank_extension: aggregate_rank_extension_count,
+            derived_alias_extension_coordinate_count:
+                aggregate_derived_alias_extension_coordinate_count,
+        },
+    ];
+    let rows = accounting
+        .rows
+        .iter()
+        .copied()
+        .zip(factorization_rows)
+        .map(
+            |(accounting_row, factorization)| ConstructionAffineImageInclusionRow {
+                source_class: accounting_row.source_class,
+                private_base_coordinate_count: accounting_row.private_base_coordinate_count,
+                conditioned_view_base_coordinate_count: accounting_row.joint_view_rank,
+                mask_image_rank_or_generic_rank: accounting_row.joint_view_rank,
+                joined_mask_and_witness_image_rank_or_generic_rank: accounting_row.joint_view_rank,
+                derived_alias_base_coordinate_count: accounting_row
+                    .derived_linear_identity_base_coordinate_count,
+                factorization,
+            },
+        )
+        .collect::<Vec<_>>();
+    if rows.iter().copied().any(|row| !row.is_complete()) {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    let sum = |select: fn(&ConstructionAffineImageInclusionRow) -> u64| {
+        rows.iter().try_fold(0_u64, |total, row| {
+            total
+                .checked_add(select(row))
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+        })
+    };
+    let certificate = ConstructionAffineImageInclusionCertificate {
+        construction_plan_identity_hash: accounting.construction_plan_identity_hash,
+        relation_plan_variant_hash: accounting.relation_plan_variant_hash,
+        total_private_base_coordinate_count: sum(|row| row.private_base_coordinate_count)?,
+        total_conditioned_view_base_coordinate_count: sum(|row| {
+            row.conditioned_view_base_coordinate_count
+        })?,
+        total_mask_image_rank_or_generic_rank: sum(|row| row.mask_image_rank_or_generic_rank)?,
+        total_joined_image_rank_or_generic_rank: sum(|row| {
+            row.joined_mask_and_witness_image_rank_or_generic_rank
+        })?,
+        total_derived_alias_base_coordinate_count: sum(|row| {
+            row.derived_alias_base_coordinate_count
+        })?,
+        rows,
+        conditioning_order: vec![
+            ConstructionAffineConditioningStage::AuthenticatedPersistentObjectsFixed,
+            ConstructionAffineConditioningStage::TraceAndPhaseRows,
+            ConstructionAffineConditioningStage::QuotientGivenMaskedTrace,
+            ConstructionAffineConditioningStage::OpeningBatchGivenRelationOpenings,
+            ConstructionAffineConditioningStage::AggregateGivenMaskedOpenings,
+        ],
+        claims_unconditioned_independence: false,
+        claims_nonlinear_simulation: false,
+        claims_family_simulation: false,
+        claims_quantum_random_oracle_zero_knowledge: false,
+    };
+    if !certificate.is_complete() {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    Ok(certificate)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ConstructionSimulatorRootStrategy {
+    RandomAttemptRootUnderPrivateSaltHybrid,
+    ImportedAuthenticatedPersistentProducerRoot,
+    PublicCanonicalStatementRoot,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ConstructionSimulatorOpenedValueStrategy {
+    TraceAndPhaseRowImage,
+    ConditionedQuotientAndPhaseRowImage,
+    PersistentProducerConsumerImage,
+    AggregateBlockDiagonalImage,
+    PublicDeterministicReplay,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ConstructionSimulatorFrontierStrategy {
+    ProgramCoordinateDerivedPrivateFrontier,
+    VerifyCoordinateDerivedPublicFrontier,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ConstructionSequentialCommitmentSimulationRow {
+    role: MerkleOracleEquationRole,
+    root_strategy: ConstructionSimulatorRootStrategy,
+    opened_value_strategy: ConstructionSimulatorOpenedValueStrategy,
+    frontier_strategy: ConstructionSimulatorFrontierStrategy,
+    dependent_query_operation_ordinal: u32,
+    sampled_query_vector_length: usize,
+    opened_leaf_count: usize,
+}
+
+impl ConstructionSequentialCommitmentSimulationRow {
+    fn is_complete(self) -> bool {
+        let strategy_matches_role = match (
+            self.role,
+            self.root_strategy,
+            self.opened_value_strategy,
+            self.frontier_strategy,
+        ) {
+            (
+                MerkleOracleEquationRole::RelationPhase {
+                    phase: RowCodeWhirPhase::Base | RowCodeWhirPhase::Auxiliary,
+                },
+                ConstructionSimulatorRootStrategy::RandomAttemptRootUnderPrivateSaltHybrid,
+                ConstructionSimulatorOpenedValueStrategy::TraceAndPhaseRowImage,
+                ConstructionSimulatorFrontierStrategy::ProgramCoordinateDerivedPrivateFrontier,
+            )
+            | (
+                MerkleOracleEquationRole::RelationPhase {
+                    phase: RowCodeWhirPhase::Quotient,
+                },
+                ConstructionSimulatorRootStrategy::RandomAttemptRootUnderPrivateSaltHybrid,
+                ConstructionSimulatorOpenedValueStrategy::ConditionedQuotientAndPhaseRowImage,
+                ConstructionSimulatorFrontierStrategy::ProgramCoordinateDerivedPrivateFrontier,
+            )
+            | (
+                MerkleOracleEquationRole::BoundTree { .. },
+                ConstructionSimulatorRootStrategy::ImportedAuthenticatedPersistentProducerRoot,
+                ConstructionSimulatorOpenedValueStrategy::PersistentProducerConsumerImage,
+                ConstructionSimulatorFrontierStrategy::ProgramCoordinateDerivedPrivateFrontier,
+            )
+            | (
+                MerkleOracleEquationRole::BoundTree { .. },
+                ConstructionSimulatorRootStrategy::PublicCanonicalStatementRoot,
+                ConstructionSimulatorOpenedValueStrategy::PublicDeterministicReplay,
+                ConstructionSimulatorFrontierStrategy::VerifyCoordinateDerivedPublicFrontier,
+            )
+            | (
+                MerkleOracleEquationRole::WhirEpoch { .. }
+                | MerkleOracleEquationRole::AggregateWideMask { .. },
+                ConstructionSimulatorRootStrategy::RandomAttemptRootUnderPrivateSaltHybrid,
+                ConstructionSimulatorOpenedValueStrategy::AggregateBlockDiagonalImage,
+                ConstructionSimulatorFrontierStrategy::ProgramCoordinateDerivedPrivateFrontier,
+            ) => true,
+            _ => false,
+        };
+        strategy_matches_role
+            && self.sampled_query_vector_length > 0
+            && self.opened_leaf_count > 0
+            && self.opened_leaf_count <= self.sampled_query_vector_length
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ConstructionSequentialQuerySimulationGroup {
+    owner: NonlinearCommitmentQueryOwner,
+    query_operation_ordinal: u32,
+    sampled_query_vector_length: usize,
+    ordered_roles: Vec<MerkleOracleEquationRole>,
+    ordered_opened_leaf_counts: Vec<usize>,
+}
+
+impl ConstructionSequentialQuerySimulationGroup {
+    fn is_complete(&self) -> bool {
+        !self.ordered_roles.is_empty()
+            && self.ordered_roles.len() == self.ordered_opened_leaf_counts.len()
+            && self.sampled_query_vector_length > 0
+            && self
+                .ordered_opened_leaf_counts
+                .iter()
+                .all(|count| *count > 0 && *count <= self.sampled_query_vector_length)
+            && self.ordered_roles.iter().enumerate().all(|(index, role)| {
+                self.ordered_roles[..index]
+                    .iter()
+                    .all(|prior| prior != role)
+            })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ConstructionSequentialDerivedView {
+    CodeSwitchFromPadAndDelta { round_ordinal: u32 },
+    FoldFromPriorOpenedLanes { epoch_ordinal: u32 },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ConstructionSequentialTransportSectionStrategy {
+    AttemptPrivateRelationCommitmentRoot { phase: RowCodeWhirPhase },
+    ConditionedRelationEvaluations,
+    IndependentOpeningBatchMaskEvaluations,
+    AttemptPrivateAggregateCommitmentRoot,
+    AttemptPrivateAggregateWidePadCommitmentRoot,
+    CoordinateDerivedPrivatePhaseOpening { phase: RowCodeWhirPhase },
+    CoordinateDerivedPersistentBoundOpening { bound_tree_ordinal: u32 },
+    CoordinateDerivedPublicBoundOpening { bound_tree_ordinal: u32 },
+    CanonicalAggregateWideTerminal,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ConstructionSequentialTransportSectionSimulationRow {
+    section: RowCodeWhirProofSectionPlan,
+    strategy: ConstructionSequentialTransportSectionStrategy,
+}
+
+impl ConstructionSequentialTransportSectionSimulationRow {
+    fn is_complete(
+        self,
+        commitment_rows: &[ConstructionSequentialCommitmentSimulationRow],
+    ) -> bool {
+        let has_commitment_row =
+            |role: MerkleOracleEquationRole,
+             root_strategy: ConstructionSimulatorRootStrategy,
+             frontier_strategy: ConstructionSimulatorFrontierStrategy| {
+                commitment_rows
+                    .iter()
+                    .filter(|row| {
+                        row.role == role
+                            && row.root_strategy == root_strategy
+                            && row.frontier_strategy == frontier_strategy
+                    })
+                    .count()
+                    == 1
+            };
+        let strategy_matches_section = match (self.section.role, self.strategy) {
+            (
+                RowCodeWhirProofSectionRole::RelationCommitment { phase },
+                ConstructionSequentialTransportSectionStrategy::AttemptPrivateRelationCommitmentRoot {
+                    phase: simulated_phase,
+                },
+            ) => {
+                phase == simulated_phase
+                    && has_commitment_row(
+                        MerkleOracleEquationRole::RelationPhase { phase },
+                        ConstructionSimulatorRootStrategy::RandomAttemptRootUnderPrivateSaltHybrid,
+                        ConstructionSimulatorFrontierStrategy::ProgramCoordinateDerivedPrivateFrontier,
+                    )
+            }
+            (
+                RowCodeWhirProofSectionRole::OutOfDomainEvaluations,
+                ConstructionSequentialTransportSectionStrategy::ConditionedRelationEvaluations,
+            )
+            | (
+                RowCodeWhirProofSectionRole::OpeningBatchMaskEvaluations,
+                ConstructionSequentialTransportSectionStrategy::IndependentOpeningBatchMaskEvaluations,
+            ) => true,
+            (
+                RowCodeWhirProofSectionRole::AggregateCommitment,
+                ConstructionSequentialTransportSectionStrategy::AttemptPrivateAggregateCommitmentRoot,
+            ) => has_commitment_row(
+                MerkleOracleEquationRole::WhirEpoch { epoch_ordinal: 0 },
+                ConstructionSimulatorRootStrategy::RandomAttemptRootUnderPrivateSaltHybrid,
+                ConstructionSimulatorFrontierStrategy::ProgramCoordinateDerivedPrivateFrontier,
+            ),
+            (
+                RowCodeWhirProofSectionRole::AggregateWidePadCommitment,
+                ConstructionSequentialTransportSectionStrategy::AttemptPrivateAggregateWidePadCommitmentRoot,
+            ) => has_commitment_row(
+                MerkleOracleEquationRole::AggregateWideMask {
+                    commitment_role:
+                        linear_bcs_transcript::LinearBcsCommittedOracleRole::AggregateWidePad,
+                },
+                ConstructionSimulatorRootStrategy::RandomAttemptRootUnderPrivateSaltHybrid,
+                ConstructionSimulatorFrontierStrategy::ProgramCoordinateDerivedPrivateFrontier,
+            ),
+            (
+                RowCodeWhirProofSectionRole::PhaseOpenings { phase },
+                ConstructionSequentialTransportSectionStrategy::CoordinateDerivedPrivatePhaseOpening {
+                    phase: simulated_phase,
+                },
+            ) => {
+                phase == simulated_phase
+                    && has_commitment_row(
+                        MerkleOracleEquationRole::RelationPhase { phase },
+                        ConstructionSimulatorRootStrategy::RandomAttemptRootUnderPrivateSaltHybrid,
+                        ConstructionSimulatorFrontierStrategy::ProgramCoordinateDerivedPrivateFrontier,
+                    )
+            }
+            (
+                RowCodeWhirProofSectionRole::BoundTreeOpenings {
+                    bound_tree_ordinal,
+                },
+                ConstructionSequentialTransportSectionStrategy::CoordinateDerivedPersistentBoundOpening {
+                    bound_tree_ordinal: simulated_ordinal,
+                },
+            ) => {
+                bound_tree_ordinal == simulated_ordinal
+                    && has_commitment_row(
+                        MerkleOracleEquationRole::BoundTree { bound_tree_ordinal },
+                        ConstructionSimulatorRootStrategy::ImportedAuthenticatedPersistentProducerRoot,
+                        ConstructionSimulatorFrontierStrategy::ProgramCoordinateDerivedPrivateFrontier,
+                    )
+            }
+            (
+                RowCodeWhirProofSectionRole::BoundTreeOpenings {
+                    bound_tree_ordinal,
+                },
+                ConstructionSequentialTransportSectionStrategy::CoordinateDerivedPublicBoundOpening {
+                    bound_tree_ordinal: simulated_ordinal,
+                },
+            ) => {
+                bound_tree_ordinal == simulated_ordinal
+                    && has_commitment_row(
+                        MerkleOracleEquationRole::BoundTree { bound_tree_ordinal },
+                        ConstructionSimulatorRootStrategy::PublicCanonicalStatementRoot,
+                        ConstructionSimulatorFrontierStrategy::VerifyCoordinateDerivedPublicFrontier,
+                    )
+            }
+            (
+                RowCodeWhirProofSectionRole::AggregateWideOpening,
+                ConstructionSequentialTransportSectionStrategy::CanonicalAggregateWideTerminal,
+            ) => true,
+            _ => false,
+        };
+        self.section.item_count > 0 && strategy_matches_section
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ConstructionSequentialAggregateSectionStrategy {
+    CanonicalFraming,
+    CanonicalEmptyVector,
+    ConditionedAggregateAffineValues,
+    AttemptPrivateCommitmentRoots,
+    CoordinateDerivedPrivateOpenings,
+    DerivedCodeSwitchValues,
+    OneTimePadReveals,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ConstructionSequentialAggregateSectionSimulationRow {
+    identifier: &'static str,
+    byte_length: usize,
+    strategy: ConstructionSequentialAggregateSectionStrategy,
+}
+
+impl ConstructionSequentialAggregateSectionSimulationRow {
+    fn is_complete(self) -> bool {
+        let expected_strategy = match self.identifier {
+            "framing" => ConstructionSequentialAggregateSectionStrategy::CanonicalFraming,
+            "commitment-out-of-domain-answers" | "round-out-of-domain-answers" => {
+                ConstructionSequentialAggregateSectionStrategy::CanonicalEmptyVector
+            }
+            "opening-evaluations" | "sumcheck-wires" | "base-case-masked-claim" => {
+                ConstructionSequentialAggregateSectionStrategy::ConditionedAggregateAffineValues
+            }
+            "round-commitments" | "base-case-fresh-commitments" => {
+                ConstructionSequentialAggregateSectionStrategy::AttemptPrivateCommitmentRoots
+            }
+            "round-query-openings"
+            | "base-case-source-openings"
+            | "base-case-fresh-main-openings"
+            | "base-case-aggregate-wide-pad-openings" => {
+                ConstructionSequentialAggregateSectionStrategy::CoordinateDerivedPrivateOpenings
+            }
+            "code-switch-mask-deltas" => {
+                ConstructionSequentialAggregateSectionStrategy::DerivedCodeSwitchValues
+            }
+            "base-case-blinded-source-reveals" | "base-case-blinded-aggregate-wide-pad-reveal" => {
+                ConstructionSequentialAggregateSectionStrategy::OneTimePadReveals
+            }
+            _ => return false,
+        };
+        let byte_length_is_canonical = match expected_strategy {
+            ConstructionSequentialAggregateSectionStrategy::CanonicalEmptyVector => {
+                self.byte_length == 0
+            }
+            _ => self.byte_length > 0,
+        };
+        byte_length_is_canonical && self.strategy == expected_strategy
+    }
+}
+
+#[derive(Clone, Copy)]
+struct ConstructionSequentialSimulatorInput<'a> {
+    plan: &'a RowCodeWhirConstructionPlan,
+    affine_image_inclusion: &'a ConstructionAffineImageInclusionCertificate,
+    nonlinear_commitment_privacy: &'a NonlinearCommitmentPrivacyCertificate,
+    nonlinear_commitment_binding: &'a NonlinearCommitmentBindingCertificate,
+    whole_database_support: &'a Cms19WholeDatabaseSupportCertificate,
+    commitment_subtree_extraction: &'a CommitmentSubtreeExtractionCertificate,
+    aggregate_wide_masking: &'a AggregateWideMaskingCertificate,
+    production_aggregate: &'a ProductionAggregateWideViewCorrespondenceCertificate,
+    transported_proof_correspondence: &'a ExactSameSecretTransportCorrespondenceCertificate,
+}
+
+/// One construction-level classical ideal-XOF simulator for a secret-bearing
+/// production verifier view.
+///
+/// The simulator first replaces every attempt-private root, imports each
+/// already simulated persistent producer root, and leaves public setup roots
+/// unchanged. Each shared query vector is then sampled once. The conditioned
+/// affine image certificate supplies the complete joint opened-value coset;
+/// code switches and folds are deterministic functions of values already in
+/// that prefix. Finally, the simulator programs only coordinate-derived leaf
+/// and frontier nodes under the pre-opening fresh-input bad event. This does
+/// not claim a concrete SHAKE256 reduction, malicious-verifier security,
+/// resettable security, cross-family simulation, or QROM zero knowledge.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ConstructionSequentialSimulatorCertificate {
+    construction_plan_identity_hash: [u8; 64],
+    affine_image_relation_plan_variant_hash: [u8; 64],
+    conditioned_affine_source_classes: Vec<ConstructionAffineMaskSourceClass>,
+    commitment_rows: Vec<ConstructionSequentialCommitmentSimulationRow>,
+    query_groups: Vec<ConstructionSequentialQuerySimulationGroup>,
+    derived_views: Vec<ConstructionSequentialDerivedView>,
+    transported_section_rows: Vec<ConstructionSequentialTransportSectionSimulationRow>,
+    aggregate_terminal_section_rows: Vec<ConstructionSequentialAggregateSectionSimulationRow>,
+    aggregate_terminal_byte_length: usize,
+    transported_family_body_byte_length_ceiling: usize,
+    attempt_private_root_count: usize,
+    imported_persistent_root_count: usize,
+    public_root_count: usize,
+    programmed_private_frontier_count: usize,
+    verified_public_frontier_count: usize,
+    opened_private_leaf_count: u64,
+    opened_public_leaf_count: u64,
+    aggregate_commitment_root_count: usize,
+    aggregate_compact_frontier_count: usize,
+    aggregate_code_switch_count: usize,
+    aggregate_fold_count: usize,
+    ideal_xof_programming_bad_event: ExactBigFraction,
+    claims_concrete_shake256_reduction: bool,
+    claims_malicious_verifier_zero_knowledge: bool,
+    claims_resettable_zero_knowledge: bool,
+    claims_family_simulation: bool,
+    claims_quantum_random_oracle_zero_knowledge: bool,
+}
+
+impl ConstructionSequentialSimulatorCertificate {
+    fn is_complete(&self) -> bool {
+        let attempt_private_root_count = self
+            .commitment_rows
+            .iter()
+            .filter(|row| {
+                row.root_strategy
+                    == ConstructionSimulatorRootStrategy::RandomAttemptRootUnderPrivateSaltHybrid
+            })
+            .count();
+        let imported_persistent_root_count = self
+            .commitment_rows
+            .iter()
+            .filter(|row| {
+                row.root_strategy
+                    == ConstructionSimulatorRootStrategy::ImportedAuthenticatedPersistentProducerRoot
+            })
+            .count();
+        let public_root_count = self
+            .commitment_rows
+            .iter()
+            .filter(|row| {
+                row.root_strategy == ConstructionSimulatorRootStrategy::PublicCanonicalStatementRoot
+            })
+            .count();
+        let programmed_private_frontier_count = self
+            .commitment_rows
+            .iter()
+            .filter(|row| {
+                row.frontier_strategy
+                    == ConstructionSimulatorFrontierStrategy::ProgramCoordinateDerivedPrivateFrontier
+            })
+            .count();
+        let verified_public_frontier_count = self
+            .commitment_rows
+            .iter()
+            .filter(|row| {
+                row.frontier_strategy
+                    == ConstructionSimulatorFrontierStrategy::VerifyCoordinateDerivedPublicFrontier
+            })
+            .count();
+        let query_group_rows_are_exact = self.commitment_rows.iter().all(|row| {
+            self.query_groups
+                .iter()
+                .filter(|group| {
+                    group.query_operation_ordinal == row.dependent_query_operation_ordinal
+                        && group.sampled_query_vector_length == row.sampled_query_vector_length
+                        && group
+                            .ordered_roles
+                            .iter()
+                            .zip(&group.ordered_opened_leaf_counts)
+                            .any(|(role, count)| {
+                                *role == row.role && *count == row.opened_leaf_count
+                            })
+                })
+                .count()
+                == 1
+        });
+        let grouped_role_count = self
+            .query_groups
+            .iter()
+            .map(|group| group.ordered_roles.len())
+            .sum::<usize>();
+        let aggregate_commitment_root_count = self
+            .commitment_rows
+            .iter()
+            .filter(|row| {
+                matches!(
+                    row.role,
+                    MerkleOracleEquationRole::WhirEpoch { .. }
+                        | MerkleOracleEquationRole::AggregateWideMask { .. }
+                )
+            })
+            .count();
+        let aggregate_code_switch_count = self
+            .derived_views
+            .iter()
+            .filter(|view| {
+                matches!(
+                    view,
+                    ConstructionSequentialDerivedView::CodeSwitchFromPadAndDelta { .. }
+                )
+            })
+            .count();
+        let aggregate_fold_count = self
+            .derived_views
+            .iter()
+            .filter(|view| {
+                matches!(
+                    view,
+                    ConstructionSequentialDerivedView::FoldFromPriorOpenedLanes { .. }
+                )
+            })
+            .count();
+        let opened_private_leaf_count = self.commitment_rows.iter().try_fold(
+            0_u64,
+            |count, row| match row.root_strategy {
+                ConstructionSimulatorRootStrategy::RandomAttemptRootUnderPrivateSaltHybrid
+                | ConstructionSimulatorRootStrategy::ImportedAuthenticatedPersistentProducerRoot => {
+                    count.checked_add(u64::try_from(row.opened_leaf_count).ok()?)
+                }
+                ConstructionSimulatorRootStrategy::PublicCanonicalStatementRoot => Some(count),
+            },
+        );
+        let opened_public_leaf_count = self.commitment_rows.iter().try_fold(
+            0_u64,
+            |count, row| match row.root_strategy {
+                ConstructionSimulatorRootStrategy::PublicCanonicalStatementRoot => {
+                    count.checked_add(u64::try_from(row.opened_leaf_count).ok()?)
+                }
+                ConstructionSimulatorRootStrategy::RandomAttemptRootUnderPrivateSaltHybrid
+                | ConstructionSimulatorRootStrategy::ImportedAuthenticatedPersistentProducerRoot => {
+                    Some(count)
+                }
+            },
+        );
+        let derived_views_are_canonical = self.derived_views.iter().copied().eq((0..self
+            .aggregate_code_switch_count)
+            .map(
+                |round_index| ConstructionSequentialDerivedView::CodeSwitchFromPadAndDelta {
+                    round_ordinal: u32::try_from(round_index).unwrap_or(u32::MAX),
+                },
+            )
+            .chain((0..self.aggregate_fold_count).map(|epoch_index| {
+                ConstructionSequentialDerivedView::FoldFromPriorOpenedLanes {
+                    epoch_ordinal: u32::try_from(epoch_index).unwrap_or(u32::MAX),
+                }
+            })));
+        let expected_affine_source_classes = [
+            ConstructionAffineMaskSourceClass::RelationTraceMasks,
+            ConstructionAffineMaskSourceClass::QuotientTelescopingMasks,
+            ConstructionAffineMaskSourceClass::OpeningBatchMask,
+            ConstructionAffineMaskSourceClass::PhaseRowPads,
+            ConstructionAffineMaskSourceClass::AggregateWidePad,
+        ];
+        let relation_commitment_section_count = self
+            .transported_section_rows
+            .iter()
+            .filter(|row| {
+                matches!(
+                    row.section.role,
+                    RowCodeWhirProofSectionRole::RelationCommitment { .. }
+                )
+            })
+            .count();
+        let phase_opening_section_count = self
+            .transported_section_rows
+            .iter()
+            .filter(|row| {
+                matches!(
+                    row.section.role,
+                    RowCodeWhirProofSectionRole::PhaseOpenings { .. }
+                )
+            })
+            .count();
+        let bound_opening_section_count = self
+            .transported_section_rows
+            .iter()
+            .filter(|row| {
+                matches!(
+                    row.section.role,
+                    RowCodeWhirProofSectionRole::BoundTreeOpenings { .. }
+                )
+            })
+            .count();
+        let exact_single_section_role_count = self
+            .transported_section_rows
+            .iter()
+            .filter(|row| {
+                matches!(
+                    row.section.role,
+                    RowCodeWhirProofSectionRole::OutOfDomainEvaluations
+                        | RowCodeWhirProofSectionRole::OpeningBatchMaskEvaluations
+                        | RowCodeWhirProofSectionRole::AggregateCommitment
+                        | RowCodeWhirProofSectionRole::AggregateWidePadCommitment
+                        | RowCodeWhirProofSectionRole::AggregateWideOpening
+                )
+            })
+            .count();
+        let expected_aggregate_section_identifiers = [
+            "framing",
+            "opening-evaluations",
+            "commitment-out-of-domain-answers",
+            "round-commitments",
+            "round-out-of-domain-answers",
+            "round-query-openings",
+            "sumcheck-wires",
+            "code-switch-mask-deltas",
+            "base-case-fresh-commitments",
+            "base-case-masked-claim",
+            "base-case-blinded-source-reveals",
+            "base-case-blinded-aggregate-wide-pad-reveal",
+            "base-case-source-openings",
+            "base-case-fresh-main-openings",
+            "base-case-aggregate-wide-pad-openings",
+        ];
+        let aggregate_terminal_byte_length = self
+            .aggregate_terminal_section_rows
+            .iter()
+            .try_fold(0_usize, |total, row| total.checked_add(row.byte_length));
+        let aggregate_terminal_commitment_root_bytes = self
+            .aggregate_terminal_section_rows
+            .iter()
+            .filter(|row| {
+                matches!(
+                    row.strategy,
+                    ConstructionSequentialAggregateSectionStrategy::AttemptPrivateCommitmentRoots
+                )
+            })
+            .try_fold(0_usize, |total, row| total.checked_add(row.byte_length));
+        let expected_aggregate_terminal_commitment_root_bytes = self
+            .aggregate_code_switch_count
+            .checked_add(2)
+            .and_then(|count| count.checked_mul(64));
+        self.construction_plan_identity_hash != [0_u8; 64]
+            && self.affine_image_relation_plan_variant_hash != [0_u8; 64]
+            && self.conditioned_affine_source_classes == expected_affine_source_classes
+            && !self.commitment_rows.is_empty()
+            && self
+                .commitment_rows
+                .iter()
+                .copied()
+                .all(ConstructionSequentialCommitmentSimulationRow::is_complete)
+            && self.commitment_rows.iter().enumerate().all(|(index, row)| {
+                self.commitment_rows[..index]
+                    .iter()
+                    .all(|prior| prior.role != row.role)
+            })
+            && !self.query_groups.is_empty()
+            && self
+                .query_groups
+                .iter()
+                .all(ConstructionSequentialQuerySimulationGroup::is_complete)
+            && self.query_groups.iter().enumerate().all(|(index, group)| {
+                self.query_groups[..index].iter().all(|prior| {
+                    (prior.owner, prior.query_operation_ordinal)
+                        != (group.owner, group.query_operation_ordinal)
+                })
+            })
+            && query_group_rows_are_exact
+            && grouped_role_count == self.commitment_rows.len()
+            && self.attempt_private_root_count == attempt_private_root_count
+            && self.imported_persistent_root_count == imported_persistent_root_count
+            && self.public_root_count == public_root_count
+            && self.programmed_private_frontier_count == programmed_private_frontier_count
+            && self.verified_public_frontier_count == verified_public_frontier_count
+            && self
+                .attempt_private_root_count
+                .checked_add(self.imported_persistent_root_count)
+                == Some(self.programmed_private_frontier_count)
+            && self.public_root_count == self.verified_public_frontier_count
+            && self.attempt_private_root_count > 0
+            && Some(self.opened_private_leaf_count) == opened_private_leaf_count
+            && Some(self.opened_public_leaf_count) == opened_public_leaf_count
+            && self.opened_private_leaf_count > 0
+            && (self.public_root_count > 0) == (self.opened_public_leaf_count > 0)
+            && self.aggregate_commitment_root_count == aggregate_commitment_root_count
+            && self.aggregate_compact_frontier_count == aggregate_commitment_root_count
+            && self.aggregate_code_switch_count == aggregate_code_switch_count
+            && self.aggregate_fold_count == aggregate_fold_count
+            && self.aggregate_commitment_root_count > 0
+            && self.aggregate_code_switch_count > 0
+            && self.aggregate_fold_count > 0
+            && derived_views_are_canonical
+            && !self.transported_section_rows.is_empty()
+            && self
+                .transported_section_rows
+                .iter()
+                .copied()
+                .all(|row| row.is_complete(&self.commitment_rows))
+            && self
+                .transported_section_rows
+                .iter()
+                .enumerate()
+                .all(|(section_index, row)| {
+                    u32::try_from(section_index) == Ok(row.section.section_ordinal)
+                })
+            && relation_commitment_section_count
+                .checked_add(phase_opening_section_count)
+                .and_then(|count| count.checked_add(bound_opening_section_count))
+                .and_then(|count| count.checked_add(exact_single_section_role_count))
+                == Some(self.transported_section_rows.len())
+            && exact_single_section_role_count == 5
+            && self.aggregate_terminal_section_rows.len()
+                == expected_aggregate_section_identifiers.len()
+            && self
+                .aggregate_terminal_section_rows
+                .iter()
+                .map(|row| row.identifier)
+                .eq(expected_aggregate_section_identifiers)
+            && self
+                .aggregate_terminal_section_rows
+                .iter()
+                .copied()
+                .all(ConstructionSequentialAggregateSectionSimulationRow::is_complete)
+            && aggregate_terminal_byte_length == Some(self.aggregate_terminal_byte_length)
+            && aggregate_terminal_commitment_root_bytes
+                == expected_aggregate_terminal_commitment_root_bytes
+            && self.aggregate_terminal_byte_length > 0
+            && self.transported_family_body_byte_length_ceiling
+                > self.aggregate_terminal_byte_length
+            && self
+                .ideal_xof_programming_bad_event
+                .is_at_most_inverse_power_of_two(128)
+            && !self.claims_concrete_shake256_reduction
+            && !self.claims_malicious_verifier_zero_knowledge
+            && !self.claims_resettable_zero_knowledge
+            && !self.claims_family_simulation
+            && !self.claims_quantum_random_oracle_zero_knowledge
+    }
+
+    fn is_complete_for(&self, input: ConstructionSequentialSimulatorInput<'_>) -> bool {
+        self.is_complete()
+            && derive_construction_sequential_simulator(input)
+                .is_ok_and(|expected| expected == *self)
+    }
+}
+
+fn simulator_opened_value_strategy(
+    binding_row: NonlinearCommitmentBindingRow,
+    privacy_row: NonlinearCommitmentPrivacyRow,
+) -> Result<ConstructionSimulatorOpenedValueStrategy, WhirTheoremCertificateError> {
+    match (binding_row.role, privacy_row.salt_source) {
+        (
+            MerkleOracleEquationRole::RelationPhase {
+                phase: RowCodeWhirPhase::Base | RowCodeWhirPhase::Auxiliary,
+            },
+            NonlinearCommitmentPrivacySaltSource::AttemptPrivate(_),
+        ) => Ok(ConstructionSimulatorOpenedValueStrategy::TraceAndPhaseRowImage),
+        (
+            MerkleOracleEquationRole::RelationPhase {
+                phase: RowCodeWhirPhase::Quotient,
+            },
+            NonlinearCommitmentPrivacySaltSource::AttemptPrivate(_),
+        ) => Ok(ConstructionSimulatorOpenedValueStrategy::ConditionedQuotientAndPhaseRowImage),
+        (
+            MerkleOracleEquationRole::BoundTree { .. },
+            NonlinearCommitmentPrivacySaltSource::AuthenticatedPersistentMaterial,
+        ) => Ok(ConstructionSimulatorOpenedValueStrategy::PersistentProducerConsumerImage),
+        (
+            MerkleOracleEquationRole::BoundTree { .. },
+            NonlinearCommitmentPrivacySaltSource::PublicSetupPolynomial,
+        ) => Ok(ConstructionSimulatorOpenedValueStrategy::PublicDeterministicReplay),
+        (
+            MerkleOracleEquationRole::WhirEpoch { .. }
+            | MerkleOracleEquationRole::AggregateWideMask { .. },
+            NonlinearCommitmentPrivacySaltSource::AttemptPrivate(_),
+        ) => Ok(ConstructionSimulatorOpenedValueStrategy::AggregateBlockDiagonalImage),
+        _ => Err(WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy),
+    }
+}
+
+fn simulator_transport_section_strategy(
+    section: RowCodeWhirProofSectionPlan,
+    commitment_rows: &[ConstructionSequentialCommitmentSimulationRow],
+) -> Result<ConstructionSequentialTransportSectionStrategy, WhirTheoremCertificateError> {
+    match section.role {
+        RowCodeWhirProofSectionRole::RelationCommitment { phase } => Ok(
+            ConstructionSequentialTransportSectionStrategy::AttemptPrivateRelationCommitmentRoot {
+                phase,
+            },
+        ),
+        RowCodeWhirProofSectionRole::OutOfDomainEvaluations => {
+            Ok(ConstructionSequentialTransportSectionStrategy::ConditionedRelationEvaluations)
+        }
+        RowCodeWhirProofSectionRole::OpeningBatchMaskEvaluations => Ok(
+            ConstructionSequentialTransportSectionStrategy::IndependentOpeningBatchMaskEvaluations,
+        ),
+        RowCodeWhirProofSectionRole::AggregateCommitment => Ok(
+            ConstructionSequentialTransportSectionStrategy::AttemptPrivateAggregateCommitmentRoot,
+        ),
+        RowCodeWhirProofSectionRole::AggregateWidePadCommitment => Ok(
+            ConstructionSequentialTransportSectionStrategy::AttemptPrivateAggregateWidePadCommitmentRoot,
+        ),
+        RowCodeWhirProofSectionRole::PhaseOpenings { phase } => Ok(
+            ConstructionSequentialTransportSectionStrategy::CoordinateDerivedPrivatePhaseOpening {
+                phase,
+            },
+        ),
+        RowCodeWhirProofSectionRole::BoundTreeOpenings {
+            bound_tree_ordinal,
+        } => {
+            let mut matching_rows = commitment_rows.iter().filter(|row| {
+                row.role == MerkleOracleEquationRole::BoundTree { bound_tree_ordinal }
+            });
+            let row = matching_rows
+                .next()
+                .ok_or(WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy)?;
+            if matching_rows.next().is_some() {
+                return Err(WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy);
+            }
+            match (row.root_strategy, row.frontier_strategy) {
+                (
+                    ConstructionSimulatorRootStrategy::ImportedAuthenticatedPersistentProducerRoot,
+                    ConstructionSimulatorFrontierStrategy::ProgramCoordinateDerivedPrivateFrontier,
+                ) => Ok(
+                    ConstructionSequentialTransportSectionStrategy::CoordinateDerivedPersistentBoundOpening {
+                        bound_tree_ordinal,
+                    },
+                ),
+                (
+                    ConstructionSimulatorRootStrategy::PublicCanonicalStatementRoot,
+                    ConstructionSimulatorFrontierStrategy::VerifyCoordinateDerivedPublicFrontier,
+                ) => Ok(
+                    ConstructionSequentialTransportSectionStrategy::CoordinateDerivedPublicBoundOpening {
+                        bound_tree_ordinal,
+                    },
+                ),
+                _ => Err(WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy),
+            }
+        }
+        RowCodeWhirProofSectionRole::AggregateWideOpening => {
+            Ok(ConstructionSequentialTransportSectionStrategy::CanonicalAggregateWideTerminal)
+        }
+    }
+}
+
+fn simulator_aggregate_section_strategy(
+    identifier: &'static str,
+) -> Result<ConstructionSequentialAggregateSectionStrategy, WhirTheoremCertificateError> {
+    match identifier {
+        "framing" => Ok(ConstructionSequentialAggregateSectionStrategy::CanonicalFraming),
+        "commitment-out-of-domain-answers" | "round-out-of-domain-answers" => {
+            Ok(ConstructionSequentialAggregateSectionStrategy::CanonicalEmptyVector)
+        }
+        "opening-evaluations" | "sumcheck-wires" | "base-case-masked-claim" => {
+            Ok(ConstructionSequentialAggregateSectionStrategy::ConditionedAggregateAffineValues)
+        }
+        "round-commitments" | "base-case-fresh-commitments" => {
+            Ok(ConstructionSequentialAggregateSectionStrategy::AttemptPrivateCommitmentRoots)
+        }
+        "round-query-openings"
+        | "base-case-source-openings"
+        | "base-case-fresh-main-openings"
+        | "base-case-aggregate-wide-pad-openings" => {
+            Ok(ConstructionSequentialAggregateSectionStrategy::CoordinateDerivedPrivateOpenings)
+        }
+        "code-switch-mask-deltas" => {
+            Ok(ConstructionSequentialAggregateSectionStrategy::DerivedCodeSwitchValues)
+        }
+        "base-case-blinded-source-reveals" | "base-case-blinded-aggregate-wide-pad-reveal" => {
+            Ok(ConstructionSequentialAggregateSectionStrategy::OneTimePadReveals)
+        }
+        _ => Err(WhirTheoremCertificateError::IncompleteTransportedProofCorrespondence),
+    }
+}
+
+fn derive_construction_sequential_simulator(
+    input: ConstructionSequentialSimulatorInput<'_>,
+) -> Result<ConstructionSequentialSimulatorCertificate, WhirTheoremCertificateError> {
+    let ConstructionSequentialSimulatorInput {
+        plan,
+        affine_image_inclusion,
+        nonlinear_commitment_privacy,
+        nonlinear_commitment_binding,
+        whole_database_support,
+        commitment_subtree_extraction,
+        aggregate_wide_masking,
+        production_aggregate,
+        transported_proof_correspondence,
+    } = input;
+    let construction_plan_identity_hash = plan
+        .canonical_identity_hash()
+        .map_err(|_| WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy)?;
+    if construction_plan_identity_hash != affine_image_inclusion.construction_plan_identity_hash
+        || construction_plan_identity_hash
+            != nonlinear_commitment_privacy.construction_plan_identity_hash
+        || construction_plan_identity_hash
+            != nonlinear_commitment_binding.construction_plan_identity_hash
+        || construction_plan_identity_hash
+            != transported_proof_correspondence.construction_plan_identity_hash
+        || !affine_image_inclusion.is_complete()
+        || !nonlinear_commitment_privacy.has_complete_standalone_theorem()
+        || !nonlinear_commitment_binding
+            .is_complete_for(whole_database_support, commitment_subtree_extraction)
+        || !production_aggregate.is_complete(aggregate_wide_masking)
+        || !transported_proof_correspondence.is_bound_to_construction_plan(plan)
+    {
+        return Err(WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy);
+    }
+
+    let mut commitment_rows = Vec::new();
+    let mut query_groups = BTreeMap::<
+        (NonlinearCommitmentQueryOwner, u32),
+        ConstructionSequentialQuerySimulationGroup,
+    >::new();
+    for binding_row in nonlinear_commitment_binding.rows.iter().copied() {
+        let mut privacy_rows = nonlinear_commitment_privacy
+            .rows
+            .iter()
+            .copied()
+            .filter(|row| row.role == binding_row.role);
+        let privacy_row = privacy_rows
+            .next()
+            .ok_or(WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy)?;
+        if privacy_rows.next().is_some() {
+            return Err(WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy);
+        }
+        let (root_strategy, frontier_strategy) = match privacy_row.salt_source {
+            NonlinearCommitmentPrivacySaltSource::AttemptPrivate(_) => (
+                ConstructionSimulatorRootStrategy::RandomAttemptRootUnderPrivateSaltHybrid,
+                ConstructionSimulatorFrontierStrategy::ProgramCoordinateDerivedPrivateFrontier,
+            ),
+            NonlinearCommitmentPrivacySaltSource::AuthenticatedPersistentMaterial => (
+                ConstructionSimulatorRootStrategy::ImportedAuthenticatedPersistentProducerRoot,
+                ConstructionSimulatorFrontierStrategy::ProgramCoordinateDerivedPrivateFrontier,
+            ),
+            NonlinearCommitmentPrivacySaltSource::PublicSetupPolynomial => (
+                ConstructionSimulatorRootStrategy::PublicCanonicalStatementRoot,
+                ConstructionSimulatorFrontierStrategy::VerifyCoordinateDerivedPublicFrontier,
+            ),
+        };
+        let row = ConstructionSequentialCommitmentSimulationRow {
+            role: binding_row.role,
+            root_strategy,
+            opened_value_strategy: simulator_opened_value_strategy(binding_row, privacy_row)?,
+            frontier_strategy,
+            dependent_query_operation_ordinal: binding_row.dependent_query_operation_ordinal,
+            sampled_query_vector_length: binding_row.sampled_query_vector_length,
+            opened_leaf_count: binding_row.query_count,
+        };
+        if !row.is_complete() || !nonlinear_privacy_root_precedes_query(binding_row) {
+            return Err(WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy);
+        }
+        let group = query_groups
+            .entry((
+                binding_row.query_owner,
+                binding_row.dependent_query_operation_ordinal,
+            ))
+            .or_insert_with(|| ConstructionSequentialQuerySimulationGroup {
+                owner: binding_row.query_owner,
+                query_operation_ordinal: binding_row.dependent_query_operation_ordinal,
+                sampled_query_vector_length: binding_row.sampled_query_vector_length,
+                ordered_roles: Vec::new(),
+                ordered_opened_leaf_counts: Vec::new(),
+            });
+        if group.sampled_query_vector_length != binding_row.sampled_query_vector_length {
+            return Err(WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy);
+        }
+        group.ordered_roles.push(binding_row.role);
+        group
+            .ordered_opened_leaf_counts
+            .push(binding_row.query_count);
+        commitment_rows.push(row);
+    }
+    let query_groups = query_groups.into_values().collect::<Vec<_>>();
+
+    let transported_section_rows = transported_proof_correspondence
+        .section_rows
+        .iter()
+        .map(|transport_row| {
+            Ok(ConstructionSequentialTransportSectionSimulationRow {
+                section: transport_row.section,
+                strategy: simulator_transport_section_strategy(
+                    transport_row.section,
+                    &commitment_rows,
+                )?,
+            })
+        })
+        .collect::<Result<Vec<_>, WhirTheoremCertificateError>>()?;
+    let aggregate_terminal_section_rows = transported_proof_correspondence
+        .aggregate_opening_section_ledger
+        .iter()
+        .map(|(identifier, byte_length)| {
+            Ok(ConstructionSequentialAggregateSectionSimulationRow {
+                identifier,
+                byte_length: *byte_length,
+                strategy: simulator_aggregate_section_strategy(identifier)?,
+            })
+        })
+        .collect::<Result<Vec<_>, WhirTheoremCertificateError>>()?;
+    let aggregate_terminal_byte_length =
+        aggregate_terminal_section_rows
+            .iter()
+            .try_fold(0_usize, |total, row| {
+                total
+                    .checked_add(row.byte_length)
+                    .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+            })?;
+
+    let (_, _, code_switch_count, fold_count) = aggregate_wide_masking.nonlinear_view_summary();
+    let mut derived_views = Vec::new();
+    for round_ordinal in 0..code_switch_count {
+        derived_views.push(
+            ConstructionSequentialDerivedView::CodeSwitchFromPadAndDelta {
+                round_ordinal: u32::try_from(round_ordinal)
+                    .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+            },
+        );
+    }
+    for epoch_ordinal in 0..fold_count {
+        derived_views.push(
+            ConstructionSequentialDerivedView::FoldFromPriorOpenedLanes {
+                epoch_ordinal: u32::try_from(epoch_ordinal)
+                    .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+            },
+        );
+    }
+    let opened_public_leaf_count = nonlinear_commitment_binding
+        .semantic_opened_leaf_count
+        .checked_sub(nonlinear_commitment_privacy.opened_private_leaf_count_per_proof)
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let (aggregate_commitment_root_count, aggregate_compact_frontier_count, _, _) =
+        aggregate_wide_masking.nonlinear_view_summary();
+    let certificate = ConstructionSequentialSimulatorCertificate {
+        construction_plan_identity_hash,
+        affine_image_relation_plan_variant_hash: affine_image_inclusion.relation_plan_variant_hash,
+        conditioned_affine_source_classes: affine_image_inclusion
+            .rows
+            .iter()
+            .map(|row| row.source_class)
+            .collect(),
+        commitment_rows,
+        query_groups,
+        derived_views,
+        transported_section_rows,
+        aggregate_terminal_section_rows,
+        aggregate_terminal_byte_length,
+        transported_family_body_byte_length_ceiling: transported_proof_correspondence
+            .family_body_byte_length_ceiling,
+        attempt_private_root_count: nonlinear_commitment_privacy.attempt_private_tree_count,
+        imported_persistent_root_count: nonlinear_commitment_privacy.persistent_private_tree_count,
+        public_root_count: nonlinear_commitment_privacy.public_tree_count,
+        programmed_private_frontier_count: nonlinear_commitment_privacy
+            .attempt_private_tree_count
+            .checked_add(nonlinear_commitment_privacy.persistent_private_tree_count)
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+        verified_public_frontier_count: nonlinear_commitment_privacy.public_tree_count,
+        opened_private_leaf_count: nonlinear_commitment_privacy.opened_private_leaf_count_per_proof,
+        opened_public_leaf_count,
+        aggregate_commitment_root_count,
+        aggregate_compact_frontier_count,
+        aggregate_code_switch_count: code_switch_count,
+        aggregate_fold_count: fold_count,
+        ideal_xof_programming_bad_event: nonlinear_commitment_privacy
+            .selected_numeric_bad_event
+            .clone(),
+        claims_concrete_shake256_reduction: false,
+        claims_malicious_verifier_zero_knowledge: false,
+        claims_resettable_zero_knowledge: false,
+        claims_family_simulation: false,
+        claims_quantum_random_oracle_zero_knowledge: false,
+    };
+    if !certificate.is_complete() {
+        return Err(WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy);
     }
     Ok(certificate)
 }
@@ -8721,13 +12154,14 @@ pub(in crate::bgv::proof_suite) struct RowCodeWhirFailurePartitionCertificate {
     deployed_aggregate_leaf_oracle: DeployedAggregateLeafOracleCertificate,
     commitment_subtree_extraction: CommitmentSubtreeExtractionCertificate,
     nonlinear_commitment_binding: NonlinearCommitmentBindingCertificate,
+    nonlinear_commitment_privacy: NonlinearCommitmentPrivacyCertificate,
     selected_plan_state_predicate: SelectedPlanStatePredicateCertificate,
     cms19_whole_state_transitions: Cms19WholeStateTransitionCertificate,
     cms19_whole_database_support: Cms19WholeDatabaseSupportCertificate,
     cms19_state_predicate: Cms19StatePredicateCertificate,
     cms19_strong_state_hash_chain: Cms19StrongStateHashChainCertificate,
     cms19_transcript_oracle_output_inventory: Cms19TranscriptOracleOutputInventory,
-    cms19_typed_variable_output_oracle_model: Cms19TypedVariableOutputOracleModelCertificate,
+    cms19_fixed_output_seeded_sampler_model: Cms19FixedOutputSeededSamplerModelCertificate,
     cms19_strong_round_by_round_semantics: Cms19StrongRoundByRoundSemanticCertificate,
     maximum_transcript_hash_query_count: u64,
     logical_verifier_message_count: u64,
@@ -8740,6 +12174,8 @@ pub(in crate::bgv::proof_suite) struct RowCodeWhirFailurePartitionCertificate {
     production_aggregate_wide_views: ProductionAggregateWideViewCorrespondenceCertificate,
     private_row_pad_generator_hybrid: PrivateRowPadGeneratorHybridCertificate,
     affine_masking_composition: ConstructionMaskingAffineCompositionCertificate,
+    affine_image_inclusion: ConstructionAffineImageInclusionCertificate,
+    sequential_simulator: ConstructionSequentialSimulatorCertificate,
     private_leaf_salt_prf: PrivateLeafSaltPrfCertificate,
     relation_compiler_interpreter_semantics: RelationCompilerInterpreterSemanticCertificate,
     polynomial_protocol_extractor: ProductionPolynomialProtocolExtractorCertificate,
@@ -8782,6 +12218,15 @@ impl RowCodeWhirFailurePartitionCertificate {
                 &self.cms19_whole_database_support,
                 &self.commitment_subtree_extraction,
             )
+            && self
+                .nonlinear_commitment_privacy
+                .has_complete_standalone_theorem()
+            && self
+                .nonlinear_commitment_privacy
+                .construction_plan_identity_hash
+                == self
+                    .nonlinear_commitment_binding
+                    .construction_plan_identity_hash
             && self.construction_masking.is_complete()
             && self.production_construction_masking.is_complete()
             && self.aggregate_wide_masking.is_complete()
@@ -8822,6 +12267,20 @@ impl RowCodeWhirFailurePartitionCertificate {
                 == self
                     .production_construction_masking
                     .relation_plan_variant_hash
+            && self.affine_image_inclusion.is_complete()
+            && self.affine_image_inclusion.construction_plan_identity_hash
+                == self
+                    .affine_masking_composition
+                    .construction_plan_identity_hash
+            && self.affine_image_inclusion.relation_plan_variant_hash
+                == self.affine_masking_composition.relation_plan_variant_hash
+            && self.sequential_simulator.is_complete()
+            && self.sequential_simulator.construction_plan_identity_hash
+                == self.affine_image_inclusion.construction_plan_identity_hash
+            && self
+                .sequential_simulator
+                .affine_image_relation_plan_variant_hash
+                == self.affine_image_inclusion.relation_plan_variant_hash
             && self.private_leaf_salt_prf.has_complete_for_bound_geometry(
                 self.production_aggregate_wide_views
                     .construction_plan_identity_hash,
@@ -8891,10 +12350,10 @@ impl RowCodeWhirFailurePartitionCertificate {
                     .production_aggregate_wide_views
                     .construction_plan_identity_hash
             && self
-                .cms19_typed_variable_output_oracle_model
-                .has_complete_direct_sum_application(&self.cms19_transcript_oracle_output_inventory)
+                .cms19_fixed_output_seeded_sampler_model
+                .matches_production_width_inventory(&self.cms19_transcript_oracle_output_inventory)
             && self
-                .cms19_typed_variable_output_oracle_model
+                .cms19_fixed_output_seeded_sampler_model
                 .canonical_oracle_plan_hash
                 == self
                     .cms19_strong_state_hash_chain
@@ -8906,13 +12365,39 @@ impl RowCodeWhirFailurePartitionCertificate {
                 .deployed_aggregate_leaf_oracle
                 .is_eligible_for_uniform_required_output()
             && self.cms19_arithmetic.oracle_model_requirement
-                == (Cms19ArithmeticOracleModelRequirement::TypedVariableOutputIdealXof {
-                    minimum_output_bit_length: CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH,
+                == (Cms19ArithmeticOracleModelRequirement::FixedOutputRandomOracle {
+                    output_bit_length: CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH,
                 })
+            && derive_cms19_separated_oracle_projection_certificate(
+                &self.cms19_fixed_output_seeded_sampler_model,
+                &self.cms19_whole_database_support,
+                &self.nonlinear_commitment_binding,
+            )
+            .is_ok_and(|expected| expected == self.cms19_arithmetic.separated_oracle_projection)
+            && self.cms19_arithmetic.verifier_hash_query_count
+                == self
+                    .cms19_arithmetic
+                    .separated_oracle_projection
+                    .primary_verifier_hash_query_count
+            && self.cms19_arithmetic.accepting_database_equation_count
+                == self
+                    .cms19_arithmetic
+                    .separated_oracle_projection
+                    .primary_accepting_database_equation_count
             && self
                 .cms19_arithmetic
                 .ideal_oracle_penalty_denominator_bit_length
                 == CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH
+            && self
+                .exact_failure_magnitude
+                .precommitted_sampler_table
+                .is_complete_for(
+                    &self
+                        .cms19_fixed_output_seeded_sampler_model
+                        .classical_sampler_distribution,
+                    &self.exact_failure_magnitude.query_rows,
+                    &self.cms19_arithmetic,
+                )
             && self.exact_failure_magnitude.is_complete()
     }
 
@@ -8920,22 +12405,64 @@ impl RowCodeWhirFailurePartitionCertificate {
         &self,
         plan: &RowCodeWhirConstructionPlan,
     ) -> bool {
+        let Ok(persistent_material_masking) =
+            derive_production_persistent_committed_material_masking_certificate()
+        else {
+            return false;
+        };
         self.has_complete_structural_certificate()
-            && self.cms19_applicability.is_selected_transform_eligible()
+            && self
+                .cms19_applicability
+                .has_complete_structural_correspondence()
             && plan.oracle_equation_catalog().is_ok_and(|catalog| {
-                self.cms19_typed_variable_output_oracle_model
-                    .is_complete_for(
-                        plan,
-                        &catalog,
-                        &self.cms19_transcript_oracle_output_inventory,
-                    )
+                self.cms19_transcript_oracle_output_inventory
+                    .is_complete_for(plan, &catalog)
+                    && self
+                        .cms19_fixed_output_seeded_sampler_model
+                        .matches_production_width_inventory(
+                            &self.cms19_transcript_oracle_output_inventory,
+                        )
+                    && self
+                        .cms19_fixed_output_seeded_sampler_model
+                        .classical_sampler_distribution
+                        .relation_plan_variant_hash
+                        == plan.relation_plan_variant_hash
             })
             && self.nonlinear_commitment_binding.is_bound_to_plan(plan)
+            && plan.canonical_identity_hash().is_ok_and(|identity| {
+                identity == self.affine_image_inclusion.construction_plan_identity_hash
+            })
             && self.private_leaf_salt_prf.is_complete_for(
                 plan,
                 &self.aggregate_wide_masking,
                 &self.private_row_pad_generator_hybrid,
             )
+            && self
+                .nonlinear_commitment_privacy
+                .is_complete_for(NonlinearCommitmentPrivacyInput {
+                    plan,
+                    nonlinear_binding: &self.nonlinear_commitment_binding,
+                    whole_database_support: &self.cms19_whole_database_support,
+                    subtree_extraction: &self.commitment_subtree_extraction,
+                    aggregate_wide_masking: &self.aggregate_wide_masking,
+                    private_row_pad_generator: &self.private_row_pad_generator_hybrid,
+                    private_leaf_salt_prf: &self.private_leaf_salt_prf,
+                    affine_masking_composition: &self.affine_masking_composition,
+                    persistent_material_masking: &persistent_material_masking,
+                })
+            && self
+                .sequential_simulator
+                .is_complete_for(ConstructionSequentialSimulatorInput {
+                    plan,
+                    affine_image_inclusion: &self.affine_image_inclusion,
+                    nonlinear_commitment_privacy: &self.nonlinear_commitment_privacy,
+                    nonlinear_commitment_binding: &self.nonlinear_commitment_binding,
+                    whole_database_support: &self.cms19_whole_database_support,
+                    commitment_subtree_extraction: &self.commitment_subtree_extraction,
+                    aggregate_wide_masking: &self.aggregate_wide_masking,
+                    production_aggregate: &self.production_aggregate_wide_views,
+                    transported_proof_correspondence: &self.transported_proof_correspondence,
+                })
             && self.cms19_strong_round_by_round_semantics.is_complete_for(
                 plan,
                 &self.cms19_whole_state_transitions,
@@ -8989,7 +12516,7 @@ struct RowCodeWhirProductionGeometryCertificate {
     cms19_whole_state_transitions: Cms19WholeStateTransitionCertificate,
     cms19_strong_state_hash_chain: Cms19StrongStateHashChainCertificate,
     cms19_transcript_oracle_output_inventory: Cms19TranscriptOracleOutputInventory,
-    cms19_typed_variable_output_oracle_model: Cms19TypedVariableOutputOracleModelCertificate,
+    cms19_fixed_output_seeded_sampler_model: Cms19FixedOutputSeededSamplerModelCertificate,
     complete_verifier_oracle_ledger: CompleteVerifierOracleLedger,
     deployed_aggregate_leaf_oracle: DeployedAggregateLeafOracleCertificate,
     cms19_whole_database_support: Cms19WholeDatabaseSupportCertificate,
@@ -9282,14 +12809,14 @@ impl RowCodeWhirProductionGeometryCertificate {
                 .construction_plan_identity_hash
                 != self.construction_plan_identity_hash
             || !self
-                .cms19_typed_variable_output_oracle_model
-                .has_complete_direct_sum_application(&self.cms19_transcript_oracle_output_inventory)
+                .cms19_fixed_output_seeded_sampler_model
+                .matches_production_width_inventory(&self.cms19_transcript_oracle_output_inventory)
             || self
-                .cms19_typed_variable_output_oracle_model
+                .cms19_fixed_output_seeded_sampler_model
                 .construction_plan_identity_hash
                 != self.construction_plan_identity_hash
             || self
-                .cms19_typed_variable_output_oracle_model
+                .cms19_fixed_output_seeded_sampler_model
                 .canonical_oracle_plan_hash
                 != self
                     .cms19_whole_state_transitions
@@ -9313,22 +12840,48 @@ impl RowCodeWhirProductionGeometryCertificate {
         {
             return Some(ProductionGeometryCertificateFailure::IncompleteTerminalStatePredicate);
         }
-        if self.cms19_arithmetic.verifier_hash_query_count
+        if self
+            .cms19_arithmetic
+            .separated_oracle_projection
+            .concrete_verifier_hash_query_count
             != self
                 .deployed_aggregate_leaf_oracle
                 .deployed_verifier_hash_query_count
-            || self.cms19_arithmetic.oracle_model_requirement
-                != (Cms19ArithmeticOracleModelRequirement::TypedVariableOutputIdealXof {
-                    minimum_output_bit_length: CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH,
-                })
-            || self.cms19_arithmetic.accepting_database_equation_count
+            || self
+                .cms19_arithmetic
+                .separated_oracle_projection
+                .concrete_accepting_database_equation_count
                 != self
                     .deployed_aggregate_leaf_oracle
                     .deployed_accepting_database_equation_count
+            || self.cms19_arithmetic.verifier_hash_query_count
+                != self
+                    .cms19_arithmetic
+                    .separated_oracle_projection
+                    .primary_verifier_hash_query_count
+            || self.cms19_arithmetic.oracle_model_requirement
+                != (Cms19ArithmeticOracleModelRequirement::FixedOutputRandomOracle {
+                    output_bit_length: CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH,
+                })
+            || self.cms19_arithmetic.accepting_database_equation_count
+                != self
+                    .cms19_arithmetic
+                    .separated_oracle_projection
+                    .primary_accepting_database_equation_count
         {
             return Some(ProductionGeometryCertificateFailure::InconsistentQromArithmetic);
         }
         if !self.exact_failure_magnitude.is_complete()
+            || !self
+                .exact_failure_magnitude
+                .precommitted_sampler_table
+                .is_complete_for(
+                    &self
+                        .cms19_fixed_output_seeded_sampler_model
+                        .classical_sampler_distribution,
+                    &self.exact_failure_magnitude.query_rows,
+                    &self.cms19_arithmetic,
+                )
             || self
                 .exact_failure_magnitude
                 .application_statement_schema_identifier
@@ -9346,6 +12899,252 @@ impl RowCodeWhirProductionGeometryCertificate {
         }
         None
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SecretBearingConstructionViewSimulationCertificate {
+    construction_plan_identity_hash: [u8; 64],
+    relation_plan_variant_hash: [u8; 64],
+    affine_masking_composition: ConstructionMaskingAffineCompositionCertificate,
+    affine_image_inclusion: ConstructionAffineImageInclusionCertificate,
+    nonlinear_commitment_privacy: NonlinearCommitmentPrivacyCertificate,
+    sequential_simulator: ConstructionSequentialSimulatorCertificate,
+    transported_proof_correspondence: ExactSameSecretTransportCorrespondenceCertificate,
+    persistent_material_masking_is_root_global: bool,
+    persistent_material_bad_event_is_owned_outside_family: bool,
+    claims_concrete_shake256_reduction: bool,
+    claims_malicious_verifier_zero_knowledge: bool,
+    claims_resettable_zero_knowledge: bool,
+    claims_family_simulation: bool,
+    claims_quantum_random_oracle_zero_knowledge: bool,
+}
+
+impl SecretBearingConstructionViewSimulationCertificate {
+    fn is_complete(&self) -> bool {
+        self.construction_plan_identity_hash != [0_u8; 64]
+            && self.relation_plan_variant_hash != [0_u8; 64]
+            && self.affine_masking_composition.is_complete()
+            && self.affine_image_inclusion.is_complete()
+            && self
+                .nonlinear_commitment_privacy
+                .has_complete_standalone_theorem()
+            && self.sequential_simulator.is_complete()
+            && self
+                .affine_masking_composition
+                .construction_plan_identity_hash
+                == self.construction_plan_identity_hash
+            && self.affine_image_inclusion.construction_plan_identity_hash
+                == self.construction_plan_identity_hash
+            && self
+                .nonlinear_commitment_privacy
+                .construction_plan_identity_hash
+                == self.construction_plan_identity_hash
+            && self.sequential_simulator.construction_plan_identity_hash
+                == self.construction_plan_identity_hash
+            && self
+                .transported_proof_correspondence
+                .construction_plan_identity_hash
+                == self.construction_plan_identity_hash
+            && self.affine_masking_composition.relation_plan_variant_hash
+                == self.relation_plan_variant_hash
+            && self.affine_image_inclusion.relation_plan_variant_hash
+                == self.relation_plan_variant_hash
+            && self
+                .transported_proof_correspondence
+                .relation_plan_variant_hash
+                == self.relation_plan_variant_hash
+            && self.persistent_material_masking_is_root_global
+            && self.persistent_material_bad_event_is_owned_outside_family
+            && !self.claims_concrete_shake256_reduction
+            && !self.claims_malicious_verifier_zero_knowledge
+            && !self.claims_resettable_zero_knowledge
+            && !self.claims_family_simulation
+            && !self.claims_quantum_random_oracle_zero_knowledge
+    }
+}
+
+fn derive_secret_bearing_construction_view_simulation_certificate(
+    plan: &RowCodeWhirConstructionPlan,
+    artifact: &ValidatedRelationPlanArtifact,
+    relation_variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
+    geometry: &RowCodeWhirProductionGeometryCertificate,
+    persistent_material_masking: &ProductionPersistentCommittedMaterialMaskingCertificate,
+) -> Result<SecretBearingConstructionViewSimulationCertificate, WhirTheoremCertificateError> {
+    let construction_plan_identity_hash = plan
+        .canonical_identity_hash()
+        .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+    if plan.proof_privacy_mode != ProofPrivacyMode::SecretBearing
+        || !geometry.is_complete()
+        || geometry.construction_plan_identity_hash != construction_plan_identity_hash
+        || geometry.relation_plan_hash != artifact.canonical_plan_hash()
+        || geometry.relation_plan_variant_hash
+            != relation_variant
+                .canonical_hash()
+                .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?
+        || !persistent_material_masking.is_complete_for_selected_profile()
+    {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    let affine_input = ConstructionMaskingAffineCompositionInput {
+        plan,
+        relation_variant,
+        relation_context,
+        production_preaggregate: &geometry.production_construction_masking,
+        aggregate_wide_masking: &geometry.aggregate_wide_masking,
+        production_aggregate: &geometry.production_aggregate_wide_views,
+        row_pad_generator: &geometry.private_row_pad_generator_hybrid,
+    };
+    let affine_masking_composition = derive_construction_masking_affine_composition(affine_input)?;
+    let affine_image_inclusion = derive_construction_affine_image_inclusion(affine_input)?;
+    let nonlinear_commitment_privacy =
+        derive_nonlinear_commitment_privacy_certificate(NonlinearCommitmentPrivacyInput {
+            plan,
+            nonlinear_binding: &geometry.nonlinear_commitment_binding,
+            whole_database_support: &geometry.cms19_whole_database_support,
+            subtree_extraction: &geometry.commitment_subtree_extraction,
+            aggregate_wide_masking: &geometry.aggregate_wide_masking,
+            private_row_pad_generator: &geometry.private_row_pad_generator_hybrid,
+            private_leaf_salt_prf: &geometry.private_leaf_salt_prf,
+            affine_masking_composition: &affine_masking_composition,
+            persistent_material_masking,
+        })?;
+    let transported_proof_correspondence = checked_row_code_whir_transport_correspondence(
+        plan,
+        artifact,
+        relation_variant,
+        relation_context,
+    )
+    .map_err(|_| WhirTheoremCertificateError::IncompleteTransportedProofCorrespondence)?;
+    let sequential_simulator =
+        derive_construction_sequential_simulator(ConstructionSequentialSimulatorInput {
+            plan,
+            affine_image_inclusion: &affine_image_inclusion,
+            nonlinear_commitment_privacy: &nonlinear_commitment_privacy,
+            nonlinear_commitment_binding: &geometry.nonlinear_commitment_binding,
+            whole_database_support: &geometry.cms19_whole_database_support,
+            commitment_subtree_extraction: &geometry.commitment_subtree_extraction,
+            aggregate_wide_masking: &geometry.aggregate_wide_masking,
+            production_aggregate: &geometry.production_aggregate_wide_views,
+            transported_proof_correspondence: &transported_proof_correspondence,
+        })?;
+    let certificate = SecretBearingConstructionViewSimulationCertificate {
+        construction_plan_identity_hash,
+        relation_plan_variant_hash: geometry.relation_plan_variant_hash,
+        affine_masking_composition,
+        affine_image_inclusion,
+        nonlinear_commitment_privacy,
+        sequential_simulator,
+        transported_proof_correspondence,
+        persistent_material_masking_is_root_global: true,
+        persistent_material_bad_event_is_owned_outside_family: true,
+        claims_concrete_shake256_reduction: false,
+        claims_malicious_verifier_zero_knowledge: false,
+        claims_resettable_zero_knowledge: false,
+        claims_family_simulation: false,
+        claims_quantum_random_oracle_zero_knowledge: false,
+    };
+    if !certificate.is_complete() {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    Ok(certificate)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PublicOnlyConstructionTranscriptReplayCertificate {
+    construction_plan_identity_hash: [u8; 64],
+    relation_plan_variant_hash: [u8; 64],
+    transported_proof_correspondence: ExactSameSecretTransportCorrespondenceCertificate,
+    relation_private_source_count: usize,
+    relation_mask_count: usize,
+    attempt_private_salt_commitment_count: usize,
+    public_terminal_transcript_is_simulator_input: bool,
+    canonical_transcript_is_replayed_without_change: bool,
+    claims_private_witness_simulation: bool,
+    claims_zero_knowledge: bool,
+}
+
+impl PublicOnlyConstructionTranscriptReplayCertificate {
+    fn is_complete(&self) -> bool {
+        self.construction_plan_identity_hash != [0_u8; 64]
+            && self.relation_plan_variant_hash != [0_u8; 64]
+            && self
+                .transported_proof_correspondence
+                .construction_plan_identity_hash
+                == self.construction_plan_identity_hash
+            && self
+                .transported_proof_correspondence
+                .relation_plan_variant_hash
+                == self.relation_plan_variant_hash
+            && self.relation_private_source_count == 0
+            && self.relation_mask_count == 0
+            && self.attempt_private_salt_commitment_count == 0
+            && self.public_terminal_transcript_is_simulator_input
+            && self.canonical_transcript_is_replayed_without_change
+            && !self.claims_private_witness_simulation
+            && !self.claims_zero_knowledge
+    }
+}
+
+fn derive_public_only_construction_transcript_replay_certificate(
+    plan: &RowCodeWhirConstructionPlan,
+    artifact: &ValidatedRelationPlanArtifact,
+    relation_variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
+    geometry: &RowCodeWhirProductionGeometryCertificate,
+) -> Result<PublicOnlyConstructionTranscriptReplayCertificate, WhirTheoremCertificateError> {
+    let construction_plan_identity_hash = plan
+        .canonical_identity_hash()
+        .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+    let relation_private_source_count = relation_variant
+        .ordered_columns()
+        .iter()
+        .filter(|column| column.origin() == &RelationColumnOrigin::Prover)
+        .count();
+    if plan.proof_privacy_mode != ProofPrivacyMode::PublicOnly
+        || !geometry.is_complete()
+        || geometry.construction_plan_identity_hash != construction_plan_identity_hash
+        || geometry.relation_plan_hash != artifact.canonical_plan_hash()
+        || !geometry
+            .production_construction_masking
+            .production_sources
+            .is_empty()
+        || !geometry
+            .production_construction_masking
+            .production_views
+            .is_empty()
+        || !geometry
+            .production_construction_masking
+            .production_rank_requirements
+            .is_empty()
+        || !geometry.private_leaf_salt_prf.commitment_rows.is_empty()
+        || !geometry.private_leaf_salt_prf.key_rows.is_empty()
+    {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    let transported_proof_correspondence = checked_row_code_whir_transport_correspondence(
+        plan,
+        artifact,
+        relation_variant,
+        relation_context,
+    )
+    .map_err(|_| WhirTheoremCertificateError::IncompleteTransportedProofCorrespondence)?;
+    let certificate = PublicOnlyConstructionTranscriptReplayCertificate {
+        construction_plan_identity_hash,
+        relation_plan_variant_hash: geometry.relation_plan_variant_hash,
+        transported_proof_correspondence,
+        relation_private_source_count,
+        relation_mask_count: relation_variant.ordered_masks().len(),
+        attempt_private_salt_commitment_count: geometry.private_leaf_salt_prf.commitment_rows.len(),
+        public_terminal_transcript_is_simulator_input: true,
+        canonical_transcript_is_replayed_without_change: true,
+        claims_private_witness_simulation: false,
+        claims_zero_knowledge: false,
+    };
+    if !certificate.is_complete() {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    Ok(certificate)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -9407,6 +13206,410 @@ struct CheckedProductionGeometryCertificateInventory {
         RowCodeWhirSelectedParameters,
         AggregateWideMaskingCertificate,
     )>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProductionConstructionSimulationStrategy {
+    SecretBearingClassicalIdealXof,
+    PublicTerminalTranscriptReplay,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ProductionConstructionSimulationRecord {
+    application_statement_schema_identifier: u16,
+    schedule_position: Option<u32>,
+    top_count: Option<u16>,
+    construction_plan_identity_hash: [u8; 64],
+    complete_action_application_multiplicity: u32,
+    strategy: ProductionConstructionSimulationStrategy,
+    attempt_local_affine_source_count: usize,
+    attempt_private_root_count: usize,
+    imported_persistent_root_count: usize,
+    public_root_count: usize,
+    persistent_material_endpoint_count_for_complete_action: usize,
+    transported_family_body_byte_length_ceiling: usize,
+    local_commitment_fresh_input_bad_event: ExactBigFraction,
+    local_leaf_salt_collision_bad_event: ExactBigFraction,
+    local_classical_ideal_xof_bad_event: ExactBigFraction,
+    logical_challenge_count: u64,
+    first_challenge_operation_ordinal: u32,
+    last_challenge_operation_ordinal: u32,
+    canonical_statement_and_header_are_absorbed_first: bool,
+    every_challenge_has_immediate_predecessor: bool,
+    common_private_coin_modulo_output_count_per_proof: u64,
+    active_phase_seed_count_per_proof: usize,
+    phase_seed_byte_length: usize,
+    row_pad_framed_xof_input_count_per_proof: usize,
+    row_pad_accepted_field_output_count_per_proof: usize,
+    private_leaf_salt_key_count_per_proof: usize,
+    private_leaf_salt_distinct_framed_input_count_per_proof: u64,
+    private_leaf_salt_clean_derivation_call_count_per_proof: u64,
+    maximum_candidate_draws_per_output: u32,
+    conditioned_affine_image_inclusion_is_complete: bool,
+    opened_leaf_sequential_simulator_is_complete: bool,
+    persistent_bad_event_is_owned_root_globally: bool,
+    canonical_transport_is_plan_bound: bool,
+    claims_family_simulation: bool,
+    claims_quantum_random_oracle_zero_knowledge: bool,
+}
+
+impl ProductionConstructionSimulationRecord {
+    fn is_complete(&self) -> bool {
+        let strategy_is_complete = match self.strategy {
+            ProductionConstructionSimulationStrategy::SecretBearingClassicalIdealXof => {
+                self.attempt_local_affine_source_count == 5
+                    && self.attempt_private_root_count > 0
+                    && self.complete_action_application_multiplicity > 0
+                    && self
+                        .local_classical_ideal_xof_bad_event
+                        .is_at_most_inverse_power_of_two(128)
+                    && self
+                        .local_commitment_fresh_input_bad_event
+                        .add(&self.local_leaf_salt_collision_bad_event)
+                        .is_ok_and(|total| total == self.local_classical_ideal_xof_bad_event)
+                    && self.common_private_coin_modulo_output_count_per_proof > 0
+                    && self.active_phase_seed_count_per_proof > 0
+                    && self.phase_seed_byte_length == PRIVATE_ROW_PAD_SEED_BYTE_LENGTH
+                    && self.row_pad_framed_xof_input_count_per_proof > 0
+                    && self.row_pad_accepted_field_output_count_per_proof > 0
+                    && self.private_leaf_salt_key_count_per_proof > 0
+                    && self.private_leaf_salt_distinct_framed_input_count_per_proof > 0
+                    && self.private_leaf_salt_clean_derivation_call_count_per_proof
+                        >= self.private_leaf_salt_distinct_framed_input_count_per_proof
+            }
+            ProductionConstructionSimulationStrategy::PublicTerminalTranscriptReplay => {
+                self.attempt_local_affine_source_count == 0
+                    && self.attempt_private_root_count == 0
+                    && self.imported_persistent_root_count == 0
+                    && self
+                        .local_commitment_fresh_input_bad_event
+                        .numerator
+                        .is_zero()
+                    && self.local_leaf_salt_collision_bad_event.numerator.is_zero()
+                    && self.local_classical_ideal_xof_bad_event.numerator.is_zero()
+                    && self.common_private_coin_modulo_output_count_per_proof == 0
+                    && self.active_phase_seed_count_per_proof == 0
+                    && self.phase_seed_byte_length == 0
+                    && self.row_pad_framed_xof_input_count_per_proof == 0
+                    && self.row_pad_accepted_field_output_count_per_proof == 0
+                    && self.private_leaf_salt_key_count_per_proof == 0
+                    && self.private_leaf_salt_distinct_framed_input_count_per_proof == 0
+                    && self.private_leaf_salt_clean_derivation_call_count_per_proof == 0
+            }
+        };
+        self.application_statement_schema_identifier != 0
+            && self.construction_plan_identity_hash != [0_u8; 64]
+            && self.transported_family_body_byte_length_ceiling > 0
+            && self.logical_challenge_count > 0
+            && self.first_challenge_operation_ordinal > 0
+            && self.last_challenge_operation_ordinal >= self.first_challenge_operation_ordinal
+            && self.canonical_statement_and_header_are_absorbed_first
+            && self.every_challenge_has_immediate_predecessor
+            && self.maximum_candidate_draws_per_output
+                == PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT
+            && self.conditioned_affine_image_inclusion_is_complete
+            && self.opened_leaf_sequential_simulator_is_complete
+            && strategy_is_complete
+            && self.persistent_bad_event_is_owned_root_globally
+            && self.canonical_transport_is_plan_bound
+            && !self.claims_family_simulation
+            && !self.claims_quantum_random_oracle_zero_knowledge
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CheckedProductionConstructionSimulationInventory {
+    records: Vec<ProductionConstructionSimulationRecord>,
+    persistent_material_masking: ProductionPersistentCommittedMaterialMaskingCertificate,
+}
+
+impl CheckedProductionConstructionSimulationInventory {
+    fn is_complete(&self) -> bool {
+        let mut coordinates = BTreeSet::new();
+        let mut identities = BTreeSet::new();
+        let Ok(expected_rows) = crate::bgv::proof_suite::selected_accounting::resource_accounting::
+            selected_proof_variant_resource_inventory()
+        else {
+            return false;
+        };
+        !self.records.is_empty()
+            && self.records.len() == expected_rows.len()
+            && self
+                .persistent_material_masking
+                .is_complete_for_selected_profile()
+            && self.records.iter().all(|record| {
+                record.is_complete()
+                    && expected_rows.iter().any(|expected| {
+                        expected.application_statement_schema_identifier()
+                            == record.application_statement_schema_identifier
+                            && expected.schedule_position() == record.schedule_position
+                            && expected.top_count() == record.top_count
+                            && expected.complete_action_application_multiplicity()
+                                == record.complete_action_application_multiplicity
+                    })
+                    && coordinates.insert((
+                        record.application_statement_schema_identifier,
+                        record.schedule_position,
+                        record.top_count,
+                    ))
+                    && identities.insert(record.construction_plan_identity_hash)
+            })
+    }
+}
+
+fn checked_selected_production_construction_simulation_inventory(
+    artifacts: &[ValidatedRelationPlanArtifact],
+) -> Result<CheckedProductionConstructionSimulationInventory, WhirTheoremCertificateError> {
+    checked_production_construction_simulation_inventory(artifacts)
+}
+
+fn checked_production_construction_simulation_inventory(
+    artifacts: &[ValidatedRelationPlanArtifact],
+) -> Result<CheckedProductionConstructionSimulationInventory, WhirTheoremCertificateError> {
+    let persistent_material_masking =
+        derive_production_persistent_committed_material_masking_certificate()?;
+    let mut masking_certificates = Vec::<(
+        RowCodeWhirSelectedParameters,
+        AggregateWideMaskingCertificate,
+    )>::new();
+    let mut records = Vec::new();
+    for artifact in artifacts {
+        let relation_context = selected_relation_plan_check_context(
+            artifact.application_statement_schema_identifier(),
+        )
+        .ok_or(WhirTheoremCertificateError::InvalidSelectedGeometry)?;
+        for relation_variant in artifact.compiled_plan().variants() {
+            let plan = RowCodeWhirConstructionPlan::for_selected_variant(
+                artifact,
+                relation_variant.schedule_position(),
+                relation_variant.top_count(),
+            )
+            .map_err(|_| WhirTheoremCertificateError::InvalidSelectedGeometry)?;
+            let complete_action_application_multiplicity =
+                selected_complete_action_variant_application_multiplicity(&plan)?;
+            let parameters = plan.selected_parameters();
+            let masking_certificate_index = if let Some(index) = masking_certificates
+                .iter()
+                .position(|(cached_parameters, _)| *cached_parameters == parameters)
+            {
+                index
+            } else {
+                let hiding_configuration = super::super::hiding_whir::selected_hiding_whir_config(
+                    parameters,
+                )
+                .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+                masking_certificates.push((
+                    parameters,
+                    AggregateWideMaskingCertificate::derive(&hiding_configuration).map_err(
+                        |_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence,
+                    )?,
+                ));
+                masking_certificates.len() - 1
+            };
+            let geometry = checked_row_code_whir_production_geometry_certificate_with_masking(
+                &plan,
+                artifact,
+                relation_variant,
+                &relation_context,
+                &masking_certificates[masking_certificate_index].1,
+            )?;
+            let chronology =
+                soundness_composition::checked_production_statement_challenge_chronology_summary(
+                    &plan, &geometry,
+                )?;
+            if chronology.construction_plan_identity_hash
+                != geometry.construction_plan_identity_hash
+                || chronology.logical_challenge_count != geometry.logical_verifier_message_count
+            {
+                return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
+            }
+            let record = match plan.proof_privacy_mode {
+                ProofPrivacyMode::SecretBearing => {
+                    let certificate =
+                        derive_secret_bearing_construction_view_simulation_certificate(
+                            &plan,
+                            artifact,
+                            relation_variant,
+                            &relation_context,
+                            &geometry,
+                            &persistent_material_masking,
+                        )?;
+                    ProductionConstructionSimulationRecord {
+                        application_statement_schema_identifier: plan
+                            .application_statement_schema_identifier,
+                        schedule_position: plan.schedule_position,
+                        top_count: plan.top_count,
+                        construction_plan_identity_hash: certificate
+                            .construction_plan_identity_hash,
+                        complete_action_application_multiplicity,
+                        strategy:
+                            ProductionConstructionSimulationStrategy::SecretBearingClassicalIdealXof,
+                        attempt_local_affine_source_count: certificate
+                            .affine_masking_composition
+                            .rows
+                            .len(),
+                        attempt_private_root_count: certificate
+                            .nonlinear_commitment_privacy
+                            .attempt_private_tree_count,
+                        imported_persistent_root_count: certificate
+                            .nonlinear_commitment_privacy
+                            .persistent_private_tree_count,
+                        public_root_count: certificate
+                            .nonlinear_commitment_privacy
+                            .public_tree_count,
+                        persistent_material_endpoint_count_for_complete_action: certificate
+                            .nonlinear_commitment_privacy
+                            .persistent_material_endpoint_count_for_family,
+                        transported_family_body_byte_length_ceiling: certificate
+                            .transported_proof_correspondence
+                            .family_body_byte_length_ceiling,
+                        local_commitment_fresh_input_bad_event: certificate
+                            .nonlinear_commitment_privacy
+                            .streaming_state_fresh_input_bad_event
+                            .add(
+                                &certificate
+                                    .nonlinear_commitment_privacy
+                                    .salted_or_marked_fresh_input_bad_event,
+                            )?,
+                        local_leaf_salt_collision_bad_event: certificate
+                            .nonlinear_commitment_privacy
+                            .leaf_salt_collision_bad_event
+                            .clone(),
+                        local_classical_ideal_xof_bad_event: certificate
+                            .nonlinear_commitment_privacy
+                            .selected_numeric_bad_event,
+                        logical_challenge_count: chronology.logical_challenge_count,
+                        first_challenge_operation_ordinal: chronology
+                            .first_challenge_operation_ordinal,
+                        last_challenge_operation_ordinal: chronology
+                            .last_challenge_operation_ordinal,
+                        canonical_statement_and_header_are_absorbed_first: chronology
+                            .canonical_statement_and_header_are_absorbed_first,
+                        every_challenge_has_immediate_predecessor: chronology
+                            .every_challenge_has_immediate_predecessor,
+                        common_private_coin_modulo_output_count_per_proof: certificate
+                            .affine_masking_composition
+                            .private_coin_generator_hybrid
+                            .total_modulo_output_count,
+                        active_phase_seed_count_per_proof: geometry
+                            .private_row_pad_generator_hybrid
+                            .active_phase_seed_count,
+                        phase_seed_byte_length: geometry
+                            .private_row_pad_generator_hybrid
+                            .phase_seed_byte_length,
+                        row_pad_framed_xof_input_count_per_proof: geometry
+                            .private_row_pad_generator_hybrid
+                            .framed_xof_input_count,
+                        row_pad_accepted_field_output_count_per_proof: geometry
+                            .private_row_pad_generator_hybrid
+                            .accepted_field_output_count,
+                        private_leaf_salt_key_count_per_proof: geometry
+                            .private_leaf_salt_prf
+                            .key_rows
+                            .len(),
+                        private_leaf_salt_distinct_framed_input_count_per_proof: geometry
+                            .private_leaf_salt_prf
+                            .distinct_framed_input_count,
+                        private_leaf_salt_clean_derivation_call_count_per_proof: geometry
+                            .private_leaf_salt_prf
+                            .clean_prover_derivation_call_count,
+                        maximum_candidate_draws_per_output: plan
+                            .parameters
+                            .maximum_fiat_shamir_candidate_draws_per_output,
+                        conditioned_affine_image_inclusion_is_complete: certificate
+                            .affine_image_inclusion
+                            .is_complete(),
+                        opened_leaf_sequential_simulator_is_complete: certificate
+                            .sequential_simulator
+                            .is_complete(),
+                        persistent_bad_event_is_owned_root_globally: certificate
+                            .persistent_material_bad_event_is_owned_outside_family,
+                        canonical_transport_is_plan_bound: certificate
+                            .transported_proof_correspondence
+                            .is_bound_to_construction_plan(&plan),
+                        claims_family_simulation: certificate.claims_family_simulation,
+                        claims_quantum_random_oracle_zero_knowledge: certificate
+                            .claims_quantum_random_oracle_zero_knowledge,
+                    }
+                }
+                ProofPrivacyMode::PublicOnly => {
+                    let certificate =
+                        derive_public_only_construction_transcript_replay_certificate(
+                            &plan,
+                            artifact,
+                            relation_variant,
+                            &relation_context,
+                            &geometry,
+                        )?;
+                    ProductionConstructionSimulationRecord {
+                        application_statement_schema_identifier: plan
+                            .application_statement_schema_identifier,
+                        schedule_position: plan.schedule_position,
+                        top_count: plan.top_count,
+                        construction_plan_identity_hash: certificate
+                            .construction_plan_identity_hash,
+                        complete_action_application_multiplicity,
+                        strategy:
+                            ProductionConstructionSimulationStrategy::PublicTerminalTranscriptReplay,
+                        attempt_local_affine_source_count: 0,
+                        attempt_private_root_count: 0,
+                        imported_persistent_root_count: 0,
+                        public_root_count: geometry.nonlinear_commitment_binding.rows.len(),
+                        persistent_material_endpoint_count_for_complete_action: 0,
+                        transported_family_body_byte_length_ceiling: certificate
+                            .transported_proof_correspondence
+                            .family_body_byte_length_ceiling,
+                        local_classical_ideal_xof_bad_event: ExactBigFraction::new(
+                            BigUint::zero(),
+                            BigUint::one(),
+                        )?,
+                        local_commitment_fresh_input_bad_event: ExactBigFraction::zero(),
+                        local_leaf_salt_collision_bad_event: ExactBigFraction::zero(),
+                        logical_challenge_count: chronology.logical_challenge_count,
+                        first_challenge_operation_ordinal: chronology
+                            .first_challenge_operation_ordinal,
+                        last_challenge_operation_ordinal: chronology
+                            .last_challenge_operation_ordinal,
+                        canonical_statement_and_header_are_absorbed_first: chronology
+                            .canonical_statement_and_header_are_absorbed_first,
+                        every_challenge_has_immediate_predecessor: chronology
+                            .every_challenge_has_immediate_predecessor,
+                        common_private_coin_modulo_output_count_per_proof: 0,
+                        active_phase_seed_count_per_proof: 0,
+                        phase_seed_byte_length: 0,
+                        row_pad_framed_xof_input_count_per_proof: 0,
+                        row_pad_accepted_field_output_count_per_proof: 0,
+                        private_leaf_salt_key_count_per_proof: 0,
+                        private_leaf_salt_distinct_framed_input_count_per_proof: 0,
+                        private_leaf_salt_clean_derivation_call_count_per_proof: 0,
+                        maximum_candidate_draws_per_output: plan
+                            .parameters
+                            .maximum_fiat_shamir_candidate_draws_per_output,
+                        conditioned_affine_image_inclusion_is_complete: true,
+                        opened_leaf_sequential_simulator_is_complete: true,
+                        persistent_bad_event_is_owned_root_globally: true,
+                        canonical_transport_is_plan_bound: certificate
+                            .transported_proof_correspondence
+                            .is_bound_to_construction_plan(&plan),
+                        claims_family_simulation: false,
+                        claims_quantum_random_oracle_zero_knowledge: false,
+                    }
+                }
+            };
+            if !record.is_complete() {
+                return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+            }
+            records.push(record);
+        }
+    }
+    let inventory = CheckedProductionConstructionSimulationInventory {
+        records,
+        persistent_material_masking,
+    };
+    if !inventory.is_complete() {
+        return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
+    }
+    Ok(inventory)
 }
 
 fn derive_production_whir_geometry_certificate(
@@ -9794,7 +13997,7 @@ struct ProductionMappedSoundnessCertificate {
     cms19_whole_state_transitions: Cms19WholeStateTransitionCertificate,
     cms19_strong_state_hash_chain: Cms19StrongStateHashChainCertificate,
     cms19_transcript_oracle_output_inventory: Cms19TranscriptOracleOutputInventory,
-    cms19_typed_variable_output_oracle_model: Cms19TypedVariableOutputOracleModelCertificate,
+    cms19_fixed_output_seeded_sampler_model: Cms19FixedOutputSeededSamplerModelCertificate,
     complete_verifier_oracle_ledger: CompleteVerifierOracleLedger,
     deployed_aggregate_leaf_oracle: DeployedAggregateLeafOracleCertificate,
     cms19_whole_database_support: Cms19WholeDatabaseSupportCertificate,
@@ -9906,15 +14109,17 @@ fn checked_production_mapped_soundness_certificate(
                 error,
             )
         })?;
-    let cms19_typed_variable_output_oracle_model =
-        derive_cms19_typed_variable_output_oracle_model_certificate(
+    let cms19_fixed_output_seeded_sampler_model =
+        derive_cms19_fixed_output_seeded_sampler_model_certificate(
             plan,
+            relation_variant,
+            relation_context,
             &catalog,
             &cms19_transcript_oracle_output_inventory,
         )
         .map_err(|error| {
             contextualize(
-                ProductionGeometryCertificateStage::TypedVariableOutputOracleModel,
+                ProductionGeometryCertificateStage::FixedOutputSeededSamplerModel,
                 error,
             )
         })?;
@@ -9989,9 +14194,9 @@ fn checked_production_mapped_soundness_certificate(
         )
     })?;
     let cms19_arithmetic = derive_cms19_arithmetic_certificate(
-        &cms19_typed_variable_output_oracle_model,
-        deployed_aggregate_leaf_oracle.deployed_verifier_hash_query_count,
-        deployed_aggregate_leaf_oracle.deployed_accepting_database_equation_count,
+        &cms19_fixed_output_seeded_sampler_model,
+        &cms19_whole_database_support,
+        &nonlinear_commitment_binding,
     )
     .map_err(|error| contextualize(ProductionGeometryCertificateStage::FailureMagnitude, error))?;
     let initial_constraint_batch_numerator = prefix_stacking
@@ -10016,6 +14221,7 @@ fn checked_production_mapped_soundness_certificate(
             aggregate_wide_masking,
             initial_constraint_batch_numerator,
             logical_verifier_message_count,
+            sampler_model: &cms19_fixed_output_seeded_sampler_model,
             cms19_arithmetic: &cms19_arithmetic,
         })
         .map_err(|error| {
@@ -10072,7 +14278,6 @@ fn checked_production_mapped_soundness_certificate(
             state_predicate: &cms19_state_predicate,
             strong_state_hash_chain: &cms19_strong_state_hash_chain,
             transcript_oracle_output_inventory: &cms19_transcript_oracle_output_inventory,
-            typed_variable_output_oracle_model: &cms19_typed_variable_output_oracle_model,
             verifier_oracle_ledger: &complete_verifier_oracle_ledger,
             deployed_leaf_oracle: &deployed_aggregate_leaf_oracle,
             exact_failure_magnitude: &exact_failure_magnitude,
@@ -10085,7 +14290,14 @@ fn checked_production_mapped_soundness_certificate(
         })?;
     if !cms19_state_predicate.is_complete()
         || !cms19_strong_round_by_round_semantics.is_complete()
-        || !cms19_applicability.is_selected_transform_eligible()
+        || !cms19_applicability.has_complete_structural_correspondence()
+        || !cms19_fixed_output_seeded_sampler_model.is_complete_for(
+            plan,
+            relation_variant,
+            relation_context,
+            &catalog,
+            &cms19_transcript_oracle_output_inventory,
+        )
     {
         return Err(contextualize(
             ProductionGeometryCertificateStage::TerminalStatePredicate,
@@ -10101,7 +14313,7 @@ fn checked_production_mapped_soundness_certificate(
         cms19_whole_state_transitions,
         cms19_strong_state_hash_chain,
         cms19_transcript_oracle_output_inventory,
-        cms19_typed_variable_output_oracle_model,
+        cms19_fixed_output_seeded_sampler_model,
         complete_verifier_oracle_ledger,
         deployed_aggregate_leaf_oracle,
         cms19_whole_database_support,
@@ -10225,7 +14437,7 @@ fn checked_row_code_whir_production_geometry_certificate_with_masking(
         cms19_whole_state_transitions,
         cms19_strong_state_hash_chain,
         cms19_transcript_oracle_output_inventory,
-        cms19_typed_variable_output_oracle_model,
+        cms19_fixed_output_seeded_sampler_model,
         complete_verifier_oracle_ledger,
         deployed_aggregate_leaf_oracle,
         cms19_whole_database_support,
@@ -10283,7 +14495,7 @@ fn checked_row_code_whir_production_geometry_certificate_with_masking(
         cms19_whole_state_transitions,
         cms19_strong_state_hash_chain,
         cms19_transcript_oracle_output_inventory,
-        cms19_typed_variable_output_oracle_model,
+        cms19_fixed_output_seeded_sampler_model,
         complete_verifier_oracle_ledger,
         deployed_aggregate_leaf_oracle,
         cms19_whole_database_support,
@@ -10431,21 +14643,6 @@ fn checked_selected_row_code_whir_production_geometry_certificates(
 pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
     plan: &RowCodeWhirConstructionPlan,
 ) -> Result<RowCodeWhirFailurePartitionCertificate, WhirTheoremCertificateError> {
-    let parameters = plan.selected_parameters();
-    let hiding_configuration =
-        super::super::hiding_whir::selected_hiding_whir_config(parameters)
-            .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
-    if parameters != RowCodeWhirSelectedParameters::selected()
-        || parameters.soundness_assumption != RowCodeWhirSoundnessAssumption::UniqueDecoding
-        || parameters.folding_factor != 3
-        || plan.whir.rounds.len() != hiding_configuration.n_rounds()
-        || plan.whir.initial_sumcheck_round_count != hiding_configuration.round_folding_factor(0)
-        || plan.whir.final_round.sumcheck_round_count
-            != hiding_configuration.inner.final_sumcheck_rounds
-    {
-        return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
-    }
-
     let relation_context = selected_relation_plan_check_context(
         ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
     )
@@ -10465,6 +14662,38 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
         .compiled_plan()
         .select_variant(None, None)
         .map_err(|_| WhirTheoremCertificateError::InvalidSelectedGeometry)?;
+    checked_row_code_whir_failure_partition_for_validated_relation(
+        plan,
+        &validated_relation_plan,
+        relation_variant,
+        &relation_context,
+    )
+}
+
+fn checked_row_code_whir_failure_partition_for_validated_relation(
+    plan: &RowCodeWhirConstructionPlan,
+    validated_relation_plan: &ValidatedRelationPlanArtifact,
+    relation_variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
+) -> Result<RowCodeWhirFailurePartitionCertificate, WhirTheoremCertificateError> {
+    let parameters = plan.selected_parameters();
+    let hiding_configuration =
+        super::super::hiding_whir::selected_hiding_whir_config(parameters)
+            .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
+    if parameters != RowCodeWhirSelectedParameters::selected()
+        || parameters.soundness_assumption != RowCodeWhirSoundnessAssumption::UniqueDecoding
+        || parameters.folding_factor != 3
+        || plan.whir.rounds.len() != hiding_configuration.n_rounds()
+        || plan.whir.initial_sumcheck_round_count != hiding_configuration.round_folding_factor(0)
+        || plan.whir.final_round.sumcheck_round_count
+            != hiding_configuration.inner.final_sumcheck_rounds
+        || validated_relation_plan.application_statement_schema_identifier()
+            != plan.application_statement_schema_identifier
+        || relation_variant.schedule_position() != plan.schedule_position
+        || relation_variant.top_count() != plan.top_count
+    {
+        return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
+    }
     let relation_compiler_interpreter_semantics =
         checked_relation_compiler_interpreter_semantics(relation_variant, &relation_context)
             .map_err(|_| WhirTheoremCertificateError::IncompleteRelationSemanticCorrespondence)?;
@@ -10478,20 +14707,23 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
     {
         return Err(WhirTheoremCertificateError::IncompleteRelationSemanticCorrespondence);
     }
-    let expected_construction_plan =
-        RowCodeWhirConstructionPlan::for_selected_variant(&validated_relation_plan, None, None)
-            .map_err(|_| WhirTheoremCertificateError::InvalidSelectedGeometry)?;
+    let expected_construction_plan = RowCodeWhirConstructionPlan::for_selected_variant(
+        validated_relation_plan,
+        relation_variant.schedule_position(),
+        relation_variant.top_count(),
+    )
+    .map_err(|_| WhirTheoremCertificateError::InvalidSelectedGeometry)?;
     if &expected_construction_plan != plan {
         return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
     }
     let relation_plan_variant_hash = relation_variant
         .canonical_hash()
         .map_err(|_| WhirTheoremCertificateError::IncompletePolynomialExtractorCorrespondence)?;
-    let transported_proof_correspondence = checked_exact_same_secret_transport_correspondence(
+    let transported_proof_correspondence = checked_row_code_whir_transport_correspondence(
         plan,
+        validated_relation_plan,
         relation_variant,
         &relation_context,
-        validated_relation_plan.canonical_plan_hash(),
     )
     .map_err(|_| WhirTheoremCertificateError::IncompleteTransportedProofCorrespondence)?;
     let (polynomial_protocol_extractor, point_constraint_extractor) =
@@ -10542,17 +14774,18 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
     if !private_row_pad_generator_hybrid.is_complete_for_plan(plan) {
         return Err(WhirTheoremCertificateError::IncompleteRowPadGeneratorHybrid);
     }
-    let affine_masking_composition = derive_construction_masking_affine_composition(
-        ConstructionMaskingAffineCompositionInput {
-            plan,
-            relation_variant,
-            relation_context: &relation_context,
-            production_preaggregate: &production_construction_masking,
-            aggregate_wide_masking: &aggregate_wide_masking,
-            production_aggregate: &production_aggregate_wide_views,
-            row_pad_generator: &private_row_pad_generator_hybrid,
-        },
-    )?;
+    let affine_masking_input = ConstructionMaskingAffineCompositionInput {
+        plan,
+        relation_variant,
+        relation_context: &relation_context,
+        production_preaggregate: &production_construction_masking,
+        aggregate_wide_masking: &aggregate_wide_masking,
+        production_aggregate: &production_aggregate_wide_views,
+        row_pad_generator: &private_row_pad_generator_hybrid,
+    };
+    let affine_masking_composition =
+        derive_construction_masking_affine_composition(affine_masking_input)?;
+    let affine_image_inclusion = derive_construction_affine_image_inclusion(affine_masking_input)?;
     let private_leaf_salt_prf = PrivateLeafSaltPrfCertificate::derive(
         plan,
         &aggregate_wide_masking,
@@ -10824,11 +15057,6 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
     let logical_verifier_message_count = catalog
         .logical_verifier_message_count()
         .map_err(|_| WhirTheoremCertificateError::InvalidSelectedGeometry)?;
-    if maximum_transcript_hash_query_count != SELECTED_TRANSCRIPT_HASH_QUERY_COUNT
-        || logical_verifier_message_count != SELECTED_LOGICAL_VERIFIER_MESSAGE_COUNT
-    {
-        return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
-    }
     validate_state_and_equation_rows(&catalog, &state_epoch_rows, &oracle_equation_rows)?;
     let selected_plan_state_predicate = derive_selected_plan_state_predicate_certificate(
         plan,
@@ -10875,6 +15103,32 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
         &cms19_whole_database_support,
         &commitment_subtree_extraction,
     )?;
+    let persistent_material_masking =
+        derive_production_persistent_committed_material_masking_certificate()?;
+    let nonlinear_commitment_privacy =
+        derive_nonlinear_commitment_privacy_certificate(NonlinearCommitmentPrivacyInput {
+            plan,
+            nonlinear_binding: &nonlinear_commitment_binding,
+            whole_database_support: &cms19_whole_database_support,
+            subtree_extraction: &commitment_subtree_extraction,
+            aggregate_wide_masking: &aggregate_wide_masking,
+            private_row_pad_generator: &private_row_pad_generator_hybrid,
+            private_leaf_salt_prf: &private_leaf_salt_prf,
+            affine_masking_composition: &affine_masking_composition,
+            persistent_material_masking: &persistent_material_masking,
+        })?;
+    let sequential_simulator =
+        derive_construction_sequential_simulator(ConstructionSequentialSimulatorInput {
+            plan,
+            affine_image_inclusion: &affine_image_inclusion,
+            nonlinear_commitment_privacy: &nonlinear_commitment_privacy,
+            nonlinear_commitment_binding: &nonlinear_commitment_binding,
+            whole_database_support: &cms19_whole_database_support,
+            commitment_subtree_extraction: &commitment_subtree_extraction,
+            aggregate_wide_masking: &aggregate_wide_masking,
+            production_aggregate: &production_aggregate_wide_views,
+            transported_proof_correspondence: &transported_proof_correspondence,
+        })?;
     let cms19_strong_state_hash_chain = derive_cms19_strong_state_hash_chain_certificate(
         plan,
         &catalog,
@@ -10886,16 +15140,18 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
     )?;
     let cms19_transcript_oracle_output_inventory =
         derive_cms19_transcript_oracle_output_inventory(plan, &catalog)?;
-    let cms19_typed_variable_output_oracle_model =
-        derive_cms19_typed_variable_output_oracle_model_certificate(
+    let cms19_fixed_output_seeded_sampler_model =
+        derive_cms19_fixed_output_seeded_sampler_model_certificate(
             plan,
+            relation_variant,
+            &relation_context,
             &catalog,
             &cms19_transcript_oracle_output_inventory,
         )?;
     let cms19_arithmetic = derive_cms19_arithmetic_certificate(
-        &cms19_typed_variable_output_oracle_model,
-        deployed_aggregate_leaf_oracle.deployed_verifier_hash_query_count,
-        deployed_aggregate_leaf_oracle.deployed_accepting_database_equation_count,
+        &cms19_fixed_output_seeded_sampler_model,
+        &cms19_whole_database_support,
+        &nonlinear_commitment_binding,
     )?;
     let exact_failure_magnitude =
         derive_exact_failure_magnitude_certificate(ExactFailureMagnitudeDerivationInput {
@@ -10910,6 +15166,7 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
             aggregate_wide_masking: &aggregate_wide_masking,
             initial_constraint_batch_numerator,
             logical_verifier_message_count,
+            sampler_model: &cms19_fixed_output_seeded_sampler_model,
             cms19_arithmetic: &cms19_arithmetic,
         })?;
     let cms19_accepting_database_extractor =
@@ -10951,7 +15208,6 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
             state_predicate: &cms19_state_predicate,
             strong_state_hash_chain: &cms19_strong_state_hash_chain,
             transcript_oracle_output_inventory: &cms19_transcript_oracle_output_inventory,
-            typed_variable_output_oracle_model: &cms19_typed_variable_output_oracle_model,
             verifier_oracle_ledger: &complete_verifier_oracle_ledger,
             deployed_leaf_oracle: &deployed_aggregate_leaf_oracle,
             exact_failure_magnitude: &exact_failure_magnitude,
@@ -10971,13 +15227,14 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
         deployed_aggregate_leaf_oracle,
         commitment_subtree_extraction,
         nonlinear_commitment_binding,
+        nonlinear_commitment_privacy,
         selected_plan_state_predicate,
         cms19_whole_state_transitions,
         cms19_whole_database_support,
         cms19_state_predicate,
         cms19_strong_state_hash_chain,
         cms19_transcript_oracle_output_inventory,
-        cms19_typed_variable_output_oracle_model,
+        cms19_fixed_output_seeded_sampler_model,
         cms19_strong_round_by_round_semantics,
         maximum_transcript_hash_query_count,
         logical_verifier_message_count,
@@ -10990,6 +15247,8 @@ pub(in crate::bgv::proof_suite) fn checked_row_code_whir_failure_partition(
         production_aggregate_wide_views,
         private_row_pad_generator_hybrid,
         affine_masking_composition,
+        affine_image_inclusion,
+        sequential_simulator,
         private_leaf_salt_prf,
         relation_compiler_interpreter_semantics,
         polynomial_protocol_extractor,
@@ -11208,9 +15467,15 @@ fn derive_state_and_equation_rows(
                         OracleEquationRole::EmptyProverResponseAbsorption,
                     )
                 }
-                RowCodeWhirOracleEquationRangeKind::AtomicChallengeXof { .. } => {
-                    OracleEquationRolePattern::Single(OracleEquationRole::AtomicChallengeXof)
-                }
+                RowCodeWhirOracleEquationRangeKind::AtomicChallengeSeededHashStream {
+                    fixed_hash_query_count,
+                    ..
+                } => OracleEquationRolePattern::SeededHashStream {
+                    seed_query_count: 1,
+                    output_block_query_count: fixed_hash_query_count
+                        .checked_sub(1)
+                        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+                },
             };
             if role_pattern.maximum_predecessor_support_count() > 2 {
                 return Err(WhirTheoremCertificateError::IncompleteOracleEquationMapping);
@@ -11283,6 +15548,7 @@ fn validate_state_and_equation_rows(
                 .role_pattern
                 .maximum_predecessor_support_count()
                 > 2
+            || equation_row.role_pattern.equation_count() != Some(equation_row.equation_count)
             || (
                 equation_row.operation_ordinal,
                 equation_row.range_ordinal,
@@ -12251,7 +16517,7 @@ fn derive_cms19_transcript_oracle_output_inventory(
         let has_atomic_challenge_range = operation.ranges.iter().any(|range| {
             matches!(
                 range.kind,
-                RowCodeWhirOracleEquationRangeKind::AtomicChallengeXof { .. }
+                RowCodeWhirOracleEquationRangeKind::AtomicChallengeSeededHashStream { .. }
             )
         });
         let Some((failure_event_owner, accepted_value_count, expected_output_byte_length)) =
@@ -12262,7 +16528,8 @@ fn derive_cms19_transcript_oracle_output_inventory(
             }
             continue;
         };
-        let output_byte_length = cms19_atomic_challenge_output_byte_length(operation)?;
+        let (output_byte_length, fixed_hash_query_count) =
+            cms19_atomic_challenge_stream_geometry(operation)?;
         if output_byte_length != expected_output_byte_length {
             return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
         }
@@ -12271,18 +16538,21 @@ fn derive_cms19_transcript_oracle_output_inventory(
             failure_event_owner,
             accepted_value_count,
             output_byte_length,
+            fixed_hash_query_count,
         });
     }
     let required_fixed_output_byte_length =
         u64::try_from(CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH / 8)
             .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
-    let fixed_output_message_count = rows
-        .iter()
-        .filter(|row| row.output_byte_length == required_fixed_output_byte_length)
-        .count();
-    let variable_output_message_count = rows
-        .len()
-        .checked_sub(fixed_output_message_count)
+    let seed_hash_query_count =
+        u64::try_from(rows.len()).map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let fixed_hash_query_count = rows.iter().try_fold(0_u64, |total, row| {
+        total
+            .checked_add(row.fixed_hash_query_count)
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+    })?;
+    let output_block_hash_query_count = fixed_hash_query_count
+        .checked_sub(seed_hash_query_count)
         .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
     let minimum_output_byte_length = rows
         .iter()
@@ -12308,10 +16578,9 @@ fn derive_cms19_transcript_oracle_output_inventory(
         logical_verifier_message_count: catalog
             .logical_verifier_message_count()
             .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
-        fixed_output_message_count: u64::try_from(fixed_output_message_count)
-            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
-        variable_output_message_count: u64::try_from(variable_output_message_count)
-            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+        seed_hash_query_count,
+        output_block_hash_query_count,
+        fixed_hash_query_count,
         minimum_output_byte_length,
         maximum_output_byte_length,
         distinct_output_byte_lengths,
@@ -12323,99 +16592,391 @@ fn derive_cms19_transcript_oracle_output_inventory(
     Ok(certificate)
 }
 
-fn derive_cms19_typed_variable_output_oracle_model_certificate(
+fn derive_cms19_fixed_output_seeded_sampler_distribution_certificate(
     plan: &RowCodeWhirConstructionPlan,
+    relation_variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
     catalog: &RowCodeWhirOracleEquationCatalog,
     output_inventory: &Cms19TranscriptOracleOutputInventory,
-) -> Result<Cms19TypedVariableOutputOracleModelCertificate, WhirTheoremCertificateError> {
+) -> Result<Cms19FixedOutputSeededSamplerDistributionCertificate, WhirTheoremCertificateError> {
+    if !output_inventory.is_complete_for(plan, catalog)
+        || relation_variant.canonical_hash().ok() != Some(plan.relation_plan_variant_hash)
+    {
+        return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
+    }
+    let maximum_candidate_draws_per_output = plan
+        .parameters
+        .maximum_fiat_shamir_candidate_draws_per_output;
+    if maximum_candidate_draws_per_output == 0 {
+        return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
+    }
+    let extension_field_cardinality = BigUint::from(PROOF_BASE_FIELD_MODULUS).pow(
+        u32::try_from(PROOF_CHALLENGE_EXTENSION_DEGREE)
+            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+    );
+    let extension_candidate_space = BigUint::one() << 512_usize;
+    let extension_accepted_preimage_multiplicity =
+        &extension_candidate_space / &extension_field_cardinality;
+    let mut rows = Vec::new();
+    rows.try_reserve_exact(output_inventory.rows.len())
+        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+
+    for inventory_row in &output_inventory.rows {
+        let operation = catalog
+            .operations
+            .get(
+                usize::try_from(inventory_row.operation_ordinal)
+                    .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+            )
+            .filter(|operation| operation.operation_ordinal == inventory_row.operation_ordinal)
+            .ok_or(WhirTheoremCertificateError::IncompleteTranscriptMapping)?;
+        let oracle_tag = operation
+            .oracle_tag
+            .clone()
+            .filter(|tag| !tag.is_empty())
+            .ok_or(WhirTheoremCertificateError::IncompleteTranscriptMapping)?;
+        let output_block_hash_query_count = inventory_row
+            .fixed_hash_query_count
+            .checked_sub(1)
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+
+        let (
+            candidate_slot_count,
+            candidate_slot_byte_length,
+            conditional_uniform_output_cardinality_floor,
+            kind,
+        ) = match &operation.kind {
+            RowCodeWhirOracleEquationOperationKind::CommonProductChallenge(group) => {
+                let target_cardinality =
+                    BigUint::from(group.modulus()).pow(u32::from(group.coordinate_count()));
+                let candidate_byte_length = group.candidate_byte_length();
+                let candidate_bit_length = candidate_byte_length
+                    .checked_mul(8)
+                    .and_then(|length| usize::try_from(length).ok())
+                    .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+                let candidate_space_cardinality = BigUint::one() << candidate_bit_length;
+                let rejected_candidate_count = &candidate_space_cardinality % &target_cardinality;
+                (
+                    u64::from(maximum_candidate_draws_per_output),
+                    candidate_byte_length,
+                    target_cardinality.clone(),
+                    Cms19SeededSamplerDistributionKind::ProductResidueVector {
+                        modulus: group.modulus(),
+                        coordinate_count: group.coordinate_count(),
+                        candidate_byte_length,
+                        target_cardinality,
+                        candidate_space_cardinality,
+                        rejected_candidate_count,
+                    },
+                )
+            }
+            RowCodeWhirOracleEquationOperationKind::CommonExtensionChallenge(challenge) => {
+                let forbidden_candidate_count_ceiling = match challenge {
+                    CommonProofChallenge::OutOfDomainPoint { point_ordinal } => relation_variant
+                        .out_of_domain_point_sampler_cardinality_bound(
+                            relation_context,
+                            *point_ordinal,
+                        )
+                        .map_err(|_| WhirTheoremCertificateError::IncompleteTranscriptMapping)?
+                        .forbidden_candidate_count_ceiling()
+                        .clone(),
+                    CommonProofChallenge::Composition { .. } => BigUint::zero(),
+                    CommonProofChallenge::Theta { .. } | CommonProofChallenge::Alpha { .. } => {
+                        return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
+                    }
+                };
+                let accepted_candidate_count_floor =
+                    &extension_field_cardinality - &forbidden_candidate_count_ceiling;
+                let rejected_candidate_count_ceiling = &extension_candidate_space
+                    - &extension_accepted_preimage_multiplicity * &accepted_candidate_count_floor;
+                (
+                    u64::from(maximum_candidate_draws_per_output),
+                    u64::try_from(EXTENSION_CHALLENGE_CANDIDATE_BYTE_LENGTH)
+                        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+                    accepted_candidate_count_floor.clone(),
+                    Cms19SeededSamplerDistributionKind::ExtensionElement {
+                        field_cardinality: extension_field_cardinality.clone(),
+                        forbidden_candidate_count_ceiling,
+                        accepted_candidate_count_floor,
+                        candidate_space_cardinality: extension_candidate_space.clone(),
+                        accepted_preimage_multiplicity: extension_accepted_preimage_multiplicity
+                            .clone(),
+                        rejected_candidate_count_ceiling,
+                    },
+                )
+            }
+            RowCodeWhirOracleEquationOperationKind::RowCodeWhir { operation, .. } => {
+                match operation {
+                    RowCodeWhirTranscriptOperation::SampleExtension { .. } => {
+                        let forbidden_candidate_count_ceiling = BigUint::zero();
+                        let accepted_candidate_count_floor = extension_field_cardinality.clone();
+                        let rejected_candidate_count_ceiling = &extension_candidate_space
+                            - &extension_accepted_preimage_multiplicity
+                                * &accepted_candidate_count_floor;
+                        (
+                            u64::from(maximum_candidate_draws_per_output),
+                            u64::try_from(EXTENSION_CHALLENGE_CANDIDATE_BYTE_LENGTH)
+                                .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+                            accepted_candidate_count_floor.clone(),
+                            Cms19SeededSamplerDistributionKind::ExtensionElement {
+                                field_cardinality: extension_field_cardinality.clone(),
+                                forbidden_candidate_count_ceiling,
+                                accepted_candidate_count_floor,
+                                candidate_space_cardinality: extension_candidate_space.clone(),
+                                accepted_preimage_multiplicity:
+                                    extension_accepted_preimage_multiplicity.clone(),
+                                rejected_candidate_count_ceiling,
+                            },
+                        )
+                    }
+                    RowCodeWhirTranscriptOperation::SampleDistinctIndices {
+                        upper_bound,
+                        output_count,
+                        ..
+                    } => {
+                        let domain_cardinality = u64::try_from(*upper_bound)
+                            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+                        let output_count = u32::try_from(*output_count)
+                            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+                        let candidate_space_cardinality = BigUint::one() << u64::BITS as usize;
+                        let ordered_output_cardinality =
+                            falling_factorial(domain_cardinality, u64::from(output_count))?;
+                        (
+                            u64::from(output_count)
+                                .checked_mul(u64::from(maximum_candidate_draws_per_output))
+                                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+                            u64::try_from(size_of::<u64>())
+                                .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
+                            ordered_output_cardinality.clone(),
+                            Cms19SeededSamplerDistributionKind::DistinctIndexVector {
+                                domain_cardinality,
+                                output_count,
+                                candidate_space_cardinality: candidate_space_cardinality.clone(),
+                                index_preimage_multiplicity: candidate_space_cardinality
+                                    / BigUint::from(domain_cardinality),
+                                ordered_output_cardinality,
+                            },
+                        )
+                    }
+                    _ => return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping),
+                }
+            }
+            RowCodeWhirOracleEquationOperationKind::InitialTranscript
+            | RowCodeWhirOracleEquationOperationKind::CommonRound(_) => {
+                return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
+            }
+        };
+        let row = Cms19SeededSamplerDistributionRow {
+            operation_ordinal: inventory_row.operation_ordinal,
+            failure_event_owner: inventory_row.failure_event_owner,
+            oracle_tag,
+            maximum_candidate_draws_per_output,
+            candidate_slot_count,
+            candidate_slot_byte_length,
+            output_byte_length: inventory_row.output_byte_length,
+            output_block_hash_query_count,
+            fixed_hash_query_count: inventory_row.fixed_hash_query_count,
+            conditional_uniform_output_cardinality_floor,
+            kind,
+        };
+        if !row.has_valid_arithmetic() {
+            return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
+        }
+        rows.push(row);
+    }
+
+    let mut exhaustion_term_map = BTreeMap::new();
+    for row in &rows {
+        row.append_exhaustion_terms(&mut exhaustion_term_map)?;
+    }
+    let exhaustion_terms = exhaustion_term_map
+        .into_iter()
+        .map(
+            |(
+                (rejected_candidate_count_ceiling, candidate_space_cardinality, draw_count),
+                event_multiplicity,
+            )| Cms19SamplerExhaustionTerm {
+                rejected_candidate_count_ceiling,
+                candidate_space_cardinality,
+                draw_count,
+                event_multiplicity,
+            },
+        )
+        .collect::<Vec<_>>();
+    let exhaustion_union_bound = exhaustion_terms
+        .iter()
+        .try_fold(ExactBigFraction::zero(), |total, term| {
+            total.add(&term.probability_ceiling()?)
+        })?;
+    let row_count =
+        u64::try_from(rows.len()).map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let seed_collision_union_bound = ExactBigFraction::new(
+        BigUint::from(row_count) * BigUint::from(row_count.saturating_sub(1)) / BigUint::from(2_u8),
+        BigUint::one() << CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH,
+    )?;
+    let product_sampler_count = u64::try_from(
+        rows.iter()
+            .filter(|row| {
+                matches!(
+                    row.kind,
+                    Cms19SeededSamplerDistributionKind::ProductResidueVector { .. }
+                )
+            })
+            .count(),
+    )
+    .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let extension_sampler_count = u64::try_from(
+        rows.iter()
+            .filter(|row| {
+                matches!(
+                    row.kind,
+                    Cms19SeededSamplerDistributionKind::ExtensionElement { .. }
+                )
+            })
+            .count(),
+    )
+    .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let distinct_index_sampler_count = u64::try_from(
+        rows.iter()
+            .filter(|row| {
+                matches!(
+                    row.kind,
+                    Cms19SeededSamplerDistributionKind::DistinctIndexVector { .. }
+                )
+            })
+            .count(),
+    )
+    .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let total_output_block_hash_query_count = rows.iter().try_fold(0_u64, |total, row| {
+        total
+            .checked_add(row.output_block_hash_query_count)
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+    })?;
+    let seed_preimages_are_pairwise_distinct = rows
+        .iter()
+        .map(|row| row.oracle_tag.as_str())
+        .collect::<BTreeSet<_>>()
+        .len()
+        == rows.len();
+    let certificate = Cms19FixedOutputSeededSamplerDistributionCertificate {
+        construction_plan_identity_hash: plan
+            .canonical_identity_hash()
+            .map_err(|_| WhirTheoremCertificateError::IncompleteTranscriptMapping)?,
+        relation_plan_variant_hash: plan.relation_plan_variant_hash,
+        canonical_oracle_plan_hash: plan
+            .linear_bcs_transcript_plan_hash()
+            .map_err(|_| WhirTheoremCertificateError::IncompleteTranscriptMapping)?,
+        scope:
+            Cms19SeededSamplerTheoremScope::ClassicalIdealFixedOutputOracleDistributionAndChronology,
+        rows,
+        product_sampler_count,
+        extension_sampler_count,
+        distinct_index_sampler_count,
+        total_output_block_hash_query_count,
+        seed_preimages_are_pairwise_distinct,
+        seed_and_block_domains_are_distinct: TRANSCRIPT_ATOMIC_CHALLENGE_SEED_DOMAIN
+            != TRANSCRIPT_ATOMIC_CHALLENGE_BLOCK_DOMAIN,
+        block_preimages_are_pairwise_distinct_conditioned_on_distinct_seeds: true,
+        forbidden_sets_are_fixed_before_seed_sampling: true,
+        every_bounded_candidate_slot_is_consumed_before_finish: true,
+        prover_responses_cannot_interleave_an_active_sampler: true,
+        seed_collision_union_bound,
+        exhaustion_terms,
+        exhaustion_union_bound,
+        claims_qrom_sampler_composition: false,
+    };
+    if !certificate.is_self_consistent() {
+        return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
+    }
+    Ok(certificate)
+}
+
+fn derive_cms19_fixed_output_seeded_sampler_model_certificate(
+    plan: &RowCodeWhirConstructionPlan,
+    relation_variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
+    catalog: &RowCodeWhirOracleEquationCatalog,
+    output_inventory: &Cms19TranscriptOracleOutputInventory,
+) -> Result<Cms19FixedOutputSeededSamplerModelCertificate, WhirTheoremCertificateError> {
     if !output_inventory.is_complete_for(plan, catalog) {
         return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
     }
-    let mut distinct_output_bit_lengths = output_inventory
-        .distinct_output_byte_lengths
-        .iter()
-        .copied()
-        .map(|byte_length| {
-            byte_length
-                .checked_mul(8)
-                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
-        })
-        .collect::<Result<BTreeSet<_>, _>>()?;
     let fixed_digest_output_bit_length = u64::try_from(CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH)
         .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
-    distinct_output_bit_lengths.insert(fixed_digest_output_bit_length);
-    let minimum_output_bit_length = distinct_output_bit_lengths
-        .first()
-        .copied()
+    let maximum_blocks_per_logical_challenge = output_inventory
+        .rows
+        .iter()
+        .map(|row| row.fixed_hash_query_count)
+        .max()
         .ok_or(WhirTheoremCertificateError::IncompleteTranscriptMapping)?;
-    let maximum_output_bit_length = distinct_output_bit_lengths
-        .last()
-        .copied()
-        .ok_or(WhirTheoremCertificateError::IncompleteTranscriptMapping)?;
-    let certificate = Cms19TypedVariableOutputOracleModelCertificate {
+    let certificate = Cms19FixedOutputSeededSamplerModelCertificate {
         construction_plan_identity_hash: plan
             .canonical_identity_hash()
             .map_err(|_| WhirTheoremCertificateError::IncompleteTranscriptMapping)?,
         canonical_oracle_plan_hash: plan
             .linear_bcs_transcript_plan_hash()
             .map_err(|_| WhirTheoremCertificateError::IncompleteTranscriptMapping)?,
-        theorem: Cms19VariableOutputCompressedOracleTheorem::OrthogonalWidthIndexedDirectSum,
-        concrete_xof_mapping_scope:
-            Cms19ConcreteXofMappingScope::DomainSeparatedShake256IdealXofQroAssumption,
-        output_width_preimage_binding:
-            Cms19OutputWidthPreimageBinding::FoundationTupleCanonicalUnsigned64FinalItem,
-        variable_output_register_embedding:
-            Cms19VariableOutputRegisterEmbedding::OrthogonalWidthControlWithZeroPaddedAnswerRegister,
+        reduction: Cms19FixedOutputSeededSamplerReduction::DomainSeparatedPredecessorLinkedFixedHashSamplerV1,
+        concrete_hash_mapping_scope:
+            Cms19ConcreteHashMappingScope::DomainSeparatedShake256Fixed512BitQroAssumption,
+        preimage_binding:
+            Cms19SeededStreamPreimageBinding::CanonicalWidthSeedOrdinalAndPredecessor,
         logical_challenge_query_count: catalog
             .logical_verifier_message_count()
             .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?,
-        variable_output_challenge_query_count: output_inventory.variable_output_message_count,
-        minimum_output_bit_length,
-        maximum_output_bit_length,
-        distinct_output_bit_lengths: distinct_output_bit_lengths.into_iter().collect(),
+        seed_hash_query_count: output_inventory.seed_hash_query_count,
+        output_block_hash_query_count: output_inventory.output_block_hash_query_count,
+        fixed_hash_query_count: output_inventory.fixed_hash_query_count,
+        oracle_output_bit_length: fixed_digest_output_bit_length,
+        maximum_blocks_per_logical_challenge,
         collision_projection_bit_length: fixed_digest_output_bit_length,
-        compressed_database_entries_added_per_query: 1,
-        conditional_lifting_constant: 6,
-        output_width_control_sectors_are_orthogonal: true,
-        complete_logical_answer_is_atomic: true,
-        partial_squeeze_blocks_are_not_state_transitions: true,
-        adversarial_fragment_access_is_dominated_by_complete_prefix_access: true,
-        unused_xof_suffix_is_independent_adversary_workspace: true,
-        repeated_reads_reuse_one_typed_database_entry: true,
-        full_output_distribution_owns_round_failure: true,
-        // The construction retains the explicit ideal-XOF QRO assumption. No
-        // fixed-Keccak or sponge-indifferentiability conclusion is smuggled
-        // into the information-theoretic CMS19 application.
-        claims_concrete_sponge_indifferentiability: false,
+        classical_sampler_distribution:
+            derive_cms19_fixed_output_seeded_sampler_distribution_certificate(
+                plan,
+                relation_variant,
+                relation_context,
+                catalog,
+                output_inventory,
+            )?,
     };
-    if !certificate.is_complete_for(plan, catalog, output_inventory) {
+    if !certificate.is_complete_for(
+        plan,
+        relation_variant,
+        relation_context,
+        catalog,
+        output_inventory,
+    ) {
         return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
     }
     Ok(certificate)
 }
 
-fn cms19_atomic_challenge_output_byte_length(
+fn cms19_atomic_challenge_stream_geometry(
     operation: &RowCodeWhirOracleEquationOperationPlan,
-) -> Result<u64, WhirTheoremCertificateError> {
-    let output_byte_lengths = operation
+) -> Result<(u64, u64), WhirTheoremCertificateError> {
+    let stream_geometries = operation
         .ranges
         .iter()
         .filter_map(|range| match range.kind {
-            RowCodeWhirOracleEquationRangeKind::AtomicChallengeXof { output_byte_length }
-                if range.equation_count == 1 =>
-            {
-                Some(output_byte_length)
+            RowCodeWhirOracleEquationRangeKind::AtomicChallengeSeededHashStream {
+                output_byte_length,
+                fixed_hash_query_count,
+            } if range.equation_count == fixed_hash_query_count => {
+                Some((output_byte_length, fixed_hash_query_count))
             }
             _ => None,
         })
         .collect::<Vec<_>>();
-    let [output_byte_length] = output_byte_lengths.as_slice() else {
+    let [stream_geometry] = stream_geometries.as_slice() else {
         return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
     };
-    if *output_byte_length == 0 {
+    if stream_geometry.0 == 0
+        || atomic_challenge_fixed_hash_query_count(stream_geometry.0).ok()
+            != Some(stream_geometry.1)
+    {
         return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
     }
-    Ok(*output_byte_length)
+    Ok(*stream_geometry)
 }
 
 fn cms19_checked_atomic_challenge_round(
@@ -12559,7 +17120,7 @@ fn derive_cms19_whole_state_transition_certificate(
                 binding: cms19_prover_oracle_binding(plan, operation, expected_root)?,
             }
         } else if let Some(failure_event_owner) = state_row.failure_event_owner {
-            let output_byte_length = cms19_atomic_challenge_output_byte_length(operation)?;
+            let (output_byte_length, _) = cms19_atomic_challenge_stream_geometry(operation)?;
             let verifier_range =
                 verifier_range.ok_or(WhirTheoremCertificateError::IncompleteTranscriptMapping)?;
             let round_ordinal = cms19_checked_atomic_challenge_round(
@@ -12579,15 +17140,19 @@ fn derive_cms19_whole_state_transition_certificate(
                         || range.verifier_message_role
                             != (linear_bcs_transcript::LinearBcsVerifierMessageRole::AtomicChallenge {
                                 source_operation_ordinal: challenge_operation_ordinal,
-                                output_byte_length: cms19_atomic_challenge_output_byte_length(
-                                    catalog.operations.get(
+                                output_byte_length: cms19_atomic_challenge_stream_geometry(
+                                    catalog
+                                        .operations
+                                        .get(
                                         usize::try_from(challenge_operation_ordinal).map_err(|_| {
                                             WhirTheoremCertificateError::ArithmeticOverflow
                                         })?,
-                                    ).ok_or(
+                                    )
+                                    .ok_or(
                                         WhirTheoremCertificateError::IncompleteTranscriptMapping,
                                     )?,
-                                )?,
+                                )?
+                                .0,
                             })
                     {
                         return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
@@ -12960,28 +17525,7 @@ fn derive_fixed_verifier_hash_rows(
         return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
     }
 
-    let verifier_source_ordinals = relation_variant
-        .ordered_columns()
-        .iter()
-        .filter_map(|column| match column.origin() {
-            RelationColumnOrigin::VerifierSequence {
-                verifier_source_ordinal,
-                ..
-            } => Some(*verifier_source_ordinal),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    let distinct_verifier_source_ordinals = verifier_source_ordinals
-        .iter()
-        .copied()
-        .collect::<BTreeSet<_>>();
-    let public_setup_hash_query_count = u64::try_from(verifier_source_ordinals.len())
-        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
-    let public_setup_distinct_equation_count =
-        u64::try_from(distinct_verifier_source_ordinals.len())
-            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
-
-    let mut rows = vec![
+    Ok(vec![
         FixedVerifierHashCoverageRow {
             role: FixedVerifierHashRole::RelationPlanIdentity,
             hash_query_count: 1,
@@ -13006,16 +17550,7 @@ fn derive_fixed_verifier_hash_rows(
             distinct_equation_count: 1,
             transcript_catalog_equation_overlap_count: 0,
         },
-    ];
-    if public_setup_hash_query_count > 0 {
-        rows.push(FixedVerifierHashCoverageRow {
-            role: FixedVerifierHashRole::PublicSetupVerifierSequence,
-            hash_query_count: public_setup_hash_query_count,
-            distinct_equation_count: public_setup_distinct_equation_count,
-            transcript_catalog_equation_overlap_count: 0,
-        });
-    }
-    Ok(rows)
+    ])
 }
 
 fn derive_complete_verifier_oracle_ledger(
@@ -13496,9 +18031,6 @@ fn validate_production_deployed_oracle_correspondence(
                 ProductionFixedVerifierHashRole::ApplicationStatement => {
                     FixedVerifierHashRole::ApplicationStatement
                 }
-                ProductionFixedVerifierHashRole::PublicSetupVerifierSequence => {
-                    FixedVerifierHashRole::PublicSetupVerifierSequence
-                }
             };
             (role, row.hash_query_count(), row.distinct_equation_count())
         })
@@ -13758,6 +18290,23 @@ fn derive_cms19_whole_database_support_certificate(
                 let role_count = transcript_equation_counts.entry(role).or_default();
                 *role_count = role_count
                     .checked_add(equation_row.equation_count)
+                    .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+            }
+            OracleEquationRolePattern::SeededHashStream {
+                seed_query_count,
+                output_block_query_count,
+            } => {
+                let seed_count = transcript_equation_counts
+                    .entry(OracleEquationRole::AtomicChallengeSeed)
+                    .or_default();
+                *seed_count = seed_count
+                    .checked_add(seed_query_count)
+                    .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+                let block_count = transcript_equation_counts
+                    .entry(OracleEquationRole::AtomicChallengeOutputBlock)
+                    .or_default();
+                *block_count = block_count
+                    .checked_add(output_block_query_count)
                     .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
             }
         }
@@ -14663,7 +19212,8 @@ fn derive_cms19_strong_state_hash_chain_certificate(
         TRANSCRIPT_INITIAL_DOMAIN,
         TRANSCRIPT_ABSORB_DOMAIN,
         TRANSCRIPT_RESPONSE_ROOT_DOMAIN,
-        TRANSCRIPT_ATOMIC_CHALLENGE_XOF_DOMAIN,
+        TRANSCRIPT_ATOMIC_CHALLENGE_SEED_DOMAIN,
+        TRANSCRIPT_ATOMIC_CHALLENGE_BLOCK_DOMAIN,
         TRANSCRIPT_RESPONSE_BINDING_DOMAIN,
         PRODUCT_RESIDUE_VECTOR_SAMPLER_TYPE,
         DISTINCT_QUERY_VECTOR_SAMPLER_TYPE,
@@ -14687,10 +19237,6 @@ fn derive_cms19_strong_state_hash_chain_certificate(
         response_absorption_edge_count,
         deterministic_empty_response_edge_count,
         transcript_predecessor_support_ceiling,
-        // This records the proposed Section 8.6 extension used by the
-        // structural table. The separate semantic certificate decides
-        // whether the deployed sampler actually permits that atomic fill.
-        undefined_message_inherits_predecessor_state: true,
         atomic_challenges_are_separate_from_response_absorption,
         typed_oracle_domains_are_pairwise_distinct,
         canonical_oracle_plan_hash: oracle_plan
@@ -14832,7 +19378,7 @@ fn derive_cms19_atomic_round_semantic_certificate(
         if state_row.failure_event_owner.is_none() {
             continue;
         }
-        cms19_atomic_challenge_output_byte_length(operation)?;
+        cms19_atomic_challenge_stream_geometry(operation)?;
         logical_verifier_message_count = logical_verifier_message_count
             .checked_add(1)
             .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
@@ -14849,7 +19395,7 @@ fn derive_cms19_atomic_round_semantic_certificate(
         derive_cms19_atomic_state_transition_certificate(whole_state_transitions)?;
     let accepting_database_extractor = derive_cms19_accepting_database_extractor_certificate(plan)?;
     let certificate = Cms19AtomicRoundSemanticCertificate {
-        sampling_shape: Cms19VerifierMessageSamplingShape::AtomicPlanSizedXofOutput,
+        sampling_shape: Cms19VerifierMessageSamplingShape::AtomicFixedHashSeededStream,
         logical_verifier_message_count,
         multi_output_verifier_message_count,
         maximum_output_count_per_verifier_message,
@@ -14895,7 +19441,7 @@ fn derive_cms19_strong_round_by_round_semantic_certificate(
         if state_row.failure_event_owner.is_none() {
             continue;
         }
-        cms19_atomic_challenge_output_byte_length(operation)?;
+        cms19_atomic_challenge_stream_geometry(operation)?;
         let output_count = 1_u64;
         maximum_output_count_per_verifier_message =
             maximum_output_count_per_verifier_message.max(output_count);
@@ -14977,7 +19523,7 @@ fn derive_cms19_strong_round_by_round_semantic_certificate(
         derive_cms19_strong_state_evaluator_certificate(whole_state_transitions, state_predicate)?;
 
     Ok(Cms19StrongRoundByRoundSemanticCertificate {
-        sampling_shape: Cms19VerifierMessageSamplingShape::AtomicPlanSizedXofOutput,
+        sampling_shape: Cms19VerifierMessageSamplingShape::AtomicFixedHashSeededStream,
         multi_output_verifier_message_count,
         maximum_output_count_per_verifier_message,
         aggregate_wide_population: aggregate_wide_row.population,
@@ -15234,7 +19780,6 @@ struct Cms19ApplicabilityCertificateInput<'a> {
     state_predicate: &'a Cms19StatePredicateCertificate,
     strong_state_hash_chain: &'a Cms19StrongStateHashChainCertificate,
     transcript_oracle_output_inventory: &'a Cms19TranscriptOracleOutputInventory,
-    typed_variable_output_oracle_model: &'a Cms19TypedVariableOutputOracleModelCertificate,
     verifier_oracle_ledger: &'a CompleteVerifierOracleLedger,
     deployed_leaf_oracle: &'a DeployedAggregateLeafOracleCertificate,
     exact_failure_magnitude: &'a ExactFailureMagnitudeCertificate,
@@ -15252,7 +19797,6 @@ fn derive_cms19_applicability_certificate(
         state_predicate,
         strong_state_hash_chain,
         transcript_oracle_output_inventory,
-        typed_variable_output_oracle_model,
         verifier_oracle_ledger,
         deployed_leaf_oracle,
         exact_failure_magnitude,
@@ -15296,41 +19840,1101 @@ fn derive_cms19_applicability_certificate(
             .is_eligible_for_uniform_required_output(),
         transcript_oracle_output_inventory_reconciled: transcript_oracle_output_inventory
             .is_complete_for(plan, catalog),
-        typed_variable_output_oracle_model_established: typed_variable_output_oracle_model
-            .is_complete_for(plan, catalog, transcript_oracle_output_inventory),
     })
 }
 
+fn cms19_transcript_preimage_family(
+    role: OracleEquationRole,
+) -> Cms19ConcreteShake256PreimageFamily {
+    let domain = match role {
+        OracleEquationRole::InitialHeaderRoot => TRANSCRIPT_INITIAL_DOMAIN,
+        OracleEquationRole::InitialAbsorption
+        | OracleEquationRole::ResponseAbsorption
+        | OracleEquationRole::EmptyProverResponseAbsorption => TRANSCRIPT_ABSORB_DOMAIN,
+        OracleEquationRole::ResponseRoot => TRANSCRIPT_RESPONSE_ROOT_DOMAIN,
+        OracleEquationRole::ResponseBinding => TRANSCRIPT_RESPONSE_BINDING_DOMAIN,
+        OracleEquationRole::AtomicChallengeSeed => TRANSCRIPT_ATOMIC_CHALLENGE_SEED_DOMAIN,
+        OracleEquationRole::AtomicChallengeOutputBlock => {
+            return Cms19ConcreteShake256PreimageFamily::AtomicChallengeOutputBlockFoundationTuple512;
+        }
+    };
+    Cms19ConcreteShake256PreimageFamily::CanonicalFoundationTuplePrimary { domain }
+}
+
+fn exactly_one_nonlinear_binding_row(
+    nonlinear_binding: &NonlinearCommitmentBindingCertificate,
+    role: MerkleOracleEquationRole,
+) -> Result<NonlinearCommitmentBindingRow, WhirTheoremCertificateError> {
+    let matching_rows = nonlinear_binding
+        .rows
+        .iter()
+        .copied()
+        .filter(|row| row.role == role)
+        .collect::<Vec<_>>();
+    let [row] = matching_rows.as_slice() else {
+        return Err(WhirTheoremCertificateError::IncompleteOracleEquationMapping);
+    };
+    Ok(*row)
+}
+
+fn cms19_bound_foundation_domain(
+    construction_kind: BoundTreeConstructionKind,
+    parent: bool,
+) -> &'static str {
+    let (committed_leaf_domain, committed_parent_domain) =
+        crate::bgv::proof_suite::committed_material::committed_material_merkle_hash_domains();
+    let (_, setup_leaf_domain, setup_parent_domain) =
+        crate::bgv::proof_suite::setup_public_polynomial::setup_public_polynomial_hash_domains();
+    match (construction_kind, parent) {
+        (BoundTreeConstructionKind::CommittedMaterial, false) => committed_leaf_domain,
+        (BoundTreeConstructionKind::CommittedMaterial, true) => committed_parent_domain,
+        (BoundTreeConstructionKind::SetupPolynomial, false) => setup_leaf_domain,
+        (BoundTreeConstructionKind::SetupPolynomial, true) => setup_parent_domain,
+    }
+}
+
+fn cms19_merkle_leaf_preimage_family(
+    nonlinear_binding: &NonlinearCommitmentBindingCertificate,
+    role: MerkleOracleEquationRole,
+) -> Result<Cms19ConcreteShake256PreimageFamily, WhirTheoremCertificateError> {
+    let row = exactly_one_nonlinear_binding_row(nonlinear_binding, role)?;
+    match row.leaf_construction {
+        NonlinearCommitmentLeafConstruction::PhaseColumnSingleCall512 { .. } => {
+            Ok(Cms19ConcreteShake256PreimageFamily::PhaseColumnLeafPrimary)
+        }
+        NonlinearCommitmentLeafConstruction::BoundMaterializedSingleCall512 {
+            construction_kind,
+            ..
+        } => Ok(
+            Cms19ConcreteShake256PreimageFamily::CanonicalFoundationTuplePrimary {
+                domain: cms19_bound_foundation_domain(construction_kind, false),
+            },
+        ),
+        NonlinearCommitmentLeafConstruction::AggregateColumnStreamable512 { .. } => {
+            Err(WhirTheoremCertificateError::IncompleteOracleEquationMapping)
+        }
+    }
+}
+
+fn cms19_merkle_parent_preimage_family(
+    nonlinear_binding: &NonlinearCommitmentBindingCertificate,
+    role: MerkleOracleEquationRole,
+) -> Result<Cms19ConcreteShake256PreimageFamily, WhirTheoremCertificateError> {
+    let row = exactly_one_nonlinear_binding_row(nonlinear_binding, role)?;
+    match row.parent_construction {
+        NonlinearCommitmentParentConstruction::PhaseColumnMerkle512 => {
+            Ok(Cms19ConcreteShake256PreimageFamily::PhaseColumnParentPrimary)
+        }
+        NonlinearCommitmentParentConstruction::BoundMaterializedMerkle512 { construction_kind } => {
+            Ok(
+                Cms19ConcreteShake256PreimageFamily::CanonicalFoundationTuplePrimary {
+                    domain: cms19_bound_foundation_domain(construction_kind, true),
+                },
+            )
+        }
+        NonlinearCommitmentParentConstruction::AggregateWideMerkle512 => {
+            Ok(Cms19ConcreteShake256PreimageFamily::AggregateWideParentPrimary)
+        }
+    }
+}
+
+fn cms19_aggregate_leaf_preimage_family(
+    nonlinear_binding: &NonlinearCommitmentBindingCertificate,
+    role: Cms19DatabaseSupportRole,
+) -> Result<Cms19ConcreteShake256PreimageFamily, WhirTheoremCertificateError> {
+    let matches_production_binding = match role {
+        Cms19DatabaseSupportRole::AggregateLeafSharedInitial { interleaving_width } => {
+            nonlinear_binding.rows.iter().any(|row| {
+                matches!(
+                    row.leaf_construction,
+                    NonlinearCommitmentLeafConstruction::AggregateColumnStreamable512 {
+                        column_count,
+                        ..
+                    } if column_count == interleaving_width
+                )
+            })
+        }
+        Cms19DatabaseSupportRole::AggregateLeafPrivateInitial { role }
+        | Cms19DatabaseSupportRole::AggregateLeafTransitionAndFinal { role } => {
+            exactly_one_nonlinear_binding_row(nonlinear_binding, role).is_ok_and(|row| {
+                matches!(
+                    row.leaf_construction,
+                    NonlinearCommitmentLeafConstruction::AggregateColumnStreamable512 { .. }
+                )
+            })
+        }
+        _ => false,
+    };
+    if !matches_production_binding {
+        return Err(WhirTheoremCertificateError::IncompleteOracleEquationMapping);
+    }
+    Ok(Cms19ConcreteShake256PreimageFamily::AggregateColumnStreamableLeafPrimary)
+}
+
+fn cms19_fixed_hash_preimage_family(
+    role: FixedVerifierHashRole,
+) -> Cms19ConcreteShake256PreimageFamily {
+    let (relation_plan_domain, relation_variant_domain) =
+        crate::bgv::proof_suite::relation_plan::relation_plan_identity_hash_domains();
+    match role {
+        FixedVerifierHashRole::RelationPlanIdentity => {
+            Cms19ConcreteShake256PreimageFamily::CanonicalFoundationTuplePrimary {
+                domain: relation_plan_domain,
+            }
+        }
+        FixedVerifierHashRole::RelationPlanVariantIdentity => {
+            Cms19ConcreteShake256PreimageFamily::CanonicalFoundationTuplePrimary {
+                domain: relation_variant_domain,
+            }
+        }
+        FixedVerifierHashRole::ConstructionPlanIdentity => {
+            Cms19ConcreteShake256PreimageFamily::LegacyFramedHash512Primary {
+                domain: ROW_CODE_WHIR_CONSTRUCTION_PLAN_IDENTITY_HASH_DOMAIN,
+            }
+        }
+        FixedVerifierHashRole::ApplicationStatement => {
+            Cms19ConcreteShake256PreimageFamily::LegacyFramedHash512Primary {
+                domain:
+                    crate::bgv::proof_suite::verifier::verified_common_proof_statement_hash_domain(),
+            }
+        }
+    }
+}
+
+fn cms19_database_support_preimage_family(
+    role: Cms19DatabaseSupportRole,
+    nonlinear_binding: &NonlinearCommitmentBindingCertificate,
+) -> Result<Cms19ConcreteShake256PreimageFamily, WhirTheoremCertificateError> {
+    match role {
+        Cms19DatabaseSupportRole::TypedTranscript { role } => {
+            Ok(cms19_transcript_preimage_family(role))
+        }
+        Cms19DatabaseSupportRole::OrdinaryMerkleLeaf { role } => {
+            cms19_merkle_leaf_preimage_family(nonlinear_binding, role)
+        }
+        role @ (Cms19DatabaseSupportRole::AggregateLeafSharedInitial { .. }
+        | Cms19DatabaseSupportRole::AggregateLeafPrivateInitial { .. }
+        | Cms19DatabaseSupportRole::AggregateLeafTransitionAndFinal { .. }) => {
+            cms19_aggregate_leaf_preimage_family(nonlinear_binding, role)
+        }
+        Cms19DatabaseSupportRole::MerkleParents { role } => {
+            cms19_merkle_parent_preimage_family(nonlinear_binding, role)
+        }
+        Cms19DatabaseSupportRole::FixedVerifierHash { role } => {
+            Ok(cms19_fixed_hash_preimage_family(role))
+        }
+    }
+}
+
+fn cms19_auxiliary_fixed_preimage_prefix() -> Result<Vec<u8>, WhirTheoremCertificateError> {
+    const CANONICAL_TUPLE_HEADER_BYTE_LENGTH: usize = 8;
+    const CANONICAL_ITEM_HEADER_BYTE_LENGTH: usize = 6;
+    let argument_items = [
+        CanonicalItem::hash512([0_u8; Hash512::BYTE_LENGTH]),
+        CanonicalItem::hash512([0_u8; Hash512::BYTE_LENGTH]),
+        CanonicalItem::unsigned64(1),
+        CanonicalItem::unsigned64(0),
+    ];
+    let representative_preimage = canonical_foundation_tuple_hash_preimage(
+        TRANSCRIPT_ATOMIC_CHALLENGE_BLOCK_DOMAIN,
+        &argument_items,
+    )
+    .map_err(|_| WhirTheoremCertificateError::IncompleteOracleEquationMapping)?;
+    let domain_item = CanonicalItem::nonempty_ascii(TRANSCRIPT_ATOMIC_CHALLENGE_BLOCK_DOMAIN)
+        .map_err(|_| WhirTheoremCertificateError::IncompleteOracleEquationMapping)?;
+    let prefix_byte_length = CANONICAL_TUPLE_HEADER_BYTE_LENGTH
+        .checked_add(CANONICAL_ITEM_HEADER_BYTE_LENGTH)
+        .and_then(|length| length.checked_add(domain_item.canonical_bytes().len()))
+        .and_then(|length| length.checked_add(CANONICAL_ITEM_HEADER_BYTE_LENGTH))
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let prefix = representative_preimage
+        .get(..prefix_byte_length)
+        .ok_or(WhirTheoremCertificateError::IncompleteOracleEquationMapping)?
+        .to_vec();
+    let mut independently_encoded_prefix = Vec::with_capacity(prefix_byte_length);
+    independently_encoded_prefix
+        .extend_from_slice(&CANONICAL_TUPLE_SCHEMA_IDENTIFIER.to_le_bytes());
+    independently_encoded_prefix.extend_from_slice(&CANONICAL_TUPLE_VERSION.to_le_bytes());
+    independently_encoded_prefix.extend_from_slice(&5_u32.to_le_bytes());
+    independently_encoded_prefix
+        .extend_from_slice(&CanonicalItemType::Ascii.canonical_code().to_le_bytes());
+    independently_encoded_prefix.extend_from_slice(
+        &u32::try_from(domain_item.canonical_bytes().len())
+            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?
+            .to_le_bytes(),
+    );
+    independently_encoded_prefix.extend_from_slice(domain_item.canonical_bytes());
+    independently_encoded_prefix
+        .extend_from_slice(&CanonicalItemType::Hash512.canonical_code().to_le_bytes());
+    independently_encoded_prefix.extend_from_slice(
+        &u32::try_from(Hash512::BYTE_LENGTH)
+            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?
+            .to_le_bytes(),
+    );
+    if prefix != independently_encoded_prefix {
+        return Err(WhirTheoremCertificateError::IncompleteOracleEquationMapping);
+    }
+    Ok(prefix)
+}
+
+fn cms19_raw_primary_fixed_prefix(family: Cms19ConcreteShake256PreimageFamily) -> Option<Vec<u8>> {
+    match family {
+        Cms19ConcreteShake256PreimageFamily::LegacyFramedHash512Primary { .. } => {
+            Some(HASH512_PREIMAGE_PREFIX.to_vec())
+        }
+        Cms19ConcreteShake256PreimageFamily::PhaseColumnLeafPrimary => {
+            Some(ROW_CODE_WHIR_PHASE_COLUMN_LEAF_DOMAIN.to_vec())
+        }
+        Cms19ConcreteShake256PreimageFamily::PhaseColumnParentPrimary => {
+            let mut prefix =
+                Vec::with_capacity(size_of::<u64>() + ROW_CODE_WHIR_PHASE_COLUMN_NODE_DOMAIN.len());
+            prefix.extend_from_slice(
+                &u64::try_from(ROW_CODE_WHIR_PHASE_COLUMN_NODE_DOMAIN.len())
+                    .ok()?
+                    .to_le_bytes(),
+            );
+            prefix.extend_from_slice(ROW_CODE_WHIR_PHASE_COLUMN_NODE_DOMAIN);
+            Some(prefix)
+        }
+        Cms19ConcreteShake256PreimageFamily::AggregateColumnStreamableLeafPrimary
+        | Cms19ConcreteShake256PreimageFamily::AggregateWideParentPrimary => {
+            let domain = match family {
+                Cms19ConcreteShake256PreimageFamily::AggregateColumnStreamableLeafPrimary => {
+                    ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN
+                }
+                Cms19ConcreteShake256PreimageFamily::AggregateWideParentPrimary => {
+                    ROW_CODE_WHIR_AGGREGATE_NODE_DOMAIN
+                }
+                _ => unreachable!(),
+            };
+            let mut prefix = Vec::with_capacity(
+                ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN.len() + size_of::<u64>() + domain.len(),
+            );
+            prefix.extend_from_slice(ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN);
+            prefix.extend_from_slice(&u64::try_from(domain.len()).ok()?.to_le_bytes());
+            prefix.extend_from_slice(domain);
+            Some(prefix)
+        }
+        Cms19ConcreteShake256PreimageFamily::CanonicalFoundationTuplePrimary { .. }
+        | Cms19ConcreteShake256PreimageFamily::AtomicChallengeOutputBlockFoundationTuple512 => None,
+    }
+}
+
+fn fixed_prefixes_are_incompatible(left: &[u8], right: &[u8]) -> bool {
+    let shared_prefix_byte_length = left.len().min(right.len());
+    shared_prefix_byte_length > 0
+        && left[..shared_prefix_byte_length] != right[..shared_prefix_byte_length]
+}
+
+fn derive_cms19_concrete_shake256_oracle_partition_certificate(
+    whole_database_support: &Cms19WholeDatabaseSupportCertificate,
+    nonlinear_binding: &NonlinearCommitmentBindingCertificate,
+) -> Result<Cms19ConcreteShake256OraclePartitionCertificate, WhirTheoremCertificateError> {
+    if !whole_database_support.is_complete()
+        || nonlinear_binding.construction_plan_identity_hash
+            != whole_database_support.construction_plan_identity_hash
+        || !nonlinear_binding.collision_free_fixed_root_yields_unique_partial_tree
+        || !nonlinear_binding.extracted_values_are_exact_semantic_verifier_inputs
+    {
+        return Err(WhirTheoremCertificateError::IncompleteOracleEquationMapping);
+    }
+    let mut rows = Vec::with_capacity(whole_database_support.rows.len());
+    for database_row in &whole_database_support.rows {
+        let preimage_family =
+            cms19_database_support_preimage_family(database_row.role, nonlinear_binding)?;
+        let restriction = match preimage_family {
+            Cms19ConcreteShake256PreimageFamily::AtomicChallengeOutputBlockFoundationTuple512 => {
+                Cms19ConcreteShake256OracleRestriction::PrecommittedAuxiliarySamplerTable
+            }
+            _ => Cms19ConcreteShake256OracleRestriction::PrimaryCms19Database,
+        };
+        rows.push(Cms19ConcreteShake256OraclePartitionRow {
+            database_role: database_row.role,
+            preimage_family,
+            restriction,
+            hash_query_count: database_row.hash_query_count,
+            accepting_database_equation_count: database_row.accepting_database_equation_count,
+            output_bit_length: CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH,
+        });
+    }
+    let auxiliary_fixed_preimage_prefix = cms19_auxiliary_fixed_preimage_prefix()?;
+    let primary_foundation_domains_exclude_auxiliary_domain = rows.iter().all(|row| {
+        !matches!(
+            row.preimage_family,
+            Cms19ConcreteShake256PreimageFamily::CanonicalFoundationTuplePrimary { domain }
+                if domain == TRANSCRIPT_ATOMIC_CHALLENGE_BLOCK_DOMAIN
+        )
+    });
+    let raw_primary_prefixes_exclude_auxiliary_grammar = rows.iter().all(|row| {
+        cms19_raw_primary_fixed_prefix(row.preimage_family).is_none_or(|prefix| {
+            fixed_prefixes_are_incompatible(&prefix, &auxiliary_fixed_preimage_prefix)
+        })
+    });
+    let (primary_hash_query_count, auxiliary_hash_query_count) =
+        rows.iter()
+            .try_fold((0_u64, 0_u64), |(primary, auxiliary), row| {
+                match row.restriction {
+                    Cms19ConcreteShake256OracleRestriction::PrimaryCms19Database => Ok((
+                        primary
+                            .checked_add(row.hash_query_count)
+                            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+                        auxiliary,
+                    )),
+                    Cms19ConcreteShake256OracleRestriction::PrecommittedAuxiliarySamplerTable => {
+                        Ok((
+                            primary,
+                            auxiliary
+                                .checked_add(row.hash_query_count)
+                                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+                        ))
+                    }
+                }
+            })?;
+    let (primary_accepting_database_equation_count, auxiliary_accepting_database_equation_count) =
+        rows.iter()
+            .try_fold((0_u64, 0_u64), |(primary, auxiliary), row| {
+                match row.restriction {
+                    Cms19ConcreteShake256OracleRestriction::PrimaryCms19Database => Ok((
+                        primary
+                            .checked_add(row.accepting_database_equation_count)
+                            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+                        auxiliary,
+                    )),
+                    Cms19ConcreteShake256OracleRestriction::PrecommittedAuxiliarySamplerTable => {
+                        Ok((
+                            primary,
+                            auxiliary
+                                .checked_add(row.accepting_database_equation_count)
+                                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+                        ))
+                    }
+                }
+            })?;
+    let certificate = Cms19ConcreteShake256OraclePartitionCertificate {
+        construction_plan_identity_hash: whole_database_support.construction_plan_identity_hash,
+        rows,
+        auxiliary_domain: TRANSCRIPT_ATOMIC_CHALLENGE_BLOCK_DOMAIN,
+        auxiliary_canonical_tuple_schema_identifier: CANONICAL_TUPLE_SCHEMA_IDENTIFIER,
+        auxiliary_canonical_tuple_version: CANONICAL_TUPLE_VERSION,
+        auxiliary_canonical_item_count_including_domain: 5,
+        auxiliary_argument_item_types: [
+            CanonicalItemType::Hash512,
+            CanonicalItemType::Hash512,
+            CanonicalItemType::Unsigned64,
+            CanonicalItemType::Unsigned64,
+        ],
+        auxiliary_fixed_preimage_prefix,
+        primary_hash_query_count,
+        auxiliary_hash_query_count,
+        primary_accepting_database_equation_count,
+        auxiliary_accepting_database_equation_count,
+        every_call_returns_exactly_512_bits: true,
+        auxiliary_membership_is_canonically_decidable: true,
+        primary_foundation_domains_exclude_auxiliary_domain,
+        raw_primary_prefixes_exclude_auxiliary_grammar,
+        one_random_function_distribution_factors_over_disjoint_restrictions: true,
+        full_oracle_unitary_is_the_composition_of_commuting_restriction_unitaries: true,
+        uses_shake256_capacity_as_the_oracle_output_denominator: false,
+        claims_concrete_shake256_is_proved_ideal: false,
+    };
+    if !certificate.is_complete_for(whole_database_support, nonlinear_binding) {
+        return Err(WhirTheoremCertificateError::IncompleteOracleEquationMapping);
+    }
+    Ok(certificate)
+}
+
+impl Cms19ConcreteShake256OraclePartitionCertificate {
+    fn is_complete_for(
+        &self,
+        whole_database_support: &Cms19WholeDatabaseSupportCertificate,
+        nonlinear_binding: &NonlinearCommitmentBindingCertificate,
+    ) -> bool {
+        let partitioned_hash_query_counts =
+            self.rows
+                .iter()
+                .try_fold((0_u64, 0_u64), |(primary, auxiliary), row| {
+                    match row.restriction {
+                Cms19ConcreteShake256OracleRestriction::PrimaryCms19Database => {
+                    Some((primary.checked_add(row.hash_query_count)?, auxiliary))
+                }
+                Cms19ConcreteShake256OracleRestriction::PrecommittedAuxiliarySamplerTable => {
+                    Some((primary, auxiliary.checked_add(row.hash_query_count)?))
+                }
+            }
+                });
+        let partitioned_accepting_database_equation_counts =
+            self.rows
+                .iter()
+                .try_fold((0_u64, 0_u64), |(primary, auxiliary), row| {
+                    match row.restriction {
+                Cms19ConcreteShake256OracleRestriction::PrimaryCms19Database => Some((
+                    primary.checked_add(row.accepting_database_equation_count)?,
+                    auxiliary,
+                )),
+                Cms19ConcreteShake256OracleRestriction::PrecommittedAuxiliarySamplerTable => {
+                    Some((
+                        primary,
+                        auxiliary.checked_add(row.accepting_database_equation_count)?,
+                    ))
+                }
+            }
+                });
+        let mapped_hash_query_count = self
+            .primary_hash_query_count
+            .checked_add(self.auxiliary_hash_query_count);
+        let mapped_accepting_database_equation_count = self
+            .primary_accepting_database_equation_count
+            .checked_add(self.auxiliary_accepting_database_equation_count);
+        self.construction_plan_identity_hash
+            == whole_database_support.construction_plan_identity_hash
+            && self.construction_plan_identity_hash
+                == nonlinear_binding.construction_plan_identity_hash
+            && self.rows.len() == whole_database_support.rows.len()
+            && self.rows.iter().zip(&whole_database_support.rows).all(
+                |(concrete_row, database_row)| {
+                    concrete_row.database_role == database_row.role
+                        && cms19_database_support_preimage_family(
+                            database_row.role,
+                            nonlinear_binding,
+                        )
+                        .is_ok_and(|expected| expected == concrete_row.preimage_family)
+                        && concrete_row.hash_query_count == database_row.hash_query_count
+                        && concrete_row.accepting_database_equation_count
+                            == database_row.accepting_database_equation_count
+                        && concrete_row.output_bit_length
+                            == CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH
+                        && (concrete_row.restriction
+                            == Cms19ConcreteShake256OracleRestriction::PrecommittedAuxiliarySamplerTable)
+                            == matches!(
+                                concrete_row.database_role,
+                                Cms19DatabaseSupportRole::TypedTranscript {
+                                    role: OracleEquationRole::AtomicChallengeOutputBlock,
+                                }
+                            )
+                },
+            )
+            && self.auxiliary_domain == TRANSCRIPT_ATOMIC_CHALLENGE_BLOCK_DOMAIN
+            && self.auxiliary_canonical_tuple_schema_identifier
+                == CANONICAL_TUPLE_SCHEMA_IDENTIFIER
+            && self.auxiliary_canonical_tuple_version == CANONICAL_TUPLE_VERSION
+            && self.auxiliary_canonical_item_count_including_domain == 5
+            && self.auxiliary_argument_item_types
+                == [
+                    CanonicalItemType::Hash512,
+                    CanonicalItemType::Hash512,
+                    CanonicalItemType::Unsigned64,
+                    CanonicalItemType::Unsigned64,
+                ]
+            && cms19_auxiliary_fixed_preimage_prefix().ok().as_ref()
+                == Some(&self.auxiliary_fixed_preimage_prefix)
+            && mapped_hash_query_count == Some(whole_database_support.mapped_hash_query_count)
+            && mapped_accepting_database_equation_count
+                == Some(whole_database_support.mapped_accepting_database_equation_count)
+            && partitioned_hash_query_counts
+                == Some((self.primary_hash_query_count, self.auxiliary_hash_query_count))
+            && partitioned_accepting_database_equation_counts
+                == Some((
+                    self.primary_accepting_database_equation_count,
+                    self.auxiliary_accepting_database_equation_count,
+                ))
+            && self.every_call_returns_exactly_512_bits
+            && self.auxiliary_membership_is_canonically_decidable
+            && self.primary_foundation_domains_exclude_auxiliary_domain
+            && self.raw_primary_prefixes_exclude_auxiliary_grammar
+            && self.one_random_function_distribution_factors_over_disjoint_restrictions
+            && self.full_oracle_unitary_is_the_composition_of_commuting_restriction_unitaries
+            && !self.uses_shake256_capacity_as_the_oracle_output_denominator
+            && !self.claims_concrete_shake256_is_proved_ideal
+    }
+}
+
+fn derive_cms19_separated_oracle_projection_certificate(
+    oracle_model: &Cms19FixedOutputSeededSamplerModelCertificate,
+    whole_database_support: &Cms19WholeDatabaseSupportCertificate,
+    nonlinear_binding: &NonlinearCommitmentBindingCertificate,
+) -> Result<Cms19SeparatedOracleProjectionCertificate, WhirTheoremCertificateError> {
+    if !whole_database_support.is_complete() {
+        return Err(WhirTheoremCertificateError::IncompleteOracleEquationMapping);
+    }
+    let concrete_shake256_partition = derive_cms19_concrete_shake256_oracle_partition_certificate(
+        whole_database_support,
+        nonlinear_binding,
+    )?;
+    let transcript_rows = whole_database_support
+        .rows
+        .iter()
+        .filter_map(|row| match row.role {
+            Cms19DatabaseSupportRole::TypedTranscript { role } => Some((role, row)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let concrete_transcript_hash_query_count =
+        transcript_rows.iter().try_fold(0_u64, |count, (_, row)| {
+            count
+                .checked_add(row.hash_query_count)
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+        })?;
+    let auxiliary_rows = transcript_rows
+        .iter()
+        .filter(|(role, _)| *role == OracleEquationRole::AtomicChallengeOutputBlock)
+        .collect::<Vec<_>>();
+    let seed_rows = transcript_rows
+        .iter()
+        .filter(|(role, _)| *role == OracleEquationRole::AtomicChallengeSeed)
+        .collect::<Vec<_>>();
+    let ([(_, auxiliary_row)], [(_, seed_row)]) = (auxiliary_rows.as_slice(), seed_rows.as_slice())
+    else {
+        return Err(WhirTheoremCertificateError::IncompleteOracleEquationMapping);
+    };
+    if auxiliary_row.hash_query_count != oracle_model.output_block_hash_query_count
+        || auxiliary_row.accepting_database_equation_count
+            != oracle_model.output_block_hash_query_count
+        || seed_row.hash_query_count != oracle_model.seed_hash_query_count
+        || seed_row.accepting_database_equation_count != oracle_model.seed_hash_query_count
+    {
+        return Err(WhirTheoremCertificateError::IncompleteOracleEquationMapping);
+    }
+    let primary_transcript_hash_query_count = concrete_transcript_hash_query_count
+        .checked_sub(auxiliary_row.hash_query_count)
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let primary_ordinary_transcript_hash_query_count = primary_transcript_hash_query_count
+        .checked_sub(seed_row.hash_query_count)
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let primary_verifier_hash_query_count = whole_database_support
+        .mapped_hash_query_count
+        .checked_sub(auxiliary_row.hash_query_count)
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let primary_accepting_database_equation_count = whole_database_support
+        .mapped_accepting_database_equation_count
+        .checked_sub(auxiliary_row.accepting_database_equation_count)
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let canonical_domain_partition_is_disjoint = concrete_shake256_partition
+        .primary_foundation_domains_exclude_auxiliary_domain
+        && concrete_shake256_partition.raw_primary_prefixes_exclude_auxiliary_grammar;
+    let certificate = Cms19SeparatedOracleProjectionCertificate {
+        concrete_shake256_partition,
+        concrete_transcript_hash_query_count,
+        primary_transcript_hash_query_count,
+        primary_seed_hash_query_count: seed_row.hash_query_count,
+        primary_ordinary_transcript_hash_query_count,
+        auxiliary_sampler_table_hash_query_count: auxiliary_row.hash_query_count,
+        concrete_verifier_hash_query_count: whole_database_support.mapped_hash_query_count,
+        primary_verifier_hash_query_count,
+        concrete_accepting_database_equation_count: whole_database_support
+            .mapped_accepting_database_equation_count,
+        primary_accepting_database_equation_count,
+        auxiliary_accepting_database_equation_count: auxiliary_row
+            .accepting_database_equation_count,
+        auxiliary_database_role_count: auxiliary_rows.len(),
+        canonical_domain_partition_is_disjoint,
+        claims_precommitted_table_goodness: false,
+        claims_relativized_cms19_reduction: false,
+    };
+    if certificate.auxiliary_database_role_count != 1
+        || !certificate.canonical_domain_partition_is_disjoint
+        || certificate.concrete_transcript_hash_query_count
+            != certificate
+                .primary_transcript_hash_query_count
+                .checked_add(certificate.auxiliary_sampler_table_hash_query_count)
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?
+        || certificate.primary_transcript_hash_query_count
+            != certificate
+                .primary_seed_hash_query_count
+                .checked_add(certificate.primary_ordinary_transcript_hash_query_count)
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?
+        || certificate.concrete_verifier_hash_query_count
+            != certificate
+                .primary_verifier_hash_query_count
+                .checked_add(certificate.auxiliary_sampler_table_hash_query_count)
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?
+        || certificate.concrete_accepting_database_equation_count
+            != certificate
+                .primary_accepting_database_equation_count
+                .checked_add(certificate.auxiliary_accepting_database_equation_count)
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?
+        || certificate.auxiliary_sampler_table_hash_query_count
+            != certificate.auxiliary_accepting_database_equation_count
+        || certificate.primary_verifier_hash_query_count
+            != certificate
+                .concrete_shake256_partition
+                .primary_hash_query_count
+        || certificate.auxiliary_sampler_table_hash_query_count
+            != certificate
+                .concrete_shake256_partition
+                .auxiliary_hash_query_count
+        || certificate.primary_accepting_database_equation_count
+            != certificate
+                .concrete_shake256_partition
+                .primary_accepting_database_equation_count
+        || certificate.auxiliary_accepting_database_equation_count
+            != certificate
+                .concrete_shake256_partition
+                .auxiliary_accepting_database_equation_count
+        || !certificate
+            .concrete_shake256_partition
+            .is_complete_for(whole_database_support, nonlinear_binding)
+        || certificate.claims_precommitted_table_goodness
+        || certificate.claims_relativized_cms19_reduction
+    {
+        return Err(WhirTheoremCertificateError::IncompleteOracleEquationMapping);
+    }
+    Ok(certificate)
+}
+
 fn derive_cms19_arithmetic_certificate(
-    oracle_model: &Cms19TypedVariableOutputOracleModelCertificate,
-    verifier_hash_query_count: u64,
-    accepting_database_equation_count: u64,
+    oracle_model: &Cms19FixedOutputSeededSamplerModelCertificate,
+    whole_database_support: &Cms19WholeDatabaseSupportCertificate,
+    nonlinear_binding: &NonlinearCommitmentBindingCertificate,
 ) -> Result<Cms19ArithmeticCertificate, WhirTheoremCertificateError> {
-    let minimum_output_bit_length = usize::try_from(oracle_model.minimum_output_bit_length)
+    if oracle_model.reduction
+        != Cms19FixedOutputSeededSamplerReduction::DomainSeparatedPredecessorLinkedFixedHashSamplerV1
+        || oracle_model.concrete_hash_mapping_scope
+            != Cms19ConcreteHashMappingScope::DomainSeparatedShake256Fixed512BitQroAssumption
+        || oracle_model.preimage_binding
+            != Cms19SeededStreamPreimageBinding::CanonicalWidthSeedOrdinalAndPredecessor
+        || oracle_model.oracle_output_bit_length != oracle_model.collision_projection_bit_length
+    {
+        return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
+    }
+    let separated_oracle_projection = derive_cms19_separated_oracle_projection_certificate(
+        oracle_model,
+        whole_database_support,
+        nonlinear_binding,
+    )?;
+    let verifier_hash_query_count = separated_oracle_projection.primary_verifier_hash_query_count;
+    let accepting_database_equation_count =
+        separated_oracle_projection.primary_accepting_database_equation_count;
+    if oracle_model.seed_hash_query_count
+        > separated_oracle_projection.primary_transcript_hash_query_count
+        || oracle_model.fixed_hash_query_count
+            != oracle_model
+                .seed_hash_query_count
+                .checked_add(oracle_model.output_block_hash_query_count)
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?
+    {
+        return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
+    }
+    let oracle_output_bit_length = usize::try_from(oracle_model.oracle_output_bit_length)
         .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
     let adversarial_query_bound =
         (BigUint::from(1_u8) << CMS19_ADVERSARIAL_QUERY_EXPONENT) - BigUint::from(1_u8);
     let compiler_query_bound = &adversarial_query_bound + BigUint::from(verifier_hash_query_count);
-    let classical_soundness_multiplier =
-        BigUint::from(12_u8) * &compiler_query_bound * &compiler_query_bound;
-    let ideal_oracle_penalty_numerator = BigUint::from(48_u8)
+    let oracle_square_relaxation_constant =
+        oracle_model.reduction.oracle_square_relaxation_constant();
+    let classical_soundness_coefficient = oracle_square_relaxation_constant
+        .checked_mul(oracle_model.reduction.database_lifting_constant())
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let ideal_oracle_penalty_coefficient = classical_soundness_coefficient
+        .checked_mul(oracle_model.reduction.database_collision_coefficient())
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let classical_soundness_multiplier = BigUint::from(classical_soundness_coefficient)
+        * &compiler_query_bound
+        * &compiler_query_bound;
+    let ideal_oracle_penalty_numerator = BigUint::from(ideal_oracle_penalty_coefficient)
         * &compiler_query_bound
         * &compiler_query_bound
         * &compiler_query_bound
-        + BigUint::from(2_u8) * BigUint::from(accepting_database_equation_count);
+        + BigUint::from(oracle_square_relaxation_constant)
+            * BigUint::from(accepting_database_equation_count);
     Ok(Cms19ArithmeticCertificate {
-        oracle_model_requirement:
-            Cms19ArithmeticOracleModelRequirement::TypedVariableOutputIdealXof {
-                minimum_output_bit_length,
-            },
+        oracle_model_requirement: Cms19ArithmeticOracleModelRequirement::FixedOutputRandomOracle {
+            output_bit_length: oracle_output_bit_length,
+        },
+        separated_oracle_projection,
         adversarial_query_bound,
         verifier_hash_query_count,
         accepting_database_equation_count,
         compiler_query_bound,
         classical_soundness_multiplier,
         ideal_oracle_penalty_numerator,
-        ideal_oracle_penalty_denominator_bit_length: minimum_output_bit_length,
+        ideal_oracle_penalty_denominator_bit_length: oracle_output_bit_length,
     })
+}
+
+fn biguint_log2_ceiling(value: &BigUint) -> Result<usize, WhirTheoremCertificateError> {
+    if value.is_zero() {
+        return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
+    }
+    let bit_length = usize::try_from(value.bits())
+        .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let lower_power = BigUint::one()
+        << bit_length
+            .checked_sub(1)
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    if value == &lower_power {
+        bit_length
+            .checked_sub(1)
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
+    } else {
+        Ok(bit_length)
+    }
+}
+
+fn inverse_power_of_two_exponent_floor(
+    fraction: &ExactBigFraction,
+) -> Result<usize, WhirTheoremCertificateError> {
+    if fraction.numerator.is_zero() || fraction.numerator > fraction.denominator {
+        return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
+    }
+    let ratio_floor = &fraction.denominator / &fraction.numerator;
+    usize::try_from(
+        ratio_floor
+            .bits()
+            .checked_sub(1)
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+    )
+    .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)
+}
+
+fn query_failure_sampler_role(
+    event: ExactQueryFailureEvent,
+    pad_epoch_ordinal: u32,
+) -> RowCodeWhirQueryRole {
+    match event {
+        ExactQueryFailureEvent::OuterOpeningPointWords
+        | ExactQueryFailureEvent::RelationPhaseColumns => RowCodeWhirQueryRole::Outer,
+        ExactQueryFailureEvent::BoundTreeWords | ExactQueryFailureEvent::StatementRootWords => {
+            RowCodeWhirQueryRole::Bound
+        }
+        ExactQueryFailureEvent::WhirSource { epoch_ordinal } => {
+            RowCodeWhirQueryRole::WhirEpoch { epoch_ordinal }
+        }
+        ExactQueryFailureEvent::AggregateWidePad => RowCodeWhirQueryRole::WhirEpoch {
+            epoch_ordinal: pad_epoch_ordinal,
+        },
+    }
+}
+
+fn derive_cms19_precommitted_sampler_table_certificate(
+    sampler_distribution: &Cms19FixedOutputSeededSamplerDistributionCertificate,
+    query_failure_rows: &[ExactQueryFailureRow],
+    cms19_arithmetic: &Cms19ArithmeticCertificate,
+) -> Result<Cms19PrecommittedSamplerTableCertificate, WhirTheoremCertificateError> {
+    if !sampler_distribution.is_self_consistent()
+        || query_failure_rows.is_empty()
+        || cms19_arithmetic.oracle_model_requirement
+            != (Cms19ArithmeticOracleModelRequirement::FixedOutputRandomOracle {
+                output_bit_length: CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH,
+            })
+        || cms19_arithmetic
+            .separated_oracle_projection
+            .claims_precommitted_table_goodness
+        || cms19_arithmetic
+            .separated_oracle_projection
+            .claims_relativized_cms19_reduction
+    {
+        return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
+    }
+    let seed_space_cardinality = BigUint::one() << CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH;
+    let mut point_rows = Vec::new();
+    let mut logical_failure_density_expansion_factor =
+        ExactBigFraction::from_u64(CMS19_AUXILIARY_TABLE_DENSITY_EXPANSION_NUMERATOR, 1)?;
+    for sampler_row in &sampler_distribution.rows {
+        let (kind, possible_output_point_count, conditional_output_floor) = match &sampler_row.kind
+        {
+            Cms19SeededSamplerDistributionKind::ProductResidueVector {
+                target_cardinality, ..
+            } => (
+                Cms19PrecommittedSamplerTablePointKind::ProductResidueVector,
+                target_cardinality.clone(),
+                target_cardinality.clone(),
+            ),
+            Cms19SeededSamplerDistributionKind::ExtensionElement {
+                field_cardinality,
+                accepted_candidate_count_floor,
+                ..
+            } => (
+                Cms19PrecommittedSamplerTablePointKind::ExtensionElement,
+                field_cardinality.clone(),
+                accepted_candidate_count_floor.clone(),
+            ),
+            Cms19SeededSamplerDistributionKind::DistinctIndexVector { .. } => continue,
+        };
+        if conditional_output_floor.is_zero()
+            || conditional_output_floor > possible_output_point_count
+            || conditional_output_floor != sampler_row.conditional_uniform_output_cardinality_floor
+        {
+            return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
+        }
+        let seed_space_to_output_mean_floor = &seed_space_cardinality / &conditional_output_floor;
+        let output_family_log2_count_ceiling =
+            u64::try_from(biguint_log2_ceiling(&possible_output_point_count)?)
+                .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+        let output_family_log2_count_ceiling_big = BigUint::from(output_family_log2_count_ceiling);
+        if seed_space_to_output_mean_floor <= output_family_log2_count_ceiling_big {
+            return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
+        }
+        let table_bad_event_inverse_power_of_two_exponent_floor =
+            &seed_space_to_output_mean_floor - &output_family_log2_count_ceiling_big;
+        let density_expansion = ExactBigFraction::new(
+            BigUint::from(CMS19_AUXILIARY_TABLE_DENSITY_EXPANSION_NUMERATOR)
+                * &possible_output_point_count,
+            conditional_output_floor.clone(),
+        )?;
+        if logical_failure_density_expansion_factor.less_than(&density_expansion) {
+            logical_failure_density_expansion_factor = density_expansion;
+        }
+        point_rows.push(Cms19PrecommittedSamplerTablePointConcentrationRow {
+            operation_ordinal: sampler_row.operation_ordinal,
+            kind,
+            possible_output_point_count,
+            conditional_uniform_output_cardinality_floor: conditional_output_floor,
+            seed_space_to_output_mean_floor,
+            output_family_log2_count_ceiling,
+            table_bad_event_inverse_power_of_two_exponent_floor,
+        });
+    }
+    if point_rows.is_empty() {
+        return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
+    }
+
+    let final_source_epoch_ordinal = query_failure_rows
+        .iter()
+        .filter_map(|row| match row.event {
+            ExactQueryFailureEvent::WhirSource { epoch_ordinal } => Some(epoch_ordinal),
+            _ => None,
+        })
+        .max()
+        .ok_or(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence)?;
+    let pad_epoch_ordinal = final_source_epoch_ordinal
+        .checked_add(1)
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let mut query_rows = Vec::new();
+    for failure_row in query_failure_rows {
+        let expected_role = query_failure_sampler_role(failure_row.event, pad_epoch_ordinal);
+        let matching_sampler_rows = sampler_distribution
+            .rows
+            .iter()
+            .filter(|sampler_row| {
+                sampler_row.failure_event_owner
+                    == (SelectedPlanFailureEventOwner::DistinctQueryVector {
+                        role: expected_role,
+                    })
+                    && matches!(
+                        sampler_row.kind,
+                        Cms19SeededSamplerDistributionKind::DistinctIndexVector {
+                            domain_cardinality,
+                            output_count: row_output_count,
+                            ..
+                        } if domain_cardinality == failure_row.population
+                            && u64::from(row_output_count) >= failure_row.query_count
+                    )
+            })
+            .collect::<Vec<_>>();
+        let [sampler_row] = matching_sampler_rows.as_slice() else {
+            return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
+        };
+        let sampler_output_count = match sampler_row.kind {
+            Cms19SeededSamplerDistributionKind::DistinctIndexVector { output_count, .. } => {
+                u64::from(output_count)
+            }
+            _ => return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping),
+        };
+        let projection = if sampler_output_count == failure_row.query_count {
+            Cms19PrecommittedSamplerQueryProjection::CompleteOrderedVector
+        } else if failure_row.event == ExactQueryFailureEvent::BoundTreeWords
+            && query_failure_rows.iter().any(|complete_row| {
+                complete_row.event == ExactQueryFailureEvent::StatementRootWords
+                    && complete_row.population == failure_row.population
+                    && complete_row.query_count == sampler_output_count
+            })
+        {
+            Cms19PrecommittedSamplerQueryProjection::CanonicalPrefixOfOrderedVector
+        } else {
+            return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
+        };
+        let probability = failure_row.exact_without_replacement_probability.clone();
+        let seed_space_bad_vector_mean_floor =
+            (&seed_space_cardinality * &probability.numerator) / &probability.denominator;
+        let agreement_family_log2_count_ceiling = failure_row.population;
+        let agreement_family_log2_count_ceiling_big =
+            BigUint::from(agreement_family_log2_count_ceiling);
+        if seed_space_bad_vector_mean_floor <= agreement_family_log2_count_ceiling_big {
+            return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
+        }
+        let table_bad_event_inverse_power_of_two_exponent_floor =
+            &seed_space_bad_vector_mean_floor - &agreement_family_log2_count_ceiling_big;
+        query_rows.push(Cms19PrecommittedSamplerTableQueryConcentrationRow {
+            event: failure_row.event,
+            sampler_operation_ordinal: sampler_row.operation_ordinal,
+            projection,
+            population: failure_row.population,
+            agreement_ceiling: failure_row.agreement_ceiling,
+            query_count: failure_row.query_count,
+            sampler_output_count,
+            exact_bad_vector_probability_ceiling: probability,
+            seed_space_bad_vector_mean_floor,
+            agreement_family_log2_count_ceiling,
+            table_bad_event_inverse_power_of_two_exponent_floor,
+        });
+    }
+    let distinct_query_sampler_operation_count = query_rows
+        .iter()
+        .map(|row| row.sampler_operation_ordinal)
+        .collect::<BTreeSet<_>>()
+        .len();
+    let canonical_prefix_projection_count = query_rows
+        .iter()
+        .filter(|row| {
+            row.projection
+                == Cms19PrecommittedSamplerQueryProjection::CanonicalPrefixOfOrderedVector
+        })
+        .count();
+    let expected_distinct_query_sampler_operation_count =
+        usize::try_from(sampler_distribution.distinct_index_sampler_count)
+            .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let every_query_failure_uses_a_production_owned_sampler_projection =
+        distinct_query_sampler_operation_count == expected_distinct_query_sampler_operation_count
+            && query_rows.iter().all(|row| {
+                row.query_count <= row.sampler_output_count
+                    && (row.query_count == row.sampler_output_count)
+                        == (row.projection
+                            == Cms19PrecommittedSamplerQueryProjection::CompleteOrderedVector)
+            });
+    let shared_query_vectors_are_not_charged_as_independent_samples =
+        query_rows.iter().enumerate().all(|(row_index, row)| {
+            query_rows.iter().skip(row_index + 1).all(|other| {
+                row.sampler_operation_ordinal != other.sampler_operation_ordinal
+                    || (row.population == other.population
+                        && row.sampler_output_count == other.sampler_output_count)
+            })
+        });
+    if !every_query_failure_uses_a_production_owned_sampler_projection
+        || !shared_query_vectors_are_not_charged_as_independent_samples
+    {
+        return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
+    }
+
+    let density_event_count = point_rows
+        .len()
+        .checked_add(query_rows.len())
+        .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+    let density_event_count_log2_ceiling =
+        biguint_log2_ceiling(&BigUint::from(density_event_count))?;
+    let minimum_density_bad_event_exponent_floor = point_rows
+        .iter()
+        .map(|row| &row.table_bad_event_inverse_power_of_two_exponent_floor)
+        .chain(
+            query_rows
+                .iter()
+                .map(|row| &row.table_bad_event_inverse_power_of_two_exponent_floor),
+        )
+        .min()
+        .cloned()
+        .ok_or(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence)?;
+    let required_density_exponent = BigUint::from(
+        CMS19_AUXILIARY_TABLE_DENSITY_BAD_EVENT_SECURITY_BITS
+            .checked_add(density_event_count_log2_ceiling)
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
+    );
+    if minimum_density_bad_event_exponent_floor < required_density_exponent {
+        return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
+    }
+    let charged_density_bad_event_probability_ceiling = ExactBigFraction::new(
+        BigUint::one(),
+        BigUint::one() << CMS19_AUXILIARY_TABLE_DENSITY_BAD_EVENT_SECURITY_BITS,
+    )?;
+
+    let average_exhaustion_probability_ceiling =
+        sampler_distribution.exhaustion_union_bound.clone();
+    let exhaustion_average_inverse_power_of_two_exponent_floor =
+        inverse_power_of_two_exponent_floor(&average_exhaustion_probability_ceiling)?;
+    let cms19_multiplier_log2_ceiling =
+        biguint_log2_ceiling(&cms19_arithmetic.classical_soundness_multiplier)?;
+    let conditioned_exhaustion_probability_exponent =
+        exhaustion_average_inverse_power_of_two_exponent_floor
+            .checked_add(cms19_multiplier_log2_ceiling)
+            .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?
+            / 2;
+    if conditioned_exhaustion_probability_exponent <= cms19_multiplier_log2_ceiling
+        || conditioned_exhaustion_probability_exponent
+            >= exhaustion_average_inverse_power_of_two_exponent_floor
+    {
+        return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
+    }
+    let conditioned_exhaustion_probability_ceiling = ExactBigFraction::new(
+        BigUint::one(),
+        BigUint::one() << conditioned_exhaustion_probability_exponent,
+    )?;
+    let exhaustion_table_bad_event_probability_ceiling = average_exhaustion_probability_ceiling
+        .multiply_integer(&(BigUint::one() << conditioned_exhaustion_probability_exponent))?;
+    let complete_auxiliary_table_bad_event_probability_ceiling =
+        charged_density_bad_event_probability_ceiling
+            .add(&exhaustion_table_bad_event_probability_ceiling)?;
+    let transformed_conditioned_exhaustion = conditioned_exhaustion_probability_ceiling
+        .multiply_integer(&cms19_arithmetic.classical_soundness_multiplier)?;
+    if !transformed_conditioned_exhaustion.is_at_most_inverse_power_of_two(128)
+        || !exhaustion_table_bad_event_probability_ceiling.is_at_most_inverse_power_of_two(128)
+        || !complete_auxiliary_table_bad_event_probability_ceiling
+            .is_at_most_inverse_power_of_two(128)
+    {
+        return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
+    }
+
+    let certificate = Cms19PrecommittedSamplerTableCertificate {
+        construction_plan_identity_hash: sampler_distribution.construction_plan_identity_hash,
+        canonical_oracle_plan_hash: sampler_distribution.canonical_oracle_plan_hash,
+        oracle_output_bit_length: CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH,
+        seed_space_cardinality,
+        point_rows,
+        query_rows,
+        distinct_query_sampler_operation_count,
+        canonical_prefix_projection_count,
+        density_event_count,
+        density_event_count_log2_ceiling,
+        minimum_density_bad_event_exponent_floor,
+        charged_density_bad_event_probability_ceiling,
+        logical_failure_density_expansion_factor,
+        average_exhaustion_probability_ceiling,
+        exhaustion_average_inverse_power_of_two_exponent_floor,
+        cms19_multiplier_log2_ceiling,
+        conditioned_exhaustion_probability_exponent,
+        conditioned_exhaustion_probability_ceiling,
+        exhaustion_table_bad_event_probability_ceiling,
+        complete_auxiliary_table_bad_event_probability_ceiling,
+        seed_collision_probability_ceiling: sampler_distribution.seed_collision_union_bound.clone(),
+        canonical_domain_restrictions_are_disjoint: sampler_distribution
+            .seed_and_block_domains_are_distinct,
+        every_seed_index_owns_an_independent_fixed_width_block_chain: sampler_distribution
+            .block_preimages_are_pairwise_distinct_conditioned_on_distinct_seeds,
+        every_query_failure_uses_a_production_owned_sampler_projection,
+        shared_query_vectors_are_not_charged_as_independent_samples,
+        table_goodness_is_universal_over_adaptive_failure_sets: true,
+        primary_oracle_reduction_relativizes_to_fixed_auxiliary_unitaries: true,
+        claims_fixed_shake256_is_an_ideal_oracle: false,
+    };
+    if certificate.construction_plan_identity_hash == [0_u8; 64]
+        || certificate.canonical_oracle_plan_hash == [0_u8; 64]
+        || certificate.point_rows.is_empty()
+        || certificate.query_rows.len() != query_failure_rows.len()
+        || certificate.distinct_query_sampler_operation_count
+            != expected_distinct_query_sampler_operation_count
+        || certificate.canonical_prefix_projection_count
+            != certificate
+                .query_rows
+                .iter()
+                .filter(|row| {
+                    row.projection
+                        == Cms19PrecommittedSamplerQueryProjection::CanonicalPrefixOfOrderedVector
+                })
+                .count()
+        || !certificate.every_query_failure_uses_a_production_owned_sampler_projection
+        || !certificate.shared_query_vectors_are_not_charged_as_independent_samples
+        || certificate.density_event_count
+            != certificate
+                .point_rows
+                .len()
+                .checked_add(certificate.query_rows.len())
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?
+        || !certificate.canonical_domain_restrictions_are_disjoint
+        || !certificate.every_seed_index_owns_an_independent_fixed_width_block_chain
+        || !certificate.table_goodness_is_universal_over_adaptive_failure_sets
+        || !certificate.primary_oracle_reduction_relativizes_to_fixed_auxiliary_unitaries
+        || certificate.claims_fixed_shake256_is_an_ideal_oracle
+    {
+        return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
+    }
+    Ok(certificate)
 }
 
 const EXACT_FAILURE_OWNER_KINDS: [ExactFailureOwnerKind; 19] = [
@@ -16111,6 +21715,7 @@ struct ExactFailureMagnitudeDerivationInput<'a> {
     aggregate_wide_masking: &'a AggregateWideMaskingCertificate,
     initial_constraint_batch_numerator: u64,
     logical_verifier_message_count: u64,
+    sampler_model: &'a Cms19FixedOutputSeededSamplerModelCertificate,
     cms19_arithmetic: &'a Cms19ArithmeticCertificate,
 }
 
@@ -16447,9 +22052,29 @@ fn derive_exact_failure_magnitude_certificate_with_mutation(
         code_state_rows,
         aggregate_wide_masking,
         logical_verifier_message_count,
+        sampler_model,
         cms19_arithmetic,
         ..
     } = input;
+    let transcript_oracle_output_inventory =
+        derive_cms19_transcript_oracle_output_inventory(plan, catalog)?;
+    if !sampler_model.is_complete_for(
+        plan,
+        relation_variant,
+        relation_context,
+        catalog,
+        &transcript_oracle_output_inventory,
+    ) || sampler_model.output_block_hash_query_count
+        != cms19_arithmetic
+            .separated_oracle_projection
+            .auxiliary_sampler_table_hash_query_count
+        || sampler_model.seed_hash_query_count
+            != cms19_arithmetic
+                .separated_oracle_projection
+                .primary_seed_hash_query_count
+    {
+        return Err(WhirTheoremCertificateError::IncompleteTranscriptMapping);
+    }
     let owner_rows = derive_exact_failure_owner_rows(catalog, selected_plan_state_predicate)?;
     if owner_rows
         .iter()
@@ -16478,15 +22103,33 @@ fn derive_exact_failure_magnitude_certificate_with_mutation(
         derive_exact_algebraic_failure_rows(input, &owner_rows, &product_challenge_rows)?;
     let query_failure_probability_ceiling = sum_query_probability_ceiling(&query_rows)?;
     let algebraic_failure_probability_ceiling = sum_algebraic_probability_ceiling(&algebraic_rows)?;
-    let classical_failure_probability_ceiling =
+    let ideal_public_coin_classical_failure_probability_ceiling =
         query_failure_probability_ceiling.add(&algebraic_failure_probability_ceiling)?;
+    let precommitted_sampler_table = derive_cms19_precommitted_sampler_table_certificate(
+        &sampler_model.classical_sampler_distribution,
+        &query_rows,
+        cms19_arithmetic,
+    )?;
+    let classical_failure_probability_ceiling =
+        ideal_public_coin_classical_failure_probability_ceiling
+            .multiply_fraction(
+                &precommitted_sampler_table.logical_failure_density_expansion_factor,
+            )?
+            .add(&precommitted_sampler_table.seed_collision_probability_ceiling)?
+            .add(&precommitted_sampler_table.conditioned_exhaustion_probability_ceiling)?;
     let ideal_oracle_penalty = ExactBigFraction::new(
         cms19_arithmetic.ideal_oracle_penalty_numerator.clone(),
         BigUint::one() << cms19_arithmetic.ideal_oracle_penalty_denominator_bit_length,
     )?;
-    let qrom_failure_probability_ceiling = classical_failure_probability_ceiling
-        .multiply_integer(&cms19_arithmetic.classical_soundness_multiplier)?
-        .add(&ideal_oracle_penalty)?;
+    let cms19_primary_oracle_qrom_failure_probability_ceiling =
+        classical_failure_probability_ceiling
+            .multiply_integer(&cms19_arithmetic.classical_soundness_multiplier)?
+            .add(&ideal_oracle_penalty)?;
+    let auxiliary_table_bad_event_probability_ceiling = precommitted_sampler_table
+        .complete_auxiliary_table_bad_event_probability_ceiling
+        .clone();
+    let qrom_failure_probability_ceiling = cms19_primary_oracle_qrom_failure_probability_ceiling
+        .add(&auxiliary_table_bad_event_probability_ceiling)?;
     let family_application_multiplicity = u64::from(
         crate::bgv::proof_suite::selected_profile::selected_proof_application_slot_ceilings()
             .map_err(|_| WhirTheoremCertificateError::InvalidSelectedGeometry)?
@@ -16530,11 +22173,19 @@ fn derive_exact_failure_magnitude_certificate_with_mutation(
         extension_field_cardinality,
         query_failure_probability_ceiling,
         algebraic_failure_probability_ceiling,
+        ideal_public_coin_classical_failure_probability_ceiling,
+        precommitted_sampler_table,
         classical_failure_probability_ceiling,
+        cms19_primary_oracle_qrom_failure_probability_ceiling,
+        auxiliary_table_bad_event_probability_ceiling,
         qrom_failure_probability_ceiling,
         family_application_multiplicity,
         cms19_verifier_hash_query_count: cms19_arithmetic.verifier_hash_query_count,
         cms19_accepting_database_equation_count: cms19_arithmetic.accepting_database_equation_count,
+        cms19_classical_soundness_multiplier: cms19_arithmetic
+            .classical_soundness_multiplier
+            .clone(),
+        cms19_ideal_oracle_penalty_probability_ceiling: ideal_oracle_penalty,
         all_failure_owners_mapped_once,
         exact_query_products_bounded,
         ordinary_family_mass_gate_holds,
@@ -16559,6 +22210,7 @@ fn validate_exact_failure_magnitude_certificate(
         code_state_rows,
         aggregate_wide_masking,
         logical_verifier_message_count,
+        sampler_model,
         cms19_arithmetic,
         ..
     } = input;
@@ -16579,13 +22231,30 @@ fn validate_exact_failure_magnitude_certificate(
     );
     let expected_query_ceiling = sum_query_probability_ceiling(&expected_query_rows)?;
     let expected_algebraic_ceiling = sum_algebraic_probability_ceiling(&expected_algebraic_rows)?;
-    let expected_classical_ceiling = expected_query_ceiling.add(&expected_algebraic_ceiling)?;
-    let expected_qrom_ceiling = expected_classical_ceiling
+    let expected_ideal_public_coin_classical_ceiling =
+        expected_query_ceiling.add(&expected_algebraic_ceiling)?;
+    let expected_precommitted_sampler_table = derive_cms19_precommitted_sampler_table_certificate(
+        &sampler_model.classical_sampler_distribution,
+        &expected_query_rows,
+        cms19_arithmetic,
+    )?;
+    let expected_classical_ceiling = expected_ideal_public_coin_classical_ceiling
+        .multiply_fraction(
+            &expected_precommitted_sampler_table.logical_failure_density_expansion_factor,
+        )?
+        .add(&expected_precommitted_sampler_table.seed_collision_probability_ceiling)?
+        .add(&expected_precommitted_sampler_table.conditioned_exhaustion_probability_ceiling)?;
+    let expected_primary_qrom_ceiling = expected_classical_ceiling
         .multiply_integer(&cms19_arithmetic.classical_soundness_multiplier)?
         .add(&ExactBigFraction::new(
             cms19_arithmetic.ideal_oracle_penalty_numerator.clone(),
             BigUint::one() << cms19_arithmetic.ideal_oracle_penalty_denominator_bit_length,
         )?)?;
+    let expected_auxiliary_table_bad_event_ceiling = expected_precommitted_sampler_table
+        .complete_auxiliary_table_bad_event_probability_ceiling
+        .clone();
+    let expected_qrom_ceiling =
+        expected_primary_qrom_ceiling.add(&expected_auxiliary_table_bad_event_ceiling)?;
     let expected_multiplicity = u64::from(
         crate::bgv::proof_suite::selected_profile::selected_proof_application_slot_ceilings()
             .map_err(|_| WhirTheoremCertificateError::InvalidSelectedGeometry)?
@@ -16620,8 +22289,8 @@ fn validate_exact_failure_magnitude_certificate(
     if certificate.application_statement_schema_identifier
         != plan.application_statement_schema_identifier
         || cms19_arithmetic.oracle_model_requirement
-            != (Cms19ArithmeticOracleModelRequirement::TypedVariableOutputIdealXof {
-                minimum_output_bit_length: CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH,
+            != (Cms19ArithmeticOracleModelRequirement::FixedOutputRandomOracle {
+                output_bit_length: CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH,
             })
         || cms19_arithmetic.ideal_oracle_penalty_denominator_bit_length
             != CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH
@@ -16632,12 +22301,26 @@ fn validate_exact_failure_magnitude_certificate(
         || certificate.extension_field_cardinality != expected_extension_field_cardinality
         || certificate.query_failure_probability_ceiling != expected_query_ceiling
         || certificate.algebraic_failure_probability_ceiling != expected_algebraic_ceiling
+        || certificate.ideal_public_coin_classical_failure_probability_ceiling
+            != expected_ideal_public_coin_classical_ceiling
+        || certificate.precommitted_sampler_table != expected_precommitted_sampler_table
         || certificate.classical_failure_probability_ceiling != expected_classical_ceiling
+        || certificate.cms19_primary_oracle_qrom_failure_probability_ceiling
+            != expected_primary_qrom_ceiling
+        || certificate.auxiliary_table_bad_event_probability_ceiling
+            != expected_auxiliary_table_bad_event_ceiling
         || certificate.qrom_failure_probability_ceiling != expected_qrom_ceiling
         || certificate.family_application_multiplicity != expected_multiplicity
         || certificate.cms19_verifier_hash_query_count != cms19_arithmetic.verifier_hash_query_count
         || certificate.cms19_accepting_database_equation_count
             != cms19_arithmetic.accepting_database_equation_count
+        || certificate.cms19_classical_soundness_multiplier
+            != cms19_arithmetic.classical_soundness_multiplier
+        || certificate.cms19_ideal_oracle_penalty_probability_ceiling
+            != ExactBigFraction::new(
+                cms19_arithmetic.ideal_oracle_penalty_numerator.clone(),
+                BigUint::one() << cms19_arithmetic.ideal_oracle_penalty_denominator_bit_length,
+            )?
         || expected_owner_count != Some(logical_verifier_message_count)
         || certificate.all_failure_owners_mapped_once
             != exact_failure_owners_are_completely_mapped(
@@ -16707,6 +22390,20 @@ fn checked_exact_failure_magnitude_with_fault(
         }
         ExactFailureMagnitudeFault::ChangeVerifierHashQueryCount => {
             certificate.cms19_verifier_hash_query_count += 1;
+        }
+        ExactFailureMagnitudeFault::ChangeSamplerDensityExpansion => {
+            certificate
+                .precommitted_sampler_table
+                .logical_failure_density_expansion_factor
+                .numerator += BigUint::one();
+        }
+        ExactFailureMagnitudeFault::ChangeAuxiliaryTableBadEvent => {
+            certificate
+                .auxiliary_table_bad_event_probability_ceiling
+                .numerator += BigUint::one();
+        }
+        ExactFailureMagnitudeFault::ChangeCms19ClassicalSoundnessMultiplier => {
+            certificate.cms19_classical_soundness_multiplier += BigUint::one();
         }
         ExactFailureMagnitudeFault::ChangeApplicationStatementSchemaIdentifier => {
             certificate.application_statement_schema_identifier ^= 1;
@@ -17018,6 +22715,33 @@ fn public_only_construction_has_physical_coverage_without_dummy_mask_sources() {
         .is_err(),
         "omitting a public bound-tree opening claim must refuse",
     );
+
+    let hiding_configuration =
+        super::super::hiding_whir::selected_hiding_whir_config(plan.selected_parameters())
+            .expect("the public-only hiding configuration derives");
+    let aggregate_wide_masking = AggregateWideMaskingCertificate::derive(&hiding_configuration)
+        .expect("the public-only aggregate masking geometry derives");
+    let geometry_certificate = checked_row_code_whir_production_geometry_certificate_with_masking(
+        &plan,
+        &artifact,
+        relation_variant,
+        &context,
+        &aggregate_wide_masking,
+    )
+    .expect("the public-only production geometry derives");
+    let replay_certificate = derive_public_only_construction_transcript_replay_certificate(
+        &plan,
+        &artifact,
+        relation_variant,
+        &context,
+        &geometry_certificate,
+    )
+    .expect("the public-only transcript replay certificate derives");
+    assert!(replay_certificate.is_complete());
+
+    let mut private_source_overclaim = replay_certificate.clone();
+    private_source_overclaim.relation_private_source_count = 1;
+    assert!(!private_source_overclaim.is_complete());
 
     let mut dummy_public_mask = certificate;
     dummy_public_mask.production_aggregate_wide_pad_source =
@@ -17801,35 +23525,12 @@ fn assert_fixed_verifier_hash_rows_follow_each_relation_variant(
     .expect("the selected public-key-share construction derives");
     let rows = derive_fixed_verifier_hash_rows(&public_key_share_plan, public_key_share_variant)
         .expect("fixed verifier hashes derive from the matching relation variant");
-    let verifier_source_ordinals = public_key_share_variant
-        .ordered_columns()
-        .iter()
-        .filter_map(|column| match column.origin() {
-            RelationColumnOrigin::VerifierSequence {
-                verifier_source_ordinal,
-                ..
-            } => Some(*verifier_source_ordinal),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    let distinct_verifier_source_ordinals = verifier_source_ordinals
-        .iter()
-        .copied()
-        .collect::<BTreeSet<_>>();
-    let public_setup_row = rows
-        .iter()
-        .find(|row| row.role == FixedVerifierHashRole::PublicSetupVerifierSequence)
-        .expect("the public setup verifier sequence has one ledger row");
-
-    assert_eq!(rows.len(), 5);
-    assert_eq!(
-        public_setup_row.hash_query_count,
-        verifier_source_ordinals.len() as u64
-    );
-    assert_eq!(
-        public_setup_row.distinct_equation_count,
-        distinct_verifier_source_ordinals.len() as u64
-    );
+    assert_eq!(rows.len(), 4);
+    assert!(rows.iter().all(|row| {
+        row.hash_query_count == 1
+            && row.distinct_equation_count == 1
+            && row.transcript_catalog_equation_overlap_count == 0
+    }));
 
     let collective_public_key_artifact = artifacts
         .iter()
@@ -17851,13 +23552,13 @@ fn assert_fixed_verifier_hash_rows_follow_each_relation_variant(
     .expect("the selected collective-public-key construction derives");
     let collective_public_key_rows =
         derive_fixed_verifier_hash_rows(&collective_public_key_plan, collective_public_key_variant)
-            .expect("the aggregate fixed-hash rows derive without an imaginary verifier sequence");
+            .expect("the aggregate fixed-hash rows derive");
     assert_eq!(collective_public_key_rows.len(), 4);
-    assert!(collective_public_key_rows.iter().all(|row| {
-        row.role != FixedVerifierHashRole::PublicSetupVerifierSequence
-            && row.hash_query_count == 1
-            && row.distinct_equation_count == 1
-    }));
+    assert!(
+        collective_public_key_rows
+            .iter()
+            .all(|row| { row.hash_query_count == 1 && row.distinct_equation_count == 1 })
+    );
 
     let same_secret_variant = artifacts
         .iter()
@@ -18067,9 +23768,10 @@ fn public_key_share_schema_0x1212_derives_from_its_production_geometry() {
             .ranges
             .iter()
             .filter_map(|range| match range.kind {
-                RowCodeWhirOracleEquationRangeKind::AtomicChallengeXof { output_byte_length } => {
-                    Some(output_byte_length)
-                }
+                RowCodeWhirOracleEquationRangeKind::AtomicChallengeSeededHashStream {
+                    output_byte_length,
+                    ..
+                } => Some(output_byte_length),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -18286,6 +23988,132 @@ fn public_key_share_schema_0x1212_derives_from_its_production_geometry() {
     assert!(exact_failure.transformed_initial_mass_gate_holds);
     assert!(exact_failure.complete_qrom_mass_gate_holds);
     assert!(exact_failure.is_complete());
+
+    let persistent_material_masking =
+        derive_production_persistent_committed_material_masking_certificate()
+            .expect("the root-global persistent masking certificate derives");
+    let construction_simulation = derive_secret_bearing_construction_view_simulation_certificate(
+        &plan,
+        &artifact,
+        relation_variant,
+        &relation_context,
+        &certificate,
+        &persistent_material_masking,
+    )
+    .expect("schema 0x1212 complete construction simulation derives");
+    assert!(construction_simulation.is_complete());
+    assert_eq!(
+        construction_simulation
+            .affine_masking_composition
+            .rows
+            .iter()
+            .map(|row| row.source_class)
+            .collect::<Vec<_>>(),
+        [
+            ConstructionAffineMaskSourceClass::RelationTraceMasks,
+            ConstructionAffineMaskSourceClass::QuotientTelescopingMasks,
+            ConstructionAffineMaskSourceClass::OpeningBatchMask,
+            ConstructionAffineMaskSourceClass::PhaseRowPads,
+            ConstructionAffineMaskSourceClass::AggregateWidePad,
+        ],
+    );
+    assert_eq!(
+        construction_simulation
+            .nonlinear_commitment_privacy
+            .persistent_material_endpoint_count_for_family,
+        construction_simulation
+            .nonlinear_commitment_privacy
+            .persistent_private_tree_count
+            * usize::try_from(
+                construction_simulation
+                    .nonlinear_commitment_privacy
+                    .family_application_multiplicity,
+            )
+            .expect("the family multiplicity fits usize"),
+    );
+    assert!(
+        construction_simulation
+            .sequential_simulator
+            .conditioned_affine_source_classes
+            == construction_simulation
+                .affine_image_inclusion
+                .rows
+                .iter()
+                .map(|row| row.source_class)
+                .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+#[ignore = "owned by test:rust:kernel:theorem-evidence"]
+fn all_exact_ten_production_identities_have_construction_view_simulation_certificates() {
+    let _certificate_test_guard = PRODUCTION_GEOMETRY_CERTIFICATE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let artifacts = selected_relation_plans().expect("selected relation plans derive");
+    let inventory = checked_selected_production_construction_simulation_inventory(&artifacts)
+        .expect("all exact-ten construction simulation certificates derive");
+    assert!(inventory.is_complete());
+    assert_eq!(inventory.records.len(), 21);
+    assert_eq!(
+        inventory
+            .records
+            .iter()
+            .filter(|record| record.complete_action_application_multiplicity > 0)
+            .count(),
+        12,
+    );
+    assert_eq!(
+        inventory
+            .records
+            .iter()
+            .map(|record| record.complete_action_application_multiplicity)
+            .sum::<u32>(),
+        103,
+    );
+    assert_eq!(
+        inventory
+            .records
+            .iter()
+            .filter(|record| {
+                record.strategy
+                    == ProductionConstructionSimulationStrategy::SecretBearingClassicalIdealXof
+            })
+            .count(),
+        9,
+    );
+    assert_eq!(
+        inventory
+            .records
+            .iter()
+            .filter(|record| {
+                record.strategy
+                    == ProductionConstructionSimulationStrategy::PublicTerminalTranscriptReplay
+            })
+            .count(),
+        12,
+    );
+    assert_eq!(
+        inventory
+            .records
+            .iter()
+            .map(|record| record.persistent_material_endpoint_count_for_complete_action)
+            .sum::<usize>(),
+        2_160,
+    );
+
+    let mut omitted_identity = inventory.clone();
+    omitted_identity.records.pop();
+    assert!(!omitted_identity.is_complete());
+
+    let mut duplicated_identity = inventory.clone();
+    duplicated_identity.records[1].construction_plan_identity_hash =
+        duplicated_identity.records[0].construction_plan_identity_hash;
+    assert!(!duplicated_identity.is_complete());
+
+    let mut family_simulation_overclaim = inventory;
+    family_simulation_overclaim.records[0].claims_family_simulation = true;
+    assert!(!family_simulation_overclaim.is_complete());
 }
 
 #[test]
@@ -18335,12 +24163,12 @@ fn width_64_same_secret_through_rkg_round_one_aggregate_have_complete_geometry_c
                 == ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER
         })
         .expect("the same-secret geometry certificate exists");
-    assert_eq!(same_secret.maximum_transcript_hash_query_count, 14_673);
+    assert_eq!(same_secret.maximum_transcript_hash_query_count, 604_801);
     assert_eq!(same_secret.logical_verifier_message_count, 4_272);
-    assert_eq!(same_secret.deployed_verifier_hash_query_count, 105_437,);
+    assert_eq!(same_secret.deployed_verifier_hash_query_count, 695_547,);
     assert_eq!(
         same_secret.deployed_accepting_database_equation_count,
-        105_428,
+        695_547,
     );
 }
 
@@ -18380,7 +24208,11 @@ fn width_64_relinearization_round_two_and_galois_share_have_complete_geometry_ce
 }
 
 fn assert_evaluator_width_64_geometry_range_is_complete(first_top_count: u16, last_top_count: u16) {
-    assert!(first_top_count > 0 && first_top_count <= last_top_count);
+    assert!(
+        first_top_count > 0
+            && first_top_count <= last_top_count
+            && last_top_count <= crate::foundation::FOUNDATION_PROFILE.option_count
+    );
     let artifacts = selected_relation_plans().expect("selected relation plans derive");
     let inventory =
         checked_selected_row_code_whir_production_geometry_certificates(&artifacts, |plan| {
@@ -18437,20 +24269,15 @@ fn evaluator_width_64_top_counts_two_through_seven_have_complete_geometry_certif
 
 #[test]
 #[ignore = "owned by test:rust:kernel:theorem-evidence"]
-fn evaluator_width_64_top_counts_eight_through_thirteen_have_complete_geometry_certificates() {
+fn evaluator_width_64_top_counts_eight_through_selected_option_count_have_complete_geometry_certificates()
+ {
     let _certificate_test_guard = PRODUCTION_GEOMETRY_CERTIFICATE_TEST_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    assert_evaluator_width_64_geometry_range_is_complete(8, 13);
-}
-
-#[test]
-#[ignore = "owned by test:rust:kernel:theorem-evidence"]
-fn evaluator_width_64_top_counts_fourteen_through_twenty_have_complete_geometry_certificates() {
-    let _certificate_test_guard = PRODUCTION_GEOMETRY_CERTIFICATE_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    assert_evaluator_width_64_geometry_range_is_complete(14, 20);
+    assert_evaluator_width_64_geometry_range_is_complete(
+        8,
+        crate::foundation::FOUNDATION_PROFILE.option_count,
+    );
 }
 
 #[test]
@@ -18709,6 +24536,7 @@ fn vss_share_linkage_has_a_complete_geometry_certificate() {
         aggregate_wide_masking: &certificate.aggregate_wide_masking,
         initial_constraint_batch_numerator: certificate.prefix_stacking.scalar_opening_count - 1,
         logical_verifier_message_count: certificate.logical_verifier_message_count,
+        sampler_model: &certificate.cms19_fixed_output_seeded_sampler_model,
         cms19_arithmetic: &certificate.cms19_arithmetic,
     };
     for fault in [
@@ -18788,6 +24616,24 @@ fn aggregate_threshold_share_has_a_complete_deterministic_geometry_certificate()
         operation.kind,
         RowCodeWhirOracleEquationOperationKind::CommonProductChallenge(_),
     )));
+    let sampler_distribution = &certificate
+        .cms19_fixed_output_seeded_sampler_model
+        .classical_sampler_distribution;
+    assert_eq!(sampler_distribution.product_sampler_count, 0);
+    assert!(sampler_distribution.extension_sampler_count > 0);
+    assert!(sampler_distribution.distinct_index_sampler_count > 0);
+    let mut invented_product_sampler = sampler_distribution.clone();
+    invented_product_sampler.product_sampler_count = 1;
+    assert!(
+        !invented_product_sampler.is_complete_for(
+            &plan,
+            relation_variant,
+            &relation_context,
+            &catalog,
+            &certificate.cms19_transcript_oracle_output_inventory,
+        ),
+        "an invented sampler category must not complete the production certificate",
+    );
     let exact_failure = &certificate.exact_failure_magnitude;
     assert!(exact_failure.product_challenge_rows.is_empty());
     assert!(exact_failure.owner_rows.iter().all(|row| {
@@ -18818,6 +24664,7 @@ fn aggregate_threshold_share_has_a_complete_deterministic_geometry_certificate()
         aggregate_wide_masking: &certificate.aggregate_wide_masking,
         initial_constraint_batch_numerator: certificate.prefix_stacking.scalar_opening_count - 1,
         logical_verifier_message_count: certificate.logical_verifier_message_count,
+        sampler_model: &certificate.cms19_fixed_output_seeded_sampler_model,
         cms19_arithmetic: &certificate.cms19_arithmetic,
     };
     assert_eq!(
@@ -18983,6 +24830,7 @@ fn relinearization_round_one_uses_the_maximum_shared_bound_agreement() {
         aggregate_wide_masking: &certificate.aggregate_wide_masking,
         initial_constraint_batch_numerator: certificate.prefix_stacking.scalar_opening_count - 1,
         logical_verifier_message_count: certificate.logical_verifier_message_count,
+        sampler_model: &certificate.cms19_fixed_output_seeded_sampler_model,
         cms19_arithmetic: &certificate.cms19_arithmetic,
     };
     assert_eq!(
@@ -19133,30 +24981,594 @@ fn deployed_streaming_leaf_chain_uses_uniform_512_bit_oracle_outputs() {
 
 #[test]
 #[ignore = "owned by test:rust:kernel:theorem-evidence"]
-fn variable_length_transcript_challenges_refuse_the_fixed_512_bit_cms19_model() {
+fn transcript_sampler_catalogs_every_fixed_512_bit_oracle_answer() {
+    let relation_context = selected_relation_plan_check_context(
+        ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+    )
+    .expect("the selected same-secret relation context exists");
+    let compiled_relation_plan = compile_same_secret_relation_plan(
+        &selected_same_secret_relation_plan_input()
+            .expect("the selected same-secret relation input derives"),
+        &relation_context,
+    )
+    .expect("the selected same-secret relation compiles");
+    let relation_variant = compiled_relation_plan
+        .variants()
+        .first()
+        .expect("the selected same-secret relation has one variant");
     let plan = selected_same_secret_construction_plan();
     let catalog = plan
         .oracle_equation_catalog()
         .expect("the selected transcript catalog derives");
     let inventory = derive_cms19_transcript_oracle_output_inventory(&plan, &catalog)
         .expect("the selected transcript output inventory derives");
-    let typed_variable_output_oracle_model =
-        derive_cms19_typed_variable_output_oracle_model_certificate(&plan, &catalog, &inventory)
-            .expect("the width-indexed ideal-XOF model derives");
-    let model_is_complete = |candidate: &Cms19TypedVariableOutputOracleModelCertificate| {
-        candidate.is_complete_for(&plan, &catalog, &inventory)
+    let fixed_output_seeded_sampler_model =
+        derive_cms19_fixed_output_seeded_sampler_model_certificate(
+            &plan,
+            relation_variant,
+            &relation_context,
+            &catalog,
+            &inventory,
+        )
+        .expect("the fixed-output seeded sampler model derives");
+    let hiding_configuration =
+        super::super::hiding_whir::selected_hiding_whir_config(plan.selected_parameters())
+            .expect("the selected hiding configuration derives");
+    let aggregate_wide_masking = AggregateWideMaskingCertificate::derive(&hiding_configuration)
+        .expect("the selected aggregate-wide masking geometry derives");
+    let whir_geometry = derive_production_whir_geometry_certificate(&plan, &aggregate_wide_masking)
+        .expect("the selected WHIR geometry derives");
+    let (state_epoch_rows, oracle_equation_rows) =
+        derive_state_and_equation_rows(&catalog).expect("the selected state rows derive");
+    let selected_plan_state_predicate = derive_selected_plan_state_predicate_certificate(
+        &plan,
+        &catalog,
+        &state_epoch_rows,
+        &whir_geometry.code_state_rows,
+    )
+    .expect("the selected state predicate derives");
+    let whole_state = derive_cms19_whole_state_transition_certificate(
+        &plan,
+        &catalog,
+        &selected_plan_state_predicate,
+    )
+    .expect("the selected whole-state correspondence derives");
+    let verifier_ledger = derive_complete_verifier_oracle_ledger(
+        &plan,
+        relation_variant,
+        catalog
+            .maximum_equation_count()
+            .expect("the transcript equation count derives"),
+        catalog
+            .maximum_transcript_hash_query_count()
+            .expect("the transcript hash-query count derives"),
+    )
+    .expect("the complete verifier ledger derives");
+    let deployed_leaf_oracle = derive_deployed_aggregate_leaf_oracle_certificate(
+        &plan,
+        relation_variant,
+        &aggregate_wide_masking,
+        &verifier_ledger,
+    )
+    .expect("the deployed leaf ledger derives");
+    let whole_database_support = derive_cms19_whole_database_support_certificate(
+        &plan,
+        &verifier_ledger,
+        &deployed_leaf_oracle,
+        &whole_state,
+        &oracle_equation_rows,
+    )
+    .expect("the concrete whole-database support derives");
+    let commitment_subtree =
+        derive_commitment_subtree_extraction_certificate(&plan, &verifier_ledger.merkle_rows)
+            .expect("the commitment-subtree extraction derives");
+    let nonlinear_binding = derive_nonlinear_commitment_binding_certificate(
+        &plan,
+        relation_variant,
+        &catalog,
+        &whole_database_support,
+        &commitment_subtree,
+    )
+    .expect("the nonlinear commitment binding derives");
+    let separated_oracle_projection = derive_cms19_separated_oracle_projection_certificate(
+        &fixed_output_seeded_sampler_model,
+        &whole_database_support,
+        &nonlinear_binding,
+    )
+    .expect("the primary and sampler-table oracle projection derives");
+    assert_eq!(
+        separated_oracle_projection.concrete_transcript_hash_query_count,
+        604_801,
+    );
+    assert_eq!(
+        separated_oracle_projection.primary_transcript_hash_query_count,
+        14_673,
+    );
+    assert_eq!(
+        separated_oracle_projection.primary_seed_hash_query_count,
+        4_272,
+    );
+    assert_eq!(
+        separated_oracle_projection.primary_ordinary_transcript_hash_query_count,
+        10_401,
+    );
+    assert_eq!(
+        separated_oracle_projection.auxiliary_sampler_table_hash_query_count,
+        590_128,
+    );
+    assert_eq!(
+        separated_oracle_projection.concrete_verifier_hash_query_count,
+        695_547,
+    );
+    assert_eq!(
+        separated_oracle_projection.primary_verifier_hash_query_count,
+        105_419,
+    );
+    assert_eq!(
+        separated_oracle_projection.concrete_accepting_database_equation_count,
+        695_547,
+    );
+    assert_eq!(
+        separated_oracle_projection.primary_accepting_database_equation_count,
+        105_419,
+    );
+    assert_eq!(
+        separated_oracle_projection.auxiliary_accepting_database_equation_count,
+        590_128,
+    );
+    assert_eq!(separated_oracle_projection.auxiliary_database_role_count, 1);
+    assert!(separated_oracle_projection.canonical_domain_partition_is_disjoint);
+    assert!(!separated_oracle_projection.claims_precommitted_table_goodness);
+    assert!(!separated_oracle_projection.claims_relativized_cms19_reduction);
+    let concrete_partition = &separated_oracle_projection.concrete_shake256_partition;
+    assert!(concrete_partition.is_complete_for(&whole_database_support, &nonlinear_binding));
+    assert_eq!(concrete_partition.primary_hash_query_count, 105_419);
+    assert_eq!(concrete_partition.auxiliary_hash_query_count, 590_128);
+    assert_eq!(
+        concrete_partition.primary_accepting_database_equation_count,
+        105_419,
+    );
+    assert_eq!(
+        concrete_partition.auxiliary_accepting_database_equation_count,
+        590_128,
+    );
+    assert_eq!(
+        concrete_partition.auxiliary_argument_item_types,
+        [
+            CanonicalItemType::Hash512,
+            CanonicalItemType::Hash512,
+            CanonicalItemType::Unsigned64,
+            CanonicalItemType::Unsigned64,
+        ],
+    );
+    assert!(concrete_partition.rows.iter().any(|row| matches!(
+        row.preimage_family,
+        Cms19ConcreteShake256PreimageFamily::CanonicalFoundationTuplePrimary { .. }
+    )));
+    assert!(concrete_partition.rows.iter().any(|row| matches!(
+        row.preimage_family,
+        Cms19ConcreteShake256PreimageFamily::LegacyFramedHash512Primary { .. }
+    )));
+    assert!(concrete_partition.rows.iter().any(|row| matches!(
+        row.preimage_family,
+        Cms19ConcreteShake256PreimageFamily::PhaseColumnLeafPrimary
+    )));
+    assert!(concrete_partition.rows.iter().any(|row| matches!(
+        row.preimage_family,
+        Cms19ConcreteShake256PreimageFamily::PhaseColumnParentPrimary
+    )));
+    assert!(concrete_partition.rows.iter().any(|row| matches!(
+        row.preimage_family,
+        Cms19ConcreteShake256PreimageFamily::AggregateColumnStreamableLeafPrimary
+    )));
+    assert!(concrete_partition.rows.iter().any(|row| matches!(
+        row.preimage_family,
+        Cms19ConcreteShake256PreimageFamily::AggregateWideParentPrimary
+    )));
+    assert_eq!(
+        concrete_partition
+            .rows
+            .iter()
+            .filter(|row| {
+                row.restriction
+                    == Cms19ConcreteShake256OracleRestriction::PrecommittedAuxiliarySamplerTable
+            })
+            .count(),
+        1,
+    );
+
+    let partition_is_complete = |candidate: &Cms19ConcreteShake256OraclePartitionCertificate| {
+        candidate.is_complete_for(&whole_database_support, &nonlinear_binding)
+    };
+    let mut changed_auxiliary_domain = concrete_partition.clone();
+    changed_auxiliary_domain.auxiliary_domain = TRANSCRIPT_ATOMIC_CHALLENGE_SEED_DOMAIN;
+    assert!(!partition_is_complete(&changed_auxiliary_domain));
+    let mut changed_auxiliary_geometry = concrete_partition.clone();
+    changed_auxiliary_geometry.auxiliary_argument_item_types[3] = CanonicalItemType::Unsigned32;
+    assert!(!partition_is_complete(&changed_auxiliary_geometry));
+    let mut reclassified_auxiliary_call = concrete_partition.clone();
+    reclassified_auxiliary_call
+        .rows
+        .iter_mut()
+        .find(|row| {
+            matches!(
+                row.database_role,
+                Cms19DatabaseSupportRole::TypedTranscript {
+                    role: OracleEquationRole::AtomicChallengeOutputBlock,
+                }
+            )
+        })
+        .expect("the concrete auxiliary row exists")
+        .restriction = Cms19ConcreteShake256OracleRestriction::PrimaryCms19Database;
+    assert!(!partition_is_complete(&reclassified_auxiliary_call));
+    let mut changed_primary_framing = concrete_partition.clone();
+    changed_primary_framing
+        .rows
+        .iter_mut()
+        .find(|row| {
+            matches!(
+                row.preimage_family,
+                Cms19ConcreteShake256PreimageFamily::PhaseColumnLeafPrimary
+            )
+        })
+        .expect("the phase-column leaf family exists")
+        .preimage_family = Cms19ConcreteShake256PreimageFamily::AggregateWideParentPrimary;
+    assert!(!partition_is_complete(&changed_primary_framing));
+    let mut omitted_merkle_family = concrete_partition.clone();
+    let omitted_merkle_index = omitted_merkle_family
+        .rows
+        .iter()
+        .position(|row| {
+            matches!(
+                row.database_role,
+                Cms19DatabaseSupportRole::MerkleParents { .. }
+            )
+        })
+        .expect("a Merkle-parent row exists");
+    omitted_merkle_family.rows.remove(omitted_merkle_index);
+    assert!(!partition_is_complete(&omitted_merkle_family));
+    let mut omitted_fixed_family = concrete_partition.clone();
+    let omitted_fixed_index = omitted_fixed_family
+        .rows
+        .iter()
+        .position(|row| {
+            matches!(
+                row.database_role,
+                Cms19DatabaseSupportRole::FixedVerifierHash { .. }
+            )
+        })
+        .expect("a fixed verifier-hash row exists");
+    omitted_fixed_family.rows.remove(omitted_fixed_index);
+    assert!(!partition_is_complete(&omitted_fixed_family));
+    assert!(!fixed_prefixes_are_incompatible(
+        &concrete_partition.auxiliary_fixed_preimage_prefix,
+        &concrete_partition.auxiliary_fixed_preimage_prefix,
+    ));
+    let mut overlapping_raw_prefix = concrete_partition.clone();
+    overlapping_raw_prefix.raw_primary_prefixes_exclude_auxiliary_grammar = false;
+    assert!(!partition_is_complete(&overlapping_raw_prefix));
+    let mut changed_output_width = concrete_partition.clone();
+    changed_output_width.rows[0].output_bit_length = 256;
+    assert!(!partition_is_complete(&changed_output_width));
+    let mut capacity_overclaim = concrete_partition.clone();
+    capacity_overclaim.uses_shake256_capacity_as_the_oracle_output_denominator = true;
+    assert!(!partition_is_complete(&capacity_overclaim));
+    let mut concrete_ideal_overclaim = concrete_partition.clone();
+    concrete_ideal_overclaim.claims_concrete_shake256_is_proved_ideal = true;
+    assert!(!partition_is_complete(&concrete_ideal_overclaim));
+    let conditional_cms19_arithmetic = derive_cms19_arithmetic_certificate(
+        &fixed_output_seeded_sampler_model,
+        &whole_database_support,
+        &nonlinear_binding,
+    )
+    .expect("the conditional primary-oracle CMS19 arithmetic derives");
+    assert_eq!(
+        conditional_cms19_arithmetic.verifier_hash_query_count,
+        105_419
+    );
+    assert_eq!(
+        conditional_cms19_arithmetic.accepting_database_equation_count,
+        105_419,
+    );
+    assert_eq!(
+        conditional_cms19_arithmetic.separated_oracle_projection,
+        separated_oracle_projection,
+    );
+    let query_failure_rows = derive_exact_query_failure_rows(
+        &plan,
+        &whir_geometry.code_state_rows,
+        &aggregate_wide_masking,
+    )
+    .expect("the exact query failure rows derive");
+    let precommitted_sampler_table = derive_cms19_precommitted_sampler_table_certificate(
+        &fixed_output_seeded_sampler_model.classical_sampler_distribution,
+        &query_failure_rows,
+        &conditional_cms19_arithmetic,
+    )
+    .expect("the precommitted sampler-table theorem derives");
+    assert!(precommitted_sampler_table.is_complete_for(
+        &fixed_output_seeded_sampler_model.classical_sampler_distribution,
+        &query_failure_rows,
+        &conditional_cms19_arithmetic,
+    ));
+    assert_eq!(
+        precommitted_sampler_table.point_rows.len(),
+        usize::try_from(
+            fixed_output_seeded_sampler_model
+                .classical_sampler_distribution
+                .product_sampler_count
+                + fixed_output_seeded_sampler_model
+                    .classical_sampler_distribution
+                    .extension_sampler_count,
+        )
+        .expect("the point-sampler count fits usize"),
+    );
+    assert_eq!(
+        precommitted_sampler_table.query_rows.len(),
+        query_failure_rows.len(),
+    );
+    assert_eq!(
+        precommitted_sampler_table.distinct_query_sampler_operation_count,
+        9,
+    );
+    assert_eq!(
+        precommitted_sampler_table.query_rows.len(),
+        precommitted_sampler_table.distinct_query_sampler_operation_count + 2,
+        "the outer opening and relation views share one sampler, and the prior and direct bound views share one sampler",
+    );
+    assert_eq!(
+        precommitted_sampler_table.canonical_prefix_projection_count,
+        1,
+    );
+    let prior_bound_projection = precommitted_sampler_table
+        .query_rows
+        .iter()
+        .find(|row| row.event == ExactQueryFailureEvent::BoundTreeWords)
+        .expect("the prior-bound projection exists");
+    let complete_bound_vector = precommitted_sampler_table
+        .query_rows
+        .iter()
+        .find(|row| row.event == ExactQueryFailureEvent::StatementRootWords)
+        .expect("the complete bound vector exists");
+    assert_eq!(prior_bound_projection.query_count, 40);
+    assert_eq!(prior_bound_projection.sampler_output_count, 266);
+    assert_eq!(
+        prior_bound_projection.projection,
+        Cms19PrecommittedSamplerQueryProjection::CanonicalPrefixOfOrderedVector,
+    );
+    assert_eq!(
+        prior_bound_projection.sampler_operation_ordinal,
+        complete_bound_vector.sampler_operation_ordinal,
+    );
+    assert_eq!(complete_bound_vector.query_count, 266);
+    assert_eq!(complete_bound_vector.sampler_output_count, 266);
+    assert_eq!(
+        complete_bound_vector.projection,
+        Cms19PrecommittedSamplerQueryProjection::CompleteOrderedVector,
+    );
+    assert_eq!(
+        precommitted_sampler_table.density_event_count,
+        precommitted_sampler_table.point_rows.len() + precommitted_sampler_table.query_rows.len(),
+    );
+    assert!(
+        precommitted_sampler_table.minimum_density_bad_event_exponent_floor
+            >= BigUint::from(
+                CMS19_AUXILIARY_TABLE_DENSITY_BAD_EVENT_SECURITY_BITS
+                    + precommitted_sampler_table.density_event_count_log2_ceiling,
+            )
+    );
+    assert!(
+        ExactBigFraction::from_u64(CMS19_AUXILIARY_TABLE_DENSITY_EXPANSION_NUMERATOR, 1,)
+            .expect("the base density factor derives")
+            .less_than_or_equal(
+                &precommitted_sampler_table.logical_failure_density_expansion_factor,
+            )
+    );
+    assert!(
+        precommitted_sampler_table
+            .complete_auxiliary_table_bad_event_probability_ceiling
+            .is_at_most_inverse_power_of_two(128)
+    );
+    assert!(
+        precommitted_sampler_table
+            .conditioned_exhaustion_probability_ceiling
+            .multiply_integer(&conditional_cms19_arithmetic.classical_soundness_multiplier)
+            .expect("the transformed exhaustion bound derives")
+            .is_at_most_inverse_power_of_two(128)
+    );
+    assert!(precommitted_sampler_table.canonical_domain_restrictions_are_disjoint);
+    assert!(
+        precommitted_sampler_table.every_seed_index_owns_an_independent_fixed_width_block_chain
+    );
+    assert!(
+        precommitted_sampler_table.every_query_failure_uses_a_production_owned_sampler_projection
+    );
+    assert!(precommitted_sampler_table.shared_query_vectors_are_not_charged_as_independent_samples);
+    assert!(precommitted_sampler_table.table_goodness_is_universal_over_adaptive_failure_sets);
+    assert!(
+        precommitted_sampler_table
+            .primary_oracle_reduction_relativizes_to_fixed_auxiliary_unitaries
+    );
+    assert!(!precommitted_sampler_table.claims_fixed_shake256_is_an_ideal_oracle);
+
+    let prefix_stacking =
+        derive_prefix_stacking_certificate(&plan).expect("the opening geometry derives");
+    let failure_input = ExactFailureMagnitudeDerivationInput {
+        plan: &plan,
+        relation_variant,
+        relation_context: &relation_context,
+        catalog: &catalog,
+        selected_plan_state_predicate: &selected_plan_state_predicate,
+        code_state_rows: &whir_geometry.code_state_rows,
+        fold_rows: &whir_geometry.fold_rows,
+        shift_rows: &whir_geometry.shift_rows,
+        aggregate_wide_masking: &aggregate_wide_masking,
+        initial_constraint_batch_numerator: prefix_stacking.scalar_opening_count - 1,
+        logical_verifier_message_count: catalog
+            .logical_verifier_message_count()
+            .expect("the logical verifier-message count derives"),
+        sampler_model: &fixed_output_seeded_sampler_model,
+        cms19_arithmetic: &conditional_cms19_arithmetic,
+    };
+    let exact_failure = derive_exact_failure_magnitude_certificate(failure_input)
+        .expect("the sampler-adjusted exact failure certificate derives");
+    let expected_ideal_public_coin_failure = exact_failure
+        .query_failure_probability_ceiling
+        .add(&exact_failure.algebraic_failure_probability_ceiling)
+        .expect("the ideal public-coin error derives");
+    let expected_sampler_adjusted_failure = expected_ideal_public_coin_failure
+        .multiply_fraction(&precommitted_sampler_table.logical_failure_density_expansion_factor)
+        .and_then(|failure| {
+            failure.add(&precommitted_sampler_table.seed_collision_probability_ceiling)
+        })
+        .and_then(|failure| {
+            failure.add(&precommitted_sampler_table.conditioned_exhaustion_probability_ceiling)
+        })
+        .expect("the sampler-adjusted public-coin error derives");
+    let expected_primary_oracle_qrom_failure = expected_sampler_adjusted_failure
+        .multiply_integer(&conditional_cms19_arithmetic.classical_soundness_multiplier)
+        .and_then(|failure| {
+            failure.add(&exact_failure.cms19_ideal_oracle_penalty_probability_ceiling)
+        })
+        .expect("the primary-oracle QROM error derives");
+    assert_eq!(
+        exact_failure.ideal_public_coin_classical_failure_probability_ceiling,
+        expected_ideal_public_coin_failure,
+    );
+    assert_eq!(
+        exact_failure.precommitted_sampler_table,
+        precommitted_sampler_table,
+    );
+    assert_eq!(
+        exact_failure.classical_failure_probability_ceiling,
+        expected_sampler_adjusted_failure,
+    );
+    assert_eq!(
+        exact_failure.cms19_primary_oracle_qrom_failure_probability_ceiling,
+        expected_primary_oracle_qrom_failure,
+    );
+    assert_eq!(
+        exact_failure.auxiliary_table_bad_event_probability_ceiling,
+        exact_failure
+            .precommitted_sampler_table
+            .complete_auxiliary_table_bad_event_probability_ceiling,
+    );
+    assert_eq!(
+        exact_failure.qrom_failure_probability_ceiling,
+        exact_failure
+            .cms19_primary_oracle_qrom_failure_probability_ceiling
+            .add(&exact_failure.auxiliary_table_bad_event_probability_ceiling)
+            .expect("the complete separated-oracle QROM error derives"),
+    );
+    assert!(exact_failure.is_complete());
+    for fault in [
+        ExactFailureMagnitudeFault::ChangeSamplerDensityExpansion,
+        ExactFailureMagnitudeFault::ChangeAuxiliaryTableBadEvent,
+        ExactFailureMagnitudeFault::ChangeCms19ClassicalSoundnessMultiplier,
+    ] {
+        assert_eq!(
+            checked_exact_failure_magnitude_with_fault(failure_input, fault),
+            Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence),
+            "the hostile separated-oracle failure mutation {fault:?} must be rejected",
+        );
+    }
+
+    let table_certificate_is_complete = |candidate: &Cms19PrecommittedSamplerTableCertificate| {
+        candidate.is_complete_for(
+            &fixed_output_seeded_sampler_model.classical_sampler_distribution,
+            &query_failure_rows,
+            &conditional_cms19_arithmetic,
+        )
+    };
+    let mut omitted_point_concentration = precommitted_sampler_table.clone();
+    omitted_point_concentration.point_rows.pop();
+    assert!(!table_certificate_is_complete(&omitted_point_concentration));
+    let mut changed_query_agreement = precommitted_sampler_table.clone();
+    changed_query_agreement.query_rows[0].agreement_ceiling -= 1;
+    assert!(!table_certificate_is_complete(&changed_query_agreement));
+    let mut invented_independent_prior_bound_sampler = precommitted_sampler_table.clone();
+    invented_independent_prior_bound_sampler
+        .query_rows
+        .iter_mut()
+        .find(|row| row.event == ExactQueryFailureEvent::BoundTreeWords)
+        .expect("the prior-bound projection exists")
+        .projection = Cms19PrecommittedSamplerQueryProjection::CompleteOrderedVector;
+    assert!(!table_certificate_is_complete(
+        &invented_independent_prior_bound_sampler
+    ));
+    let mut changed_prior_bound_sampler_width = precommitted_sampler_table.clone();
+    changed_prior_bound_sampler_width
+        .query_rows
+        .iter_mut()
+        .find(|row| row.event == ExactQueryFailureEvent::BoundTreeWords)
+        .expect("the prior-bound projection exists")
+        .sampler_output_count -= 1;
+    assert!(!table_certificate_is_complete(
+        &changed_prior_bound_sampler_width
+    ));
+    let mut adaptive_set_overclaim = precommitted_sampler_table.clone();
+    adaptive_set_overclaim.table_goodness_is_universal_over_adaptive_failure_sets = false;
+    assert!(!table_certificate_is_complete(&adaptive_set_overclaim));
+    let mut fixed_function_overclaim = precommitted_sampler_table.clone();
+    fixed_function_overclaim.claims_fixed_shake256_is_an_ideal_oracle = true;
+    assert!(!table_certificate_is_complete(&fixed_function_overclaim));
+
+    let mut changed_block_inventory = fixed_output_seeded_sampler_model.clone();
+    changed_block_inventory.output_block_hash_query_count -= 1;
+    assert_eq!(
+        derive_cms19_separated_oracle_projection_certificate(
+            &changed_block_inventory,
+            &whole_database_support,
+            &nonlinear_binding,
+        ),
+        Err(WhirTheoremCertificateError::IncompleteOracleEquationMapping),
+    );
+    let mut reclassified_block_role = whole_database_support.clone();
+    let block_row = reclassified_block_role
+        .rows
+        .iter_mut()
+        .find(|row| {
+            row.role
+                == (Cms19DatabaseSupportRole::TypedTranscript {
+                    role: OracleEquationRole::AtomicChallengeOutputBlock,
+                })
+        })
+        .expect("the auxiliary block row exists");
+    block_row.role = Cms19DatabaseSupportRole::TypedTranscript {
+        role: OracleEquationRole::AtomicChallengeSeed,
+    };
+    assert!(
+        derive_cms19_separated_oracle_projection_certificate(
+            &fixed_output_seeded_sampler_model,
+            &reclassified_block_role,
+            &nonlinear_binding,
+        )
+        .is_err()
+    );
+    let model_is_complete = |candidate: &Cms19FixedOutputSeededSamplerModelCertificate| {
+        candidate.is_complete_for(
+            &plan,
+            relation_variant,
+            &relation_context,
+            &catalog,
+            &inventory,
+        )
     };
 
     assert!(inventory.is_complete_for(&plan, &catalog));
+    assert!(inventory.all_underlying_oracle_answers_are_fixed_output());
     assert_eq!(inventory.required_fixed_output_byte_length, 64);
     assert_eq!(
         inventory.logical_verifier_message_count,
         SELECTED_LOGICAL_VERIFIER_MESSAGE_COUNT,
     );
-    assert_eq!(inventory.fixed_output_message_count, 0);
     assert_eq!(
-        inventory.variable_output_message_count,
-        SELECTED_LOGICAL_VERIFIER_MESSAGE_COUNT,
+        inventory.seed_hash_query_count,
+        inventory.logical_verifier_message_count,
+    );
+    assert_eq!(
+        inventory.seed_hash_query_count + inventory.output_block_hash_query_count,
+        inventory.fixed_hash_query_count,
     );
     assert_eq!(inventory.minimum_output_byte_length, 8_192);
     assert_eq!(inventory.maximum_output_byte_length, 402_432);
@@ -19177,6 +25589,7 @@ fn variable_length_transcript_challenges_refuse_the_fixed_512_bit_cms19_model() 
         .expect("the production transcript has an extension challenge");
     assert_eq!(extension_row.accepted_value_count, 1);
     assert_eq!(extension_row.output_byte_length, 8_192);
+    assert_eq!(extension_row.fixed_hash_query_count, 129);
 
     let (_, aggregate_wide_query_count) = plan
         .aggregate_wide_pad_query_geometry()
@@ -19209,101 +25622,192 @@ fn variable_length_transcript_challenges_refuse_the_fixed_512_bit_cms19_model() 
         expected_aggregate_wide_query_output_byte_length,
     );
     assert_eq!(expected_aggregate_wide_query_output_byte_length, 402_432);
+    assert_eq!(aggregate_wide_query_row.fixed_hash_query_count, 6_289);
 
-    assert!(!inventory.is_eligible_for_uniform_fixed_output());
-    assert!(model_is_complete(&typed_variable_output_oracle_model));
+    assert!(model_is_complete(&fixed_output_seeded_sampler_model));
     assert_eq!(
-        typed_variable_output_oracle_model.minimum_output_bit_length,
+        fixed_output_seeded_sampler_model.oracle_output_bit_length,
         512
     );
     assert_eq!(
-        typed_variable_output_oracle_model.maximum_output_bit_length,
-        expected_aggregate_wide_query_output_byte_length * 8,
+        fixed_output_seeded_sampler_model.maximum_blocks_per_logical_challenge,
+        6_289,
     );
+    assert_eq!(
+        fixed_output_seeded_sampler_model.fixed_hash_query_count,
+        inventory.fixed_hash_query_count,
+    );
+    assert_eq!(
+        fixed_output_seeded_sampler_model
+            .reduction
+            .evidence_identifier(),
+        Cms19FixedOutputSeededSamplerReduction::EVIDENCE_IDENTIFIER,
+    );
+    let sampler_distribution = &fixed_output_seeded_sampler_model.classical_sampler_distribution;
+    assert!(sampler_distribution.is_complete_for(
+        &plan,
+        relation_variant,
+        &relation_context,
+        &catalog,
+        &inventory,
+    ));
+    assert_eq!(sampler_distribution.product_sampler_count, 3);
+    assert_eq!(sampler_distribution.extension_sampler_count, 4_260);
+    assert_eq!(sampler_distribution.distinct_index_sampler_count, 9);
+    assert_eq!(
+        sampler_distribution.total_output_block_hash_query_count,
+        inventory.output_block_hash_query_count,
+    );
+    assert!(sampler_distribution.seed_preimages_are_pairwise_distinct);
+    assert!(sampler_distribution.seed_and_block_domains_are_distinct);
     assert!(
-        typed_variable_output_oracle_model
-            .distinct_output_bit_lengths
-            .contains(&(8_192 * 8))
+        sampler_distribution.block_preimages_are_pairwise_distinct_conditioned_on_distinct_seeds
     );
-    assert!(
-        typed_variable_output_oracle_model
-            .distinct_output_bit_lengths
-            .contains(&(402_432 * 8))
+    assert!(sampler_distribution.forbidden_sets_are_fixed_before_seed_sampling);
+    assert!(sampler_distribution.every_bounded_candidate_slot_is_consumed_before_finish);
+    assert!(sampler_distribution.prover_responses_cannot_interleave_an_active_sampler);
+    assert!(!sampler_distribution.claims_qrom_sampler_composition);
+    let aggregate_query_distribution = sampler_distribution
+        .rows
+        .iter()
+        .find(|row| {
+            matches!(
+                row.kind,
+                Cms19SeededSamplerDistributionKind::DistinctIndexVector {
+                    domain_cardinality: 8_192,
+                    output_count: 393,
+                    ..
+                }
+            )
+        })
+        .expect("the aggregate-wide distinct query sampler is cataloged");
+    assert_eq!(
+        aggregate_query_distribution.conditional_uniform_output_cardinality_floor,
+        falling_factorial(8_192, 393).expect("the ordered without-replacement cardinality derives"),
     );
+    assert_eq!(aggregate_query_distribution.candidate_slot_count, 50_304);
 
-    let mut blockwise_partial_messages = typed_variable_output_oracle_model.clone();
-    blockwise_partial_messages.compressed_database_entries_added_per_query = 2;
-    blockwise_partial_messages.partial_squeeze_blocks_are_not_state_transitions = false;
-    assert!(!model_is_complete(&blockwise_partial_messages));
+    let distribution_is_complete =
+        |candidate: &Cms19FixedOutputSeededSamplerDistributionCertificate| {
+            candidate.is_complete_for(
+                &plan,
+                relation_variant,
+                &relation_context,
+                &catalog,
+                &inventory,
+            )
+        };
+    let mut changed_forbidden_ceiling = sampler_distribution.clone();
+    let changed_extension = changed_forbidden_ceiling
+        .rows
+        .iter_mut()
+        .find(|row| {
+            matches!(
+                row.kind,
+                Cms19SeededSamplerDistributionKind::ExtensionElement {
+                    ref forbidden_candidate_count_ceiling,
+                    ..
+                } if !forbidden_candidate_count_ceiling.is_zero()
+            )
+        })
+        .expect("an out-of-domain sampler has a nonzero forbidden-set ceiling");
+    let Cms19SeededSamplerDistributionKind::ExtensionElement {
+        forbidden_candidate_count_ceiling,
+        ..
+    } = &mut changed_extension.kind
+    else {
+        unreachable!("the selected row is an extension sampler")
+    };
+    *forbidden_candidate_count_ceiling += BigUint::one();
+    assert!(!distribution_is_complete(&changed_forbidden_ceiling));
 
-    let mut wrapper_restricted_adversary = typed_variable_output_oracle_model.clone();
-    wrapper_restricted_adversary
-        .adversarial_fragment_access_is_dominated_by_complete_prefix_access = false;
-    wrapper_restricted_adversary.unused_xof_suffix_is_independent_adversary_workspace = false;
-    wrapper_restricted_adversary.repeated_reads_reuse_one_typed_database_entry = false;
-    assert!(!model_is_complete(&wrapper_restricted_adversary));
+    let mut changed_query_schedule = sampler_distribution.clone();
+    let changed_distinct = changed_query_schedule
+        .rows
+        .iter_mut()
+        .find(|row| {
+            matches!(
+                row.kind,
+                Cms19SeededSamplerDistributionKind::DistinctIndexVector {
+                    output_count: 393,
+                    ..
+                }
+            )
+        })
+        .expect("the aggregate-wide query sampler exists");
+    let Cms19SeededSamplerDistributionKind::DistinctIndexVector { output_count, .. } =
+        &mut changed_distinct.kind
+    else {
+        unreachable!("the selected row is a distinct-index sampler")
+    };
+    *output_count -= 1;
+    assert!(!distribution_is_complete(&changed_query_schedule));
 
-    let mut concrete_sponge_overclaim = typed_variable_output_oracle_model.clone();
-    concrete_sponge_overclaim.claims_concrete_sponge_indifferentiability = true;
-    assert!(!model_is_complete(&concrete_sponge_overclaim));
+    let mut duplicate_seed_preimage = sampler_distribution.clone();
+    duplicate_seed_preimage.rows[1].oracle_tag = duplicate_seed_preimage.rows[0].oracle_tag.clone();
+    assert!(!distribution_is_complete(&duplicate_seed_preimage));
 
-    let mut changed_construction_identity = typed_variable_output_oracle_model.clone();
+    let mut omitted_exhaustion_term = sampler_distribution.clone();
+    omitted_exhaustion_term.exhaustion_terms.pop();
+    assert!(!distribution_is_complete(&omitted_exhaustion_term));
+
+    let mut interleaving_overclaim = sampler_distribution.clone();
+    interleaving_overclaim.prover_responses_cannot_interleave_an_active_sampler = false;
+    assert!(!distribution_is_complete(&interleaving_overclaim));
+
+    let mut qrom_composition_overclaim = sampler_distribution.clone();
+    qrom_composition_overclaim.claims_qrom_sampler_composition = true;
+    assert!(!distribution_is_complete(&qrom_composition_overclaim));
+
+    let mut changed_construction_identity = fixed_output_seeded_sampler_model.clone();
     changed_construction_identity.construction_plan_identity_hash[0] ^= 1;
     assert!(!model_is_complete(&changed_construction_identity));
 
-    let mut changed_transcript_plan = typed_variable_output_oracle_model.clone();
+    let mut changed_transcript_plan = fixed_output_seeded_sampler_model.clone();
     changed_transcript_plan.canonical_oracle_plan_hash[0] ^= 1;
     assert!(!model_is_complete(&changed_transcript_plan));
 
-    let mut changed_logical_query_count = typed_variable_output_oracle_model.clone();
+    let mut changed_logical_query_count = fixed_output_seeded_sampler_model.clone();
     changed_logical_query_count.logical_challenge_query_count -= 1;
     assert!(!model_is_complete(&changed_logical_query_count));
 
-    let mut changed_variable_query_count = typed_variable_output_oracle_model.clone();
-    changed_variable_query_count.variable_output_challenge_query_count -= 1;
-    assert!(!model_is_complete(&changed_variable_query_count));
+    let mut changed_seed_query_count = fixed_output_seeded_sampler_model.clone();
+    changed_seed_query_count.seed_hash_query_count -= 1;
+    assert!(!model_is_complete(&changed_seed_query_count));
 
-    let mut changed_minimum_width = typed_variable_output_oracle_model.clone();
-    changed_minimum_width.minimum_output_bit_length += 1;
-    assert!(!model_is_complete(&changed_minimum_width));
+    let mut changed_output_block_query_count = fixed_output_seeded_sampler_model.clone();
+    changed_output_block_query_count.output_block_hash_query_count -= 1;
+    assert!(!model_is_complete(&changed_output_block_query_count));
 
-    let mut changed_maximum_width = typed_variable_output_oracle_model.clone();
-    changed_maximum_width.maximum_output_bit_length -= 1;
-    assert!(!model_is_complete(&changed_maximum_width));
+    let mut changed_fixed_hash_query_count = fixed_output_seeded_sampler_model.clone();
+    changed_fixed_hash_query_count.fixed_hash_query_count -= 1;
+    assert!(!model_is_complete(&changed_fixed_hash_query_count));
 
-    let mut missing_width_sector = typed_variable_output_oracle_model.clone();
-    missing_width_sector.distinct_output_bit_lengths.pop();
-    assert!(!model_is_complete(&missing_width_sector));
+    let mut changed_oracle_width = fixed_output_seeded_sampler_model.clone();
+    changed_oracle_width.oracle_output_bit_length -= 1;
+    assert!(!model_is_complete(&changed_oracle_width));
 
-    let mut duplicated_width_sector = typed_variable_output_oracle_model.clone();
-    duplicated_width_sector
-        .distinct_output_bit_lengths
-        .push(duplicated_width_sector.maximum_output_bit_length);
-    assert!(!model_is_complete(&duplicated_width_sector));
+    let mut changed_maximum_block_count = fixed_output_seeded_sampler_model.clone();
+    changed_maximum_block_count.maximum_blocks_per_logical_challenge -= 1;
+    assert!(!model_is_complete(&changed_maximum_block_count));
 
-    let mut changed_collision_projection = typed_variable_output_oracle_model.clone();
+    let mut changed_collision_projection = fixed_output_seeded_sampler_model.clone();
     changed_collision_projection.collision_projection_bit_length += 1;
     assert!(!model_is_complete(&changed_collision_projection));
-
-    let mut changed_lifting_constant = typed_variable_output_oracle_model.clone();
-    changed_lifting_constant.conditional_lifting_constant -= 1;
-    assert!(!model_is_complete(&changed_lifting_constant));
-
-    let mut nonorthogonal_width_sectors = typed_variable_output_oracle_model.clone();
-    nonorthogonal_width_sectors.output_width_control_sectors_are_orthogonal = false;
-    assert!(!model_is_complete(&nonorthogonal_width_sectors));
-
-    let mut non_atomic_logical_answer = typed_variable_output_oracle_model.clone();
-    non_atomic_logical_answer.complete_logical_answer_is_atomic = false;
-    assert!(!model_is_complete(&non_atomic_logical_answer));
-
-    let mut coordinate_probability_substitution = typed_variable_output_oracle_model.clone();
-    coordinate_probability_substitution.full_output_distribution_owns_round_failure = false;
-    assert!(!model_is_complete(&coordinate_probability_substitution));
 
     let mut missing_row = inventory.clone();
     missing_row.rows.pop();
     assert!(!missing_row.is_self_consistent());
+    assert!(
+        derive_cms19_fixed_output_seeded_sampler_model_certificate(
+            &plan,
+            relation_variant,
+            &relation_context,
+            &catalog,
+            &missing_row,
+        )
+        .is_err(),
+    );
 
     let mut altered_output = inventory.clone();
     altered_output
@@ -19313,24 +25817,51 @@ fn variable_length_transcript_challenges_refuse_the_fixed_512_bit_cms19_model() 
         .expect("the selected query output exists")
         .output_byte_length -= 1;
     assert!(!altered_output.is_self_consistent());
+    assert!(
+        derive_cms19_fixed_output_seeded_sampler_model_certificate(
+            &plan,
+            relation_variant,
+            &relation_context,
+            &catalog,
+            &altered_output,
+        )
+        .is_err()
+    );
 
     let mut reordered_rows = inventory.clone();
     reordered_rows.rows.swap(0, 1);
     assert!(!reordered_rows.is_self_consistent());
+    assert!(
+        derive_cms19_fixed_output_seeded_sampler_model_certificate(
+            &plan,
+            relation_variant,
+            &relation_context,
+            &catalog,
+            &reordered_rows,
+        )
+        .is_err()
+    );
 
-    let mut producer_claimed_fixed_output = inventory.clone();
-    for row in &mut producer_claimed_fixed_output.rows {
-        row.output_byte_length = producer_claimed_fixed_output.required_fixed_output_byte_length;
+    let mut old_single_query_abstraction = inventory.clone();
+    for row in &mut old_single_query_abstraction.rows {
+        row.fixed_hash_query_count = 1;
     }
-    producer_claimed_fixed_output.fixed_output_message_count =
-        producer_claimed_fixed_output.logical_verifier_message_count;
-    producer_claimed_fixed_output.variable_output_message_count = 0;
-    producer_claimed_fixed_output.minimum_output_byte_length = 64;
-    producer_claimed_fixed_output.maximum_output_byte_length = 64;
-    producer_claimed_fixed_output.distinct_output_byte_lengths = vec![64];
-    assert!(producer_claimed_fixed_output.is_self_consistent());
-    assert!(producer_claimed_fixed_output.is_eligible_for_uniform_fixed_output());
-    assert!(!producer_claimed_fixed_output.is_complete_for(&plan, &catalog));
+    old_single_query_abstraction.seed_hash_query_count =
+        old_single_query_abstraction.logical_verifier_message_count;
+    old_single_query_abstraction.output_block_hash_query_count = 0;
+    old_single_query_abstraction.fixed_hash_query_count =
+        old_single_query_abstraction.logical_verifier_message_count;
+    assert!(!old_single_query_abstraction.is_self_consistent());
+    assert!(
+        derive_cms19_fixed_output_seeded_sampler_model_certificate(
+            &plan,
+            relation_variant,
+            &relation_context,
+            &catalog,
+            &old_single_query_abstraction,
+        )
+        .is_err(),
+    );
 }
 
 #[test]
@@ -19360,13 +25891,18 @@ fn exact_transported_proof_catalog_binds_every_production_section() {
             .expect("the exact same-secret construction derives");
     let certificate = checked_exact_same_secret_transport_correspondence(
         &plan,
+        &validated_relation_plan,
         relation_variant,
         &relation_context,
-        validated_relation_plan.canonical_plan_hash(),
     )
     .expect("the transported-proof correspondence derives");
 
-    assert!(certificate.is_complete_for(&plan, relation_variant, &relation_context));
+    assert!(certificate.is_complete_for(
+        &plan,
+        &validated_relation_plan,
+        relation_variant,
+        &relation_context,
+    ));
     assert_eq!(certificate.section_rows.len(), 22);
     assert_eq!(certificate.section_rows.len(), plan.proof_sections().len());
     assert_eq!(certificate.family_body_byte_length_ceiling, 5_813_652);
@@ -19381,20 +25917,36 @@ fn exact_transported_proof_catalog_binds_every_production_section() {
 
     let mut omitted_section = certificate.clone();
     omitted_section.section_rows.remove(7);
-    assert!(!omitted_section.is_complete_for(&plan, relation_variant, &relation_context));
+    assert!(!omitted_section.is_complete_for(
+        &plan,
+        &validated_relation_plan,
+        relation_variant,
+        &relation_context,
+    ));
 
     let mut reordered_sections = certificate.clone();
     reordered_sections.section_rows.swap(7, 8);
-    assert!(!reordered_sections.is_complete_for(&plan, relation_variant, &relation_context));
+    assert!(!reordered_sections.is_complete_for(
+        &plan,
+        &validated_relation_plan,
+        relation_variant,
+        &relation_context,
+    ));
 
     let mut stale_construction = certificate.clone();
     stale_construction.construction_plan_identity_hash[0] ^= 1;
-    assert!(!stale_construction.is_complete_for(&plan, relation_variant, &relation_context));
+    assert!(!stale_construction.is_complete_for(
+        &plan,
+        &validated_relation_plan,
+        relation_variant,
+        &relation_context,
+    ));
 
     let mut incomplete_refusal_catalog = certificate.clone();
     incomplete_refusal_catalog.refusals.pop();
     assert!(!incomplete_refusal_catalog.is_complete_for(
         &plan,
+        &validated_relation_plan,
         relation_variant,
         &relation_context,
     ));
@@ -19403,17 +25955,276 @@ fn exact_transported_proof_catalog_binds_every_production_section() {
     incomplete_binding_catalog.bindings.pop();
     assert!(!incomplete_binding_catalog.is_complete_for(
         &plan,
+        &validated_relation_plan,
         relation_variant,
         &relation_context,
     ));
 
     let mut changed_aggregate_ledger = certificate.clone();
     changed_aggregate_ledger.aggregate_opening_section_ledger[0].1 += 1;
-    assert!(!changed_aggregate_ledger.is_complete_for(&plan, relation_variant, &relation_context,));
+    assert!(!changed_aggregate_ledger.is_complete_for(
+        &plan,
+        &validated_relation_plan,
+        relation_variant,
+        &relation_context,
+    ));
 
     let mut changed_body_length = certificate;
     changed_body_length.family_body_byte_length_ceiling -= 1;
-    assert!(!changed_body_length.is_complete_for(&plan, relation_variant, &relation_context));
+    assert!(!changed_body_length.is_complete_for(
+        &plan,
+        &validated_relation_plan,
+        relation_variant,
+        &relation_context,
+    ));
+}
+
+#[test]
+#[ignore = "owned by test:rust:kernel:theorem-evidence"]
+fn every_exact_ten_production_geometry_has_a_plan_bound_transport_correspondence() {
+    let artifacts = selected_relation_plans().expect("selected relation plans derive");
+    let mut coordinates = BTreeSet::new();
+    let mut saw_public_only = false;
+    let mut saw_secret_bearing = false;
+    for artifact in &artifacts {
+        let relation_context = selected_relation_plan_check_context(
+            artifact.application_statement_schema_identifier(),
+        )
+        .expect("selected relation context exists");
+        for relation_variant in artifact.compiled_plan().variants() {
+            let plan = RowCodeWhirConstructionPlan::for_selected_variant(
+                artifact,
+                relation_variant.schedule_position(),
+                relation_variant.top_count(),
+            )
+            .expect("selected construction plan derives");
+            let certificate = checked_row_code_whir_transport_correspondence(
+                &plan,
+                artifact,
+                relation_variant,
+                &relation_context,
+            )
+            .expect("plan-bound transport correspondence derives");
+            assert!(certificate.is_complete_for(
+                &plan,
+                artifact,
+                relation_variant,
+                &relation_context,
+            ));
+            assert!(coordinates.insert((
+                plan.application_statement_schema_identifier,
+                plan.schedule_position,
+                plan.top_count,
+            )));
+            match plan.proof_privacy_mode {
+                ProofPrivacyMode::PublicOnly => saw_public_only = true,
+                ProofPrivacyMode::SecretBearing => saw_secret_bearing = true,
+            }
+
+            let mut wrong_identity = certificate.clone();
+            wrong_identity.construction_plan_identity_hash[0] ^= 1;
+            assert!(!wrong_identity.is_complete_for(
+                &plan,
+                artifact,
+                relation_variant,
+                &relation_context,
+            ));
+        }
+    }
+    assert_eq!(coordinates.len(), 21);
+    assert!(saw_public_only);
+    assert!(saw_secret_bearing);
+}
+
+#[test]
+#[ignore = "owned by test:rust:kernel:theorem-evidence"]
+fn persistent_committed_material_masks_cover_each_producer_and_joint_consumer_view() {
+    let certificate = derive_production_persistent_committed_material_masking_certificate()
+        .expect("persistent committed-material masking certificate derives");
+    assert!(certificate.is_complete_for_selected_profile());
+    assert_eq!(certificate.producer_root_count, 1_200);
+    assert_eq!(certificate.consumer_edge_count, 960);
+    assert_eq!(certificate.producer_root_without_consumer_count, 240);
+    assert_eq!(certificate.physical_column_count, 4_800);
+    assert_eq!(certificate.private_base_coordinate_count, 9_830_400);
+    assert_eq!(
+        certificate.generic_joint_view_base_coordinate_count,
+        4_495_040
+    );
+    assert_eq!(certificate.joint_view_rank_ceiling, 4_495_040);
+    assert_eq!(
+        certificate.residual_conditional_entropy_lower_bound,
+        5_335_360
+    );
+    assert_eq!(certificate.producer_construction_plan_identities.len(), 2);
+    assert_eq!(certificate.consumer_construction_plan_identities.len(), 3);
+    assert_eq!(
+        certificate.generator_hybrid.ceremony_material_root_count,
+        1_200
+    );
+    assert_eq!(
+        certificate
+            .generator_hybrid
+            .accepted_mask_base_field_output_count,
+        9_830_400
+    );
+    assert_eq!(
+        certificate.generator_hybrid.maximum_mask_kmac_call_count,
+        1_258_291_200
+    );
+    assert_eq!(certificate.generator_hybrid.leaf_salt_count, 10_066_329_600);
+    assert_eq!(
+        certificate.generator_hybrid.leaf_salt_kmac_call_count,
+        20_132_659_200
+    );
+    assert_eq!(
+        certificate.generator_hybrid.maximum_total_kmac_call_count,
+        21_390_950_400
+    );
+    assert!(!certificate.generator_hybrid.masks_are_publicly_recomputable);
+    assert_eq!(
+        certificate.commitment_privacy.salted_leaf_hash_call_count,
+        10_066_329_600
+    );
+    assert_eq!(
+        certificate
+            .commitment_privacy
+            .fully_hidden_parent_hash_call_count,
+        10_066_328_400
+    );
+    assert_eq!(
+        certificate
+            .commitment_privacy
+            .complete_commitment_hash_call_count,
+        20_132_658_000
+    );
+    assert!(
+        certificate
+            .commitment_privacy
+            .selected_numeric_bad_event
+            .is_at_most_inverse_power_of_two(128)
+    );
+
+    let producer_root_counts = certificate.inventory.roots.iter().fold(
+        BTreeMap::<u16, usize>::new(),
+        |mut counts, root| {
+            *counts
+                .entry(root.producer.application_statement_schema_identifier)
+                .or_default() += 1;
+            counts
+        },
+    );
+    assert_eq!(
+        producer_root_counts,
+        BTreeMap::from([
+            (
+                ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+                1_120,
+            ),
+            (
+                ProofApplicationSlotCeilings::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+                80,
+            ),
+        ])
+    );
+    let consumer_edge_counts = certificate
+        .inventory
+        .roots
+        .iter()
+        .flat_map(|root| &root.ordered_consumers)
+        .fold(BTreeMap::<u16, usize>::new(), |mut counts, consumer| {
+            *counts
+                .entry(consumer.application_statement_schema_identifier)
+                .or_default() += 1;
+            counts
+        });
+    assert_eq!(
+        consumer_edge_counts,
+        BTreeMap::from([
+            (
+                ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+                80,
+            ),
+            (
+                ProofApplicationSlotCeilings::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+                800,
+            ),
+            (
+                ProofApplicationSlotCeilings::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER,
+                80,
+            ),
+        ])
+    );
+    for root in &certificate.inventory.roots {
+        assert!(root.ordered_consumers.len() <= 1);
+        assert_eq!(root.physical_column_demands.len(), 4);
+        assert_eq!(root.leaf_count, 8_388_608);
+        for demand in &root.physical_column_demands {
+            assert_eq!(demand.mask_coefficient_count, 2_048);
+            assert_eq!(demand.producer_base_coordinate_count, 537);
+            if let Some(consumer) = root.ordered_consumers.first() {
+                let expected_consumer_coordinate_count = if consumer
+                    .application_statement_schema_identifier
+                    == ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER
+                {
+                    85
+                } else {
+                    537
+                };
+                assert_eq!(
+                    demand.ordered_consumer_base_coordinate_counts,
+                    [expected_consumer_coordinate_count]
+                );
+            } else {
+                assert!(demand.ordered_consumer_base_coordinate_counts.is_empty());
+            }
+            assert_eq!(
+                demand.joint_evaluation_image_rank_ceiling,
+                demand.generic_joint_base_coordinate_count
+            );
+        }
+    }
+
+    let mut changed_rank = certificate.clone();
+    changed_rank.inventory.roots[0].physical_column_demands[0]
+        .joint_evaluation_image_rank_ceiling += 1;
+    assert!(!changed_rank.is_complete());
+
+    let mut omitted_consumer = certificate.clone();
+    let root_with_consumer = omitted_consumer
+        .inventory
+        .roots
+        .iter_mut()
+        .find(|root| !root.ordered_consumers.is_empty())
+        .expect("selected persistent topology has a consumer");
+    root_with_consumer.ordered_consumers.pop();
+    assert!(!omitted_consumer.is_complete());
+
+    let mut public_masks = certificate.clone();
+    public_masks.masks_are_publicly_recomputable = true;
+    assert!(!public_masks.is_complete());
+
+    let mut public_generator = certificate.clone();
+    public_generator
+        .generator_hybrid
+        .masks_are_publicly_recomputable = true;
+    assert!(!public_generator.is_complete());
+
+    let mut omitted_persistent_parent = certificate.clone();
+    omitted_persistent_parent
+        .commitment_privacy
+        .fully_hidden_parent_hash_call_count -= 1;
+    assert!(!omitted_persistent_parent.is_complete());
+
+    let mut concrete_shake_overclaim = certificate.clone();
+    concrete_shake_overclaim
+        .commitment_privacy
+        .claims_concrete_shake256_reduction = true;
+    assert!(!concrete_shake_overclaim.is_complete());
+
+    let mut wrong_authority = certificate;
+    wrong_authority.source_authority = ConstructionAffineSourceAuthority::CurrentAttemptPrivateCoin;
+    assert!(!wrong_authority.is_complete());
 }
 
 #[test]
@@ -19431,7 +26242,7 @@ fn cms19_whole_state_and_database_support_are_exact_and_mutation_sensitive() {
 
     assert_eq!(
         strong_semantics.sampling_shape,
-        Cms19VerifierMessageSamplingShape::AtomicPlanSizedXofOutput,
+        Cms19VerifierMessageSamplingShape::AtomicFixedHashSeededStream,
     );
     assert_eq!(strong_semantics.multi_output_verifier_message_count, 0);
     assert_eq!(
@@ -19455,6 +26266,88 @@ fn cms19_whole_state_and_database_support_are_exact_and_mutation_sensitive() {
     assert!(strong_semantics.accepting_database_extractor.is_complete());
     assert!(strong_semantics.is_complete());
     assert!(certificate.has_complete_construction_theorem_for(&plan));
+
+    let atomic_operation_ordinals = strong_semantics
+        .state_evaluator
+        .state_transitions
+        .rows
+        .iter()
+        .filter_map(|row| {
+            matches!(
+                row.rule,
+                Cms19AtomicStateTransitionRule::AtomicVerifierMessageFill { .. }
+            )
+            .then_some(row.operation_ordinal)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        atomic_operation_ordinals.len(),
+        usize::try_from(SELECTED_LOGICAL_VERIFIER_MESSAGE_COUNT)
+            .expect("the logical message count fits usize"),
+    );
+    let every_message_is_explicitly_undefined = atomic_operation_ordinals
+        .iter()
+        .copied()
+        .map(|operation_ordinal| (operation_ordinal, Cms19VerifierMessageAssignment::Undefined))
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(
+        strong_semantics
+            .state_evaluator
+            .evaluate(&every_message_is_explicitly_undefined, false),
+        Ok(false),
+    );
+    assert!(
+        strong_semantics
+            .state_evaluator
+            .evaluate(&every_message_is_explicitly_undefined, true)
+            .is_err()
+    );
+    let every_message_is_non_failing = atomic_operation_ordinals
+        .iter()
+        .copied()
+        .map(|operation_ordinal| {
+            (
+                operation_ordinal,
+                Cms19VerifierMessageAssignment::FailureEventDidNotOccur,
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(
+        strong_semantics
+            .state_evaluator
+            .evaluate(&every_message_is_non_failing, false),
+        Ok(false),
+    );
+    let first_atomic_operation = atomic_operation_ordinals[0];
+    let last_atomic_operation = *atomic_operation_ordinals
+        .last()
+        .expect("the production state has atomic verifier messages");
+    let early_failure_and_late_non_failure = BTreeMap::from([
+        (
+            first_atomic_operation,
+            Cms19VerifierMessageAssignment::FailureEventOccurred,
+        ),
+        (
+            last_atomic_operation,
+            Cms19VerifierMessageAssignment::FailureEventDidNotOccur,
+        ),
+    ]);
+    assert_eq!(
+        strong_semantics
+            .state_evaluator
+            .evaluate(&early_failure_and_late_non_failure, true),
+        Ok(true),
+    );
+    let late_failure = BTreeMap::from([(
+        last_atomic_operation,
+        Cms19VerifierMessageAssignment::FailureEventOccurred,
+    )]);
+    assert_eq!(
+        strong_semantics
+            .state_evaluator
+            .evaluate(&late_failure, true),
+        Ok(true),
+    );
 
     let mut wrong_atomic_event_binding = strong_semantics.clone();
     wrong_atomic_event_binding
@@ -20425,11 +27318,11 @@ fn ballot_width_eight_has_complete_semantic_state_and_database_support() {
             .count(),
     );
     let ballot_cms19_arithmetic = derive_cms19_arithmetic_certificate(
-        &production_geometry_certificate.cms19_typed_variable_output_oracle_model,
-        deployed_leaf_oracle.deployed_verifier_hash_query_count,
-        deployed_leaf_oracle.deployed_accepting_database_equation_count,
+        &production_geometry_certificate.cms19_fixed_output_seeded_sampler_model,
+        &production_geometry_certificate.cms19_whole_database_support,
+        &production_geometry_certificate.nonlinear_commitment_binding,
     )
-    .expect("the ballot typed ideal-XOF arithmetic derives");
+    .expect("the ballot fixed-output oracle arithmetic derives");
     let ballot_failure_input = ExactFailureMagnitudeDerivationInput {
         plan: &plan,
         relation_variant,
@@ -20447,6 +27340,7 @@ fn ballot_width_eight_has_complete_semantic_state_and_database_support() {
         logical_verifier_message_count: catalog
             .logical_verifier_message_count()
             .expect("the ballot verifier-message count derives"),
+        sampler_model: &production_geometry_certificate.cms19_fixed_output_seeded_sampler_model,
         cms19_arithmetic: &ballot_cms19_arithmetic,
     };
     for fault in [
@@ -20641,8 +27535,8 @@ fn selected_nonlinear_commitment_binding_covers_every_root_and_shared_query() {
     assert_eq!(binding.underlying_leaf_hash_query_count, 22_756);
     assert_eq!(binding.parent_hash_query_count, 67_986);
     assert_eq!(binding.complete_merkle_hash_query_count, 90_742);
-    assert_eq!(binding.whole_database_hash_query_count, 105_437);
-    assert_eq!(binding.whole_database_accepting_equation_count, 105_428);
+    assert_eq!(binding.whole_database_hash_query_count, 695_547);
+    assert_eq!(binding.whole_database_accepting_equation_count, 695_547);
     assert_eq!(
         binding
             .rows
@@ -20881,6 +27775,200 @@ fn selected_nonlinear_commitment_binding_covers_every_root_and_shared_query() {
 
 #[test]
 #[ignore = "owned by test:rust:kernel:theorem-evidence"]
+fn selected_nonlinear_commitment_privacy_counts_every_deployed_hash_call() {
+    let plan = selected_same_secret_construction_plan();
+    let theorem = checked_row_code_whir_failure_partition(&plan)
+        .expect("the selected theorem certificate derives");
+    let privacy = &theorem.nonlinear_commitment_privacy;
+    let persistent_material_masking =
+        derive_production_persistent_committed_material_masking_certificate()
+            .expect("the root-global persistent masking certificate derives");
+    let privacy_input = NonlinearCommitmentPrivacyInput {
+        plan: &plan,
+        nonlinear_binding: &theorem.nonlinear_commitment_binding,
+        whole_database_support: &theorem.cms19_whole_database_support,
+        subtree_extraction: &theorem.commitment_subtree_extraction,
+        aggregate_wide_masking: &theorem.aggregate_wide_masking,
+        private_row_pad_generator: &theorem.private_row_pad_generator_hybrid,
+        private_leaf_salt_prf: &theorem.private_leaf_salt_prf,
+        affine_masking_composition: &theorem.affine_masking_composition,
+        persistent_material_masking: &persistent_material_masking,
+    };
+    let is_complete = |candidate: &NonlinearCommitmentPrivacyCertificate| {
+        candidate.is_complete_for(privacy_input)
+    };
+
+    assert!(is_complete(privacy));
+    assert!(theorem.has_complete_construction_theorem_for(&plan));
+    assert_eq!(privacy.rows.len(), 23);
+    assert_eq!(privacy.attempt_private_tree_count, 12);
+    assert_eq!(privacy.persistent_private_tree_count, 8);
+    assert_eq!(privacy.public_tree_count, 3);
+    assert_eq!(privacy.private_leaf_count_per_proof, 134_234_112);
+    assert_eq!(privacy.attempt_private_leaf_count_per_proof, 67_125_248);
+    assert_eq!(privacy.opened_private_leaf_count_per_proof, 4_263);
+    assert_eq!(
+        privacy.salted_start_or_single_call_count_per_proof,
+        67_125_248
+    );
+    assert_eq!(privacy.streaming_state_call_count_per_proof, 149_192_704);
+    assert_eq!(
+        privacy.fully_hidden_parent_replacement_count_ceiling_per_proof,
+        67_125_236
+    );
+    assert_eq!(
+        privacy.complete_private_commitment_hash_call_count_ceiling_per_proof,
+        283_443_188
+    );
+    assert_eq!(privacy.family_application_multiplicity, 10);
+    assert_eq!(privacy.ceremony_private_leaf_count, 671_252_480);
+    assert_eq!(
+        privacy.ceremony_salted_start_or_single_call_count,
+        671_252_480
+    );
+    assert_eq!(privacy.ceremony_streaming_state_call_count, 1_491_927_040);
+    assert_eq!(
+        privacy.ceremony_fully_hidden_parent_replacement_count_ceiling,
+        671_252_360
+    );
+    assert_eq!(privacy.streaming_state_entropy_bit_length, 512);
+    assert_eq!(privacy.salted_or_marked_input_entropy_bit_length, 1_024);
+    assert!(
+        privacy
+            .streaming_state_fresh_input_bad_event
+            .is_at_most_inverse_power_of_two(401)
+    );
+    assert!(
+        privacy
+            .streaming_state_fresh_input_bad_event
+            .is_greater_than_inverse_power_of_two(402)
+    );
+    assert!(
+        privacy
+            .salted_or_marked_fresh_input_bad_event
+            .is_at_most_inverse_power_of_two(913)
+    );
+    assert!(
+        privacy
+            .salted_or_marked_fresh_input_bad_event
+            .is_greater_than_inverse_power_of_two(914)
+    );
+    assert!(
+        privacy
+            .leaf_salt_collision_bad_event
+            .is_at_most_inverse_power_of_two(969)
+    );
+    assert!(
+        privacy
+            .leaf_salt_collision_bad_event
+            .is_greater_than_inverse_power_of_two(970)
+    );
+    assert!(
+        privacy
+            .selected_numeric_bad_event
+            .is_at_most_inverse_power_of_two(401)
+    );
+    assert!(
+        privacy
+            .selected_numeric_bad_event
+            .is_greater_than_inverse_power_of_two(402)
+    );
+    assert!(
+        privacy
+            .hypothetical_bcs16_direct_leaf_statistical_bound
+            .is_at_most_inverse_power_of_two(96)
+    );
+    assert!(
+        privacy
+            .hypothetical_bcs16_direct_leaf_statistical_bound
+            .is_greater_than_inverse_power_of_two(97)
+    );
+    assert!(!privacy.bcs16_direct_leaf_hypothesis_matches_deployed_chain);
+    assert!(!privacy.bcs16_direct_leaf_bound_meets_128_bit_allocation);
+    assert_eq!(privacy.persistent_material_endpoint_count_for_family, 80);
+    assert!(privacy.persistent_material_masking_is_bound_root_globally);
+    assert!(privacy.persistent_material_bad_event_is_charged_once_outside_family);
+    assert!(privacy.affine_component_catalog_is_bound);
+    assert!(!privacy.affine_image_inclusion_is_proved);
+    assert!(!privacy.opened_leaf_sequential_simulator_is_proved);
+    assert!(!privacy.concrete_shake256_reduction_is_available);
+    assert!(!privacy.claims_fiat_shamir_zero_knowledge);
+    assert!(!privacy.claims_malicious_verifier_zero_knowledge);
+    assert!(!privacy.claims_family_simulation);
+    assert!(!privacy.claims_quantum_random_oracle_zero_knowledge);
+
+    let mut omitted_commitment = privacy.clone();
+    omitted_commitment.rows.pop();
+    assert!(!is_complete(&omitted_commitment));
+
+    let mut challenge_dependent_commitment = privacy.clone();
+    challenge_dependent_commitment.rows[0].commitment_is_fixed_before_dependent_query = false;
+    assert!(!challenge_dependent_commitment.has_complete_standalone_theorem());
+
+    let mut publicly_recomputable_salt = privacy.clone();
+    publicly_recomputable_salt.rows[0].salt_source =
+        NonlinearCommitmentPrivacySaltSource::PublicSetupPolynomial;
+    assert!(!publicly_recomputable_salt.has_complete_standalone_theorem());
+
+    let mut reused_attempt_salt_role = privacy.clone();
+    let first_attempt_role = reused_attempt_salt_role
+        .rows
+        .iter()
+        .find_map(|row| match row.salt_source {
+            NonlinearCommitmentPrivacySaltSource::AttemptPrivate(role) => Some(role),
+            _ => None,
+        })
+        .expect("an attempt-private salt role exists");
+    let second_attempt_row = reused_attempt_salt_role
+        .rows
+        .iter_mut()
+        .filter(|row| {
+            matches!(
+                row.salt_source,
+                NonlinearCommitmentPrivacySaltSource::AttemptPrivate(_)
+            )
+        })
+        .nth(1)
+        .expect("a second attempt-private salt role exists");
+    second_attempt_row.salt_source =
+        NonlinearCommitmentPrivacySaltSource::AttemptPrivate(first_attempt_role);
+    assert!(!is_complete(&reused_attempt_salt_role));
+
+    let mut omitted_streaming_transition = privacy.clone();
+    omitted_streaming_transition.streaming_state_call_count_per_proof -= 1;
+    assert!(!omitted_streaming_transition.has_complete_standalone_theorem());
+
+    let mut narrowed_streaming_state = privacy.clone();
+    narrowed_streaming_state.streaming_state_entropy_bit_length = 256;
+    assert!(!narrowed_streaming_state.has_complete_standalone_theorem());
+
+    let mut substituted_bcs16_route = privacy.clone();
+    substituted_bcs16_route.bcs16_direct_leaf_hypothesis_matches_deployed_chain = true;
+    assert!(!substituted_bcs16_route.has_complete_standalone_theorem());
+
+    let mut affine_image_overclaim = privacy.clone();
+    affine_image_overclaim.affine_image_inclusion_is_proved = true;
+    assert!(!affine_image_overclaim.has_complete_standalone_theorem());
+
+    let mut sequential_simulator_overclaim = privacy.clone();
+    sequential_simulator_overclaim.opened_leaf_sequential_simulator_is_proved = true;
+    assert!(!sequential_simulator_overclaim.has_complete_standalone_theorem());
+
+    let mut concrete_reduction_overclaim = privacy.clone();
+    concrete_reduction_overclaim.concrete_shake256_reduction_is_available = true;
+    assert!(!concrete_reduction_overclaim.has_complete_standalone_theorem());
+
+    let mut fiat_shamir_overclaim = privacy.clone();
+    fiat_shamir_overclaim.claims_fiat_shamir_zero_knowledge = true;
+    assert!(!fiat_shamir_overclaim.has_complete_standalone_theorem());
+
+    let mut qrom_zero_knowledge_overclaim = privacy.clone();
+    qrom_zero_knowledge_overclaim.claims_quantum_random_oracle_zero_knowledge = true;
+    assert!(!qrom_zero_knowledge_overclaim.has_complete_standalone_theorem());
+}
+
+#[test]
+#[ignore = "owned by test:rust:kernel:theorem-evidence"]
 fn selected_same_secret_affine_masking_composition_is_exact_and_hostile_mutations_refuse() {
     let relation_context = selected_relation_plan_check_context(
         ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
@@ -20941,7 +28029,6 @@ fn selected_same_secret_affine_masking_composition_is_exact_and_hostile_mutation
             ConstructionAffineMaskSourceClass::QuotientTelescopingMasks,
             ConstructionAffineMaskSourceClass::OpeningBatchMask,
             ConstructionAffineMaskSourceClass::PhaseRowPads,
-            ConstructionAffineMaskSourceClass::PriorVssCommittedMaterialMasks,
             ConstructionAffineMaskSourceClass::AggregateWidePad,
         ],
     );
@@ -20961,26 +28048,10 @@ fn selected_same_secret_affine_masking_composition_is_exact_and_hostile_mutation
         certificate.rows[3].private_base_coordinate_count,
         130_023_424
     );
-    assert_eq!(certificate.rows[4].joint_view_rank, 19_904);
-    assert_eq!(
-        certificate.rows[4].residual_conditional_entropy_lower_bound,
-        45_632,
-    );
-    assert_eq!(certificate.rows[5].joint_view_rank, 90_065);
-    assert_eq!(
-        certificate
-            .persistent_material_generator_hybrid
-            .maximum_total_kmac_call_count,
-        1_426_063_360,
-    );
+    assert_eq!(certificate.rows[4].joint_view_rank, 90_065);
     assert!(
         !certificate
             .private_coin_generator_hybrid
-            .masks_are_publicly_recomputable
-    );
-    assert!(
-        !certificate
-            .persistent_material_generator_hybrid
             .masks_are_publicly_recomputable
     );
 
@@ -20992,8 +28063,8 @@ fn selected_same_secret_affine_masking_composition_is_exact_and_hostile_mutation
     assert!(!deficient_rank.is_complete_for(derivation_input));
 
     let mut omitted_coordinate = certificate.clone();
-    omitted_coordinate.rows[5].private_base_coordinate_count -= 1;
-    omitted_coordinate.rows[5].residual_conditional_entropy_lower_bound -= 1;
+    omitted_coordinate.rows[4].private_base_coordinate_count -= 1;
+    omitted_coordinate.rows[4].residual_conditional_entropy_lower_bound -= 1;
     assert!(!omitted_coordinate.is_complete());
 
     let mut wrong_authority = certificate.clone();
@@ -21007,11 +28078,9 @@ fn selected_same_secret_affine_masking_composition_is_exact_and_hostile_mutation
         .masks_are_publicly_recomputable = true;
     assert!(!public_attempt_masks.is_complete());
 
-    let mut public_persistent_masks = certificate.clone();
-    public_persistent_masks
-        .persistent_material_generator_hybrid
-        .masks_are_publicly_recomputable = true;
-    assert!(!public_persistent_masks.is_complete());
+    let mut affine_image_overclaim = certificate.clone();
+    affine_image_overclaim.claims_affine_image_inclusion = true;
+    assert!(!affine_image_overclaim.is_complete());
 
     let mut challenge_dependent_aggregate = production_aggregate.clone();
     challenge_dependent_aggregate.chronology.swap(2, 3);
@@ -21036,6 +28105,341 @@ fn selected_same_secret_affine_masking_composition_is_exact_and_hostile_mutation
     let mut overclaimed_scope = certificate;
     overclaimed_scope.claims_quantum_random_oracle_zero_knowledge = true;
     assert!(!overclaimed_scope.is_complete());
+}
+
+#[test]
+#[ignore = "owned by test:rust:kernel:theorem-evidence"]
+fn selected_same_secret_affine_image_inclusion_uses_conditioned_production_factorizations() {
+    let relation_context = selected_relation_plan_check_context(
+        ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+    )
+    .expect("the selected same-secret relation context exists");
+    let compiled_plan = compile_same_secret_relation_plan(
+        &selected_same_secret_relation_plan_input()
+            .expect("the selected same-secret relation input derives"),
+        &relation_context,
+    )
+    .expect("the selected same-secret relation compiles");
+    let relation_artifact =
+        ValidatedRelationPlanArtifact::from_owned_compiled_plan(compiled_plan, &relation_context)
+            .expect("the selected same-secret relation validates");
+    let relation_variant = relation_artifact
+        .compiled_plan()
+        .select_variant(None, None)
+        .expect("the selected same-secret relation variant exists");
+    let plan = RowCodeWhirConstructionPlan::for_selected_variant(&relation_artifact, None, None)
+        .expect("the selected same-secret construction derives");
+    let production_preaggregate = derive_production_construction_masking_correspondence(
+        &plan,
+        relation_variant,
+        &relation_context,
+    )
+    .expect("the production pre-aggregate correspondence derives");
+    let hiding_configuration =
+        super::super::hiding_whir::selected_hiding_whir_config(plan.selected_parameters())
+            .expect("the selected hiding configuration derives");
+    let aggregate_wide_masking = AggregateWideMaskingCertificate::derive(&hiding_configuration)
+        .expect("the selected aggregate masking certificate derives");
+    let production_aggregate =
+        derive_production_aggregate_wide_view_correspondence(&plan, &aggregate_wide_masking)
+            .expect("the production aggregate correspondence derives");
+    let row_pad_generator = PrivateRowPadGeneratorHybridCertificate::derive(&plan)
+        .expect("the production row-pad generator derives");
+    let derivation_input = ConstructionMaskingAffineCompositionInput {
+        plan: &plan,
+        relation_variant,
+        relation_context: &relation_context,
+        production_preaggregate: &production_preaggregate,
+        aggregate_wide_masking: &aggregate_wide_masking,
+        production_aggregate: &production_aggregate,
+        row_pad_generator: &row_pad_generator,
+    };
+    let accounting = derive_construction_masking_affine_composition(derivation_input)
+        .expect("the selected affine accounting derives");
+    let certificate = derive_construction_affine_image_inclusion(derivation_input)
+        .expect("the selected conditioned affine image theorem derives");
+
+    assert!(certificate.is_complete_for(derivation_input));
+    assert_eq!(certificate.rows.len(), 6);
+    assert_eq!(
+        certificate.total_mask_image_rank_or_generic_rank,
+        certificate.total_joined_image_rank_or_generic_rank
+    );
+    assert_eq!(
+        certificate.total_private_base_coordinate_count,
+        accounting
+            .rows
+            .iter()
+            .map(|row| row.private_base_coordinate_count)
+            .sum::<u64>()
+    );
+    assert_eq!(
+        certificate.total_conditioned_view_base_coordinate_count,
+        accounting
+            .rows
+            .iter()
+            .map(|row| row.joint_view_rank)
+            .sum::<u64>()
+    );
+    assert_eq!(
+        certificate.total_derived_alias_base_coordinate_count,
+        accounting
+            .rows
+            .iter()
+            .map(|row| row.derived_linear_identity_base_coordinate_count)
+            .sum::<u64>()
+    );
+    assert!(matches!(
+        certificate.rows[1].factorization,
+        ConstructionAffineImageFactorization::ConditionedTelescopingKernel {
+            quotient_component_count: 8,
+            telescoping_source_count: 7,
+            opening_point_count: 1,
+            challenge_extension_degree: 5,
+            dependency_matrix_rank: 7,
+            conditioned_identity_coordinate_count: 5,
+        }
+    ));
+    assert!(matches!(
+        certificate.rows[3].factorization,
+        ConstructionAffineImageFactorization::PhaseRowPadVandermonde {
+            physical_row_count: 62,
+            source_dimension_per_row: 2_097_152,
+            conditioned_view_rank_per_row: 3_483,
+            verification: ConstructionMaskingRankVerification::DistinctPointVandermonde,
+        }
+    ));
+    assert!(matches!(
+        certificate.rows[4].factorization,
+        ConstructionAffineImageFactorization::AggregateBlockDiagonal {
+            challenge_extension_degree: 5,
+            affine_block_count: 15,
+            block_kind_counts: [6, 5, 1, 1, 1, 1],
+            private_extension_coordinate_count: 18_025,
+            conditioned_image_rank_extension: 18_013,
+            derived_alias_extension_coordinate_count: 2_444,
+        }
+    ));
+
+    let mut changed_joined_rank = certificate.clone();
+    changed_joined_rank.rows[0].joined_mask_and_witness_image_rank_or_generic_rank -= 1;
+    assert!(!changed_joined_rank.is_complete());
+
+    let mut changed_trace_factorization = certificate.clone();
+    let ConstructionAffineImageFactorization::VanishingScaledTraceEvaluation {
+        minimum_source_coordinate_surplus,
+        ..
+    } = &mut changed_trace_factorization.rows[0].factorization
+    else {
+        panic!("the trace factorization row is present");
+    };
+    *minimum_source_coordinate_surplus += 1;
+    assert!(!changed_trace_factorization.is_complete_for(derivation_input));
+
+    let mut changed_conditioning_order = certificate.clone();
+    changed_conditioning_order.conditioning_order.swap(1, 2);
+    assert!(!changed_conditioning_order.is_complete());
+
+    let mut unconditioned_overclaim = certificate.clone();
+    unconditioned_overclaim.claims_unconditioned_independence = true;
+    assert!(!unconditioned_overclaim.is_complete());
+
+    let mut nonlinear_overclaim = certificate;
+    nonlinear_overclaim.claims_nonlinear_simulation = true;
+    assert!(!nonlinear_overclaim.is_complete());
+}
+
+#[test]
+#[ignore = "owned by test:rust:kernel:theorem-evidence"]
+fn selected_same_secret_sequential_simulator_covers_shared_queries_and_nonlinear_views() {
+    let plan = selected_same_secret_construction_plan();
+    let theorem = checked_row_code_whir_failure_partition(&plan)
+        .expect("the selected theorem certificate derives");
+    let simulator = &theorem.sequential_simulator;
+    let simulator_input = ConstructionSequentialSimulatorInput {
+        plan: &plan,
+        affine_image_inclusion: &theorem.affine_image_inclusion,
+        nonlinear_commitment_privacy: &theorem.nonlinear_commitment_privacy,
+        nonlinear_commitment_binding: &theorem.nonlinear_commitment_binding,
+        whole_database_support: &theorem.cms19_whole_database_support,
+        commitment_subtree_extraction: &theorem.commitment_subtree_extraction,
+        aggregate_wide_masking: &theorem.aggregate_wide_masking,
+        production_aggregate: &theorem.production_aggregate_wide_views,
+        transported_proof_correspondence: &theorem.transported_proof_correspondence,
+    };
+    let is_complete = |candidate: &ConstructionSequentialSimulatorCertificate| {
+        candidate.is_complete_for(simulator_input)
+    };
+
+    assert!(is_complete(simulator));
+    assert!(theorem.has_complete_construction_theorem_for(&plan));
+    assert_eq!(simulator.commitment_rows.len(), 23);
+    assert_eq!(simulator.query_groups.len(), 9);
+    assert_eq!(simulator.derived_views.len(), 11);
+    assert_eq!(simulator.conditioned_affine_source_classes.len(), 6);
+    assert_eq!(simulator.transported_section_rows.len(), 22);
+    assert_eq!(simulator.aggregate_terminal_section_rows.len(), 15);
+    assert_eq!(simulator.aggregate_terminal_byte_length, 2_942_104);
+    assert_eq!(
+        simulator
+            .aggregate_terminal_section_rows
+            .iter()
+            .filter(|row| {
+                row.strategy == ConstructionSequentialAggregateSectionStrategy::CanonicalEmptyVector
+                    && row.byte_length == 0
+            })
+            .count(),
+        2
+    );
+    assert_eq!(
+        simulator.transported_family_body_byte_length_ceiling,
+        5_813_652
+    );
+    assert_eq!(simulator.attempt_private_root_count, 12);
+    assert_eq!(simulator.imported_persistent_root_count, 8);
+    assert_eq!(simulator.public_root_count, 3);
+    assert_eq!(simulator.programmed_private_frontier_count, 20);
+    assert_eq!(simulator.verified_public_frontier_count, 3);
+    assert_eq!(simulator.opened_private_leaf_count, 4_263);
+    assert_eq!(simulator.opened_public_leaf_count, 798);
+    assert_eq!(simulator.aggregate_commitment_root_count, 9);
+    assert_eq!(simulator.aggregate_compact_frontier_count, 9);
+    assert_eq!(simulator.aggregate_code_switch_count, 5);
+    assert_eq!(simulator.aggregate_fold_count, 6);
+    assert!(
+        simulator
+            .ideal_xof_programming_bad_event
+            .is_at_most_inverse_power_of_two(401)
+    );
+    assert!(
+        simulator
+            .ideal_xof_programming_bad_event
+            .is_greater_than_inverse_power_of_two(402)
+    );
+    assert!(simulator.query_groups.iter().any(|group| {
+        group.owner == NonlinearCommitmentQueryOwner::Outer && group.ordered_roles.len() == 3
+    }));
+    assert!(simulator.query_groups.iter().any(|group| {
+        group.owner == NonlinearCommitmentQueryOwner::Bound
+            && group.sampled_query_vector_length == 266
+            && group.ordered_roles.len() == 11
+            && group
+                .ordered_opened_leaf_counts
+                .iter()
+                .filter(|count| **count == 40)
+                .count()
+                == 8
+            && group
+                .ordered_opened_leaf_counts
+                .iter()
+                .filter(|count| **count == 266)
+                .count()
+                == 3
+    }));
+    assert!(!simulator.claims_concrete_shake256_reduction);
+    assert!(!simulator.claims_malicious_verifier_zero_knowledge);
+    assert!(!simulator.claims_resettable_zero_knowledge);
+    assert!(!simulator.claims_family_simulation);
+    assert!(!simulator.claims_quantum_random_oracle_zero_knowledge);
+
+    let mut omitted_commitment = simulator.clone();
+    omitted_commitment.commitment_rows.pop();
+    assert!(!omitted_commitment.is_complete());
+
+    let mut split_shared_query = simulator.clone();
+    split_shared_query.query_groups[0].query_operation_ordinal += 1;
+    assert!(!is_complete(&split_shared_query));
+
+    let mut persistent_root_redrawn = simulator.clone();
+    let persistent_row = persistent_root_redrawn
+        .commitment_rows
+        .iter_mut()
+        .find(|row| {
+            row.root_strategy
+                == ConstructionSimulatorRootStrategy::ImportedAuthenticatedPersistentProducerRoot
+        })
+        .expect("a persistent root exists");
+    persistent_row.root_strategy =
+        ConstructionSimulatorRootStrategy::RandomAttemptRootUnderPrivateSaltHybrid;
+    assert!(!persistent_root_redrawn.is_complete());
+
+    let mut omitted_fold = simulator.clone();
+    omitted_fold.derived_views.pop();
+    assert!(!omitted_fold.is_complete());
+
+    let mut reordered_derived_view = simulator.clone();
+    reordered_derived_view.derived_views.swap(4, 5);
+    assert!(!reordered_derived_view.is_complete());
+
+    let mut omitted_affine_source = simulator.clone();
+    omitted_affine_source
+        .conditioned_affine_source_classes
+        .pop();
+    assert!(!omitted_affine_source.is_complete());
+
+    let mut omitted_transport_section = simulator.clone();
+    omitted_transport_section.transported_section_rows.remove(7);
+    assert!(!omitted_transport_section.is_complete());
+
+    let mut reordered_transport_sections = simulator.clone();
+    reordered_transport_sections
+        .transported_section_rows
+        .swap(7, 8);
+    assert!(!reordered_transport_sections.is_complete());
+
+    let mut changed_transport_owner = simulator.clone();
+    let out_of_domain_row = changed_transport_owner
+        .transported_section_rows
+        .iter_mut()
+        .find(|row| row.section.role == RowCodeWhirProofSectionRole::OutOfDomainEvaluations)
+        .expect("the out-of-domain section exists");
+    out_of_domain_row.strategy =
+        ConstructionSequentialTransportSectionStrategy::IndependentOpeningBatchMaskEvaluations;
+    assert!(!changed_transport_owner.is_complete());
+
+    let mut omitted_aggregate_section = simulator.clone();
+    omitted_aggregate_section
+        .aggregate_terminal_section_rows
+        .remove(6);
+    assert!(!omitted_aggregate_section.is_complete());
+
+    let mut reordered_aggregate_sections = simulator.clone();
+    reordered_aggregate_sections
+        .aggregate_terminal_section_rows
+        .swap(6, 7);
+    assert!(!reordered_aggregate_sections.is_complete());
+
+    let mut changed_aggregate_section_length = simulator.clone();
+    changed_aggregate_section_length.aggregate_terminal_section_rows[6].byte_length += 1;
+    assert!(!changed_aggregate_section_length.is_complete());
+
+    let mut nonempty_canonical_empty_vector = simulator.clone();
+    let canonical_empty_vector = nonempty_canonical_empty_vector
+        .aggregate_terminal_section_rows
+        .iter_mut()
+        .find(|row| {
+            row.strategy == ConstructionSequentialAggregateSectionStrategy::CanonicalEmptyVector
+        })
+        .expect("a canonical empty aggregate vector exists");
+    canonical_empty_vector.byte_length = 1;
+    assert!(!nonempty_canonical_empty_vector.is_complete());
+
+    let mut programming_budget_overclaim = simulator.clone();
+    programming_budget_overclaim.ideal_xof_programming_bad_event =
+        ExactBigFraction::new(BigUint::one(), BigUint::one()).expect("the unit fraction derives");
+    assert!(!programming_budget_overclaim.is_complete());
+
+    let mut malicious_verifier_overclaim = simulator.clone();
+    malicious_verifier_overclaim.claims_malicious_verifier_zero_knowledge = true;
+    assert!(!malicious_verifier_overclaim.is_complete());
+
+    let mut qrom_overclaim = simulator.clone();
+    qrom_overclaim.claims_quantum_random_oracle_zero_knowledge = true;
+    assert!(!qrom_overclaim.is_complete());
+
+    let mut family_overclaim = simulator.clone();
+    family_overclaim.claims_family_simulation = true;
+    assert!(!family_overclaim.is_complete());
 }
 
 #[test]
@@ -21261,8 +28665,7 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
         certificate
             .oracle_equation_rows
             .iter()
-            .filter(|row| row.role_pattern == OracleEquationRolePattern::Single(role))
-            .map(|row| row.equation_count)
+            .map(|row| row.role_pattern.equation_count_for(role))
             .sum::<u64>()
     };
     let semantic_response_operation_count = production_catalog
@@ -21334,12 +28737,16 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
         consecutive_challenge_count,
     );
     assert_eq!(
-        transcript_role_equation_count(OracleEquationRole::AtomicChallengeXof),
+        transcript_role_equation_count(OracleEquationRole::AtomicChallengeSeed),
         semantic_challenge_operation_count,
     );
+    assert!(
+        transcript_role_equation_count(OracleEquationRole::AtomicChallengeOutputBlock)
+            > semantic_challenge_operation_count,
+    );
     let verifier_ledger = &certificate.complete_verifier_oracle_ledger;
-    assert_eq!(verifier_ledger.transcript_equation_count, 14_673);
-    assert_eq!(verifier_ledger.transcript_hash_query_count, 14_673);
+    assert_eq!(verifier_ledger.transcript_equation_count, 604_801);
+    assert_eq!(verifier_ledger.transcript_hash_query_count, 604_801);
     assert_eq!(verifier_ledger.merkle_rows.len(), 23);
     assert_eq!(
         verifier_ledger.merkle_rows[..3]
@@ -21479,25 +28886,22 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
             }),
         Some(8_093),
     );
-    assert_eq!(verifier_ledger.fixed_hash_rows.len(), 5);
-    assert_eq!(verifier_ledger.fixed_hash_query_count(), Ok(22));
-    assert_eq!(verifier_ledger.fixed_distinct_equation_count(), Ok(13));
-    assert_eq!(verifier_ledger.fixed_new_equation_count(), Ok(13));
+    assert_eq!(verifier_ledger.fixed_hash_rows.len(), 4);
+    assert_eq!(verifier_ledger.fixed_hash_query_count(), Ok(4));
+    assert_eq!(verifier_ledger.fixed_distinct_equation_count(), Ok(4));
+    assert_eq!(verifier_ledger.fixed_new_equation_count(), Ok(4));
     assert!(
         verifier_ledger
             .fixed_hash_rows
             .iter()
             .all(|row| row.transcript_catalog_equation_overlap_count == 0),
     );
-    // Both complete ceilings are the transcript ceiling plus the plan's Merkle
-    // ceiling of `73,047` plus the fixed rows: `14,673 + 73,047 + 13 =
-    // 87,733` equations and `14,673 + 73,047 + 22 = 87,742` hash
-    // queries. The Merkle and fixed components are independent of the
-    // transcript catalog, and the two totals now differ only by the fixed
-    // distinct-equation and hash-query rows because the catalog charges one
-    // equation per hash query.
-    assert_eq!(verifier_ledger.complete_equation_count_ceiling, 87_733);
-    assert_eq!(verifier_ledger.complete_hash_query_count, 87_742);
+    // The complete ceilings are the `604,801` transcript calls plus `73,056`
+    // Merkle equations or `73,065` Merkle hash calls and four fixed verifier
+    // calls. The transcript and fixed rows each charge one equation per call;
+    // the nine-call difference comes from repeated Merkle initial inputs.
+    assert_eq!(verifier_ledger.complete_equation_count_ceiling, 677_861);
+    assert_eq!(verifier_ledger.complete_hash_query_count, 677_870);
     assert!(certificate.commitment_subtree_extraction.is_complete());
     assert_eq!(certificate.commitment_subtree_extraction.rows.len(), 23);
     assert_eq!(
@@ -21519,15 +28923,18 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
             > 0,
     );
     // The compiler query ceiling is the full adversarial budget plus every
-    // deployed verifier hash query on an accepting path, including the initial,
-    // transition, and final calls hidden by the abstract one-call leaf row.
+    // primary-restriction verifier query. The concrete ledger retains the
+    // precommitted sampler-restriction block calls, but the CMS19 database
+    // projection excludes them while retaining every seed, transcript, Merkle,
+    // leaf, and fixed-verifier call.
     assert_eq!(
         certificate.cms19_arithmetic.compiler_query_bound,
         ((BigUint::from(1_u8) << 80_usize) - BigUint::from(1_u8))
             + BigUint::from(
                 certificate
-                    .deployed_aggregate_leaf_oracle
-                    .deployed_verifier_hash_query_count,
+                    .cms19_arithmetic
+                    .separated_oracle_projection
+                    .primary_verifier_hash_query_count,
             ),
     );
     assert_eq!(
@@ -21536,14 +28943,48 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
     );
     assert_eq!(
         certificate.cms19_arithmetic.verifier_hash_query_count,
-        105_437
+        105_419,
     );
     assert_eq!(
         certificate
             .cms19_arithmetic
             .accepting_database_equation_count,
-        105_428,
+        105_419,
     );
+    let oracle_projection = &certificate.cms19_arithmetic.separated_oracle_projection;
+    assert_eq!(
+        oracle_projection.concrete_transcript_hash_query_count,
+        604_801
+    );
+    assert_eq!(
+        oracle_projection.primary_transcript_hash_query_count,
+        14_673
+    );
+    assert_eq!(oracle_projection.primary_seed_hash_query_count, 4_272);
+    assert_eq!(
+        oracle_projection.primary_ordinary_transcript_hash_query_count,
+        10_401,
+    );
+    assert_eq!(
+        oracle_projection.auxiliary_sampler_table_hash_query_count,
+        590_128,
+    );
+    assert_eq!(
+        oracle_projection.concrete_verifier_hash_query_count,
+        695_547
+    );
+    assert_eq!(oracle_projection.primary_verifier_hash_query_count, 105_419);
+    assert_eq!(
+        oracle_projection.concrete_accepting_database_equation_count,
+        695_547,
+    );
+    assert_eq!(
+        oracle_projection.primary_accepting_database_equation_count,
+        105_419,
+    );
+    assert!(oracle_projection.canonical_domain_partition_is_disjoint);
+    assert!(!oracle_projection.claims_precommitted_table_goodness);
+    assert!(!oracle_projection.claims_relativized_cms19_reduction);
     assert_eq!(
         certificate.cms19_arithmetic.classical_soundness_multiplier,
         BigUint::from(12_u8)
@@ -21556,7 +28997,7 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
             * &certificate.cms19_arithmetic.compiler_query_bound
             * &certificate.cms19_arithmetic.compiler_query_bound
             * &certificate.cms19_arithmetic.compiler_query_bound
-            + BigUint::from(2_u8) * BigUint::from(105_428_u64),
+            + BigUint::from(2_u8) * BigUint::from(105_419_u64),
     );
     assert_eq!(
         certificate
@@ -21566,8 +29007,8 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
     );
     assert_eq!(
         certificate.cms19_arithmetic.oracle_model_requirement,
-        Cms19ArithmeticOracleModelRequirement::TypedVariableOutputIdealXof {
-            minimum_output_bit_length: 512,
+        Cms19ArithmeticOracleModelRequirement::FixedOutputRandomOracle {
+            output_bit_length: 512,
         },
     );
     assert_eq!(
@@ -21586,13 +29027,13 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
         certificate
             .cms19_applicability
             .claimed_complete_equation_count,
-        105_428,
+        695_547,
     );
     assert_eq!(
         certificate
             .cms19_applicability
             .claimed_complete_hash_query_count,
-        105_437,
+        695_547,
     );
     assert_eq!(
         certificate
@@ -21655,12 +29096,27 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
     assert!(
         certificate
             .cms19_applicability
-            .typed_variable_output_oracle_model_established
+            .has_complete_structural_correspondence()
     );
     assert!(
         certificate
-            .cms19_applicability
-            .is_selected_transform_eligible()
+            .cms19_fixed_output_seeded_sampler_model
+            .matches_production_width_inventory(
+                &certificate.cms19_transcript_oracle_output_inventory,
+            )
+    );
+    assert!(
+        certificate
+            .cms19_fixed_output_seeded_sampler_model
+            .classical_sampler_distribution
+            .is_self_consistent()
+    );
+    assert_eq!(
+        certificate
+            .cms19_fixed_output_seeded_sampler_model
+            .classical_sampler_distribution
+            .relation_plan_variant_hash,
+        plan.relation_plan_variant_hash,
     );
     let deployed_leaf_oracle = &certificate.deployed_aggregate_leaf_oracle;
     assert!(deployed_leaf_oracle.has_complete_call_inventory());
@@ -21685,11 +29141,11 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
     assert_eq!(deployed_leaf_oracle.repeated_initial_hash_query_count, 0);
     assert_eq!(
         deployed_leaf_oracle.deployed_verifier_hash_query_count,
-        105_437
+        695_547
     );
     assert_eq!(
         deployed_leaf_oracle.deployed_accepting_database_equation_count,
-        105_428
+        695_547
     );
     assert_eq!(
         deployed_leaf_oracle.intermediate_oracle_output_bit_length,
@@ -21866,13 +29322,13 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
     changed_conditional_oracle_requirement
         .cms19_arithmetic
         .oracle_model_requirement =
-        Cms19ArithmeticOracleModelRequirement::TypedVariableOutputIdealXof {
-            minimum_output_bit_length: 256,
+        Cms19ArithmeticOracleModelRequirement::FixedOutputRandomOracle {
+            output_bit_length: 256,
         };
     assert!(!changed_conditional_oracle_requirement.has_complete_structural_certificate());
     let mut changed_typed_oracle_plan = certificate.clone();
     changed_typed_oracle_plan
-        .cms19_typed_variable_output_oracle_model
+        .cms19_fixed_output_seeded_sampler_model
         .canonical_oracle_plan_hash[0] ^= 1;
     assert!(!changed_typed_oracle_plan.has_complete_structural_certificate());
     assert!(!changed_typed_oracle_plan.has_complete_construction_theorem_for(&plan));
@@ -22033,23 +29489,28 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
     );
     assert!(
         exact_failure
-            .classical_failure_probability_ceiling
+            .ideal_public_coin_classical_failure_probability_ceiling
             .is_greater_than_inverse_power_of_two(244)
     );
     assert!(
         exact_failure
-            .classical_failure_probability_ceiling
+            .ideal_public_coin_classical_failure_probability_ceiling
             .is_at_most_inverse_power_of_two(243)
     );
     assert!(
         exact_failure
-            .qrom_failure_probability_ceiling
-            .is_greater_than_inverse_power_of_two(80)
+            .ideal_public_coin_classical_failure_probability_ceiling
+            .less_than(&exact_failure.classical_failure_probability_ceiling)
     );
     assert!(
         exact_failure
             .qrom_failure_probability_ceiling
-            .is_at_most_inverse_power_of_two(79)
+            .is_at_most_inverse_power_of_two(64)
+    );
+    assert!(
+        exact_failure
+            .cms19_primary_oracle_qrom_failure_probability_ceiling
+            .less_than(&exact_failure.qrom_failure_probability_ceiling)
     );
     assert!(
         exact_failure
@@ -22201,16 +29662,6 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
                 129_807_478,
             ),
             (
-                ConstructionAffineMaskSourceClass::PriorVssCommittedMaterialMasks,
-                32,
-                65_536,
-                19_904,
-                19_904,
-                ConstructionAffineRankKind::ConservativeCeiling,
-                0,
-                45_632,
-            ),
-            (
                 ConstructionAffineMaskSourceClass::AggregateWidePad,
                 15,
                 90_125,
@@ -22257,90 +29708,6 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
         130_023_424
     );
 
-    let persistent_mask_image = &affine_masking.persistent_mask_image;
-    assert_ne!(
-        persistent_mask_image.vss_construction_plan_identity_hash,
-        [0_u8; 64]
-    );
-    assert_eq!(
-        persistent_mask_image.same_secret_construction_plan_identity_hash,
-        plan.canonical_identity_hash()
-            .expect("the selected plan identity derives"),
-    );
-    assert_eq!(persistent_mask_image.ceremony_proof_count, 10);
-    assert_eq!(persistent_mask_image.logical_root_count_per_proof, 8);
-    assert_eq!(persistent_mask_image.physical_column_count_per_root, 4);
-    assert_eq!(
-        persistent_mask_image.producer_base_coordinate_count_per_column,
-        537
-    );
-    assert_eq!(
-        persistent_mask_image.consumer_base_coordinate_count_per_column,
-        85
-    );
-    assert_eq!(
-        persistent_mask_image.joint_evaluation_image_rank_ceiling_per_column,
-        622,
-    );
-    assert_eq!(
-        persistent_mask_image.mask_coefficient_count_per_column,
-        2_048
-    );
-    assert_eq!(
-        persistent_mask_image.residual_conditional_entropy_lower_bound_per_column,
-        1_426,
-    );
-    assert_eq!(persistent_mask_image.leaf_count_per_root, 8_388_608);
-    let persistent_generator = &affine_masking.persistent_material_generator_hybrid;
-    assert_eq!(persistent_generator.ceremony_material_root_count, 80);
-    assert_eq!(
-        persistent_generator.accepted_mask_base_field_output_count,
-        655_360
-    );
-    assert_eq!(
-        persistent_generator.maximum_mask_kmac_call_count,
-        83_886_080
-    );
-    assert_eq!(persistent_generator.leaf_salt_count, 671_088_640);
-    assert_eq!(
-        persistent_generator.leaf_salt_kmac_call_count,
-        1_342_177_280
-    );
-    assert_eq!(
-        persistent_generator.maximum_total_kmac_call_count,
-        1_426_063_360
-    );
-    assert_eq!(
-        persistent_generator.description.material_seed_byte_length,
-        64
-    );
-    assert_eq!(
-        persistent_generator.description.kmac_security_bit_length,
-        256
-    );
-    assert_eq!(
-        persistent_generator.description.derived_block_byte_length,
-        64
-    );
-    assert_eq!(persistent_generator.description.leaf_salt_byte_length, 128);
-    assert_eq!(persistent_generator.description.leaf_salt_block_count, 2);
-    assert!(
-        persistent_generator
-            .description
-            .canonical_frame_coordinates_are_injective
-    );
-    assert!(
-        persistent_generator
-            .description
-            .requires_private_material_seed
-    );
-    assert!(!persistent_generator.masks_are_publicly_recomputable);
-    assert!(
-        persistent_generator
-            .rejection_sampler_exhaustion_probability
-            .is_at_most_inverse_power_of_two(128),
-    );
-
     let mut self_consistent_deficient_rank = affine_masking.clone();
     self_consistent_deficient_rank.rows[0].joint_view_rank -= 1;
     self_consistent_deficient_rank.rows[0].derived_linear_identity_base_coordinate_count += 1;
@@ -22349,8 +29716,8 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
     assert!(!self_consistent_deficient_rank.is_complete_for(affine_masking_input));
 
     let mut omitted_private_coordinate = affine_masking.clone();
-    omitted_private_coordinate.rows[5].private_base_coordinate_count -= 1;
-    omitted_private_coordinate.rows[5].residual_conditional_entropy_lower_bound -= 1;
+    omitted_private_coordinate.rows[4].private_base_coordinate_count -= 1;
+    omitted_private_coordinate.rows[4].residual_conditional_entropy_lower_bound -= 1;
     assert!(!omitted_private_coordinate.is_complete());
     assert!(!omitted_private_coordinate.is_complete_for(affine_masking_input));
 
@@ -22364,12 +29731,6 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
         .private_coin_generator_hybrid
         .masks_are_publicly_recomputable = true;
     assert!(!publicly_recomputable_attempt_masks.is_complete());
-
-    let mut publicly_recomputable_persistent_masks = affine_masking.clone();
-    publicly_recomputable_persistent_masks
-        .persistent_material_generator_hybrid
-        .masks_are_publicly_recomputable = true;
-    assert!(!publicly_recomputable_persistent_masks.is_complete());
 
     let mut challenge_dependent_aggregate_pad = certificate.production_aggregate_wide_views.clone();
     challenge_dependent_aggregate_pad.chronology.swap(2, 3);
@@ -22436,6 +29797,7 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
                     initial_constraint_batch_numerator: certificate
                         .initial_constraint_batch_numerator,
                     logical_verifier_message_count: certificate.logical_verifier_message_count,
+                    sampler_model: &certificate.cms19_fixed_output_seeded_sampler_model,
                     cms19_arithmetic: &certificate.cms19_arithmetic,
                 },
                 fault,

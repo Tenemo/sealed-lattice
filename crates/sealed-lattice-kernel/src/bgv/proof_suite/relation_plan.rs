@@ -70,6 +70,14 @@ pub(crate) use model::{
 mod checking;
 mod expressions;
 
+#[cfg(all(test, feature = "theorem-evidence"))]
+pub(crate) const fn relation_plan_identity_hash_domains() -> (&'static str, &'static str) {
+    (
+        schema::RELATION_PLAN_HASH_DOMAIN,
+        schema::RELATION_PLAN_VARIANT_HASH_DOMAIN,
+    )
+}
+
 use checking::{RelationPlanChecker, full_trace_zeroifier_expression};
 #[cfg(test)]
 use checking::{
@@ -133,6 +141,10 @@ pub(crate) use collective_public_key_adapter::{
     CollectivePublicKeySourceProviderMemoryAccounting,
     collective_public_key_source_provider_memory_accounting,
 };
+#[cfg(feature = "primitive-measurement-evidence")]
+pub(crate) use committed_material::SelectedVssSourceReplayMeasurement;
+#[cfg(test)]
+pub(crate) use committed_material::vss_share_linkage_trace_witness_structure_memory_accounting;
 pub(crate) use committed_material::{
     CommittedMaterialRelationPlanInput, CommittedMaterialTraceWitnessProvider,
     CommittedMaterialTraceWitnessStructureMemoryAccounting,
@@ -140,6 +152,8 @@ pub(crate) use committed_material::{
     derive_vss_share_linkage_trace_witness_provider,
 };
 pub(crate) use committed_material_adapter::CommittedMaterialSourcePolynomialAdapter;
+#[cfg(test)]
+pub(crate) use committed_material_adapter::selected_vss_source_provider_memory_accounting;
 pub(crate) use galois_key_share_adapter::{
     GaloisKeyShareSourcePolynomialAdapter, galois_relation_tree_inputs,
 };

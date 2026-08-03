@@ -38,20 +38,33 @@ const hostileRecord = (
     return record as JsonValue;
 };
 
+const supersededTwentyOptionProductionAuthority = (
+    trackedEvidence: JsonValue,
+): JsonValue => {
+    const authority = structuredClone(
+        requireRecord(trackedEvidence).productionAuthority,
+    ) as Record<string, unknown>;
+    const profile = requireRecord(authority.profile);
+    profile.optionCount = 20;
+    return authority as JsonValue;
+};
+
 describe('Selected collective-setup security evidence', () => {
     let checkedEvidence: JsonValue;
     let expectedEvidence: JsonValue;
+    let trackedEvidence: JsonValue;
 
     beforeAll(async () => {
-        checkedEvidence = parseJsonValue(
+        trackedEvidence = parseJsonValue(
             await readFile(selectedCollectiveSetupSecurityEvidencePath, 'utf8'),
         );
-        const productionAuthority = requireRecord(checkedEvidence)
+        const productionAuthority = requireRecord(trackedEvidence)
             .productionAuthority as JsonValue;
         expectedEvidence =
             await buildSelectedCollectiveSetupSecurityEvidence(
                 productionAuthority,
             );
+        checkedEvidence = expectedEvidence;
     });
 
     it('binds the exact production roster, corruption subsets, proof inventory, samples, and witness joins', () => {
@@ -66,6 +79,9 @@ describe('Selected collective-setup security evidence', () => {
             physicalProofApplicationCount: 73,
             readyForClosure: false,
             unresolvedNonAssumptionLeaves: [
+                'commonConstructionQromTransform',
+                'commonProofQromComposition',
+                'commonConstructionMaskingCorrespondence',
                 'setupFamilySimulationComposition',
                 'collectiveSetupHybridComposition',
             ],
@@ -79,7 +95,7 @@ describe('Selected collective-setup security evidence', () => {
             reconstructionThreshold: 4,
             finalityQuorum: 7,
             stateWitnessQuorum: 7,
-            optionCount: 20,
+            optionCount: 10,
             polynomialDegree: 32_768,
             plaintextModulus: 257,
         });
@@ -96,7 +112,7 @@ describe('Selected collective-setup security evidence', () => {
             requireArray(authority.relationPlanBindings).flatMap((value) =>
                 requireArray(requireRecord(value).variants),
             ),
-        ).toHaveLength(29);
+        ).toHaveLength(19);
         expect(requireArray(record.witnessJoins)).toHaveLength(5);
         expect(
             requireRecord(record.jointSetupSampleHybridReduction).status,
@@ -127,11 +143,18 @@ describe('Selected collective-setup security evidence', () => {
                     value.identifier === 'commonConstructionQromTransform',
             );
         expect(qromImport).toMatchObject({
-            observedStatus: 'resolved',
+            observedStatus: 'unresolved',
             requiredClosurePredicate:
-                'typedCmsNineteenVariableOutputApplicabilityAndAcceptingPathCeilings',
-            missingEvidence: null,
+                'singleFixed512BitQroRestrictionCorrespondenceAndProductionRows',
         });
+        const qromMissingEvidence = qromImport?.missingEvidence;
+        expect(typeof qromMissingEvidence).toBe('string');
+        if (typeof qromMissingEvidence !== 'string') {
+            throw new Error('Expected QROM graph missing evidence.');
+        }
+        expect(qromMissingEvidence).toContain(
+            'No independently derived fixed-output oracle-graph certificate',
+        );
         expect(qromImport?.ownerSourcePaths).toEqual(
             expect.arrayContaining([
                 'crates/sealed-lattice-kernel/src/foundation/hash.rs',
@@ -143,11 +166,19 @@ describe('Selected collective-setup security evidence', () => {
             .map((value) => requireRecord(value))
             .find((value) => value.identifier === 'commonProofQromComposition');
         expect(qromCompositionImport).toMatchObject({
-            observedStatus: 'resolved',
+            observedStatus: 'unresolved',
             requiredClosurePredicate:
                 'conservativePerPhysicalProofTransformAndExplicitCeremonyUnion',
-            missingEvidence: null,
         });
+        const qromCompositionMissingEvidence =
+            qromCompositionImport?.missingEvidence;
+        expect(typeof qromCompositionMissingEvidence).toBe('string');
+        if (typeof qromCompositionMissingEvidence !== 'string') {
+            throw new Error('Expected QROM composition missing evidence.');
+        }
+        expect(qromCompositionMissingEvidence).toContain(
+            'component accounting only',
+        );
         expect(qromCompositionImport?.ownerSourcePaths).toEqual(
             expect.arrayContaining([
                 'crates/sealed-lattice-kernel/src/bgv/proof_suite/selected_accounting.rs',
@@ -165,13 +196,35 @@ describe('Selected collective-setup security evidence', () => {
             expect.arrayContaining([
                 expect.objectContaining({
                     source: 'common-proof multi-round transform',
-                    status: 'resolved',
+                    status: 'unresolved',
                 }),
                 expect.objectContaining({
                     source: 'common-proof physical-proof composition',
-                    status: 'resolved',
+                    status: 'unresolved',
                 }),
             ]),
+        );
+    });
+
+    it('accepts the tracked evidence only when production and source authority are current', () => {
+        expect(() =>
+            validateSelectedCollectiveSetupSecurityEvidence(
+                trackedEvidence,
+                expectedEvidence,
+            ),
+        ).not.toThrow();
+        expect(canonicalJsonText(trackedEvidence)).toBe(
+            canonicalJsonText(expectedEvidence),
+        );
+    });
+
+    it('refuses the superseded twenty-option production authority', async () => {
+        const supersededAuthority =
+            supersededTwentyOptionProductionAuthority(trackedEvidence);
+        await expect(
+            buildSelectedCollectiveSetupSecurityEvidence(supersededAuthority),
+        ).rejects.toThrow(
+            'The production roster or algebra profile is not exact.',
         );
     });
 
@@ -269,6 +322,73 @@ describe('Selected collective-setup security evidence', () => {
         }
     });
 
+    it('refuses QROM resolution without an independently derived graph certificate', () => {
+        const overstatedImport = hostileRecord(checkedEvidence, (record) => {
+            const qromImport = requireArray(record.constructionEvidenceImports)
+                .map((value) => requireRecord(value))
+                .find(
+                    (value) =>
+                        value.identifier === 'commonConstructionQromTransform',
+                );
+            if (qromImport === undefined) {
+                throw new Error('Expected the QROM construction import.');
+            }
+            qromImport.observedStatus = 'resolved';
+            qromImport.missingEvidence = null;
+        });
+        expect(() =>
+            validateSelectedCollectiveSetupSecurityEvidence(
+                overstatedImport,
+                expectedEvidence,
+            ),
+        ).toThrow(
+            'A common-construction evidence import is stale or overstated.',
+        );
+
+        const overstatedGraphNode = hostileRecord(checkedEvidence, (record) => {
+            const qromNode = requireArray(record.reductionDag)
+                .map((value) => requireRecord(value))
+                .find(
+                    (value) =>
+                        value.identifier === 'commonConstructionQromTransform',
+                );
+            if (qromNode === undefined) {
+                throw new Error('Expected the QROM graph node.');
+            }
+            qromNode.status = 'resolved';
+        });
+        expect(() =>
+            validateSelectedCollectiveSetupSecurityEvidence(
+                overstatedGraphNode,
+                expectedEvidence,
+            ),
+        ).toThrow('unresolved non-assumption reduction catalog');
+
+        const overstatedCompositionNode = hostileRecord(
+            checkedEvidence,
+            (record) => {
+                const compositionNode = requireArray(record.reductionDag)
+                    .map((value) => requireRecord(value))
+                    .find(
+                        (value) =>
+                            value.identifier === 'commonProofQromComposition',
+                    );
+                if (compositionNode === undefined) {
+                    throw new Error('Expected the QROM composition node.');
+                }
+                compositionNode.status = 'resolved';
+            },
+        );
+        expect(() =>
+            validateSelectedCollectiveSetupSecurityEvidence(
+                overstatedCompositionNode,
+                expectedEvidence,
+            ),
+        ).toThrow(
+            'A resolved reduction may not depend on an unresolved obligation.',
+        );
+    });
+
     it('canonically binds every imported construction artifact', () => {
         const constructionEvidenceImports = requireArray(
             requireRecord(checkedEvidence).constructionEvidenceImports,
@@ -319,7 +439,7 @@ describe('Selected collective-setup security evidence', () => {
                 expectedEvidence,
             ),
         ).toThrow(
-            'Collective-setup security closure is blocked by: setupFamilySimulationComposition, collectiveSetupHybridComposition.',
+            'Collective-setup security closure is blocked by: commonConstructionQromTransform, commonProofQromComposition, commonConstructionMaskingCorrespondence, setupFamilySimulationComposition, collectiveSetupHybridComposition.',
         );
         const closure = requireRecord(requireRecord(checkedEvidence).closure);
         expect(closure).toMatchObject({
@@ -383,16 +503,19 @@ describe('Selected collective-setup security evidence', () => {
 
         const overstatedReduction = hostileRecord(checkedEvidence, (record) => {
             const nodes = requireArray(record.reductionDag);
-            const setupFamilyNode = nodes
+            const maskingCorrespondenceNode = nodes
                 .map((value) => requireRecord(value))
                 .find(
                     (node) =>
-                        node.identifier === 'setupFamilySimulationComposition',
+                        node.identifier ===
+                        'commonConstructionMaskingCorrespondence',
                 );
-            if (setupFamilyNode === undefined) {
-                throw new Error('Expected setup-family obligation.');
+            if (maskingCorrespondenceNode === undefined) {
+                throw new Error(
+                    'Expected common-construction masking obligation.',
+                );
             }
-            setupFamilyNode.status = 'resolved';
+            maskingCorrespondenceNode.status = 'resolved';
         });
         expect(() =>
             validateSelectedCollectiveSetupSecurityEvidence(

@@ -6,7 +6,7 @@ export type PollSpecInput = {
     readonly topOptionCount: number;
 };
 
-/** Validated poll input whose twenty options can be encoded as a canonical manifest. */
+/** Validated poll input whose bounded options can be encoded as a canonical manifest. */
 export type PollSpec = PollSpecInput;
 
 /** Stable poll specification validation error code. */

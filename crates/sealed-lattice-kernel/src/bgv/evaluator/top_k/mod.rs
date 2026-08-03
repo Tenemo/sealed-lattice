@@ -39,7 +39,7 @@ pub(crate) const TRACE_KEY_LEVEL: usize = 18;
 pub(crate) const SCATTER_KEY_LEVEL: usize = 14;
 pub(crate) const RANK_INPUT_LEVEL: usize = 13;
 pub(crate) const CANONICAL_TARGET_CIPHERTEXT_LEVEL: usize = 7;
-// Five is near the square root of the degree-19 rank lookup.
+// Five is near the square root of the maximum supported degree-19 rank lookup.
 pub(crate) const RANK_LOOKUP_BABY_STEP_COUNT: usize = 5;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

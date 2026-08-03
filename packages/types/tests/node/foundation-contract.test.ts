@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 import {
+    configurableOptionCountRange,
     configurableParticipantCountRange,
     deriveFoundationRosterParameters,
     foundationProfile,
@@ -21,7 +22,7 @@ describe('foundation contract', () => {
             maximumScore: 10,
             maximumWasmMemoryByteLength: 671_088_640,
             minimumScore: 1,
-            optionCount: 20,
+            optionCount: 10,
             participantCount: 10,
             protocolName: 'sealed-lattice',
             protocolVersion: 1,
@@ -29,6 +30,14 @@ describe('foundation contract', () => {
             stateWitnessQuorum: 7,
             streamChunkByteLength: 1_048_576,
         });
+    });
+
+    it('publishes the bounded option-count family separately from the selected profile', () => {
+        expect(configurableOptionCountRange).toEqual({
+            maximum: 20,
+            minimum: 2,
+        });
+        expect(foundationProfile.optionCount).toBe(10);
     });
 
     it('derives the configurable roster family without selecting it', () => {

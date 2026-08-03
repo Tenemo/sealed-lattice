@@ -68,8 +68,9 @@ impl From<RelationPlanError> for SelectedEvaluatorAggregatePlanError {
 }
 
 /// Constructs the selected `0x1218` plan used in production. Each of its
-/// twenty variants covers the complete ordered evaluator-key list selected by
-/// that action's top count; one action authorizes one aggregate proof object.
+/// option-count-derived variants covers the complete ordered evaluator-key list
+/// selected by that action's top count; one action authorizes one aggregate
+/// proof object.
 pub(crate) fn selected_evaluator_aggregate_relation_plan()
 -> Result<CompiledRelationPlan, SelectedEvaluatorAggregatePlanError> {
     if KEY_SWITCH_DATA_PRIMES_PER_BLOCK == 0
@@ -2036,7 +2037,10 @@ mod tests {
         let plan = selected_evaluator_aggregate_relation_plan()
             .expect("selected evaluator aggregate relation plan");
         let trees_per_entry = usize::from(FOUNDATION_PROFILE.participant_count) + 1;
-        assert_eq!(plan.variants().len(), 20);
+        assert_eq!(
+            plan.variants().len(),
+            usize::from(FOUNDATION_PROFILE.option_count)
+        );
         for (variant, top_count) in plan
             .variants()
             .iter()

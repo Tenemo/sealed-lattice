@@ -1,3 +1,8 @@
+import {
+    configurableOptionCountRange,
+    foundationProfile,
+} from '@sealed-lattice/types';
+
 import { createSuiteArtifactHashAccumulator } from '#packages/wasm/src/runtime-build-canonical';
 import {
     canonicalItem,
@@ -87,6 +92,7 @@ const artifactReference = (
 
 type CanonicalSuiteRecordFixtureInput = Readonly<{
     artifactBytes?: readonly Uint8Array[];
+    optionCount?: number;
     polynomialDegree?: number;
 }>;
 
@@ -98,6 +104,7 @@ export const createCanonicalSuiteRecordFixture = (
         Array.from({ length: 6 }, (_unused, artifactIndex) =>
             Uint8Array.of(artifactIndex + 1),
         );
+    const optionCount = input.optionCount ?? foundationProfile.optionCount;
     const polynomialDegree = input.polynomialDegree ?? 32_768;
     if (
         artifactBytes.length !== 6 ||
@@ -107,6 +114,15 @@ export const createCanonicalSuiteRecordFixture = (
     ) {
         throw new TypeError(
             'The canonical suite fixture requires six nonempty artifact byte strings.',
+        );
+    }
+    if (
+        !Number.isInteger(optionCount) ||
+        optionCount < configurableOptionCountRange.minimum ||
+        optionCount > configurableOptionCountRange.maximum
+    ) {
+        throw new RangeError(
+            'The canonical suite fixture option count is outside the configurable range.',
         );
     }
     if (
@@ -132,11 +148,12 @@ export const createCanonicalSuiteRecordFixture = (
 
     return canonicalTuple(
         0x0118,
-        unsigned16Item(2),
+        unsigned16Item(3),
         unsigned16Item(10),
         unsigned16Item(3),
         unsigned16Item(4),
         unsigned16Item(7),
+        unsigned16Item(optionCount),
         unsigned32Item(polynomialDegree),
         unsigned64Item(257n),
         homogeneousListItem(

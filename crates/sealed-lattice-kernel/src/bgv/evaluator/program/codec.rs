@@ -11,8 +11,8 @@ use super::{
     EVALUATOR_INSTRUCTION_STREAM_SCHEMA_IDENTIFIER, EVALUATOR_PROGRAM_SCHEMA_VERSION,
     EVALUATOR_PROGRAM_SET_SCHEMA_IDENTIFIER, EvaluatorConstant, EvaluatorConstantKind,
     EvaluatorInstruction, EvaluatorInstructionStream, EvaluatorOpcode, EvaluatorProgramSet,
-    MAXIMUM_EVALUATOR_CONSTANT_COUNT, MAXIMUM_INSTRUCTIONS_PER_STREAM, SELECTED_STREAM_COUNT,
-    program_error,
+    MAXIMUM_EVALUATOR_CONSTANT_COUNT, MAXIMUM_EVALUATOR_STREAM_COUNT,
+    MAXIMUM_INSTRUCTIONS_PER_STREAM, program_error,
 };
 
 const PLAINTEXT_FIELD_ELEMENT_BYTE_LENGTH: usize = 3;
@@ -91,7 +91,7 @@ pub(crate) fn verify_canonical_program_set(canonical_bytes: &[u8]) -> CanonicalR
             .get(1)
             .ok_or_else(|| program_error("missing streams"))?,
         &limits,
-        SELECTED_STREAM_COUNT,
+        MAXIMUM_EVALUATOR_STREAM_COUNT,
     )?
     .iter()
     .map(|stream| decode_instruction_stream(stream, &limits))

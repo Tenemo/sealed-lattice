@@ -11,7 +11,7 @@ use super::{
 };
 use crate::bgv::direct_ballots::{
     PAIR_CHARACTER_AUXILIARY_COUNT, PAIR_CHARACTER_CIPHERTEXT_COUNT, PAIR_CHARACTER_LANE_COUNT,
-    PAIR_CHARACTER_LANE_DEGREE, selected_pair_character_lane_assignments,
+    PAIR_CHARACTER_LANE_DEGREE, pair_character_lane_assignments,
 };
 use crate::bgv::evaluator::program::verify_canonical_program_set;
 use crate::bgv::evaluator::top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL;
@@ -64,9 +64,11 @@ pub(crate) fn verify_canonical_suite_artifact(
     }
 
     match artifact_kind {
-        ArtifactKind::EncoderAndBallotLayout => {
-            verify_encoder_and_ballot_layout(canonical_artifact_bytes, &artifact_limits)
-        }
+        ArtifactKind::EncoderAndBallotLayout => verify_encoder_and_ballot_layout(
+            canonical_artifact_bytes,
+            &artifact_limits,
+            suite.option_count(),
+        ),
         ArtifactKind::VerifiableSecretSharingProfile => {
             verify_verifiable_secret_sharing_profile(canonical_artifact_bytes, &artifact_limits)
         }
@@ -105,12 +107,13 @@ fn artifact_decode_limits(artifact_kind: ArtifactKind) -> CanonicalDecodeLimits 
 fn verify_encoder_and_ballot_layout(
     bytes: &[u8],
     limits: &CanonicalDecodeLimits,
+    suite_option_count: u16,
 ) -> Result<(), FoundationSchemaError> {
     validate_supported_algebraic_parameters()
         .map_err(|_| unsupported_artifact("selected algebraic parameters are invalid"))?;
     let tuple = decode_exact(bytes, limits)?;
     require_exact_header(&tuple, 0x1300, 4, 12)?;
-    let expected_assignments = selected_pair_character_lane_assignments()
+    let expected_assignments = pair_character_lane_assignments(usize::from(suite_option_count))
         .map_err(|_| unsupported_artifact("pair-character assignment catalog is invalid"))?
         .into_iter()
         .flat_map(|assignment| {
@@ -132,7 +135,7 @@ fn verify_encoder_and_ballot_layout(
         && usize::from(read_u16(&tuple.items[4])?) == PAIR_CHARACTER_LANE_COUNT
         && usize::from(read_u16(&tuple.items[5])?) == PAIR_CHARACTER_CIPHERTEXT_COUNT
         && usize::from(read_u16(&tuple.items[6])?) == PAIR_CHARACTER_AUXILIARY_COUNT
-        && read_u16(&tuple.items[7])? == FOUNDATION_PROFILE.option_count
+        && read_u16(&tuple.items[7])? == suite_option_count
         && read_u16(&tuple.items[8])? == FOUNDATION_PROFILE.minimum_score
         && read_u16(&tuple.items[9])? == FOUNDATION_PROFILE.maximum_score
         && read_u16(&tuple.items[10])? == 1

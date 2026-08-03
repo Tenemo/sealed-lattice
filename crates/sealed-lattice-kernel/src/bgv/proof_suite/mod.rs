@@ -155,8 +155,10 @@ pub(crate) use profile::{
 };
 #[cfg(all(test, feature = "theorem-evidence"))]
 pub(crate) use profile::{
-    SelectedSameSecretPersistentMaskImageAccounting,
-    selected_same_secret_persistent_mask_image_accounting,
+    SelectedPersistentCommittedMaterialEndpoint,
+    SelectedPersistentCommittedMaterialMaskImageInventory,
+    SelectedPersistentCommittedMaterialPhysicalColumnDemand,
+    selected_persistent_committed_material_mask_image_inventory,
 };
 #[cfg(test)]
 pub(crate) use prover::common_proof_checkpoint_cursor_manifest_requirement_for_variant;
@@ -199,6 +201,8 @@ pub(crate) use recipient_vss_payload::{
     DecodedRecipientShareLimb, RecipientPrivateVssPayloadError, RecipientShareLimbInput,
     canonical_recipient_private_vss_payload, decode_recipient_private_vss_payload,
 };
+#[cfg(feature = "primitive-measurement-evidence")]
+pub(crate) use relation_plan::SelectedVssSourceReplayMeasurement;
 pub(crate) use relation_plan::{
     BallotValidityAcceptedSetupBinding, BallotValidityAdapterError,
     BallotValidityBoundPublicMaterial, BallotValidityCiphertextReadback,
@@ -255,6 +259,8 @@ pub(crate) use relinearization_source_material::{
 };
 pub(in crate::bgv) use row_code_whir::VerifiedSameSecretLowDegreePrerequisite;
 pub(in crate::bgv) use row_code_whir::exact_same_secret_verification_runtime_limits;
+#[cfg(feature = "primitive-measurement-evidence")]
+pub(crate) use row_code_whir::run_primitive_measurement;
 pub(in crate::bgv::proof_suite) use row_code_whir::{
     ExactSameSecretAuthenticatedTranscriptPrefixRequest, PreparedExactSameSecretTranscriptPrefix,
 };

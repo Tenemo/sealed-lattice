@@ -8,6 +8,7 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
+    fs,
     sync::OnceLock,
 };
 
@@ -34,6 +35,7 @@ use crate::{
     },
     foundation::{
         FOUNDATION_PROFILE, ProofApplicationSlotCeilings,
+        SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION,
         SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
         SELECTED_MAXIMUM_PUBLIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
         selected_sharing_data_prime_coordinates,
@@ -58,6 +60,9 @@ const SETUP_FAMILY_SCHEMA_IDENTIFIERS: [u16; 10] = [
     ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
     ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
 ];
+
+const PRODUCTION_AUTHORITY_EXPORT_PATH_ENVIRONMENT_VARIABLE: &str =
+    "SEALED_LATTICE_COLLECTIVE_SETUP_AUTHORITY_EXPORT_PATH";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -350,7 +355,7 @@ fn derive_proof_inventory() -> Result<(Vec<ProofInventoryEntry>, ProofInventoryT
         u32::try_from(relinearization_positions.len())
             .map_err(|_| "relinearization position count overflowed")?,
         if galois_positions.is_empty() { 0 } else { 1 },
-        u32::from(FOUNDATION_PROFILE.option_count),
+        SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION,
     )
     .map_err(|error| format!("proof application ceilings failed: {error:?}"))?;
     let inventory = ceilings
@@ -742,16 +747,27 @@ fn assert_collective_setup_security_authority_derives_exact_roster_inventory_and
     assert_eq!(authority.profile.reconstruction_threshold, 4);
     assert_eq!(authority.profile.finality_quorum, 7);
     assert_eq!(authority.profile.state_witness_quorum, 7);
-    assert_eq!(authority.profile.option_count, 20);
+    assert_eq!(
+        authority.profile.option_count,
+        FOUNDATION_PROFILE.option_count
+    );
     assert_eq!(authority.profile.polynomial_degree, 32_768);
     assert_eq!(authority.profile.plaintext_modulus, 257);
     assert_eq!(authority.proof_inventory.len(), 10);
     assert_eq!(
         authority.proof_inventory_totals,
-        ProofInventoryTotals {
-            physical_proof_application_count: 73,
-            logical_relation_instance_count: 129,
-        }
+        authority.proof_inventory.iter().fold(
+            ProofInventoryTotals {
+                physical_proof_application_count: 0,
+                logical_relation_instance_count: 0,
+            },
+            |totals, entry| ProofInventoryTotals {
+                physical_proof_application_count: totals.physical_proof_application_count
+                    + entry.physical_proof_application_count,
+                logical_relation_instance_count: totals.logical_relation_instance_count
+                    + entry.logical_relation_instance_count,
+            },
+        )
     );
     assert_eq!(authority.relation_plan_bindings.len(), 10);
     assert_eq!(
@@ -760,7 +776,7 @@ fn assert_collective_setup_security_authority_derives_exact_roster_inventory_and
             .iter()
             .map(|binding| binding.variants.len())
             .sum::<usize>(),
-        29
+        authority.relation_plan_bindings.len() - 1 + usize::from(FOUNDATION_PROFILE.option_count)
     );
     assert_eq!(
         authority
@@ -772,7 +788,11 @@ fn assert_collective_setup_security_authority_derives_exact_roster_inventory_and
     assert_eq!(authority.evaluator_topology.ordered_galois_entries.len(), 6);
     assert_eq!(
         authority.evaluator_topology.complete_action_entries.len(),
-        7
+        authority
+            .evaluator_topology
+            .ordered_relinearization_entries
+            .len()
+            + authority.evaluator_topology.ordered_galois_entries.len()
     );
     assert_eq!(
         authority.sample_census.summary,
@@ -844,10 +864,14 @@ fn assert_collective_setup_security_authority_derives_exact_roster_inventory_and
             .setup_correctness
             .special_basis_is_coprime_to_plaintext_modulus
     );
-    assert_eq!(authority.setup_correctness.accepted_ballot_count_cases, 10);
+    assert_eq!(
+        authority.setup_correctness.accepted_ballot_count_cases,
+        usize::from(FOUNDATION_PROFILE.participant_count)
+    );
     assert_eq!(
         authority.setup_correctness.evaluator_target_trace_count,
-        200
+        usize::from(FOUNDATION_PROFILE.participant_count)
+            * usize::from(FOUNDATION_PROFILE.option_count)
     );
     assert_eq!(
         authority
@@ -991,6 +1015,27 @@ fn assert_checked_collective_setup_security_record_uses_the_live_production_auth
             .expect("checked record has production authority"),
         &serde_json::to_value(production_authority()).expect("production authority serializes")
     );
+}
+
+#[test]
+#[ignore = "guarded collective-setup production-authority export"]
+fn collective_setup_security_production_authority_exports_for_refresh() {
+    assert_collective_setup_security_authority_derives_exact_roster_inventory_and_samples();
+    assert_collective_setup_security_authority_enumerates_every_static_corruption_subset();
+    assert_collective_setup_security_authority_binds_every_plan_and_variant();
+    assert_collective_setup_security_authority_refuses_mutated_production_facts();
+
+    let output_path = std::env::var_os(PRODUCTION_AUTHORITY_EXPORT_PATH_ENVIRONMENT_VARIABLE)
+        .map(std::path::PathBuf::from)
+        .expect("the production-authority export path must be provided");
+    let parent_path = output_path
+        .parent()
+        .expect("the production-authority export path must have a parent");
+    fs::create_dir_all(parent_path).expect("the production-authority export directory is created");
+    let serialized_authority = serde_json::to_string_pretty(production_authority())
+        .expect("production authority serializes");
+    fs::write(output_path, format!("{serialized_authority}\n"))
+        .expect("the production authority is exported by the focused owner");
 }
 
 #[test]

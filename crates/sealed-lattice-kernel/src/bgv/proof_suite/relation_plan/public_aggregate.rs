@@ -1037,10 +1037,16 @@ mod tests {
             &context,
         )
         .expect("exact action-selected complete-list evaluator aggregate plan");
-        assert_eq!(evaluator_plan.variants().len(), 20);
+        assert_eq!(evaluator_plan.variants().len(), evaluator_variants.len());
         assert_eq!(evaluator_plan.variants()[0].schedule_position(), None);
         assert_eq!(evaluator_plan.variants()[0].top_count(), Some(1));
-        assert_eq!(evaluator_plan.variants()[19].top_count(), Some(20));
+        assert_eq!(
+            evaluator_plan
+                .variants()
+                .last()
+                .and_then(RelationPlanVariant::top_count),
+            Some(crate::foundation::FOUNDATION_PROFILE.option_count)
+        );
 
         let mut inconsistent_evaluator_variants = evaluator_variants.clone();
         inconsistent_evaluator_variants[7].ordered_entries[1].ordered_runtime_component_moduli =
@@ -1060,7 +1066,7 @@ mod tests {
             compile_evaluator_key_aggregate_relation_plan(
                 &EvaluatorKeyAggregatePlanInput {
                     geometry: geometry(),
-                    ordered_variants: evaluator_variants[..19].to_vec(),
+                    ordered_variants: evaluator_variants[..evaluator_variants.len() - 1].to_vec(),
                 },
                 &context,
             ),

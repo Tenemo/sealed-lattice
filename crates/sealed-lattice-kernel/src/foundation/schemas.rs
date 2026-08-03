@@ -35,6 +35,9 @@ const OBJECT_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/object-signature/v1";
 pub const MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT: u16 = 3;
 pub const MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT: u16 = 20;
 pub(crate) const PROTOTYPE_PARTICIPANT_COUNT: u16 = 10;
+pub const MINIMUM_CONFIGURABLE_OPTION_COUNT: u16 = 2;
+pub const MAXIMUM_CONFIGURABLE_OPTION_COUNT: u16 = 20;
+pub(crate) const PROTOTYPE_OPTION_COUNT: u16 = 10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FoundationRosterParameters {
@@ -105,7 +108,7 @@ pub const FOUNDATION_PROFILE: FoundationProfile = FoundationProfile {
     reconstruction_threshold: PROTOTYPE_ROSTER_PARAMETERS.reconstruction_threshold,
     finality_quorum: PROTOTYPE_ROSTER_PARAMETERS.finality_quorum,
     state_witness_quorum: PROTOTYPE_ROSTER_PARAMETERS.state_witness_quorum,
-    option_count: 20,
+    option_count: PROTOTYPE_OPTION_COUNT,
     minimum_score: 1,
     maximum_score: 10,
     maximum_identifier_byte_length: 128,

@@ -7,8 +7,9 @@ use num_traits::One;
 use super::relation_plan::OutOfDomainPointSamplerCardinalityBound;
 
 use crate::foundation::{
-    CanonicalItem, CanonicalItemType, FoundationTupleXofReader, Hash512,
-    StreamingFoundationHashError, StreamingFoundationTupleHash512, hash_foundation_tuple_512,
+    CanonicalItem, CanonicalItemType, FoundationTupleHash512BlockReader, Hash512,
+    StreamingFoundationHashError, StreamingFoundationTupleHash512,
+    foundation_tuple_hash512_seeded_stream_query_count, hash_foundation_tuple_512,
 };
 
 use super::field::{
@@ -24,8 +25,10 @@ pub(crate) const TRANSCRIPT_INITIAL_DOMAIN: &str = "sealed-lattice/proof/transcr
 pub(crate) const TRANSCRIPT_ABSORB_DOMAIN: &str = "sealed-lattice/proof/transcript/absorb/v2";
 pub(crate) const TRANSCRIPT_RESPONSE_ROOT_DOMAIN: &str =
     "sealed-lattice/proof/transcript/response-root/v1";
-pub(crate) const TRANSCRIPT_ATOMIC_CHALLENGE_XOF_DOMAIN: &str =
-    "sealed-lattice/proof/transcript/atomic-challenge-xof/v3";
+pub(crate) const TRANSCRIPT_ATOMIC_CHALLENGE_SEED_DOMAIN: &str =
+    "sealed-lattice/proof/transcript/atomic-challenge-seed/v4";
+pub(crate) const TRANSCRIPT_ATOMIC_CHALLENGE_BLOCK_DOMAIN: &str =
+    "sealed-lattice/proof/transcript/atomic-challenge-block/v1";
 pub(crate) const TRANSCRIPT_RESPONSE_BINDING_DOMAIN: &str =
     "sealed-lattice/proof/transcript/response-binding/v2";
 pub(crate) const TRANSCRIPT_EMPTY_PROVER_RESPONSE_TAG_SUFFIX: &str = "/empty-prover-response";
@@ -37,8 +40,10 @@ pub(crate) const TRANSCRIPT_INITIAL_DOMAIN_BYTES: &[u8] = TRANSCRIPT_INITIAL_DOM
 pub(crate) const TRANSCRIPT_ABSORB_DOMAIN_BYTES: &[u8] = TRANSCRIPT_ABSORB_DOMAIN.as_bytes();
 pub(crate) const TRANSCRIPT_RESPONSE_ROOT_DOMAIN_BYTES: &[u8] =
     TRANSCRIPT_RESPONSE_ROOT_DOMAIN.as_bytes();
-pub(crate) const TRANSCRIPT_ATOMIC_CHALLENGE_XOF_DOMAIN_BYTES: &[u8] =
-    TRANSCRIPT_ATOMIC_CHALLENGE_XOF_DOMAIN.as_bytes();
+pub(crate) const TRANSCRIPT_ATOMIC_CHALLENGE_SEED_DOMAIN_BYTES: &[u8] =
+    TRANSCRIPT_ATOMIC_CHALLENGE_SEED_DOMAIN.as_bytes();
+pub(crate) const TRANSCRIPT_ATOMIC_CHALLENGE_BLOCK_DOMAIN_BYTES: &[u8] =
+    TRANSCRIPT_ATOMIC_CHALLENGE_BLOCK_DOMAIN.as_bytes();
 pub(crate) const TRANSCRIPT_RESPONSE_BINDING_DOMAIN_BYTES: &[u8] =
     TRANSCRIPT_RESPONSE_BINDING_DOMAIN.as_bytes();
 pub(crate) const TRANSCRIPT_EMPTY_PROVER_RESPONSE_TAG_SUFFIX_BYTES: &[u8] =
@@ -186,12 +191,19 @@ pub(crate) struct CanonicalProofTranscript {
     row_code_whir_construction_plan_identity_hash: [u8; 64],
     state: [u8; 64],
     pending_common_challenge: Option<PendingCommonChallenge>,
+    active_common_challenge: Option<ActiveCommonChallenge>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct PendingCommonChallenge {
     challenge_tag: String,
     canonical_output_bytes: Vec<u8>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ActiveCommonChallenge {
+    challenge_tag: String,
+    starting_transcript_state: [u8; Hash512::BYTE_LENGTH],
 }
 
 impl CanonicalProofTranscript {
@@ -220,6 +232,7 @@ impl CanonicalProofTranscript {
                 header_root,
             )?,
             pending_common_challenge: None,
+            active_common_challenge: None,
         })
     }
 
@@ -293,6 +306,7 @@ impl CanonicalProofTranscript {
     ) -> Result<(), TranscriptError> {
         if absorber.starting_transcript_state != self.state
             || self.pending_common_challenge.is_some()
+            || self.active_common_challenge.is_some()
         {
             return Err(TranscriptError::UnexpectedCommonProofRound);
         }
@@ -405,7 +419,8 @@ impl CanonicalProofTranscript {
     }
 
     /// Begins one typed product-space verifier message. The complete bounded
-    /// draw budget is one plan-sized XOF output and is consumed incrementally.
+    /// draw budget is one plan-sized chain of fixed 512-bit outputs and is
+    /// consumed incrementally.
     fn begin_common_product_residue_challenge(
         &mut self,
         group: CommonProofApplicationChallengeGroup,
@@ -533,6 +548,9 @@ impl CanonicalProofTranscript {
         mode: CommonChallengeStreamMode,
     ) -> Result<CommonChallengeStream, TranscriptError> {
         self.close_pending_common_challenge_with_empty_response()?;
+        if self.active_common_challenge.is_some() {
+            return Err(TranscriptError::UnexpectedCommonProofChallenge);
+        }
         let mut prefix_items = Vec::new();
         prefix_items
             .try_reserve_exact(
@@ -552,15 +570,22 @@ impl CanonicalProofTranscript {
                 .map_err(|_| TranscriptError::CanonicalEncoding)?,
         );
         prefix_items.extend(geometry_items);
-        let reader = FoundationTupleXofReader::new(
-            TRANSCRIPT_ATOMIC_CHALLENGE_XOF_DOMAIN,
+        let reader = FoundationTupleHash512BlockReader::new(
+            TRANSCRIPT_ATOMIC_CHALLENGE_SEED_DOMAIN,
+            TRANSCRIPT_ATOMIC_CHALLENGE_BLOCK_DOMAIN,
             &prefix_items,
             output_byte_length,
         )
         .map_err(transcript_streaming_hash_error)?;
+        let active_common_challenge = ActiveCommonChallenge {
+            challenge_tag: challenge_tag.clone(),
+            starting_transcript_state: self.state,
+        };
+        self.active_common_challenge = Some(active_common_challenge);
         Ok(CommonChallengeStream {
             reader,
             challenge_tag,
+            starting_transcript_state: self.state,
             mode,
         })
     }
@@ -573,9 +598,18 @@ impl CanonicalProofTranscript {
         if canonical_output_bytes.is_empty() || self.pending_common_challenge.is_some() {
             return Err(TranscriptError::UnexpectedCommonProofChallenge);
         }
-        let challenge_tag = stream.finish()?;
+        let finished_challenge = stream.finish()?;
+        if self.active_common_challenge.as_ref()
+            != Some(&ActiveCommonChallenge {
+                challenge_tag: finished_challenge.challenge_tag.clone(),
+                starting_transcript_state: finished_challenge.starting_transcript_state,
+            })
+        {
+            return Err(TranscriptError::UnexpectedCommonProofChallenge);
+        }
+        self.active_common_challenge = None;
         self.pending_common_challenge = Some(PendingCommonChallenge {
-            challenge_tag,
+            challenge_tag: finished_challenge.challenge_tag,
             canonical_output_bytes,
         });
         Ok(())
@@ -584,6 +618,9 @@ impl CanonicalProofTranscript {
     fn close_pending_common_challenge_with_empty_response(
         &mut self,
     ) -> Result<(), TranscriptError> {
+        if self.active_common_challenge.is_some() {
+            return Err(TranscriptError::UnexpectedCommonProofChallenge);
+        }
         let Some(pending) = self.pending_common_challenge.take() else {
             return Ok(());
         };
@@ -600,6 +637,9 @@ impl CanonicalProofTranscript {
     }
 
     fn prepare_typed_response(&mut self, round_tag: &str) -> Result<(), TranscriptError> {
+        if self.active_common_challenge.is_some() {
+            return Err(TranscriptError::UnexpectedCommonProofRound);
+        }
         if self.pending_common_challenge.is_some() {
             self.pending_common_challenge = None;
             return Ok(());
@@ -960,8 +1000,8 @@ pub(crate) struct CommonProofApplicationChallengeSamplerAccounting {
     candidate_byte_length: u64,
     maximum_candidate_draw_count: u32,
     accepted_vector_byte_length: u64,
-    fixed_xof_output_byte_length: u64,
-    atomic_xof_query_count: u64,
+    bounded_output_byte_length: u64,
+    fixed_hash_query_count: u64,
 }
 
 impl CommonProofApplicationChallengeSamplerAccounting {
@@ -990,17 +1030,17 @@ impl CommonProofApplicationChallengeSamplerAccounting {
         self.accepted_vector_byte_length
     }
 
-    pub(crate) const fn fixed_xof_output_byte_length(self) -> u64 {
-        self.fixed_xof_output_byte_length
+    pub(crate) const fn bounded_output_byte_length(self) -> u64 {
+        self.bounded_output_byte_length
     }
 
-    pub(crate) const fn atomic_xof_query_count(self) -> u64 {
-        self.atomic_xof_query_count
+    pub(crate) const fn fixed_hash_query_count(self) -> u64 {
+        self.fixed_hash_query_count
     }
 
     #[cfg(test)]
-    pub(crate) const fn maximum_oracle_answer_byte_length(self) -> u64 {
-        self.fixed_xof_output_byte_length
+    pub(crate) const fn oracle_answer_byte_length(self) -> u64 {
+        Hash512::BYTE_LENGTH as u64
     }
 }
 
@@ -1237,7 +1277,7 @@ impl CommonProofRelationPrefixSchedule {
                     *challenge,
                     self.maximum_candidate_draws_per_output,
                 )?
-                .atomic_xof_query_count(),
+                .fixed_hash_query_count(),
             )?;
         }
         for _ in &self.ordered_auxiliary_tree_ordinals {
@@ -1382,9 +1422,14 @@ fn application_challenge_sampler_accounting(
     {
         return Err(TranscriptError::InvalidCommonProofSchedule);
     }
-    let fixed_xof_output_byte_length = u64::from(maximum_candidate_draws)
+    let bounded_output_byte_length = u64::from(maximum_candidate_draws)
         .checked_mul(group.candidate_byte_length)
         .ok_or(TranscriptError::ChallengeCounterOverflow)?;
+    let fixed_hash_query_count = foundation_tuple_hash512_seeded_stream_query_count(
+        usize::try_from(bounded_output_byte_length)
+            .map_err(|_| TranscriptError::ChallengeCounterOverflow)?,
+    )
+    .map_err(transcript_streaming_hash_error)?;
     let accepted_vector_byte_length = u64::from(group.coordinate_count)
         .checked_mul(
             u64::try_from(std::mem::size_of::<u64>())
@@ -1398,8 +1443,8 @@ fn application_challenge_sampler_accounting(
         candidate_byte_length: group.candidate_byte_length,
         maximum_candidate_draw_count: maximum_candidate_draws,
         accepted_vector_byte_length,
-        fixed_xof_output_byte_length,
-        atomic_xof_query_count: 1,
+        bounded_output_byte_length,
+        fixed_hash_query_count,
     })
 }
 
@@ -1438,7 +1483,16 @@ fn distinct_query_challenge_hash_count(
     if output_count == 0 || maximum_candidate_draws_per_output == 0 {
         return Err(TranscriptError::InvalidCommonProofSchedule);
     }
-    Ok(1)
+    let output_byte_length = usize::try_from(output_count)
+        .map_err(|_| TranscriptError::ChallengeCounterOverflow)?
+        .checked_mul(
+            usize::try_from(maximum_candidate_draws_per_output)
+                .map_err(|_| TranscriptError::ChallengeCounterOverflow)?,
+        )
+        .and_then(|candidate_count| candidate_count.checked_mul(std::mem::size_of::<u64>()))
+        .ok_or(TranscriptError::ChallengeCounterOverflow)?;
+    foundation_tuple_hash512_seeded_stream_query_count(output_byte_length)
+        .map_err(transcript_streaming_hash_error)
 }
 
 fn sample_distinct_query_positions_from_transcript_blocks(
@@ -1485,7 +1539,17 @@ fn maximum_extension_challenge_hash_count(
     if maximum_candidate_draws == 0 {
         return Err(TranscriptError::InvalidChallengeModulus);
     }
-    Ok(1)
+    let output_byte_length = usize::try_from(maximum_candidate_draws)
+        .map_err(|_| TranscriptError::ChallengeCounterOverflow)?
+        .checked_mul(EXTENSION_CHALLENGE_CANDIDATE_BYTE_LENGTH)
+        .ok_or(TranscriptError::ChallengeCounterOverflow)?;
+    foundation_tuple_hash512_seeded_stream_query_count(output_byte_length)
+        .map_err(transcript_streaming_hash_error)
+}
+
+fn fixed_bits_challenge_hash_count() -> Result<u64, TranscriptError> {
+    foundation_tuple_hash512_seeded_stream_query_count(Hash512::BYTE_LENGTH)
+        .map_err(transcript_streaming_hash_error)
 }
 
 fn strictly_increasing(values: &[u16]) -> bool {
@@ -1916,7 +1980,7 @@ impl CommonProofTranscript {
                 self.relation_prefix_schedule
                     .maximum_candidate_draws_per_output,
             )?
-            .atomic_xof_query_count(),
+            .fixed_hash_query_count(),
         )?;
         #[cfg(test)]
         self.record_public_sampler_row(observed_sampler_row)?;
@@ -2036,6 +2100,7 @@ impl CommonProofTranscript {
         if self.relation_prefix_schedule.privacy_mode != CommonProofPrivacyMode::PublicOnly
             || self.progress != CommonProofProgress::ReadyForRowCodeWhir
             || self.transcript.pending_common_challenge.is_some()
+            || self.transcript.active_common_challenge.is_some()
             || self.hash_query_counter.pending_challenge
         {
             return Err(TranscriptError::IncompleteCommonProofTranscript);
@@ -2067,6 +2132,7 @@ impl CommonProofTranscript {
         if self.relation_prefix_schedule.privacy_mode != CommonProofPrivacyMode::SecretBearing
             || self.progress != CommonProofProgress::ReadyForRowCodeWhir
             || self.transcript.pending_common_challenge.is_some()
+            || self.transcript.active_common_challenge.is_some()
             || self.hash_query_counter.pending_challenge
         {
             return Err(TranscriptError::IncompleteCommonProofTranscript);
@@ -2928,6 +2994,7 @@ impl RowCodeWhirProofStreamAbsorber {
             .transcript
             .pending_common_challenge
             .is_some()
+            || self.transcript.transcript.active_common_challenge.is_some()
             || self
                 .transcript
                 .transcript_operations
@@ -3014,6 +3081,7 @@ impl RowCodeWhirTranscript {
                 != expected.logical_verifier_message_count
             || self.hash_query_counter.pending_challenge
                 != expected.hash_query_counter_pending_challenge
+            || self.transcript.active_common_challenge.is_some()
             || self.transcript.pending_common_challenge.is_some()
                 != expected.pending_challenge_operation_index.is_some()
         {
@@ -3083,6 +3151,9 @@ impl RowCodeWhirTranscript {
         &self,
         construction_plan: &RowCodeWhirConstructionPlan,
     ) -> Result<RowCodeWhirTranscriptCheckpointCursor, TranscriptError> {
+        if self.transcript.active_common_challenge.is_some() {
+            return Err(TranscriptError::IncompleteRowCodeWhirTranscript);
+        }
         self.validate_catalog_cursor_position()?;
         let construction_plan_identity_hash = construction_plan
             .canonical_identity_hash()
@@ -3144,6 +3215,7 @@ impl RowCodeWhirTranscript {
                     .construction_plan_identity_hash,
                 state: snapshot.transcript_state,
                 pending_common_challenge: snapshot.pending_common_challenge.clone(),
+                active_common_challenge: None,
             },
             hash_query_counter: TranscriptHashQueryCounter {
                 hash_query_count: snapshot.hash_query_count,
@@ -3652,7 +3724,8 @@ impl RowCodeWhirTranscript {
         let sampled = stream.sample_fixed_bits()?;
         self.transcript
             .finish_common_challenge(stream, (sampled as u64).to_le_bytes().to_vec())?;
-        self.hash_query_counter.begin_challenge(1)?;
+        self.hash_query_counter
+            .begin_challenge(fixed_bits_challenge_hash_count()?)?;
         self.progress = RowCodeWhirProgress::Whir;
         Ok(sampled)
     }
@@ -3832,9 +3905,15 @@ impl RowCodeWhirTranscript {
 }
 
 struct CommonChallengeStream {
-    reader: FoundationTupleXofReader,
+    reader: FoundationTupleHash512BlockReader,
     challenge_tag: String,
+    starting_transcript_state: [u8; Hash512::BYTE_LENGTH],
     mode: CommonChallengeStreamMode,
+}
+
+struct FinishedCommonChallenge {
+    challenge_tag: String,
+    starting_transcript_state: [u8; Hash512::BYTE_LENGTH],
 }
 
 enum CommonChallengeStreamMode {
@@ -4132,10 +4211,11 @@ impl CommonChallengeStream {
         Ok(sampled)
     }
 
-    fn finish(self) -> Result<String, TranscriptError> {
+    fn finish(self) -> Result<FinishedCommonChallenge, TranscriptError> {
         let Self {
             mut reader,
             challenge_tag,
+            starting_transcript_state,
             mode,
         } = self;
         match mode {
@@ -4196,7 +4276,10 @@ impl CommonChallengeStream {
             }
         }
         reader.finish().map_err(transcript_streaming_hash_error)?;
-        Ok(challenge_tag)
+        Ok(FinishedCommonChallenge {
+            challenge_tag,
+            starting_transcript_state,
+        })
     }
 }
 
@@ -4236,6 +4319,56 @@ fn decode_product_residue_candidate(
         return Err(TranscriptError::InvalidChallengeModulus);
     }
     Ok(Some(coordinates))
+}
+
+#[cfg(test)]
+mod atomic_challenge_tests {
+    use super::{CanonicalProofTranscript, CommonProofRound, Hash512, TranscriptError};
+
+    fn transcript() -> CanonicalProofTranscript {
+        CanonicalProofTranscript::try_new_row_code_whir(
+            1,
+            [0x31; Hash512::BYTE_LENGTH],
+            [0x52; Hash512::BYTE_LENGTH],
+            0x1211,
+            b"atomic challenge chronology",
+        )
+        .expect("the fixed transcript header is canonical")
+    }
+
+    #[test]
+    fn active_atomic_challenge_refuses_interleaved_challenges_and_responses() {
+        let mut transcript = transcript();
+        let mut first = transcript
+            .begin_fixed_bits_challenge("test/first".to_owned(), 7)
+            .expect("the first fixed-bit challenge begins");
+
+        assert!(matches!(
+            transcript.begin_fixed_bits_challenge("test/interleaved".to_owned(), 7),
+            Err(TranscriptError::UnexpectedCommonProofChallenge)
+        ));
+        assert_eq!(
+            transcript.absorb_common_round(
+                CommonProofRound::BaseRoot { tree_ordinal: 0 },
+                &[0x73; Hash512::BYTE_LENGTH],
+            ),
+            Err(TranscriptError::UnexpectedCommonProofRound)
+        );
+
+        let sampled = first
+            .sample_fixed_bits()
+            .expect("the bounded fixed-bit sampler consumes its complete block");
+        transcript
+            .finish_common_challenge(first, (sampled as u64).to_le_bytes().to_vec())
+            .expect("the owning challenge finishes atomically");
+
+        assert!(
+            transcript
+                .begin_fixed_bits_challenge("test/next".to_owned(), 7)
+                .is_ok(),
+            "finishing the owner releases the transcript for the next challenge"
+        );
+    }
 }
 
 #[cfg(test)]

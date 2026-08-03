@@ -225,11 +225,18 @@ const deriveSelectedTopology = (
         foundationSource,
         'PROTOTYPE_PARTICIPANT_COUNT',
     );
-    const optionCountMatch = requireMatch(
-        /pub\s+(?:const|static)\s+FOUNDATION_PROFILE.*?option_count:\s*([0-9][0-9_]*)/su,
+    const optionCount = deriveIntegerConstant(
         foundationSource,
-        'foundation option count',
+        'PROTOTYPE_OPTION_COUNT',
     );
+    if (
+        foundationSource.split('option_count: PROTOTYPE_OPTION_COUNT')
+            .length !== 2
+    ) {
+        throw new Error(
+            'The foundation profile must bind the prototype option count exactly once.',
+        );
+    }
     const scatterLevel = deriveIntegerConstant(
         evaluatorSource,
         'SCATTER_KEY_LEVEL',
@@ -301,7 +308,7 @@ const deriveSelectedTopology = (
             'CANONICAL_TARGET_CIPHERTEXT_LEVEL',
         ),
         participantCount,
-        optionCount: parseRustInteger(optionCountMatch[1] ?? ''),
+        optionCount,
     };
     const expectedGaloisSchedule = [
         [15, 14],
@@ -322,7 +329,7 @@ const deriveSelectedTopology = (
         topology.relinearizationLevels[0] === 22 &&
         topology.targetCiphertextLevel === 7 &&
         topology.participantCount === 10 &&
-        topology.optionCount === 20 &&
+        topology.optionCount === 10 &&
         topology.galoisSchedule.every(
             (entry, index) =>
                 entry.galoisElement === expectedGaloisSchedule[index]?.[0] &&

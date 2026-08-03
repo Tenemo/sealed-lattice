@@ -2,7 +2,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::foundation::ProofApplicationSlotCeilings;
+use crate::foundation::{
+    ProofApplicationSlotCeilings, foundation_tuple_hash512_seeded_stream_query_count,
+};
 use crate::hashing::hash_framed_parts_512;
 
 use super::super::profile::ProofProfileError;
@@ -25,9 +27,10 @@ use super::super::transcript::{
     EXTENSION_CHALLENGE_CANDIDATE_BYTE_LENGTH, EXTENSION_ELEMENT_SAMPLER_TYPE,
     FIXED_BITS_SAMPLER_TYPE, PRODUCT_RESIDUE_CANDIDATE_ALIGNMENT_BYTE_LENGTH,
     PRODUCT_RESIDUE_VECTOR_SAMPLER_TYPE, RowCodeWhirChallenge, RowCodeWhirTracePhase,
-    TRANSCRIPT_ABSORB_DOMAIN, TRANSCRIPT_ATOMIC_CHALLENGE_XOF_DOMAIN,
-    TRANSCRIPT_EMPTY_PROVER_RESPONSE_ROOT, TRANSCRIPT_EMPTY_PROVER_RESPONSE_TAG_SUFFIX,
-    TRANSCRIPT_INITIAL_DOMAIN, TRANSCRIPT_RESPONSE_BINDING_DOMAIN, TRANSCRIPT_RESPONSE_ROOT_DOMAIN,
+    TRANSCRIPT_ABSORB_DOMAIN, TRANSCRIPT_ATOMIC_CHALLENGE_BLOCK_DOMAIN,
+    TRANSCRIPT_ATOMIC_CHALLENGE_SEED_DOMAIN, TRANSCRIPT_EMPTY_PROVER_RESPONSE_ROOT,
+    TRANSCRIPT_EMPTY_PROVER_RESPONSE_TAG_SUFFIX, TRANSCRIPT_INITIAL_DOMAIN,
+    TRANSCRIPT_RESPONSE_BINDING_DOMAIN, TRANSCRIPT_RESPONSE_ROOT_DOMAIN,
 };
 use super::super::{
     PROOF_BASE_FIELD_MODULUS, PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
@@ -101,7 +104,7 @@ const ROW_CODE_WHIR_PROOF_OF_WORK_BITS: usize = 0;
 const ROW_CODE_WHIR_CONSTRUCTION_PLAN_IDENTITY_ENCODING_VERSION: u16 = 12;
 const ROW_CODE_WHIR_CONSTRUCTION_PLAN_IDENTITY_HASH_DOMAIN: &str =
     "sealed-lattice/proof/row-code-whir/construction-plan/v1";
-const ROW_CODE_WHIR_ORACLE_EQUATION_CATALOG_ENCODING_VERSION: u16 = 3;
+const ROW_CODE_WHIR_ORACLE_EQUATION_CATALOG_ENCODING_VERSION: u16 = 4;
 const ROW_CODE_WHIR_ORACLE_EQUATION_CATALOG_HASH_DOMAIN: &str =
     "sealed-lattice/proof/row-code-whir/oracle-equation-catalog/v2";
 const VERIFIED_VSS_LOW_DEGREE_CERTIFICATE_GEOMETRY_DOMAIN: &str =
@@ -685,8 +688,10 @@ enum RowCodeWhirOracleEquationOperationKind {
 }
 
 /// Compact equation grammar for one contiguous maximum-support range. Every
-/// logical verifier challenge is one plan-sized, incrementally consumed XOF
-/// answer. Different challenge samplers can request different output lengths.
+/// logical verifier challenge is one plan-sized, incrementally consumed stream
+/// built from one 512-bit seed and a predecessor-linked sequence of 512-bit
+/// output blocks. Different samplers can request different total lengths, but
+/// every underlying oracle answer has the same fixed width.
 /// Consecutive verifier messages are separated by one deterministic
 /// empty-prover absorption. Variable prover responses first derive one
 /// fixed-width response root; the separate absorption edge consumes both the
@@ -700,7 +705,20 @@ enum RowCodeWhirOracleEquationRangeKind {
     ResponseBinding,
     ResponseAbsorption,
     EmptyProverResponseAbsorption,
-    AtomicChallengeXof { output_byte_length: u64 },
+    AtomicChallengeSeededHashStream {
+        output_byte_length: u64,
+        fixed_hash_query_count: u64,
+    },
+}
+
+fn atomic_challenge_fixed_hash_query_count(
+    output_byte_length: u64,
+) -> Result<u64, RowCodeWhirConstructionPlanError> {
+    foundation_tuple_hash512_seeded_stream_query_count(
+        usize::try_from(output_byte_length)
+            .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?,
+    )
+    .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2124,11 +2142,15 @@ impl RowCodeWhirOracleEquationCatalogBuilder {
         let mut next_offset = 0_u64;
         let challenge_predecessor =
             self.push_pending_close_if_needed(&mut ranges, &mut next_offset)?;
+        let fixed_hash_query_count = atomic_challenge_fixed_hash_query_count(output_byte_length)?;
         push_oracle_equation_range(
             &mut ranges,
             &mut next_offset,
-            RowCodeWhirOracleEquationRangeKind::AtomicChallengeXof { output_byte_length },
-            1,
+            RowCodeWhirOracleEquationRangeKind::AtomicChallengeSeededHashStream {
+                output_byte_length,
+                fixed_hash_query_count,
+            },
+            fixed_hash_query_count,
             challenge_predecessor,
         )?;
         self.push_operation(kind, Some(oracle_tag), ranges)?;
@@ -2158,11 +2180,15 @@ impl RowCodeWhirOracleEquationCatalogBuilder {
         let mut next_offset = 0_u64;
         let challenge_predecessor =
             self.push_pending_close_if_needed(&mut ranges, &mut next_offset)?;
+        let fixed_hash_query_count = atomic_challenge_fixed_hash_query_count(output_byte_length)?;
         push_oracle_equation_range(
             &mut ranges,
             &mut next_offset,
-            RowCodeWhirOracleEquationRangeKind::AtomicChallengeXof { output_byte_length },
-            1,
+            RowCodeWhirOracleEquationRangeKind::AtomicChallengeSeededHashStream {
+                output_byte_length,
+                fixed_hash_query_count,
+            },
+            fixed_hash_query_count,
             challenge_predecessor,
         )?;
         self.push_operation(
@@ -2193,11 +2219,15 @@ impl RowCodeWhirOracleEquationCatalogBuilder {
         let mut next_offset = 0_u64;
         let challenge_predecessor =
             self.push_pending_close_if_needed(&mut ranges, &mut next_offset)?;
+        let fixed_hash_query_count = atomic_challenge_fixed_hash_query_count(output_byte_length)?;
         push_oracle_equation_range(
             &mut ranges,
             &mut next_offset,
-            RowCodeWhirOracleEquationRangeKind::AtomicChallengeXof { output_byte_length },
-            1,
+            RowCodeWhirOracleEquationRangeKind::AtomicChallengeSeededHashStream {
+                output_byte_length,
+                fixed_hash_query_count,
+            },
+            fixed_hash_query_count,
             challenge_predecessor,
         )?;
         self.push_operation(
@@ -2690,12 +2720,17 @@ fn validate_atomic_challenge_equation_ranges(
     output_byte_length: u64,
 ) -> Result<(), RowCodeWhirConstructionPlanError> {
     let challenge_range_index = usize::from(previous_operation_left_pending_challenge);
+    let fixed_hash_query_count = atomic_challenge_fixed_hash_query_count(output_byte_length)?;
     if output_byte_length == 0
         || ranges.len() != challenge_range_index + 1
         || (previous_operation_left_pending_challenge
             && ranges[0].kind != RowCodeWhirOracleEquationRangeKind::EmptyProverResponseAbsorption)
+        || ranges[challenge_range_index].equation_count != fixed_hash_query_count
         || ranges[challenge_range_index].kind
-            != (RowCodeWhirOracleEquationRangeKind::AtomicChallengeXof { output_byte_length })
+            != (RowCodeWhirOracleEquationRangeKind::AtomicChallengeSeededHashStream {
+                output_byte_length,
+                fixed_hash_query_count,
+            })
     {
         return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
     }
@@ -2772,8 +2807,18 @@ fn validate_oracle_equation_catalog(
                 | RowCodeWhirOracleEquationRangeKind::ResponseRoot
                 | RowCodeWhirOracleEquationRangeKind::ResponseBinding
                 | RowCodeWhirOracleEquationRangeKind::ResponseAbsorption
-                | RowCodeWhirOracleEquationRangeKind::EmptyProverResponseAbsorption
-                | RowCodeWhirOracleEquationRangeKind::AtomicChallengeXof { .. } => 1,
+                | RowCodeWhirOracleEquationRangeKind::EmptyProverResponseAbsorption => 1,
+                RowCodeWhirOracleEquationRangeKind::AtomicChallengeSeededHashStream {
+                    output_byte_length,
+                    fixed_hash_query_count,
+                } if atomic_challenge_fixed_hash_query_count(output_byte_length)?
+                    == fixed_hash_query_count =>
+                {
+                    fixed_hash_query_count
+                }
+                RowCodeWhirOracleEquationRangeKind::AtomicChallengeSeededHashStream { .. } => {
+                    return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
+                }
             };
             if range.equation_count != expected_equation_count {
                 return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
@@ -3457,7 +3502,8 @@ fn encode_oracle_equation_catalog(
         TRANSCRIPT_INITIAL_DOMAIN,
         TRANSCRIPT_ABSORB_DOMAIN,
         TRANSCRIPT_RESPONSE_ROOT_DOMAIN,
-        TRANSCRIPT_ATOMIC_CHALLENGE_XOF_DOMAIN,
+        TRANSCRIPT_ATOMIC_CHALLENGE_SEED_DOMAIN,
+        TRANSCRIPT_ATOMIC_CHALLENGE_BLOCK_DOMAIN,
         TRANSCRIPT_RESPONSE_BINDING_DOMAIN,
         TRANSCRIPT_EMPTY_PROVER_RESPONSE_TAG_SUFFIX,
         EXTENSION_ELEMENT_SAMPLER_TYPE,
@@ -3600,9 +3646,13 @@ fn encode_oracle_equation_range_kind(
         RowCodeWhirOracleEquationRangeKind::ResponseBinding => encoder.push_u16(4),
         RowCodeWhirOracleEquationRangeKind::ResponseAbsorption => encoder.push_u16(5),
         RowCodeWhirOracleEquationRangeKind::EmptyProverResponseAbsorption => encoder.push_u16(6),
-        RowCodeWhirOracleEquationRangeKind::AtomicChallengeXof { output_byte_length } => {
+        RowCodeWhirOracleEquationRangeKind::AtomicChallengeSeededHashStream {
+            output_byte_length,
+            fixed_hash_query_count,
+        } => {
             encoder.push_u16(7);
             encoder.push_u64(output_byte_length);
+            encoder.push_u64(fixed_hash_query_count);
         }
     }
 }
@@ -6709,10 +6759,12 @@ mod tests {
                 }
             }
         }
-        assert_eq!(variant_count, 31);
-        assert_eq!(variant_identities.len(), 31);
-        assert_eq!(construction_plan_identity_hashes.len(), 31);
-        assert_eq!(evaluator_top_counts, (1_u16..=20).collect::<BTreeSet<_>>(),);
+        assert_eq!(variant_identities.len(), variant_count);
+        assert_eq!(construction_plan_identity_hashes.len(), variant_count);
+        assert_eq!(
+            evaluator_top_counts,
+            (1_u16..=crate::foundation::FOUNDATION_PROFILE.option_count).collect::<BTreeSet<_>>(),
+        );
 
         for (boundary, variable_count, suffix_prefixes) in degree_suffix_shapes {
             let coefficient_domain_size = 1_u64 << variable_count;
@@ -6980,6 +7032,14 @@ mod tests {
         assert_eq!(plan.parameters.security_level, 262);
         assert_eq!(plan.parameters.proof_of_work_bits, 0);
         assert_eq!(plan.parameters.outer_query_count, 387);
+        let (_, aggregate_wide_pad_query_count) = plan
+            .aggregate_wide_pad_query_geometry()
+            .expect("the aggregate-wide pad query geometry derives");
+        assert_eq!(aggregate_wide_pad_query_count, 393);
+        assert_ne!(
+            plan.parameters.outer_query_count,
+            aggregate_wide_pad_query_count,
+        );
         assert_eq!(plan.parameters.trace_mask_degree_bound_exclusive, 682);
         assert_eq!(
             plan.phase_order,
@@ -7273,15 +7333,45 @@ mod tests {
         );
         let mut independently_derived_hash_query_count = 2_u64;
         let mut independently_pending_challenge = false;
+        let mut independently_derived_response_hash_query_count = 2_u64;
+        let mut independently_derived_empty_response_hash_query_count = 0_u64;
+        let mut independently_derived_product_hash_query_count = 0_u64;
+        let mut independently_derived_extension_hash_query_count = 0_u64;
+        let mut independently_derived_distinct_hash_query_count = 0_u64;
+        let maximum_candidate_draws = u64::from(
+            plan.parameters
+                .maximum_fiat_shamir_candidate_draws_per_output,
+        );
+        let extension_output_byte_length = maximum_candidate_draws
+            * u64::try_from(EXTENSION_CHALLENGE_CANDIDATE_BYTE_LENGTH)
+                .expect("the extension candidate width fits u64");
         for operation in catalog.operations.iter().skip(1) {
             let response_root_is_recomputed = match &operation.kind {
                 RowCodeWhirOracleEquationOperationKind::InitialTranscript => {
                     panic!("only operation zero is the initial transcript")
                 }
-                RowCodeWhirOracleEquationOperationKind::CommonProductChallenge(_)
-                | RowCodeWhirOracleEquationOperationKind::CommonExtensionChallenge(_) => {
+                RowCodeWhirOracleEquationOperationKind::CommonProductChallenge(group) => {
+                    let challenge_hash_query_count = atomic_challenge_fixed_hash_query_count(
+                        group.candidate_byte_length() * maximum_candidate_draws,
+                    )
+                    .expect("the product sampler fixed-hash count derives");
+                    independently_derived_product_hash_query_count += challenge_hash_query_count;
+                    independently_derived_empty_response_hash_query_count +=
+                        u64::from(independently_pending_challenge);
                     independently_derived_hash_query_count +=
-                        1 + u64::from(independently_pending_challenge);
+                        u64::from(independently_pending_challenge) + challenge_hash_query_count;
+                    independently_pending_challenge = true;
+                    continue;
+                }
+                RowCodeWhirOracleEquationOperationKind::CommonExtensionChallenge(_) => {
+                    let challenge_hash_query_count =
+                        atomic_challenge_fixed_hash_query_count(extension_output_byte_length)
+                            .expect("the extension sampler fixed-hash count derives");
+                    independently_derived_extension_hash_query_count += challenge_hash_query_count;
+                    independently_derived_empty_response_hash_query_count +=
+                        u64::from(independently_pending_challenge);
+                    independently_derived_hash_query_count +=
+                        u64::from(independently_pending_challenge) + challenge_hash_query_count;
                     independently_pending_challenge = true;
                     continue;
                 }
@@ -7290,10 +7380,41 @@ mod tests {
                 }
                 RowCodeWhirOracleEquationOperationKind::RowCodeWhir { operation, .. } => {
                     match operation {
-                        RowCodeWhirTranscriptOperation::SampleExtension { .. }
-                        | RowCodeWhirTranscriptOperation::SampleDistinctIndices { .. } => {
+                        RowCodeWhirTranscriptOperation::SampleExtension { .. } => {
+                            let challenge_hash_query_count =
+                                atomic_challenge_fixed_hash_query_count(
+                                    extension_output_byte_length,
+                                )
+                                .expect("the extension sampler fixed-hash count derives");
+                            independently_derived_extension_hash_query_count +=
+                                challenge_hash_query_count;
+                            independently_derived_empty_response_hash_query_count +=
+                                u64::from(independently_pending_challenge);
                             independently_derived_hash_query_count +=
-                                1 + u64::from(independently_pending_challenge);
+                                u64::from(independently_pending_challenge)
+                                    + challenge_hash_query_count;
+                            independently_pending_challenge = true;
+                            continue;
+                        }
+                        RowCodeWhirTranscriptOperation::SampleDistinctIndices {
+                            output_count,
+                            ..
+                        } => {
+                            let output_byte_length = u64::try_from(*output_count)
+                                .expect("the query count fits u64")
+                                * maximum_candidate_draws
+                                * u64::try_from(std::mem::size_of::<u64>())
+                                    .expect("the candidate width fits u64");
+                            let challenge_hash_query_count =
+                                atomic_challenge_fixed_hash_query_count(output_byte_length)
+                                    .expect("the distinct sampler fixed-hash count derives");
+                            independently_derived_distinct_hash_query_count +=
+                                challenge_hash_query_count;
+                            independently_derived_empty_response_hash_query_count +=
+                                u64::from(independently_pending_challenge);
+                            independently_derived_hash_query_count +=
+                                u64::from(independently_pending_challenge)
+                                    + challenge_hash_query_count;
                             independently_pending_challenge = true;
                             continue;
                         }
@@ -7308,6 +7429,9 @@ mod tests {
             independently_derived_hash_query_count += 1
                 + u64::from(!independently_pending_challenge)
                 + u64::from(response_root_is_recomputed);
+            independently_derived_response_hash_query_count += 1
+                + u64::from(!independently_pending_challenge)
+                + u64::from(response_root_is_recomputed);
             independently_pending_challenge = false;
         }
         assert!(!independently_pending_challenge);
@@ -7315,7 +7439,17 @@ mod tests {
             maximum_transcript_hash_query_count,
             independently_derived_hash_query_count,
         );
-        assert_eq!(maximum_transcript_hash_query_count, 14_673);
+        assert_eq!(
+            (
+                independently_derived_response_hash_query_count,
+                independently_derived_empty_response_hash_query_count,
+                independently_derived_product_hash_query_count,
+                independently_derived_extension_hash_query_count,
+                independently_derived_distinct_hash_query_count,
+            ),
+            (6_166, 4_235, 387, 549_540, 44_473),
+        );
+        assert_eq!(maximum_transcript_hash_query_count, 604_801);
         assert_eq!(
             logical_verifier_message_count,
             u64::try_from(
@@ -7338,10 +7472,17 @@ mod tests {
             .iter()
             .flat_map(|operation| &operation.ranges)
         {
-            if let RowCodeWhirOracleEquationRangeKind::AtomicChallengeXof { output_byte_length } =
-                range.kind
+            if let RowCodeWhirOracleEquationRangeKind::AtomicChallengeSeededHashStream {
+                output_byte_length,
+                fixed_hash_query_count,
+            } = range.kind
             {
                 atomic_challenge_count += 1;
+                assert_eq!(
+                    fixed_hash_query_count,
+                    atomic_challenge_fixed_hash_query_count(output_byte_length)
+                        .expect("the fixed-hash query count derives"),
+                );
                 total_atomic_challenge_output_byte_length =
                     total_atomic_challenge_output_byte_length
                         .checked_add(output_byte_length)
@@ -7453,7 +7594,14 @@ mod tests {
             cryptographically_rescheduled_catalog
                 .maximum_transcript_hash_query_count()
                 .expect("the changed transcript ceiling remains defined"),
-            maximum_transcript_hash_query_count,
+            maximum_transcript_hash_query_count
+                - atomic_challenge_fixed_hash_query_count(
+                    maximum_candidate_draws
+                        * u64::try_from(std::mem::size_of::<u64>())
+                            .expect("the candidate width fits u64"),
+                )
+                .expect("one removed query slot has an exact fixed-hash cost")
+                + 1,
         );
         assert_ne!(
             cryptographically_rescheduled_plan

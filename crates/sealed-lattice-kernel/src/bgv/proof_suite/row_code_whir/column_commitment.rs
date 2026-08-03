@@ -1247,7 +1247,7 @@ pub(super) fn hash_opened_column_with_salt(
     finish_shake256(state)
 }
 
-fn hash_merkle_parent(left: &ColumnDigest, right: &ColumnDigest) -> ColumnDigest {
+pub(super) fn hash_merkle_parent(left: &ColumnDigest, right: &ColumnDigest) -> ColumnDigest {
     let mut state = Shake256::default();
     state.update(&(super::ROW_CODE_WHIR_PHASE_COLUMN_NODE_DOMAIN.len() as u64).to_le_bytes());
     state.update(super::ROW_CODE_WHIR_PHASE_COLUMN_NODE_DOMAIN);

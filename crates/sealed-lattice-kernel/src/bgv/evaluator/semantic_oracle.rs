@@ -5,7 +5,8 @@
 //! directly from the finite-field lane definitions and the canonical pair
 //! placement table.
 
-pub(crate) const ORACLE_OPTION_COUNT: usize = 20;
+pub(crate) const ORACLE_OPTION_COUNT: usize =
+    crate::foundation::FOUNDATION_PROFILE.option_count as usize;
 pub(crate) const ORACLE_LANE_COUNT: usize = 128;
 pub(crate) const ORACLE_BANK_LANE_COUNT: usize = 64;
 pub(crate) const ORACLE_EXTENSION_DEGREE: usize = 256;
@@ -33,7 +34,7 @@ struct OracleShiftPlacement {
     lane_start: usize,
 }
 
-const ORACLE_SHIFT_PLACEMENTS: [OracleShiftPlacement; ORACLE_OPTION_COUNT - 1] = [
+const ORACLE_SHIFT_PLACEMENTS: [OracleShiftPlacement; 19] = [
     placement(1, 0, 7),
     placement(1, 0, 35),
     placement(0, 1, 15),
@@ -69,7 +70,12 @@ const fn placement(
 
 pub(crate) fn pair_assignments() -> Vec<OraclePairAssignment> {
     let mut assignments = Vec::with_capacity(ORACLE_OPTION_COUNT * (ORACLE_OPTION_COUNT - 1) / 2);
-    for (shift_index, placement) in ORACLE_SHIFT_PLACEMENTS.iter().copied().enumerate() {
+    for (shift_index, placement) in ORACLE_SHIFT_PLACEMENTS
+        .iter()
+        .copied()
+        .take(ORACLE_OPTION_COUNT - 1)
+        .enumerate()
+    {
         let option_shift = shift_index + 1;
         for lower_option_ordinal in 0..ORACLE_OPTION_COUNT - option_shift {
             assignments.push(OraclePairAssignment {
@@ -369,7 +375,8 @@ mod tests {
     #[test]
     fn independent_catalog_covers_every_pair_once_across_both_banks() {
         let assignments = pair_assignments();
-        assert_eq!(assignments.len(), 190);
+        let expected_pair_count = ORACLE_OPTION_COUNT * (ORACLE_OPTION_COUNT - 1) / 2;
+        assert_eq!(assignments.len(), expected_pair_count);
         assert_eq!(
             assignments
                 .iter()
@@ -379,7 +386,7 @@ mod tests {
                 ))
                 .collect::<BTreeSet<_>>()
                 .len(),
-            190
+            expected_pair_count
         );
         assert_eq!(
             assignments
@@ -394,7 +401,7 @@ mod tests {
                 .map(|assignment| (assignment.ciphertext_ordinal, assignment.lane_ordinal))
                 .collect::<BTreeSet<_>>()
                 .len(),
-            190
+            expected_pair_count
         );
     }
 

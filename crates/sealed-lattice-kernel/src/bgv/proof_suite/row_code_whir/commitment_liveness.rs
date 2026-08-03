@@ -33,7 +33,7 @@ use crate::bgv::proof_suite::{
     merkle::maximum_minimal_frontier_node_count, prover::CommonProofSourceProviderMemoryAccounting,
 };
 
-const ROOT_AND_OPENING_PASS_COUNT: u64 = 2;
+pub(super) const ROOT_AND_OPENING_PASS_COUNT: u64 = 2;
 pub(super) const BOUND_TREE_AUTHENTICATION_STRIPE_LEAF_COUNT: usize = 1 << 20;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1351,7 +1351,6 @@ pub(super) fn derive_phase_commitment_geometry_accounting(
 fn derive_phase_commitment_work_accounting(
     construction_plan: &RowCodeWhirConstructionPlan,
 ) -> Result<PhaseCommitmentWorkAccounting, String> {
-    const MATERIALIZATION_PASS_COUNT: u64 = 2;
     let geometries = construction_plan
         .base_phase
         .iter()
@@ -1413,13 +1412,13 @@ fn derive_phase_commitment_work_accounting(
     }
     let scale = |count: u64, role: &str| {
         count
-            .checked_mul(MATERIALIZATION_PASS_COUNT)
+            .checked_mul(ROOT_AND_OPENING_PASS_COUNT)
             .ok_or_else(|| format!("phase {role} count overflowed"))
     };
     let leaf_hash_query_count = scale(leaf_hash_query_count_per_pass, "leaf-hash")?;
     Ok(PhaseCommitmentWorkAccounting {
         geometry_count,
-        materialization_pass_count: MATERIALIZATION_PASS_COUNT,
+        materialization_pass_count: ROOT_AND_OPENING_PASS_COUNT,
         lane_dft_count: scale(lane_dft_count_per_pass, "lane DFT")?,
         butterfly_count: scale(butterfly_count_per_pass, "butterfly")?,
         coefficient_fold_count: scale(coefficient_fold_count_per_pass, "coefficient-fold")?,

@@ -3,6 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::*;
 use num_bigint::{BigInt, BigUint};
 use num_traits::{One, Zero};
+#[cfg(feature = "primitive-measurement-evidence")]
+use zeroize::Zeroizing;
 
 use crate::bgv::proof_suite::{AuthenticatedCompactCommittedMaterialSource, ProofBaseFieldElement};
 
@@ -1434,9 +1436,105 @@ impl CommittedMaterialTraceWitnessInput {
 /// sources. It therefore supports deterministic repeated passes without
 /// retaining every witness column simultaneously. The common prover remains
 /// responsible for interpolation and the plan-assigned trace mask.
-pub(crate) struct CommittedMaterialTraceWitnessProvider {
+pub(crate) trait CommittedMaterialTraceSource {
+    fn material_digit(
+        &self,
+        physical_half_ordinal: usize,
+        material_digit_ordinal: usize,
+        row_ordinal: usize,
+    ) -> Result<u64, RelationPlanError>;
+}
+
+impl CommittedMaterialTraceSource for AuthenticatedCompactCommittedMaterialSource {
+    fn material_digit(
+        &self,
+        physical_half_ordinal: usize,
+        material_digit_ordinal: usize,
+        row_ordinal: usize,
+    ) -> Result<u64, RelationPlanError> {
+        AuthenticatedCompactCommittedMaterialSource::material_digit(
+            self,
+            physical_half_ordinal,
+            material_digit_ordinal,
+            row_ordinal,
+        )
+        .map_err(|_| RelationPlanError::InvalidColumn)
+    }
+}
+
+/// Recipe-only input for the opt-in primitive measurement artifact.
+///
+/// It has no commitment root, seed, authenticated-source marker, or conversion
+/// into a production source. Consequently it can exercise the same trace
+/// recipes but cannot enter proving or verification.
+#[cfg(feature = "primitive-measurement-evidence")]
+struct PrimitiveMeasurementCommittedMaterialSource {
+    canonical_message: Zeroizing<Box<[u64]>>,
+    canonical_modulus: u64,
+    trace_domain_size: usize,
+}
+
+#[cfg(feature = "primitive-measurement-evidence")]
+impl PrimitiveMeasurementCommittedMaterialSource {
+    fn new(
+        canonical_message: Box<[u64]>,
+        canonical_modulus: u64,
+    ) -> Result<Self, RelationPlanError> {
+        if canonical_modulus < 2
+            || canonical_message.len() < 4
+            || !canonical_message.len().is_power_of_two()
+            || canonical_message
+                .iter()
+                .any(|coefficient| *coefficient >= canonical_modulus)
+        {
+            return Err(RelationPlanError::InvalidRoot);
+        }
+        Ok(Self {
+            trace_domain_size: canonical_message.len() / 2,
+            canonical_message: Zeroizing::new(canonical_message),
+            canonical_modulus,
+        })
+    }
+}
+
+#[cfg(feature = "primitive-measurement-evidence")]
+impl CommittedMaterialTraceSource for PrimitiveMeasurementCommittedMaterialSource {
+    fn material_digit(
+        &self,
+        physical_half_ordinal: usize,
+        material_digit_ordinal: usize,
+        row_ordinal: usize,
+    ) -> Result<u64, RelationPlanError> {
+        if physical_half_ordinal >= 2
+            || material_digit_ordinal >= 2
+            || row_ordinal >= self.trace_domain_size
+        {
+            return Err(RelationPlanError::InvalidColumn);
+        }
+        let coefficient_ordinal = physical_half_ordinal
+            .checked_mul(self.trace_domain_size)
+            .and_then(|offset| offset.checked_add(row_ordinal))
+            .ok_or(RelationPlanError::CountOverflow)?;
+        let coefficient = *self
+            .canonical_message
+            .get(coefficient_ordinal)
+            .ok_or(RelationPlanError::InvalidColumn)?;
+        if coefficient >= self.canonical_modulus {
+            return Err(RelationPlanError::InvalidColumn);
+        }
+        Ok(if material_digit_ordinal == 0 {
+            coefficient % MATERIAL_DIGIT_RADIX
+        } else {
+            coefficient / MATERIAL_DIGIT_RADIX
+        })
+    }
+}
+
+pub(crate) struct CommittedMaterialTraceWitnessProvider<
+    Source = AuthenticatedCompactCommittedMaterialSource,
+> {
     input: CommittedMaterialTraceWitnessInput,
-    ordered_roots: Box<[AuthenticatedCompactCommittedMaterialSource]>,
+    ordered_roots: Box<[Source]>,
     resolved_moduli: Box<[u64]>,
     ordered_recipes: Box<[(u32, CommittedMaterialColumnRecipe)]>,
     relation_plan_hash: [u8; 64],
@@ -1521,7 +1619,7 @@ impl CommittedMaterialTraceWitnessStructureMemoryAccounting {
     }
 }
 
-impl CommittedMaterialTraceWitnessProvider {
+impl<Source: CommittedMaterialTraceSource> CommittedMaterialTraceWitnessProvider<Source> {
     pub(crate) const fn relation_plan_hash(&self) -> [u8; 64] {
         self.relation_plan_hash
     }
@@ -1781,7 +1879,6 @@ impl CommittedMaterialTraceWitnessProvider {
             .get(logical_root_ordinal)
             .ok_or(RelationPlanError::InvalidRoot)?
             .material_digit(physical_half_ordinal, material_digit_ordinal, row_ordinal)
-            .map_err(|_| RelationPlanError::InvalidColumn)
             .map(i128::from)
     }
 
@@ -1993,6 +2090,325 @@ impl CommittedMaterialTraceWitnessProvider {
             return Err(RelationPlanError::InvalidColumn);
         }
         Ok(residual / modulus)
+    }
+}
+
+/// Prepared production-geometry source replay for the opt-in primitive
+/// measurement artifact. Setup is kept outside the timed operation.
+#[cfg(feature = "primitive-measurement-evidence")]
+pub(crate) struct SelectedVssSourceReplayMeasurement {
+    provider: CommittedMaterialTraceWitnessProvider<PrimitiveMeasurementCommittedMaterialSource>,
+    trace_domain: crate::bgv::proof_suite::ProofEvaluationDomain,
+    column_ordinal: u32,
+    trace_value_count: usize,
+}
+
+#[cfg(feature = "primitive-measurement-evidence")]
+impl SelectedVssSourceReplayMeasurement {
+    pub(crate) fn prepare() -> Result<Self, String> {
+        let input = crate::bgv::proof_suite::selected_committed_material_relation_plan_input()
+            .map_err(|_| "selected VSS source-replay input is invalid".to_owned())?;
+        let context = crate::bgv::proof_suite::selected_relation_plan_check_context(
+            crate::foundation::ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        .ok_or_else(|| "selected VSS source-replay context is absent".to_owned())?;
+        let resolved_moduli = input
+            .validate(&context)
+            .map_err(|_| "selected VSS source-replay moduli are invalid".to_owned())?;
+        let roots_per_limb = usize::from(input.threshold)
+            .checked_add(usize::from(input.participant_count))
+            .ok_or_else(|| "selected VSS root count overflowed".to_owned())?;
+        let canonical_coefficient_count = usize::try_from(input.ring_degree)
+            .map_err(|_| "selected VSS ring degree exceeds usize".to_owned())?;
+        let expected_root_count = resolved_moduli
+            .len()
+            .checked_mul(roots_per_limb)
+            .ok_or_else(|| "selected VSS root count overflowed".to_owned())?;
+        let mut ordered_sources = Vec::new();
+        ordered_sources
+            .try_reserve_exact(expected_root_count)
+            .map_err(|_| "selected VSS source catalog allocation failed".to_owned())?;
+        let point_stride = input
+            .point_stride()
+            .map_err(|_| "selected VSS point stride is invalid".to_owned())?;
+        for (modulus_ordinal, (_, modulus)) in resolved_moduli.iter().copied().enumerate() {
+            let mut coefficient_messages = Vec::new();
+            coefficient_messages
+                .try_reserve_exact(usize::from(input.threshold))
+                .map_err(|_| "selected VSS coefficient catalog allocation failed".to_owned())?;
+            for coefficient_ordinal in 0..usize::from(input.threshold) {
+                let mut message = Vec::new();
+                message
+                    .try_reserve_exact(canonical_coefficient_count)
+                    .map_err(|_| "selected VSS coefficient allocation failed".to_owned())?;
+                for ring_coefficient_ordinal in 0..canonical_coefficient_count {
+                    let seed = u128::try_from(modulus_ordinal + 1)
+                        .ok()
+                        .and_then(|value| value.checked_mul(1_000_003))
+                        .and_then(|value| {
+                            value
+                                .checked_add(u128::try_from(coefficient_ordinal + 1).ok()? * 65_537)
+                        })
+                        .and_then(|value| {
+                            value.checked_add(
+                                u128::try_from(ring_coefficient_ordinal + 1).ok()? * 257,
+                            )
+                        })
+                        .ok_or_else(|| "selected VSS coefficient seed overflowed".to_owned())?;
+                    let canonical = u64::try_from(seed % u128::from(modulus - 1) + 1)
+                        .map_err(|_| "selected VSS coefficient does not fit u64".to_owned())?;
+                    message.push(canonical);
+                }
+                coefficient_messages.push(message.into_boxed_slice());
+            }
+            for message in &coefficient_messages {
+                ordered_sources.push(
+                    PrimitiveMeasurementCommittedMaterialSource::new(message.clone(), modulus)
+                        .map_err(|_| {
+                            "selected VSS measurement coefficient is invalid".to_owned()
+                        })?,
+                );
+            }
+            for recipient_ordinal in 0..usize::from(input.participant_count) {
+                let mut share = vec![0_u64; canonical_coefficient_count];
+                for (coefficient_ordinal, message) in coefficient_messages.iter().enumerate() {
+                    let exponent = u64::try_from(recipient_ordinal)
+                        .ok()
+                        .and_then(|recipient| {
+                            u64::try_from(coefficient_ordinal)
+                                .ok()
+                                .and_then(|coefficient| recipient.checked_mul(coefficient))
+                        })
+                        .and_then(|product| product.checked_mul(point_stride))
+                        .ok_or_else(|| "selected VSS share exponent overflowed".to_owned())?;
+                    let reduced_exponent = exponent
+                        % input
+                            .ring_degree
+                            .checked_mul(2)
+                            .ok_or_else(|| "selected VSS action domain overflowed".to_owned())?;
+                    let unsigned_exponent = reduced_exponent % input.ring_degree;
+                    for (target_ordinal, destination) in share.iter_mut().enumerate() {
+                        let target = u64::try_from(target_ordinal)
+                            .map_err(|_| "selected VSS target ordinal exceeds u64".to_owned())?;
+                        let wraps_below_zero = target < unsigned_exponent;
+                        let source_ordinal = if wraps_below_zero {
+                            target
+                                .checked_add(input.ring_degree)
+                                .and_then(|value| value.checked_sub(unsigned_exponent))
+                                .ok_or_else(|| {
+                                    "selected VSS source ordinal overflowed".to_owned()
+                                })?
+                        } else {
+                            target - unsigned_exponent
+                        };
+                        let value = *message
+                            .get(usize::try_from(source_ordinal).map_err(|_| {
+                                "selected VSS source ordinal exceeds usize".to_owned()
+                            })?)
+                            .ok_or_else(|| {
+                                "selected VSS source coefficient is absent".to_owned()
+                            })?;
+                        let acted = if (reduced_exponent >= input.ring_degree) ^ wraps_below_zero {
+                            if value == 0 { 0 } else { modulus - value }
+                        } else {
+                            value
+                        };
+                        *destination = u64::try_from(
+                            (u128::from(*destination) + u128::from(acted)) % u128::from(modulus),
+                        )
+                        .map_err(|_| {
+                            "selected VSS share coefficient does not fit u64".to_owned()
+                        })?;
+                    }
+                }
+                ordered_sources.push(
+                    PrimitiveMeasurementCommittedMaterialSource::new(
+                        share.into_boxed_slice(),
+                        modulus,
+                    )
+                    .map_err(|_| "selected VSS measurement share is invalid".to_owned())?,
+                );
+            }
+        }
+        if ordered_sources.len() != expected_root_count {
+            return Err("selected VSS source catalog is incomplete".to_owned());
+        }
+        let layout = derive_vss_share_linkage_trace_witness_layout(&input, &context)
+            .map_err(|_| "selected VSS trace-witness layout is invalid".to_owned())?;
+        let provider = CommittedMaterialTraceWitnessProvider {
+            input: CommittedMaterialTraceWitnessInput::from_relation_input(&input),
+            ordered_roots: ordered_sources.into_boxed_slice(),
+            resolved_moduli: layout
+                .resolved_moduli
+                .into_iter()
+                .map(|(_, modulus)| modulus)
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+            ordered_recipes: layout.ordered_recipes,
+            relation_plan_hash: layout.relation_plan_hash,
+        };
+
+        fn contains_vss_quotient(source: &CommittedMaterialIntegerRecipe) -> bool {
+            match source {
+                CommittedMaterialIntegerRecipe::Packed {
+                    ordered_lane_sources,
+                } => ordered_lane_sources.iter().any(contains_vss_quotient),
+                CommittedMaterialIntegerRecipe::VssQuotient { .. } => true,
+                _ => false,
+            }
+        }
+
+        let column_ordinal = provider
+            .ordered_recipes
+            .iter()
+            .find_map(|(column_ordinal, recipe)| match recipe {
+                CommittedMaterialColumnRecipe::Integer(source)
+                | CommittedMaterialColumnRecipe::TernaryDigit { source, .. }
+                    if contains_vss_quotient(source) =>
+                {
+                    Some(*column_ordinal)
+                }
+                _ => None,
+            })
+            .ok_or_else(|| "selected VSS quotient replay recipe is absent".to_owned())?;
+        let trace_value_count = usize::try_from(
+            input
+                .relation_trace_domain_size()
+                .map_err(|_| "selected VSS source-replay trace domain is invalid".to_owned())?,
+        )
+        .map_err(|_| "selected VSS source-replay trace domain exceeds usize".to_owned())?;
+        let trace_domain =
+            crate::bgv::proof_suite::ProofEvaluationDomain::new_subgroup(trace_value_count)
+                .map_err(|_| "selected VSS source-replay trace domain is invalid".to_owned())?;
+        Ok(Self {
+            provider,
+            trace_domain,
+            column_ordinal,
+            trace_value_count,
+        })
+    }
+
+    pub(crate) fn logical_root_count(&self) -> usize {
+        self.provider.logical_root_count()
+    }
+
+    pub(crate) const fn trace_value_count(&self) -> usize {
+        self.trace_value_count
+    }
+
+    pub(crate) const fn column_ordinal(&self) -> u32 {
+        self.column_ordinal
+    }
+
+    pub(crate) fn production_recipe_count(&self) -> usize {
+        self.provider.ordered_recipes.len()
+    }
+
+    pub(crate) fn nonzero_source_coefficient_count(&self) -> Result<u64, String> {
+        self.provider
+            .ordered_roots
+            .iter()
+            .try_fold(0_u64, |total, source| {
+                let source_count = u64::try_from(
+                    source
+                        .canonical_message
+                        .iter()
+                        .filter(|coefficient| **coefficient != 0)
+                        .count(),
+                )
+                .map_err(|_| "selected VSS nonzero coefficient count exceeds u64".to_owned())?;
+                total
+                    .checked_add(source_count)
+                    .ok_or_else(|| "selected VSS nonzero coefficient count overflowed".to_owned())
+            })
+    }
+
+    pub(crate) fn retained_input_byte_length(&self) -> Result<u64, String> {
+        let source_allocation_byte_length =
+            self.provider
+                .ordered_roots
+                .iter()
+                .try_fold(0_u64, |total, source| {
+                    let coefficient_byte_length = u64::try_from(source.canonical_message.len())
+                        .ok()
+                        .and_then(|count| count.checked_mul(size_of::<u64>() as u64))
+                        .ok_or_else(|| {
+                            "selected VSS measurement source size overflowed".to_owned()
+                        })?;
+                    let source_byte_length = u64::try_from(size_of::<
+                        PrimitiveMeasurementCommittedMaterialSource,
+                    >())
+                    .ok()
+                    .and_then(|fixed| fixed.checked_add(coefficient_byte_length))
+                    .ok_or_else(|| "selected VSS measurement source size overflowed".to_owned())?;
+                    total.checked_add(source_byte_length).ok_or_else(|| {
+                        "selected VSS measurement source catalog overflowed".to_owned()
+                    })
+                })?;
+        let structure_byte_length = self
+            .provider
+            .structure_memory_accounting()
+            .map_err(|_| "selected VSS measurement recipe accounting failed".to_owned())?
+            .total_byte_length();
+        u64::try_from(size_of::<Self>())
+            .ok()
+            .and_then(|fixed| fixed.checked_add(source_allocation_byte_length))
+            .and_then(|total| total.checked_add(structure_byte_length))
+            .ok_or_else(|| "selected VSS measurement retained input size overflowed".to_owned())
+    }
+
+    pub(crate) fn replay_once(&self) -> Result<Vec<ProofBaseFieldElement>, String> {
+        let mut rows = self
+            .provider
+            .column_trace_field_values(self.column_ordinal)
+            .map_err(|_| "selected VSS source-replay rows are invalid".to_owned())?;
+        if rows.len() != self.trace_value_count {
+            return Err("selected VSS source-replay row count is inconsistent".to_owned());
+        }
+        self.trace_domain
+            .interpolate_base_polynomial_in_place(&mut rows)
+            .map_err(|_| "selected VSS source-replay interpolation failed".to_owned())?;
+        Ok(rows)
+    }
+
+    pub(crate) fn replay_production_recipe_catalog_once(&self) -> Result<u64, String> {
+        let mut checksum = 0xcbf2_9ce4_8422_2325_u64;
+        for (recipe_ordinal, (column_ordinal, _)) in
+            self.provider.ordered_recipes.iter().enumerate()
+        {
+            let mut coefficients = self
+                .provider
+                .column_trace_field_values(*column_ordinal)
+                .map_err(|_| "selected VSS production replay rows are invalid".to_owned())?;
+            if coefficients.len() != self.trace_value_count {
+                return Err("selected VSS production replay row count is inconsistent".to_owned());
+            }
+            self.trace_domain
+                .interpolate_base_polynomial_in_place(&mut coefficients)
+                .map_err(|_| "selected VSS production replay interpolation failed".to_owned())?;
+            let middle_ordinal = coefficients.len() / 2;
+            let sampled_value = coefficients
+                .first()
+                .ok_or_else(|| "selected VSS production replay is empty".to_owned())?
+                .canonical()
+                ^ coefficients[middle_ordinal].canonical().rotate_left(21)
+                ^ coefficients
+                    .last()
+                    .ok_or_else(|| "selected VSS production replay is empty".to_owned())?
+                    .canonical()
+                    .rotate_left(42)
+                ^ u64::from(*column_ordinal).rotate_left(7)
+                ^ u64::try_from(coefficients.len())
+                    .map_err(|_| "production replay value count exceeds u64".to_owned())?;
+            let ordinal = u64::try_from(recipe_ordinal)
+                .map_err(|_| "production replay recipe ordinal exceeds u64".to_owned())?;
+            checksum = checksum
+                .rotate_left(17)
+                .wrapping_add(sampled_value)
+                .wrapping_add(ordinal.wrapping_mul(0x9e37_79b1_85eb_ca87))
+                .wrapping_mul(0x1000_0000_01b3);
+        }
+        Ok(checksum)
     }
 }
 

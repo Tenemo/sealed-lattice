@@ -90,6 +90,19 @@ const setupProofInventory = [
     ['evaluatorKeyAggregate', 0x1218, 1, 7],
 ] as const;
 
+const setupProofInventoryTotals = setupProofInventory.reduce(
+    (totals, [, , physicalCount, logicalCount]) => ({
+        physicalProofApplicationCount:
+            totals.physicalProofApplicationCount + physicalCount,
+        logicalRelationInstanceCount:
+            totals.logicalRelationInstanceCount + logicalCount,
+    }),
+    {
+        physicalProofApplicationCount: 0,
+        logicalRelationInstanceCount: 0,
+    },
+);
+
 const exactWitnessJoinIdentifiers = [
     'secretContributionAcrossVssAnchorAndKeyShares',
     'relinearizationEphemeralAcrossBothRounds',
@@ -169,6 +182,9 @@ const assumptionNodeIdentifiers = [
 ] as const;
 
 const unresolvedNodeIdentifiers = [
+    'commonConstructionQromTransform',
+    'commonProofQromComposition',
+    'commonConstructionMaskingCorrespondence',
     'setupFamilySimulationComposition',
     'collectiveSetupHybridComposition',
 ] as const;
@@ -679,7 +695,7 @@ const buildSelectedSetupCorrectnessImport = (): JsonValue => ({
         'collective secret and error bounds include all ten participant contributions',
         'every selected data-prime collective-public-key centered margin is positive',
         'the special basis is coprime to the plaintext modulus for exact plaintext-preserving correction',
-        'all ten accepted ballot counts and all twenty target variants retain positive evaluator margins',
+        'all selected accepted ballot counts and top-count target variants retain positive evaluator margins',
         'sampler exhaustion is a typed honest abort under the selected bounded candidate-draw catalogs',
         'missing, malformed, noncanonical, inconsistent, or partial setup material cannot mint a terminal capability',
     ],
@@ -752,6 +768,7 @@ const buildConstructionEvidenceImports = (
         'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/aggregate_wide_prover.rs',
         'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/aggregate_wide_verifier.rs',
         'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/aggregate_wide_wire.rs',
+        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate.rs',
         'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/exact_same_secret/exact_proof.rs',
     ] as const;
     return [
@@ -771,37 +788,40 @@ const buildConstructionEvidenceImports = (
             identifier: exactConstructionEvidenceImportIdentifiers[1],
             ownerSourcePaths: qromOwnerSourcePaths,
             requiredClosurePredicate:
-                'typedCmsNineteenVariableOutputApplicabilityAndAcceptingPathCeilings',
-            observedStatus: 'resolved',
+                'singleFixed512BitQroRestrictionCorrespondenceAndProductionRows',
+            observedStatus: 'unresolved',
             checkedArtifactDigest: checkedSourceBundleDigest(
                 sourceAuthority,
                 qromOwnerSourcePaths,
             ),
-            missingEvidence: null,
+            missingEvidence:
+                'No independently derived fixed-output oracle-graph certificate yet proves coherent fragment, suffix, repeated, and overlapping block access; the exact half-preimage support; purification, recording, lifting, and extraction; and every accepted-path predecessor and verifier equation.',
         },
         {
             identifier: exactConstructionEvidenceImportIdentifiers[2],
             ownerSourcePaths: qromCompositionOwnerSourcePaths,
             requiredClosurePredicate:
                 'conservativePerPhysicalProofTransformAndExplicitCeremonyUnion',
-            observedStatus: 'resolved',
+            observedStatus: 'unresolved',
             checkedArtifactDigest: checkedSourceBundleDigest(
                 sourceAuthority,
                 qromCompositionOwnerSourcePaths,
             ),
-            missingEvidence: null,
+            missingEvidence:
+                'The 103-physical-proof and 159-logical-instance census is component accounting only. Composition remains unresolved until the independently derived fixed-output graph certificate and every per-physical-proof transform are established under the complete adversarial query budget.',
         },
         {
             identifier: exactConstructionEvidenceImportIdentifiers[3],
             ownerSourcePaths: maskingOwnerSourcePaths,
             requiredClosurePredicate:
                 'completeConstructionMaskingCorrespondence',
-            observedStatus: 'resolved',
+            observedStatus: 'unresolved',
             checkedArtifactDigest: checkedSourceBundleDigest(
                 sourceAuthority,
                 maskingOwnerSourcePaths,
             ),
-            missingEvidence: null,
+            missingEvidence:
+                'The static conditioned affine image inclusion and classical ideal-XOF sequential simulator derive. Emitted transported-proof instantiation, the concrete SHAKE256 reduction, adaptive setup-family composition, and stronger zero-knowledge notions remain unproved.',
         },
     ];
 };
@@ -1046,29 +1066,30 @@ const buildReductionDag = (): JsonValue => [
     {
         identifier: 'commonConstructionQromTransform',
         kind: 'reduction',
-        status: 'resolved',
+        status: 'unresolved',
         dependencies: ['shakeQuantumOracle'],
-        advantageExpression: 'epsilon_common_construction_qrom',
+        advantageExpression:
+            'unresolved_common_construction_qrom_transform_error',
         statement:
-            'The canonically width-bound transcript domains, typed variable-output ideal-XOF direct-sum theorem, complete-prefix dominance over fragment access, independent unused suffix, strong-state hash chain, accepting-database catalog, verifier hash ceiling, and exact failure partition instantiate the CMS19 transform separately for each complete construction under the declared SHAKE256 ideal-XOF quantum-oracle assumption.',
+            'The typed seed and block calls, sampler chronology, accepting-database inventory, and deployed-call partition are component inputs. An independent graph certificate for coherent fragment, suffix, repeated, and overlapping access, exact half-preimage support, purification, recording, lifting, extraction, and accepted-path predecessor closure has not yet been derived. Concrete SHAKE256 remains only an explicit ideal-QRO assumption.',
     },
     {
         identifier: 'commonProofQromComposition',
         kind: 'reduction',
-        status: 'resolved',
+        status: 'unresolved',
         dependencies: ['commonConstructionQromTransform'],
-        advantageExpression: 'epsilon_common_proof_qrom_composition',
+        advantageExpression: 'unresolved_common_proof_qrom_composition_error',
         statement:
-            'The construction-bound evidence assigns one mapped transform and the complete global adversarial query budget to each of 103 physical proofs, unions 159 logical failure instances inside their owning proofs, applies exact family multiplicities, and then takes the explicit action union without cross-proof independence, shared-root hybrid credit, or a concatenated-IOP claim.',
+            'Twelve construction-bound rows inventory 103 physical proofs and 159 logical instances, but the conservative action union is not a theorem until each physical proof owns a valid fixed-output transform under the complete adversarial query budget. The current numerical projection is refused as closure evidence.',
     },
     {
         identifier: 'commonConstructionMaskingCorrespondence',
         kind: 'reduction',
-        status: 'resolved',
+        status: 'unresolved',
         dependencies: ['shakeQuantumOracle'],
-        advantageExpression: 'zero',
+        advantageExpression: 'unresolved_common_construction_privacy_error',
         statement:
-            'The construction mask-image certificate and fixed precommitted private masking subspace cover every phase, quotient, fold, auxiliary, bound, switch, and aggregate view without publicly recomputable masks.',
+            'The selected same-secret construction derives production-bound affine source accounting, exact conditioned witness-to-mask image inclusion, pre-opening commitment-root hiding, and one classical ideal-XOF sequential simulator over all shared queries, nonlinear views, and canonical transport sections. Emitted transported-proof instantiation, a concrete SHAKE256 reduction, adaptive setup-family composition, malicious-verifier or resettable security, and QROM zero knowledge remain open.',
     },
     {
         identifier: 'setupFamilySimulationComposition',
@@ -1163,13 +1184,14 @@ const buildResidualLedgers = (): JsonValue => [
             },
             {
                 source: 'common-proof multi-round transform',
-                symbolicTerm: 'epsilon_common_construction_qrom',
-                status: 'resolved',
+                symbolicTerm:
+                    'unresolved_common_construction_qrom_transform_error',
+                status: 'unresolved',
             },
             {
                 source: 'common-proof physical-proof composition',
-                symbolicTerm: 'epsilon_common_proof_qrom_composition',
-                status: 'resolved',
+                symbolicTerm: 'unresolved_common_proof_qrom_composition_error',
+                status: 'unresolved',
             },
             {
                 source: 'collective setup composition',
@@ -1222,8 +1244,8 @@ const buildResidualLedgers = (): JsonValue => [
             },
             {
                 source: 'common-proof masking',
-                symbolicTerm: 'zero',
-                status: 'resolved',
+                symbolicTerm: 'unresolved_common_construction_privacy_error',
+                status: 'unresolved',
             },
             {
                 source: 'setup-family simulation',
@@ -1271,10 +1293,7 @@ const buildCertificateBody = (
             logicalRelationInstanceCount: logicalCount,
         }),
     ),
-    proofInventoryTotals: {
-        physicalProofApplicationCount: 73,
-        logicalRelationInstanceCount: 129,
-    },
+    proofInventoryTotals: setupProofInventoryTotals,
     game: buildGame(),
     witnessJoins: buildWitnessJoins(),
     sampleRelations: buildSampleRelations(),
@@ -1337,7 +1356,7 @@ const validateProductionAuthority = (productionAuthority: JsonValue): void => {
         reconstructionThreshold: 4,
         finalityQuorum: 7,
         stateWitnessQuorum: 7,
-        optionCount: 20,
+        optionCount: 10,
         polynomialDegree: 32_768,
         plaintextModulus: 257,
     };
@@ -1414,6 +1433,20 @@ const validateProductionAuthority = (productionAuthority: JsonValue): void => {
         );
     }
 
+    const expectedProofInventoryTotals = expectedInventory.reduce(
+        (totals, entry) => ({
+            physicalProofApplicationCount:
+                totals.physicalProofApplicationCount +
+                entry.physicalProofApplicationCount,
+            logicalRelationInstanceCount:
+                totals.logicalRelationInstanceCount +
+                entry.logicalRelationInstanceCount,
+        }),
+        {
+            physicalProofApplicationCount: 0,
+            logicalRelationInstanceCount: 0,
+        },
+    );
     if (
         canonicalJsonText(
             requireArray(
@@ -1426,11 +1459,7 @@ const validateProductionAuthority = (productionAuthority: JsonValue): void => {
                 authority.proofInventoryTotals,
                 'Production proof inventory totals',
             ),
-        ) !==
-            canonicalJsonText({
-                physicalProofApplicationCount: 73,
-                logicalRelationInstanceCount: 129,
-            })
+        ) !== canonicalJsonText(expectedProofInventoryTotals)
     ) {
         throw new Error(
             'The production proof multiplicities are stale or altered.',
@@ -1482,7 +1511,9 @@ const validateProductionAuthority = (productionAuthority: JsonValue): void => {
             'Relation-plan variants',
         );
         const expectedVariantCount =
-            binding.family === 'evaluatorKeyAggregate' ? 20 : 1;
+            binding.family === 'evaluatorKeyAggregate'
+                ? expectedProfile.optionCount
+                : 1;
         if (variants.length !== expectedVariantCount) {
             throw new Error(
                 'A production relation-plan variant catalog is incomplete.',
@@ -1670,11 +1701,23 @@ const validateProductionAuthority = (productionAuthority: JsonValue): void => {
         setupCorrectness.specialBasisModulusProductDecimal,
         'Special-basis modulus product',
     );
+    const participantSecretCoefficientBound = requireInteger(
+        setupCorrectness.participantSecretCoefficientBound,
+        'Participant secret coefficient bound',
+    );
+    const participantErrorCoefficientBound = requireInteger(
+        setupCorrectness.participantErrorCoefficientBound,
+        'Participant error coefficient bound',
+    );
     if (
-        setupCorrectness.participantSecretCoefficientBound !== 1 ||
-        setupCorrectness.participantErrorCoefficientBound !== 2 ||
-        setupCorrectness.collectiveSecretCoefficientBound !== 10 ||
-        setupCorrectness.collectiveErrorCoefficientBound !== 20 ||
+        participantSecretCoefficientBound !== 1 ||
+        participantErrorCoefficientBound !== 2 ||
+        setupCorrectness.collectiveSecretCoefficientBound !==
+            expectedProfile.participantCount *
+                participantSecretCoefficientBound ||
+        setupCorrectness.collectiveErrorCoefficientBound !==
+            expectedProfile.participantCount *
+                participantErrorCoefficientBound ||
         setupCorrectness.collectivePublicKeyScaledErrorCoefficientBound !==
             5_140 ||
         collectivePublicKeyMargins.length !== 23 ||
@@ -1686,8 +1729,10 @@ const validateProductionAuthority = (productionAuthority: JsonValue): void => {
         ) ||
         setupCorrectness.keySwitchDataPrimesPerBlock !== 3 ||
         setupCorrectness.specialBasisIsCoprimeToPlaintextModulus !== true ||
-        setupCorrectness.acceptedBallotCountCases !== 10 ||
-        setupCorrectness.evaluatorTargetTraceCount !== 200 ||
+        setupCorrectness.acceptedBallotCountCases !==
+            expectedProfile.participantCount ||
+        setupCorrectness.evaluatorTargetTraceCount !==
+            expectedProfile.participantCount * expectedProfile.optionCount ||
         setupCorrectness.maximumPrivateSamplerCandidateDrawsPerOutput !== 64 ||
         setupCorrectness.maximumPublicSamplerCandidateDrawsPerOutput !== 128 ||
         !/^[1-9][0-9]*$/u.test(specialBasisProduct) ||
@@ -1892,10 +1937,7 @@ export const validateSelectedCollectiveSetupSecurityEvidence = (
     }
     if (
         canonicalJsonText(record.proofInventoryTotals ?? null) !==
-        canonicalJsonText({
-            physicalProofApplicationCount: 73,
-            logicalRelationInstanceCount: 129,
-        })
+        canonicalJsonText(setupProofInventoryTotals)
     ) {
         throw new Error('The security proof inventory totals are stale.');
     }
@@ -2144,8 +2186,10 @@ export const validateSelectedCollectiveSetupSecurityEvidence = (
     return {
         assumptionLeafCount: assumptionNodeIdentifiers.length,
         corruptionSubsetCount: 176,
-        logicalRelationInstanceCount: 129,
-        physicalProofApplicationCount: 73,
+        logicalRelationInstanceCount:
+            setupProofInventoryTotals.logicalRelationInstanceCount,
+        physicalProofApplicationCount:
+            setupProofInventoryTotals.physicalProofApplicationCount,
         readyForClosure: unresolved.length === 0,
         unresolvedNonAssumptionLeaves: unresolved,
     };

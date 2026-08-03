@@ -101,7 +101,7 @@ describe('manual Rust kernel preflight', () => {
         expect(guardedExecutorCallCount).toBe(0);
     });
 
-    it('resolves a libtest substring inside the exact registry before preflight', async () => {
+    it('resolves a focused libtest substring from the exact registry without compiling an inventory', async () => {
         const focusedFilter = 'static_resource_accounting_emits_run_attachment';
         const verifiedTestFilters: string[] = [];
         let executedTestFilters: readonly string[] = [];
@@ -120,7 +120,7 @@ describe('manual Rust kernel preflight', () => {
             },
         });
 
-        expect(verifiedTestFilters).toEqual([focusedFilter]);
+        expect(verifiedTestFilters).toEqual([]);
         expect(executedTestFilters).toEqual([focusedFilter]);
     });
 
@@ -170,5 +170,60 @@ describe('manual Rust kernel preflight', () => {
             theoremEvidenceRustTests.map(() => ['theorem-evidence']),
         );
         expect(executedTestFilters).toEqual(theoremEvidenceRustTests);
+    });
+
+    it('preflights bounded measurements under their isolated Cargo feature', async () => {
+        const verifiedCargoFeatures: string[][] = [];
+        const verifiedReleaseProfiles: boolean[] = [];
+
+        const configuredMeasurement =
+            measurementRustTests.find((testName) =>
+                testName.includes(
+                    'selected_vss_source_replay_emits_measurement',
+                ),
+            ) ?? '';
+        await preflightAndRunManualRustKernelLane({
+            cargoFeatures: ['primitive-measurement-evidence'],
+            configuredTestNames: [configuredMeasurement],
+            lane: 'rust-measurements',
+            runGuardedCommands: () => Promise.resolve(),
+            useReleaseProfile: true,
+            verifyLaneSelection: (input) => {
+                verifiedCargoFeatures.push([...(input.cargoFeatures ?? [])]);
+                verifiedReleaseProfiles.push(input.useReleaseProfile === true);
+                return Promise.resolve();
+            },
+        });
+
+        expect(verifiedCargoFeatures).toEqual([
+            ['primitive-measurement-evidence'],
+        ]);
+        expect(verifiedReleaseProfiles).toEqual([true]);
+    });
+
+    it('runs a registry-owned focused filter without invoking Cargo inventory', async () => {
+        let executedTestFilters: readonly string[] = [];
+        let verifierCallCount = 0;
+
+        await preflightAndRunManualRustKernelLane({
+            configuredTestNames: measurementRustTests,
+            focusedFilter: 'selected_authenticated_scratch_record_codec',
+            lane: 'rust-measurements',
+            runGuardedCommands: (testFilters) => {
+                executedTestFilters = testFilters;
+                return Promise.resolve();
+            },
+            verifyLaneSelection: () => {
+                verifierCallCount += 1;
+                return Promise.reject(
+                    new Error('Focused inventory must not run.'),
+                );
+            },
+        });
+
+        expect(verifierCallCount).toBe(0);
+        expect(executedTestFilters).toEqual([
+            'selected_authenticated_scratch_record_codec',
+        ]);
     });
 });

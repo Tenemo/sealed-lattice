@@ -14,6 +14,7 @@ export const fullProfileEvidenceRustTests = [
     'bgv::proof_suite::row_code_whir::same_secret_source_manifest::tests::selected_family_manifests_bind_each_candidate_specific_material_catalog',
     'bgv::proof_suite::selected_profile::tests::selected_non_native_identity_counts_are_independently_minimal',
     'bgv::proof_suite::selected_profile::tests::selected_profile_has_the_complete_relation_and_root_inventory',
+    'bgv::setup::collective_setup_security_evidence::collective_setup_security_production_authority_exports_for_refresh',
     'bgv::setup::collective_setup_security_evidence::collective_setup_security_production_authority_closes_complete_evidence',
     'foundation::selected_suite::tests::candidate_suite_gate_derives_one_complete_canonical_record',
     'foundation::suite_artifact_preflight::tests::candidate_suite_artifacts_pass_semantic_preflight_and_refuse_mutations',
@@ -21,6 +22,14 @@ export const fullProfileEvidenceRustTests = [
 
 export const measurementRustTests = [
     'bgv::proof_suite::resource_accounting_evidence::tests::selected_candidate_static_resource_accounting_emits_run_attachment',
+    'bgv::proof_suite::row_code_whir::primitive_measurements::tests::selected_bounded_lane_dft_emits_measurement',
+    'bgv::proof_suite::row_code_whir::primitive_measurements::tests::selected_salted_phase_leaf_emits_measurement',
+    'bgv::proof_suite::row_code_whir::primitive_measurements::tests::selected_private_leaf_salt_derivation_emits_measurement',
+    'bgv::proof_suite::row_code_whir::primitive_measurements::tests::selected_five_level_digest_carry_emits_measurement',
+    'bgv::proof_suite::row_code_whir::primitive_measurements::tests::selected_vss_source_replay_emits_measurement',
+    'bgv::proof_suite::row_code_whir::primitive_measurements::tests::selected_authenticated_scratch_record_codec_emits_measurement',
+    'bgv::proof_suite::row_code_whir::primitive_measurements::tests::selected_vss_checkpoint_opening_lane_dfts_emit_measurement',
+    'bgv::proof_suite::row_code_whir::primitive_measurements::tests::selected_vss_production_weighted_source_replay_emits_measurement',
 ] as const;
 
 export const phaseLivenessEvidenceRustTests = [
@@ -48,25 +57,32 @@ export const theoremEvidenceRustTests = [
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::production_row_pad_hybrid_refuses_256_bit_secret_prefixes',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::production_private_leaf_salt_prf_binds_every_clean_and_replayed_derivation',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::public_key_share_schema_0x1212_derives_from_its_production_geometry',
+    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::all_exact_ten_production_identities_have_construction_view_simulation_certificates',
+    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::setup_simulation_composition::tests::selected_setup_family_has_one_adaptive_classical_simulation_composition',
+    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::setup_simulation_composition::tests::aggregate_threshold_share_schema_has_a_complete_nonlinear_simulator_owner',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::width_64_same_secret_through_rkg_round_one_aggregate_have_complete_geometry_certificates',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::width_64_relinearization_round_two_and_galois_share_have_complete_geometry_certificates',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::evaluator_width_64_top_count_one_has_a_complete_geometry_certificate',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::evaluator_width_64_top_counts_two_through_seven_have_complete_geometry_certificates',
-    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::evaluator_width_64_top_counts_eight_through_thirteen_have_complete_geometry_certificates',
-    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::evaluator_width_64_top_counts_fourteen_through_twenty_have_complete_geometry_certificates',
+    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::evaluator_width_64_top_counts_eight_through_selected_option_count_have_complete_geometry_certificates',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::every_width_8_construction_identity_has_a_complete_geometry_certificate',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::vss_share_linkage_has_a_complete_geometry_certificate',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::aggregate_threshold_share_has_a_complete_deterministic_geometry_certificate',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::relinearization_round_one_uses_the_maximum_shared_bound_agreement',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::a_256_bit_transition_chain_refuses_a_uniform_512_bit_oracle_denominator',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::deployed_streaming_leaf_chain_uses_uniform_512_bit_oracle_outputs',
-    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::variable_length_transcript_challenges_refuse_the_fixed_512_bit_cms19_model',
+    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::transcript_sampler_catalogs_every_fixed_512_bit_oracle_answer',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::exact_transported_proof_catalog_binds_every_production_section',
+    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::every_exact_ten_production_geometry_has_a_plan_bound_transport_correspondence',
+    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::persistent_committed_material_masks_cover_each_producer_and_joint_consumer_view',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::cms19_whole_state_and_database_support_are_exact_and_mutation_sensitive',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::ballot_width_eight_has_complete_semantic_state_and_database_support',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::one_transition_collision_propagates_through_the_shared_suffix_and_final_digest',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::selected_nonlinear_commitment_binding_covers_every_root_and_shared_query',
+    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::selected_nonlinear_commitment_privacy_counts_every_deployed_hash_call',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::selected_same_secret_affine_masking_composition_is_exact_and_hostile_mutations_refuse',
+    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::selected_same_secret_affine_image_inclusion_uses_conditioned_production_factorizations',
+    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::selected_same_secret_sequential_simulator_covers_shared_queries_and_nonlinear_views',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::independent_unique_decoder_and_explicit_constraint_filter_cover_hostile_words',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::soundness_composition::aggregate_threshold_share_mapped_soundness_derives_in_isolation',
@@ -197,6 +213,7 @@ export const verifyFocusedRustLaneSelection = async (input: {
     readonly lane: FocusedRustLane;
     readonly runLog?: ActiveLocalRunLog;
     readonly testFilter: string;
+    readonly useReleaseProfile?: boolean;
 }): Promise<void> => {
     const completeTestInventory = await collectRustKernelTestInventory({
         ...(input.cargoFeatures === undefined
@@ -209,6 +226,7 @@ export const verifyFocusedRustLaneSelection = async (input: {
                   inventoryCommandTransform: input.inventoryCommandTransform,
               }),
         runLog: input.runLog,
+        useReleaseProfile: input.useReleaseProfile,
     });
     validateCompleteRustLaneOwnership(completeTestInventory);
     validateFocusedRustLaneSelection({
@@ -227,6 +245,7 @@ export const verifyCompleteRustLaneOwnership = async (input: {
         command: CommandInvocation,
     ) => CommandInvocation;
     readonly runLog?: ActiveLocalRunLog;
+    readonly useReleaseProfile?: boolean;
 }): Promise<void> => {
     validateCompleteRustLaneOwnership(
         await collectRustKernelTestInventory(input),

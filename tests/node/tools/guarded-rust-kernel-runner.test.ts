@@ -51,6 +51,25 @@ describe('Guarded Rust kernel runner', () => {
         );
         expect(featureGatedCommand.command.args).toContain('--features');
         expect(featureGatedCommand.command.args).toContain('theorem-evidence');
+
+        const releaseMeasurementCommand = buildGuardedRustKernelCommand(
+            'selected_measurement',
+            {
+                cargoFeatures: ['primitive-measurement-evidence'],
+                logFileSlug: 'selected-measurement',
+                progressLabel: 'selected-measurement',
+                runName: 'Selected measurement',
+                targetDirectoryPath: 'guarded-target',
+                useReleaseProfile: true,
+            },
+        );
+        expect(releaseMeasurementCommand.command.args).toContain('--release');
+        expect(releaseMeasurementCommand.command.args).toContain(
+            'primitive-measurement-evidence',
+        );
+        expect(releaseMeasurementCommand.setupMessages[0]).toContain(
+            'release profile',
+        );
     });
 
     it('derives a bounded memory ceiling and permits only lower overrides', () => {

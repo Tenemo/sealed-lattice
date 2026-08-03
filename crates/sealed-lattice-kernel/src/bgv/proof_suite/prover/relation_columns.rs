@@ -4037,8 +4037,11 @@ mod requested_pre_challenge_source_column_tests {
             }
         }
 
-        assert_eq!(variant_count, 31);
-        assert_eq!(evaluator_top_counts, (1_u16..=20).collect::<BTreeSet<_>>());
+        assert_eq!(
+            evaluator_top_counts,
+            (1_u16..=crate::foundation::FOUNDATION_PROFILE.option_count).collect::<BTreeSet<_>>()
+        );
+        assert!(variant_count >= evaluator_top_counts.len());
         assert!(observed_integer_lift_auxiliary_column);
         assert!(
             observed_repeated_reversed_column_binding,

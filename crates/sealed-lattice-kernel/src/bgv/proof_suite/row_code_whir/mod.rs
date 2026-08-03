@@ -24,6 +24,8 @@ mod generation_state;
 mod hiding_whir;
 mod opening_schedule;
 mod oracle_geometry;
+#[cfg(feature = "primitive-measurement-evidence")]
+mod primitive_measurements;
 mod private_leaf_salt;
 mod quotient_transform_storage;
 mod recomputable_oracle;
@@ -65,11 +67,14 @@ pub(crate) use exact_same_secret::{
 pub(in crate::bgv::proof_suite) use exact_same_secret::{
     ExactSameSecretTransportCorrespondenceCertificate,
     checked_exact_same_secret_transport_correspondence,
+    checked_row_code_whir_transport_correspondence,
 };
 pub(in crate::bgv::proof_suite) use generation_state::{
     RowCodeWhirGenerationStateMachine, RowCodeWhirTranscriptPrefixAuthority,
     planned_row_code_whir_external_memory_requirement,
 };
+#[cfg(feature = "primitive-measurement-evidence")]
+pub(crate) use primitive_measurements::run_primitive_measurement;
 pub(in crate::bgv::proof_suite) use quotient_transform_storage::{
     RowCodeWhirQuotientColumnSourcePlan, RowCodeWhirQuotientColumnTransformPlan,
     RowCodeWhirQuotientTransformStoragePlan, RowCodeWhirQuotientTransformStorageRequest,

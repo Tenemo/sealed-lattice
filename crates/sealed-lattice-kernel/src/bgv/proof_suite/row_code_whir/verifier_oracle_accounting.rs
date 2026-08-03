@@ -22,9 +22,7 @@ use super::construction_plan::{
 use super::private_leaf_salt::PRIVATE_LEAF_SALT_BYTE_LENGTH;
 use super::{ColumnStreamableLeafHasher, MERKLE_DIGEST_BYTE_LENGTH, MERKLE_DIGEST_WORD_LENGTH};
 use crate::bgv::proof_suite::merkle::maximum_minimal_frontier_parent_hash_count;
-use crate::bgv::proof_suite::relation_plan::{
-    ProofPrivacyMode, RelationColumnOrigin, RelationPlanVariant,
-};
+use crate::bgv::proof_suite::relation_plan::{ProofPrivacyMode, RelationPlanVariant};
 use crate::foundation::Hash512;
 
 const FOUNDATION_HASH_OUTPUT_BIT_LENGTH: usize = Hash512::BYTE_LENGTH * u8::BITS as usize;
@@ -124,7 +122,6 @@ pub(super) enum FixedVerifierHashRole {
     RelationPlanVariantIdentity,
     ConstructionPlanIdentity,
     ApplicationStatement,
-    PublicSetupVerifierSequence,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -675,30 +672,10 @@ fn derive_fixed_hash_rows(
     {
         return Err("fixed verifier hash accounting has the wrong relation geometry".to_owned());
     }
-    let verifier_source_ordinals = relation_variant
-        .ordered_columns()
-        .iter()
-        .filter_map(|column| match column.origin() {
-            RelationColumnOrigin::VerifierSequence {
-                verifier_source_ordinal,
-                ..
-            } => Some(*verifier_source_ordinal),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    let distinct_verifier_source_count = verifier_source_ordinals
-        .iter()
-        .copied()
-        .collect::<BTreeSet<_>>()
-        .len();
-    let public_setup_hash_query_count = u64::try_from(verifier_source_ordinals.len())
-        .map_err(|_| "public setup hash-query count exceeds u64".to_owned())?;
-    let public_setup_distinct_equation_count = u64::try_from(distinct_verifier_source_count)
-        .map_err(|_| "public setup equation count exceeds u64".to_owned())?;
     // The transcript header is not a fixed row here. Its independent header
     // root and zero-state absorption are already the first two equations in
     // the production oracle-equation catalog.
-    let mut rows = vec![
+    Ok(vec![
         FixedVerifierHashAccountingRow {
             role: FixedVerifierHashRole::RelationPlanIdentity,
             hash_query_count: 1,
@@ -723,19 +700,7 @@ fn derive_fixed_hash_rows(
             distinct_equation_count: 1,
             output_bit_length: FOUNDATION_HASH_OUTPUT_BIT_LENGTH,
         },
-    ];
-    if public_setup_hash_query_count > 0 {
-        if public_setup_distinct_equation_count == 0 {
-            return Err("public setup hashes have no distinct equations".to_owned());
-        }
-        rows.push(FixedVerifierHashAccountingRow {
-            role: FixedVerifierHashRole::PublicSetupVerifierSequence,
-            hash_query_count: public_setup_hash_query_count,
-            distinct_equation_count: public_setup_distinct_equation_count,
-            output_bit_length: FOUNDATION_HASH_OUTPUT_BIT_LENGTH,
-        });
-    }
-    Ok(rows)
+    ])
 }
 
 pub(super) fn derive_deployed_verifier_oracle_accounting(
@@ -868,16 +833,35 @@ mod tests {
             relation_variant.proof_privacy_mode(),
             ProofPrivacyMode::SecretBearing
         );
-        assert_eq!(accounting.maximum_transcript_hash_query_count(), 14_673);
+        assert_eq!(accounting.maximum_transcript_hash_query_count(), 604_801);
         assert_eq!(accounting.logical_verifier_message_count(), 4_272);
         assert_eq!(accounting.transcript_output_bit_length(), 512);
-        assert_eq!(accounting.maximum_verifier_hash_query_count(), 105_437);
+        assert_eq!(accounting.maximum_verifier_hash_query_count(), 695_547);
         assert_eq!(
             accounting.maximum_accepting_database_equation_count(),
-            105_428
+            695_547
+        );
+        let merkle_hash_query_count = accounting
+            .merkle_rows()
+            .iter()
+            .map(|row| {
+                row.complete_hash_query_count()
+                    .expect("the Merkle hash-query count adds")
+            })
+            .sum::<u64>();
+        let fixed_hash_query_count = accounting
+            .fixed_hash_rows()
+            .iter()
+            .map(|row| row.hash_query_count)
+            .sum::<u64>();
+        assert_eq!(
+            accounting.maximum_verifier_hash_query_count(),
+            accounting.maximum_transcript_hash_query_count()
+                + merkle_hash_query_count
+                + fixed_hash_query_count
         );
         assert_eq!(accounting.merkle_rows().len(), 23);
-        assert_eq!(accounting.fixed_hash_rows().len(), 5);
+        assert_eq!(accounting.fixed_hash_rows().len(), 4);
 
         let streaming_rows = accounting
             .merkle_rows()
@@ -1055,6 +1039,10 @@ mod tests {
         let mut wrong_transcript_output_width = accounting.clone();
         wrong_transcript_output_width.transcript_output_bit_length = 256;
         assert!(wrong_transcript_output_width.validate().is_err());
+
+        let mut omitted_transcript_output_block = accounting.clone();
+        omitted_transcript_output_block.maximum_transcript_hash_query_count -= 1;
+        assert!(omitted_transcript_output_block.validate().is_err());
 
         let mut wrong_fixed_output_width = accounting.clone();
         wrong_fixed_output_width.fixed_hash_rows[0].output_bit_length = 256;

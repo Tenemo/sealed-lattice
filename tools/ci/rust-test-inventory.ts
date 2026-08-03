@@ -39,6 +39,26 @@ export const classifyRustTestInventory = (input: {
     }));
 };
 
+export const buildRustTestInventoryArguments = (input: {
+    readonly cargoFeatures?: readonly string[];
+    readonly ignoredOnly: boolean;
+    readonly useReleaseProfile?: boolean;
+}): readonly string[] => [
+    'test',
+    '--locked',
+    '-p',
+    'sealed-lattice-kernel',
+    ...(input.useReleaseProfile === true ? ['--release'] : []),
+    ...(input.cargoFeatures === undefined || input.cargoFeatures.length === 0
+        ? []
+        : ['--features', input.cargoFeatures.join(',')]),
+    '--',
+    ...(input.ignoredOnly ? ['--ignored'] : ['--include-ignored']),
+    '--list',
+    '--format',
+    'terse',
+];
+
 const listRustTests = async (input: {
     readonly cargoFeatures?: readonly string[];
     readonly environment?: NodeJS.ProcessEnv;
@@ -47,22 +67,9 @@ const listRustTests = async (input: {
         command: CommandInvocation,
     ) => CommandInvocation;
     readonly runLog?: ActiveLocalRunLog;
+    readonly useReleaseProfile?: boolean;
 }): Promise<readonly string[]> => {
-    const arguments_ = [
-        'test',
-        '--locked',
-        '-p',
-        'sealed-lattice-kernel',
-        ...(input.cargoFeatures === undefined ||
-        input.cargoFeatures.length === 0
-            ? []
-            : ['--features', input.cargoFeatures.join(',')]),
-        '--',
-        ...(input.ignoredOnly ? ['--ignored'] : ['--include-ignored']),
-        '--list',
-        '--format',
-        'terse',
-    ];
+    const arguments_ = buildRustTestInventoryArguments(input);
     const command: CommandInvocation = {
         args: arguments_,
         command: 'cargo',
@@ -91,6 +98,7 @@ export const collectRustKernelTestInventory = async (input: {
         command: CommandInvocation,
     ) => CommandInvocation;
     readonly runLog?: ActiveLocalRunLog;
+    readonly useReleaseProfile?: boolean;
 }): Promise<readonly RustTestInventoryEntry[]> => {
     const allTests = await listRustTests({
         ...input,

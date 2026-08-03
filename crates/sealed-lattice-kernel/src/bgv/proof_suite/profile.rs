@@ -42,10 +42,10 @@ use super::selected_accounting::resource_accounting::{
 };
 
 use super::transcript::{
-    TRANSCRIPT_ABSORB_DOMAIN_BYTES, TRANSCRIPT_ATOMIC_CHALLENGE_XOF_DOMAIN_BYTES,
-    TRANSCRIPT_EMPTY_PROVER_RESPONSE_ROOT, TRANSCRIPT_EMPTY_PROVER_RESPONSE_TAG_SUFFIX_BYTES,
-    TRANSCRIPT_INITIAL_DOMAIN_BYTES, TRANSCRIPT_RESPONSE_BINDING_DOMAIN_BYTES,
-    TRANSCRIPT_RESPONSE_ROOT_DOMAIN_BYTES,
+    TRANSCRIPT_ABSORB_DOMAIN_BYTES, TRANSCRIPT_ATOMIC_CHALLENGE_BLOCK_DOMAIN_BYTES,
+    TRANSCRIPT_ATOMIC_CHALLENGE_SEED_DOMAIN_BYTES, TRANSCRIPT_EMPTY_PROVER_RESPONSE_ROOT,
+    TRANSCRIPT_EMPTY_PROVER_RESPONSE_TAG_SUFFIX_BYTES, TRANSCRIPT_INITIAL_DOMAIN_BYTES,
+    TRANSCRIPT_RESPONSE_BINDING_DOMAIN_BYTES, TRANSCRIPT_RESPONSE_ROOT_DOMAIN_BYTES,
 };
 
 use super::field::PROOF_CHALLENGE_EXTENSION_POLYNOMIAL_COEFFICIENTS;
@@ -75,9 +75,10 @@ const SCHEMA_VERSION: u16 = 1;
 const PROOF_FAMILY_PROFILE_SCHEMA_VERSION: u16 = 2;
 const ROW_CODE_WHIR_CONSTRUCTION_PROFILE_SCHEMA_VERSION: u16 = 3;
 const ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_SCHEMA_VERSION: u16 = 2;
-const ROW_CODE_WHIR_HASH_PROFILE_SCHEMA_VERSION: u16 = 3;
+const ROW_CODE_WHIR_HASH_PROFILE_SCHEMA_VERSION: u16 = 4;
 const PROOF_PROFILE_SET_VERSION: u16 = 7;
-const SELECTED_ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_COUNT: usize = 31;
+const SELECTED_ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_COUNT: usize =
+    FIRST_PROFILE_APPLICATION_FAMILIES.len() - 1 + FOUNDATION_PROFILE.option_count as usize;
 const ROW_CODE_WHIR_HASH_ALGORITHM_IDENTIFIER: &str = "SHAKE256";
 const ROW_CODE_WHIR_DIGEST_BYTE_LENGTH: u16 = ROW_CODE_WHIR_MERKLE_DIGEST_BYTE_LENGTH;
 
@@ -175,8 +176,10 @@ mod construction_profile_decoder_tests {
                     .expect("the transcript-initial domain encodes"),
                 CanonicalItem::fixed_bytes(TRANSCRIPT_ABSORB_DOMAIN_BYTES)
                     .expect("the transcript-absorb domain encodes"),
-                CanonicalItem::fixed_bytes(TRANSCRIPT_ATOMIC_CHALLENGE_XOF_DOMAIN_BYTES)
-                    .expect("the atomic-challenge XOF domain encodes"),
+                CanonicalItem::fixed_bytes(TRANSCRIPT_ATOMIC_CHALLENGE_SEED_DOMAIN_BYTES)
+                    .expect("the atomic-challenge seed domain encodes"),
+                CanonicalItem::fixed_bytes(TRANSCRIPT_ATOMIC_CHALLENGE_BLOCK_DOMAIN_BYTES)
+                    .expect("the atomic-challenge block domain encodes"),
                 CanonicalItem::fixed_bytes(TRANSCRIPT_RESPONSE_BINDING_DOMAIN_BYTES)
                     .expect("the response-binding domain encodes"),
                 CanonicalItem::fixed_bytes(TRANSCRIPT_RESPONSE_ROOT_DOMAIN_BYTES)
@@ -1106,12 +1109,12 @@ fn verify_row_code_whir_hash_profile(tuple: &CanonicalTuple) -> Result<(), Proof
         tuple,
         ROW_CODE_WHIR_HASH_PROFILE_SCHEMA_IDENTIFIER,
         ROW_CODE_WHIR_HASH_PROFILE_SCHEMA_VERSION,
-        16,
+        17,
     )?;
     let algorithm = tuple.items[0]
         .variable_value_bytes()
         .map_err(|_| ProofProfileError::CanonicalEncoding)?;
-    let domains: [&[u8]; 10] = [
+    let domains: [&[u8]; 11] = [
         ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN,
         ROW_CODE_WHIR_PHASE_COLUMN_LEAF_DOMAIN,
         ROW_CODE_WHIR_PHASE_COLUMN_NODE_DOMAIN,
@@ -1119,7 +1122,8 @@ fn verify_row_code_whir_hash_profile(tuple: &CanonicalTuple) -> Result<(), Proof
         ROW_CODE_WHIR_AGGREGATE_NODE_DOMAIN,
         TRANSCRIPT_INITIAL_DOMAIN_BYTES,
         TRANSCRIPT_ABSORB_DOMAIN_BYTES,
-        TRANSCRIPT_ATOMIC_CHALLENGE_XOF_DOMAIN_BYTES,
+        TRANSCRIPT_ATOMIC_CHALLENGE_SEED_DOMAIN_BYTES,
+        TRANSCRIPT_ATOMIC_CHALLENGE_BLOCK_DOMAIN_BYTES,
         TRANSCRIPT_RESPONSE_BINDING_DOMAIN_BYTES,
         TRANSCRIPT_RESPONSE_ROOT_DOMAIN_BYTES,
     ];
@@ -1129,17 +1133,17 @@ fn verify_row_code_whir_hash_profile(tuple: &CanonicalTuple) -> Result<(), Proof
         || profile_u16(&tuple.items[2])? != ROW_CODE_WHIR_AGGREGATE_LEAF_STATE_BYTE_LENGTH
         || tuple.items[3].item_type() != CanonicalItemType::RawBytes
         || tuple.items[3].canonical_bytes() != ROW_CODE_WHIR_AGGREGATE_LEAF_FRAME_TAGS
-        || tuple.items[4..14]
+        || tuple.items[4..15]
             .iter()
             .zip(domains)
             .any(|(item, expected)| {
                 item.item_type() != CanonicalItemType::RawBytes
                     || item.canonical_bytes() != expected
             })
-        || tuple.items[14].item_type() != CanonicalItemType::RawBytes
-        || tuple.items[14].canonical_bytes() != TRANSCRIPT_EMPTY_PROVER_RESPONSE_TAG_SUFFIX_BYTES
         || tuple.items[15].item_type() != CanonicalItemType::RawBytes
-        || tuple.items[15].canonical_bytes() != TRANSCRIPT_EMPTY_PROVER_RESPONSE_ROOT
+        || tuple.items[15].canonical_bytes() != TRANSCRIPT_EMPTY_PROVER_RESPONSE_TAG_SUFFIX_BYTES
+        || tuple.items[16].item_type() != CanonicalItemType::RawBytes
+        || tuple.items[16].canonical_bytes() != TRANSCRIPT_EMPTY_PROVER_RESPONSE_ROOT
     {
         return Err(ProofProfileError::InvalidSchedule);
     }
@@ -1440,8 +1444,10 @@ pub(crate) use canonical_profile_artifact::ProofProfileSet;
 
 #[cfg(all(test, feature = "theorem-evidence"))]
 pub(crate) use canonical_profile_artifact::{
-    SelectedSameSecretPersistentMaskImageAccounting,
-    selected_same_secret_persistent_mask_image_accounting,
+    SelectedPersistentCommittedMaterialEndpoint,
+    SelectedPersistentCommittedMaterialMaskImageInventory,
+    SelectedPersistentCommittedMaterialPhysicalColumnDemand,
+    selected_persistent_committed_material_mask_image_inventory,
 };
 
 #[cfg(test)]
@@ -1512,9 +1518,9 @@ mod canonical_profile_artifact {
                 || self.schedule_position.is_some() != schedule_expected
                 || self.top_count.is_some() != top_count_expected
                 || self.producer_sequence.is_some() != producer_sequence_expected
-                || self
-                    .top_count
-                    .is_some_and(|top_count| !(1..=20).contains(&top_count))
+                || self.top_count.is_some_and(|top_count| {
+                    !(1..=crate::foundation::MAXIMUM_CONFIGURABLE_OPTION_COUNT).contains(&top_count)
+                })
             {
                 return Err(ProofProfileError::InvalidRootEndpoint);
             }
@@ -1700,7 +1706,8 @@ mod canonical_profile_artifact {
         aggregate_node_domain: Vec<u8>,
         transcript_initial_domain: Vec<u8>,
         transcript_absorb_domain: Vec<u8>,
-        transcript_atomic_challenge_xof_domain: Vec<u8>,
+        transcript_atomic_challenge_seed_domain: Vec<u8>,
+        transcript_atomic_challenge_block_domain: Vec<u8>,
         transcript_response_binding_domain: Vec<u8>,
         transcript_response_root_domain: Vec<u8>,
         transcript_empty_prover_response_tag_suffix: Vec<u8>,
@@ -1721,8 +1728,10 @@ mod canonical_profile_artifact {
                 aggregate_node_domain: ROW_CODE_WHIR_AGGREGATE_NODE_DOMAIN.to_vec(),
                 transcript_initial_domain: TRANSCRIPT_INITIAL_DOMAIN_BYTES.to_vec(),
                 transcript_absorb_domain: TRANSCRIPT_ABSORB_DOMAIN_BYTES.to_vec(),
-                transcript_atomic_challenge_xof_domain:
-                    TRANSCRIPT_ATOMIC_CHALLENGE_XOF_DOMAIN_BYTES.to_vec(),
+                transcript_atomic_challenge_seed_domain:
+                    TRANSCRIPT_ATOMIC_CHALLENGE_SEED_DOMAIN_BYTES.to_vec(),
+                transcript_atomic_challenge_block_domain:
+                    TRANSCRIPT_ATOMIC_CHALLENGE_BLOCK_DOMAIN_BYTES.to_vec(),
                 transcript_response_binding_domain: TRANSCRIPT_RESPONSE_BINDING_DOMAIN_BYTES
                     .to_vec(),
                 transcript_response_root_domain: TRANSCRIPT_RESPONSE_ROOT_DOMAIN_BYTES.to_vec(),
@@ -1766,7 +1775,9 @@ mod canonical_profile_artifact {
                         .map_err(canonical_encoding_error)?,
                     CanonicalItem::fixed_bytes(&self.transcript_absorb_domain)
                         .map_err(canonical_encoding_error)?,
-                    CanonicalItem::fixed_bytes(&self.transcript_atomic_challenge_xof_domain)
+                    CanonicalItem::fixed_bytes(&self.transcript_atomic_challenge_seed_domain)
+                        .map_err(canonical_encoding_error)?,
+                    CanonicalItem::fixed_bytes(&self.transcript_atomic_challenge_block_domain)
                         .map_err(canonical_encoding_error)?,
                     CanonicalItem::fixed_bytes(&self.transcript_response_binding_domain)
                         .map_err(canonical_encoding_error)?,
@@ -2215,14 +2226,25 @@ mod canonical_profile_artifact {
 
             self.row_code_whir_construction_profile
                 .hash_profile
-                .transcript_atomic_challenge_xof_domain[0] ^= 1;
+                .transcript_atomic_challenge_seed_domain[0] ^= 1;
             assert_eq!(
                 self.canonical_bytes(),
                 Err(ProofProfileError::InvalidConstructionProfile)
             );
             self.row_code_whir_construction_profile
                 .hash_profile
-                .transcript_atomic_challenge_xof_domain[0] ^= 1;
+                .transcript_atomic_challenge_seed_domain[0] ^= 1;
+
+            self.row_code_whir_construction_profile
+                .hash_profile
+                .transcript_atomic_challenge_block_domain[0] ^= 1;
+            assert_eq!(
+                self.canonical_bytes(),
+                Err(ProofProfileError::InvalidConstructionProfile)
+            );
+            self.row_code_whir_construction_profile
+                .hash_profile
+                .transcript_atomic_challenge_block_domain[0] ^= 1;
 
             self.row_code_whir_construction_profile.ordered_references[0]
                 .canonical_identity_byte_length += 1;
@@ -3251,25 +3273,54 @@ mod canonical_profile_artifact {
         evaluation_image_rank_ceiling: u64,
     }
 
-    /// Exact selected-profile bridge from the VSS producer proof to one
-    /// same-secret consumer proof. The underlying accounting remains rooted in
-    /// the complete persistent-root topology and the two production
-    /// construction plans; this compact row merely exposes the facts needed by
-    /// the construction theorem without duplicating that derivation.
+    /// One construction-bound producer or consumer endpoint in the complete
+    /// persistent committed-material mask image.
+    #[cfg(feature = "theorem-evidence")]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+    pub(crate) struct SelectedPersistentCommittedMaterialEndpoint {
+        pub(crate) application_statement_schema_identifier: u16,
+        pub(crate) roster_position: Option<u16>,
+        pub(crate) schedule_position: Option<u32>,
+        pub(crate) top_count: Option<u16>,
+        pub(crate) producer_sequence: Option<u64>,
+        pub(crate) verifier_source_ordinal: u32,
+        pub(crate) construction_plan_identity_hash: [u8; 64],
+    }
+
+    /// Complete producer-and-consumer evaluation demand for one physical
+    /// column of one persistent root. The rank is derived by the real
+    /// Frobenius-closed opening catalogs, so coincident coordinates reduce the
+    /// rank rather than being counted as independent observations.
     #[cfg(feature = "theorem-evidence")]
     #[derive(Clone, Debug, PartialEq, Eq)]
-    pub(crate) struct SelectedSameSecretPersistentMaskImageAccounting {
-        pub(crate) vss_construction_plan_identity_hash: [u8; 64],
-        pub(crate) same_secret_construction_plan_identity_hash: [u8; 64],
-        pub(crate) ceremony_proof_count: usize,
-        pub(crate) logical_root_count_per_proof: usize,
-        pub(crate) physical_column_count_per_root: usize,
-        pub(crate) producer_base_coordinate_count_per_column: u64,
-        pub(crate) consumer_base_coordinate_count_per_column: u64,
-        pub(crate) joint_evaluation_image_rank_ceiling_per_column: u64,
-        pub(crate) mask_coefficient_count_per_column: u64,
-        pub(crate) residual_conditional_entropy_lower_bound_per_column: u64,
-        pub(crate) leaf_count_per_root: usize,
+    pub(crate) struct SelectedPersistentCommittedMaterialPhysicalColumnDemand {
+        pub(crate) mask_coefficient_count: u64,
+        pub(crate) producer_base_coordinate_count: u64,
+        pub(crate) ordered_consumer_base_coordinate_counts: Vec<u64>,
+        pub(crate) generic_joint_base_coordinate_count: u64,
+        pub(crate) joint_evaluation_image_rank_ceiling: u64,
+        pub(crate) residual_conditional_entropy_lower_bound: u64,
+    }
+
+    /// One unique persistent root together with every proof endpoint that can
+    /// observe its masked polynomial. The producer is charged exactly once.
+    #[cfg(feature = "theorem-evidence")]
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub(crate) struct SelectedPersistentCommittedMaterialRootMaskImageAccounting {
+        pub(crate) producer: SelectedPersistentCommittedMaterialEndpoint,
+        pub(crate) ordered_consumers: Vec<SelectedPersistentCommittedMaterialEndpoint>,
+        pub(crate) physical_column_demands:
+            Vec<SelectedPersistentCommittedMaterialPhysicalColumnDemand>,
+        pub(crate) leaf_count: usize,
+    }
+
+    /// Complete selected-profile persistent mask image. It contains every VSS
+    /// and threshold-share producer root, including roots without a consumer,
+    /// and every authorized consumer view in canonical endpoint order.
+    #[cfg(feature = "theorem-evidence")]
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub(crate) struct SelectedPersistentCommittedMaterialMaskImageInventory {
+        pub(crate) roots: Vec<SelectedPersistentCommittedMaterialRootMaskImageAccounting>,
     }
 
     fn selected_persistent_committed_material_relation_plans()
@@ -3314,8 +3365,95 @@ mod canonical_profile_artifact {
     }
 
     #[cfg(feature = "theorem-evidence")]
-    pub(crate) fn selected_same_secret_persistent_mask_image_accounting()
-    -> Result<SelectedSameSecretPersistentMaskImageAccounting, ProofProfileError> {
+    fn selected_persistent_committed_material_endpoint(
+        endpoint: RelationRootEndpoint,
+        construction_plans: &BTreeMap<
+            RowCodeWhirConstructionPlanCoordinates,
+            RowCodeWhirConstructionPlan,
+        >,
+    ) -> Result<SelectedPersistentCommittedMaterialEndpoint, ProofProfileError> {
+        let construction_plan = construction_plans
+            .get(&(
+                endpoint.application_statement_schema_identifier,
+                endpoint.schedule_position,
+                endpoint.top_count,
+            ))
+            .ok_or(ProofProfileError::InvalidConstructionProfile)?;
+        Ok(SelectedPersistentCommittedMaterialEndpoint {
+            application_statement_schema_identifier: endpoint
+                .application_statement_schema_identifier,
+            roster_position: endpoint.roster_position,
+            schedule_position: endpoint.schedule_position,
+            top_count: endpoint.top_count,
+            producer_sequence: endpoint.producer_sequence,
+            verifier_source_ordinal: endpoint.verifier_source_ordinal,
+            construction_plan_identity_hash: construction_plan
+                .canonical_identity_hash()
+                .map_err(|_| ProofProfileError::InvalidConstructionProfile)?,
+        })
+    }
+
+    #[cfg(feature = "theorem-evidence")]
+    impl SelectedPersistentCommittedMaterialMaskImageInventory {
+        pub(crate) fn is_complete(&self) -> bool {
+            !self.roots.is_empty()
+                && self.roots.iter().enumerate().all(|(root_index, root)| {
+                    let consumers_are_unique = root.ordered_consumers.iter().enumerate().all(
+                        |(consumer_index, consumer)| {
+                            *consumer != root.producer
+                                && root.ordered_consumers[..consumer_index]
+                                    .iter()
+                                    .all(|prior| prior != consumer)
+                        },
+                    );
+                    let demands_are_complete = !root.physical_column_demands.is_empty()
+                        && root.physical_column_demands.iter().all(|demand| {
+                            let generic_joint_count = demand
+                                .ordered_consumer_base_coordinate_counts
+                                .iter()
+                                .try_fold(
+                                    demand.producer_base_coordinate_count,
+                                    |count, consumer_count| count.checked_add(*consumer_count),
+                                );
+                            demand.mask_coefficient_count > 0
+                                && demand.producer_base_coordinate_count > 0
+                                && demand.ordered_consumer_base_coordinate_counts.len()
+                                    == root.ordered_consumers.len()
+                                && demand
+                                    .ordered_consumer_base_coordinate_counts
+                                    .iter()
+                                    .all(|count| *count > 0)
+                                && generic_joint_count
+                                    == Some(demand.generic_joint_base_coordinate_count)
+                                && demand.joint_evaluation_image_rank_ceiling > 0
+                                && demand.joint_evaluation_image_rank_ceiling
+                                    <= demand.generic_joint_base_coordinate_count
+                                && demand.joint_evaluation_image_rank_ceiling
+                                    <= demand.mask_coefficient_count
+                                && demand
+                                    .mask_coefficient_count
+                                    .checked_sub(demand.joint_evaluation_image_rank_ceiling)
+                                    == Some(demand.residual_conditional_entropy_lower_bound)
+                        });
+                    root.producer.application_statement_schema_identifier != 0
+                        && root.producer.construction_plan_identity_hash != [0_u8; 64]
+                        && root.ordered_consumers.iter().all(|consumer| {
+                            consumer.application_statement_schema_identifier != 0
+                                && consumer.construction_plan_identity_hash != [0_u8; 64]
+                        })
+                        && consumers_are_unique
+                        && demands_are_complete
+                        && root.leaf_count.is_power_of_two()
+                        && self.roots[..root_index]
+                            .iter()
+                            .all(|prior| prior.producer != root.producer)
+                })
+        }
+    }
+
+    #[cfg(feature = "theorem-evidence")]
+    pub(crate) fn selected_persistent_committed_material_mask_image_inventory()
+    -> Result<SelectedPersistentCommittedMaterialMaskImageInventory, ProofProfileError> {
         let relation_plans = selected_persistent_committed_material_relation_plans()?;
         let construction_plans = row_code_whir_construction_plans_by_coordinates(&relation_plans)?;
         let topology = FirstProfileRootTopology::selected(
@@ -3325,111 +3463,88 @@ mod canonical_profile_artifact {
             &relation_plans,
             &topology,
         )?;
-        let accounting = persistent_committed_material_mask_image_accounting(
+        let mut accounting = persistent_committed_material_mask_image_accounting(
             &relation_plans,
             &topology,
             &edges,
         )?;
+        accounting.sort_by_key(|root| root.producer_endpoint);
 
-        let vss_coordinates = (
-            ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
-            None,
-            None,
-        );
-        let same_secret_coordinates = (
-            ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
-            None,
-            None,
-        );
-        let vss_plan = construction_plans
-            .get(&vss_coordinates)
-            .ok_or(ProofProfileError::InvalidConstructionProfile)?;
-        let same_secret_plan = construction_plans
-            .get(&same_secret_coordinates)
-            .ok_or(ProofProfileError::InvalidConstructionProfile)?;
-
-        let mut roots_by_consumer_roster_position = BTreeMap::<u16, BTreeSet<u32>>::new();
-        let mut physical_column_count_per_root = BTreeSet::new();
-        let mut producer_base_coordinate_counts = BTreeSet::new();
-        let mut consumer_base_coordinate_counts = BTreeSet::new();
-        let mut joint_rank_ceilings = BTreeSet::new();
-        let mut mask_coefficient_counts = BTreeSet::new();
-        let mut leaf_counts = BTreeSet::new();
-        let mut selected_root_count = 0_usize;
-
-        for root_accounting in &accounting {
-            let same_secret_consumers = root_accounting
-                .consumer_endpoints
-                .iter()
-                .copied()
-                .filter(|endpoint| {
-                    endpoint.application_statement_schema_identifier
-                        == ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER
-                })
-                .collect::<Vec<_>>();
-            if same_secret_consumers.is_empty() {
-                continue;
-            }
-            let [same_secret_consumer] = same_secret_consumers.as_slice() else {
-                return Err(ProofProfileError::AmbiguousRootProducer);
-            };
-            if root_accounting
-                .producer_endpoint
-                .application_statement_schema_identifier
-                != ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
-                || root_accounting.producer_endpoint.roster_position
-                    != same_secret_consumer.roster_position
-            {
-                return Err(ProofProfileError::IncompatibleRoot);
-            }
-            let roster_position = same_secret_consumer
-                .roster_position
-                .ok_or(ProofProfileError::InvalidRootTopology)?;
-            if !roots_by_consumer_roster_position
-                .entry(roster_position)
-                .or_default()
-                .insert(same_secret_consumer.verifier_source_ordinal)
-            {
-                return Err(ProofProfileError::DuplicateRootEdge);
-            }
-
+        let mut roots = Vec::new();
+        roots
+            .try_reserve_exact(accounting.len())
+            .map_err(|_| ProofProfileError::CountOverflow)?;
+        for root_accounting in accounting {
             let producer_catalogs = committed_material_root_view_catalogs(
                 &relation_plans,
                 &construction_plans,
                 root_accounting.producer_endpoint,
                 BoundTreeRootUse::Output,
             )?;
-            let consumer_catalogs = committed_material_root_view_catalogs(
-                &relation_plans,
-                &construction_plans,
-                *same_secret_consumer,
-                BoundTreeRootUse::Input,
-            )?;
-            if producer_catalogs.len() != consumer_catalogs.len()
-                || producer_catalogs.len() != root_accounting.physical_column_demands.len()
+            if producer_catalogs.len() != root_accounting.physical_column_demands.len() {
+                return Err(ProofProfileError::IncompatibleRoot);
+            }
+            let mut ordered_consumer_endpoints = root_accounting.consumer_endpoints;
+            ordered_consumer_endpoints.sort();
+            if ordered_consumer_endpoints
+                .windows(2)
+                .any(|window| window[0] == window[1])
+            {
+                return Err(ProofProfileError::DuplicateRootEdge);
+            }
+            let consumer_catalogs = ordered_consumer_endpoints
+                .iter()
+                .copied()
+                .map(|endpoint| {
+                    committed_material_root_view_catalogs(
+                        &relation_plans,
+                        &construction_plans,
+                        endpoint,
+                        BoundTreeRootUse::Input,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            if consumer_catalogs
+                .iter()
+                .any(|catalogs| catalogs.len() != producer_catalogs.len())
             {
                 return Err(ProofProfileError::IncompatibleRoot);
             }
-            physical_column_count_per_root.insert(producer_catalogs.len());
-            for ((producer_catalog, consumer_catalog), demand) in producer_catalogs
+
+            let physical_column_demands = producer_catalogs
                 .iter()
-                .zip(&consumer_catalogs)
-                .zip(&root_accounting.physical_column_demands)
-            {
-                let producer_count = producer_catalog.base_coordinate_count()?;
-                let consumer_count = consumer_catalog.base_coordinate_count()?;
-                if producer_count
-                    .checked_add(consumer_count)
-                    .ok_or(ProofProfileError::CountOverflow)?
-                    != demand.evaluation_image_rank_ceiling
-                {
-                    return Err(ProofProfileError::InsufficientRootMaskImage);
-                }
-                producer_base_coordinate_counts.insert(producer_count);
-                consumer_base_coordinate_counts.insert(consumer_count);
-                joint_rank_ceilings.insert(demand.evaluation_image_rank_ceiling);
-                mask_coefficient_counts.insert(demand.mask_coefficient_count);
-            }
+                .enumerate()
+                .map(|(column_index, producer_catalog)| {
+                    let producer_base_coordinate_count =
+                        producer_catalog.base_coordinate_count()?;
+                    let ordered_consumer_base_coordinate_counts = consumer_catalogs
+                        .iter()
+                        .map(|catalogs| catalogs[column_index].base_coordinate_count())
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let generic_joint_base_coordinate_count =
+                        ordered_consumer_base_coordinate_counts.iter().try_fold(
+                            producer_base_coordinate_count,
+                            |count, consumer_count| {
+                                count
+                                    .checked_add(*consumer_count)
+                                    .ok_or(ProofProfileError::CountOverflow)
+                            },
+                        )?;
+                    let demand = root_accounting.physical_column_demands[column_index];
+                    let residual_conditional_entropy_lower_bound = demand
+                        .mask_coefficient_count
+                        .checked_sub(demand.evaluation_image_rank_ceiling)
+                        .ok_or(ProofProfileError::InsufficientRootMaskImage)?;
+                    Ok(SelectedPersistentCommittedMaterialPhysicalColumnDemand {
+                        mask_coefficient_count: demand.mask_coefficient_count,
+                        producer_base_coordinate_count,
+                        ordered_consumer_base_coordinate_counts,
+                        generic_joint_base_coordinate_count,
+                        joint_evaluation_image_rank_ceiling: demand.evaluation_image_rank_ceiling,
+                        residual_conditional_entropy_lower_bound,
+                    })
+                })
+                .collect::<Result<Vec<_>, ProofProfileError>>()?;
             let producer_root = bound_root_slot_for_endpoint(
                 &relation_plans,
                 root_accounting.producer_endpoint,
@@ -3441,93 +3556,31 @@ mod canonical_profile_artifact {
                 .evaluation_domain_size
                 .checked_div(2)
                 .and_then(|count| usize::try_from(count).ok())
-                .filter(|count| *count > 0)
+                .filter(|count| count.is_power_of_two())
                 .ok_or(ProofProfileError::InvalidRootTopology)?;
-            leaf_counts.insert(leaf_count);
-            selected_root_count = selected_root_count
-                .checked_add(1)
-                .ok_or(ProofProfileError::CountOverflow)?;
+            roots.push(SelectedPersistentCommittedMaterialRootMaskImageAccounting {
+                producer: selected_persistent_committed_material_endpoint(
+                    root_accounting.producer_endpoint,
+                    &construction_plans,
+                )?,
+                ordered_consumers: ordered_consumer_endpoints
+                    .into_iter()
+                    .map(|endpoint| {
+                        selected_persistent_committed_material_endpoint(
+                            endpoint,
+                            &construction_plans,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+                physical_column_demands,
+                leaf_count,
+            });
         }
-
-        let ceremony_proof_count = roots_by_consumer_roster_position.len();
-        let logical_root_counts = roots_by_consumer_roster_position
-            .values()
-            .map(BTreeSet::len)
-            .collect::<BTreeSet<_>>();
-        let mut logical_root_counts = logical_root_counts.into_iter();
-        let logical_root_count_per_proof = logical_root_counts
-            .next()
-            .filter(|count| *count > 0)
-            .ok_or(ProofProfileError::InvalidRootTopology)?;
-        if logical_root_counts.next().is_some() {
-            return Err(ProofProfileError::InvalidRootTopology);
+        let inventory = SelectedPersistentCommittedMaterialMaskImageInventory { roots };
+        if !inventory.is_complete() {
+            return Err(ProofProfileError::InsufficientRootMaskImage);
         }
-        if ceremony_proof_count != usize::from(topology.roster_size())
-            || selected_root_count
-                != ceremony_proof_count
-                    .checked_mul(logical_root_count_per_proof)
-                    .ok_or(ProofProfileError::CountOverflow)?
-        {
-            return Err(ProofProfileError::InvalidRootTopology);
-        }
-
-        let singleton = |values: &BTreeSet<u64>| {
-            let mut values = values.iter().copied();
-            let value = values
-                .next()
-                .ok_or(ProofProfileError::InvalidRootTopology)?;
-            if values.next().is_some() {
-                return Err(ProofProfileError::InvalidRootTopology);
-            }
-            Ok(value)
-        };
-        let physical_column_count_per_root = {
-            let mut values = physical_column_count_per_root.iter().copied();
-            let value = values
-                .next()
-                .ok_or(ProofProfileError::InvalidRootTopology)?;
-            if value == 0 || values.next().is_some() {
-                return Err(ProofProfileError::InvalidRootTopology);
-            }
-            value
-        };
-        let producer_base_coordinate_count_per_column =
-            singleton(&producer_base_coordinate_counts)?;
-        let consumer_base_coordinate_count_per_column =
-            singleton(&consumer_base_coordinate_counts)?;
-        let joint_evaluation_image_rank_ceiling_per_column = singleton(&joint_rank_ceilings)?;
-        let mask_coefficient_count_per_column = singleton(&mask_coefficient_counts)?;
-        let residual_conditional_entropy_lower_bound_per_column = mask_coefficient_count_per_column
-            .checked_sub(joint_evaluation_image_rank_ceiling_per_column)
-            .ok_or(ProofProfileError::InsufficientRootMaskImage)?;
-        let leaf_count_per_root = {
-            let mut values = leaf_counts.iter().copied();
-            let value = values
-                .next()
-                .ok_or(ProofProfileError::InvalidRootTopology)?;
-            if value == 0 || values.next().is_some() {
-                return Err(ProofProfileError::InvalidRootTopology);
-            }
-            value
-        };
-
-        Ok(SelectedSameSecretPersistentMaskImageAccounting {
-            vss_construction_plan_identity_hash: vss_plan
-                .canonical_identity_hash()
-                .map_err(|_| ProofProfileError::InvalidConstructionProfile)?,
-            same_secret_construction_plan_identity_hash: same_secret_plan
-                .canonical_identity_hash()
-                .map_err(|_| ProofProfileError::InvalidConstructionProfile)?,
-            ceremony_proof_count,
-            logical_root_count_per_proof,
-            physical_column_count_per_root,
-            producer_base_coordinate_count_per_column,
-            consumer_base_coordinate_count_per_column,
-            joint_evaluation_image_rank_ceiling_per_column,
-            mask_coefficient_count_per_column,
-            residual_conditional_entropy_lower_bound_per_column,
-            leaf_count_per_root,
-        })
+        Ok(inventory)
     }
 
     fn persistent_committed_material_mask_image_accounting(
@@ -3740,7 +3793,7 @@ mod canonical_profile_artifact {
             .map_err(|_| ProofProfileError::InvalidRootTopology)?
             .galois_key_schedule
             .len();
-        for top_count in 1..=20_u16 {
+        for top_count in 1..=crate::foundation::FOUNDATION_PROFILE.option_count {
             let selected_entries = topology
                 .ordered_evaluator_key_entries_by_top_count
                 .get(usize::from(top_count - 1))
@@ -4276,8 +4329,10 @@ mod canonical_profile_artifact {
                             .expect("transcript initial domain fits the canonical byte limit"),
                         CanonicalItem::fixed_bytes(TRANSCRIPT_ABSORB_DOMAIN_BYTES)
                             .expect("transcript absorb domain fits the canonical byte limit"),
-                        CanonicalItem::fixed_bytes(TRANSCRIPT_ATOMIC_CHALLENGE_XOF_DOMAIN_BYTES)
-                            .expect("atomic-challenge XOF domain fits the canonical byte limit",),
+                        CanonicalItem::fixed_bytes(TRANSCRIPT_ATOMIC_CHALLENGE_SEED_DOMAIN_BYTES)
+                            .expect("atomic-challenge seed domain fits the canonical byte limit",),
+                        CanonicalItem::fixed_bytes(TRANSCRIPT_ATOMIC_CHALLENGE_BLOCK_DOMAIN_BYTES)
+                            .expect("atomic-challenge block domain fits the canonical byte limit",),
                         CanonicalItem::fixed_bytes(TRANSCRIPT_RESPONSE_BINDING_DOMAIN_BYTES)
                             .expect("response-binding domain fits the canonical byte limit"),
                         CanonicalItem::fixed_bytes(TRANSCRIPT_RESPONSE_ROOT_DOMAIN_BYTES)

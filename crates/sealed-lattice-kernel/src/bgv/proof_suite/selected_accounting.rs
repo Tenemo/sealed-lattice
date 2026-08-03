@@ -2196,16 +2196,18 @@ pub(crate) mod resource_accounting {
                 (0x1216, Some(0), None, 10, 37_793_946, 29_929_626),
                 (0x1217, Some(0), None, 10, 34_907_252, 27_042_932),
             ];
-            expected_engineering_review_rows.extend((1_u16..=20).map(|top_count| {
-                (
-                    0x1218,
-                    None,
-                    Some(top_count),
-                    u32::from(top_count == FOUNDATION_PROFILE.option_count),
-                    29_105_588,
-                    21_241_268,
-                )
-            }));
+            expected_engineering_review_rows.extend((1_u16..=FOUNDATION_PROFILE.option_count).map(
+                |top_count| {
+                    (
+                        0x1218,
+                        None,
+                        Some(top_count),
+                        u32::from(top_count == FOUNDATION_PROFILE.option_count),
+                        29_105_588,
+                        21_241_268,
+                    )
+                },
+            ));
             expected_engineering_review_rows.extend([
                 (0x1621, None, None, 10, 20_870_226, 13_005_906),
                 (0x2110, None, None, 10, 41_843_986, 33_979_666),

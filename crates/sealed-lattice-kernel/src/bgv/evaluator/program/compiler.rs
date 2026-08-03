@@ -4,13 +4,16 @@ use crate::{
     bgv::{
         direct_ballots::{
             PAIR_CHARACTER_CIPHERTEXT_COUNT, PAIR_CHARACTER_LANE_COUNT, PAIR_CHARACTER_LANE_DEGREE,
-            pair_character_lane_idempotent_coefficients, selected_pair_character_lane_assignments,
+            pair_character_lane_assignments, pair_character_lane_idempotent_coefficients,
         },
         modular_arithmetic::{add_mod, mul_mod, sub_mod},
         parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
     },
     encoding::{CanonicalErrorCode, CanonicalResult},
-    foundation::{FOUNDATION_PROFILE, Hash512},
+    foundation::{
+        FOUNDATION_PROFILE, Hash512, MAXIMUM_CONFIGURABLE_OPTION_COUNT,
+        MINIMUM_CONFIGURABLE_OPTION_COUNT,
+    },
 };
 
 use super::{
@@ -20,7 +23,7 @@ use super::{
 use crate::bgv::evaluator::top_k::{
     CANONICAL_TARGET_CIPHERTEXT_LEVEL, CHARACTER_OUTPUT_LEVEL, RANK_INPUT_LEVEL,
     RANK_LOOKUP_BABY_STEP_COUNT, SCATTER_KEY_LEVEL, SCATTER_ROUTES,
-    SELECTED_EVALUATOR_MODULUS_SCHEDULE, TRACE_GALOIS_PATHS, TRACE_KEY_LEVEL,
+    SELECTED_EVALUATOR_MODULUS_SCHEDULE, ScatterRoute, TRACE_GALOIS_PATHS, TRACE_KEY_LEVEL,
     interpolate_coefficients, scheduled_power_table_products,
 };
 
@@ -409,21 +412,41 @@ impl<'catalog> ProgramBuilder<'catalog> {
                 last_use.insert(*register, instruction_index);
             }
         }
-        for register_index in 0..self.register_states.len() {
+        for register_index in PAIR_CHARACTER_CIPHERTEXT_COUNT..self.register_states.len() {
             let register = u32::try_from(register_index)
                 .map_err(|_| program_error("compiled register index does not fit u32"))?;
             if !output_registers.contains(&register) && !last_use.contains_key(&register) {
-                return Err(program_error(
-                    "compiled evaluator created a register that has no operative use",
-                ));
+                return Err(program_error(format!(
+                    "compiled evaluator top-count {top_count} created register {register} with no operative use",
+                )));
             }
         }
 
+        let unused_input_registers = (0..PAIR_CHARACTER_CIPHERTEXT_COUNT)
+            .map(|register| {
+                u32::try_from(register)
+                    .map_err(|_| program_error("compiled input register index does not fit u32"))
+            })
+            .collect::<CanonicalResult<Vec<_>>>()?
+            .into_iter()
+            .filter(|register| !last_use.contains_key(register))
+            .collect::<Vec<_>>();
         let mut instructions_with_drops = Vec::with_capacity(
             self.instructions
                 .len()
-                .saturating_add(self.register_states.len()),
+                .saturating_add(self.register_states.len())
+                .saturating_add(unused_input_registers.len()),
         );
+        for register in unused_input_registers {
+            instructions_with_drops.push(EvaluatorInstruction::new(
+                EvaluatorOpcode::DropRegister,
+                None,
+                vec![register],
+                0,
+                0,
+                None,
+            )?);
+        }
         for (instruction_index, instruction) in self.instructions.into_iter().enumerate() {
             let last_used_registers = instruction
                 .input_registers
@@ -465,6 +488,8 @@ struct RouteSourceMask {
 
 struct SelectedPlaintextTopology {
     comparison_trace_mask: Vec<u32>,
+    active_ciphertext_ordinals: Vec<usize>,
+    scatter_routes: Vec<ScatterRoute>,
     route_source_masks: Vec<Vec<RouteSourceMask>>,
     rank_base: Vec<u32>,
     identifier_selector: Vec<u32>,
@@ -472,7 +497,13 @@ struct SelectedPlaintextTopology {
 }
 
 pub(crate) fn selected_evaluator_program_set() -> CanonicalResult<EvaluatorProgramSet> {
-    Ok(compile_selected_evaluator_program_set()?.program_set)
+    Ok(compile_evaluator_program_set(SELECTED_OPTION_COUNT)?.program_set)
+}
+
+pub(in crate::bgv::evaluator) fn evaluator_program_set_for_option_count(
+    option_count: usize,
+) -> CanonicalResult<EvaluatorProgramSet> {
+    Ok(compile_evaluator_program_set(option_count)?.program_set)
 }
 
 #[cfg(test)]
@@ -480,12 +511,16 @@ pub(crate) fn selected_evaluator_program_set_with_stage_registers() -> Canonical
     EvaluatorProgramSet,
     Vec<EvaluatorCompilerStreamStageRegisters>,
 )> {
-    let compiled = compile_selected_evaluator_program_set()?;
+    let compiled = compile_evaluator_program_set(SELECTED_OPTION_COUNT)?;
     Ok((compiled.program_set, compiled.stream_stage_registers))
 }
 
-fn compile_selected_evaluator_program_set() -> CanonicalResult<CompiledEvaluatorProgramSet> {
-    if usize::from(FOUNDATION_PROFILE.option_count) != SELECTED_OPTION_COUNT
+fn compile_evaluator_program_set(
+    option_count: usize,
+) -> CanonicalResult<CompiledEvaluatorProgramSet> {
+    if !(usize::from(MINIMUM_CONFIGURABLE_OPTION_COUNT)
+        ..=usize::from(MAXIMUM_CONFIGURABLE_OPTION_COUNT))
+        .contains(&option_count)
         || usize::from(FOUNDATION_PROFILE.participant_count) != 10
         || FOUNDATION_PROFILE.minimum_score != 1
         || FOUNDATION_PROFILE.maximum_score != 10
@@ -497,15 +532,16 @@ fn compile_selected_evaluator_program_set() -> CanonicalResult<CompiledEvaluator
             "selected evaluator compiler received incompatible suite geometry",
         ));
     }
-    let plaintext_topology = selected_plaintext_topology()?;
+    let plaintext_topology = selected_plaintext_topology(option_count)?;
     let mut constants = ConstantCatalog::default();
-    let mut streams = Vec::with_capacity(SELECTED_OPTION_COUNT);
+    let mut streams = Vec::with_capacity(option_count);
     #[cfg(test)]
-    let mut stream_stage_registers = Vec::with_capacity(SELECTED_OPTION_COUNT);
-    for top_count in 1..=SELECTED_OPTION_COUNT {
+    let mut stream_stage_registers = Vec::with_capacity(option_count);
+    for top_count in 1..=option_count {
         let compiled_stream = compile_stream(
             &mut constants,
             &plaintext_topology,
+            option_count,
             u16::try_from(top_count).expect("selected top count fits u16"),
         )?;
         #[cfg(test)]
@@ -523,10 +559,14 @@ fn compile_selected_evaluator_program_set() -> CanonicalResult<CompiledEvaluator
 fn compile_stream(
     constants: &mut ConstantCatalog,
     plaintext_topology: &SelectedPlaintextTopology,
+    option_count: usize,
     top_count: u16,
 ) -> CanonicalResult<CompiledEvaluatorInstructionStream> {
     let mut builder = ProgramBuilder::new(constants);
-    let traced_ciphertexts = (0..PAIR_CHARACTER_CIPHERTEXT_COUNT)
+    let traced_ciphertexts = plaintext_topology
+        .active_ciphertext_ordinals
+        .iter()
+        .copied()
         .map(|ciphertext_ordinal| {
             let ciphertext = builder.input(ciphertext_ordinal)?;
             #[cfg(test)]
@@ -534,25 +574,26 @@ fn compile_stream(
                 EvaluatorCompilerStage::NormalizedCharacterProductInput { ciphertext_ordinal },
                 ciphertext,
             );
-            trace_pair_character_ciphertext(
+            let traced = trace_pair_character_ciphertext(
                 &mut builder,
                 ciphertext,
                 ciphertext_ordinal,
                 &plaintext_topology.comparison_trace_mask,
-            )
+            )?;
+            Ok((ciphertext_ordinal, traced))
         })
-        .collect::<CanonicalResult<Vec<_>>>()?;
+        .collect::<CanonicalResult<BTreeMap<_, _>>>()?;
     let ranks = scatter_pair_comparisons(&mut builder, &traced_ciphertexts, plaintext_topology)?;
     let ranks = builder.modulus_switch_to(ranks, RANK_INPUT_LEVEL)?;
     #[cfg(test)]
     builder.record_stage(EvaluatorCompilerStage::RankInputAfterLevelSwitch, ranks);
-    let prepared_powers = prepare_rank_powers(&mut builder, ranks)?;
+    let prepared_powers = prepare_rank_powers(&mut builder, ranks, option_count)?;
 
     let top_count = usize::from(top_count);
-    let identifier_values = (0..SELECTED_OPTION_COUNT)
+    let identifier_values = (0..option_count)
         .map(|rank| u64::from(rank < top_count))
         .collect::<Vec<_>>();
-    let order_values = (0..SELECTED_OPTION_COUNT)
+    let order_values = (0..option_count)
         .map(|rank| {
             if rank < top_count {
                 u64::try_from(rank + 1).expect("selected rank fits u64")
@@ -645,28 +686,34 @@ fn trace_pair_character_ciphertext(
 
 fn scatter_pair_comparisons(
     builder: &mut ProgramBuilder<'_>,
-    traced_ciphertexts: &[Register],
+    traced_ciphertexts: &BTreeMap<usize, Register>,
     plaintext_topology: &SelectedPlaintextTopology,
 ) -> CanonicalResult<Register> {
-    if traced_ciphertexts.len() != PAIR_CHARACTER_CIPHERTEXT_COUNT
-        || plaintext_topology.route_source_masks.len() != SCATTER_ROUTES.len()
+    if traced_ciphertexts.len() != plaintext_topology.active_ciphertext_ordinals.len()
+        || plaintext_topology.route_source_masks.len() != plaintext_topology.scatter_routes.len()
     {
         return Err(program_error(
             "selected evaluator scatter input does not match its suite-fixed topology",
         ));
     }
-    let mut routed_terms = Vec::with_capacity(SCATTER_ROUTES.len());
-    for (route, source_masks) in SCATTER_ROUTES
+    let mut routed_terms = Vec::with_capacity(plaintext_topology.scatter_routes.len());
+    for (route, source_masks) in plaintext_topology
+        .scatter_routes
         .iter()
         .copied()
         .zip(&plaintext_topology.route_source_masks)
     {
         let mut source_terms = Vec::with_capacity(source_masks.len());
         for source_mask in source_masks {
-            source_terms.push(builder.plaintext_multiply(
-                traced_ciphertexts[source_mask.ciphertext_ordinal],
-                source_mask.coefficients.clone(),
-            )?);
+            let traced_ciphertext = traced_ciphertexts
+                .get(&source_mask.ciphertext_ordinal)
+                .copied()
+                .ok_or_else(|| {
+                    program_error("selected evaluator scatter source ciphertext is unavailable")
+                })?;
+            source_terms.push(
+                builder.plaintext_multiply(traced_ciphertext, source_mask.coefficients.clone())?,
+            );
         }
         let mut routed = builder.sum_aligned(&source_terms)?;
         for galois_element in route.galois_path() {
@@ -690,7 +737,7 @@ fn scatter_pair_comparisons(
     Ok(ranks)
 }
 
-fn selected_plaintext_topology() -> CanonicalResult<SelectedPlaintextTopology> {
+fn selected_plaintext_topology(option_count: usize) -> CanonicalResult<SelectedPlaintextTopology> {
     let mut comparison_trace_mask = vec![0_u32; POLYNOMIAL_DEGREE];
     comparison_trace_mask[0] = field_value(PLAINTEXT_MODULUS - 1)?;
     let strict_comparison_exponent_bound = usize::from(FOUNDATION_PROFILE.participant_count)
@@ -702,7 +749,13 @@ fn selected_plaintext_topology() -> CanonicalResult<SelectedPlaintextTopology> {
         comparison_trace_mask[POLYNOMIAL_DEGREE - exponent] = 1;
     }
 
-    let assignments = selected_pair_character_lane_assignments()?;
+    let assignments = pair_character_lane_assignments(option_count)?;
+    let active_ciphertext_ordinals = assignments
+        .iter()
+        .map(|assignment| usize::from(assignment.ciphertext_ordinal()))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
     let mut assignments_by_route_and_ciphertext =
         BTreeMap::<(u16, u16, usize), Vec<(usize, bool)>>::new();
     for assignment in assignments {
@@ -735,6 +788,8 @@ fn selected_plaintext_topology() -> CanonicalResult<SelectedPlaintextTopology> {
             .push((lane_ordinal, false));
     }
 
+    let expected_source_mask_count = assignments_by_route_and_ciphertext.len();
+    let mut scatter_routes = Vec::with_capacity(SCATTER_ROUTES.len());
     let mut route_source_masks = Vec::with_capacity(SCATTER_ROUTES.len());
     let mut source_mask_count = 0_usize;
     for route in SCATTER_ROUTES {
@@ -755,35 +810,39 @@ fn selected_plaintext_topology() -> CanonicalResult<SelectedPlaintextTopology> {
             source_mask_count += 1;
         }
         if source_masks.is_empty() {
-            return Err(program_error(
-                "selected evaluator scatter route has no pair contribution",
-            ));
+            continue;
         }
+        scatter_routes.push(route);
         route_source_masks.push(source_masks);
     }
-    if !assignments_by_route_and_ciphertext.is_empty() || source_mask_count != 36 {
+    if !assignments_by_route_and_ciphertext.is_empty()
+        || source_mask_count != expected_source_mask_count
+        || scatter_routes.is_empty()
+    {
         return Err(program_error(
-            "selected evaluator scatter catalog does not contain exactly thirty-six source masks",
+            "selected evaluator scatter catalog omits or duplicates a source mask",
         ));
     }
 
     let rank_base = scalar_lane_coefficients(
-        &(0..SELECTED_OPTION_COUNT)
+        &(0..option_count)
             .map(|option_ordinal| {
                 u64::try_from(option_ordinal).expect("selected option ordinal fits u64")
             })
             .collect::<Vec<_>>(),
     )?;
     let identifier_selector = scalar_lane_coefficients(
-        &(0..SELECTED_OPTION_COUNT)
+        &(0..option_count)
             .map(|option_ordinal| {
                 u64::try_from(option_ordinal + 1).expect("selected option identifier fits u64")
             })
             .collect::<Vec<_>>(),
     )?;
-    let order_selector = scalar_lane_coefficients(&[1; SELECTED_OPTION_COUNT])?;
+    let order_selector = scalar_lane_coefficients(&vec![1; option_count])?;
     Ok(SelectedPlaintextTopology {
         comparison_trace_mask,
+        active_ciphertext_ordinals,
+        scatter_routes,
         route_source_masks,
         rank_base,
         identifier_selector,
@@ -850,6 +909,7 @@ struct ScheduledRegisterPower {
 
 struct PreparedRankPowers {
     input: Register,
+    coefficient_count: usize,
     baby_powers: Vec<Option<ScheduledRegisterPower>>,
     giant_powers: Vec<Option<ScheduledRegisterPower>>,
 }
@@ -857,7 +917,22 @@ struct PreparedRankPowers {
 fn prepare_rank_powers(
     builder: &mut ProgramBuilder<'_>,
     input: Register,
+    coefficient_count: usize,
 ) -> CanonicalResult<PreparedRankPowers> {
+    if !(usize::from(MINIMUM_CONFIGURABLE_OPTION_COUNT)
+        ..=usize::from(MAXIMUM_CONFIGURABLE_OPTION_COUNT))
+        .contains(&coefficient_count)
+    {
+        return Err(program_error(
+            "compiled rank power schedule received an invalid coefficient count",
+        ));
+    }
+    let block_count = coefficient_count.div_ceil(RANK_LOOKUP_BABY_STEP_COUNT);
+    let highest_baby_power = if block_count > 1 {
+        RANK_LOOKUP_BABY_STEP_COUNT
+    } else {
+        coefficient_count - 1
+    };
     let depth_drop_counts = &SELECTED_EVALUATOR_MODULUS_SCHEDULE.rank_depth_drop_counts;
     let baby_powers = build_power_table(
         builder,
@@ -865,12 +940,16 @@ fn prepare_rank_powers(
             register: input,
             multiplication_depth: 0,
         },
-        RANK_LOOKUP_BABY_STEP_COUNT,
+        highest_baby_power,
         depth_drop_counts,
     )?;
-    let giant_base = baby_powers[RANK_LOOKUP_BABY_STEP_COUNT]
-        .ok_or_else(|| program_error("compiled evaluator omitted rank giant-step base"))?;
-    let giant_powers = build_power_table(builder, giant_base, 3, depth_drop_counts)?;
+    let giant_powers = if block_count > 1 {
+        let giant_base = baby_powers[RANK_LOOKUP_BABY_STEP_COUNT]
+            .ok_or_else(|| program_error("compiled evaluator omitted rank giant-step base"))?;
+        build_power_table(builder, giant_base, block_count - 1, depth_drop_counts)?
+    } else {
+        vec![None]
+    };
     #[cfg(test)]
     for (rank_exponent, scheduled_power) in baby_powers.iter().enumerate() {
         if let Some(scheduled_power) = scheduled_power {
@@ -893,6 +972,7 @@ fn prepare_rank_powers(
     }
     Ok(PreparedRankPowers {
         input,
+        coefficient_count,
         baby_powers,
         giant_powers,
     })
@@ -938,15 +1018,13 @@ fn evaluate_rank_polynomial(
     prepared: &PreparedRankPowers,
     coefficients: &[u64],
 ) -> CanonicalResult<Register> {
-    if coefficients.len() != SELECTED_OPTION_COUNT {
+    if coefficients.len() != prepared.coefficient_count {
         return Err(program_error(
-            "compiled rank polynomial does not have degree nineteen",
+            "compiled rank polynomial does not match its power schedule",
         ));
     }
-    let mut terms = Vec::with_capacity(4);
-    for block_index in 0..4 {
-        let start = block_index * RANK_LOOKUP_BABY_STEP_COUNT;
-        let block = &coefficients[start..start + RANK_LOOKUP_BABY_STEP_COUNT];
+    let mut terms = Vec::with_capacity(coefficients.len().div_ceil(RANK_LOOKUP_BABY_STEP_COUNT));
+    for (block_index, block) in coefficients.chunks(RANK_LOOKUP_BABY_STEP_COUNT).enumerate() {
         let block_value = linear_combination_from_baby_powers(builder, prepared, block)?;
         let term = if block_index == 0 {
             block_value
@@ -957,7 +1035,9 @@ fn evaluate_rank_polynomial(
         };
         terms.push(term);
     }
-    builder.sum_aligned(&terms)
+    let result = builder.sum_aligned(&terms)?;
+    let result = builder.modulus_switch_to(result, CANONICAL_TARGET_CIPHERTEXT_LEVEL)?;
+    builder.normalize(result)
 }
 
 fn linear_combination_from_baby_powers(
@@ -965,19 +1045,24 @@ fn linear_combination_from_baby_powers(
     prepared: &PreparedRankPowers,
     coefficients: &[u64],
 ) -> CanonicalResult<Register> {
-    let anchor_level = prepared.baby_powers[1..RANK_LOOKUP_BABY_STEP_COUNT]
+    if coefficients.is_empty() || coefficients.len() > RANK_LOOKUP_BABY_STEP_COUNT {
+        return Err(program_error(
+            "compiled rank polynomial block has an invalid coefficient count",
+        ));
+    }
+    let anchor_level = prepared.baby_powers[1..coefficients.len()]
         .iter()
         .flatten()
         .map(|power| builder.state(power.register).level)
         .min()
-        .ok_or_else(|| program_error("compiled rank baby powers are empty"))?;
+        .unwrap_or_else(|| builder.state(prepared.input).level);
     let anchor = builder.modulus_switch_to(prepared.input, anchor_level)?;
     let anchor = builder.normalize(anchor)?;
     let encrypted_zero = builder.plaintext_multiply_scalar(anchor, 0)?;
     let mut result = builder.plaintext_add(encrypted_zero, vec![field_value(coefficients[0])?])?;
-    for (scheduled_power, coefficient) in prepared.baby_powers[1..RANK_LOOKUP_BABY_STEP_COUNT]
+    for (scheduled_power, coefficient) in prepared.baby_powers[1..coefficients.len()]
         .iter()
-        .zip(&coefficients[1..RANK_LOOKUP_BABY_STEP_COUNT])
+        .zip(&coefficients[1..])
     {
         let power_register =
             scheduled_power.ok_or_else(|| program_error("compiled rank baby power is missing"))?;
@@ -1018,63 +1103,86 @@ mod tests {
     }
 
     #[test]
-    fn selected_plaintext_topology_pins_all_thirty_six_route_masks() {
-        let topology = selected_plaintext_topology().expect("selected plaintext topology");
+    fn selected_plaintext_topology_covers_every_pair_contribution_once() {
+        let topology = selected_plaintext_topology(SELECTED_OPTION_COUNT)
+            .expect("selected plaintext topology");
         assert_eq!(centered_l1(&topology.comparison_trace_mask), 90);
+        let expected_source_mask_count = pair_character_lane_assignments(SELECTED_OPTION_COUNT)
+            .expect("selected pair assignments derive")
+            .into_iter()
+            .flat_map(|assignment| {
+                let lane_ordinal = usize::from(assignment.lane_ordinal());
+                let lower_option_ordinal = usize::from(assignment.lower_option_ordinal());
+                let higher_option_ordinal = usize::from(assignment.higher_option_ordinal());
+                let bank_lane_count = PAIR_CHARACTER_LANE_COUNT / 2;
+                let bank_ordinal = lane_ordinal / bank_lane_count;
+                let lane_within_bank = lane_ordinal % bank_lane_count;
+                let lower_start =
+                    (lane_within_bank + bank_lane_count - lower_option_ordinal) % bank_lane_count;
+                let shift = higher_option_ordinal - lower_option_ordinal;
+                let higher_start = (lower_start + bank_lane_count - shift) % bank_lane_count;
+                [
+                    (
+                        bank_ordinal,
+                        lower_start,
+                        usize::from(assignment.ciphertext_ordinal()),
+                    ),
+                    (
+                        bank_ordinal,
+                        higher_start,
+                        usize::from(assignment.ciphertext_ordinal()),
+                    ),
+                ]
+            })
+            .collect::<BTreeSet<_>>()
+            .len();
         assert_eq!(
             topology
                 .route_source_masks
                 .iter()
                 .map(Vec::len)
                 .sum::<usize>(),
-            36
+            expected_source_mask_count
         );
         assert_eq!(
-            topology
-                .route_source_masks
-                .iter()
-                .map(|masks| masks
-                    .iter()
-                    .map(|mask| centered_l1(&mask.coefficients))
-                    .collect())
-                .collect::<Vec<Vec<u64>>>(),
-            vec![
-                vec![7_387],
-                vec![8_256, 7_387],
-                vec![7_994],
-                vec![7_937],
-                vec![7_943],
-                vec![7_937],
-                vec![8_089],
-                vec![8_416],
-                vec![8_416],
-                vec![8_089],
-                vec![7_625],
-                vec![7_085],
-                vec![8_256],
-                vec![7_085, 7_625],
-                vec![7_935],
-                vec![7_778],
-                vec![8_524],
-                vec![8_354, 8_524],
-                vec![8_354],
-                vec![8_327],
-                vec![5_756, 7_151],
-                vec![8_327],
-                vec![5_756],
-                vec![7_823],
-                vec![7_575],
-                vec![7_151],
-                vec![7_680],
-                vec![7_575],
-                vec![7_939],
-                vec![7_778],
-                vec![7_680, 8_015],
-            ]
+            topology.scatter_routes.len(),
+            topology.route_source_masks.len()
         );
-        assert_eq!(centered_l1(&topology.rank_base), 8_395);
-        assert_eq!(centered_l1(&topology.identifier_selector), 8_607);
-        assert_eq!(centered_l1(&topology.order_selector), 8_042);
+        assert!(topology.route_source_masks.iter().flatten().all(|mask| {
+            mask.coefficients.len() == POLYNOMIAL_DEGREE && centered_l1(&mask.coefficients) > 0
+        }));
+        assert!(centered_l1(&topology.rank_base) > 0);
+        assert!(centered_l1(&topology.identifier_selector) > 0);
+        assert!(centered_l1(&topology.order_selector) > 0);
+    }
+
+    #[test]
+    fn evaluator_program_compiler_derives_every_configurable_option_count() {
+        for option_count in usize::from(MINIMUM_CONFIGURABLE_OPTION_COUNT)
+            ..=usize::from(MAXIMUM_CONFIGURABLE_OPTION_COUNT)
+        {
+            let program = evaluator_program_set_for_option_count(option_count)
+                .expect("bounded evaluator program derives");
+            assert_eq!(program.streams().len(), option_count);
+            assert!(
+                program
+                    .streams()
+                    .iter()
+                    .enumerate()
+                    .all(|(stream_index, stream)| usize::from(stream.top_count())
+                        == stream_index + 1)
+            );
+            assert_eq!(
+                program
+                    .key_positions()
+                    .expect("bounded program key positions derive")
+                    .streams()
+                    .len(),
+                option_count
+            );
+        }
+        assert!(evaluator_program_set_for_option_count(1).is_err());
+        assert!(evaluator_program_set_for_option_count(21).is_err());
     }
 
     #[test]
@@ -1093,6 +1201,10 @@ mod tests {
             observed_program.streams().len()
         );
 
+        let selected_scatter_route_count = selected_plaintext_topology(SELECTED_OPTION_COUNT)
+            .expect("selected topology derives")
+            .scatter_routes
+            .len();
         for (stream, stage_registers) in observed_program
             .streams()
             .iter()
@@ -1203,7 +1315,7 @@ mod tests {
                     .iter()
                     .map(|(route_ordinal, _)| *route_ordinal)
                     .collect::<Vec<_>>(),
-                (0..SCATTER_ROUTES.len()).collect::<Vec<_>>()
+                (0..selected_scatter_route_count).collect::<Vec<_>>()
             );
             assert_eq!(raw_scatter_sums.len(), 1);
             assert_eq!(adjusted_ranks.len(), 1);
@@ -1220,7 +1332,7 @@ mod tests {
                     .iter()
                     .map(|(rank_exponent, _)| *rank_exponent)
                     .collect::<Vec<_>>(),
-                (1..=3)
+                (1..SELECTED_OPTION_COUNT.div_ceil(RANK_LOOKUP_BABY_STEP_COUNT))
                     .map(|giant_power| giant_power * RANK_LOOKUP_BABY_STEP_COUNT)
                     .collect::<Vec<_>>()
             );
@@ -1246,13 +1358,15 @@ mod tests {
         let values = (0..SELECTED_OPTION_COUNT)
             .map(|rank| u64::from(rank < 8))
             .collect::<Vec<_>>();
-        assert_eq!(
-            interpolate_coefficients(&values).expect("rank indicator polynomial"),
-            vec![
-                1, 128, 180, 129, 245, 129, 182, 222, 125, 132, 203, 129, 64, 92, 191, 155, 230,
-                230, 110, 208,
-            ]
-        );
+        let coefficients = interpolate_coefficients(&values).expect("rank indicator polynomial");
+        assert_eq!(coefficients.len(), SELECTED_OPTION_COUNT);
+        for (rank, expected) in values.into_iter().enumerate() {
+            let rank = u64::try_from(rank).expect("rank fits u64");
+            let observed = coefficients.iter().rev().fold(0_u64, |value, coefficient| {
+                (value * rank + coefficient) % PLAINTEXT_MODULUS
+            });
+            assert_eq!(observed, expected);
+        }
     }
 }
 

@@ -109,10 +109,15 @@ pub(crate) use finality_runtime::{
     release_verified_evaluator_replay, release_verified_finality, retain_verified_evaluator_replay,
     verify_finality, with_verified_finality,
 };
+#[cfg(all(test, feature = "theorem-evidence"))]
+pub(crate) use hash::canonical_foundation_tuple_hash_preimage;
 pub(crate) use hash::{
-    FoundationTupleXofReader, StreamingFoundationHashError, StreamingFoundationTupleHash512,
+    FoundationTupleHash512BlockReader, StreamingFoundationHashError,
+    StreamingFoundationTupleHash512, foundation_tuple_hash512_seeded_stream_query_count,
 };
 pub use hash::{Hash512, hash_foundation_tuple_512};
+#[cfg(feature = "primitive-measurement-evidence")]
+pub(crate) use local_encrypted_storage::measure_common_proof_scratch_record_codec;
 pub use local_encrypted_storage::{
     ACTION_STORAGE_DERIVATION_INPUT_SCHEMA_IDENTIFIER, ACTION_STORAGE_ROOT_BYTE_LENGTH,
     ActionStorageDerivationInput, ActionStorageRoot, CommonProofExternalMemoryRecordKind,
@@ -202,7 +207,8 @@ pub(crate) use schemas::{
 };
 pub use schemas::{
     FOUNDATION_PROFILE, FoundationObjectType, FoundationProfile, FoundationRosterParameters,
-    FoundationSchemaError, MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT,
+    FoundationSchemaError, MAXIMUM_CONFIGURABLE_OPTION_COUNT,
+    MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT, MINIMUM_CONFIGURABLE_OPTION_COUNT,
     MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT, ML_DSA_65_SIGNATURE_BYTE_LENGTH,
     ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH, OBJECT_ENVELOPE_SCHEMA_IDENTIFIER, ObjectEnvelope,
     ROSTER_ENTRY_SCHEMA_IDENTIFIER, ROSTER_SCHEMA_IDENTIFIER, Roster, RosterEntry,

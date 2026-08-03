@@ -62,6 +62,9 @@ use foundation::{
 
 pub use encoding::run_transcript_core_command;
 
+#[cfg(feature = "primitive-measurement-evidence")]
+use bgv::proof_suite::run_primitive_measurement;
+
 fn leak_bytes(bytes: Vec<u8>) -> *mut u8 {
     Box::into_raw(bytes.into_boxed_slice()) as *mut u8
 }
@@ -83,6 +86,37 @@ pub extern "C" fn sealed_lattice_allocate(length: usize) -> *mut u8 {
     }
 
     leak_bytes(vec![0_u8; length])
+}
+
+/// Runs one bounded primitive measurement in the opt-in measurement artifact.
+///
+/// The export is absent from the ordinary kernel. A null result indicates that
+/// the case identifier or its deterministic production geometry was refused.
+///
+/// # Safety
+///
+/// `output_length_pointer` must be null or point to writable memory for one
+/// `usize` value in this WebAssembly module's linear memory.
+#[cfg(feature = "primitive-measurement-evidence")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_primitive_measurement_with_length(
+    case_identifier: u32,
+    output_length_pointer: *mut usize,
+) -> *mut u8 {
+    let Ok(output) = run_primitive_measurement(case_identifier) else {
+        if !output_length_pointer.is_null() {
+            unsafe {
+                output_length_pointer.write(0);
+            }
+        }
+        return ptr::null_mut();
+    };
+    if !output_length_pointer.is_null() {
+        unsafe {
+            output_length_pointer.write(output.len());
+        }
+    }
+    leak_bytes(output)
 }
 
 /// # Safety

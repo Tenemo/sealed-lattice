@@ -1643,6 +1643,151 @@ impl fmt::Debug for LocalRecordEnvelope {
     }
 }
 
+/// Runs the exact canonical secret-record codec used by browser-owned common-
+/// proof scratch storage over deterministic, non-authoritative measurement
+/// bytes. This helper exists only in the opt-in primitive-measurement artifact.
+#[cfg(feature = "primitive-measurement-evidence")]
+pub(crate) fn measure_common_proof_scratch_record_codec(
+    plaintext: &[u8],
+    iteration_count: usize,
+) -> SchemaResult<(u64, usize, usize)> {
+    if plaintext.is_empty() || iteration_count == 0 {
+        return Err(schema_error(
+            RefusalReason::WrongTypeOrLength,
+            "the common-proof scratch-record measurement requires nonempty input and iterations",
+        ));
+    }
+    let binding = LocalStorageBinding::new(
+        Hash512::from_bytes([0x31; Hash512::BYTE_LENGTH]),
+        Hash512::from_bytes([0x42; Hash512::BYTE_LENGTH]),
+        Hash512::from_bytes([0x53; Hash512::BYTE_LENGTH]),
+        ParticipantIdentity::from_bytes([0x64; ParticipantIdentity::BYTE_LENGTH]),
+    );
+    let root = ActionStorageRoot::from_verified_root(
+        binding,
+        Zeroizing::new([0x75; ACTION_STORAGE_ROOT_BYTE_LENGTH]),
+    )?;
+    let action_randomness_commitment = Hash512::from_bytes([0x86; Hash512::BYTE_LENGTH]);
+    let common_proof_runtime_binding_hash = Hash512::from_bytes([0x97; Hash512::BYTE_LENGTH]);
+    let common_proof_environment_identifier = [0xa8; 32];
+    let proof_attempt_lineage_identifier = [0xb9; 32];
+    let decode_limits = CanonicalDecodeLimits::default();
+    let mut checksum = 0_u64;
+    let mut canonical_envelope_byte_length = 0_usize;
+
+    for iteration_ordinal in 0..iteration_count {
+        let chunk_ordinal = u32::try_from(iteration_ordinal)
+            .ok()
+            .and_then(|ordinal| ordinal.checked_add(1))
+            .ok_or_else(|| {
+                schema_error(
+                    RefusalReason::OutsideSupportedProfile,
+                    "the common-proof scratch-record measurement iteration exceeds u32",
+                )
+            })?;
+        let byte_offset = u64::try_from(iteration_ordinal)
+            .ok()
+            .and_then(|ordinal| {
+                u64::try_from(plaintext.len())
+                    .ok()
+                    .and_then(|byte_length| ordinal.checked_mul(byte_length))
+            })
+            .ok_or_else(|| {
+                schema_error(
+                    RefusalReason::OutsideSupportedProfile,
+                    "the common-proof scratch-record measurement offset overflows",
+                )
+            })?;
+        let identifier_input = LocalRecordIdentifierInput::CommonProofExternalMemory {
+            common_proof_environment_identifier,
+            common_proof_runtime_binding_hash,
+            proof_attempt_lineage_identifier,
+            record_kind: CommonProofExternalMemoryRecordKind::DataChunk,
+            object_ordinal: 1,
+            chunk_ordinal,
+            byte_offset,
+        };
+        let record_identifier = derive_local_record_identifier(binding, identifier_input)?;
+        let mut nonce = [0xca; LOCAL_RECORD_NONCE_BYTE_LENGTH];
+        nonce[..8].copy_from_slice(
+            &u64::try_from(iteration_ordinal)
+                .map_err(|_| {
+                    schema_error(
+                        RefusalReason::OutsideSupportedProfile,
+                        "the common-proof scratch-record measurement nonce ordinal exceeds u64",
+                    )
+                })?
+                .to_le_bytes(),
+        );
+        let mut canonical_envelope =
+            root.seal_local_record_with_identifier_canonical(LocalRecordSealWithIdentifierInput {
+                action_randomness_commitment,
+                record_type: LocalRecordType::CommonProofExternalMemory,
+                record_identifier,
+                record_version: 0,
+                predecessor_record_hash: None,
+                nonce,
+                plaintext,
+            })?;
+        canonical_envelope_byte_length = canonical_envelope.len();
+        let borrowed_envelope =
+            BorrowedLocalRecordEnvelope::decode(&canonical_envelope, &decode_limits)?;
+        let opened = match root.open_borrowed_local_record_with_identifier(
+            LocalRecordOpenWithIdentifierInput {
+                action_randomness_commitment,
+                record_type: LocalRecordType::CommonProofExternalMemory,
+                expected_identifier: record_identifier,
+                record_version: 0,
+                predecessor_record_hash: None,
+            },
+            &borrowed_envelope,
+        ) {
+            VerificationResult::Valid { value } => value,
+            VerificationResult::Refused { refusal_reason } => {
+                canonical_envelope.fill(0);
+                return Err(schema_error(
+                    refusal_reason,
+                    "the exact common-proof scratch-record measurement refused its own canonical envelope",
+                ));
+            }
+        };
+        if opened.as_slice() != plaintext {
+            canonical_envelope.fill(0);
+            return Err(schema_error(
+                RefusalReason::WrongHashOrRoot,
+                "the exact common-proof scratch-record measurement opened different plaintext",
+            ));
+        }
+        checksum ^= opened
+            .iter()
+            .fold(u64::from(chunk_ordinal), |accumulated, byte| {
+                accumulated.rotate_left(1) ^ u64::from(*byte)
+            });
+        checksum ^= canonical_envelope.iter().fold(
+            u64::try_from(canonical_envelope_byte_length).unwrap_or(u64::MAX),
+            |accumulated, byte| accumulated.rotate_left(1) ^ u64::from(*byte),
+        );
+        canonical_envelope.fill(0);
+    }
+
+    let maximum_live_byte_length = plaintext
+        .len()
+        .checked_mul(2)
+        .and_then(|byte_length| byte_length.checked_add(canonical_envelope_byte_length))
+        .and_then(|byte_length| byte_length.checked_add(size_of::<ActionStorageRoot>()))
+        .ok_or_else(|| {
+            schema_error(
+                RefusalReason::OutsideSupportedProfile,
+                "the common-proof scratch-record measurement live set overflows",
+            )
+        })?;
+    Ok((
+        checksum,
+        canonical_envelope_byte_length,
+        maximum_live_byte_length,
+    ))
+}
+
 pub fn derive_local_record_envelope_hash(
     canonical_local_record_envelope_bytes: &[u8],
 ) -> SchemaResult<Hash512> {

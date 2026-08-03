@@ -64,7 +64,7 @@ use super::{
     verified_application_statement_hash,
 };
 
-const BALLOT_SCORE_COUNT: usize = 20;
+const BALLOT_SCORE_COUNT: usize = FOUNDATION_PROFILE.option_count as usize;
 const BALLOT_SCORE_INPUT_BYTE_LENGTH: usize = BALLOT_SCORE_COUNT * size_of::<u64>();
 const ATTEMPT_IDENTIFIER_BYTE_LENGTH: usize = 32;
 const MAXIMUM_VERIFIED_BALLOT_OUTPUT_COUNT: usize = 1;
@@ -1832,7 +1832,8 @@ unsafe fn prepare_generation_from_ffi_inputs(
 ///
 /// # Safety
 ///
-/// The score pointer must name exactly 20 little-endian `u64` values. Each
+/// The score pointer must name exactly the selected option count of
+/// little-endian `u64` values. Each
 /// attempt pointer must name 32 readable bytes. The readback output pointer
 /// must name one writable `u32`; a non-null status pointer must do the same.
 #[unsafe(no_mangle)]
@@ -1873,7 +1874,8 @@ pub unsafe extern "C" fn sealed_lattice_ballot_validity_prepare_generation(
 ///
 /// # Safety
 ///
-/// The score pointer must name exactly 20 little-endian `u64` values. Each
+/// The score pointer must name exactly the selected option count of
+/// little-endian `u64` values. Each
 /// attempt pointer must name 32 readable bytes. The readback output pointer
 /// must name one writable `u32`; a non-null status pointer must do the same.
 #[unsafe(no_mangle)]

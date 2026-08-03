@@ -42,6 +42,11 @@ const COLUMN_MASK_PURPOSE: &str = "column-mask";
 const LEAF_SALT_PURPOSE: &str = "leaf-salt";
 
 #[cfg(all(test, feature = "theorem-evidence"))]
+pub(crate) const fn committed_material_merkle_hash_domains() -> (&'static str, &'static str) {
+    (PHASE_PAIR_LEAF_HASH_DOMAIN, MERKLE_NODE_HASH_DOMAIN)
+}
+
+#[cfg(all(test, feature = "theorem-evidence"))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CommittedMaterialPrivateDerivationDescription {
     pub(crate) material_seed_byte_length: usize,

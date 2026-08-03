@@ -15,7 +15,9 @@ use crate::{
     bgv::{
         evaluator::{
             pair_character_product::canonical_pair_character_product_schedule,
-            program::{EvaluatorInstruction, EvaluatorOpcode, selected_evaluator_program_set},
+            program::{
+                EvaluatorInstruction, EvaluatorOpcode, evaluator_program_set_for_option_count,
+            },
             top_k::{
                 CANONICAL_TARGET_CIPHERTEXT_LEVEL, CHARACTER_OUTPUT_LEVEL,
                 SELECTED_EVALUATOR_WORKING_LEVEL,
@@ -27,7 +29,10 @@ use crate::{
         parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    foundation::{FOUNDATION_PROFILE, Hash512},
+    foundation::{
+        FOUNDATION_PROFILE, Hash512, MAXIMUM_CONFIGURABLE_OPTION_COUNT,
+        MINIMUM_CONFIGURABLE_OPTION_COUNT,
+    },
 };
 
 const CENTERED_PLAINTEXT_BOUND: u64 = PLAINTEXT_MODULUS / 2;
@@ -436,9 +441,9 @@ impl SymbolicState {
     }
 }
 
-/// Runs the exact production recurrence for all twenty selected target counts.
-/// Other roster sizes and score domains are intentionally unsupported by the
-/// current cryptographic prototype.
+/// Runs the production recurrence for every target count in a structurally
+/// configurable option geometry. Only the exact selected option count carries
+/// cryptographic and runtime qualification.
 pub(crate) fn direct_ballot_target_noise_bounds(
     participant_count: u64,
     ballot_count: usize,
@@ -490,7 +495,9 @@ fn derive_direct_ballot_noise_bounds(
     if participant_count != u64::from(FOUNDATION_PROFILE.participant_count)
         || ballot_count == 0
         || ballot_count > usize::from(FOUNDATION_PROFILE.participant_count)
-        || option_count != usize::from(FOUNDATION_PROFILE.option_count)
+        || !(usize::from(MINIMUM_CONFIGURABLE_OPTION_COUNT)
+            ..=usize::from(MAXIMUM_CONFIGURABLE_OPTION_COUNT))
+            .contains(&option_count)
         || minimum_score != u64::from(FOUNDATION_PROFILE.minimum_score)
         || maximum_score != u64::from(FOUNDATION_PROFILE.maximum_score)
         || PLAINTEXT_MODULUS != 257
@@ -518,7 +525,7 @@ fn derive_direct_ballot_noise_bounds(
             "pair-character product reached the wrong selected level",
         ));
     }
-    let program = selected_evaluator_program_set()?;
+    let program = evaluator_program_set_for_option_count(option_count)?;
     let constants_by_hash = program
         .constants()
         .iter()
@@ -924,19 +931,23 @@ mod tests {
     use crate::bgv::evaluator::program::selected_evaluator_program_set_with_stage_registers;
 
     #[test]
-    fn selected_recurrence_pins_the_exact_worst_target_error() {
-        let bounds =
-            direct_ballot_target_noise_bounds(10, 10, 20, 1, 10).expect("selected recurrence");
-        assert_eq!(bounds.len(), 20);
-        let worst = bounds
-            .iter()
-            .max_by_key(|bound| bound.maximum_error_coefficient_bound())
-            .expect("selected target bounds");
-        assert_eq!(worst.top_count, 8);
-        assert_eq!(
-            worst.maximum_error_coefficient_bound().to_str_radix(10),
-            "16873484365703521901782467690810",
-        );
+    fn selected_recurrence_derives_exact_bound_shape_from_the_selected_program() {
+        let option_count = usize::from(FOUNDATION_PROFILE.option_count);
+        let bounds = direct_ballot_target_noise_bounds(10, 10, option_count, 1, 10)
+            .expect("selected recurrence");
+        assert_eq!(bounds.len(), option_count);
+        assert!(bounds.iter().enumerate().all(|(index, bound)| {
+            bound.top_count == index + 1
+                && bound.target_identifier.level == CANONICAL_TARGET_CIPHERTEXT_LEVEL
+                && bound.target_order.level == CANONICAL_TARGET_CIPHERTEXT_LEVEL
+                && bound.target_identifier.decrypt_scaling == 1
+                && bound.target_order.decrypt_scaling == 1
+                && bound.target_identifier.component_count == 2
+                && bound.target_order.component_count == 2
+                && bound.target_identifier.collective_secret_coefficient_bound == 10
+                && bound.target_order.collective_secret_coefficient_bound == 10
+                && !bound.maximum_error_coefficient_bound().is_zero()
+        }));
         assert!(
             bounds
                 .iter()
@@ -971,9 +982,11 @@ mod tests {
             }
             previous_product_error = Some(product.error_bound);
 
-            let target_bounds = direct_ballot_target_noise_bounds(10, ballot_count, 20, 1, 10)
-                .expect("selected target recurrence");
-            assert_eq!(target_bounds.len(), 20);
+            let option_count = usize::from(FOUNDATION_PROFILE.option_count);
+            let target_bounds =
+                direct_ballot_target_noise_bounds(10, ballot_count, option_count, 1, 10)
+                    .expect("selected target recurrence");
+            assert_eq!(target_bounds.len(), option_count);
             assert!(
                 target_bounds
                     .iter()
@@ -1004,7 +1017,10 @@ mod tests {
     fn selected_recurrence_covers_both_inputs_and_every_compiler_stage() {
         let (program, compiler_streams) = selected_evaluator_program_set_with_stage_registers()
             .expect("selected compiler stage catalog");
-        assert_eq!(program.streams().len(), 20);
+        assert_eq!(
+            program.streams().len(),
+            usize::from(FOUNDATION_PROFILE.option_count)
+        );
         assert_eq!(compiler_streams.len(), program.streams().len());
 
         let expected_stages = compiler_streams
@@ -1015,8 +1031,14 @@ mod tests {
         assert!(!expected_stages.is_empty());
 
         for ballot_count in 1..=10 {
-            let traces = direct_ballot_evaluator_noise_traces(10, ballot_count, 20, 1, 10)
-                .expect("selected evaluator noise traces");
+            let traces = direct_ballot_evaluator_noise_traces(
+                10,
+                ballot_count,
+                usize::from(FOUNDATION_PROFILE.option_count),
+                1,
+                10,
+            )
+            .expect("selected evaluator noise traces");
             assert_eq!(traces.len(), program.streams().len());
             let mut observed_stages = BTreeSet::new();
 
@@ -1119,15 +1141,38 @@ mod tests {
     }
 
     #[test]
-    fn selected_recurrence_rejects_each_nonselected_dimension() {
+    fn recurrence_derives_every_configurable_option_count() {
+        for option_count in usize::from(MINIMUM_CONFIGURABLE_OPTION_COUNT)
+            ..=usize::from(MAXIMUM_CONFIGURABLE_OPTION_COUNT)
+        {
+            let bounds = direct_ballot_target_noise_bounds(10, 10, option_count, 1, 10)
+                .expect("configurable recurrence");
+            assert_eq!(bounds.len(), option_count);
+            assert!(
+                bounds
+                    .iter()
+                    .enumerate()
+                    .all(|(index, bound)| bound.top_count == index + 1)
+            );
+            assert!(
+                bounds
+                    .iter()
+                    .all(DirectBallotTargetNoiseBound::every_decryption_margin_is_positive)
+            );
+        }
+    }
+
+    #[test]
+    fn recurrence_rejects_each_unsupported_dimension() {
+        let option_count = usize::from(FOUNDATION_PROFILE.option_count);
         for arguments in [
-            (9, 10, 20, 1, 10),
-            (10, 0, 20, 1, 10),
-            (10, 11, 20, 1, 10),
-            (10, 10, 19, 1, 10),
+            (9, 10, option_count, 1, 10),
+            (10, 0, option_count, 1, 10),
+            (10, 11, option_count, 1, 10),
+            (10, 10, 1, 1, 10),
             (10, 10, 21, 1, 10),
-            (10, 10, 20, 0, 10),
-            (10, 10, 20, 1, 11),
+            (10, 10, option_count, 0, 10),
+            (10, 10, option_count, 1, 11),
         ] {
             assert!(
                 direct_ballot_target_noise_bounds(

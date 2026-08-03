@@ -23,6 +23,20 @@ describe('WASM kernel build environment', () => {
             'wasm32-unknown-unknown',
             '--release',
         ]);
+        expect(
+            createWasmCargoBuildArguments(['primitive-measurement-evidence']),
+        ).toEqual([
+            'build',
+            '--locked',
+            '--package',
+            'sealed-lattice-kernel',
+            '--lib',
+            '--target',
+            'wasm32-unknown-unknown',
+            '--release',
+            '--features',
+            'primitive-measurement-evidence',
+        ]);
     });
 
     it('sets the complete deterministic Rust flag list and target directory', () => {

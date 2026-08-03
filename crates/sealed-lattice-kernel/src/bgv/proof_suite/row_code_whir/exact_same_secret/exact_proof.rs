@@ -44,6 +44,8 @@ use super::super::{
     algebra::{coset_point, polynomial_extension_opening_reduction, polynomial_opening_reduction},
 };
 use super::*;
+#[cfg(all(test, feature = "theorem-evidence"))]
+use crate::bgv::proof_suite::ValidatedRelationPlanArtifact;
 use crate::bgv::proof_suite::prover::requested_pre_challenge_source_column_ordinals;
 use crate::bgv::proof_suite::relation_plan::{
     ProofPrivacyMode, RelationColumnOrigin, RelationOpeningSourceClass,
@@ -533,7 +535,7 @@ pub(in crate::bgv::proof_suite) enum ExactSameSecretTransportRefusal {
 }
 
 /// Production-code correspondence from the checked construction sections to
-/// the exact transported same-secret decoder and its semantic verifier.
+/// the transported row-code WHIR decoder and its semantic verifier.
 ///
 /// The certificate is structural: it proves that the canonical parser has one
 /// plan-owned interpretation and that its byte ceiling is the sum of those
@@ -775,18 +777,18 @@ impl ExactSameSecretTransportCorrespondenceCertificate {
     pub(in crate::bgv::proof_suite) fn is_complete_for(
         &self,
         construction_plan: &RowCodeWhirConstructionPlan,
+        relation_plan: &ValidatedRelationPlanArtifact,
         relation_variant: &RelationPlanVariant,
         relation_context: &RelationPlanCheckContext,
     ) -> bool {
         let Ok(relation_plan_variant_hash) = relation_variant.canonical_hash() else {
             return false;
         };
-        if validate_exact_same_secret_construction_plan(
+        if validate_row_code_whir_transport_construction_plan(
             construction_plan,
+            relation_plan,
             relation_variant,
             relation_context,
-            self.relation_plan_hash,
-            relation_plan_variant_hash,
         )
         .is_err()
         {
@@ -798,21 +800,63 @@ impl ExactSameSecretTransportCorrespondenceCertificate {
 }
 
 #[cfg(all(test, feature = "theorem-evidence"))]
-pub(in crate::bgv::proof_suite) fn checked_exact_same_secret_transport_correspondence(
+fn validate_row_code_whir_transport_construction_plan(
     construction_plan: &RowCodeWhirConstructionPlan,
+    relation_plan: &ValidatedRelationPlanArtifact,
     relation_variant: &RelationPlanVariant,
     relation_context: &RelationPlanCheckContext,
-    relation_plan_hash: [u8; 64],
+) -> Result<(), String> {
+    let relation_plan_variant_hash = relation_variant
+        .canonical_hash()
+        .map_err(|error| format!("hash row-code WHIR relation variant for transport: {error:?}"))?;
+    let selected_variant = relation_plan
+        .compiled_plan()
+        .select_variant(
+            construction_plan.schedule_position,
+            construction_plan.top_count,
+        )
+        .map_err(|error| {
+            format!("select row-code WHIR relation variant for transport: {error:?}")
+        })?;
+    let selected_variant_hash = selected_variant
+        .canonical_hash()
+        .map_err(|error| format!("hash selected row-code WHIR relation variant: {error:?}"))?;
+    let expected_construction_plan = RowCodeWhirConstructionPlan::for_selected_variant(
+        relation_plan,
+        construction_plan.schedule_position,
+        construction_plan.top_count,
+    )
+    .map_err(|error| format!("derive row-code WHIR construction for transport: {error:?}"))?;
+    if relation_plan.application_statement_schema_identifier()
+        != construction_plan.application_statement_schema_identifier
+        || relation_plan.checked_context() != relation_context
+        || relation_plan.canonical_plan_hash() != construction_plan.relation_plan_hash
+        || relation_plan_variant_hash != selected_variant_hash
+        || construction_plan.relation_plan_variant_hash != relation_plan_variant_hash
+        || expected_construction_plan != *construction_plan
+    {
+        return Err(
+            "transported row-code WHIR proof diverges from the selected construction".to_owned(),
+        );
+    }
+    Ok(())
+}
+
+#[cfg(all(test, feature = "theorem-evidence"))]
+pub(in crate::bgv::proof_suite) fn checked_row_code_whir_transport_correspondence(
+    construction_plan: &RowCodeWhirConstructionPlan,
+    relation_plan: &ValidatedRelationPlanArtifact,
+    relation_variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
 ) -> Result<ExactSameSecretTransportCorrespondenceCertificate, String> {
     let relation_plan_variant_hash = relation_variant
         .canonical_hash()
-        .map_err(|error| format!("hash exact relation variant for transport: {error:?}"))?;
-    validate_exact_same_secret_construction_plan(
+        .map_err(|error| format!("hash row-code WHIR relation variant for transport: {error:?}"))?;
+    validate_row_code_whir_transport_construction_plan(
         construction_plan,
+        relation_plan,
         relation_variant,
         relation_context,
-        relation_plan_hash,
-        relation_plan_variant_hash,
     )?;
     let section_rows = exact_same_secret_transport_section_rows(construction_plan)?;
     let family_body_byte_length_ceiling =
@@ -830,8 +874,8 @@ pub(in crate::bgv::proof_suite) fn checked_exact_same_secret_transport_correspon
     let certificate = ExactSameSecretTransportCorrespondenceCertificate {
         construction_plan_identity_hash: construction_plan
             .canonical_identity_hash()
-            .map_err(|error| format!("hash exact construction for transport: {error:?}"))?,
-        relation_plan_hash,
+            .map_err(|error| format!("hash row-code WHIR construction for transport: {error:?}"))?,
+        relation_plan_hash: relation_plan.canonical_plan_hash(),
         relation_plan_variant_hash,
         family_wire_magic: *EXACT_PROOF_WIRE_MAGIC,
         section_rows,
@@ -841,10 +885,35 @@ pub(in crate::bgv::proof_suite) fn checked_exact_same_secret_transport_correspon
             canonical_row_code_whir_aggregate_opening_section_byte_ledger(construction_plan)?,
         family_body_byte_length_ceiling,
     };
-    if !certificate.is_complete_for(construction_plan, relation_variant, relation_context) {
-        return Err("exact transported-proof correspondence is incomplete".to_owned());
+    if !certificate.is_complete_for(
+        construction_plan,
+        relation_plan,
+        relation_variant,
+        relation_context,
+    ) {
+        return Err("transported row-code WHIR proof correspondence is incomplete".to_owned());
     }
     Ok(certificate)
+}
+
+#[cfg(all(test, feature = "theorem-evidence"))]
+pub(in crate::bgv::proof_suite) fn checked_exact_same_secret_transport_correspondence(
+    construction_plan: &RowCodeWhirConstructionPlan,
+    relation_plan: &ValidatedRelationPlanArtifact,
+    relation_variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
+) -> Result<ExactSameSecretTransportCorrespondenceCertificate, String> {
+    if construction_plan.application_statement_schema_identifier
+        != crate::foundation::ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER
+    {
+        return Err("exact same-secret transport requires the same-secret schema".to_owned());
+    }
+    checked_row_code_whir_transport_correspondence(
+        construction_plan,
+        relation_plan,
+        relation_variant,
+        relation_context,
+    )
 }
 
 fn validate_exact_trace_phase_plan(

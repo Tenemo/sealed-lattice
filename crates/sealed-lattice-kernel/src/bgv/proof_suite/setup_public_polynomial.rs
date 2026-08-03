@@ -31,6 +31,16 @@ pub(super) const SETUP_PUBLIC_POLYNOMIAL_LEAF_HASH_DOMAIN: &str =
 pub(super) const SETUP_PUBLIC_POLYNOMIAL_NODE_HASH_DOMAIN: &str =
     "sealed-lattice/setup/public-polynomial/merkle-node/v3";
 
+#[cfg(all(test, feature = "theorem-evidence"))]
+pub(crate) const fn setup_public_polynomial_hash_domains()
+-> (&'static str, &'static str, &'static str) {
+    (
+        CONTEXT_HASH_DOMAIN,
+        SETUP_PUBLIC_POLYNOMIAL_LEAF_HASH_DOMAIN,
+        SETUP_PUBLIC_POLYNOMIAL_NODE_HASH_DOMAIN,
+    )
+}
+
 const FOUNDATION_TUPLE_SCHEMA_IDENTIFIER: u16 = 0x0001;
 const FOUNDATION_TUPLE_SCHEMA_VERSION: u16 = 1;
 const SETUP_PUBLIC_POLYNOMIAL_FIXED_LEAF_BYTE_LENGTH: usize = 104;

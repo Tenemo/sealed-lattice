@@ -107,6 +107,7 @@ pub(crate) use exact_proof::{
 pub(in crate::bgv::proof_suite) use exact_proof::{
     ExactSameSecretTransportCorrespondenceCertificate,
     checked_exact_same_secret_transport_correspondence,
+    checked_row_code_whir_transport_correspondence,
 };
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

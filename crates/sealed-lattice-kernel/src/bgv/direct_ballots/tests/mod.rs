@@ -22,7 +22,7 @@ use crate::{
 };
 
 const PAIR_COUNT: usize = OPTION_COUNT * (OPTION_COUNT - 1) / 2;
-const EXPECTED_SHIFT_PLACEMENTS: [(usize, usize, usize); OPTION_COUNT - 1] = [
+const EXPECTED_SHIFT_PLACEMENTS: [(usize, usize, usize); 19] = [
     (1, 0, 7),
     (1, 0, 35),
     (0, 1, 15),
@@ -45,12 +45,46 @@ const EXPECTED_SHIFT_PLACEMENTS: [(usize, usize, usize); OPTION_COUNT - 1] = [
 ];
 
 fn varied_scores() -> [u64; OPTION_COUNT] {
-    [1, 10, 2, 9, 3, 8, 4, 7, 5, 6, 10, 1, 9, 2, 8, 3, 7, 4, 6, 5]
+    [1, 10, 2, 9, 3, 8, 4, 7, 5, 6]
+}
+
+#[test]
+fn configurable_pair_catalogs_cover_every_option_count_without_collisions() {
+    for option_count in usize::from(crate::foundation::MINIMUM_CONFIGURABLE_OPTION_COUNT)
+        ..=usize::from(crate::foundation::MAXIMUM_CONFIGURABLE_OPTION_COUNT)
+    {
+        let assignments = pair_character_lane_assignments(option_count)
+            .expect("bounded pair-character catalog derives");
+        assert_eq!(assignments.len(), option_count * (option_count - 1) / 2);
+        let mut occupied = [BTreeSet::new(), BTreeSet::new()];
+        let mut assignment_ordinal = 0_usize;
+        for shift in 1..option_count {
+            for lower_option_ordinal in 0..option_count - shift {
+                let assignment = assignments[assignment_ordinal];
+                assert_eq!(
+                    usize::from(assignment.lower_option_ordinal()),
+                    lower_option_ordinal
+                );
+                assert_eq!(
+                    usize::from(assignment.higher_option_ordinal()),
+                    lower_option_ordinal + shift
+                );
+                assert!(
+                    occupied[usize::from(assignment.ciphertext_ordinal())]
+                        .insert(usize::from(assignment.lane_ordinal()))
+                );
+                assignment_ordinal += 1;
+            }
+        }
+        assert_eq!(assignment_ordinal, assignments.len());
+    }
+    assert!(pair_character_lane_assignments(1).is_err());
+    assert!(pair_character_lane_assignments(21).is_err());
 }
 
 #[test]
 fn selected_pair_catalog_is_ordered_collision_free_and_has_exact_reserved_lanes() {
-    let assignments = selected_pair_character_lane_assignments().expect("selected pair catalog");
+    let assignments = pair_character_lane_assignments(OPTION_COUNT).expect("selected pair catalog");
     assert_eq!(assignments.len(), PAIR_COUNT);
 
     let mut assignment_position = 0_usize;
@@ -94,25 +128,18 @@ fn selected_pair_catalog_is_ordered_collision_free_and_has_exact_reserved_lanes(
             assignment_position += 1;
         }
     }
-    assert_eq!([occupied[0].len(), occupied[1].len()], [93, 97]);
-
-    let reserved = occupied.map(|lanes| {
-        (0..PAIR_CHARACTER_LANE_COUNT)
-            .filter(|lane_ordinal| !lanes.contains(lane_ordinal))
-            .collect::<Vec<_>>()
-    });
+    assert_eq!([occupied[0].len(), occupied[1].len()], [19, 26]);
     assert_eq!(
-        reserved[0],
+        occupied[0].iter().copied().collect::<Vec<_>>(),
         vec![
-            5, 6, 8, 9, 10, 11, 14, 15, 16, 17, 18, 19, 20, 32, 33, 34, 35, 36, 37, 51, 52, 53, 54,
-            55, 56, 64, 65, 66, 67, 68, 69, 77, 78, 96, 127,
+            21, 38, 39, 40, 57, 58, 79, 80, 81, 82, 83, 84, 85, 97, 98, 99, 100, 101, 102
         ]
     );
     assert_eq!(
-        reserved[1],
+        occupied[1].iter().copied().collect::<Vec<_>>(),
         vec![
-            0, 1, 2, 3, 4, 5, 6, 26, 27, 28, 53, 54, 55, 56, 61, 62, 63, 72, 73, 74, 75, 91, 92,
-            93, 94, 113, 114, 115, 119, 120, 121,
+            7, 8, 9, 10, 11, 12, 13, 14, 15, 35, 36, 37, 38, 39, 40, 41, 42, 76, 77, 78, 79, 80,
+            122, 123, 124, 125
         ]
     );
 }
@@ -133,7 +160,7 @@ fn pair_character_auxiliaries_multiply_to_the_exact_message_in_every_lane() {
             PAIR_CHARACTER_RING_DEGREE,
         )
         .expect("pair-character plaintexts");
-        let assignments = selected_pair_character_lane_assignments().expect("pair catalog");
+        let assignments = pair_character_lane_assignments(OPTION_COUNT).expect("pair catalog");
         let assigned = assignments
             .iter()
             .map(|assignment| {
@@ -242,7 +269,7 @@ fn rotated_encoder_profiles_reconstruct_both_auxiliary_plaintexts() {
 
 #[test]
 fn sparse_encoder_profiles_reduce_lane_sums_and_cover_all_score_rotations() {
-    let assignments = selected_pair_character_lane_assignments().expect("selected pair catalog");
+    let assignments = pair_character_lane_assignments(OPTION_COUNT).expect("selected pair catalog");
     let mut observed_plaintext_modulus_reduction = false;
     for ciphertext_ordinal in 0..PAIR_CHARACTER_CIPHERTEXT_COUNT {
         for auxiliary_ordinal in 0..PAIR_CHARACTER_AUXILIARY_COUNT - 1 {
@@ -640,12 +667,12 @@ fn pair_character_codec_rejects_malformed_scores_and_wrong_suite_geometry() {
         )
         .is_err()
     );
-    for invalid_coordinates in [(2, 0, 0), (0, 2, 0), (0, 0, 20)] {
+    for invalid_coordinates in [(2, 0, 0), (0, 2, 0), (0, 0, OPTION_COUNT)] {
         assert!(
             pair_character_encoder_profile_sequence(
                 invalid_coordinates.0,
                 invalid_coordinates.1,
-                invalid_coordinates.2,
+                u16::try_from(invalid_coordinates.2).expect("invalid option ordinal fits u16"),
             )
             .is_err()
         );

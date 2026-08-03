@@ -129,7 +129,9 @@ export const createDeterministicCargoEnvironment = (
     };
 };
 
-export const createWasmCargoBuildArguments = (): readonly string[] => [
+export const createWasmCargoBuildArguments = (
+    cargoFeatures: readonly string[] = [],
+): readonly string[] => [
     'build',
     '--locked',
     '--package',
@@ -138,14 +140,23 @@ export const createWasmCargoBuildArguments = (): readonly string[] => [
     '--target',
     'wasm32-unknown-unknown',
     '--release',
+    ...(cargoFeatures.length === 0
+        ? []
+        : ['--features', cargoFeatures.join(',')]),
 ];
 
-const runCargoBuild = (environment: NodeJS.ProcessEnv): void => {
+const runCargoBuild = (input: {
+    readonly cargoFeatures: readonly string[];
+    readonly environment: NodeJS.ProcessEnv;
+    readonly targetDirectoryPath: string;
+}): void => {
     runCheckedCommand({
         command: 'cargo',
-        args: createWasmCargoBuildArguments(),
+        args: createWasmCargoBuildArguments(input.cargoFeatures),
         description: 'cargo build',
-        env: createDeterministicCargoEnvironment(environment),
+        env: createDeterministicCargoEnvironment(input.environment, {
+            targetDirectory: input.targetDirectoryPath,
+        }),
     });
 };
 
@@ -166,9 +177,9 @@ const runWasmOptimizer = (
     });
 };
 
-const cargoWasmOutputFilePath = (): string =>
+const cargoWasmOutputFilePath = (targetDirectoryPath: string): string =>
     path.resolve(
-        cargoTargetDirectory,
+        targetDirectoryPath,
         'wasm32-unknown-unknown',
         'release',
         'sealed_lattice_kernel.wasm',
@@ -339,12 +350,35 @@ export const assertDeterministicWasmStackLayout = (bytes: Uint8Array): void => {
     }
 };
 
-export const buildWasmKernel = async (): Promise<void> => {
-    const outputDirectoryPath = path.dirname(wasmOutputFilePath);
+export type BuiltWasmKernelArtifact = Readonly<{
+    normalizedSha256Hex: string;
+    outputFilePath: string;
+}>;
+
+export const buildOptimizedWasmKernelArtifact = async (input: {
+    readonly artifactLabel: string;
+    readonly cargoFeatures?: readonly string[];
+    readonly outputFilePath: string;
+    readonly scratchDirectoryPrefix: string;
+    readonly targetDirectoryPath: string;
+}): Promise<BuiltWasmKernelArtifact> => {
+    const cargoFeatures = input.cargoFeatures ?? [];
+    if (
+        cargoFeatures.some(
+            (feature, featureIndex) =>
+                !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(feature) ||
+                cargoFeatures.indexOf(feature) !== featureIndex,
+        )
+    ) {
+        throw new Error(
+            'The deterministic WASM build requires unique kebab-case Cargo features.',
+        );
+    }
+    const outputDirectoryPath = path.dirname(input.outputFilePath);
     await mkdir(outputDirectoryPath, { recursive: true });
     await mkdir(wasmBuildScratchRoot, { recursive: true });
     const scratchDirectoryPath = await mkdtemp(
-        path.join(wasmBuildScratchRoot, 'build-'),
+        path.join(wasmBuildScratchRoot, input.scratchDirectoryPrefix),
     );
     const unoptimizedOutputFilePath = path.join(
         scratchDirectoryPath,
@@ -356,25 +390,45 @@ export const buildWasmKernel = async (): Promise<void> => {
     );
 
     try {
-        runCargoBuild(process.env);
-        await copyFile(cargoWasmOutputFilePath(), unoptimizedOutputFilePath);
+        runCargoBuild({
+            cargoFeatures,
+            environment: process.env,
+            targetDirectoryPath: input.targetDirectoryPath,
+        });
+        await copyFile(
+            cargoWasmOutputFilePath(input.targetDirectoryPath),
+            unoptimizedOutputFilePath,
+        );
         runWasmOptimizer(unoptimizedOutputFilePath, optimizedOutputFilePath);
 
         assertDeterministicWasmStackLayout(
             await readFile(optimizedOutputFilePath),
         );
 
-        const kernelHash = await hashNormalizedWasmKernel(
+        const normalizedSha256Hex = await hashNormalizedWasmKernel(
             optimizedOutputFilePath,
         );
-        await rename(optimizedOutputFilePath, wasmOutputFilePath);
+        await rename(optimizedOutputFilePath, input.outputFilePath);
 
         console.log(
-            `Transcript-core kernel built at packages/wasm/dist/sealed-lattice-kernel.wasm (${kernelHash}); deterministic WASM stack ${wasmStackByteLength} bytes.`,
+            `${input.artifactLabel} built at ${path.relative(repoRoot, input.outputFilePath)} (${normalizedSha256Hex}); deterministic WASM stack ${wasmStackByteLength} bytes.`,
         );
+        return Object.freeze({
+            normalizedSha256Hex,
+            outputFilePath: input.outputFilePath,
+        });
     } finally {
         await rm(scratchDirectoryPath, { force: true, recursive: true });
     }
+};
+
+export const buildWasmKernel = async (): Promise<void> => {
+    await buildOptimizedWasmKernelArtifact({
+        artifactLabel: 'Transcript-core kernel',
+        outputFilePath: wasmOutputFilePath,
+        scratchDirectoryPrefix: 'build-',
+        targetDirectoryPath: cargoTargetDirectory,
+    });
 };
 
 if (import.meta.main) {

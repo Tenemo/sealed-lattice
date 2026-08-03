@@ -116,7 +116,7 @@ struct SelectedNonNativeIdentitySoundnessRow {
     sampler_accounting: CommonProofApplicationChallengeSamplerAccounting,
 }
 
-fn expected_product_sampler_fixed_xof_output_byte_length(
+fn expected_product_sampler_bounded_output_byte_length(
     sampler_accounting: CommonProofApplicationChallengeSamplerAccounting,
 ) -> Result<u64, ProofProfileError> {
     let oracle_answer_byte_length =
@@ -127,15 +127,19 @@ fn expected_product_sampler_fixed_xof_output_byte_length(
     {
         return Err(ProofProfileError::InvalidSchedule);
     }
-    let fixed_xof_output_byte_length = u64::from(sampler_accounting.maximum_candidate_draw_count())
+    let bounded_output_byte_length = u64::from(sampler_accounting.maximum_candidate_draw_count())
         .checked_mul(candidate_byte_length)
         .ok_or(ProofProfileError::CountOverflow)?;
-    if sampler_accounting.fixed_xof_output_byte_length() != fixed_xof_output_byte_length
-        || sampler_accounting.atomic_xof_query_count() != 1
+    let expected_fixed_hash_query_count = bounded_output_byte_length
+        .checked_div(oracle_answer_byte_length)
+        .and_then(|block_count| block_count.checked_add(1))
+        .ok_or(ProofProfileError::CountOverflow)?;
+    if sampler_accounting.bounded_output_byte_length() != bounded_output_byte_length
+        || sampler_accounting.fixed_hash_query_count() != expected_fixed_hash_query_count
     {
         return Err(ProofProfileError::InvalidSchedule);
     }
-    Ok(fixed_xof_output_byte_length)
+    Ok(bounded_output_byte_length)
 }
 
 impl SelectedNonNativeIdentitySoundnessRow {
@@ -152,8 +156,8 @@ impl SelectedNonNativeIdentitySoundnessRow {
                 != ordered_bad_polynomial_degrees.len()
             || sampler_accounting.maximum_candidate_draw_count()
                 != PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT
-            || sampler_accounting.fixed_xof_output_byte_length()
-                != expected_product_sampler_fixed_xof_output_byte_length(sampler_accounting)?
+            || sampler_accounting.bounded_output_byte_length()
+                != expected_product_sampler_bounded_output_byte_length(sampler_accounting)?
         {
             return Err(ProofProfileError::InvalidSchedule);
         }
@@ -1342,23 +1346,25 @@ mod tests {
             sampler_accounting.maximum_candidate_draw_count(),
             PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
         );
-        assert_eq!(sampler_accounting.atomic_xof_query_count(), 1);
-        let expected_fixed_xof_output_byte_length =
+        let expected_bounded_output_byte_length =
             u64::from(sampler_accounting.maximum_candidate_draw_count())
                 * sampler_accounting.candidate_byte_length();
         assert_eq!(
-            sampler_accounting.fixed_xof_output_byte_length(),
-            expected_fixed_xof_output_byte_length,
+            sampler_accounting.bounded_output_byte_length(),
+            expected_bounded_output_byte_length,
         );
         assert_eq!(
-            sampler_accounting.maximum_oracle_answer_byte_length(),
-            expected_product_sampler_fixed_xof_output_byte_length(sampler_accounting)
-                .expect("the fixed-width sampler output length derives"),
+            sampler_accounting.fixed_hash_query_count(),
+            expected_bounded_output_byte_length / candidate_alignment_byte_length + 1,
+        );
+        assert_eq!(
+            sampler_accounting.oracle_answer_byte_length(),
+            candidate_alignment_byte_length,
         );
     }
 
     #[test]
-    fn product_sampler_uses_one_width_bound_xof_for_all_rounded_candidates() {
+    fn product_sampler_uses_only_fixed_hash_blocks_for_all_rounded_candidates() {
         let group = CommonProofApplicationChallengeGroup::new(
             CommonProofChallenge::Alpha { modulus_ordinal: 0 },
             2,

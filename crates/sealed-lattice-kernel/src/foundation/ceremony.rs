@@ -10,7 +10,8 @@ use super::schemas::{
 use super::suite::SuiteRecord;
 use super::{
     CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple, FOUNDATION_PROFILE,
-    FoundationSchemaError, Hash512, RefusalReason, Roster, StabilizedDisplayText,
+    FoundationSchemaError, Hash512, MAXIMUM_CONFIGURABLE_OPTION_COUNT,
+    MINIMUM_CONFIGURABLE_OPTION_COUNT, RefusalReason, Roster, StabilizedDisplayText,
     StreamingFoundationTupleHash512, hash_foundation_tuple_512,
 };
 
@@ -62,7 +63,7 @@ impl OptionDefinition {
     }
 
     fn validate(&self) -> SchemaResult<()> {
-        if self.option_index >= FOUNDATION_PROFILE.option_count {
+        if self.option_index >= MAXIMUM_CONFIGURABLE_OPTION_COUNT {
             return Err(FoundationSchemaError::new(
                 RefusalReason::OutsideSupportedProfile,
                 "option index is outside the supported profile",
@@ -130,10 +131,13 @@ impl Manifest {
     }
 
     fn validate_components(&self) -> SchemaResult<()> {
-        if self.options.len() != usize::from(FOUNDATION_PROFILE.option_count) {
+        if !(usize::from(MINIMUM_CONFIGURABLE_OPTION_COUNT)
+            ..=usize::from(MAXIMUM_CONFIGURABLE_OPTION_COUNT))
+            .contains(&self.options.len())
+        {
             return Err(FoundationSchemaError::new(
                 RefusalReason::OutsideSupportedProfile,
-                "manifest option count does not match the supported profile",
+                "manifest option count is outside the configurable range",
             ));
         }
         CanonicalItem::display_text(&self.display_title)?;
@@ -222,7 +226,7 @@ pub struct ActionDefinition {
 
 impl ActionDefinition {
     pub fn new(top_count: u16, submission_cutoff_unix_milliseconds: u64) -> SchemaResult<Self> {
-        if top_count == 0 || top_count > FOUNDATION_PROFILE.option_count {
+        if top_count == 0 || top_count > MAXIMUM_CONFIGURABLE_OPTION_COUNT {
             return Err(FoundationSchemaError::new(
                 RefusalReason::OutsideSupportedProfile,
                 "action top count is outside the supported profile",
@@ -324,6 +328,7 @@ pub struct CeremonyContext {
     suite_id: Hash512,
     manifest_hash: Hash512,
     roster_hash: Hash512,
+    option_count: u16,
     ceremony_identifier: String,
     context_hash: Hash512,
 }
@@ -340,6 +345,18 @@ impl CeremonyContext {
             return Err(FoundationSchemaError::new(
                 RefusalReason::WrongContext,
                 "ceremony roster size does not match the suite record",
+            ));
+        }
+        let manifest_option_count = u16::try_from(manifest.options().len()).map_err(|_| {
+            FoundationSchemaError::new(
+                RefusalReason::OutsideSupportedProfile,
+                "manifest option count does not fit the suite field",
+            )
+        })?;
+        if manifest_option_count != suite.option_count() {
+            return Err(FoundationSchemaError::new(
+                RefusalReason::WrongContext,
+                "ceremony manifest option count does not match the suite record",
             ));
         }
         let suite_id = suite.suite_id()?;
@@ -360,6 +377,7 @@ impl CeremonyContext {
             suite_id,
             manifest_hash,
             roster_hash,
+            option_count: manifest_option_count,
             ceremony_identifier,
             context_hash,
         })
@@ -375,6 +393,10 @@ impl CeremonyContext {
 
     pub const fn roster_hash(&self) -> Hash512 {
         self.roster_hash
+    }
+
+    pub const fn option_count(&self) -> u16 {
+        self.option_count
     }
 
     pub fn ceremony_identifier(&self) -> &str {
@@ -406,6 +428,12 @@ impl ActionContext {
         board_policy: &BoardPolicy,
     ) -> SchemaResult<Self> {
         validate_external_identifier(&action_identifier)?;
+        if action_definition.top_count() > ceremony_context.option_count {
+            return Err(FoundationSchemaError::new(
+                RefusalReason::WrongContext,
+                "action top count exceeds the ceremony option count",
+            ));
+        }
         let action_definition_hash = action_definition.action_definition_hash()?;
         let board_policy_hash = board_policy.board_policy_hash()?;
         let context_hash = hash_foundation_tuple_512(
@@ -523,8 +551,8 @@ mod tests {
             .expect("test display text is valid")
     }
 
-    fn sample_manifest() -> Manifest {
-        let options = (0..FOUNDATION_PROFILE.option_count)
+    fn manifest_for_option_count(option_count: u16) -> Manifest {
+        let options = (0..option_count)
             .map(|option_index| {
                 OptionDefinition::new(
                     option_index,
@@ -535,6 +563,10 @@ mod tests {
             })
             .collect();
         Manifest::new(display_text("Ceremony title"), options).expect("test manifest is valid")
+    }
+
+    fn sample_manifest() -> Manifest {
+        manifest_for_option_count(FOUNDATION_PROFILE.option_count)
     }
 
     fn sample_roster() -> Roster {
@@ -601,6 +633,21 @@ mod tests {
     }
 
     #[test]
+    fn manifest_schema_round_trips_every_configurable_option_count() {
+        for option_count in MINIMUM_CONFIGURABLE_OPTION_COUNT..=MAXIMUM_CONFIGURABLE_OPTION_COUNT {
+            let manifest = manifest_for_option_count(option_count);
+            let encoded = manifest.encode().expect("bounded manifest encodes");
+            let decoded = Manifest::decode(&encoded, &CanonicalDecodeLimits::default())
+                .expect("bounded manifest decodes");
+            assert_eq!(decoded.options().len(), usize::from(option_count));
+            assert_eq!(
+                decoded.encode().expect("bounded manifest re-encodes"),
+                encoded
+            );
+        }
+    }
+
+    #[test]
     fn manifest_hash_accepts_the_exact_copied_buffer_boundary() {
         let options = sample_manifest().options;
         let one_byte_title_manifest =
@@ -644,11 +691,14 @@ mod tests {
 
     #[test]
     fn manifest_rejects_wrong_count_order_duplicate_identifiers_and_empty_labels() {
-        let mut too_few = sample_manifest().options;
-        too_few.pop();
+        let too_few = manifest_for_option_count(MINIMUM_CONFIGURABLE_OPTION_COUNT)
+            .options
+            .into_iter()
+            .take(1)
+            .collect();
         assert_eq!(
             Manifest::new(display_text("Title"), too_few)
-                .expect_err("nineteen options must refuse")
+                .expect_err("one option must refuse")
                 .refusal_reason,
             RefusalReason::OutsideSupportedProfile
         );
@@ -688,7 +738,7 @@ mod tests {
 
     #[test]
     fn action_and_board_values_round_trip_and_reject_genuine_boundary_errors() {
-        for top_count in [1, FOUNDATION_PROFILE.option_count] {
+        for top_count in [1, MAXIMUM_CONFIGURABLE_OPTION_COUNT] {
             let action =
                 ActionDefinition::new(top_count, u64::MAX).expect("boundary top count is valid");
             assert_eq!(
@@ -700,7 +750,7 @@ mod tests {
                 action
             );
         }
-        for top_count in [0, FOUNDATION_PROFILE.option_count + 1] {
+        for top_count in [0, MAXIMUM_CONFIGURABLE_OPTION_COUNT + 1] {
             assert_eq!(
                 ActionDefinition::new(top_count, 0)
                     .expect_err("out-of-range top count must refuse")
@@ -720,6 +770,46 @@ mod tests {
             board_policy
         );
         assert!(BoardPolicy::new("board\norigin".to_owned()).is_err());
+    }
+
+    #[test]
+    fn ceremony_and_action_contexts_bind_the_suite_option_count() {
+        let suite = sample_suite();
+        let roster = sample_roster();
+        assert_eq!(suite.option_count(), FOUNDATION_PROFILE.option_count);
+        assert_eq!(
+            CeremonyContext::new(
+                &suite,
+                &manifest_for_option_count(FOUNDATION_PROFILE.option_count - 1),
+                &roster,
+                "wrong-option-count".to_owned(),
+            )
+            .expect_err("manifest count must match its suite")
+            .refusal_reason,
+            RefusalReason::WrongContext
+        );
+
+        let ceremony = CeremonyContext::new(
+            &suite,
+            &sample_manifest(),
+            &roster,
+            "matching-option-count".to_owned(),
+        )
+        .expect("matching ceremony derives");
+        let board_policy =
+            BoardPolicy::new("https://board.example".to_owned()).expect("board policy derives");
+        assert_eq!(
+            ActionContext::new(
+                &ceremony,
+                "too-wide-action".to_owned(),
+                ActionDefinition::new(FOUNDATION_PROFILE.option_count + 1, 0)
+                    .expect("top count remains structurally bounded"),
+                &board_policy,
+            )
+            .expect_err("action top count must fit the ceremony")
+            .refusal_reason,
+            RefusalReason::WrongContext
+        );
     }
 
     #[test]

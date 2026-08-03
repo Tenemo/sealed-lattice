@@ -7766,7 +7766,10 @@ mod tests {
                 MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
                 NOMINAL_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
             },
-            relation_plan::same_secret_source_provider_memory_accounting,
+            relation_plan::{
+                same_secret_source_provider_memory_accounting,
+                selected_vss_source_provider_memory_accounting,
+            },
             selected_accounting::resource_accounting::selected_relation_tree_inputs,
             selected_committed_material_relation_plan_input, selected_relation_plan_check_context,
             selected_same_secret_relation_plan_input,
@@ -8197,6 +8200,230 @@ mod tests {
             ),
             Err(CommonProofProverError::CountOverflow),
         );
+    }
+
+    #[test]
+    fn selected_vss_complete_generation_liveness_derives_from_the_production_layout() {
+        let schema_identifier =
+            ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER;
+        let relation_context = selected_relation_plan_check_context(schema_identifier)
+            .expect("the selected VSS relation context exists");
+        let relation_input = selected_committed_material_relation_plan_input()
+            .expect("the selected VSS relation input derives");
+        let compiled_plan =
+            compile_vss_share_linkage_relation_plan(&relation_input, &relation_context)
+                .expect("the selected VSS relation compiles");
+        let source_provider = selected_vss_source_provider_memory_accounting(
+            &relation_input,
+            &relation_context,
+            &compiled_plan,
+        )
+        .expect("the selected VSS source-provider accounting derives");
+        let relation_variant = compiled_plan
+            .variants()
+            .first()
+            .expect("the selected VSS relation has one variant");
+        let canonical_statement = canonical_selected_application_statement_for_ceiling(
+            schema_identifier,
+            SelectedApplicationStatementContext::new(
+                FOUNDATION_PROFILE.protocol_version,
+                [0_u8; Hash512::BYTE_LENGTH],
+                relation_variant.schedule_position(),
+                relation_variant.top_count(),
+            ),
+        )
+        .expect("the selected VSS statement encodes");
+        let artifact = ValidatedRelationPlanArtifact::from_owned_compiled_plan(
+            compiled_plan,
+            &relation_context,
+        )
+        .expect("the selected VSS relation validates");
+        let validated_variant = artifact
+            .compiled_plan()
+            .variants()
+            .first()
+            .expect("the validated VSS relation has one variant");
+        let construction_plan = RowCodeWhirConstructionPlan::for_selected_variant(
+            &artifact,
+            validated_variant.schedule_position(),
+            validated_variant.top_count(),
+        )
+        .expect("the selected VSS construction derives");
+        let relation_trees = selected_relation_tree_inputs(validated_variant)
+            .expect("the selected VSS relation trees derive");
+        let bound_tree_entries = build_relation_bound_public_tree_catalog_entries(&relation_trees)
+            .expect("the selected VSS bound-tree entries derive");
+        let canonical_header_bytes = canonical_proof_object_header_bytes(&canonical_statement)
+            .expect("the selected VSS proof header derives");
+        let relation_plan_hash = artifact
+            .compiled_plan()
+            .canonical_hash()
+            .expect("the selected VSS relation plan hashes");
+        let relation_plan_variant_hash = validated_variant
+            .canonical_hash()
+            .expect("the selected VSS relation variant hashes");
+        let source_request_context = CommonProofSourcePolynomialRequestContext::new(
+            FOUNDATION_PROFILE.protocol_version,
+            [0x11; HASH_BYTE_LENGTH],
+            schema_identifier,
+            [0x22; HASH_BYTE_LENGTH],
+            relation_plan_hash,
+            relation_plan_variant_hash,
+            validated_variant.schedule_position(),
+            validated_variant.top_count(),
+        );
+        let source_cursor =
+            CommonProofPreChallengeSourceCursor::new(validated_variant, source_request_context)
+                .expect("the selected VSS source cursor derives");
+        let reversed_column_bindings = source_cursor.reversed_column_bindings().to_vec();
+        let source_manifest = checked_same_secret_source_manifest(
+            &construction_plan,
+            validated_variant,
+            &relation_context,
+            &reversed_column_bindings,
+        )
+        .expect("the selected VSS source manifest derives");
+        let storage_plan = RowCodeWhirGenerationStoragePlan::new(
+            &construction_plan,
+            validated_variant,
+            &relation_context,
+            &reversed_column_bindings,
+        )
+        .expect("the selected VSS storage plan derives");
+        let complete_liveness = derive_generation_liveness(
+            &construction_plan,
+            validated_variant,
+            &relation_context,
+            &relation_trees,
+            &bound_tree_entries,
+            &canonical_header_bytes,
+            &source_cursor,
+            &source_manifest,
+            &reversed_column_bindings,
+            &storage_plan,
+            source_provider,
+            MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
+        )
+        .expect("the complete selected VSS live set derives");
+        let phase_commitment = complete_liveness
+            .rows()
+            .iter()
+            .find(|row| row.phase() == GenerationPhaseLivenessKind::PhaseCommitment)
+            .expect("the selected VSS phase-commitment row exists");
+        assert_eq!(
+            phase_commitment.wasm_runtime_baseline_byte_length(),
+            33_554_432
+        );
+        assert_eq!(phase_commitment.engine_control_byte_length(), 19_216_525);
+        assert_eq!(phase_commitment.source_provider_byte_length(), 30_431_176);
+        assert_eq!(phase_commitment.replay_reader_byte_length(), 11_534_336);
+        assert_eq!(phase_commitment.dft_buffer_byte_length(), 4_194_304);
+        assert_eq!(
+            phase_commitment.merkle_and_frontier_byte_length(),
+            276_973_656,
+        );
+        assert_eq!(
+            phase_commitment.proof_encoder_non_salt_byte_length(),
+            39_871_506,
+        );
+        assert_eq!(
+            phase_commitment.transported_private_leaf_salt_byte_length(),
+            4_268_544,
+        );
+        assert_eq!(phase_commitment.transcript_byte_length(), 223_344);
+        assert_eq!(phase_commitment.private_material_byte_length(), 721_272);
+        assert_eq!(phase_commitment.private_leaf_salt_state_byte_length(), 0);
+        assert_eq!(
+            phase_commitment.private_leaf_salt_workspace_byte_length(),
+            392,
+        );
+        assert_eq!(
+            phase_commitment.private_leaf_salt_uniqueness_set_byte_length(),
+            0,
+        );
+        assert_eq!(phase_commitment.bridge_copy_byte_length(), 2_097_508);
+        assert_eq!(phase_commitment.specialized_workspace_byte_length(), 0);
+        let allocator_owned_byte_length = [
+            phase_commitment.engine_control_byte_length(),
+            phase_commitment.source_provider_byte_length(),
+            phase_commitment.replay_reader_byte_length(),
+            phase_commitment.dft_buffer_byte_length(),
+            phase_commitment.merkle_and_frontier_byte_length(),
+            phase_commitment.proof_encoder_non_salt_byte_length(),
+            phase_commitment.transported_private_leaf_salt_byte_length(),
+            phase_commitment.transcript_byte_length(),
+            phase_commitment.private_material_byte_length(),
+            phase_commitment.private_leaf_salt_state_byte_length(),
+            phase_commitment.private_leaf_salt_workspace_byte_length(),
+            phase_commitment.private_leaf_salt_uniqueness_set_byte_length(),
+            phase_commitment.bridge_copy_byte_length(),
+            phase_commitment.specialized_workspace_byte_length(),
+        ]
+        .into_iter()
+        .try_fold(0_u64, |total, byte_length| total.checked_add(byte_length))
+        .expect("the selected VSS owned live set adds");
+        assert_eq!(allocator_owned_byte_length, 389_532_563);
+        assert_eq!(
+            phase_commitment.allocator_overhead_byte_length(),
+            allocator_owned_byte_length.div_ceil(8),
+        );
+        assert_eq!(
+            phase_commitment.allocator_overhead_byte_length(),
+            48_691_571
+        );
+        assert_eq!(
+            phase_commitment.total_byte_length(),
+            phase_commitment.wasm_runtime_baseline_byte_length()
+                + allocator_owned_byte_length
+                + allocator_owned_byte_length.div_ceil(8),
+        );
+        assert_eq!(phase_commitment.total_byte_length(), 471_778_566);
+        assert_eq!(
+            complete_liveness.maximum_live_set_byte_length(),
+            597_022_845
+        );
+
+        let base_phase = construction_plan
+            .base_phase
+            .as_ref()
+            .expect("the selected VSS base phase exists");
+        let geometry_accounting = derive_phase_commitment_geometry_accounting(base_phase.geometry)
+            .expect("the selected VSS phase geometry derives");
+        let retained_source_row_byte_length = geometry_accounting.working_buffer_byte_length;
+        let additional_lane_hasher_byte_length = geometry_accounting.hash_state_byte_length;
+        let grouped_phase_total = |active_lane_count: u64| {
+            let additional_owned_byte_length = active_lane_count
+                .checked_sub(1)
+                .and_then(|additional_lane_count| {
+                    additional_lane_count.checked_mul(additional_lane_hasher_byte_length)
+                })
+                .and_then(|additional_hashers| {
+                    additional_hashers.checked_add(retained_source_row_byte_length)
+                })
+                .expect("the selected VSS grouped-lane live set adds");
+            let grouped_owned_byte_length = allocator_owned_byte_length
+                .checked_add(additional_owned_byte_length)
+                .expect("the selected VSS grouped-lane owned live set adds");
+            phase_commitment
+                .wasm_runtime_baseline_byte_length()
+                .checked_add(grouped_owned_byte_length)
+                .and_then(|total| total.checked_add(grouped_owned_byte_length.div_ceil(8)))
+                .expect("the selected VSS grouped-lane total adds")
+        };
+        let two_lane_total_byte_length = grouped_phase_total(2);
+        assert_eq!(two_lane_total_byte_length, 594_461_958);
+        assert_eq!(
+            crate::bgv::proof_suite::prover::AUTOMATIC_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
+                .checked_sub(two_lane_total_byte_length),
+            Some(9_517_818),
+        );
+        assert_eq!(
+            MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH.checked_sub(two_lane_total_byte_length),
+            Some(76_626_682),
+        );
+        let three_lane_total_byte_length = grouped_phase_total(3);
+        assert_eq!(three_lane_total_byte_length, 712_426_758);
+        assert!(three_lane_total_byte_length > MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH);
     }
 
     #[test]

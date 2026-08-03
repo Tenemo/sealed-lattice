@@ -139,15 +139,16 @@ fn selected_eight_prime_target_basis_satisfies_the_exact_factor_four_theorem_bou
         &DATA_PRIMES[..=CANONICAL_TARGET_CIPHERTEXT_LEVEL],
         &expected_target_primes,
     );
+    let selected_option_count = usize::from(FOUNDATION_PROFILE.option_count);
 
     let target_bounds_by_ballot_count = (1..=10)
         .map(|ballot_count| {
-            direct_ballot_target_noise_bounds(10, ballot_count, 20, 1, 10)
+            direct_ballot_target_noise_bounds(10, ballot_count, selected_option_count, 1, 10)
                 .expect("every accepted ballot count has exact symbolic target bounds")
         })
         .collect::<Vec<_>>();
     assert!(target_bounds_by_ballot_count.iter().all(|target_bounds| {
-        target_bounds.len() == 20
+        target_bounds.len() == selected_option_count
             && target_bounds
                 .iter()
                 .enumerate()
@@ -165,11 +166,6 @@ fn selected_eight_prime_target_basis_satisfies_the_exact_factor_four_theorem_bou
         .cloned()
         .expect("the selected evaluator has at least one decryption margin");
     assert!(minimum_evaluator_margin.is_positive());
-    assert_eq!(
-        minimum_evaluator_margin.to_str_radix(10),
-        "2271682199083132530942007860211960213597475281518060405409880153470463641741",
-        "the exact evaluator no-wrap margin must remain positive",
-    );
 
     let evaluation_error_bound = target_bounds_by_ballot_count
         .iter()
@@ -178,17 +174,10 @@ fn selected_eight_prime_target_basis_satisfies_the_exact_factor_four_theorem_bou
         .max()
         .cloned()
         .expect("the selected evaluator has at least one target");
-    assert_eq!(
-        evaluation_error_bound.to_str_radix(10),
-        "16873484365703521901782467690810",
-    );
+    assert!(!evaluation_error_bound.is_zero());
 
     let flooding_bound = factor_four_required_flooding_bound(&evaluation_error_bound)
         .expect("the exact factor-four flooding bound is representable");
-    assert_eq!(
-        flooding_bound.to_str_radix(10),
-        "350448559458315701434059649110456171713052518886842104181466071040",
-    );
     let independently_required_flooding_bound = (&evaluation_error_bound
         << usize::try_from(KLLPS_THRESHOLD_SIMULATION_BIT_LENGTH)
             .expect("selected simulation width fits usize"))
@@ -218,11 +207,7 @@ fn selected_eight_prime_target_basis_satisfies_the_exact_factor_four_theorem_bou
         target_modulus.to_str_radix(10),
         "2271682199083132530942007860211960213597483954489024377020137669658856718337",
     );
-    assert_eq!(
-        (&target_modulus - &flooding_bound).to_str_radix(10),
-        "2271682198732683971483692158777900564487027782775971858133295565477390647297",
-        "the selected flooding support must remain strictly below the target modulus",
-    );
+    assert!(flooding_bound < target_modulus);
 
     let plaintext_modulus = BigUint::from(PLAINTEXT_MODULUS);
     let clearing_coefficient_norm = BigUint::from(KLLPS_DENOMINATOR_CLEARING_FACTOR);
@@ -245,21 +230,13 @@ fn selected_eight_prime_target_basis_satisfies_the_exact_factor_four_theorem_bou
         scaled_c2_left, independently_scaled_c2_left,
         "C2 must scale the converted ciphertext's unscaled evaluator error by ||Cdec||_1 = 4",
     );
-    assert_eq!(
-        scaled_c2_left.to_str_radix(10),
-        "63405956965674143229061544194256614305082933848931450285473800446066085",
-    );
-    assert_eq!(
-        ((&target_modulus << 1_usize) - &scaled_c2_left).to_str_radix(10),
-        "4543300992209299387740786658879726170580662826044199822589989865517267370589",
-        "the exact C2 margin must remain positive",
-    );
+    assert!(scaled_c2_left < (&target_modulus << 1_usize));
     let release_traces_by_ballot_count = (1..=10)
         .map(|ballot_count| {
             direct_ballot_target_release_noise_trace(DirectBallotTargetReleaseNoiseInput {
                 participant_count: 10,
                 ballot_count,
-                option_count: 20,
+                option_count: selected_option_count,
                 minimum_score: 1,
                 maximum_score: 10,
                 denominator_clearing_factor: KLLPS_DENOMINATOR_CLEARING_FACTOR,

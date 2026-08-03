@@ -104,7 +104,11 @@ impl<'context> RelationPlanChecker<'context> {
                 variant.schedule_position.is_some() && variant.top_count.is_none()
             }
             ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => {
-                variant.schedule_position.is_none() && matches!(variant.top_count, Some(1..=20))
+                variant.schedule_position.is_none()
+                    && variant.top_count.is_some_and(|top_count| {
+                        (1..=crate::foundation::FOUNDATION_PROFILE.option_count)
+                            .contains(&top_count)
+                    })
             }
             _ => variant.schedule_position.is_none() && variant.top_count.is_none(),
         };

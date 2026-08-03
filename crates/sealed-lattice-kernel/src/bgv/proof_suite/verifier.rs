@@ -5,6 +5,11 @@ use super::{ProofBodyError, RelationPlanError};
 const VERIFIED_COMMON_PROOF_STATEMENT_HASH_DOMAIN: &str =
     "sealed-lattice/common-proof/verified-application-statement/v1";
 
+#[cfg(all(test, feature = "theorem-evidence"))]
+pub(crate) const fn verified_common_proof_statement_hash_domain() -> &'static str {
+    VERIFIED_COMMON_PROOF_STATEMENT_HASH_DOMAIN
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum CommonProofVerifierError {
     CanonicalEncoding,

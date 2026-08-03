@@ -109,28 +109,67 @@ pub(crate) enum StreamingFoundationHashError {
     OutputIncomplete,
 }
 
-/// Bounded reader for one canonically framed SHAKE256 XOF invocation.
-///
-/// The requested output length is the final typed tuple item, so two logical
-/// verifier messages with different fixed widths cannot share an oracle-query
-/// preimage. Reading in fragments does not start another SHAKE invocation and
-/// never materializes the complete output in memory.
-pub(crate) struct FoundationTupleXofReader {
-    reader: <Shake256 as ExtendableOutput>::Reader,
-    remaining_output_byte_length: usize,
+/// Returns the exact number of fixed 512-bit hash calls needed to fill a
+/// bounded byte string.
+pub(crate) fn foundation_tuple_hash512_block_count(
+    output_byte_length: usize,
+) -> Result<u64, StreamingFoundationHashError> {
+    if output_byte_length == 0 {
+        return Err(StreamingFoundationHashError::OutputIncomplete);
+    }
+    let output_byte_length = u64::try_from(output_byte_length)
+        .map_err(|_| StreamingFoundationHashError::ItemLengthOverflow)?;
+    output_byte_length
+        .checked_add(Hash512::BYTE_LENGTH as u64 - 1)
+        .and_then(|rounded| rounded.checked_div(Hash512::BYTE_LENGTH as u64))
+        .ok_or(StreamingFoundationHashError::ItemLengthOverflow)
 }
 
-impl FoundationTupleXofReader {
+/// Returns the fixed-hash query count for one seed plus every output block.
+pub(crate) fn foundation_tuple_hash512_seeded_stream_query_count(
+    output_byte_length: usize,
+) -> Result<u64, StreamingFoundationHashError> {
+    foundation_tuple_hash512_block_count(output_byte_length)?
+        .checked_add(1)
+        .ok_or(StreamingFoundationHashError::ItemLengthOverflow)
+}
+
+/// Bounded reader backed exclusively by canonically framed 512-bit hashes.
+///
+/// One fixed hash derives the construction-bound seed. Output block zero and
+/// every later block commit to that seed, the immediately preceding value,
+/// the complete requested width, and the block ordinal under a separate
+/// domain. Thus every oracle answer is exactly 512 bits, fragment boundaries
+/// cannot change the byte stream, and producing a later block requires the
+/// complete predecessor chain.
+pub(crate) struct FoundationTupleHash512BlockReader {
+    seed: [u8; Hash512::BYTE_LENGTH],
+    preceding_block: [u8; Hash512::BYTE_LENGTH],
+    current_block: [u8; Hash512::BYTE_LENGTH],
+    current_block_offset: usize,
+    next_block_ordinal: u64,
+    total_output_byte_length: u64,
+    remaining_output_byte_length: usize,
+    block_domain: &'static str,
+}
+
+impl FoundationTupleHash512BlockReader {
     pub(crate) fn new(
-        domain: &str,
+        seed_domain: &'static str,
+        block_domain: &'static str,
         prefix_items: &[CanonicalItem],
         output_byte_length: usize,
     ) -> Result<Self, StreamingFoundationHashError> {
         if output_byte_length == 0 {
             return Err(StreamingFoundationHashError::OutputIncomplete);
         }
-        CanonicalItem::nonempty_ascii(domain)
+        CanonicalItem::nonempty_ascii(seed_domain)
             .map_err(|_| StreamingFoundationHashError::InvalidDomain)?;
+        CanonicalItem::nonempty_ascii(block_domain)
+            .map_err(|_| StreamingFoundationHashError::InvalidDomain)?;
+        if seed_domain == block_domain {
+            return Err(StreamingFoundationHashError::InvalidDomain);
+        }
         let output_byte_length = u64::try_from(output_byte_length)
             .map_err(|_| StreamingFoundationHashError::ItemLengthOverflow)?;
         let mut items = Vec::new();
@@ -144,13 +183,53 @@ impl FoundationTupleXofReader {
             .map_err(|_| StreamingFoundationHashError::ItemCountOverflow)?;
         items.extend_from_slice(prefix_items);
         items.push(CanonicalItem::unsigned64(output_byte_length));
-        let hasher = foundation_tuple_hasher(domain, &items)
+        let seed = hash_foundation_tuple_512(seed_domain, &items)
             .map_err(|_| StreamingFoundationHashError::ItemLengthOverflow)?;
+        let seed = seed.into_bytes();
+        let first_block = hash_foundation_tuple_512(
+            block_domain,
+            &[
+                CanonicalItem::hash512(seed),
+                CanonicalItem::hash512(seed),
+                CanonicalItem::unsigned64(output_byte_length),
+                CanonicalItem::unsigned64(0),
+            ],
+        )
+        .map_err(|_| StreamingFoundationHashError::ItemLengthOverflow)?
+        .into_bytes();
         Ok(Self {
-            reader: hasher.finalize_xof(),
+            seed,
+            preceding_block: first_block,
+            current_block: first_block,
+            current_block_offset: 0,
+            next_block_ordinal: 1,
+            total_output_byte_length: output_byte_length,
             remaining_output_byte_length: usize::try_from(output_byte_length)
                 .map_err(|_| StreamingFoundationHashError::ItemLengthOverflow)?,
+            block_domain,
         })
+    }
+
+    fn advance_block(&mut self) -> Result<(), StreamingFoundationHashError> {
+        let block = hash_foundation_tuple_512(
+            self.block_domain,
+            &[
+                CanonicalItem::hash512(self.seed),
+                CanonicalItem::hash512(self.preceding_block),
+                CanonicalItem::unsigned64(self.total_output_byte_length),
+                CanonicalItem::unsigned64(self.next_block_ordinal),
+            ],
+        )
+        .map_err(|_| StreamingFoundationHashError::ItemLengthOverflow)?
+        .into_bytes();
+        self.preceding_block = block;
+        self.current_block = block;
+        self.current_block_offset = 0;
+        self.next_block_ordinal = self
+            .next_block_ordinal
+            .checked_add(1)
+            .ok_or(StreamingFoundationHashError::ItemLengthOverflow)?;
+        Ok(())
     }
 
     pub(crate) fn read(
@@ -160,7 +239,22 @@ impl FoundationTupleXofReader {
         if output_fragment.len() > self.remaining_output_byte_length {
             return Err(StreamingFoundationHashError::OutputOverrun);
         }
-        self.reader.read(output_fragment);
+        let mut written_byte_length = 0;
+        while written_byte_length < output_fragment.len() {
+            if self.current_block_offset == Hash512::BYTE_LENGTH {
+                self.advance_block()?;
+            }
+            let available_byte_length = Hash512::BYTE_LENGTH - self.current_block_offset;
+            let copied_byte_length =
+                available_byte_length.min(output_fragment.len() - written_byte_length);
+            output_fragment[written_byte_length..written_byte_length + copied_byte_length]
+                .copy_from_slice(
+                    &self.current_block
+                        [self.current_block_offset..self.current_block_offset + copied_byte_length],
+                );
+            self.current_block_offset += copied_byte_length;
+            written_byte_length += copied_byte_length;
+        }
         self.remaining_output_byte_length -= output_fragment.len();
         Ok(())
     }
@@ -176,10 +270,9 @@ impl FoundationTupleXofReader {
         let mut remaining = output_byte_length;
         while remaining > 0 {
             let fragment_byte_length = remaining.min(buffer.len());
-            self.reader.read(&mut buffer[..fragment_byte_length]);
+            self.read(&mut buffer[..fragment_byte_length])?;
             remaining -= fragment_byte_length;
         }
-        self.remaining_output_byte_length -= output_byte_length;
         Ok(())
     }
 
@@ -376,29 +469,69 @@ mod tests {
         );
     }
 
+    fn expected_fixed_hash_block_stream(
+        seed_domain: &str,
+        block_domain: &str,
+        prefix_items: &[CanonicalItem],
+        output_byte_length: usize,
+    ) -> Vec<u8> {
+        let mut seed_items = prefix_items.to_vec();
+        seed_items.push(CanonicalItem::unsigned64(
+            u64::try_from(output_byte_length).expect("test length fits u64"),
+        ));
+        let seed = hash_foundation_tuple_512(seed_domain, &seed_items)
+            .expect("seed hash")
+            .into_bytes();
+        let mut output = Vec::with_capacity(output_byte_length);
+        let mut preceding_value = seed;
+        let mut block_ordinal = 0_u64;
+        while output.len() < output_byte_length {
+            let block = hash_foundation_tuple_512(
+                block_domain,
+                &[
+                    CanonicalItem::hash512(seed),
+                    CanonicalItem::hash512(preceding_value),
+                    CanonicalItem::unsigned64(
+                        u64::try_from(output_byte_length).expect("test length fits u64"),
+                    ),
+                    CanonicalItem::unsigned64(block_ordinal),
+                ],
+            )
+            .expect("block hash")
+            .into_bytes();
+            let remaining_byte_length = output_byte_length - output.len();
+            output.extend_from_slice(&block[..remaining_byte_length.min(Hash512::BYTE_LENGTH)]);
+            preceding_value = block;
+            block_ordinal += 1;
+        }
+        output
+    }
+
     #[test]
-    fn bounded_xof_reader_matches_one_shot_framing_across_fragmentation() {
-        let domain = "sealed-lattice/test/bounded-xof/v1";
+    fn fixed_hash_block_reader_matches_the_complete_chain_across_fragmentation() {
+        const SEED_DOMAIN: &str = "sealed-lattice/test/fixed-hash-seed/v1";
+        const BLOCK_DOMAIN: &str = "sealed-lattice/test/fixed-hash-block/v1";
         let prefix_items = [
             CanonicalItem::hash512([0x51; 64]),
             CanonicalItem::nonempty_ascii("aggregate/query-vector").expect("test tag"),
             CanonicalItem::unsigned32(393),
         ];
         let output_byte_length = 1_025_usize;
-        let mut expected_items = prefix_items.to_vec();
-        expected_items.push(CanonicalItem::unsigned64(
-            u64::try_from(output_byte_length).expect("test length fits u64"),
-        ));
-        let mut expected_reader = foundation_tuple_hasher(domain, &expected_items)
-            .expect("one-shot XOF framing")
-            .finalize_xof();
-        let mut expected = vec![0_u8; output_byte_length];
-        expected_reader.read(&mut expected);
+        let expected = expected_fixed_hash_block_stream(
+            SEED_DOMAIN,
+            BLOCK_DOMAIN,
+            &prefix_items,
+            output_byte_length,
+        );
 
         for fragment_byte_length in [1, 7, 63, 64, 65, 256, output_byte_length] {
-            let mut actual_reader =
-                FoundationTupleXofReader::new(domain, &prefix_items, output_byte_length)
-                    .expect("bounded XOF reader initializes");
+            let mut actual_reader = FoundationTupleHash512BlockReader::new(
+                SEED_DOMAIN,
+                BLOCK_DOMAIN,
+                &prefix_items,
+                output_byte_length,
+            )
+            .expect("fixed-hash reader initializes");
             let mut actual = vec![0_u8; output_byte_length];
             for fragment in actual.chunks_mut(fragment_byte_length) {
                 actual_reader.read(fragment).expect("fragment is in bounds");
@@ -409,13 +542,17 @@ mod tests {
     }
 
     #[test]
-    fn bounded_xof_reader_binds_output_width_into_the_oracle_preimage() {
-        let domain = "sealed-lattice/test/bounded-xof-width/v1";
+    fn fixed_hash_block_reader_binds_width_domains_ordinals_and_predecessors() {
+        const SEED_DOMAIN: &str = "sealed-lattice/test/fixed-hash-width-seed/v1";
+        const BLOCK_DOMAIN: &str = "sealed-lattice/test/fixed-hash-width-block/v1";
+        const OTHER_BLOCK_DOMAIN: &str = "sealed-lattice/test/fixed-hash-width-other-block/v1";
         let prefix_items = [CanonicalItem::hash512([0x52; 64])];
-        let mut short_reader = FoundationTupleXofReader::new(domain, &prefix_items, 64)
-            .expect("short reader initializes");
-        let mut long_reader = FoundationTupleXofReader::new(domain, &prefix_items, 65)
-            .expect("long reader initializes");
+        let mut short_reader =
+            FoundationTupleHash512BlockReader::new(SEED_DOMAIN, BLOCK_DOMAIN, &prefix_items, 64)
+                .expect("short reader initializes");
+        let mut long_reader =
+            FoundationTupleHash512BlockReader::new(SEED_DOMAIN, BLOCK_DOMAIN, &prefix_items, 65)
+                .expect("long reader initializes");
         let mut short_prefix = [0_u8; 64];
         let mut long_prefix = [0_u8; 64];
         short_reader
@@ -434,29 +571,88 @@ mod tests {
         let mut long_items = prefix_items.to_vec();
         long_items.push(CanonicalItem::unsigned64(65));
         assert_ne!(
-            canonical_foundation_tuple_hash_preimage(domain, &short_items).expect("short preimage"),
-            canonical_foundation_tuple_hash_preimage(domain, &long_items).expect("long preimage"),
+            canonical_foundation_tuple_hash_preimage(SEED_DOMAIN, &short_items)
+                .expect("short preimage"),
+            canonical_foundation_tuple_hash_preimage(SEED_DOMAIN, &long_items)
+                .expect("long preimage"),
         );
+
+        let expected =
+            expected_fixed_hash_block_stream(SEED_DOMAIN, BLOCK_DOMAIN, &prefix_items, 129);
+        let changed_domain =
+            expected_fixed_hash_block_stream(SEED_DOMAIN, OTHER_BLOCK_DOMAIN, &prefix_items, 129);
+        assert_ne!(expected, changed_domain);
+
+        let mut seed_items = prefix_items.to_vec();
+        seed_items.push(CanonicalItem::unsigned64(129));
+        let seed = hash_foundation_tuple_512(SEED_DOMAIN, &seed_items)
+            .expect("seed hash")
+            .into_bytes();
+        let first_block: [u8; Hash512::BYTE_LENGTH] = expected[..64]
+            .try_into()
+            .expect("first block has the fixed width");
+        let correct_second_block = hash_foundation_tuple_512(
+            BLOCK_DOMAIN,
+            &[
+                CanonicalItem::hash512(seed),
+                CanonicalItem::hash512(first_block),
+                CanonicalItem::unsigned64(129),
+                CanonicalItem::unsigned64(1),
+            ],
+        )
+        .expect("correct second block");
+        let wrong_predecessor = hash_foundation_tuple_512(
+            BLOCK_DOMAIN,
+            &[
+                CanonicalItem::hash512(seed),
+                CanonicalItem::hash512([0x91; Hash512::BYTE_LENGTH]),
+                CanonicalItem::unsigned64(129),
+                CanonicalItem::unsigned64(1),
+            ],
+        )
+        .expect("changed-predecessor block");
+        let wrong_ordinal = hash_foundation_tuple_512(
+            BLOCK_DOMAIN,
+            &[
+                CanonicalItem::hash512(seed),
+                CanonicalItem::hash512(first_block),
+                CanonicalItem::unsigned64(129),
+                CanonicalItem::unsigned64(2),
+            ],
+        )
+        .expect("changed-ordinal block");
+        assert_eq!(correct_second_block.as_bytes(), &expected[64..128]);
+        assert_ne!(correct_second_block, wrong_predecessor);
+        assert_ne!(correct_second_block, wrong_ordinal);
     }
 
     #[test]
-    fn bounded_xof_reader_discard_preserves_the_exact_stream_suffix() {
-        let domain = "sealed-lattice/test/bounded-xof-discard/v1";
+    fn fixed_hash_block_reader_discard_preserves_the_exact_stream_suffix() {
+        const SEED_DOMAIN: &str = "sealed-lattice/test/fixed-hash-discard-seed/v1";
+        const BLOCK_DOMAIN: &str = "sealed-lattice/test/fixed-hash-discard-block/v1";
         let prefix_items = [CanonicalItem::unsigned64(17)];
         let output_byte_length = 777_usize;
         let discarded_prefix_byte_length = 513_usize;
-        let mut complete_reader =
-            FoundationTupleXofReader::new(domain, &prefix_items, output_byte_length)
-                .expect("complete reader initializes");
+        let mut complete_reader = FoundationTupleHash512BlockReader::new(
+            SEED_DOMAIN,
+            BLOCK_DOMAIN,
+            &prefix_items,
+            output_byte_length,
+        )
+        .expect("complete reader initializes");
         let mut complete_output = vec![0_u8; output_byte_length];
         complete_reader
             .read(&mut complete_output)
             .expect("complete output fits");
         complete_reader.finish().expect("complete output consumed");
 
-        let mut discarded_reader =
-            FoundationTupleXofReader::new(domain, &prefix_items, output_byte_length)
-                .expect("discarding reader initializes");
+        let mut discarded_reader = FoundationTupleHash512BlockReader::new(
+            SEED_DOMAIN,
+            BLOCK_DOMAIN,
+            &prefix_items,
+            output_byte_length,
+        )
+        .expect("discarding reader initializes");
         discarded_reader
             .discard(discarded_prefix_byte_length)
             .expect("discarded prefix fits");
@@ -469,15 +665,38 @@ mod tests {
     }
 
     #[test]
-    fn bounded_xof_reader_refuses_zero_width_overrun_and_incomplete_consumption() {
+    fn fixed_hash_block_reader_counts_blocks_and_refuses_invalid_streams() {
+        assert_eq!(foundation_tuple_hash512_block_count(1), Ok(1));
+        assert_eq!(foundation_tuple_hash512_block_count(64), Ok(1));
+        assert_eq!(foundation_tuple_hash512_block_count(65), Ok(2));
+        assert_eq!(foundation_tuple_hash512_block_count(402_432), Ok(6_288));
+        assert_eq!(foundation_tuple_hash512_seeded_stream_query_count(1), Ok(2));
+        assert_eq!(
+            foundation_tuple_hash512_seeded_stream_query_count(64),
+            Ok(2)
+        );
+        assert_eq!(
+            foundation_tuple_hash512_seeded_stream_query_count(65),
+            Ok(3)
+        );
+        assert_eq!(
+            foundation_tuple_hash512_seeded_stream_query_count(402_432),
+            Ok(6_289)
+        );
+        assert_eq!(
+            foundation_tuple_hash512_block_count(0),
+            Err(StreamingFoundationHashError::OutputIncomplete),
+        );
+
+        const SEED_DOMAIN: &str = "sealed-lattice/test/fixed-hash-errors-seed/v1";
+        const BLOCK_DOMAIN: &str = "sealed-lattice/test/fixed-hash-errors-block/v1";
         assert!(matches!(
-            FoundationTupleXofReader::new("sealed-lattice/test/bounded-xof-errors/v1", &[], 0),
+            FoundationTupleHash512BlockReader::new(SEED_DOMAIN, BLOCK_DOMAIN, &[], 0),
             Err(StreamingFoundationHashError::OutputIncomplete),
         ));
 
-        let mut overrun =
-            FoundationTupleXofReader::new("sealed-lattice/test/bounded-xof-errors/v1", &[], 2)
-                .expect("reader initializes");
+        let mut overrun = FoundationTupleHash512BlockReader::new(SEED_DOMAIN, BLOCK_DOMAIN, &[], 2)
+            .expect("reader initializes");
         assert_eq!(
             overrun.read(&mut [0_u8; 3]),
             Err(StreamingFoundationHashError::OutputOverrun),
@@ -488,7 +707,7 @@ mod tests {
         );
 
         let mut incomplete =
-            FoundationTupleXofReader::new("sealed-lattice/test/bounded-xof-errors/v1", &[], 2)
+            FoundationTupleHash512BlockReader::new(SEED_DOMAIN, BLOCK_DOMAIN, &[], 2)
                 .expect("reader initializes");
         incomplete.read(&mut [0_u8; 1]).expect("prefix fits");
         assert_eq!(
@@ -497,11 +716,15 @@ mod tests {
         );
 
         assert!(matches!(
-            FoundationTupleXofReader::new("", &[], 1),
+            FoundationTupleHash512BlockReader::new("", BLOCK_DOMAIN, &[], 1),
             Err(StreamingFoundationHashError::InvalidDomain),
         ));
         assert!(matches!(
-            FoundationTupleXofReader::new("sealed-lattice/test\n", &[], 1),
+            FoundationTupleHash512BlockReader::new(SEED_DOMAIN, "sealed-lattice/test\n", &[], 1),
+            Err(StreamingFoundationHashError::InvalidDomain),
+        ));
+        assert!(matches!(
+            FoundationTupleHash512BlockReader::new(SEED_DOMAIN, SEED_DOMAIN, &[], 1),
             Err(StreamingFoundationHashError::InvalidDomain),
         ));
     }

@@ -8,6 +8,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 #[cfg(test)]
+use std::collections::HashMap;
+
+#[cfg(test)]
 use num_bigint::BigUint;
 
 #[cfg(test)]
@@ -2140,6 +2143,33 @@ fn deterministic_semantic_oracle_column_value(
 }
 
 #[cfg(test)]
+fn cached_deterministic_semantic_oracle_column_value(
+    cache: &mut HashMap<(usize, u32, bool, u64), ProofChallengeExtensionElement>,
+    case_ordinal: usize,
+    column_ordinal: u32,
+    rotation_is_negative: bool,
+    rotation_magnitude: u64,
+) -> Result<ProofChallengeExtensionElement, RelationPlanError> {
+    let key = (
+        case_ordinal,
+        column_ordinal,
+        rotation_is_negative,
+        rotation_magnitude,
+    );
+    if let Some(value) = cache.get(&key) {
+        return Ok(*value);
+    }
+    let value = deterministic_semantic_oracle_column_value(
+        case_ordinal,
+        column_ordinal,
+        rotation_is_negative,
+        rotation_magnitude,
+    )?;
+    cache.insert(key, value);
+    Ok(value)
+}
+
+#[cfg(test)]
 fn deterministic_semantic_oracle_application_challenges(
     variant: &RelationPlanVariant,
     context: &RelationPlanCheckContext,
@@ -2266,80 +2296,125 @@ fn checked_relation_compiler_interpreter_semantics_with_fault(
     let mut covered_instruction_kinds = BTreeSet::new();
     let mut compared_program_evaluation_count = 0_usize;
     let mut injected_fault = false;
+    let mut numerator_evaluation_cache = BTreeMap::<
+        &[RelationExpressionInstruction],
+        Vec<(
+            ProofChallengeExtensionElement,
+            ProofChallengeExtensionElement,
+        )>,
+    >::new();
+    let mut zeroifier_evaluation_cache = BTreeMap::<
+        &[RelationExpressionInstruction],
+        Vec<(
+            ProofChallengeExtensionElement,
+            ProofChallengeExtensionElement,
+        )>,
+    >::new();
+    let mut column_value_cache = HashMap::new();
 
     for constraint in &variant.ordered_constraints {
         structurally_checked_instruction_count = structurally_checked_instruction_count
             .checked_add(constraint.numerator_postfix_expression.len())
             .and_then(|count| count.checked_add(constraint.zeroifier_postfix_expression.len()))
             .ok_or(RelationPlanError::CountOverflow)?;
-        let independent_numerator = parse_independent_expression(
-            &constraint.numerator_postfix_expression,
-            false,
-            &mut covered_instruction_kinds,
-        )?;
-        let independent_zeroifier = parse_independent_expression(
-            &constraint.zeroifier_postfix_expression,
-            true,
-            &mut covered_instruction_kinds,
-        )?;
-        for (case_ordinal, evaluation_point) in evaluation_points.iter().copied().enumerate() {
-            let production_numerator = evaluate_program(
-                variant,
-                context,
-                &constraint.numerator_postfix_expression,
-                evaluation_point,
-                &checked_challenges,
-                &mut |column_ordinal, rotation_is_negative, rotation_magnitude| {
-                    deterministic_semantic_oracle_column_value(
-                        case_ordinal,
-                        column_ordinal,
-                        rotation_is_negative,
-                        rotation_magnitude,
-                    )
-                },
+        let numerator_program = constraint.numerator_postfix_expression.as_slice();
+        let numerator_evaluations = if let Some(cached) =
+            numerator_evaluation_cache.get(numerator_program)
+        {
+            cached.clone()
+        } else {
+            let independent_numerator = parse_independent_expression(
+                numerator_program,
                 false,
+                &mut covered_instruction_kinds,
             )?;
-            let mut oracle_numerator = evaluate_independent_expression(
-                &independent_numerator,
-                variant,
-                context,
-                evaluation_point,
-                &checked_challenges,
-                &mut |column_ordinal, rotation_is_negative, rotation_magnitude| {
-                    deterministic_semantic_oracle_column_value(
-                        case_ordinal,
-                        column_ordinal,
-                        rotation_is_negative,
-                        rotation_magnitude,
-                    )
-                },
-            )?;
-            if fault == IndependentSemanticOracleFault::ChangeFirstEvaluation && !injected_fault {
-                oracle_numerator = oracle_numerator.add(independent_base_value(1)?);
-                injected_fault = true;
+            let mut evaluations = Vec::with_capacity(evaluation_points.len());
+            for (case_ordinal, evaluation_point) in evaluation_points.iter().copied().enumerate() {
+                let production_numerator = evaluate_program(
+                    variant,
+                    context,
+                    numerator_program,
+                    evaluation_point,
+                    &checked_challenges,
+                    &mut |column_ordinal, rotation_is_negative, rotation_magnitude| {
+                        cached_deterministic_semantic_oracle_column_value(
+                            &mut column_value_cache,
+                            case_ordinal,
+                            column_ordinal,
+                            rotation_is_negative,
+                            rotation_magnitude,
+                        )
+                    },
+                    false,
+                )?;
+                let mut oracle_numerator = evaluate_independent_expression(
+                    &independent_numerator,
+                    variant,
+                    context,
+                    evaluation_point,
+                    &checked_challenges,
+                    &mut |column_ordinal, rotation_is_negative, rotation_magnitude| {
+                        cached_deterministic_semantic_oracle_column_value(
+                            &mut column_value_cache,
+                            case_ordinal,
+                            column_ordinal,
+                            rotation_is_negative,
+                            rotation_magnitude,
+                        )
+                    },
+                )?;
+                if fault == IndependentSemanticOracleFault::ChangeFirstEvaluation && !injected_fault
+                {
+                    oracle_numerator = oracle_numerator.add(independent_base_value(1)?);
+                    injected_fault = true;
+                }
+                evaluations.push((production_numerator, oracle_numerator));
             }
-            if production_numerator != oracle_numerator {
-                return Err(RelationPlanError::InvalidConstraint);
-            }
-
-            let production_zeroifier = evaluate_program(
-                variant,
-                context,
-                &constraint.zeroifier_postfix_expression,
-                evaluation_point,
-                &checked_challenges,
-                &mut |_, _, _| Err(RelationPlanError::InvalidZeroifier),
-                true,
-            )?;
-            let oracle_zeroifier = evaluate_independent_expression(
-                &independent_zeroifier,
-                variant,
-                context,
-                evaluation_point,
-                &checked_challenges,
-                &mut |_, _, _| Err(RelationPlanError::InvalidZeroifier),
-            )?;
-            if production_zeroifier != oracle_zeroifier {
+            numerator_evaluation_cache.insert(numerator_program, evaluations.clone());
+            evaluations
+        };
+        let zeroifier_program = constraint.zeroifier_postfix_expression.as_slice();
+        let zeroifier_evaluations =
+            if let Some(cached) = zeroifier_evaluation_cache.get(zeroifier_program) {
+                cached.clone()
+            } else {
+                let independent_zeroifier = parse_independent_expression(
+                    zeroifier_program,
+                    true,
+                    &mut covered_instruction_kinds,
+                )?;
+                let evaluations = evaluation_points
+                    .iter()
+                    .copied()
+                    .map(|evaluation_point| {
+                        let production_zeroifier = evaluate_program(
+                            variant,
+                            context,
+                            zeroifier_program,
+                            evaluation_point,
+                            &checked_challenges,
+                            &mut |_, _, _| Err(RelationPlanError::InvalidZeroifier),
+                            true,
+                        )?;
+                        let oracle_zeroifier = evaluate_independent_expression(
+                            &independent_zeroifier,
+                            variant,
+                            context,
+                            evaluation_point,
+                            &checked_challenges,
+                            &mut |_, _, _| Err(RelationPlanError::InvalidZeroifier),
+                        )?;
+                        Ok((production_zeroifier, oracle_zeroifier))
+                    })
+                    .collect::<Result<Vec<_>, RelationPlanError>>()?;
+                zeroifier_evaluation_cache.insert(zeroifier_program, evaluations.clone());
+                evaluations
+            };
+        for ((production_numerator, oracle_numerator), (production_zeroifier, oracle_zeroifier)) in
+            numerator_evaluations.into_iter().zip(zeroifier_evaluations)
+        {
+            if production_numerator != oracle_numerator || production_zeroifier != oracle_zeroifier
+            {
                 return Err(RelationPlanError::InvalidConstraint);
             }
             compared_program_evaluation_count = compared_program_evaluation_count
@@ -2425,6 +2500,44 @@ mod tests {
             ),
             Err(RelationPlanError::InvalidConstraint),
         );
+    }
+
+    #[test]
+    fn semantic_oracle_column_cache_binds_every_query_coordinate() {
+        let mut cache = HashMap::new();
+        let query_coordinates = [
+            (2_usize, 17_u32, false, 29_u64),
+            (3, 17, false, 29),
+            (2, 18, false, 29),
+            (2, 17, true, 29),
+            (2, 17, false, 30),
+        ];
+        let values = query_coordinates
+            .into_iter()
+            .map(
+                |(case_ordinal, column_ordinal, rotation_is_negative, rotation_magnitude)| {
+                    cached_deterministic_semantic_oracle_column_value(
+                        &mut cache,
+                        case_ordinal,
+                        column_ordinal,
+                        rotation_is_negative,
+                        rotation_magnitude,
+                    )
+                    .expect("the deterministic semantic-oracle value derives")
+                },
+            )
+            .collect::<Vec<_>>();
+        for (left_ordinal, left) in values.iter().enumerate() {
+            for right in values.iter().skip(left_ordinal + 1) {
+                assert_ne!(left, right);
+            }
+        }
+        assert_eq!(cache.len(), query_coordinates.len());
+        assert_eq!(
+            cached_deterministic_semantic_oracle_column_value(&mut cache, 2, 17, false, 29,),
+            Ok(values[0]),
+        );
+        assert_eq!(cache.len(), query_coordinates.len());
     }
 
     fn vss_linkage_interpreter_fixture() -> (RelationPlanVariant, RelationPlanCheckContext) {

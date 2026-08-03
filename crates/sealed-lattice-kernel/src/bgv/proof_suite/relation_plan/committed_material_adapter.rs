@@ -26,6 +26,9 @@ use super::{
     derive_vss_share_linkage_trace_witness_provider,
 };
 
+#[cfg(test)]
+use super::vss_share_linkage_trace_witness_structure_memory_accounting;
+
 const VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER: u16 =
     crate::foundation::ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER;
 const AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER: u16 =
@@ -571,6 +574,28 @@ fn committed_material_source_provider_memory_accounting(
         maximum_returned_source_polynomial_value_count,
         trace_witness_structure,
     )
+}
+
+#[cfg(test)]
+pub(crate) fn selected_vss_source_provider_memory_accounting(
+    input: &CommittedMaterialRelationPlanInput,
+    context: &RelationPlanCheckContext,
+    compiled_relation_plan: &CompiledRelationPlan,
+) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
+    let detailed = committed_material_source_provider_memory_accounting(
+        SelectedCommittedMaterialRelationKind::VssShareLinkage,
+        input,
+        context,
+        compiled_relation_plan,
+        vss_share_linkage_trace_witness_structure_memory_accounting(input, context)
+            .map_err(CommonProofProverError::Relation)?,
+    )?;
+    Ok(CommonProofSourceProviderMemoryAccounting::new(
+        detailed.loading_persistent_resident_byte_length(),
+        detailed.post_source_polynomial_finish_persistent_resident_byte_length(),
+        detailed.additional_loading_source_polynomials_transient_byte_length(),
+        detailed.maximum_returned_source_polynomial_byte_length(),
+    ))
 }
 
 /// One-column-at-a-time source adapter for selected committed-material relations.

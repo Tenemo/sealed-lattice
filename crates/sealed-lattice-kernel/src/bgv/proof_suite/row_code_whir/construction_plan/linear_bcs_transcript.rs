@@ -991,9 +991,10 @@ fn atomic_challenge_output_byte_length(
         .ranges
         .iter()
         .filter_map(|range| match range.kind {
-            RowCodeWhirOracleEquationRangeKind::AtomicChallengeXof { output_byte_length } => {
-                Some(output_byte_length)
-            }
+            RowCodeWhirOracleEquationRangeKind::AtomicChallengeSeededHashStream {
+                output_byte_length,
+                ..
+            } => Some(output_byte_length),
             _ => None,
         })
         .collect::<Vec<_>>();

@@ -1,0 +1,1173 @@
+//! Bounded, opt-in measurements of exact production primitive owners.
+//!
+//! The feature is absent from the ordinary kernel. It exposes no proof,
+//! verification, source-authentication, or capability surface; only a small
+//! deterministic result record crosses the Wasm boundary.
+
+use core::{hint::black_box, mem::size_of};
+use std::collections::{BTreeMap, BTreeSet};
+
+use p3_goldilocks::Goldilocks;
+use serde::Serialize;
+use sha3::Shake256;
+use zeroize::Zeroizing;
+
+use super::{
+    bounded_dft::{
+        BoundedBaseCosetLaneDft, BoundedSelectedBaseCosetLaneDft, SelectedBaseCosetLaneDftSchedule,
+    },
+    column_commitment::{ColumnDigest, hash_merkle_parent, hash_opened_column_with_salt},
+    commitment_liveness::{
+        ROOT_AND_OPENING_PASS_COUNT, derive_phase_commitment_geometry_accounting,
+    },
+    construction_plan::RowCodeWhirConstructionPlan,
+    hiding_whir::selected_hiding_whir_config,
+    private_leaf_salt::{
+        PRIVATE_LEAF_SALT_BYTE_LENGTH, derive_private_leaf_salt,
+        private_leaf_salt_derivation_workspace_byte_length,
+    },
+};
+use crate::bgv::proof_suite::{
+    PROOF_BASE_FIELD_MODULUS, PROOF_EVALUATION_COSET_OFFSET, ProofBaseFieldElement,
+    ProofEvaluationDomain, SelectedVssSourceReplayMeasurement, ValidatedRelationPlanArtifact,
+    compile_vss_share_linkage_relation_plan,
+    prover::relation_reversed_column_bindings,
+    relation_plan::{ProofPrivacyMode, RelationColumnOrigin},
+    selected_committed_material_relation_plan_input, selected_relation_plan_check_context,
+};
+use crate::foundation::{
+    MAXIMUM_LOCAL_RECORD_PLAINTEXT_BYTE_LENGTH, ProofApplicationSlotCeilings,
+    measure_common_proof_scratch_record_codec,
+};
+
+const MEASUREMENT_SCHEMA_VERSION: u16 = 2;
+const PHASE_ENCODED_COLUMN_COUNT: usize = 1 << 24;
+const PHASE_LANE_COLUMN_COUNT: usize = 1 << 19;
+const PHASE_LOGICAL_LEAF_WIDTH: usize = 1_128;
+const DFT_BUTTERFLY_COUNT: u64 = 4_980_736;
+const SALTED_LEAF_PERMUTATION_COUNT: u64 = 68;
+const SALTED_LEAF_ITERATION_COUNT: usize = 512;
+const PRIVATE_SALT_ITERATION_COUNT: usize = 4_096;
+const FIVE_LEVEL_CARRY_ITERATION_COUNT: usize = 32_768;
+const SOURCE_REPLAY_ITERATION_COUNT: usize = 4;
+const PRODUCTION_WEIGHTED_SOURCE_REPLAY_ITERATION_COUNT: usize = 1;
+const AUTHENTICATED_SCRATCH_RECORD_ITERATION_COUNT: usize = 8;
+const SELECTED_CHECKPOINT_LEVEL: u32 = 2;
+
+#[cfg(target_arch = "wasm32")]
+#[link(wasm_import_module = "env")]
+unsafe extern "C" {
+    fn sealed_lattice_primitive_measurement_now_milliseconds() -> f64;
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PrimitiveMeasurementDimension {
+    name: &'static str,
+    value: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PrimitiveMeasurementRecord {
+    schema_version: u16,
+    case_identifier: u32,
+    case_name: &'static str,
+    execution_target: &'static str,
+    iteration_count: u64,
+    elapsed_nanoseconds: u64,
+    modeled_peak_live_byte_length: u64,
+    checksum_hex: String,
+    dimensions: Vec<PrimitiveMeasurementDimension>,
+}
+
+fn dimension(name: &'static str, value: usize) -> Result<PrimitiveMeasurementDimension, String> {
+    Ok(PrimitiveMeasurementDimension {
+        name,
+        value: u64::try_from(value)
+            .map_err(|_| format!("primitive measurement dimension {name} exceeds u64"))?,
+    })
+}
+
+const fn dimension_u64(name: &'static str, value: u64) -> PrimitiveMeasurementDimension {
+    PrimitiveMeasurementDimension { name, value }
+}
+
+fn execution_target() -> &'static str {
+    if cfg!(target_arch = "wasm32") {
+        "wasm32-unknown-unknown"
+    } else {
+        "release-native"
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn measure_elapsed_nanoseconds<ResultValue>(
+    operation: impl FnOnce() -> Result<ResultValue, String>,
+) -> Result<(ResultValue, u64), String> {
+    let started_at = std::time::Instant::now();
+    let result = operation()?;
+    let elapsed = u64::try_from(started_at.elapsed().as_nanos())
+        .map_err(|_| "primitive measurement duration exceeds u64 nanoseconds".to_owned())?;
+    if elapsed == 0 {
+        return Err("primitive measurement clock did not advance".to_owned());
+    }
+    Ok((result, elapsed))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn measure_elapsed_nanoseconds<ResultValue>(
+    operation: impl FnOnce() -> Result<ResultValue, String>,
+) -> Result<(ResultValue, u64), String> {
+    let started_at = unsafe { sealed_lattice_primitive_measurement_now_milliseconds() };
+    let result = operation()?;
+    let finished_at = unsafe { sealed_lattice_primitive_measurement_now_milliseconds() };
+    let elapsed_nanoseconds = (finished_at - started_at) * 1_000_000.0;
+    if !started_at.is_finite()
+        || !finished_at.is_finite()
+        || elapsed_nanoseconds <= 0.0
+        || elapsed_nanoseconds > u64::MAX as f64
+    {
+        return Err("primitive measurement clock returned an invalid duration".to_owned());
+    }
+    Ok((result, elapsed_nanoseconds.round() as u64))
+}
+
+fn measurement_lane_coefficients() -> Result<Vec<ProofBaseFieldElement>, String> {
+    let mut coefficients = Vec::new();
+    coefficients
+        .try_reserve_exact(PHASE_LANE_COLUMN_COUNT)
+        .map_err(|_| "lane DFT coefficient allocation failed".to_owned())?;
+    for coefficient_ordinal in 0..PHASE_LANE_COLUMN_COUNT {
+        let ordinal = u64::try_from(coefficient_ordinal)
+            .map_err(|_| "lane DFT coefficient ordinal exceeds u64".to_owned())?;
+        coefficients.push(
+            ProofBaseFieldElement::from_canonical(
+                ordinal.wrapping_mul(65_537).wrapping_add(17) % PROOF_BASE_FIELD_MODULUS,
+            )
+            .map_err(|_| "lane DFT coefficient is noncanonical".to_owned())?,
+        );
+    }
+    Ok(coefficients)
+}
+
+fn measure_lane_dft() -> Result<PrimitiveMeasurementRecord, String> {
+    let coefficients = measurement_lane_coefficients()?;
+    let full_domain =
+        ProofEvaluationDomain::new(PHASE_ENCODED_COLUMN_COUNT, PROOF_EVALUATION_COSET_OFFSET)
+            .map_err(|_| "lane DFT domain is invalid".to_owned())?;
+    let mut transform = BoundedBaseCosetLaneDft::new(
+        Zeroizing::new(coefficients),
+        full_domain,
+        PHASE_LANE_COLUMN_COUNT,
+        0,
+    )?;
+    let ((values, poll_count), elapsed_nanoseconds) = measure_elapsed_nanoseconds(|| {
+        let mut poll_count = 0_usize;
+        loop {
+            poll_count = poll_count
+                .checked_add(1)
+                .ok_or_else(|| "lane DFT poll count overflowed".to_owned())?;
+            if transform.poll()? {
+                break;
+            }
+        }
+        Ok((transform.into_values()?, poll_count))
+    })?;
+    if values.len() != PHASE_LANE_COLUMN_COUNT {
+        return Err("lane DFT returned the wrong value count".to_owned());
+    }
+    let checksum = values
+        .iter()
+        .fold(0_u64, |accumulated, value| accumulated ^ value.canonical());
+    black_box(checksum);
+    Ok(PrimitiveMeasurementRecord {
+        schema_version: MEASUREMENT_SCHEMA_VERSION,
+        case_identifier: 1,
+        case_name: "bounded-phase-lane-dft",
+        execution_target: execution_target(),
+        iteration_count: 1,
+        elapsed_nanoseconds,
+        modeled_peak_live_byte_length: u64::try_from(
+            PHASE_LANE_COLUMN_COUNT
+                .checked_mul(size_of::<ProofBaseFieldElement>())
+                .and_then(|length| length.checked_add(size_of::<BoundedBaseCosetLaneDft>()))
+                .ok_or_else(|| "lane DFT live-set size overflowed".to_owned())?,
+        )
+        .map_err(|_| "lane DFT live-set size exceeds u64".to_owned())?,
+        checksum_hex: format!("{checksum:016x}"),
+        dimensions: vec![
+            dimension("fullDomainSize", PHASE_ENCODED_COLUMN_COUNT)?,
+            dimension("laneColumnCount", PHASE_LANE_COLUMN_COUNT)?,
+            dimension("butterflyCount", DFT_BUTTERFLY_COUNT as usize)?,
+            dimension("pollCount", poll_count)?,
+        ],
+    })
+}
+
+fn measure_selected_vss_checkpoint_opening_lane_dfts() -> Result<PrimitiveMeasurementRecord, String>
+{
+    let work_ledger = derive_selected_vss_base_phase_work_ledger()?;
+    let checkpoint_leaf_count = 1_u64
+        .checked_shl(SELECTED_CHECKPOINT_LEVEL)
+        .ok_or_else(|| "selected checkpoint leaf count overflowed".to_owned())?;
+    let maximum_recomputed_leaf_count = work_ledger
+        .opening_query_count
+        .checked_mul(checkpoint_leaf_count)
+        .ok_or_else(|| "selected checkpoint recomputed-leaf count overflowed".to_owned())?;
+    let lane_count = usize::try_from(work_ledger.lane_count)
+        .map_err(|_| "selected checkpoint lane count exceeds usize".to_owned())?;
+    let maximum_recomputed_leaf_count = usize::try_from(maximum_recomputed_leaf_count)
+        .map_err(|_| "selected checkpoint recomputed-leaf count exceeds usize".to_owned())?;
+    if lane_count != PHASE_ENCODED_COLUMN_COUNT / PHASE_LANE_COLUMN_COUNT
+        || maximum_recomputed_leaf_count == 0
+    {
+        return Err("selected checkpoint opening geometry is inconsistent".to_owned());
+    }
+    let lower_selected_output_count = maximum_recomputed_leaf_count / lane_count;
+    let higher_selected_output_count = maximum_recomputed_leaf_count.div_ceil(lane_count);
+    let higher_output_lane_count = maximum_recomputed_leaf_count % lane_count;
+    let lower_output_lane_count = lane_count
+        .checked_sub(higher_output_lane_count)
+        .ok_or_else(|| "selected checkpoint balanced-lane count underflowed".to_owned())?;
+    if lower_selected_output_count == 0
+        || higher_selected_output_count != lower_selected_output_count + 1
+        || higher_output_lane_count == 0
+    {
+        return Err("selected checkpoint balanced-lane geometry is degenerate".to_owned());
+    }
+
+    // The first 387 distinct four-leaf checkpoint blocks induce exactly 49
+    // consecutive within-lane coordinates in twelve lanes and 48 in the
+    // remaining twenty. Consecutive coordinates attain the dependency-count
+    // upper bound at every DFT layer, so this is an executable conservative
+    // projection rather than a favorable sampled schedule.
+    let lower_selected_indices = (0..lower_selected_output_count).collect::<Vec<_>>();
+    let higher_selected_indices = (0..higher_selected_output_count).collect::<Vec<_>>();
+    let lower_schedule =
+        SelectedBaseCosetLaneDftSchedule::new(PHASE_LANE_COLUMN_COUNT, &lower_selected_indices)?;
+    let higher_schedule =
+        SelectedBaseCosetLaneDftSchedule::new(PHASE_LANE_COLUMN_COUNT, &higher_selected_indices)?;
+    if lower_schedule.butterfly_count() != lower_schedule.maximum_butterfly_count_upper_bound()
+        || higher_schedule.butterfly_count()
+            != higher_schedule.maximum_butterfly_count_upper_bound()
+    {
+        return Err("selected checkpoint benchmark does not attain its DFT work bound".to_owned());
+    }
+    let full_domain =
+        ProofEvaluationDomain::new(PHASE_ENCODED_COLUMN_COUNT, PROOF_EVALUATION_COSET_OFFSET)
+            .map_err(|_| "selected checkpoint DFT domain is invalid".to_owned())?;
+    let coefficients = Zeroizing::new(measurement_lane_coefficients()?);
+    let ((checksum, poll_count, selected_value_count), elapsed_nanoseconds) =
+        measure_elapsed_nanoseconds(|| {
+            let mut checksum = 0xcbf2_9ce4_8422_2325_u64;
+            let mut poll_count = 0_usize;
+            let mut selected_value_count = 0_usize;
+            for lane_ordinal in 0..lane_count {
+                let schedule = if lane_ordinal < higher_output_lane_count {
+                    higher_schedule.clone()
+                } else {
+                    lower_schedule.clone()
+                };
+                let mut transform = BoundedSelectedBaseCosetLaneDft::new(
+                    Zeroizing::new(coefficients.as_slice().to_vec()),
+                    full_domain,
+                    lane_ordinal,
+                    schedule,
+                )?;
+                loop {
+                    poll_count = poll_count.checked_add(1).ok_or_else(|| {
+                        "selected checkpoint DFT poll count overflowed".to_owned()
+                    })?;
+                    if transform.poll()? {
+                        break;
+                    }
+                }
+                let selected_values = transform.into_selected_values()?;
+                selected_value_count = selected_value_count
+                    .checked_add(selected_values.len())
+                    .ok_or_else(|| "selected checkpoint DFT output count overflowed".to_owned())?;
+                for (within_lane_index, value) in selected_values {
+                    checksum = checksum
+                        .rotate_left(17)
+                        .wrapping_add(value.canonical())
+                        .wrapping_add(
+                            u64::try_from(lane_ordinal)
+                                .map_err(|_| "selected lane ordinal exceeds u64".to_owned())?
+                                .rotate_left(11),
+                        )
+                        .wrapping_add(
+                            u64::try_from(within_lane_index)
+                                .map_err(|_| "selected output index exceeds u64".to_owned())?
+                                .rotate_left(37),
+                        )
+                        .wrapping_mul(0x1000_0000_01b3);
+                }
+            }
+            Ok((checksum, poll_count, selected_value_count))
+        })?;
+    if selected_value_count != maximum_recomputed_leaf_count {
+        return Err("selected checkpoint DFT returned the wrong value count".to_owned());
+    }
+    black_box(checksum);
+
+    let lower_schedule_byte_length = lower_schedule.exact_heap_byte_length()?;
+    let higher_schedule_byte_length = higher_schedule.exact_heap_byte_length()?;
+    let active_schedule_byte_length = lower_schedule_byte_length.max(higher_schedule_byte_length);
+    let coefficient_buffer_byte_length = PHASE_LANE_COLUMN_COUNT
+        .checked_mul(size_of::<ProofBaseFieldElement>())
+        .ok_or_else(|| "selected checkpoint coefficient-buffer size overflowed".to_owned())?;
+    let maximum_selected_output_byte_length = higher_selected_output_count
+        .checked_mul(size_of::<(usize, ProofBaseFieldElement)>())
+        .ok_or_else(|| "selected checkpoint output size overflowed".to_owned())?;
+    let runtime_peak = coefficient_buffer_byte_length
+        .checked_mul(2)
+        .and_then(|total| total.checked_add(lower_schedule_byte_length))
+        .and_then(|total| total.checked_add(higher_schedule_byte_length))
+        .and_then(|total| total.checked_add(active_schedule_byte_length))
+        .and_then(|total| total.checked_add(maximum_selected_output_byte_length))
+        .and_then(|total| total.checked_add(size_of::<BoundedSelectedBaseCosetLaneDft>()))
+        .ok_or_else(|| "selected checkpoint DFT live set overflowed".to_owned())?;
+    let schedule_construction_peak = lower_schedule_byte_length
+        .checked_add(higher_schedule.maximum_construction_workspace_byte_length()?)
+        .and_then(|total| total.checked_add(coefficient_buffer_byte_length))
+        .ok_or_else(|| "selected checkpoint schedule live set overflowed".to_owned())?;
+    let modeled_peak_live_byte_length = runtime_peak.max(schedule_construction_peak);
+    let executed_butterfly_count = higher_schedule
+        .butterfly_count()
+        .checked_mul(higher_output_lane_count)
+        .and_then(|total| {
+            lower_schedule
+                .butterfly_count()
+                .checked_mul(lower_output_lane_count)
+                .and_then(|lower| total.checked_add(lower))
+        })
+        .ok_or_else(|| "selected checkpoint butterfly count overflowed".to_owned())?;
+    let full_lane_butterfly_count = usize::try_from(DFT_BUTTERFLY_COUNT)
+        .map_err(|_| "full lane butterfly count exceeds usize".to_owned())?;
+    let full_butterfly_count = full_lane_butterfly_count
+        .checked_mul(lane_count)
+        .ok_or_else(|| "full checkpoint opening butterfly count overflowed".to_owned())?;
+
+    Ok(PrimitiveMeasurementRecord {
+        schema_version: MEASUREMENT_SCHEMA_VERSION,
+        case_identifier: 7,
+        case_name: "selected-vss-checkpoint-opening-lane-dfts",
+        execution_target: execution_target(),
+        iteration_count: u64::try_from(lane_count)
+            .map_err(|_| "selected checkpoint iteration count exceeds u64".to_owned())?,
+        elapsed_nanoseconds,
+        modeled_peak_live_byte_length: u64::try_from(modeled_peak_live_byte_length)
+            .map_err(|_| "selected checkpoint DFT live set exceeds u64".to_owned())?,
+        checksum_hex: format!("{checksum:016x}"),
+        dimensions: vec![
+            dimension("fullDomainSize", PHASE_ENCODED_COLUMN_COUNT)?,
+            dimension("laneColumnCount", PHASE_LANE_COLUMN_COUNT)?,
+            dimension("laneCount", lane_count)?,
+            dimension_u64("checkpointLevel", u64::from(SELECTED_CHECKPOINT_LEVEL)),
+            dimension_u64("checkpointLeafCount", checkpoint_leaf_count),
+            dimension("maximumRecomputedLeafCount", maximum_recomputed_leaf_count)?,
+            dimension("higherOutputLaneCount", higher_output_lane_count)?,
+            dimension("higherSelectedOutputCount", higher_selected_output_count)?,
+            dimension("lowerOutputLaneCount", lower_output_lane_count)?,
+            dimension("lowerSelectedOutputCount", lower_selected_output_count)?,
+            dimension("selectedValueCount", selected_value_count)?,
+            dimension("executedButterflyCount", executed_butterfly_count)?,
+            dimension("fullButterflyCount", full_butterfly_count)?,
+            dimension("pollCount", poll_count)?,
+            dimension("lowerScheduleHeapByteLength", lower_schedule_byte_length)?,
+            dimension("higherScheduleHeapByteLength", higher_schedule_byte_length)?,
+            dimension(
+                "scheduleConstructionWorkspaceByteLength",
+                higher_schedule.maximum_construction_workspace_byte_length()?,
+            )?,
+        ],
+    })
+}
+
+fn measurement_leaf_values() -> Result<Vec<Goldilocks>, String> {
+    (0..PHASE_LOGICAL_LEAF_WIDTH)
+        .map(|value_ordinal| {
+            let canonical = u64::try_from(value_ordinal)
+                .map_err(|_| "phase-leaf value ordinal exceeds u64".to_owned())?
+                .wrapping_mul(1_000_003)
+                .wrapping_add(29)
+                % PROOF_BASE_FIELD_MODULUS;
+            Ok(Goldilocks::new(canonical))
+        })
+        .collect()
+}
+
+fn measure_salted_phase_leaf() -> Result<PrimitiveMeasurementRecord, String> {
+    let values = measurement_leaf_values()?;
+    let salt = derive_private_leaf_salt(
+        &[0x63_u8; 64],
+        b"relation-phase/base",
+        PHASE_ENCODED_COLUMN_COUNT,
+        PHASE_LOGICAL_LEAF_WIDTH,
+        0,
+        17,
+    )?;
+    let (checksum, elapsed_nanoseconds) = measure_elapsed_nanoseconds(|| {
+        let mut checksum = 0xcbf2_9ce4_8422_2325_u64;
+        for iteration_ordinal in 0..SALTED_LEAF_ITERATION_COUNT {
+            let digest = hash_opened_column_with_salt(
+                black_box(&values),
+                PHASE_ENCODED_COLUMN_COUNT,
+                Some(black_box(&salt)),
+            );
+            let ordinal = u64::try_from(iteration_ordinal)
+                .map_err(|_| "salted phase-leaf iteration ordinal exceeds u64".to_owned())?;
+            checksum = checksum
+                .rotate_left(17)
+                .wrapping_add(digest[iteration_ordinal % digest.len()])
+                .wrapping_add(ordinal.wrapping_mul(0x9e37_79b1_85eb_ca87))
+                .wrapping_mul(0x1000_0000_01b3);
+        }
+        Ok(checksum)
+    })?;
+    black_box(checksum);
+    let modeled_peak_live_byte_length = values
+        .len()
+        .checked_mul(size_of::<Goldilocks>())
+        .and_then(|length| length.checked_add(PRIVATE_LEAF_SALT_BYTE_LENGTH))
+        .and_then(|length| length.checked_add(size_of::<Shake256>()))
+        .and_then(|length| length.checked_add(size_of::<ColumnDigest>()))
+        .ok_or_else(|| "salted phase-leaf live-set size overflowed".to_owned())?;
+    Ok(PrimitiveMeasurementRecord {
+        schema_version: MEASUREMENT_SCHEMA_VERSION,
+        case_identifier: 2,
+        case_name: "salted-phase-column-leaf",
+        execution_target: execution_target(),
+        iteration_count: SALTED_LEAF_ITERATION_COUNT as u64,
+        elapsed_nanoseconds,
+        modeled_peak_live_byte_length: modeled_peak_live_byte_length as u64,
+        checksum_hex: format!("{checksum:016x}"),
+        dimensions: vec![
+            dimension("logicalLeafWidth", PHASE_LOGICAL_LEAF_WIDTH)?,
+            dimension("saltByteLength", PRIVATE_LEAF_SALT_BYTE_LENGTH)?,
+            dimension(
+                "keccakPermutationCount",
+                SALTED_LEAF_ITERATION_COUNT * SALTED_LEAF_PERMUTATION_COUNT as usize,
+            )?,
+        ],
+    })
+}
+
+fn measure_private_leaf_salt_derivation() -> Result<PrimitiveMeasurementRecord, String> {
+    let (checksum, elapsed_nanoseconds) = measure_elapsed_nanoseconds(|| {
+        let mut checksum = 0_u64;
+        for leaf_index in 0..PRIVATE_SALT_ITERATION_COUNT {
+            let salt = derive_private_leaf_salt(
+                &[0x7d_u8; 64],
+                b"relation-phase/base",
+                PHASE_ENCODED_COLUMN_COUNT,
+                PHASE_LOGICAL_LEAF_WIDTH,
+                0,
+                leaf_index,
+            )?;
+            checksum ^= u64::from_le_bytes(
+                salt[..8]
+                    .try_into()
+                    .map_err(|_| "private leaf salt prefix has the wrong size".to_owned())?,
+            );
+            checksum = checksum.rotate_left(1);
+        }
+        Ok(checksum)
+    })?;
+    black_box(checksum);
+    Ok(PrimitiveMeasurementRecord {
+        schema_version: MEASUREMENT_SCHEMA_VERSION,
+        case_identifier: 3,
+        case_name: "private-leaf-salt-kmac",
+        execution_target: execution_target(),
+        iteration_count: PRIVATE_SALT_ITERATION_COUNT as u64,
+        elapsed_nanoseconds,
+        modeled_peak_live_byte_length: private_leaf_salt_derivation_workspace_byte_length() as u64,
+        checksum_hex: format!("{checksum:016x}"),
+        dimensions: vec![
+            dimension("leafCount", PHASE_ENCODED_COLUMN_COUNT)?,
+            dimension("logicalLeafWidth", PHASE_LOGICAL_LEAF_WIDTH)?,
+            dimension("saltByteLength", PRIVATE_LEAF_SALT_BYTE_LENGTH)?,
+        ],
+    })
+}
+
+fn measure_five_level_digest_carry() -> Result<PrimitiveMeasurementRecord, String> {
+    let left_digests: [ColumnDigest; 5] = core::array::from_fn(|level| {
+        core::array::from_fn(|word| ((level + 1) as u64) << 32 | (word + 1) as u64)
+    });
+    let (checksum, elapsed_nanoseconds) = measure_elapsed_nanoseconds(|| {
+        let mut carried = [0x9a5b_c31d_e742_816f_u64; 8];
+        for _ in 0..FIVE_LEVEL_CARRY_ITERATION_COUNT {
+            for left in &left_digests {
+                carried = hash_merkle_parent(left, &carried);
+            }
+        }
+        Ok(carried[0])
+    })?;
+    black_box(checksum);
+    Ok(PrimitiveMeasurementRecord {
+        schema_version: MEASUREMENT_SCHEMA_VERSION,
+        case_identifier: 4,
+        case_name: "five-level-digest-carry",
+        execution_target: execution_target(),
+        iteration_count: FIVE_LEVEL_CARRY_ITERATION_COUNT as u64,
+        elapsed_nanoseconds,
+        modeled_peak_live_byte_length: (size_of::<[ColumnDigest; 5]>()
+            + size_of::<ColumnDigest>()
+            + size_of::<Shake256>()) as u64,
+        checksum_hex: format!("{checksum:016x}"),
+        dimensions: vec![dimension(
+            "merkleParentHashCount",
+            FIVE_LEVEL_CARRY_ITERATION_COUNT * 5,
+        )?],
+    })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SelectedVssBasePhaseWorkLedger {
+    materialization_pass_count: u64,
+    row_count: u64,
+    lane_count: u64,
+    opening_query_count: u64,
+    aggregate_wide_pad_query_count: u64,
+    logical_chunk_count_per_lane: u64,
+    direct_source_column_count_per_lane: u64,
+    coefficient_chunk_count_per_source: u64,
+    direct_source_chunk_count_per_lane: u64,
+    reversed_source_chunk_count_per_lane: u64,
+    source_replay_count: u64,
+    reversed_polynomial_reconstruction_count: u64,
+    bound_source_replay_count: u64,
+    prover_source_replay_count: u64,
+    lane_dft_count: u64,
+    butterfly_count: u64,
+    coset_multiplication_count: u64,
+    column_value_delivery_count: u64,
+    transported_value_byte_length: u64,
+    leaf_hash_query_count: u64,
+    salted_leaf_keccak_permutation_count: u64,
+    merkle_parent_hash_query_count: u64,
+    private_leaf_salt_derivation_count: u64,
+}
+
+fn derive_selected_vss_base_phase_work_ledger() -> Result<SelectedVssBasePhaseWorkLedger, String> {
+    let schema_identifier =
+        ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER;
+    let relation_context = selected_relation_plan_check_context(schema_identifier)
+        .ok_or_else(|| "selected VSS work-ledger context is absent".to_owned())?;
+    let relation_input = selected_committed_material_relation_plan_input()
+        .map_err(|_| "selected VSS work-ledger input is invalid".to_owned())?;
+    let compiled_plan = compile_vss_share_linkage_relation_plan(&relation_input, &relation_context)
+        .map_err(|_| "selected VSS work-ledger relation does not compile".to_owned())?;
+    let artifact =
+        ValidatedRelationPlanArtifact::from_owned_compiled_plan(compiled_plan, &relation_context)
+            .map_err(|_| "selected VSS work-ledger relation does not validate".to_owned())?;
+    let relation_variant = artifact
+        .compiled_plan()
+        .variants()
+        .first()
+        .ok_or_else(|| "selected VSS work-ledger relation variant is absent".to_owned())?;
+    let construction_plan = RowCodeWhirConstructionPlan::for_selected_variant(
+        &artifact,
+        relation_variant.schedule_position(),
+        relation_variant.top_count(),
+    )
+    .map_err(|_| "selected VSS work-ledger construction does not derive".to_owned())?;
+    let base_phase = construction_plan
+        .base_phase
+        .as_ref()
+        .ok_or_else(|| "selected VSS work-ledger base phase is absent".to_owned())?;
+    let commitment = derive_phase_commitment_geometry_accounting(base_phase.geometry)?;
+    let requested_source_columns = construction_plan
+        .requested_source_column_ordinals
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
+    let reversed_source_by_column = relation_reversed_column_bindings(relation_variant)
+        .map_err(|_| "selected VSS reversed-column bindings do not derive".to_owned())?
+        .into_iter()
+        .map(|(source_column_ordinal, reversed_column_ordinal)| {
+            (reversed_column_ordinal, source_column_ordinal)
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    let mut logical_chunk_count_per_lane = 0_u64;
+    let mut direct_source_chunk_count_per_lane = 0_u64;
+    let mut reversed_source_chunk_count_per_lane = 0_u64;
+    let mut direct_chunks_by_source_column = BTreeMap::<u32, BTreeSet<u32>>::new();
+    let mut bound_source_count_per_lane = 0_u64;
+    let mut prover_source_count_per_lane = 0_u64;
+    for chunk in base_phase
+        .rows
+        .iter()
+        .flat_map(|row| row.logical_polynomial_chunks.iter().flatten())
+    {
+        logical_chunk_count_per_lane = logical_chunk_count_per_lane
+            .checked_add(1)
+            .ok_or_else(|| "selected VSS logical-chunk count overflowed".to_owned())?;
+        let source_column_ordinal = if requested_source_columns.contains(&chunk.column_ordinal) {
+            direct_source_chunk_count_per_lane = direct_source_chunk_count_per_lane
+                .checked_add(1)
+                .ok_or_else(|| "selected VSS direct-source count overflowed".to_owned())?;
+            if !direct_chunks_by_source_column
+                .entry(chunk.column_ordinal)
+                .or_default()
+                .insert(chunk.coefficient_chunk_ordinal)
+            {
+                return Err("selected VSS direct-source chunk is duplicated".to_owned());
+            }
+            chunk.column_ordinal
+        } else {
+            reversed_source_chunk_count_per_lane = reversed_source_chunk_count_per_lane
+                .checked_add(1)
+                .ok_or_else(|| "selected VSS reversed-source count overflowed".to_owned())?;
+            *reversed_source_by_column
+                .get(&chunk.column_ordinal)
+                .ok_or_else(|| {
+                    "selected VSS base chunk is neither a source nor its reversal".to_owned()
+                })?
+        };
+        let descriptor = relation_variant
+            .ordered_columns()
+            .get(
+                usize::try_from(source_column_ordinal)
+                    .map_err(|_| "selected VSS source column exceeds usize".to_owned())?,
+            )
+            .ok_or_else(|| "selected VSS source column is absent".to_owned())?;
+        match descriptor.origin() {
+            RelationColumnOrigin::BoundTree { .. } => {
+                bound_source_count_per_lane = bound_source_count_per_lane
+                    .checked_add(1)
+                    .ok_or_else(|| "selected VSS bound-source count overflowed".to_owned())?;
+            }
+            RelationColumnOrigin::Prover => {
+                prover_source_count_per_lane = prover_source_count_per_lane
+                    .checked_add(1)
+                    .ok_or_else(|| "selected VSS prover-source count overflowed".to_owned())?;
+            }
+            RelationColumnOrigin::VerifierSequence { .. } => {
+                return Err("selected VSS base chunk depends on a verifier sequence".to_owned());
+            }
+        }
+    }
+
+    let direct_source_column_count_per_lane =
+        u64::try_from(direct_chunks_by_source_column.len())
+            .map_err(|_| "selected VSS direct-source column count exceeds u64".to_owned())?;
+    let coefficient_chunk_count_per_source = direct_chunks_by_source_column
+        .values()
+        .next()
+        .map(BTreeSet::len)
+        .filter(|chunk_count| *chunk_count > 0)
+        .ok_or_else(|| "selected VSS direct-source chunk catalog is empty".to_owned())?;
+    if direct_chunks_by_source_column
+        .values()
+        .any(|chunk_ordinals| {
+            chunk_ordinals.len() != coefficient_chunk_count_per_source
+                || chunk_ordinals
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .any(|(expected_ordinal, ordinal)| {
+                        u32::try_from(expected_ordinal).ok() != Some(ordinal)
+                    })
+        })
+    {
+        return Err("selected VSS direct-source chunk geometry is nonuniform".to_owned());
+    }
+    let coefficient_chunk_count_per_source = u64::try_from(coefficient_chunk_count_per_source)
+        .map_err(|_| "selected VSS coefficient chunk count exceeds u64".to_owned())?;
+
+    let scale_per_materialization = |count: u64, role: &str| {
+        count
+            .checked_mul(commitment.lane_count)
+            .and_then(|value| value.checked_mul(ROOT_AND_OPENING_PASS_COUNT))
+            .ok_or_else(|| format!("selected VSS {role} count overflowed"))
+    };
+    let scale_per_pass = |count: u64, role: &str| {
+        count
+            .checked_mul(ROOT_AND_OPENING_PASS_COUNT)
+            .ok_or_else(|| format!("selected VSS {role} count overflowed"))
+    };
+    let bound_source_replay_count =
+        scale_per_materialization(bound_source_count_per_lane, "bound-source replay")?;
+    let prover_source_replay_count =
+        scale_per_materialization(prover_source_count_per_lane, "prover-source replay")?;
+    let source_replay_count = bound_source_replay_count
+        .checked_add(prover_source_replay_count)
+        .ok_or_else(|| "selected VSS source-replay count overflowed".to_owned())?;
+    let reversed_polynomial_reconstruction_count = scale_per_materialization(
+        reversed_source_chunk_count_per_lane,
+        "reversed-polynomial reconstruction",
+    )?;
+    let lane_dft_count = scale_per_pass(commitment.lane_dft_count_per_pass, "lane DFT")?;
+    let leaf_hash_query_count =
+        scale_per_pass(commitment.leaf_hash_query_count_per_pass, "leaf hash")?;
+    let private_leaf_salt_derivation_count = match construction_plan.proof_privacy_mode {
+        ProofPrivacyMode::SecretBearing => leaf_hash_query_count,
+        ProofPrivacyMode::PublicOnly => 0,
+    };
+    let column_value_delivery_count = scale_per_pass(
+        commitment.column_value_delivery_count_per_pass,
+        "column value delivery",
+    )?;
+
+    if direct_source_chunk_count_per_lane.checked_add(reversed_source_chunk_count_per_lane)
+        != Some(logical_chunk_count_per_lane)
+        || source_replay_count
+            != logical_chunk_count_per_lane
+                .checked_mul(commitment.lane_count)
+                .and_then(|value| value.checked_mul(ROOT_AND_OPENING_PASS_COUNT))
+                .ok_or_else(|| "selected VSS source-replay identity overflowed".to_owned())?
+        || lane_dft_count
+            != commitment
+                .row_count
+                .checked_mul(commitment.lane_count)
+                .and_then(|value| value.checked_mul(ROOT_AND_OPENING_PASS_COUNT))
+                .ok_or_else(|| "selected VSS lane-DFT identity overflowed".to_owned())?
+    {
+        return Err("selected VSS work-ledger identities are inconsistent".to_owned());
+    }
+
+    let aggregate_wide_pad_query_count = selected_hiding_whir_config(construction_plan.parameters)
+        .map_err(|_| "selected VSS aggregate-wide hiding configuration does not derive".to_owned())?
+        .mask_queries;
+    if aggregate_wide_pad_query_count == construction_plan.parameters.outer_query_count {
+        return Err(
+            "selected VSS outer and aggregate-wide pad query schedules were conflated".to_owned(),
+        );
+    }
+
+    Ok(SelectedVssBasePhaseWorkLedger {
+        materialization_pass_count: ROOT_AND_OPENING_PASS_COUNT,
+        row_count: commitment.row_count,
+        lane_count: commitment.lane_count,
+        opening_query_count: u64::try_from(construction_plan.parameters.outer_query_count)
+            .map_err(|_| "selected VSS opening-query count exceeds u64".to_owned())?,
+        aggregate_wide_pad_query_count: u64::try_from(aggregate_wide_pad_query_count)
+            .map_err(|_| "selected VSS aggregate-wide pad query count exceeds u64".to_owned())?,
+        logical_chunk_count_per_lane,
+        direct_source_column_count_per_lane,
+        coefficient_chunk_count_per_source,
+        direct_source_chunk_count_per_lane,
+        reversed_source_chunk_count_per_lane,
+        source_replay_count,
+        reversed_polynomial_reconstruction_count,
+        bound_source_replay_count,
+        prover_source_replay_count,
+        lane_dft_count,
+        butterfly_count: scale_per_pass(commitment.butterfly_count_per_pass, "butterfly")?,
+        coset_multiplication_count: scale_per_pass(
+            commitment.coset_multiplication_count_per_pass,
+            "coset multiplication",
+        )?,
+        column_value_delivery_count,
+        transported_value_byte_length: column_value_delivery_count
+            .checked_mul(size_of::<ProofBaseFieldElement>() as u64)
+            .ok_or_else(|| "selected VSS transported-value size overflowed".to_owned())?,
+        leaf_hash_query_count,
+        salted_leaf_keccak_permutation_count: leaf_hash_query_count
+            .checked_mul(SALTED_LEAF_PERMUTATION_COUNT)
+            .ok_or_else(|| "selected VSS leaf permutation count overflowed".to_owned())?,
+        merkle_parent_hash_query_count: scale_per_pass(
+            commitment.merkle_parent_hash_query_count_per_pass,
+            "Merkle parent hash",
+        )?,
+        private_leaf_salt_derivation_count,
+    })
+}
+
+fn measure_selected_vss_source_replay() -> Result<PrimitiveMeasurementRecord, String> {
+    let measurement = SelectedVssSourceReplayMeasurement::prepare()?;
+    let work_ledger = derive_selected_vss_base_phase_work_ledger()?;
+    let retained_input_byte_length = measurement.retained_input_byte_length()?;
+    let nonzero_source_coefficient_count = measurement.nonzero_source_coefficient_count()?;
+    if measurement.logical_root_count() != 112 || nonzero_source_coefficient_count == 0 {
+        return Err("selected VSS measurement source geometry is incomplete".to_owned());
+    }
+    let (checksum, elapsed_nanoseconds) = measure_elapsed_nanoseconds(|| {
+        let mut checksum = 0xcbf2_9ce4_8422_2325_u64;
+        for iteration_ordinal in 0..SOURCE_REPLAY_ITERATION_COUNT {
+            let coefficients = measurement.replay_once()?;
+            black_box(&coefficients);
+            let middle_ordinal = coefficients.len() / 2;
+            let sampled_value = coefficients
+                .first()
+                .ok_or_else(|| "selected VSS source replay is empty".to_owned())?
+                .canonical()
+                ^ coefficients[middle_ordinal].canonical().rotate_left(21)
+                ^ coefficients
+                    .last()
+                    .ok_or_else(|| "selected VSS source replay is empty".to_owned())?
+                    .canonical()
+                    .rotate_left(42)
+                ^ u64::try_from(coefficients.len())
+                    .map_err(|_| "source-replay value count exceeds u64".to_owned())?;
+            let ordinal = u64::try_from(iteration_ordinal)
+                .map_err(|_| "source-replay iteration ordinal exceeds u64".to_owned())?;
+            checksum = checksum
+                .rotate_left(17)
+                .wrapping_add(sampled_value)
+                .wrapping_add(ordinal.wrapping_mul(0x9e37_79b1_85eb_ca87))
+                .wrapping_mul(0x1000_0000_01b3);
+        }
+        Ok(checksum)
+    })?;
+    black_box(checksum);
+    let replay_buffer_byte_length = u64::try_from(measurement.trace_value_count())
+        .ok()
+        .and_then(|count| count.checked_mul(size_of::<ProofBaseFieldElement>() as u64))
+        .ok_or_else(|| "selected VSS replay buffer size overflowed".to_owned())?;
+    Ok(PrimitiveMeasurementRecord {
+        schema_version: MEASUREMENT_SCHEMA_VERSION,
+        case_identifier: 5,
+        case_name: "selected-vss-source-replay",
+        execution_target: execution_target(),
+        iteration_count: SOURCE_REPLAY_ITERATION_COUNT as u64,
+        elapsed_nanoseconds,
+        modeled_peak_live_byte_length: retained_input_byte_length
+            .checked_add(replay_buffer_byte_length)
+            .ok_or_else(|| "selected VSS source-replay live set overflowed".to_owned())?,
+        checksum_hex: format!("{checksum:016x}"),
+        dimensions: vec![
+            dimension("logicalRootCount", measurement.logical_root_count())?,
+            dimension("traceValueCount", measurement.trace_value_count())?,
+            dimension("columnOrdinal", measurement.column_ordinal() as usize)?,
+            PrimitiveMeasurementDimension {
+                name: "nonzeroSourceCoefficientCount",
+                value: nonzero_source_coefficient_count,
+            },
+            PrimitiveMeasurementDimension {
+                name: "retainedInputByteLength",
+                value: retained_input_byte_length,
+            },
+            dimension_u64(
+                "basePhaseMaterializationPassCount",
+                work_ledger.materialization_pass_count,
+            ),
+            dimension_u64("basePhaseRowCount", work_ledger.row_count),
+            dimension_u64("basePhaseLaneCount", work_ledger.lane_count),
+            dimension_u64(
+                "basePhaseOpeningQueryCount",
+                work_ledger.opening_query_count,
+            ),
+            dimension_u64(
+                "aggregateWidePadQueryCount",
+                work_ledger.aggregate_wide_pad_query_count,
+            ),
+            dimension_u64(
+                "basePhaseLogicalChunkCountPerLane",
+                work_ledger.logical_chunk_count_per_lane,
+            ),
+            dimension_u64(
+                "basePhaseDirectSourceChunkCountPerLane",
+                work_ledger.direct_source_chunk_count_per_lane,
+            ),
+            dimension_u64(
+                "basePhaseDirectSourceColumnCountPerLane",
+                work_ledger.direct_source_column_count_per_lane,
+            ),
+            dimension_u64(
+                "basePhaseCoefficientChunkCountPerSource",
+                work_ledger.coefficient_chunk_count_per_source,
+            ),
+            dimension_u64(
+                "basePhaseReversedSourceChunkCountPerLane",
+                work_ledger.reversed_source_chunk_count_per_lane,
+            ),
+            dimension_u64(
+                "basePhaseSourceReplayCount",
+                work_ledger.source_replay_count,
+            ),
+            dimension_u64(
+                "basePhaseBoundSourceReplayCount",
+                work_ledger.bound_source_replay_count,
+            ),
+            dimension_u64(
+                "basePhaseProverSourceReplayCount",
+                work_ledger.prover_source_replay_count,
+            ),
+            dimension_u64(
+                "basePhaseReversedPolynomialReconstructionCount",
+                work_ledger.reversed_polynomial_reconstruction_count,
+            ),
+            dimension_u64("basePhaseLaneDftCount", work_ledger.lane_dft_count),
+            dimension_u64("basePhaseButterflyCount", work_ledger.butterfly_count),
+            dimension_u64(
+                "basePhaseCosetMultiplicationCount",
+                work_ledger.coset_multiplication_count,
+            ),
+            dimension_u64(
+                "basePhaseColumnValueDeliveryCount",
+                work_ledger.column_value_delivery_count,
+            ),
+            dimension_u64(
+                "basePhaseTransportedValueByteLength",
+                work_ledger.transported_value_byte_length,
+            ),
+            dimension_u64(
+                "basePhaseLeafHashQueryCount",
+                work_ledger.leaf_hash_query_count,
+            ),
+            dimension_u64(
+                "basePhaseSaltedLeafKeccakPermutationCount",
+                work_ledger.salted_leaf_keccak_permutation_count,
+            ),
+            dimension_u64(
+                "basePhaseMerkleParentHashQueryCount",
+                work_ledger.merkle_parent_hash_query_count,
+            ),
+            dimension_u64(
+                "basePhasePrivateLeafSaltDerivationCount",
+                work_ledger.private_leaf_salt_derivation_count,
+            ),
+        ],
+    })
+}
+
+fn measure_selected_vss_production_weighted_source_replay()
+-> Result<PrimitiveMeasurementRecord, String> {
+    let measurement = SelectedVssSourceReplayMeasurement::prepare()?;
+    let work_ledger = derive_selected_vss_base_phase_work_ledger()?;
+    let retained_input_byte_length = measurement.retained_input_byte_length()?;
+    let production_recipe_count = measurement.production_recipe_count();
+    if u64::try_from(production_recipe_count).ok()
+        != Some(work_ledger.direct_source_column_count_per_lane)
+        || work_ledger.reversed_source_chunk_count_per_lane != 0
+        || work_ledger.reversed_polynomial_reconstruction_count != 0
+    {
+        return Err(format!(
+            "selected VSS production replay catalog does not match the base phase: recipes={production_recipe_count}, columns={}, chunks={}, reversed={}, reconstructions={}",
+            work_ledger.direct_source_column_count_per_lane,
+            work_ledger.direct_source_chunk_count_per_lane,
+            work_ledger.reversed_source_chunk_count_per_lane,
+            work_ledger.reversed_polynomial_reconstruction_count,
+        ));
+    }
+    let (checksum, elapsed_nanoseconds) =
+        measure_elapsed_nanoseconds(|| measurement.replay_production_recipe_catalog_once())?;
+    black_box(checksum);
+    let replay_buffer_byte_length = u64::try_from(measurement.trace_value_count())
+        .ok()
+        .and_then(|count| count.checked_mul(size_of::<ProofBaseFieldElement>() as u64))
+        .ok_or_else(|| "selected VSS production replay buffer size overflowed".to_owned())?;
+    let root_pass_source_catalog_pass_count = work_ledger
+        .lane_count
+        .checked_mul(work_ledger.coefficient_chunk_count_per_source)
+        .ok_or_else(|| "selected VSS root source-catalog pass count overflowed".to_owned())?;
+    let current_two_pass_source_catalog_pass_count = root_pass_source_catalog_pass_count
+        .checked_mul(work_ledger.materialization_pass_count)
+        .ok_or_else(|| "selected VSS source-catalog pass count overflowed".to_owned())?;
+    Ok(PrimitiveMeasurementRecord {
+        schema_version: MEASUREMENT_SCHEMA_VERSION,
+        case_identifier: 8,
+        case_name: "selected-vss-production-weighted-source-replay",
+        execution_target: execution_target(),
+        iteration_count: PRODUCTION_WEIGHTED_SOURCE_REPLAY_ITERATION_COUNT as u64,
+        elapsed_nanoseconds,
+        modeled_peak_live_byte_length: retained_input_byte_length
+            .checked_add(replay_buffer_byte_length)
+            .ok_or_else(|| "selected VSS production replay live set overflowed".to_owned())?,
+        checksum_hex: format!("{checksum:016x}"),
+        dimensions: vec![
+            dimension("logicalRootCount", measurement.logical_root_count())?,
+            dimension("traceValueCount", measurement.trace_value_count())?,
+            dimension("productionRecipeCount", production_recipe_count)?,
+            PrimitiveMeasurementDimension {
+                name: "retainedInputByteLength",
+                value: retained_input_byte_length,
+            },
+            dimension_u64(
+                "basePhaseDirectSourceChunkCountPerLane",
+                work_ledger.direct_source_chunk_count_per_lane,
+            ),
+            dimension_u64(
+                "basePhaseDirectSourceColumnCountPerLane",
+                work_ledger.direct_source_column_count_per_lane,
+            ),
+            dimension_u64(
+                "basePhaseCoefficientChunkCountPerSource",
+                work_ledger.coefficient_chunk_count_per_source,
+            ),
+            dimension_u64(
+                "basePhaseReversedSourceChunkCountPerLane",
+                work_ledger.reversed_source_chunk_count_per_lane,
+            ),
+            dimension_u64(
+                "basePhaseRootPassSourceCatalogPassCount",
+                root_pass_source_catalog_pass_count,
+            ),
+            dimension_u64(
+                "basePhaseCurrentTwoPassSourceCatalogPassCount",
+                current_two_pass_source_catalog_pass_count,
+            ),
+        ],
+    })
+}
+
+fn measure_authenticated_scratch_record_codec() -> Result<PrimitiveMeasurementRecord, String> {
+    let mut plaintext = Vec::new();
+    plaintext
+        .try_reserve_exact(MAXIMUM_LOCAL_RECORD_PLAINTEXT_BYTE_LENGTH)
+        .map_err(|_| "authenticated scratch-record input allocation failed".to_owned())?;
+    for byte_ordinal in 0..MAXIMUM_LOCAL_RECORD_PLAINTEXT_BYTE_LENGTH {
+        let ordinal = u64::try_from(byte_ordinal)
+            .map_err(|_| "authenticated scratch-record byte ordinal exceeds u64".to_owned())?;
+        plaintext.push(ordinal.wrapping_mul(131).wrapping_add(17) as u8);
+    }
+    if plaintext.iter().all(|byte| *byte == 0) {
+        return Err("authenticated scratch-record input is degenerate".to_owned());
+    }
+    let (
+        (checksum, canonical_envelope_byte_length, modeled_peak_live_byte_length),
+        elapsed_nanoseconds,
+    ) = measure_elapsed_nanoseconds(|| {
+        measure_common_proof_scratch_record_codec(
+            &plaintext,
+            AUTHENTICATED_SCRATCH_RECORD_ITERATION_COUNT,
+        )
+        .map_err(|error| format!("authenticated scratch-record codec refused: {error:?}"))
+    })?;
+    black_box(checksum);
+    Ok(PrimitiveMeasurementRecord {
+        schema_version: MEASUREMENT_SCHEMA_VERSION,
+        case_identifier: 6,
+        case_name: "authenticated-scratch-record-codec",
+        execution_target: execution_target(),
+        iteration_count: AUTHENTICATED_SCRATCH_RECORD_ITERATION_COUNT as u64,
+        elapsed_nanoseconds,
+        modeled_peak_live_byte_length: u64::try_from(modeled_peak_live_byte_length)
+            .map_err(|_| "authenticated scratch-record live set exceeds u64".to_owned())?,
+        checksum_hex: format!("{checksum:016x}"),
+        dimensions: vec![
+            dimension("plaintextByteLength", plaintext.len())?,
+            dimension(
+                "canonicalEnvelopeByteLength",
+                canonical_envelope_byte_length,
+            )?,
+            dimension(
+                "roundTripCount",
+                AUTHENTICATED_SCRATCH_RECORD_ITERATION_COUNT,
+            )?,
+        ],
+    })
+}
+
+fn derive_primitive_measurement(
+    case_identifier: u32,
+) -> Result<PrimitiveMeasurementRecord, String> {
+    match case_identifier {
+        1 => measure_lane_dft(),
+        2 => measure_salted_phase_leaf(),
+        3 => measure_private_leaf_salt_derivation(),
+        4 => measure_five_level_digest_carry(),
+        5 => measure_selected_vss_source_replay(),
+        6 => measure_authenticated_scratch_record_codec(),
+        7 => measure_selected_vss_checkpoint_opening_lane_dfts(),
+        8 => measure_selected_vss_production_weighted_source_replay(),
+        _ => Err("primitive measurement case is unsupported".to_owned()),
+    }
+}
+
+pub(crate) fn run_primitive_measurement(case_identifier: u32) -> Result<Vec<u8>, String> {
+    serde_json::to_vec(&derive_primitive_measurement(case_identifier)?)
+        .map_err(|_| "primitive measurement record serialization failed".to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run_and_validate(case_identifier: u32, expected_case_name: &str) {
+        let first = run_primitive_measurement(case_identifier)
+            .expect("the selected primitive measurement completes");
+        let record: serde_json::Value =
+            serde_json::from_slice(&first).expect("the primitive measurement record decodes");
+        assert_eq!(record["schemaVersion"], MEASUREMENT_SCHEMA_VERSION);
+        assert_eq!(record["caseIdentifier"], case_identifier);
+        assert_eq!(record["caseName"], expected_case_name);
+        assert_eq!(record["executionTarget"], "release-native");
+        assert!(
+            record["elapsedNanoseconds"]
+                .as_u64()
+                .is_some_and(|value| value > 0)
+        );
+        assert!(
+            record["modeledPeakLiveByteLength"]
+                .as_u64()
+                .is_some_and(|value| value > 0)
+        );
+        assert_ne!(record["checksumHex"], "0000000000000000");
+        assert!(
+            record["dimensions"]
+                .as_array()
+                .is_some_and(|rows| !rows.is_empty())
+        );
+        println!(
+            "primitive measurement: {}",
+            String::from_utf8(first).expect("the primitive measurement record is UTF-8")
+        );
+    }
+
+    #[test]
+    fn primitive_measurement_refuses_unknown_case() {
+        assert_eq!(
+            run_primitive_measurement(0),
+            Err("primitive measurement case is unsupported".to_owned())
+        );
+        assert_eq!(
+            run_primitive_measurement(u32::MAX),
+            Err("primitive measurement case is unsupported".to_owned())
+        );
+    }
+
+    #[test]
+    #[ignore = "guarded release-native bounded lane DFT measurement"]
+    fn selected_bounded_lane_dft_emits_measurement() {
+        run_and_validate(1, "bounded-phase-lane-dft");
+    }
+
+    #[test]
+    #[ignore = "guarded release-native salted phase-leaf measurement"]
+    fn selected_salted_phase_leaf_emits_measurement() {
+        run_and_validate(2, "salted-phase-column-leaf");
+    }
+
+    #[test]
+    #[ignore = "guarded release-native private leaf-salt measurement"]
+    fn selected_private_leaf_salt_derivation_emits_measurement() {
+        run_and_validate(3, "private-leaf-salt-kmac");
+    }
+
+    #[test]
+    #[ignore = "guarded release-native digest-carry measurement"]
+    fn selected_five_level_digest_carry_emits_measurement() {
+        run_and_validate(4, "five-level-digest-carry");
+    }
+
+    #[test]
+    #[ignore = "guarded release-native VSS source-replay measurement"]
+    fn selected_vss_source_replay_emits_measurement() {
+        run_and_validate(5, "selected-vss-source-replay");
+    }
+
+    #[test]
+    #[ignore = "guarded release-native authenticated scratch-record codec measurement"]
+    fn selected_authenticated_scratch_record_codec_emits_measurement() {
+        run_and_validate(6, "authenticated-scratch-record-codec");
+    }
+
+    #[test]
+    #[ignore = "guarded release-native selected VSS checkpoint-opening lane-DFT measurement"]
+    fn selected_vss_checkpoint_opening_lane_dfts_emit_measurement() {
+        run_and_validate(7, "selected-vss-checkpoint-opening-lane-dfts");
+    }
+
+    #[test]
+    #[ignore = "guarded release-native production-weighted VSS source-replay measurement"]
+    fn selected_vss_production_weighted_source_replay_emits_measurement() {
+        run_and_validate(8, "selected-vss-production-weighted-source-replay");
+    }
+}

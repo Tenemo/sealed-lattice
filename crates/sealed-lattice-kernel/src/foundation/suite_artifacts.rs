@@ -18,8 +18,8 @@ use super::{
 use crate::bgv::{
     direct_ballots::{
         PAIR_CHARACTER_AUXILIARY_COUNT, PAIR_CHARACTER_CIPHERTEXT_COUNT, PAIR_CHARACTER_LANE_COUNT,
-        PAIR_CHARACTER_LANE_DEGREE, pair_character_lane_value, pair_character_plaintexts,
-        selected_pair_character_lane_assignments,
+        PAIR_CHARACTER_LANE_DEGREE, pair_character_lane_assignments, pair_character_lane_value,
+        pair_character_plaintexts,
     },
     evaluator::program::selected_evaluator_program_set,
     evaluator::top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL,
@@ -66,6 +66,10 @@ pub(crate) struct EncoderAndBallotLayout {
 
 impl EncoderAndBallotLayout {
     pub(crate) fn selected() -> SchemaResult<Self> {
+        Self::for_option_count(FOUNDATION_PROFILE.option_count)
+    }
+
+    pub(crate) fn for_option_count(option_count: u16) -> SchemaResult<Self> {
         validate_supported_algebraic_parameters().map_err(|_| invalid_selected_artifact())?;
         let artifact = Self {
             polynomial_degree: u32::try_from(POLYNOMIAL_DEGREE)
@@ -81,11 +85,11 @@ impl EncoderAndBallotLayout {
                 .map_err(|_| invalid_selected_artifact())?,
             auxiliary_count: u16::try_from(PAIR_CHARACTER_AUXILIARY_COUNT)
                 .map_err(|_| invalid_selected_artifact())?,
-            option_count: FOUNDATION_PROFILE.option_count,
+            option_count,
             minimum_score: FOUNDATION_PROFILE.minimum_score,
             maximum_score: FOUNDATION_PROFILE.maximum_score,
             pair_difference_rule: LOWER_MINUS_HIGHER_PAIR_DIFFERENCE_RULE,
-            ordered_pair_character_assignments: selected_pair_character_assignment_catalog()?,
+            ordered_pair_character_assignments: pair_character_assignment_catalog(option_count)?,
         };
         artifact.validate()?;
         Ok(artifact)
@@ -152,23 +156,27 @@ impl EncoderAndBallotLayout {
             || usize::from(self.lane_count) != PAIR_CHARACTER_LANE_COUNT
             || usize::from(self.ciphertext_count) != PAIR_CHARACTER_CIPHERTEXT_COUNT
             || usize::from(self.auxiliary_count) != PAIR_CHARACTER_AUXILIARY_COUNT
-            || self.option_count != FOUNDATION_PROFILE.option_count
+            || !(super::MINIMUM_CONFIGURABLE_OPTION_COUNT
+                ..=super::MAXIMUM_CONFIGURABLE_OPTION_COUNT)
+                .contains(&self.option_count)
             || self.minimum_score != FOUNDATION_PROFILE.minimum_score
             || self.maximum_score != FOUNDATION_PROFILE.maximum_score
             || self.minimum_score > self.maximum_score
             || self.pair_difference_rule != LOWER_MINUS_HIGHER_PAIR_DIFFERENCE_RULE
             || self.ordered_pair_character_assignments
-                != selected_pair_character_assignment_catalog()?
+                != pair_character_assignment_catalog(self.option_count)?
         {
             return Err(invalid_selected_artifact());
         }
-        require_pair_character_ballot_codec_layout()?;
+        if self.option_count == FOUNDATION_PROFILE.option_count {
+            require_pair_character_ballot_codec_layout(self.option_count)?;
+        }
         Ok(())
     }
 }
 
-fn selected_pair_character_assignment_catalog() -> SchemaResult<Vec<u16>> {
-    Ok(selected_pair_character_lane_assignments()
+fn pair_character_assignment_catalog(option_count: u16) -> SchemaResult<Vec<u16>> {
+    Ok(pair_character_lane_assignments(usize::from(option_count))
         .map_err(|_| invalid_selected_artifact())?
         .into_iter()
         .flat_map(|assignment| {
@@ -182,8 +190,8 @@ fn selected_pair_character_assignment_catalog() -> SchemaResult<Vec<u16>> {
         .collect::<Vec<_>>())
 }
 
-fn require_pair_character_ballot_codec_layout() -> SchemaResult<()> {
-    let option_count = usize::from(FOUNDATION_PROFILE.option_count);
+fn require_pair_character_ballot_codec_layout(option_count: u16) -> SchemaResult<()> {
+    let option_count = usize::from(option_count);
     let score_bucket_count = u64::from(
         FOUNDATION_PROFILE
             .maximum_score
@@ -208,7 +216,7 @@ fn require_pair_character_ballot_codec_layout() -> SchemaResult<()> {
         pair_character_plaintexts(&discriminating_scores, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE)
             .map_err(|_| invalid_selected_artifact())?;
     let assignments =
-        selected_pair_character_lane_assignments().map_err(|_| invalid_selected_artifact())?;
+        pair_character_lane_assignments(option_count).map_err(|_| invalid_selected_artifact())?;
     for (ciphertext_ordinal, plaintext) in plaintexts
         .iter()
         .enumerate()
@@ -691,6 +699,27 @@ mod tests {
                     RefusalReason::UnsupportedVersionOrSuite
                 );
             }
+        }
+    }
+
+    #[test]
+    fn encoder_layout_derives_every_configurable_option_count() {
+        let limits = CanonicalDecodeLimits::default();
+        for option_count in super::super::MINIMUM_CONFIGURABLE_OPTION_COUNT
+            ..=super::super::MAXIMUM_CONFIGURABLE_OPTION_COUNT
+        {
+            let artifact = EncoderAndBallotLayout::for_option_count(option_count)
+                .expect("bounded encoder layout derives");
+            let expected_pair_count = usize::from(option_count) * usize::from(option_count - 1) / 2;
+            assert_eq!(
+                artifact.ordered_pair_character_assignments.len(),
+                expected_pair_count * 4
+            );
+            let encoded = artifact.clone().encode().expect("encoder layout encodes");
+            assert_eq!(
+                EncoderAndBallotLayout::decode(&encoded, &limits).expect("encoder layout decodes"),
+                artifact
+            );
         }
     }
 

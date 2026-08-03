@@ -4,7 +4,7 @@ use crate::{
         POLYNOMIAL_DEGREE,
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    foundation::FOUNDATION_PROFILE,
+    foundation::{MAXIMUM_CONFIGURABLE_OPTION_COUNT, MINIMUM_CONFIGURABLE_OPTION_COUNT},
 };
 
 use super::{SCATTER_KEY_LEVEL, SELECTED_EVALUATOR_WORKING_LEVEL, TRACE_KEY_LEVEL};
@@ -122,7 +122,9 @@ pub(crate) fn compose_galois_path(path: &[usize]) -> CanonicalResult<usize> {
 pub(crate) fn selected_evaluator_rotation_key_schedule(
     option_count: usize,
 ) -> CanonicalResult<Vec<(usize, usize)>> {
-    if option_count != usize::from(FOUNDATION_PROFILE.option_count)
+    if !(usize::from(MINIMUM_CONFIGURABLE_OPTION_COUNT)
+        ..=usize::from(MAXIMUM_CONFIGURABLE_OPTION_COUNT))
+        .contains(&option_count)
         || SELECTED_EVALUATOR_WORKING_LEVEL + 1 != crate::bgv::parameters::DATA_PRIMES.len()
         || TRACE_KEY_LEVEL >= SELECTED_EVALUATOR_WORKING_LEVEL
         || SCATTER_KEY_LEVEL >= TRACE_KEY_LEVEL
@@ -212,7 +214,7 @@ mod tests {
     #[test]
     fn selected_rotation_catalog_has_exact_levels_and_compositions() {
         assert_eq!(
-            selected_evaluator_rotation_key_schedule(20).unwrap(),
+            selected_evaluator_rotation_key_schedule(10).unwrap(),
             vec![
                 (15, 14),
                 (19, 14),
@@ -222,7 +224,8 @@ mod tests {
                 (8_193, 18),
             ]
         );
-        assert!(selected_evaluator_rotation_key_schedule(19).is_err());
+        assert!(selected_evaluator_rotation_key_schedule(1).is_err());
+        assert!(selected_evaluator_rotation_key_schedule(21).is_err());
         validate_selected_rotation_topology().unwrap();
         assert_eq!(
             TRACE_GALOIS_PATHS

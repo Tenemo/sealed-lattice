@@ -703,8 +703,11 @@ fn verify_record(record: &StaticResourceAccountingRecord) -> Result<(), String> 
             > record.caps.automatic_proof_wasm_resident_byte_length
         || record.caps.automatic_proof_wasm_resident_byte_length
             > record.caps.maximum_proof_wasm_resident_byte_length
-        || record.candidate_input.participant_count != 10
-        || record.ordered_proof_variants.len() != 31
+        || record.candidate_input.participant_count != FOUNDATION_PROFILE.participant_count
+        || record.candidate_input.option_count != FOUNDATION_PROFILE.option_count
+        || record.ordered_proof_variants.len()
+            != FIRST_PROFILE_APPLICATION_FAMILIES.len() - 1
+                + usize::from(FOUNDATION_PROFILE.option_count)
         || record.complete_action.ordered_proof_families.len()
             != FIRST_PROFILE_APPLICATION_FAMILIES.len()
         || record.complete_action.physical_proof_count != 103
@@ -1257,8 +1260,19 @@ mod tests {
         let record = derive_static_resource_accounting_record()
             .expect("selected static resource accounting derives without missing carriers");
         verify_record(&record).expect("selected static resource accounting closes");
-        assert_eq!(record.candidate_input.participant_count, 10);
-        assert_eq!(record.ordered_proof_variants.len(), 31);
+        assert_eq!(
+            record.candidate_input.participant_count,
+            FOUNDATION_PROFILE.participant_count
+        );
+        assert_eq!(
+            record.candidate_input.option_count,
+            FOUNDATION_PROFILE.option_count
+        );
+        assert_eq!(
+            record.ordered_proof_variants.len(),
+            FIRST_PROFILE_APPLICATION_FAMILIES.len() - 1
+                + usize::from(FOUNDATION_PROFILE.option_count)
+        );
         assert_eq!(
             record.caps.nominal_proof_byte_length,
             u64::try_from(NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH)

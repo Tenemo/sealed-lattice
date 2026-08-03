@@ -1,48 +1,47 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-    classifyRustTestInventory,
-    parseLibtestListOutput,
-} from '#tools/ci/rust-test-inventory';
+import { buildRustTestInventoryArguments } from '#tools/ci/rust-test-inventory';
 
-describe('Rust test inventory', () => {
-    it('parses CRLF output, removes duplicates, and ignores Cargo summary noise', () => {
-        const parsedTests = parseLibtestListOutput(
-            [
-                'foundation::tests::ordinary: test',
-                'foundation::tests::ignored: test',
-                'foundation::tests::ordinary: test',
-                '',
-                '2 tests, 0 benchmarks',
-                'Doc-tests sealed_lattice_kernel',
-                '',
-            ].join('\r\n'),
-        );
-
-        expect(parsedTests).toEqual([
-            'foundation::tests::ignored',
-            'foundation::tests::ordinary',
+describe('Rust test inventory command', () => {
+    it('uses the owning release profile and feature set for measurement inventory', () => {
+        expect(
+            buildRustTestInventoryArguments({
+                cargoFeatures: ['primitive-measurement-evidence'],
+                ignoredOnly: true,
+                useReleaseProfile: true,
+            }),
+        ).toEqual([
+            'test',
+            '--locked',
+            '-p',
+            'sealed-lattice-kernel',
+            '--release',
+            '--features',
+            'primitive-measurement-evidence',
+            '--',
+            '--ignored',
+            '--list',
+            '--format',
+            'terse',
         ]);
     });
 
-    it('classifies only names present in the ignored inventory as ignored', () => {
+    it('keeps ordinary inventory in the test profile without an empty feature argument', () => {
         expect(
-            classifyRustTestInventory({
-                allTests: [
-                    'foundation::tests::ignored',
-                    'foundation::tests::ordinary',
-                ],
-                ignoredTests: ['foundation::tests::ignored'],
+            buildRustTestInventoryArguments({
+                cargoFeatures: [],
+                ignoredOnly: false,
             }),
         ).toEqual([
-            {
-                ignored: true,
-                testName: 'foundation::tests::ignored',
-            },
-            {
-                ignored: false,
-                testName: 'foundation::tests::ordinary',
-            },
+            'test',
+            '--locked',
+            '-p',
+            'sealed-lattice-kernel',
+            '--',
+            '--include-ignored',
+            '--list',
+            '--format',
+            'terse',
         ]);
     });
 });

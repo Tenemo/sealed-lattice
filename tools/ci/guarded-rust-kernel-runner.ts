@@ -82,11 +82,13 @@ export const buildGuardedRustEnvironment = (input: {
 const cargoTestArgumentsForGuardedRustFilter = (
     testFilter: string,
     cargoFeatures: readonly string[] = [],
+    useReleaseProfile = false,
 ): readonly string[] => [
     'test',
     '--locked',
     '-p',
     'sealed-lattice-kernel',
+    ...(useReleaseProfile ? ['--release'] : []),
     ...(cargoFeatures.length === 0
         ? []
         : ['--features', cargoFeatures.join(',')]),
@@ -106,6 +108,7 @@ export const buildGuardedRustKernelCommand = (
         readonly runName: string;
         readonly targetDirectoryPath: string;
         readonly cargoFeatures?: readonly string[];
+        readonly useReleaseProfile?: boolean;
     },
 ): BuiltGuardedRustKernelCommand => {
     const memoryLimitGigabytes =
@@ -115,6 +118,7 @@ export const buildGuardedRustKernelCommand = (
             args: cargoTestArgumentsForGuardedRustFilter(
                 testFilter,
                 input.cargoFeatures ?? [],
+                input.useReleaseProfile ?? false,
             ),
             command: 'cargo',
             description: `cargo test ${testFilter} (guarded)`,
@@ -126,7 +130,7 @@ export const buildGuardedRustKernelCommand = (
         progressLabel: input.progressLabel,
         setupMessages: [
             `${input.runName}: filter [${testFilter}], 1 serialized test thread; ` +
-                `hard inherited process-memory ceiling ${memoryLimitGigabytes} GiB.`,
+                `${input.useReleaseProfile === true ? 'release' : 'test'} profile; hard inherited process-memory ceiling ${memoryLimitGigabytes} GiB.`,
             `Pinned target directory: ${input.targetDirectoryPath}. Incremental compilation: on. Run logs stay under logs/.`,
         ],
     };

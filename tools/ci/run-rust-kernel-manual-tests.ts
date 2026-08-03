@@ -1,3 +1,4 @@
+import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import {
@@ -8,6 +9,7 @@ import {
     verifyGuardedRustProcessMemoryGuardCommand,
 } from './guarded-rust-kernel-runner.js';
 import { runWithLocalRunLog, type ActiveLocalRunLog } from './local-run-log.js';
+import { parseReleaseNativePrimitiveMeasurementOutput } from './primitive-measurement-evidence.js';
 import { runCommandsInSeries, type CommandInvocation } from './run-command.js';
 import {
     focusedRustLaneScripts,
@@ -37,7 +39,7 @@ const laneLabels = {
 
 const laneCargoFeatures = {
     'rust-full-profile-evidence': [],
-    'rust-measurements': [],
+    'rust-measurements': ['primitive-measurement-evidence'],
     'rust-phase-liveness-evidence': [],
     'rust-theorem-evidence': ['theorem-evidence'],
 } as const satisfies Record<ManualRustKernelLane, readonly string[]>;
@@ -51,6 +53,7 @@ type ManualRustLaneSelectionVerifier = (input: {
     readonly lane: ManualRustKernelLane;
     readonly runLog?: ActiveLocalRunLog;
     readonly testFilter: string;
+    readonly useReleaseProfile?: boolean;
 }) => Promise<void>;
 
 const resolveManualRustKernelTestFilters = (input: {
@@ -95,6 +98,7 @@ export const preflightAndRunManualRustKernelLane = async (input: {
         testFilters: readonly string[],
     ) => Promise<void>;
     readonly runLog?: ActiveLocalRunLog;
+    readonly useReleaseProfile?: boolean;
     readonly verifyLaneSelection?: ManualRustLaneSelectionVerifier;
 }): Promise<void> => {
     const testFilters = resolveManualRustKernelTestFilters({
@@ -105,26 +109,31 @@ export const preflightAndRunManualRustKernelLane = async (input: {
         lane: input.lane,
     });
 
-    const verifyLaneSelection =
-        input.verifyLaneSelection ?? verifyFocusedRustLaneSelection;
-    for (const testFilter of testFilters) {
-        await verifyLaneSelection({
-            ...(input.cargoFeatures === undefined
-                ? {}
-                : { cargoFeatures: input.cargoFeatures }),
-            ...(input.environment === undefined
-                ? {}
-                : { environment: input.environment }),
-            ...(input.inventoryCommandTransform === undefined
-                ? {}
-                : {
-                      inventoryCommandTransform:
-                          input.inventoryCommandTransform,
-                  }),
-            lane: input.lane,
-            ...(input.runLog === undefined ? {} : { runLog: input.runLog }),
-            testFilter,
-        });
+    if (input.focusedFilter === undefined) {
+        const verifyLaneSelection =
+            input.verifyLaneSelection ?? verifyFocusedRustLaneSelection;
+        for (const testFilter of testFilters) {
+            await verifyLaneSelection({
+                ...(input.cargoFeatures === undefined
+                    ? {}
+                    : { cargoFeatures: input.cargoFeatures }),
+                ...(input.environment === undefined
+                    ? {}
+                    : { environment: input.environment }),
+                ...(input.inventoryCommandTransform === undefined
+                    ? {}
+                    : {
+                          inventoryCommandTransform:
+                              input.inventoryCommandTransform,
+                      }),
+                lane: input.lane,
+                ...(input.runLog === undefined ? {} : { runLog: input.runLog }),
+                testFilter,
+                ...(input.useReleaseProfile === undefined
+                    ? {}
+                    : { useReleaseProfile: input.useReleaseProfile }),
+            });
+        }
     }
 
     await input.runGuardedCommands(testFilters);
@@ -244,6 +253,8 @@ export const runRustKernelManualTests = async (): Promise<void> => {
                                 runName: label,
                                 targetDirectoryPath,
                                 cargoFeatures: laneCargoFeatures[parsed.lane],
+                                useReleaseProfile:
+                                    parsed.lane === 'rust-measurements',
                             },
                         ),
                         expectedTestFilter: testFilter,
@@ -258,7 +269,44 @@ export const runRustKernelManualTests = async (): Promise<void> => {
                     });
                 },
                 runLog,
+                useReleaseProfile: parsed.lane === 'rust-measurements',
             });
+            if (parsed.lane === 'rust-measurements') {
+                const evidence = parseReleaseNativePrimitiveMeasurementOutput(
+                    await readFile(
+                        path.join(runLog.runDirectoryPath, 'output.log'),
+                        'utf8',
+                    ),
+                    parsed.focusedFilter === undefined,
+                );
+                const attachmentDirectoryPath = path.join(
+                    runLog.runDirectoryPath,
+                    'attachments',
+                    'primitive-measurements',
+                );
+                await mkdir(attachmentDirectoryPath, { recursive: true });
+                const attachmentFilePath = path.join(
+                    attachmentDirectoryPath,
+                    parsed.focusedFilter === undefined
+                        ? 'release-native-primitive-measurements.json'
+                        : 'release-native-focused-primitive-measurement.json',
+                );
+                await writeFile(
+                    attachmentFilePath,
+                    `${JSON.stringify(evidence, undefined, 2)}\n`,
+                    'utf8',
+                );
+                runLog.writeEvent({
+                    details: {
+                        attachmentFilePath,
+                        caseIdentifiers: evidence.primitiveCases.map(
+                            (record) => record.caseIdentifier,
+                        ),
+                    },
+                    eventType:
+                        'release-native-primitive-measurement-evidence-written',
+                });
+            }
         },
     );
 };

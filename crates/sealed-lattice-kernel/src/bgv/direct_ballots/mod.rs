@@ -3,8 +3,9 @@ pub(crate) use request::{
     PAIR_CHARACTER_AUXILIARY_COUNT, PAIR_CHARACTER_CIPHERTEXT_COUNT, PAIR_CHARACTER_LANE_COUNT,
     PAIR_CHARACTER_LANE_DEGREE, PAIR_CHARACTER_PLAINTEXT_MODULUS, PAIR_CHARACTER_RING_DEGREE,
     PairCharacterEncoderProfileTerm, SCORE_BUCKET_COUNT, pair_character_encoder_profile_sequence,
-    pair_character_encoder_profile_terms, pair_character_lane_idempotent_coefficients,
-    pair_character_lane_value, pair_character_plaintexts, selected_pair_character_lane_assignments,
+    pair_character_encoder_profile_terms, pair_character_lane_assignments,
+    pair_character_lane_idempotent_coefficients, pair_character_lane_value,
+    pair_character_plaintexts,
 };
 
 use crate::foundation::FOUNDATION_PROFILE;

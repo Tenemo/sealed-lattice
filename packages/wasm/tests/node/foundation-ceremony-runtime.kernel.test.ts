@@ -2,6 +2,7 @@ import { resolve as resolvePath } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import {
+    configurableOptionCountRange,
     foundationProfile,
     isProtocolHash,
     refusalReasonCodes,
@@ -29,12 +30,17 @@ const permittedOpaqueBindingExports = new Set([
 
 const manifestInput = () => ({
     displayTitle: 'Wybór priorytetów',
-    optionDefinitions: Array.from({ length: 20 }, (_value, optionIndex) => ({
-        displayLabel:
-            optionIndex === 4 ? 'Cafe\u0301' : `Option ${String(optionIndex)}`,
-        optionIdentifier: `option-${String(optionIndex)}`,
-        optionIndex,
-    })),
+    optionDefinitions: Array.from(
+        { length: foundationProfile.optionCount },
+        (_value, optionIndex) => ({
+            displayLabel:
+                optionIndex === 4
+                    ? 'Cafe\u0301'
+                    : `Option ${String(optionIndex)}`,
+            optionIdentifier: `option-${String(optionIndex)}`,
+            optionIndex,
+        }),
+    ),
 });
 
 describe('foundation ceremony Rust/WASM boundary', () => {
@@ -185,13 +191,13 @@ describe('foundation ceremony Rust/WASM boundary', () => {
                 ...manifestInput(),
                 optionDefinitions: manifestInput().optionDefinitions.slice(
                     0,
-                    19,
+                    foundationProfile.optionCount - 1,
                 ),
             }),
         ).toThrow();
 
         const boundaryOptionDefinitions = Array.from(
-            { length: 20 },
+            { length: configurableOptionCountRange.maximum },
             (_value, optionIndex) => ({
                 displayLabel: `O${String(optionIndex)}`,
                 optionIdentifier: `option-${String(optionIndex)}`,
@@ -202,10 +208,20 @@ describe('foundation ceremony Rust/WASM boundary', () => {
             (total, option) => total + option.displayLabel.length,
             0,
         );
+        const boundaryNonDisplayByteLength =
+            30 +
+            36 * boundaryOptionDefinitions.length +
+            boundaryOptionDefinitions.reduce(
+                (total, option) =>
+                    total +
+                    new TextEncoder().encode(option.optionIdentifier)
+                        .byteLength,
+                0,
+            );
         const boundaryManifest = runtime.encodeManifest({
             displayTitle: 'Q'.repeat(
                 foundationProfile.maximumCopiedBufferByteLength -
-                    920 -
+                    boundaryNonDisplayByteLength -
                     optionDisplayByteLength,
             ),
             optionDefinitions: boundaryOptionDefinitions,
@@ -217,7 +233,7 @@ describe('foundation ceremony Rust/WASM boundary', () => {
             runtime.encodeManifest({
                 displayTitle: `${'Q'.repeat(
                     foundationProfile.maximumCopiedBufferByteLength -
-                        920 -
+                        boundaryNonDisplayByteLength -
                         optionDisplayByteLength,
                 )}Q`,
                 optionDefinitions: boundaryOptionDefinitions,

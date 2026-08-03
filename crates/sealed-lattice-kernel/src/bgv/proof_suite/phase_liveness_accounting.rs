@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
+    FIRST_PROFILE_APPLICATION_FAMILIES, MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
     selected_accounting::resource_accounting::{
         selected_complete_proof_resource_accounting, selected_proof_variant_resource_inventory,
     },
@@ -225,7 +225,12 @@ mod tests {
     fn construction_driven_phase_liveness_closes_every_selected_variant() {
         let accounting = derive_selected_complete_action_phase_liveness_accounting()
             .expect("construction-driven phase liveness derives");
-        assert_eq!(accounting.ordered_variants().len(), 31);
+        let selected_construction_variant_count = FIRST_PROFILE_APPLICATION_FAMILIES.len() - 1
+            + usize::from(crate::foundation::FOUNDATION_PROFILE.option_count);
+        assert_eq!(
+            accounting.ordered_variants().len(),
+            selected_construction_variant_count
+        );
         assert_eq!(accounting.physical_proof_count(), 103);
         assert!(accounting.complete_action_proof_byte_ceiling() > 0);
         assert_eq!(

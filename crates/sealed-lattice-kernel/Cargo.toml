@@ -9,6 +9,7 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 default = []
+primitive-measurement-evidence = []
 theorem-evidence = []
 
 [dependencies]

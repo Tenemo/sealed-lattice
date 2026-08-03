@@ -54,12 +54,17 @@ describe('Selected lattice-security evidence', () => {
         ReturnType<typeof buildSelectedLatticeEstimatorInput>
     >;
     let checkedEvidence: JsonValue;
+    let validationFixture: JsonValue;
 
     beforeAll(async () => {
         expectedInput = await buildSelectedLatticeEstimatorInput();
         checkedEvidence = parseJsonValue(
             await readFile(selectedLatticeEvidencePath, 'utf8'),
         );
+        validationFixture = hostileRecord(checkedEvidence, (record) => {
+            record.input = expectedInput;
+            record.inputPayloadSha256 = canonicalJsonSha256(expectedInput);
+        });
     });
 
     it('derives the exact selected topology, sample census, and corruption cases from production source', () => {
@@ -73,7 +78,7 @@ describe('Selected lattice-security evidence', () => {
             relinearizationLevels: [22],
             targetCiphertextLevel: 7,
             participantCount: 10,
-            optionCount: 20,
+            optionCount: 10,
         });
         expect(requireArray(topology.orderedDataPrimes)).toHaveLength(23);
         expect(requireArray(topology.orderedSpecialPrimes)).toHaveLength(3);
@@ -146,9 +151,15 @@ describe('Selected lattice-security evidence', () => {
         ]);
     });
 
-    it('accepts only the pinned estimator record with complete attack coverage and candid scope', () => {
+    it('refuses the superseded estimator record after the selected option-count change', () => {
+        expect(() =>
+            validateSelectedLatticeEvidence(checkedEvidence, expectedInput),
+        ).toThrow('The estimator evidence input is stale or mismatched.');
+    });
+
+    it('validates complete attack coverage and candid scope on a synthetic current-input fixture', () => {
         const summary = validateSelectedLatticeEvidence(
-            checkedEvidence,
+            validationFixture,
             expectedInput,
         );
         expect(summary).toEqual({
@@ -156,7 +167,7 @@ describe('Selected lattice-security evidence', () => {
             minimumQuantumSecurityBitsLowerBound: 123.127188561514,
         });
 
-        const input = requireRecord(requireRecord(checkedEvidence).input);
+        const input = requireRecord(requireRecord(validationFixture).input);
         expect(input.estimator).toMatchObject({
             revision: selectedLatticeEstimatorRevision,
             sourceTreeSha256: selectedLatticeEstimatorSourceTreeSha256,
@@ -174,7 +185,7 @@ describe('Selected lattice-security evidence', () => {
     });
 
     it('refuses stale inputs, altered geometry, missing attacks, invalid dimensions, and inconsistent minima', () => {
-        const wrongDigest = structuredClone(checkedEvidence) as Record<
+        const wrongDigest = structuredClone(validationFixture) as Record<
             string,
             unknown
         >;
@@ -186,7 +197,7 @@ describe('Selected lattice-security evidence', () => {
             ),
         ).toThrow('The output payload digest does not match.');
 
-        const staleInput = hostileRecord(checkedEvidence, (record) => {
+        const staleInput = hostileRecord(validationFixture, (record) => {
             const input = requireRecord(record.input);
             const topology = requireRecord(input.topology);
             topology.polynomialDegree = 16_384;
@@ -195,7 +206,7 @@ describe('Selected lattice-security evidence', () => {
             validateSelectedLatticeEvidence(staleInput, expectedInput),
         ).toThrow('The estimator evidence input is stale or mismatched.');
 
-        const wrongModulus = hostileRecord(checkedEvidence, (record) => {
+        const wrongModulus = hostileRecord(validationFixture, (record) => {
             const firstEstimate = requireRecord(
                 requireArray(record.estimates)[0],
             );
@@ -207,7 +218,7 @@ describe('Selected lattice-security evidence', () => {
             'An estimator modulus logarithm does not match its exact input case.',
         );
 
-        const missingAttack = hostileRecord(checkedEvidence, (record) => {
+        const missingAttack = hostileRecord(validationFixture, (record) => {
             const firstEstimate = requireRecord(
                 requireArray(record.estimates)[0],
             );
@@ -220,7 +231,7 @@ describe('Selected lattice-security evidence', () => {
             validateSelectedLatticeEvidence(missingAttack, expectedInput),
         ).toThrow('classical attack coverage is incomplete or unexpected.');
 
-        const excessiveSamples = hostileRecord(checkedEvidence, (record) => {
+        const excessiveSamples = hostileRecord(validationFixture, (record) => {
             const firstEstimate = requireRecord(
                 requireArray(record.estimates)[0],
             );
@@ -236,7 +247,7 @@ describe('Selected lattice-security evidence', () => {
             validateSelectedLatticeEvidence(excessiveSamples, expectedInput),
         ).toThrow('classical dual used more scalar samples than supplied.');
 
-        const wrongMinimum = hostileRecord(checkedEvidence, (record) => {
+        const wrongMinimum = hostileRecord(validationFixture, (record) => {
             const firstEstimate = requireRecord(
                 requireArray(record.estimates)[0],
             );

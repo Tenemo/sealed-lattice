@@ -576,8 +576,13 @@ mod tests {
 
     #[test]
     fn selected_proof_family_inventory_derives_every_physical_and_logical_count() {
-        let ceilings = ProofApplicationSlotCeilings::derive(10, 1, 1, 20)
-            .expect("selected proof-family ceilings derive");
+        let ceilings = ProofApplicationSlotCeilings::derive(
+            crate::foundation::FOUNDATION_PROFILE.participant_count,
+            1,
+            1,
+            crate::foundation::SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION,
+        )
+        .expect("selected proof-family ceilings derive");
         let inventory = ceilings
             .derive_proof_family_application_inventory(6, 7)
             .expect("selected proof-family inventory derives");

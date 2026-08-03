@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::bgv::{
     direct_ballots::{
         PAIR_CHARACTER_CIPHERTEXT_COUNT, PAIR_CHARACTER_LANE_COUNT, PAIR_CHARACTER_LANE_DEGREE,
-        selected_pair_character_lane_assignments,
+        pair_character_lane_assignments,
     },
     encoding::{
         decode_plaintext_coefficients_to_extension_lanes,
@@ -16,15 +16,15 @@ use crate::bgv::{
     parameters::{PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
 };
 
-use super::{SCATTER_ROUTES, TRACE_GALOIS_PATHS, selected_plaintext_topology};
+use super::{TRACE_GALOIS_PATHS, selected_plaintext_topology};
 use crate::bgv::evaluator::program::{
     EvaluatorInstructionStream, EvaluatorOpcode, EvaluatorProgramSet,
 };
 
 #[test]
 fn compiled_scatter_routes_strictly_increasing_scores_to_direct_stable_ranks() {
-    let assignments =
-        selected_pair_character_lane_assignments().expect("selected pair-character catalog");
+    let assignments = pair_character_lane_assignments(ORACLE_OPTION_COUNT)
+        .expect("selected pair-character catalog");
     let mut traced_lanes = vec![
         vec![[0_u64; PAIR_CHARACTER_LANE_DEGREE]; PAIR_CHARACTER_LANE_COUNT];
         PAIR_CHARACTER_CIPHERTEXT_COUNT
@@ -41,9 +41,11 @@ fn compiled_scatter_routes_strictly_increasing_scores_to_direct_stable_ranks() {
         })
         .collect::<Vec<_>>();
 
-    let topology = selected_plaintext_topology().expect("selected plaintext topology");
+    let topology =
+        selected_plaintext_topology(ORACLE_OPTION_COUNT).expect("selected plaintext topology");
     let mut rank_coefficients = vec![0_u64; POLYNOMIAL_DEGREE];
-    for (route, source_masks) in SCATTER_ROUTES
+    for (route, source_masks) in topology
+        .scatter_routes
         .iter()
         .copied()
         .zip(&topology.route_source_masks)
@@ -80,20 +82,23 @@ fn compiled_scatter_routes_strictly_increasing_scores_to_direct_stable_ranks() {
 
     let observed_lanes = decode_plaintext_coefficients_to_extension_lanes(&rank_coefficients)
         .expect("scattered rank ring decodes");
-    let observed_ranks = observed_lanes[..20]
+    let observed_ranks = observed_lanes[..ORACLE_OPTION_COUNT]
         .iter()
         .map(|lane| {
             assert!(lane[1..].iter().all(|coefficient| *coefficient == 0));
             lane[0]
         })
         .collect::<Vec<_>>();
-    let expected_ranks = (0_u64..20).rev().collect::<Vec<_>>();
+    let expected_ranks = (0..ORACLE_OPTION_COUNT)
+        .rev()
+        .map(|rank| u64::try_from(rank).expect("oracle rank fits u64"))
+        .collect::<Vec<_>>();
     assert_eq!(observed_ranks, expected_ranks);
 }
 
 #[test]
 fn independent_pair_catalog_matches_every_production_orientation_lane_and_bank() {
-    let observed = selected_pair_character_lane_assignments()
+    let observed = pair_character_lane_assignments(ORACLE_OPTION_COUNT)
         .expect("selected pair-character catalog")
         .into_iter()
         .map(|assignment| {
@@ -121,10 +126,14 @@ fn independent_pair_catalog_matches_every_production_orientation_lane_and_bank()
 
 #[test]
 fn compiled_comparison_trace_matches_every_reachable_exponent_in_both_banks() {
-    let topology = selected_plaintext_topology().expect("selected plaintext topology");
+    let topology =
+        selected_plaintext_topology(ORACLE_OPTION_COUNT).expect("selected plaintext topology");
     let comparison_mask = decode_u32_coefficients(&topology.comparison_trace_mask);
     let assignments = semantic_oracle::pair_assignments();
-    assert_eq!(assignments.len(), 190);
+    assert_eq!(
+        assignments.len(),
+        ORACLE_OPTION_COUNT * (ORACLE_OPTION_COUNT - 1) / 2
+    );
     for ciphertext_ordinal in 0..ORACLE_CIPHERTEXT_COUNT {
         let active_lanes = assignments
             .iter()
@@ -168,9 +177,11 @@ fn compiled_comparison_trace_matches_every_reachable_exponent_in_both_banks() {
 
 #[test]
 fn compiled_scatter_routes_every_pair_sign_from_its_actual_source_bank() {
-    let topology = selected_plaintext_topology().expect("selected plaintext topology");
+    let topology =
+        selected_plaintext_topology(ORACLE_OPTION_COUNT).expect("selected plaintext topology");
     let mut observed_contributions = BTreeMap::<(usize, usize), Vec<(usize, u64)>>::new();
-    for (route, source_masks) in SCATTER_ROUTES
+    for (route, source_masks) in topology
+        .scatter_routes
         .iter()
         .copied()
         .zip(&topology.route_source_masks)
@@ -231,7 +242,8 @@ fn compiled_scatter_routes_every_pair_sign_from_its_actual_source_bank() {
 
 #[test]
 fn compiled_trace_and_scatter_match_direct_stable_ranks_for_the_complete_fast_matrix() {
-    let topology = selected_plaintext_topology().expect("selected plaintext topology");
+    let topology =
+        selected_plaintext_topology(ORACLE_OPTION_COUNT).expect("selected plaintext topology");
     for (case_name, scores) in fast_semantic_score_vectors() {
         let inputs = semantic_oracle::aggregate_character_inputs(&scores);
         let traced = inputs.map(|input| {
@@ -262,9 +274,7 @@ fn compiled_trace_and_scatter_match_direct_stable_ranks_for_the_complete_fast_ma
 
 #[test]
 fn compiled_plaintext_program_matches_both_direct_targets_for_every_top_count() {
-    let scores = vec![
-        90, 0, 45, 45, 12, 78, 12, 78, 1, 89, 30, 60, 30, 60, 44, 46, 44, 46, 23, 67,
-    ];
+    let scores: [u64; ORACLE_OPTION_COUNT] = [90, 0, 45, 45, 12, 78, 12, 78, 1, 89];
     let inputs = semantic_oracle::aggregate_character_inputs(&scores);
     let program = super::selected_evaluator_program_set().expect("selected evaluator program");
     let interpreter = PlaintextProgramInterpreter::new(&program);
@@ -303,7 +313,8 @@ fn execute_compiled_scatter(
     topology: &super::SelectedPlaintextTopology,
 ) -> OracleRingValue {
     let mut ranks = semantic_oracle::zero_ring_value();
-    for (route, source_masks) in SCATTER_ROUTES
+    for (route, source_masks) in topology
+        .scatter_routes
         .iter()
         .copied()
         .zip(&topology.route_source_masks)

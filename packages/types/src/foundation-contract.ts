@@ -89,6 +89,12 @@ export const configurableParticipantCountRange = Object.freeze({
     maximum: 20,
 } as const);
 
+/** Option counts for which canonical structure and formulas are defined. */
+export const configurableOptionCountRange = Object.freeze({
+    minimum: 2,
+    maximum: 20,
+} as const);
+
 export type FoundationRosterParameters = Readonly<{
     participantCount: number;
     activeFaultBound: number;
@@ -137,7 +143,7 @@ export const foundationProfile = Object.freeze({
     protocolName: 'sealed-lattice',
     protocolVersion: 1,
     ...prototypeRosterParameters,
-    optionCount: 20,
+    optionCount: 10,
     minimumScore: 1,
     maximumScore: 10,
     maximumIdentifierByteLength: 128,

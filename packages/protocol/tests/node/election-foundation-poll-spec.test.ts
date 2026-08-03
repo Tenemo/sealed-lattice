@@ -1,4 +1,8 @@
-import { foundationProfile, type PollSpecInput } from '@sealed-lattice/types';
+import {
+    configurableOptionCountRange,
+    foundationProfile,
+    type PollSpecInput,
+} from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -8,13 +12,20 @@ import {
 
 const createValidPollSpecInput = (
     overrides: Partial<PollSpecInput> = {},
-): PollSpecInput => ({
-    pollId: 'poll-2026-board',
-    question: 'Select the top priorities',
-    options: Array.from({ length: 20 }, (_value, index) => `Option ${index}`),
-    topOptionCount: 20,
-    ...overrides,
-});
+): PollSpecInput => {
+    const optionCount =
+        overrides.options?.length ?? foundationProfile.optionCount;
+    return {
+        pollId: 'poll-2026-board',
+        question: 'Select the top priorities',
+        options: Array.from(
+            { length: optionCount },
+            (_value, index) => `Option ${index}`,
+        ),
+        topOptionCount: optionCount,
+        ...overrides,
+    };
+};
 
 const expectErrorCodes = (
     input: unknown,
@@ -31,21 +42,38 @@ const expectErrorCodes = (
 };
 
 describe('pre-protocol poll input validation', () => {
-    it('accepts only the fixed twenty-option input shape', () => {
-        const input = createValidPollSpecInput();
-        const validation = validatePollSpec(input);
+    it('accepts every bounded option count and refuses counts outside the family', () => {
+        for (
+            let optionCount = configurableOptionCountRange.minimum;
+            optionCount <= configurableOptionCountRange.maximum;
+            optionCount += 1
+        ) {
+            const input = createValidPollSpecInput({
+                options: Array.from(
+                    { length: optionCount },
+                    (_value, optionIndex) => `Option ${optionIndex}`,
+                ),
+                topOptionCount: optionCount,
+            });
+            expect(validatePollSpec(input)).toEqual({
+                isValid: true,
+                normalized: input,
+            });
+        }
 
-        expect(validation).toEqual({ isValid: true, normalized: input });
         expectErrorCodes(
             createValidPollSpecInput({
-                options: input.options.slice(0, 19),
-                topOptionCount: 19,
+                options: ['Only option'],
+                topOptionCount: 1,
             }),
             ['InvalidOptionCount'],
         );
         expectErrorCodes(
             createValidPollSpecInput({
-                options: [...input.options, 'Option 20'],
+                options: Array.from(
+                    { length: configurableOptionCountRange.maximum + 1 },
+                    (_value, optionIndex) => `Option ${optionIndex}`,
+                ),
             }),
             ['InvalidOptionCount'],
         );
@@ -60,16 +88,18 @@ describe('pre-protocol poll input validation', () => {
 
         const ingress = prepareFoundationManifestIngress(validation.normalized);
         expect(ingress.displayTitle).toBe(validation.normalized.question);
-        expect(ingress.optionDefinitions).toHaveLength(20);
+        expect(ingress.optionDefinitions).toHaveLength(
+            foundationProfile.optionCount,
+        );
         expect(ingress.optionDefinitions[0]).toEqual({
             displayLabel: 'Option 0',
             optionIdentifier: 'option-0',
             optionIndex: 0,
         });
-        expect(ingress.optionDefinitions[19]).toEqual({
-            displayLabel: 'Option 19',
-            optionIdentifier: 'option-19',
-            optionIndex: 19,
+        expect(ingress.optionDefinitions[9]).toEqual({
+            displayLabel: 'Option 9',
+            optionIdentifier: 'option-9',
+            optionIndex: 9,
         });
     });
 
@@ -83,7 +113,7 @@ describe('pre-protocol poll input validation', () => {
         const secondValidation = validatePollSpec(
             createValidPollSpecInput({
                 pollId: 'display-flow-b',
-                topOptionCount: 17,
+                topOptionCount: 7,
             }),
         );
         expect(firstValidation.isValid).toBe(true);
@@ -211,7 +241,7 @@ describe('pre-protocol poll input validation', () => {
             createValidPollSpecInput({
                 question: 'Wybór priorytetów',
                 options: Array.from(
-                    { length: 20 },
+                    { length: foundationProfile.optionCount },
                     (_value, index) => `Opcja ${String(index)} ł`,
                 ),
             }),
@@ -240,16 +270,24 @@ describe('pre-protocol poll input validation', () => {
         );
 
         const optionLabels = Array.from(
-            { length: 20 },
+            { length: foundationProfile.optionCount },
             (_value, index) => `O${String(index)}`,
         );
         const optionByteLength = optionLabels.reduce(
             (total, label) => total + new TextEncoder().encode(label).length,
             0,
         );
-        // The canonical manifest has 920 non-display bytes: its tuple and
-        // list framing plus the fixed option indexes and option-N identifiers.
-        const canonicalManifestNonDisplayByteLength = 920;
+        const canonicalManifestNonDisplayByteLength =
+            30 +
+            36 * foundationProfile.optionCount +
+            Array.from(
+                { length: foundationProfile.optionCount },
+                (_value, optionIndex) => `option-${String(optionIndex)}`,
+            ).reduce(
+                (byteLength, identifier) =>
+                    byteLength + new TextEncoder().encode(identifier).length,
+                0,
+            );
         const exactBudgetValidation = validatePollSpec(
             createValidPollSpecInput({
                 options: optionLabels,
