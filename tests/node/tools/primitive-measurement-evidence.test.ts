@@ -913,6 +913,15 @@ describe('Primitive measurement evidence', () => {
         expect(
             parseDesktopBrowserPrimitiveMeasurementArguments([
                 'chromium',
+                'case-6',
+            ]),
+        ).toEqual({
+            browserEngines: ['chromium'],
+            focusedCaseIdentifiers: [6],
+        });
+        expect(
+            parseDesktopBrowserPrimitiveMeasurementArguments([
+                'chromium',
                 'case-8',
             ]),
         ).toEqual({

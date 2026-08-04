@@ -44,7 +44,7 @@ export const primitiveMeasurementRustTests = Object.freeze(
 
 export const vssFusedRadix51ProjectionOwnerRustFilter =
     'vss_fused_bound_range_projection_owners';
-const vssFusedRadix51ProjectionOwnerCaseIdentifierSet = new Set(
+const vssFusedRadix51ProjectionOwnerCaseIdentifierSet = new Set<number>(
     vssFusedRadix51ProjectionOwnerCaseIdentifiers,
 );
 
