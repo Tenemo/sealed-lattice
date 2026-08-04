@@ -554,7 +554,7 @@ enum ProofTreePhase {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CommittedMaterialRangeDesign {
     CopiedMessageColumns,
-    #[cfg(all(feature = "primitive-measurement-evidence", test))]
+    #[cfg(feature = "primitive-measurement-evidence")]
     FusedBoundColumns,
 }
 
@@ -612,7 +612,7 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
         )
     }
 
-    #[cfg(all(feature = "primitive-measurement-evidence", test))]
+    #[cfg(feature = "primitive-measurement-evidence")]
     pub(super) fn new_with_fused_bound_range_design(
         application_statement_schema_identifier: u16,
         geometry: &'context CommittedMaterialRelationPlanInput,
@@ -847,7 +847,7 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
         )
     }
 
-    #[cfg(all(feature = "primitive-measurement-evidence", test))]
+    #[cfg(feature = "primitive-measurement-evidence")]
     fn add_radix_digit_upper_bound_constraint(
         &mut self,
         ordered_digit_column_ordinals: &[u32],
@@ -1050,14 +1050,14 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
             CommittedMaterialRangeDesign::CopiedMessageColumns => {
                 self.add_selected_material_messages(ordered_roots, modulus_ordinal)
             }
-            #[cfg(all(feature = "primitive-measurement-evidence", test))]
+            #[cfg(feature = "primitive-measurement-evidence")]
             CommittedMaterialRangeDesign::FusedBoundColumns => {
                 self.add_fused_bound_material_messages(ordered_roots, modulus_ordinal)
             }
         }
     }
 
-    #[cfg(all(feature = "primitive-measurement-evidence", test))]
+    #[cfg(feature = "primitive-measurement-evidence")]
     fn add_fused_bound_material_messages(
         &mut self,
         ordered_roots: &[(usize, MaterialRootUse)],
@@ -1349,7 +1349,7 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
         if required_absolute_bound == 0 {
             return Err(RelationPlanError::InvalidBoundCertificate);
         }
-        #[cfg(all(feature = "primitive-measurement-evidence", test))]
+        #[cfg(feature = "primitive-measurement-evidence")]
         if self.range_design == CommittedMaterialRangeDesign::FusedBoundColumns {
             return self.add_direct_finite_signed_quotient_columns(
                 quotient_count,
@@ -1400,7 +1400,7 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
         Ok(quotients)
     }
 
-    #[cfg(all(feature = "primitive-measurement-evidence", test))]
+    #[cfg(feature = "primitive-measurement-evidence")]
     fn add_direct_finite_signed_quotient_columns(
         &mut self,
         quotient_count: usize,
@@ -2119,7 +2119,7 @@ enum CommittedMaterialColumnRecipe {
         digit_ordinal: usize,
         offset: u64,
     },
-    #[cfg(all(feature = "primitive-measurement-evidence", test))]
+    #[cfg(feature = "primitive-measurement-evidence")]
     RadixDigit {
         source: CommittedMaterialIntegerRecipe,
         digit_ordinal: usize,
@@ -2137,7 +2137,7 @@ impl CommittedMaterialColumnRecipe {
             Self::Integer(source) | Self::TernaryDigit { source, .. } => {
                 source.nested_allocation_byte_length()
             }
-            #[cfg(all(feature = "primitive-measurement-evidence", test))]
+            #[cfg(feature = "primitive-measurement-evidence")]
             Self::RadixDigit { source, .. } => source.nested_allocation_byte_length(),
             Self::ShiftSelector { .. } => Ok(0),
         }
@@ -2519,7 +2519,7 @@ impl<Source: CommittedMaterialTraceSource> CommittedMaterialTraceWitnessProvider
                     .ok_or(RelationPlanError::IntegerBoundOverflow)?;
                 shifted / divisor % i128::from(TERNARY_DIGIT_RADIX)
             }
-            #[cfg(all(feature = "primitive-measurement-evidence", test))]
+            #[cfg(feature = "primitive-measurement-evidence")]
             CommittedMaterialColumnRecipe::RadixDigit {
                 source,
                 digit_ordinal,
@@ -2894,10 +2894,7 @@ pub(crate) struct SelectedVssSourceReplayMeasurement {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum VssTraceWitnessLayoutDesign {
     Selected,
-    #[cfg(test)]
-    FusedBoundRange {
-        range_digit_radix: u64,
-    },
+    FusedBoundRange { range_digit_radix: u64 },
 }
 
 #[cfg(feature = "primitive-measurement-evidence")]
@@ -2929,7 +2926,6 @@ impl SelectedVssSourceReplayMeasurement {
         Self::prepare_for_relation(input, context)
     }
 
-    #[cfg(test)]
     pub(crate) fn prepare_fused_bound_range_candidate(
         range_digit_radix: u64,
     ) -> Result<Self, String> {
@@ -3025,7 +3021,6 @@ impl SelectedVssSourceReplayMeasurement {
         Ok((input, artifact, context))
     }
 
-    #[cfg(test)]
     pub(crate) fn validated_fused_bound_range_candidate_with_input(
         range_digit_radix: u64,
     ) -> Result<
@@ -3087,7 +3082,6 @@ impl SelectedVssSourceReplayMeasurement {
         Ok((input, context))
     }
 
-    #[cfg(test)]
     pub(crate) fn fused_bound_range_candidate_definition(
         range_digit_radix: u64,
     ) -> Result<(CommittedMaterialRelationPlanInput, RelationPlanCheckContext), String> {
@@ -3174,7 +3168,6 @@ impl SelectedVssSourceReplayMeasurement {
         Ok((input, context))
     }
 
-    #[cfg(test)]
     fn configure_candidate_quotient_context(
         input: &CommittedMaterialRelationPlanInput,
         context: &mut RelationPlanCheckContext,
@@ -3408,7 +3401,6 @@ impl SelectedVssSourceReplayMeasurement {
             VssTraceWitnessLayoutDesign::Selected => {
                 derive_vss_share_linkage_trace_witness_layout(&input, &context)
             }
-            #[cfg(test)]
             VssTraceWitnessLayoutDesign::FusedBoundRange { range_digit_radix } => {
                 derive_vss_fused_bound_range_trace_witness_layout(
                     &input,
@@ -3829,7 +3821,7 @@ impl<'plan> CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
         Ok(())
     }
 
-    #[cfg(all(feature = "primitive-measurement-evidence", test))]
+    #[cfg(feature = "primitive-measurement-evidence")]
     fn add_radix_digits(
         &mut self,
         source: CommittedMaterialIntegerRecipe,
@@ -3974,7 +3966,7 @@ impl<'plan> CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
         Ok(())
     }
 
-    #[cfg(all(feature = "primitive-measurement-evidence", test))]
+    #[cfg(feature = "primitive-measurement-evidence")]
     fn add_fused_bound_material_root(
         &mut self,
         logical_root_ordinal: usize,
@@ -4066,7 +4058,7 @@ impl<'plan> CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
         Ok(())
     }
 
-    #[cfg(all(feature = "primitive-measurement-evidence", test))]
+    #[cfg(feature = "primitive-measurement-evidence")]
     fn add_direct_signed_quotients(
         &mut self,
         ordered_sources: impl IntoIterator<Item = CommittedMaterialIntegerRecipe>,
@@ -4222,7 +4214,7 @@ fn derive_vss_share_linkage_trace_witness_layout(
     })
 }
 
-#[cfg(all(feature = "primitive-measurement-evidence", test))]
+#[cfg(feature = "primitive-measurement-evidence")]
 fn derive_vss_fused_bound_range_trace_witness_layout(
     input: &CommittedMaterialRelationPlanInput,
     context: &RelationPlanCheckContext,

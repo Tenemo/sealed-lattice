@@ -356,6 +356,79 @@ export const primitiveMeasurementCaseCatalog = Object.freeze([
             witnessValueCount: 2_097_152,
         }),
     }),
+    Object.freeze({
+        caseIdentifier: 11,
+        caseName: 'vss-fused-radix-51-retained-group',
+        expectedIterationCount: 1,
+        requiredDimensions: Object.freeze({
+            basePhaseRowCount: 42,
+            completeSourceMaterializationCount: 5_254,
+            completeSourceTraceValueGenerationCount: 86_081_536,
+            logicalRowChunkByteLength: 16_777_216,
+            phaseMaterializationPassCount: 2,
+            physicalRowWidth: 64,
+            productionRecipeCount: 2_627,
+            proverColumnDegreeBoundExclusive: 18_432,
+            rangeDigitRadix: 51,
+            relationPlanHashByteLength: 64,
+            replayBufferByteLength: 131_072,
+            retainedCoefficientPayloadByteLength: 9_437_184,
+            retainedRecipeCount: 64,
+            tracePackingFactor: 1,
+            traceValueCount: 16_384,
+        }),
+    }),
+    Object.freeze({
+        caseIdentifier: 12,
+        caseName: 'vss-fused-radix-51-row-lane-stripe',
+        expectedIterationCount: 1,
+        requiredDimensions: Object.freeze({
+            basePhaseRowCount: 42,
+            butterflyCountPerLane: 4_980_736,
+            coefficientChunkCount: 1,
+            coefficientFoldCountPerLane: 3_670_016,
+            completeButterflyCount: 16_575_889_408,
+            completeCoefficientFoldCount: 12_213_813_248,
+            completeColumnValueDeliveryCount: 1_744_830_464,
+            completeCosetMultiplicationCount: 1_744_830_464,
+            completeLaneDftCount: 3_328,
+            completeLeafHashQueryCount: 67_108_864,
+            completeMerkleParentHashQueryCount: 67_108_860,
+            completePhaseRowCount: 52,
+            completePrivateHighHalfValueGenerationCount: 218_103_808,
+            completePrivateLeafSaltDerivationCount: 67_108_864,
+            completeSaltedLeafKeccakPermutationCount: 201_326_592,
+            completeSourceMaterializationCount: 5_254,
+            completeSourceTraceValueGenerationCount: 86_081_536,
+            completeTransportedValueByteLength: 13_958_643_712,
+            copiedCoefficientValueCount: 1_179_648,
+            fullDomainSize: 16_777_216,
+            laneColumnCount: 524_288,
+            laneCount: 32,
+            laneOrdinal: 0,
+            logicalPolynomialCoefficientCount: 32_768,
+            paddedCoefficientCount: 4_194_304,
+            phaseGeometryCount: 2,
+            phaseMaterializationPassCount: 2,
+            physicalRowWidth: 64,
+            productionRecipeCount: 2_627,
+            proverColumnDegreeBoundExclusive: 18_432,
+            quotientPhaseRowCount: 10,
+            rangeDigitRadix: 51,
+            relationPlanHashByteLength: 64,
+            replayBufferByteLength: 131_072,
+            retainedCoefficientPayloadByteLength: 9_437_184,
+            retainedRecipeCount: 64,
+            rowWorkingBufferByteLength: 33_554_432,
+            stripeButterflyCount: 4_980_736,
+            stripeCoefficientFoldCount: 3_670_016,
+            stripeCosetMultiplicationCount: 524_288,
+            stripePrivateHighHalfValueCount: 2_097_152,
+            tracePackingFactor: 1,
+            traceValueCount: 16_384,
+            witnessValueCount: 2_097_152,
+        }),
+    }),
 ] as const);
 
 type JsonObject = Record<string, unknown>;
@@ -392,6 +465,10 @@ const requireExactKeys = (
         throw new Error(`${label} has noncanonical fields.`);
     }
 };
+
+const saltedPhaseColumnLeafKeccakPermutationCount = (
+    logicalLeafWidth: number,
+): number => Math.floor((7 + 128 / 8 + logicalLeafWidth) / 17) + 1;
 
 export const validatePrimitiveMeasurementRecord = (
     value: unknown,
@@ -760,8 +837,6 @@ export const validatePrimitiveMeasurementRecord = (
             dimensionsByName.get(
                 'singleAggregateCandidateBasePhaseAlgorithmLiveSetByteLength',
             )!;
-        const phaseLeafPermutationCount = (logicalLeafWidth: number): number =>
-            Math.floor((7 + 128 / 8 + logicalLeafWidth) / 17) + 1;
         const messageTraceValueCount = traceValueCount / tracePackingFactor;
         const deriveVssOpeningPointCount = (
             candidateTracePackingFactor: number,
@@ -1008,7 +1083,7 @@ export const validatePrimitiveMeasurementRecord = (
                 'basePhaseSaltedLeafKeccakPermutationCount',
             ) ===
                 dimensionsByName.get('basePhaseLeafHashQueryCount')! *
-                    phaseLeafPermutationCount(rowCount) &&
+                    saltedPhaseColumnLeafKeccakPermutationCount(rowCount) &&
             modeledCandidateRelationTraceValueCount ===
                 independentlyDerivedModeledRelationTraceValueCount &&
             modeledCandidateProverColumnDegreeBoundExclusive ===
@@ -1054,7 +1129,9 @@ export const validatePrimitiveMeasurementRecord = (
                 'modeledCandidateSaltedLeafKeccakPermutationCount',
             ) ===
                 modeledCandidateLeafHashQueryCount *
-                    phaseLeafPermutationCount(modeledCandidateRowCount) &&
+                    saltedPhaseColumnLeafKeccakPermutationCount(
+                        modeledCandidateRowCount,
+                    ) &&
             dimensionsByName.get(
                 'modeledCandidateMerkleParentHashQueryCount',
             ) ===
@@ -1195,7 +1272,7 @@ export const validatePrimitiveMeasurementRecord = (
             ) ===
                 fullDomainSize *
                     materializationPassCount *
-                    phaseLeafPermutationCount(
+                    saltedPhaseColumnLeafKeccakPermutationCount(
                         singleAggregateCandidateRowCount,
                     ) &&
             rowCount < singleAggregateCandidateRowCount * 10 &&
@@ -1364,7 +1441,7 @@ export const validatePrimitiveMeasurementRecord = (
             );
         }
     }
-    if (caseIdentifier === 9) {
+    if (caseIdentifier === 9 || caseIdentifier === 11) {
         const retainedInputByteLength = requireSafeUnsignedInteger(
             dimensionsByName.get('retainedInputByteLength'),
             'Primitive measurement retainedInputByteLength',
@@ -1406,7 +1483,32 @@ export const validatePrimitiveMeasurementRecord = (
             );
         }
     }
-    if (caseIdentifier === 10) {
+    if (caseIdentifier === 11) {
+        const productionRecipeCount = dimensionsByName.get(
+            'productionRecipeCount',
+        )!;
+        const physicalRowWidth = dimensionsByName.get('physicalRowWidth')!;
+        const materializationPassCount = dimensionsByName.get(
+            'phaseMaterializationPassCount',
+        )!;
+        const completeSourceMaterializationCount = dimensionsByName.get(
+            'completeSourceMaterializationCount',
+        )!;
+        if (
+            dimensionsByName.get('basePhaseRowCount') !==
+                Math.ceil(productionRecipeCount / physicalRowWidth) ||
+            completeSourceMaterializationCount !==
+                productionRecipeCount * materializationPassCount ||
+            dimensionsByName.get('completeSourceTraceValueGenerationCount') !==
+                completeSourceMaterializationCount *
+                    dimensionsByName.get('traceValueCount')!
+        ) {
+            throw new Error(
+                'Primitive measurement fused VSS retained-group work identities are inconsistent.',
+            );
+        }
+    }
+    if (caseIdentifier === 10 || caseIdentifier === 12) {
         const retainedInputByteLength = requireSafeUnsignedInteger(
             dimensionsByName.get('retainedInputByteLength'),
             'Primitive measurement retainedInputByteLength',
@@ -1478,7 +1580,11 @@ export const validatePrimitiveMeasurementRecord = (
             dimensionsByName.get('laneOrdinal')! >= laneCount ||
             coefficientChunkCount !==
                 Math.ceil(degreeBound / logicalPolynomialCoefficientCount) ||
-            dimensionsByName.get('physicalRowCount') !==
+            dimensionsByName.get(
+                caseIdentifier === 10
+                    ? 'physicalRowCount'
+                    : 'basePhaseRowCount',
+            ) !==
                 Math.ceil(productionRecipeCount / physicalRowWidth) *
                     coefficientChunkCount ||
             coefficientFoldCountPerLane !==
@@ -1521,6 +1627,89 @@ export const validatePrimitiveMeasurementRecord = (
         ) {
             throw new Error(
                 'Primitive measurement VSS row-lane stripe identities are inconsistent.',
+            );
+        }
+    }
+    if (caseIdentifier === 12) {
+        const basePhaseRowCount = dimensionsByName.get('basePhaseRowCount')!;
+        const quotientPhaseRowCount = dimensionsByName.get(
+            'quotientPhaseRowCount',
+        )!;
+        const completePhaseRowCount = dimensionsByName.get(
+            'completePhaseRowCount',
+        )!;
+        const phaseGeometryCount = dimensionsByName.get('phaseGeometryCount')!;
+        const materializationPassCount = dimensionsByName.get(
+            'phaseMaterializationPassCount',
+        )!;
+        const laneCount = dimensionsByName.get('laneCount')!;
+        const fullDomainSize = dimensionsByName.get('fullDomainSize')!;
+        const witnessValueCount = dimensionsByName.get('witnessValueCount')!;
+        const completeLaneDftCount = dimensionsByName.get(
+            'completeLaneDftCount',
+        )!;
+        const completeLeafHashQueryCount = dimensionsByName.get(
+            'completeLeafHashQueryCount',
+        )!;
+        const productionRecipeCount = dimensionsByName.get(
+            'productionRecipeCount',
+        )!;
+        const completeSourceMaterializationCount = dimensionsByName.get(
+            'completeSourceMaterializationCount',
+        )!;
+        if (
+            completePhaseRowCount !==
+                basePhaseRowCount + quotientPhaseRowCount ||
+            completeLaneDftCount !==
+                completePhaseRowCount * laneCount * materializationPassCount ||
+            dimensionsByName.get('completeButterflyCount') !==
+                completeLaneDftCount *
+                    dimensionsByName.get('butterflyCountPerLane')! ||
+            dimensionsByName.get('completeCoefficientFoldCount') !==
+                completeLaneDftCount *
+                    dimensionsByName.get('coefficientFoldCountPerLane')! ||
+            dimensionsByName.get('completeCosetMultiplicationCount') !==
+                completeLaneDftCount *
+                    dimensionsByName.get('laneColumnCount')! ||
+            dimensionsByName.get('completeColumnValueDeliveryCount') !==
+                completePhaseRowCount *
+                    fullDomainSize *
+                    materializationPassCount ||
+            dimensionsByName.get('completeTransportedValueByteLength') !==
+                dimensionsByName.get('completeColumnValueDeliveryCount')! * 8 ||
+            dimensionsByName.get(
+                'completePrivateHighHalfValueGenerationCount',
+            ) !==
+                completePhaseRowCount *
+                    witnessValueCount *
+                    materializationPassCount ||
+            completeLeafHashQueryCount !==
+                phaseGeometryCount *
+                    fullDomainSize *
+                    materializationPassCount ||
+            dimensionsByName.get('completeMerkleParentHashQueryCount') !==
+                phaseGeometryCount *
+                    (fullDomainSize - 1) *
+                    materializationPassCount ||
+            dimensionsByName.get('completePrivateLeafSaltDerivationCount') !==
+                completeLeafHashQueryCount ||
+            dimensionsByName.get('completeSaltedLeafKeccakPermutationCount') !==
+                fullDomainSize *
+                    materializationPassCount *
+                    (saltedPhaseColumnLeafKeccakPermutationCount(
+                        basePhaseRowCount,
+                    ) +
+                        saltedPhaseColumnLeafKeccakPermutationCount(
+                            quotientPhaseRowCount,
+                        )) ||
+            completeSourceMaterializationCount !==
+                productionRecipeCount * materializationPassCount ||
+            dimensionsByName.get('completeSourceTraceValueGenerationCount') !==
+                completeSourceMaterializationCount *
+                    dimensionsByName.get('traceValueCount')!
+        ) {
+            throw new Error(
+                'Primitive measurement fused VSS complete-work identities are inconsistent.',
             );
         }
     }
@@ -1574,13 +1763,17 @@ export const requireCompletePrimitiveMeasurementCatalog = (
     const productionWeightedSourceReplayRecord = records[7];
     const retainedGroupCandidateRecord = records[8];
     const rowLaneCandidateRecord = records[9];
+    const fusedRetainedGroupCandidateRecord = records[10];
+    const fusedRowLaneCandidateRecord = records[11];
     if (
         saltedLeafRecord === undefined ||
         selectedVssRecord === undefined ||
         modeledCheckpointDftRecord === undefined ||
         productionWeightedSourceReplayRecord === undefined ||
         retainedGroupCandidateRecord === undefined ||
-        rowLaneCandidateRecord === undefined
+        rowLaneCandidateRecord === undefined ||
+        fusedRetainedGroupCandidateRecord === undefined ||
+        fusedRowLaneCandidateRecord === undefined
     ) {
         throw new Error('Primitive measurement catalog work ledger is absent.');
     }
@@ -1616,6 +1809,18 @@ export const requireCompletePrimitiveMeasurementCatalog = (
     );
     const rowLaneCandidateDimensions = new Map(
         rowLaneCandidateRecord.dimensions.map((dimension) => [
+            dimension.name,
+            dimension.value,
+        ]),
+    );
+    const fusedRetainedGroupCandidateDimensions = new Map(
+        fusedRetainedGroupCandidateRecord.dimensions.map((dimension) => [
+            dimension.name,
+            dimension.value,
+        ]),
+    );
+    const fusedRowLaneCandidateDimensions = new Map(
+        fusedRowLaneCandidateRecord.dimensions.map((dimension) => [
             dimension.name,
             dimension.value,
         ]),
@@ -1769,11 +1974,65 @@ export const requireCompletePrimitiveMeasurementCatalog = (
             'Primitive measurement row-lane workload does not reconcile to the modeled candidate.',
         );
     }
+    for (const dimensionName of [
+        'rangeDigitRadix',
+        'tracePackingFactor',
+        'traceValueCount',
+        'physicalRowWidth',
+        'basePhaseRowCount',
+        'productionRecipeCount',
+        'proverColumnDegreeBoundExclusive',
+        'retainedRecipeCount',
+        'retainedCoefficientPayloadByteLength',
+        'replayBufferByteLength',
+        'phaseMaterializationPassCount',
+        'completeSourceMaterializationCount',
+        'completeSourceTraceValueGenerationCount',
+        'relationPlanHashByteLength',
+    ] as const) {
+        if (
+            fusedRetainedGroupCandidateDimensions.get(dimensionName) !==
+            fusedRowLaneCandidateDimensions.get(dimensionName)
+        ) {
+            throw new Error(
+                'Primitive measurement fused VSS candidate records disagree.',
+            );
+        }
+    }
+    if (
+        fusedRowLaneCandidateDimensions.get('completeLaneDftCount')! * 10 >
+            selectedVssDimensions.get('basePhaseLaneDftCount')! ||
+        fusedRowLaneCandidateDimensions.get('completeButterflyCount')! * 10 >
+            selectedVssDimensions.get('basePhaseButterflyCount')! ||
+        fusedRowLaneCandidateDimensions.get(
+            'completeColumnValueDeliveryCount',
+        )! *
+            10 >
+            selectedVssDimensions.get('basePhaseColumnValueDeliveryCount')! ||
+        fusedRowLaneCandidateDimensions.get(
+            'completeSaltedLeafKeccakPermutationCount',
+        )! *
+            10 >
+            selectedVssDimensions.get(
+                'basePhaseSaltedLeafKeccakPermutationCount',
+            )! ||
+        fusedRowLaneCandidateDimensions.get(
+            'completeSourceTraceValueGenerationCount',
+        )! *
+            10 >
+            selectedVssDimensions.get('basePhaseSourceReplayCount')! *
+                selectedVssDimensions.get('traceValueCount')!
+    ) {
+        throw new Error(
+            'Primitive measurement fused VSS candidate fails its tenfold static work gate.',
+        );
+    }
 };
 
 export const parseReleaseNativePrimitiveMeasurementOutput = (
     output: string,
     requireCompleteCatalog: boolean,
+    expectedFocusedCaseIdentifiers?: readonly number[],
 ): ReleaseNativePrimitiveMeasurementEvidence => {
     const outputMarker = 'primitive measurement: ';
     const primitiveCases: PrimitiveMeasurementRecord[] = [];
@@ -1809,10 +2068,41 @@ export const parseReleaseNativePrimitiveMeasurementOutput = (
         );
     }
     if (requireCompleteCatalog) {
+        if (expectedFocusedCaseIdentifiers !== undefined) {
+            throw new Error(
+                'Complete release-native primitive measurement output cannot declare focused cases.',
+            );
+        }
         requireCompletePrimitiveMeasurementCatalog(primitiveCases);
-    } else if (primitiveCases.length !== 1) {
-        throw new Error(
-            'Focused release-native primitive measurement output must contain one case.',
+    } else if (expectedFocusedCaseIdentifiers === undefined) {
+        if (primitiveCases.length !== 1) {
+            throw new Error(
+                'Focused release-native primitive measurement output must contain one case.',
+            );
+        }
+    } else {
+        if (
+            expectedFocusedCaseIdentifiers.length === 0 ||
+            new Set(expectedFocusedCaseIdentifiers).size !==
+                expectedFocusedCaseIdentifiers.length ||
+            expectedFocusedCaseIdentifiers.some(
+                (caseIdentifier) =>
+                    !Number.isSafeInteger(caseIdentifier) ||
+                    caseIdentifier <= 0,
+            ) ||
+            primitiveCases.length !== expectedFocusedCaseIdentifiers.length ||
+            expectedFocusedCaseIdentifiers.some(
+                (caseIdentifier) => !identifiers.includes(caseIdentifier),
+            )
+        ) {
+            throw new Error(
+                'Focused release-native primitive measurement output differs from its expected case set.',
+            );
+        }
+        primitiveCases.sort(
+            (left, right) =>
+                expectedFocusedCaseIdentifiers.indexOf(left.caseIdentifier) -
+                expectedFocusedCaseIdentifiers.indexOf(right.caseIdentifier),
         );
     }
     return Object.freeze({

@@ -29,7 +29,7 @@ pub(crate) fn compile_vss_share_linkage_range_candidate_relation_plan(
     )
 }
 
-#[cfg(all(feature = "primitive-measurement-evidence", test))]
+#[cfg(feature = "primitive-measurement-evidence")]
 pub(crate) fn compile_vss_share_linkage_fused_bound_range_candidate_relation_plan(
     input: &CommittedMaterialRelationPlanInput,
     check_context: &RelationPlanCheckContext,

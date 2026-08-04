@@ -135,7 +135,7 @@ const recordFor = (
     if (caseIdentifier === 8) {
         dimensions.push({ name: 'retainedInputByteLength', value: 2_097_152 });
     }
-    if (caseIdentifier === 9) {
+    if (caseIdentifier === 9 || caseIdentifier === 11) {
         dimensions.push(
             { name: 'retainedInputByteLength', value: 2_097_152 },
             {
@@ -144,7 +144,7 @@ const recordFor = (
             },
         );
     }
-    if (caseIdentifier === 10) {
+    if (caseIdentifier === 10 || caseIdentifier === 12) {
         const retainedInputByteLength = 2_097_152;
         const retainedGroupHeaderByteLength =
             executionTarget === 'release-native' ? 1_536 : 768;
@@ -152,9 +152,16 @@ const recordFor = (
             executionTarget === 'release-native' ? 32 : 24;
         const ownedFixedStateByteLength =
             executionTarget === 'release-native' ? 256 : 192;
-        const retainedCoefficientPayloadByteLength = 135_266_304;
-        const replayBufferByteLength = 2_097_152;
-        const rowWorkingBufferByteLength = 33_554_432;
+        const retainedCoefficientPayloadByteLength = dimensions.find(
+            (dimension) =>
+                dimension.name === 'retainedCoefficientPayloadByteLength',
+        )!.value;
+        const replayBufferByteLength = dimensions.find(
+            (dimension) => dimension.name === 'replayBufferByteLength',
+        )!.value;
+        const rowWorkingBufferByteLength = dimensions.find(
+            (dimension) => dimension.name === 'rowWorkingBufferByteLength',
+        )!.value;
         dimensions.push(
             { name: 'pollCount', value: 10_000 },
             { name: 'retainedInputByteLength', value: retainedInputByteLength },
@@ -220,7 +227,7 @@ const recordFor = (
         modeledPeakLiveByteLength:
             caseIdentifier === 5 || caseIdentifier === 8
                 ? retainedInputByteLength! + traceValueCount! * 8
-                : caseIdentifier === 9
+                : caseIdentifier === 9 || caseIdentifier === 11
                   ? retainedInputByteLength! +
                     retainedCoefficientPayloadByteLength! +
                     dimensions.find(
@@ -228,7 +235,7 @@ const recordFor = (
                             dimension.name === 'replayBufferByteLength',
                     )!.value +
                     retainedGroupHeaderByteLength!
-                  : caseIdentifier === 10
+                  : caseIdentifier === 10 || caseIdentifier === 12
                     ? Math.max(
                           materializationPeakLiveByteLength!,
                           stripePeakLiveByteLength!,
@@ -333,6 +340,29 @@ describe('Primitive measurement evidence', () => {
             ).toThrow(/production geometry/u);
         }
 
+        for (const [caseIdentifier, dimensionName, wrongValue] of [
+            [11, 'rangeDigitRadix', 50],
+            [11, 'completeSourceMaterializationCount', 5_253],
+            [12, 'completePhaseRowCount', 51],
+            [12, 'completeLaneDftCount', 3_327],
+            [12, 'completeSaltedLeafKeccakPermutationCount', 201_326_591],
+        ] as const) {
+            const staleFusedCandidate = recordFor(caseIdentifier);
+            const staleDimension = (
+                staleFusedCandidate.dimensions as Array<{
+                    name: string;
+                    value: number;
+                }>
+            ).find((dimension) => dimension.name === dimensionName);
+            if (staleDimension === undefined) {
+                throw new Error(`Test ${dimensionName} dimension is absent.`);
+            }
+            staleDimension.value = wrongValue;
+            expect(() =>
+                validatePrimitiveMeasurementRecord(staleFusedCandidate),
+            ).toThrow(/production geometry|inconsistent/u);
+        }
+
         for (const [dimensionName, wrongValue] of [
             ['modeledCandidateQuotientOpeningBatchCount', 922],
             ['modeledCandidateQuotientConstructionIdentityByteLength', 0],
@@ -433,6 +463,42 @@ describe('Primitive measurement evidence', () => {
                 false,
             ),
         ).toThrow(/production geometry/u);
+        const reversedFocusedOutput = [12, 11]
+            .map(
+                (caseIdentifier) =>
+                    `primitive measurement: ${JSON.stringify(
+                        recordFor(caseIdentifier, 'release-native'),
+                    )}`,
+            )
+            .join('\n');
+        expect(
+            parseReleaseNativePrimitiveMeasurementOutput(
+                reversedFocusedOutput,
+                false,
+                [11, 12],
+            ).primitiveCases.map((record) => record.caseIdentifier),
+        ).toEqual([11, 12]);
+        expect(() =>
+            parseReleaseNativePrimitiveMeasurementOutput(
+                reversedFocusedOutput,
+                false,
+                [11],
+            ),
+        ).toThrow(/expected case set/u);
+        expect(() =>
+            parseReleaseNativePrimitiveMeasurementOutput(
+                reversedFocusedOutput,
+                false,
+                [11, 11],
+            ),
+        ).toThrow(/expected case set/u);
+        expect(() =>
+            parseReleaseNativePrimitiveMeasurementOutput(
+                serializedRecords,
+                true,
+                [11, 12],
+            ),
+        ).toThrow(/cannot declare focused cases/u);
 
         const exactEvidence = {
             primitiveCases: primitiveMeasurementCaseCatalog.map((entry) =>
@@ -643,8 +709,45 @@ describe('Primitive measurement evidence', () => {
         const modeledCheckpoint = projection.checkpointCandidates.find(
             (candidate) => candidate.modeled === true,
         );
-        expect(projection.schemaVersion).toBe(2);
+        expect(projection.schemaVersion).toBe(3);
         expect(projection.currentTwoPass.sourceReplayCount).toBe(576_576);
+        expect(projection.fusedRadix51Candidate).toMatchObject({
+            basePhaseRowCount: 42,
+            completePhaseRowCount: 52,
+            physicalRowWidth: 64,
+            productionRecipeCount: 2_627,
+            proverColumnDegreeBoundExclusive: 18_432,
+            quotientPhaseRowCount: 10,
+            rangeDigitRadix: 51,
+            relationTraceValueCount: 16_384,
+            retainedCoefficientGroupByteLength: 9_437_184,
+            tracePackingFactor: 1,
+            transportedValueByteLength: 13_958_643_712,
+        });
+        const fusedCandidateTargetProjections = projection.fusedRadix51Candidate
+            .targetProjections as
+            | Array<{
+                  currentOwnerTotalNanoseconds: number;
+                  fusedOwnerTotalNanoseconds: number;
+                  ownerReductionFactor: number;
+                  owners: {
+                      rowLaneOwnerCaseIdentifier: number;
+                      totalNanoseconds: number;
+                  };
+              }>
+            | undefined;
+        expect(fusedCandidateTargetProjections).toHaveLength(3);
+        expect(
+            fusedCandidateTargetProjections?.every(
+                (target) =>
+                    target.owners.rowLaneOwnerCaseIdentifier === 12 &&
+                    target.owners.totalNanoseconds ===
+                        target.fusedOwnerTotalNanoseconds &&
+                    target.ownerReductionFactor > 1 &&
+                    target.fusedOwnerTotalNanoseconds <
+                        target.currentOwnerTotalNanoseconds,
+            ),
+        ).toBe(true);
         expect(projection.modeledRelationReplayCandidate).toMatchObject({
             coefficientChunkCountPerSource: 9,
             logicalRowChunkByteLength: 16_777_216,
@@ -841,6 +944,26 @@ describe('Primitive measurement evidence', () => {
         ).toEqual({
             browserEngines: ['firefox'],
             focusedCaseIdentifier: 10,
+            reuseMeasurementWasm: true,
+        });
+        expect(
+            parseDesktopBrowserPrimitiveMeasurementArguments([
+                'chromium',
+                'case-11',
+            ]),
+        ).toEqual({
+            browserEngines: ['chromium'],
+            focusedCaseIdentifier: 11,
+        });
+        expect(
+            parseDesktopBrowserPrimitiveMeasurementArguments([
+                'firefox',
+                'case-12',
+                'reuse-wasm',
+            ]),
+        ).toEqual({
+            browserEngines: ['firefox'],
+            focusedCaseIdentifier: 12,
             reuseMeasurementWasm: true,
         });
         expect(() =>

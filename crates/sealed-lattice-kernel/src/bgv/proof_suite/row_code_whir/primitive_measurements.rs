@@ -24,8 +24,9 @@ use super::super::relation_plan::{
     vss_fused_bound_range_candidate_inventory, vss_relation_range_digit_prover_column_ordinals,
     vss_relation_trinary_prover_column_ordinals,
 };
-#[cfg(test)]
-use super::commitment_liveness::derive_phase_commitment_work_accounting;
+use super::commitment_liveness::{
+    PhaseCommitmentWorkAccounting, derive_phase_commitment_work_accounting,
+};
 #[cfg(test)]
 use super::construction_plan::RowCodeWhirTracePhasePlan;
 use super::{
@@ -56,10 +57,19 @@ use super::{
         padded_base_row_coefficients,
     },
 };
+use crate::bgv::proof_suite::{
+    CommittedMaterialRelationPlanInput, PROOF_BASE_FIELD_MODULUS, PROOF_EVALUATION_COSET_OFFSET,
+    ProofBaseFieldElement, ProofEvaluationDomain, ProofProfileError, RelationPlanCheckContext,
+    RelationTreeDescriptor, SelectedVssSourceReplayMeasurement, ValidatedRelationPlanArtifact,
+    compile_vss_share_linkage_relation_plan,
+    prover::relation_reversed_column_bindings,
+    relation_plan::{BoundTreeConstructionKind, ProofPrivacyMode, RelationColumnOrigin},
+    selected_committed_material_relation_plan_input, selected_relation_plan_check_context,
+};
 #[cfg(test)]
 use crate::bgv::proof_suite::{
-    CommittedMaterialRelationPlanInput, MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
-    MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, RelationPlanCheckContext,
+    MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+    MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
     external_memory::{
         COMMON_PROOF_EXTERNAL_MEMORY_EMPTY_RESPONSE_BYTE_LENGTH,
         COMMON_PROOF_EXTERNAL_MEMORY_READ_REQUEST_BYTE_LENGTH,
@@ -67,15 +77,6 @@ use crate::bgv::proof_suite::{
         MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_READ_RESPONSE_BYTE_LENGTH,
         MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
     },
-};
-use crate::bgv::proof_suite::{
-    PROOF_BASE_FIELD_MODULUS, PROOF_EVALUATION_COSET_OFFSET, ProofBaseFieldElement,
-    ProofEvaluationDomain, ProofProfileError, RelationTreeDescriptor,
-    SelectedVssSourceReplayMeasurement, ValidatedRelationPlanArtifact,
-    compile_vss_share_linkage_relation_plan,
-    prover::relation_reversed_column_bindings,
-    relation_plan::{BoundTreeConstructionKind, ProofPrivacyMode, RelationColumnOrigin},
-    selected_committed_material_relation_plan_input, selected_relation_plan_check_context,
 };
 use crate::foundation::{
     MAXIMUM_LOCAL_RECORD_PLAINTEXT_BYTE_LENGTH, ProofApplicationSlotCeilings,
@@ -95,6 +96,9 @@ const PRODUCTION_WEIGHTED_SOURCE_REPLAY_ITERATION_COUNT: usize = 1;
 const VSS_RELATION_REPLAY_CANDIDATE_RETAINED_GROUP_WIDTH: usize = 64;
 const VSS_RELATION_REPLAY_CANDIDATE_TRACE_PACKING_FACTOR: u64 = 16;
 const VSS_RELATION_REPLAY_CANDIDATE_LANE_ORDINAL: usize = 0;
+const VSS_FUSED_BOUND_RANGE_CANDIDATE_RANGE_DIGIT_RADIX: u64 = 51;
+const VSS_FUSED_BOUND_RANGE_CANDIDATE_RETAINED_GROUP_WIDTH: usize = 64;
+const VSS_FUSED_BOUND_RANGE_CANDIDATE_LANE_ORDINAL: usize = 0;
 const AUTHENTICATED_SCRATCH_RECORD_ITERATION_COUNT: usize = 8;
 const SELECTED_CHECKPOINT_LEVEL: u32 = 2;
 
@@ -711,6 +715,26 @@ struct VssFusedBoundRangeCandidateLedger {
     merkle_parent_hash_query_count: u64,
 }
 
+struct VssFusedBoundRangeMeasurementGeometry {
+    range_digit_radix: u64,
+    trace_packing_factor: u64,
+    trace_value_count: u64,
+    logical_polynomial_coefficient_count: u64,
+    physical_row_width: u64,
+    base_phase_row_count: u64,
+    quotient_phase_row_count: u64,
+    complete_phase_row_count: u64,
+    production_recipe_count: u64,
+    prover_column_degree_bound_exclusive: u64,
+    coefficient_chunk_count: u64,
+    base_phase_geometry: RowEncodingGeometry,
+    complete_source_materialization_count: u64,
+    complete_source_trace_value_generation_count: u64,
+    complete_private_high_half_value_generation_count: u64,
+    complete_salted_leaf_keccak_permutation_count: u64,
+    phase_commitment_work: PhaseCommitmentWorkAccounting,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct VssOpeningClaimQuotientCandidateLedger {
     direct_aggregate_column_role_count: u64,
@@ -801,7 +825,6 @@ pub(super) struct VssPersistedCheckpointReplayCandidateLedger {
     pub(super) eligible_for_focused_browser_measurement: bool,
 }
 
-#[cfg(test)]
 fn complete_phase_salted_leaf_keccak_permutation_count(
     construction_plan: &RowCodeWhirConstructionPlan,
     pass_count: u64,
@@ -2408,7 +2431,6 @@ fn derive_vss_range_packing_candidate_construction_plan(
     .map_err(|error| format!("VSS range-packing candidate construction does not derive: {error:?}"))
 }
 
-#[cfg(test)]
 pub(super) fn derive_vss_fused_bound_range_candidate_construction_plan(
     range_digit_radix: u64,
 ) -> Result<
@@ -2441,6 +2463,150 @@ pub(super) fn derive_vss_fused_bound_range_candidate_construction_plan(
             format!("VSS fused-bound range candidate construction does not derive: {error:?}")
         })?;
     Ok((input, artifact, context, construction_plan))
+}
+
+fn prepare_vss_fused_bound_range_candidate_measurement() -> Result<
+    (
+        SelectedVssSourceReplayMeasurement,
+        VssFusedBoundRangeMeasurementGeometry,
+    ),
+    String,
+> {
+    let (_, artifact, _, construction_plan) =
+        derive_vss_fused_bound_range_candidate_construction_plan(
+            VSS_FUSED_BOUND_RANGE_CANDIDATE_RANGE_DIGIT_RADIX,
+        )?;
+    let measurement = SelectedVssSourceReplayMeasurement::prepare_fused_bound_range_candidate(
+        VSS_FUSED_BOUND_RANGE_CANDIDATE_RANGE_DIGIT_RADIX,
+    )?;
+    if measurement.relation_plan_hash() != artifact.canonical_plan_hash()
+        || construction_plan.relation_plan_hash != artifact.canonical_plan_hash()
+    {
+        return Err(
+            "VSS fused-bound measurement source and construction identities disagree".to_owned(),
+        );
+    }
+    let base_phase = construction_plan
+        .base_phase
+        .as_ref()
+        .ok_or_else(|| "VSS fused-bound measurement base phase is absent".to_owned())?;
+    if construction_plan.auxiliary_phase.is_some() {
+        return Err("VSS fused-bound measurement has an unexpected auxiliary phase".to_owned());
+    }
+    let logical_polynomial_coefficient_count = u64::try_from(
+        construction_plan
+            .parameters
+            .logical_polynomial_coefficient_count,
+    )
+    .map_err(|_| "VSS fused-bound logical coefficient count exceeds u64".to_owned())?;
+    let physical_row_width = u64::try_from(
+        construction_plan
+            .parameters
+            .logical_polynomials_per_physical_row,
+    )
+    .map_err(|_| "VSS fused-bound physical row width exceeds u64".to_owned())?;
+    let base_phase_row_count = u64::try_from(base_phase.rows.len())
+        .map_err(|_| "VSS fused-bound base row count exceeds u64".to_owned())?;
+    let quotient_phase_row_count = u64::try_from(construction_plan.quotient_phase.rows.len())
+        .map_err(|_| "VSS fused-bound quotient row count exceeds u64".to_owned())?;
+    let complete_phase_row_count = base_phase_row_count
+        .checked_add(quotient_phase_row_count)
+        .ok_or_else(|| "VSS fused-bound complete row count overflowed".to_owned())?;
+    if u64::try_from(base_phase.geometry.row_count).ok() != Some(base_phase_row_count)
+        || u64::try_from(construction_plan.quotient_phase.geometry.row_count).ok()
+            != Some(quotient_phase_row_count)
+    {
+        return Err("VSS fused-bound phase rows disagree with their geometries".to_owned());
+    }
+    let production_recipe_count = u64::try_from(measurement.production_recipe_count())
+        .map_err(|_| "VSS fused-bound recipe count exceeds u64".to_owned())?;
+    let trace_packing_factor = measurement.trace_packing_factor();
+    let prover_column_degree_bound_exclusive =
+        u64::try_from(measurement.prover_column_degree_bound_exclusive())
+            .map_err(|_| "VSS fused-bound prover degree exceeds u64".to_owned())?;
+    let coefficient_chunk_count =
+        prover_column_degree_bound_exclusive.div_ceil(logical_polynomial_coefficient_count);
+    let phase_commitment_work = derive_phase_commitment_work_accounting(&construction_plan)?;
+    let complete_source_materialization_count = production_recipe_count
+        .checked_mul(phase_commitment_work.materialization_pass_count)
+        .ok_or_else(|| "VSS fused-bound source materialization count overflowed".to_owned())?;
+    let trace_value_count = u64::try_from(measurement.trace_value_count())
+        .map_err(|_| "VSS fused-bound trace value count exceeds u64".to_owned())?;
+    let complete_source_trace_value_generation_count = complete_source_materialization_count
+        .checked_mul(trace_value_count)
+        .ok_or_else(|| "VSS fused-bound source trace work overflowed".to_owned())?;
+    let complete_private_high_half_value_generation_count = [
+        base_phase.geometry,
+        construction_plan.quotient_phase.geometry,
+    ]
+    .into_iter()
+    .try_fold(0_u64, |total, geometry| {
+        u64::try_from(geometry.row_count)
+            .ok()
+            .and_then(|row_count| {
+                u64::try_from(geometry.witness_values_per_row)
+                    .ok()
+                    .and_then(|value_count| row_count.checked_mul(value_count))
+            })
+            .and_then(|value_count| {
+                value_count.checked_mul(phase_commitment_work.materialization_pass_count)
+            })
+            .and_then(|value_count| total.checked_add(value_count))
+            .ok_or_else(|| "VSS fused-bound private high-half work overflowed".to_owned())
+    })?;
+    let complete_salted_leaf_keccak_permutation_count =
+        complete_phase_salted_leaf_keccak_permutation_count(
+            &construction_plan,
+            phase_commitment_work.materialization_pass_count,
+        )?;
+    if trace_packing_factor != 1
+        || physical_row_width
+            != u64::try_from(VSS_FUSED_BOUND_RANGE_CANDIDATE_RETAINED_GROUP_WIDTH)
+                .map_err(|_| "VSS fused-bound retained width exceeds u64".to_owned())?
+        || base_phase_row_count != production_recipe_count.div_ceil(physical_row_width)
+        || base_phase.geometry.witness_values_per_row
+            != construction_plan
+                .parameters
+                .logical_polynomials_per_physical_row
+                .checked_mul(
+                    construction_plan
+                        .parameters
+                        .logical_polynomial_coefficient_count,
+                )
+                .ok_or_else(|| "VSS fused-bound witness size overflowed".to_owned())?
+        || base_phase.geometry.encoded_column_count != PHASE_ENCODED_COLUMN_COUNT
+        || construction_plan
+            .quotient_phase
+            .geometry
+            .encoded_column_count
+            != PHASE_ENCODED_COLUMN_COUNT
+        || phase_commitment_work.geometry_count != 2
+        || phase_commitment_work.materialization_pass_count != ROOT_AND_OPENING_PASS_COUNT
+    {
+        return Err("VSS fused-bound measurement geometry is inconsistent".to_owned());
+    }
+    Ok((
+        measurement,
+        VssFusedBoundRangeMeasurementGeometry {
+            range_digit_radix: VSS_FUSED_BOUND_RANGE_CANDIDATE_RANGE_DIGIT_RADIX,
+            trace_packing_factor,
+            trace_value_count,
+            logical_polynomial_coefficient_count,
+            physical_row_width,
+            base_phase_row_count,
+            quotient_phase_row_count,
+            complete_phase_row_count,
+            production_recipe_count,
+            prover_column_degree_bound_exclusive,
+            coefficient_chunk_count,
+            base_phase_geometry: base_phase.geometry,
+            complete_source_materialization_count,
+            complete_source_trace_value_generation_count,
+            complete_private_high_half_value_generation_count,
+            complete_salted_leaf_keccak_permutation_count,
+            phase_commitment_work,
+        },
+    ))
 }
 
 #[cfg(test)]
@@ -4147,6 +4313,423 @@ fn measure_vss_relation_replay_candidate_row_lane_stripe()
     })
 }
 
+fn measure_vss_fused_bound_range_candidate_retained_group()
+-> Result<PrimitiveMeasurementRecord, String> {
+    let (measurement, candidate) = prepare_vss_fused_bound_range_candidate_measurement()?;
+    let retained_recipe_count = VSS_FUSED_BOUND_RANGE_CANDIDATE_RETAINED_GROUP_WIDTH;
+    let retained_input_byte_length = measurement.retained_input_byte_length()?;
+    let replay_buffer_byte_length = candidate
+        .trace_value_count
+        .checked_mul(size_of::<ProofBaseFieldElement>() as u64)
+        .ok_or_else(|| "VSS fused-bound replay buffer size overflowed".to_owned())?;
+    let retained_coefficient_payload_byte_length = u64::try_from(retained_recipe_count)
+        .ok()
+        .and_then(|count| {
+            count
+                .checked_mul(candidate.prover_column_degree_bound_exclusive)
+                .and_then(|value_count| {
+                    value_count.checked_mul(size_of::<ProofBaseFieldElement>() as u64)
+                })
+        })
+        .ok_or_else(|| "VSS fused-bound retained payload size overflowed".to_owned())?;
+    let retained_group_header_byte_length = u64::try_from(retained_recipe_count)
+        .ok()
+        .and_then(|count| {
+            count.checked_mul(size_of::<Zeroizing<Vec<ProofBaseFieldElement>>>() as u64)
+        })
+        .ok_or_else(|| "VSS fused-bound retained header size overflowed".to_owned())?;
+    if measurement.trace_packing_factor() != candidate.trace_packing_factor
+        || u64::try_from(measurement.trace_value_count()).ok() != Some(candidate.trace_value_count)
+        || u64::try_from(measurement.production_recipe_count()).ok()
+            != Some(candidate.production_recipe_count)
+        || u64::try_from(measurement.prover_column_degree_bound_exclusive()).ok()
+            != Some(candidate.prover_column_degree_bound_exclusive)
+    {
+        return Err("VSS fused-bound retained-group geometry changed".to_owned());
+    }
+    let (checksum, elapsed_nanoseconds) = measure_elapsed_nanoseconds(|| {
+        measurement.materialize_retained_recipe_group_once(retained_recipe_count)
+    })?;
+    black_box(checksum);
+    let modeled_peak_live_byte_length = retained_input_byte_length
+        .checked_add(retained_coefficient_payload_byte_length)
+        .and_then(|value| value.checked_add(replay_buffer_byte_length))
+        .and_then(|value| value.checked_add(retained_group_header_byte_length))
+        .ok_or_else(|| "VSS fused-bound retained live set overflowed".to_owned())?;
+    let logical_row_chunk_byte_length = candidate
+        .physical_row_width
+        .checked_mul(candidate.logical_polynomial_coefficient_count)
+        .and_then(|value_count| value_count.checked_mul(size_of::<ProofBaseFieldElement>() as u64))
+        .ok_or_else(|| "VSS fused-bound logical row size overflowed".to_owned())?;
+    Ok(PrimitiveMeasurementRecord {
+        schema_version: MEASUREMENT_SCHEMA_VERSION,
+        case_identifier: 11,
+        case_name: "vss-fused-radix-51-retained-group",
+        execution_target: execution_target(),
+        iteration_count: 1,
+        elapsed_nanoseconds,
+        modeled_peak_live_byte_length,
+        checksum_hex: format!("{checksum:016x}"),
+        dimensions: vec![
+            dimension_u64("rangeDigitRadix", candidate.range_digit_radix),
+            dimension_u64("tracePackingFactor", candidate.trace_packing_factor),
+            dimension_u64("traceValueCount", candidate.trace_value_count),
+            dimension_u64("physicalRowWidth", candidate.physical_row_width),
+            dimension_u64("basePhaseRowCount", candidate.base_phase_row_count),
+            dimension_u64("productionRecipeCount", candidate.production_recipe_count),
+            dimension_u64(
+                "proverColumnDegreeBoundExclusive",
+                candidate.prover_column_degree_bound_exclusive,
+            ),
+            dimension("retainedRecipeCount", retained_recipe_count)?,
+            dimension_u64(
+                "retainedCoefficientPayloadByteLength",
+                retained_coefficient_payload_byte_length,
+            ),
+            dimension_u64("replayBufferByteLength", replay_buffer_byte_length),
+            dimension_u64(
+                "retainedGroupHeaderByteLength",
+                retained_group_header_byte_length,
+            ),
+            PrimitiveMeasurementDimension {
+                name: "retainedInputByteLength",
+                value: retained_input_byte_length,
+            },
+            dimension_u64("logicalRowChunkByteLength", logical_row_chunk_byte_length),
+            dimension_u64(
+                "phaseMaterializationPassCount",
+                candidate.phase_commitment_work.materialization_pass_count,
+            ),
+            dimension_u64(
+                "completeSourceMaterializationCount",
+                candidate.complete_source_materialization_count,
+            ),
+            dimension_u64(
+                "completeSourceTraceValueGenerationCount",
+                candidate.complete_source_trace_value_generation_count,
+            ),
+            dimension(
+                "relationPlanHashByteLength",
+                measurement.relation_plan_hash().len(),
+            )?,
+        ],
+    })
+}
+
+fn measure_vss_fused_bound_range_candidate_row_lane_stripe()
+-> Result<PrimitiveMeasurementRecord, String> {
+    let (measurement, candidate) = prepare_vss_fused_bound_range_candidate_measurement()?;
+    let retained_group = measurement
+        .materialize_retained_recipe_group(VSS_FUSED_BOUND_RANGE_CANDIDATE_RETAINED_GROUP_WIDTH)?;
+    let geometry = candidate.base_phase_geometry;
+    let logical_polynomial_coefficient_count =
+        usize::try_from(candidate.logical_polynomial_coefficient_count)
+            .map_err(|_| "VSS fused-bound logical width exceeds usize".to_owned())?;
+    let coefficient_chunk_count = usize::try_from(candidate.coefficient_chunk_count)
+        .map_err(|_| "VSS fused-bound chunk count exceeds usize".to_owned())?;
+    let retained_recipe_count = retained_group.coefficients.len();
+    let expected_retained_payload_byte_length = u64::try_from(retained_recipe_count)
+        .ok()
+        .and_then(|count| {
+            count
+                .checked_mul(candidate.prover_column_degree_bound_exclusive)
+                .and_then(|value_count| {
+                    value_count.checked_mul(size_of::<ProofBaseFieldElement>() as u64)
+                })
+        })
+        .ok_or_else(|| "VSS fused-bound row-lane payload size overflowed".to_owned())?;
+    let lane_count = geometry
+        .encoded_column_count
+        .checked_div(PHASE_LANE_COLUMN_COUNT)
+        .filter(|count| count.is_power_of_two())
+        .ok_or_else(|| "VSS fused-bound row-lane count is invalid".to_owned())?;
+    if retained_recipe_count != VSS_FUSED_BOUND_RANGE_CANDIDATE_RETAINED_GROUP_WIDTH
+        || u64::try_from(measurement.prover_column_degree_bound_exclusive()).ok()
+            != Some(candidate.prover_column_degree_bound_exclusive)
+        || u64::try_from(coefficient_chunk_count).ok() != Some(candidate.coefficient_chunk_count)
+        || u64::try_from(geometry.witness_values_per_row).ok()
+            != candidate
+                .physical_row_width
+                .checked_mul(candidate.logical_polynomial_coefficient_count)
+        || geometry.padded_coefficient_count != geometry.witness_values_per_row * 2
+        || geometry.encoded_column_count != PHASE_ENCODED_COLUMN_COUNT
+        || lane_count != PHASE_ENCODED_COLUMN_COUNT / PHASE_LANE_COLUMN_COUNT
+    {
+        return Err("VSS fused-bound row-lane geometry changed".to_owned());
+    }
+
+    let full_domain =
+        ProofEvaluationDomain::new(geometry.encoded_column_count, PROOF_EVALUATION_COSET_OFFSET)
+            .map_err(|_| "VSS fused-bound row-lane domain is invalid".to_owned())?;
+    let private_row_pad_seed = [0x51_u8; PRIVATE_ROW_PAD_SEED_BYTE_LENGTH];
+    let ((checksum, poll_count), elapsed_nanoseconds) = measure_elapsed_nanoseconds(|| {
+        let mut checksum = retained_group.checksum;
+        let mut poll_count = 0_usize;
+        for coefficient_chunk_ordinal in 0..coefficient_chunk_count {
+            let row_witness = assemble_vss_relation_replay_candidate_row_chunk(
+                &retained_group.coefficients,
+                logical_polynomial_coefficient_count,
+                coefficient_chunk_ordinal,
+                geometry,
+            )?;
+            let padded_coefficients = padded_base_row_coefficients(
+                geometry,
+                coefficient_chunk_ordinal,
+                row_witness,
+                RowCodeHighHalfSource::PrivateMaskSeed(&private_row_pad_seed),
+            )?;
+            let mut transform = BoundedBaseCosetLaneDft::new(
+                padded_coefficients,
+                full_domain,
+                PHASE_LANE_COLUMN_COUNT,
+                VSS_FUSED_BOUND_RANGE_CANDIDATE_LANE_ORDINAL,
+            )?;
+            loop {
+                poll_count = poll_count
+                    .checked_add(1)
+                    .ok_or_else(|| "VSS fused-bound row-lane poll count overflowed".to_owned())?;
+                if transform.poll()? {
+                    break;
+                }
+            }
+            let values = transform.into_values()?;
+            if values.len() != PHASE_LANE_COLUMN_COUNT {
+                return Err("VSS fused-bound row-lane output width changed".to_owned());
+            }
+            let middle_ordinal = values.len() / 2;
+            let sampled_value = values[0].canonical()
+                ^ values[middle_ordinal].canonical().rotate_left(21)
+                ^ values[values.len() - 1].canonical().rotate_left(42)
+                ^ u64::try_from(coefficient_chunk_ordinal)
+                    .map_err(|_| "VSS fused-bound chunk ordinal exceeds u64".to_owned())?
+                    .rotate_left(7);
+            checksum = checksum
+                .rotate_left(17)
+                .wrapping_add(sampled_value)
+                .wrapping_mul(0x1000_0000_01b3);
+            black_box(&values);
+        }
+        Ok((checksum, poll_count))
+    })?;
+    black_box(checksum);
+
+    let retained_input_byte_length = measurement.retained_input_byte_length()?;
+    let replay_buffer_byte_length = candidate
+        .trace_value_count
+        .checked_mul(size_of::<ProofBaseFieldElement>() as u64)
+        .ok_or_else(|| "VSS fused-bound row-lane replay size overflowed".to_owned())?;
+    let retained_group_header_byte_length = u64::try_from(retained_recipe_count)
+        .ok()
+        .and_then(|count| {
+            count.checked_mul(size_of::<Zeroizing<Vec<ProofBaseFieldElement>>>() as u64)
+        })
+        .ok_or_else(|| "VSS fused-bound row-lane header size overflowed".to_owned())?;
+    let row_working_buffer_byte_length = u64::try_from(geometry.padded_coefficient_count)
+        .ok()
+        .and_then(|count| count.checked_mul(size_of::<ProofBaseFieldElement>() as u64))
+        .ok_or_else(|| "VSS fused-bound row-lane buffer size overflowed".to_owned())?;
+    let retained_group_container_byte_length = u64::try_from(size_of_val(&retained_group))
+        .map_err(|_| "VSS fused-bound group container exceeds u64".to_owned())?;
+    let owned_fixed_state_byte_length = u64::try_from(
+        size_of_val(&retained_group)
+            + size_of::<BoundedBaseCosetLaneDft>()
+            + size_of::<RowEncodingGeometry>()
+            + size_of::<ProofEvaluationDomain>()
+            + size_of_val(&private_row_pad_seed),
+    )
+    .map_err(|_| "VSS fused-bound fixed state exceeds u64".to_owned())?;
+    let materialization_peak_live_byte_length = retained_input_byte_length
+        .checked_add(expected_retained_payload_byte_length)
+        .and_then(|value| value.checked_add(replay_buffer_byte_length))
+        .and_then(|value| value.checked_add(retained_group_header_byte_length))
+        .and_then(|value| value.checked_add(retained_group_container_byte_length))
+        .ok_or_else(|| "VSS fused-bound materialization live set overflowed".to_owned())?;
+    let stripe_peak_live_byte_length = retained_input_byte_length
+        .checked_add(expected_retained_payload_byte_length)
+        .and_then(|value| value.checked_add(retained_group_header_byte_length))
+        .and_then(|value| value.checked_add(row_working_buffer_byte_length))
+        .and_then(|value| value.checked_add(owned_fixed_state_byte_length))
+        .ok_or_else(|| "VSS fused-bound stripe live set overflowed".to_owned())?;
+    let modeled_peak_live_byte_length =
+        materialization_peak_live_byte_length.max(stripe_peak_live_byte_length);
+    let copied_coefficient_value_count = u64::try_from(retained_recipe_count)
+        .ok()
+        .and_then(|count| count.checked_mul(candidate.prover_column_degree_bound_exclusive))
+        .ok_or_else(|| "VSS fused-bound copied coefficient count overflowed".to_owned())?;
+    let coefficient_fold_count_per_lane = u64::try_from(geometry.padded_coefficient_count)
+        .ok()
+        .and_then(|count| count.checked_sub(PHASE_LANE_COLUMN_COUNT as u64))
+        .ok_or_else(|| "VSS fused-bound coefficient-fold count underflowed".to_owned())?;
+    let stripe_coefficient_fold_count = coefficient_fold_count_per_lane
+        .checked_mul(candidate.coefficient_chunk_count)
+        .ok_or_else(|| "VSS fused-bound stripe fold count overflowed".to_owned())?;
+    let stripe_butterfly_count = DFT_BUTTERFLY_COUNT
+        .checked_mul(candidate.coefficient_chunk_count)
+        .ok_or_else(|| "VSS fused-bound stripe butterfly count overflowed".to_owned())?;
+    let stripe_coset_multiplication_count = u64::try_from(PHASE_LANE_COLUMN_COUNT)
+        .ok()
+        .and_then(|count| count.checked_mul(candidate.coefficient_chunk_count))
+        .ok_or_else(|| "VSS fused-bound stripe coset count overflowed".to_owned())?;
+    let stripe_private_high_half_value_count = u64::try_from(geometry.witness_values_per_row)
+        .ok()
+        .and_then(|count| count.checked_mul(candidate.coefficient_chunk_count))
+        .ok_or_else(|| "VSS fused-bound stripe private work overflowed".to_owned())?;
+    let complete_transported_value_byte_length = candidate
+        .phase_commitment_work
+        .column_value_delivery_count
+        .checked_mul(size_of::<ProofBaseFieldElement>() as u64)
+        .ok_or_else(|| "VSS fused-bound transported value length overflowed".to_owned())?;
+
+    Ok(PrimitiveMeasurementRecord {
+        schema_version: MEASUREMENT_SCHEMA_VERSION,
+        case_identifier: 12,
+        case_name: "vss-fused-radix-51-row-lane-stripe",
+        execution_target: execution_target(),
+        iteration_count: candidate.coefficient_chunk_count,
+        elapsed_nanoseconds,
+        modeled_peak_live_byte_length,
+        checksum_hex: format!("{checksum:016x}"),
+        dimensions: vec![
+            dimension_u64("rangeDigitRadix", candidate.range_digit_radix),
+            dimension_u64("tracePackingFactor", candidate.trace_packing_factor),
+            dimension_u64("traceValueCount", candidate.trace_value_count),
+            dimension_u64(
+                "logicalPolynomialCoefficientCount",
+                candidate.logical_polynomial_coefficient_count,
+            ),
+            dimension_u64("physicalRowWidth", candidate.physical_row_width),
+            dimension_u64("basePhaseRowCount", candidate.base_phase_row_count),
+            dimension_u64("quotientPhaseRowCount", candidate.quotient_phase_row_count),
+            dimension_u64("completePhaseRowCount", candidate.complete_phase_row_count),
+            dimension_u64("productionRecipeCount", candidate.production_recipe_count),
+            dimension_u64(
+                "proverColumnDegreeBoundExclusive",
+                candidate.prover_column_degree_bound_exclusive,
+            ),
+            dimension_u64("coefficientChunkCount", candidate.coefficient_chunk_count),
+            dimension("witnessValueCount", geometry.witness_values_per_row)?,
+            dimension("paddedCoefficientCount", geometry.padded_coefficient_count)?,
+            dimension("fullDomainSize", geometry.encoded_column_count)?,
+            dimension("laneColumnCount", PHASE_LANE_COLUMN_COUNT)?,
+            dimension("laneCount", lane_count)?,
+            dimension("laneOrdinal", VSS_FUSED_BOUND_RANGE_CANDIDATE_LANE_ORDINAL)?,
+            dimension_u64(
+                "coefficientFoldCountPerLane",
+                coefficient_fold_count_per_lane,
+            ),
+            dimension_u64("stripeCoefficientFoldCount", stripe_coefficient_fold_count),
+            dimension_u64("butterflyCountPerLane", DFT_BUTTERFLY_COUNT),
+            dimension_u64("stripeButterflyCount", stripe_butterfly_count),
+            dimension_u64(
+                "stripeCosetMultiplicationCount",
+                stripe_coset_multiplication_count,
+            ),
+            dimension_u64(
+                "copiedCoefficientValueCount",
+                copied_coefficient_value_count,
+            ),
+            dimension_u64(
+                "stripePrivateHighHalfValueCount",
+                stripe_private_high_half_value_count,
+            ),
+            dimension("pollCount", poll_count)?,
+            dimension("retainedRecipeCount", retained_recipe_count)?,
+            dimension_u64(
+                "retainedCoefficientPayloadByteLength",
+                expected_retained_payload_byte_length,
+            ),
+            PrimitiveMeasurementDimension {
+                name: "retainedInputByteLength",
+                value: retained_input_byte_length,
+            },
+            dimension_u64("replayBufferByteLength", replay_buffer_byte_length),
+            dimension_u64(
+                "retainedGroupHeaderByteLength",
+                retained_group_header_byte_length,
+            ),
+            dimension_u64(
+                "retainedGroupContainerByteLength",
+                retained_group_container_byte_length,
+            ),
+            dimension_u64("rowWorkingBufferByteLength", row_working_buffer_byte_length),
+            dimension_u64("ownedFixedStateByteLength", owned_fixed_state_byte_length),
+            dimension_u64(
+                "materializationPeakLiveByteLength",
+                materialization_peak_live_byte_length,
+            ),
+            dimension_u64("stripePeakLiveByteLength", stripe_peak_live_byte_length),
+            dimension_u64(
+                "phaseGeometryCount",
+                candidate.phase_commitment_work.geometry_count,
+            ),
+            dimension_u64(
+                "phaseMaterializationPassCount",
+                candidate.phase_commitment_work.materialization_pass_count,
+            ),
+            dimension_u64(
+                "completeSourceMaterializationCount",
+                candidate.complete_source_materialization_count,
+            ),
+            dimension_u64(
+                "completeSourceTraceValueGenerationCount",
+                candidate.complete_source_trace_value_generation_count,
+            ),
+            dimension_u64(
+                "completeLaneDftCount",
+                candidate.phase_commitment_work.lane_dft_count,
+            ),
+            dimension_u64(
+                "completeButterflyCount",
+                candidate.phase_commitment_work.butterfly_count,
+            ),
+            dimension_u64(
+                "completeCoefficientFoldCount",
+                candidate.phase_commitment_work.coefficient_fold_count,
+            ),
+            dimension_u64(
+                "completeCosetMultiplicationCount",
+                candidate.phase_commitment_work.coset_multiplication_count,
+            ),
+            dimension_u64(
+                "completeColumnValueDeliveryCount",
+                candidate.phase_commitment_work.column_value_delivery_count,
+            ),
+            dimension_u64(
+                "completeTransportedValueByteLength",
+                complete_transported_value_byte_length,
+            ),
+            dimension_u64(
+                "completePrivateHighHalfValueGenerationCount",
+                candidate.complete_private_high_half_value_generation_count,
+            ),
+            dimension_u64(
+                "completeLeafHashQueryCount",
+                candidate.phase_commitment_work.leaf_hash_query_count,
+            ),
+            dimension_u64(
+                "completeSaltedLeafKeccakPermutationCount",
+                candidate.complete_salted_leaf_keccak_permutation_count,
+            ),
+            dimension_u64(
+                "completeMerkleParentHashQueryCount",
+                candidate
+                    .phase_commitment_work
+                    .merkle_parent_hash_query_count,
+            ),
+            dimension_u64(
+                "completePrivateLeafSaltDerivationCount",
+                candidate
+                    .phase_commitment_work
+                    .private_leaf_salt_derivation_count,
+            ),
+            dimension(
+                "relationPlanHashByteLength",
+                measurement.relation_plan_hash().len(),
+            )?,
+        ],
+    })
+}
+
 fn measure_authenticated_scratch_record_codec() -> Result<PrimitiveMeasurementRecord, String> {
     let mut plaintext = Vec::new();
     plaintext
@@ -4209,6 +4792,8 @@ fn derive_primitive_measurement(
         8 => measure_selected_vss_production_weighted_source_replay(),
         9 => measure_vss_relation_replay_candidate_retained_group(),
         10 => measure_vss_relation_replay_candidate_row_lane_stripe(),
+        11 => measure_vss_fused_bound_range_candidate_retained_group(),
+        12 => measure_vss_fused_bound_range_candidate_row_lane_stripe(),
         _ => Err("primitive measurement case is unsupported".to_owned()),
     }
 }
@@ -5673,5 +6258,17 @@ mod tests {
     #[ignore = "guarded release-native VSS relation-replay candidate row-lane stripe measurement"]
     fn vss_relation_replay_candidate_row_lane_stripe_emits_measurement() {
         run_and_validate(10, "vss-relation-replay-candidate-row-lane-stripe");
+    }
+
+    #[test]
+    #[ignore = "guarded release-native VSS fused-bound range candidate retained-group measurement"]
+    fn vss_fused_bound_range_candidate_retained_group_emits_measurement() {
+        run_and_validate(11, "vss-fused-radix-51-retained-group");
+    }
+
+    #[test]
+    #[ignore = "guarded release-native VSS fused-bound range candidate row-lane stripe measurement"]
+    fn vss_fused_bound_range_candidate_row_lane_stripe_emits_measurement() {
+        run_and_validate(12, "vss-fused-radix-51-row-lane-stripe");
     }
 }

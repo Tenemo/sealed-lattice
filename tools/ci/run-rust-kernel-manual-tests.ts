@@ -16,6 +16,7 @@ import {
     fullProfileEvidenceRustTests,
     measurementRustTests,
     phaseLivenessEvidenceRustTests,
+    primitiveMeasurementRustTests,
     theoremEvidenceRustTests,
     verifyFocusedRustLaneSelection,
 } from './rust-focused-lane-selection.js';
@@ -272,12 +273,26 @@ export const runRustKernelManualTests = async (): Promise<void> => {
                 useReleaseProfile: parsed.lane === 'rust-measurements',
             });
             if (parsed.lane === 'rust-measurements') {
+                const focusedFilter = parsed.focusedFilter;
+                const expectedFocusedCaseIdentifiers =
+                    focusedFilter === undefined
+                        ? undefined
+                        : primitiveMeasurementRustTests
+                              .map((testName, testIndex) => ({
+                                  caseIdentifier: testIndex + 1,
+                                  testName,
+                              }))
+                              .filter(({ testName }) =>
+                                  testName.includes(focusedFilter),
+                              )
+                              .map(({ caseIdentifier }) => caseIdentifier);
                 const evidence = parseReleaseNativePrimitiveMeasurementOutput(
                     await readFile(
                         path.join(runLog.runDirectoryPath, 'output.log'),
                         'utf8',
                     ),
                     parsed.focusedFilter === undefined,
+                    expectedFocusedCaseIdentifiers,
                 );
                 const attachmentDirectoryPath = path.join(
                     runLog.runDirectoryPath,
@@ -289,7 +304,9 @@ export const runRustKernelManualTests = async (): Promise<void> => {
                     attachmentDirectoryPath,
                     parsed.focusedFilter === undefined
                         ? 'release-native-primitive-measurements.json'
-                        : 'release-native-focused-primitive-measurement.json',
+                        : expectedFocusedCaseIdentifiers?.length === 1
+                          ? 'release-native-focused-primitive-measurement.json'
+                          : 'release-native-focused-primitive-measurements.json',
                 );
                 await writeFile(
                     attachmentFilePath,

@@ -568,7 +568,18 @@ Works today:
   checks preserve the configured MMCS root and authentication paths, but exact
   whole-proof byte parity, theorem integration, native and browser measurement,
   production integration, and a suite identity do not yet exist. No replay
-  redesign is selected.
+  redesign is selected. Focused release-native measurements now execute the
+  production-derived feature candidate from one release binary. One retained
+  64-column source group took `100,787,000` nanoseconds with a
+  `39,185,944`-byte modeled primitive live set, and one selected row-lane stripe
+  took `79,148,600` nanoseconds with a `72,609,648`-byte modeled primitive live
+  set. The successful cached guarded run completed with child exit zero, a
+  `344,961,024`-byte job-object peak, a `77,246,464`-byte sampled process-tree
+  resident-set peak, and no memory-limit violation. These are focused owner
+  measurements, not a complete-runtime projection, whole-proof live-set
+  measurement, production integration result, or proof result. Matching
+  release-WebAssembly measurements from one reproducible binary in Chromium
+  and Firefox remain absent.
   The fastest comparator accepted by the existing one-aggregate construction
   is instead factor 1, width 32. It has 331 rows, 21,184 lane DFTs,
   `105,511,911,424` butterflies, `11,106,516,992` value deliveries, and

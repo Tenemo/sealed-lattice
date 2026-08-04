@@ -51,8 +51,9 @@ export type VssBaseMaterializationProjection = Readonly<{
         basePhaseRowCount: number;
         aggregateWidePadQueryCount: number;
     }>;
+    fusedRadix51Candidate: Readonly<Record<string, unknown>>;
     modeledRelationReplayCandidate: Readonly<Record<string, unknown>>;
-    schemaVersion: 2;
+    schemaVersion: 3;
     modeledCheckpointLevel: 2;
     targetProjections: readonly Readonly<Record<string, unknown>>[];
 }>;
@@ -113,14 +114,14 @@ const scaleElapsedNanoseconds = (
 const projectPrimitiveOwners = (
     primitiveCases: readonly PrimitiveMeasurementRecord[],
     work: WorkCounts,
-    sourceReplayCaseIdentifier: 8 | 9,
-    rowLaneCaseIdentifier: 1 | 10,
+    sourceReplayCaseIdentifier: 8 | 9 | 11,
+    rowLaneCaseIdentifier: 1 | 10 | 12,
 ): Readonly<{
     leafHashNanoseconds: number;
     merkleParentHashNanoseconds: number;
     privateLeafSaltNanoseconds: number;
     rowLaneNanoseconds: number;
-    rowLaneOwnerCaseIdentifier: 1 | 10;
+    rowLaneOwnerCaseIdentifier: 1 | 10 | 12;
     sourceReplayNanoseconds: number;
     totalNanoseconds: number;
 }> => {
@@ -201,9 +202,11 @@ const assertCatalogCorrespondence = (
             nativeRecord.caseIdentifier === 5 ||
                 nativeRecord.caseIdentifier === 8
                 ? ['retainedInputByteLength']
-                : nativeRecord.caseIdentifier === 9
+                : nativeRecord.caseIdentifier === 9 ||
+                    nativeRecord.caseIdentifier === 11
                   ? ['retainedInputByteLength', 'retainedGroupHeaderByteLength']
-                  : nativeRecord.caseIdentifier === 10
+                  : nativeRecord.caseIdentifier === 10 ||
+                      nativeRecord.caseIdentifier === 12
                     ? [
                           'retainedInputByteLength',
                           'retainedGroupHeaderByteLength',
@@ -460,6 +463,69 @@ export const deriveVssBaseMaterializationProjection = (input: {
             });
         },
     );
+    const fusedCandidateRetainedGroupRecord = requireCase(nativeCases, 11);
+    const fusedCandidateRowLaneRecord = requireCase(nativeCases, 12);
+    const fusedCandidateWork: WorkCounts = Object.freeze({
+        laneDftCount: requireDimension(
+            fusedCandidateRowLaneRecord,
+            'completeLaneDftCount',
+        ),
+        leafHashKeccakPermutationCount: requireDimension(
+            fusedCandidateRowLaneRecord,
+            'completeSaltedLeafKeccakPermutationCount',
+        ),
+        leafHashQueryCount: requireDimension(
+            fusedCandidateRowLaneRecord,
+            'completeLeafHashQueryCount',
+        ),
+        merkleParentHashQueryCount: requireDimension(
+            fusedCandidateRowLaneRecord,
+            'completeMerkleParentHashQueryCount',
+        ),
+        privateLeafSaltDerivationCount: requireDimension(
+            fusedCandidateRowLaneRecord,
+            'completePrivateLeafSaltDerivationCount',
+        ),
+        sourceReplayCount: requireDimension(
+            fusedCandidateRetainedGroupRecord,
+            'completeSourceMaterializationCount',
+        ),
+        sourceTraceValueGenerationCount: requireDimension(
+            fusedCandidateRetainedGroupRecord,
+            'completeSourceTraceValueGenerationCount',
+        ),
+    });
+    const fusedCandidateTargetProjections = targets.map(
+        (target, targetIndex) => {
+            const owners = projectPrimitiveOwners(
+                target.primitiveCases,
+                fusedCandidateWork,
+                11,
+                12,
+            );
+            const currentProjection = currentTargetProjections[targetIndex];
+            const currentOwners = currentProjection?.currentTwoPassOwners;
+            if (
+                currentOwners === undefined ||
+                currentOwners.totalNanoseconds <= owners.totalNanoseconds
+            ) {
+                throw new Error(
+                    'Fused radix-51 VSS candidate does not reduce every target owner total.',
+                );
+            }
+            return Object.freeze({
+                ...(target.browserEngine === undefined
+                    ? {}
+                    : { browserEngine: target.browserEngine }),
+                currentOwnerTotalNanoseconds: currentOwners.totalNanoseconds,
+                fusedOwnerTotalNanoseconds: owners.totalNanoseconds,
+                ownerReductionFactor:
+                    currentOwners.totalNanoseconds / owners.totalNanoseconds,
+                owners,
+                target: target.target,
+            });
+        },
+    );
 
     const scratchCodecRecord = requireCase(nativeCases, 6);
     const scratchRecordByteLength = requireDimension(
@@ -637,6 +703,83 @@ export const deriveVssBaseMaterializationProjection = (input: {
             basePhaseRowCount: rowCount,
             aggregateWidePadQueryCount,
         }),
+        fusedRadix51Candidate: Object.freeze({
+            basePhaseRowCount: requireDimension(
+                fusedCandidateRowLaneRecord,
+                'basePhaseRowCount',
+            ),
+            completePhaseRowCount: requireDimension(
+                fusedCandidateRowLaneRecord,
+                'completePhaseRowCount',
+            ),
+            completeWork: Object.freeze({
+                butterflyCount: requireDimension(
+                    fusedCandidateRowLaneRecord,
+                    'completeButterflyCount',
+                ),
+                coefficientFoldCount: requireDimension(
+                    fusedCandidateRowLaneRecord,
+                    'completeCoefficientFoldCount',
+                ),
+                columnValueDeliveryCount: requireDimension(
+                    fusedCandidateRowLaneRecord,
+                    'completeColumnValueDeliveryCount',
+                ),
+                cosetMultiplicationCount: requireDimension(
+                    fusedCandidateRowLaneRecord,
+                    'completeCosetMultiplicationCount',
+                ),
+                laneDftCount: fusedCandidateWork.laneDftCount,
+                leafHashQueryCount: fusedCandidateWork.leafHashQueryCount,
+                merkleParentHashQueryCount:
+                    fusedCandidateWork.merkleParentHashQueryCount,
+                privateLeafSaltDerivationCount:
+                    fusedCandidateWork.privateLeafSaltDerivationCount,
+                saltedLeafKeccakPermutationCount:
+                    fusedCandidateWork.leafHashKeccakPermutationCount,
+                sourceMaterializationCount:
+                    fusedCandidateWork.sourceReplayCount,
+                sourceTraceValueGenerationCount:
+                    fusedCandidateWork.sourceTraceValueGenerationCount,
+            }),
+            physicalRowWidth: requireDimension(
+                fusedCandidateRowLaneRecord,
+                'physicalRowWidth',
+            ),
+            productionRecipeCount: requireDimension(
+                fusedCandidateRowLaneRecord,
+                'productionRecipeCount',
+            ),
+            proverColumnDegreeBoundExclusive: requireDimension(
+                fusedCandidateRowLaneRecord,
+                'proverColumnDegreeBoundExclusive',
+            ),
+            quotientPhaseRowCount: requireDimension(
+                fusedCandidateRowLaneRecord,
+                'quotientPhaseRowCount',
+            ),
+            rangeDigitRadix: requireDimension(
+                fusedCandidateRowLaneRecord,
+                'rangeDigitRadix',
+            ),
+            relationTraceValueCount: requireDimension(
+                fusedCandidateRowLaneRecord,
+                'traceValueCount',
+            ),
+            retainedCoefficientGroupByteLength: requireDimension(
+                fusedCandidateRetainedGroupRecord,
+                'retainedCoefficientPayloadByteLength',
+            ),
+            targetProjections: Object.freeze(fusedCandidateTargetProjections),
+            tracePackingFactor: requireDimension(
+                fusedCandidateRowLaneRecord,
+                'tracePackingFactor',
+            ),
+            transportedValueByteLength: requireDimension(
+                fusedCandidateRowLaneRecord,
+                'completeTransportedValueByteLength',
+            ),
+        }),
         modeledRelationReplayCandidate: Object.freeze({
             coefficientChunkCountPerSource: requireDimension(
                 ledgerRecord,
@@ -698,7 +841,7 @@ export const deriveVssBaseMaterializationProjection = (input: {
                 'modeledCandidateTransportedValueByteLength',
             ),
         }),
-        schemaVersion: 2,
+        schemaVersion: 3,
         modeledCheckpointLevel,
         targetProjections: Object.freeze(currentTargetProjections),
     });
