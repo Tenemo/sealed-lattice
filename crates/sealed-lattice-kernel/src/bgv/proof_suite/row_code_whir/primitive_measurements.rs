@@ -18,6 +18,8 @@ use zeroize::Zeroizing;
 use super::super::relation_plan::{
     COMMITTED_MATERIAL_TRACE_PACKING_FACTOR, derive_vss_relation_packing_candidate_geometry,
 };
+#[cfg(test)]
+use super::commitment_liveness::derive_phase_commitment_work_accounting;
 use super::{
     bounded_dft::{
         BoundedBaseCosetLaneDft, BoundedSelectedBaseCosetLaneDft, SelectedBaseCosetLaneDftSchedule,
@@ -47,7 +49,17 @@ use super::{
     },
 };
 #[cfg(test)]
-use crate::bgv::proof_suite::{CommittedMaterialRelationPlanInput, RelationPlanCheckContext};
+use crate::bgv::proof_suite::{
+    CommittedMaterialRelationPlanInput, MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+    MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, RelationPlanCheckContext,
+    external_memory::{
+        COMMON_PROOF_EXTERNAL_MEMORY_EMPTY_RESPONSE_BYTE_LENGTH,
+        COMMON_PROOF_EXTERNAL_MEMORY_READ_REQUEST_BYTE_LENGTH,
+        MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_APPEND_REQUEST_BYTE_LENGTH,
+        MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_READ_RESPONSE_BYTE_LENGTH,
+        MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
+    },
+};
 use crate::bgv::proof_suite::{
     PROOF_BASE_FIELD_MODULUS, PROOF_EVALUATION_COSET_OFFSET, ProofBaseFieldElement,
     ProofEvaluationDomain, ProofProfileError, RelationTreeDescriptor,
@@ -635,6 +647,558 @@ struct VssOpeningClaimQuotientCandidateLedger {
     query_domain_size: u64,
     query_count: u64,
     agreement_ceiling: u64,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Production-derived totals that remain live while phase checkpoint roots
+/// await the dependent outer-query challenge.
+pub(super) struct VssPersistedCheckpointReplayBaseline {
+    pub(super) maximum_wasm_live_set_byte_length: u64,
+    pub(super) phase_commitment_live_set_byte_length: u64,
+    pub(super) maximum_scratch_stored_byte_length: u64,
+    pub(super) scratch_total_written_byte_length: u64,
+    pub(super) scratch_total_read_byte_length: u64,
+    pub(super) scratch_transaction_count: u64,
+    pub(super) scratch_object_count: u64,
+}
+
+#[cfg(test)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+/// Conservative complete work and liveness for one persisted-subtree level.
+///
+/// The model gives all 387 distinct queries separate checkpoint blocks, which
+/// maximizes replay. Each phase writes one streamed public-integrity plane of
+/// 512-bit subtree roots, later reads the complete plane, replaces queried
+/// roots with recomputed roots, and rebuilds the upper tree. No checkpoint
+/// root is trusted or treated as secret. The candidate never enters a proof,
+/// transcript, selected profile, or serialized evidence record.
+pub(super) struct VssPersistedCheckpointReplayCandidateLedger {
+    pub(super) checkpoint_level: u32,
+    pub(super) phase_geometry_count: u64,
+    pub(super) physical_row_count: u64,
+    pub(super) checkpoint_leaf_count: u64,
+    pub(super) maximum_recomputed_leaf_count_per_geometry: u64,
+    pub(super) checkpoint_root_count_per_geometry: u64,
+    pub(super) checkpoint_plane_byte_length: u64,
+    pub(super) checkpoint_object_count: u64,
+    pub(super) checkpoint_chunk_count: u64,
+    pub(super) combined_scratch_stored_byte_length: u64,
+    pub(super) scratch_hard_bound_headroom_byte_length: u64,
+    pub(super) scratch_hard_bound_overage_byte_length: u64,
+    pub(super) combined_scratch_total_written_byte_length: u64,
+    pub(super) combined_scratch_total_read_byte_length: u64,
+    pub(super) combined_scratch_transaction_count: u64,
+    pub(super) combined_scratch_object_count: u64,
+    pub(super) checkpoint_boundary_transport_byte_length: u64,
+    pub(super) checkpoint_local_record_seal_invocation_count: u64,
+    pub(super) lower_selected_output_count_per_lane: u64,
+    pub(super) higher_selected_output_count_per_lane: u64,
+    pub(super) lower_output_lane_count: u64,
+    pub(super) higher_output_lane_count: u64,
+    pub(super) selected_butterfly_count_per_physical_row: u64,
+    pub(super) root_pass_butterfly_count: u64,
+    pub(super) opening_pass_butterfly_count: u64,
+    pub(super) complete_butterfly_count: u64,
+    pub(super) complete_lane_dft_count: u64,
+    pub(super) complete_coefficient_fold_count: u64,
+    pub(super) complete_coset_multiplication_count: u64,
+    pub(super) complete_bit_reversal_visit_count: u64,
+    pub(super) complete_column_value_delivery_count: u64,
+    pub(super) complete_leaf_hash_query_count: u64,
+    pub(super) complete_salted_leaf_keccak_permutation_count: u64,
+    pub(super) complete_merkle_parent_hash_query_count: u64,
+    pub(super) complete_private_leaf_salt_derivation_count: u64,
+    pub(super) selected_vss_complete_butterfly_count: u64,
+    pub(super) selected_vss_complete_coset_multiplication_count: u64,
+    pub(super) selected_vss_complete_column_value_delivery_count: u64,
+    pub(super) selected_vss_complete_salted_leaf_keccak_permutation_count: u64,
+    pub(super) maximum_selected_schedule_owned_byte_length: u64,
+    pub(super) phase_commitment_live_set_upper_bound_byte_length: u64,
+    pub(super) combined_wasm_live_set_upper_bound_byte_length: u64,
+    pub(super) wasm_hard_bound_headroom_byte_length: u64,
+    pub(super) scratch_within_hard_bound: bool,
+    pub(super) has_tenfold_butterfly_reduction: bool,
+    pub(super) has_tenfold_coset_reduction: bool,
+    pub(super) has_tenfold_column_delivery_reduction: bool,
+    pub(super) has_tenfold_salted_leaf_permutation_reduction: bool,
+    pub(super) eligible_for_focused_browser_measurement: bool,
+}
+
+#[cfg(test)]
+fn complete_phase_salted_leaf_keccak_permutation_count(
+    construction_plan: &RowCodeWhirConstructionPlan,
+    pass_count: u64,
+) -> Result<u64, String> {
+    construction_plan
+        .base_phase
+        .iter()
+        .chain(construction_plan.auxiliary_phase.iter())
+        .map(|phase| phase.geometry)
+        .chain(core::iter::once(construction_plan.quotient_phase.geometry))
+        .try_fold(0_u64, |total, geometry| {
+            let leaf_count = u64::try_from(geometry.encoded_column_count)
+                .map_err(|_| "phase leaf count exceeds u64".to_owned())?;
+            let permutations_per_leaf =
+                salted_phase_column_leaf_keccak_permutation_count(geometry.row_count)?;
+            total
+                .checked_add(
+                    leaf_count
+                        .checked_mul(permutations_per_leaf)
+                        .and_then(|count| count.checked_mul(pass_count))
+                        .ok_or_else(|| {
+                            "complete phase leaf permutation count overflowed".to_owned()
+                        })?,
+                )
+                .ok_or_else(|| "complete phase leaf permutation count overflowed".to_owned())
+        })
+}
+
+#[cfg(test)]
+fn selected_vss_construction_plan_for_checkpoint_comparison()
+-> Result<RowCodeWhirConstructionPlan, String> {
+    let schema_identifier =
+        ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER;
+    let relation_context = selected_relation_plan_check_context(schema_identifier)
+        .ok_or_else(|| "selected VSS checkpoint context is absent".to_owned())?;
+    let relation_input = selected_committed_material_relation_plan_input()
+        .map_err(|_| "selected VSS checkpoint input is invalid".to_owned())?;
+    let compiled_plan = compile_vss_share_linkage_relation_plan(&relation_input, &relation_context)
+        .map_err(|_| "selected VSS checkpoint relation does not compile".to_owned())?;
+    let artifact =
+        ValidatedRelationPlanArtifact::from_owned_compiled_plan(compiled_plan, &relation_context)
+            .map_err(|_| "selected VSS checkpoint relation does not validate".to_owned())?;
+    let relation_variant = artifact
+        .compiled_plan()
+        .variants()
+        .first()
+        .ok_or_else(|| "selected VSS checkpoint relation variant is absent".to_owned())?;
+    RowCodeWhirConstructionPlan::for_selected_variant(
+        &artifact,
+        relation_variant.schedule_position(),
+        relation_variant.top_count(),
+    )
+    .map_err(|_| "selected VSS checkpoint construction does not derive".to_owned())
+}
+
+#[cfg(test)]
+pub(super) fn derive_vss_persisted_checkpoint_replay_candidate_ledgers(
+    baseline: VssPersistedCheckpointReplayBaseline,
+) -> Result<Vec<VssPersistedCheckpointReplayCandidateLedger>, String> {
+    if baseline.maximum_wasm_live_set_byte_length == 0
+        || baseline.phase_commitment_live_set_byte_length == 0
+        || baseline.maximum_scratch_stored_byte_length == 0
+        || baseline.scratch_total_written_byte_length == 0
+        || baseline.scratch_total_read_byte_length == 0
+        || baseline.scratch_transaction_count == 0
+        || baseline.scratch_object_count == 0
+    {
+        return Err("bounded VSS checkpoint baseline is incomplete".to_owned());
+    }
+    let modeled_candidate = derive_vss_relation_replay_candidate_ledger(
+        VSS_RELATION_REPLAY_CANDIDATE_TRACE_PACKING_FACTOR,
+        VSS_RELATION_REPLAY_CANDIDATE_RETAINED_GROUP_WIDTH as u64,
+    )?
+    .ok_or_else(|| "bounded VSS checkpoint candidate exceeds its opening bound".to_owned())?;
+    let candidate_construction =
+        derive_vss_relation_replay_opening_claim_quotient_candidate_construction_plan(
+            modeled_candidate,
+        )?;
+    let candidate_work = derive_phase_commitment_work_accounting(&candidate_construction)?;
+    let selected_construction = selected_vss_construction_plan_for_checkpoint_comparison()?;
+    let selected_work = derive_phase_commitment_work_accounting(&selected_construction)?;
+    let selected_salted_leaf_permutation_count =
+        complete_phase_salted_leaf_keccak_permutation_count(
+            &selected_construction,
+            ROOT_AND_OPENING_PASS_COUNT,
+        )?;
+    let candidate_root_pass_salted_leaf_permutation_count =
+        complete_phase_salted_leaf_keccak_permutation_count(&candidate_construction, 1)?;
+    let candidate_geometries = candidate_construction
+        .base_phase
+        .iter()
+        .chain(candidate_construction.auxiliary_phase.iter())
+        .map(|phase| phase.geometry)
+        .chain(core::iter::once(
+            candidate_construction.quotient_phase.geometry,
+        ))
+        .collect::<Vec<_>>();
+    let phase_geometry_count = u64::try_from(candidate_geometries.len())
+        .map_err(|_| "checkpoint phase-geometry count exceeds u64".to_owned())?;
+    let physical_row_count = candidate_geometries
+        .iter()
+        .try_fold(0_u64, |total, geometry| {
+            total
+                .checked_add(
+                    u64::try_from(geometry.row_count)
+                        .map_err(|_| "checkpoint phase row count exceeds u64".to_owned())?,
+                )
+                .ok_or_else(|| "checkpoint phase row count overflowed".to_owned())
+        })?;
+    let encoded_column_count = candidate_geometries
+        .first()
+        .map(|geometry| geometry.encoded_column_count)
+        .ok_or_else(|| "checkpoint phase geometry is empty".to_owned())?;
+    let lane_column_count = encoded_column_count
+        .min(super::generation_state::MAXIMUM_PHASE_COMMITMENT_LANE_COLUMN_COUNT);
+    let lane_count = encoded_column_count
+        .checked_div(lane_column_count)
+        .ok_or_else(|| "checkpoint lane count does not derive".to_owned())?;
+    if phase_geometry_count != candidate_work.geometry_count
+        || candidate_work.materialization_pass_count != ROOT_AND_OPENING_PASS_COUNT
+        || encoded_column_count != PHASE_ENCODED_COLUMN_COUNT
+        || lane_column_count != PHASE_LANE_COLUMN_COUNT
+        || lane_count != PHASE_ENCODED_COLUMN_COUNT / PHASE_LANE_COLUMN_COUNT
+        || candidate_geometries.iter().any(|geometry| {
+            geometry.encoded_column_count != encoded_column_count
+                || geometry.padded_coefficient_count != 1 << 22
+        })
+    {
+        return Err("bounded VSS checkpoint phase geometry is inconsistent".to_owned());
+    }
+    let candidate_leaf_permutation_count_per_column =
+        candidate_geometries
+            .iter()
+            .try_fold(0_u64, |total, geometry| {
+                total
+                    .checked_add(salted_phase_column_leaf_keccak_permutation_count(
+                        geometry.row_count,
+                    )?)
+                    .ok_or_else(|| "checkpoint per-column permutation count overflowed".to_owned())
+            })?;
+    let root_pass_butterfly_count = candidate_work
+        .butterfly_count
+        .checked_div(ROOT_AND_OPENING_PASS_COUNT)
+        .filter(|count| {
+            count.checked_mul(ROOT_AND_OPENING_PASS_COUNT) == Some(candidate_work.butterfly_count)
+        })
+        .ok_or_else(|| "checkpoint root-pass butterfly count is inexact".to_owned())?;
+    let root_pass_column_value_delivery_count = candidate_work
+        .column_value_delivery_count
+        .checked_div(ROOT_AND_OPENING_PASS_COUNT)
+        .filter(|count| {
+            count.checked_mul(ROOT_AND_OPENING_PASS_COUNT)
+                == Some(candidate_work.column_value_delivery_count)
+        })
+        .ok_or_else(|| "checkpoint root-pass value-delivery count is inexact".to_owned())?;
+    let root_pass_leaf_hash_query_count = candidate_work
+        .leaf_hash_query_count
+        .checked_div(ROOT_AND_OPENING_PASS_COUNT)
+        .filter(|count| {
+            count.checked_mul(ROOT_AND_OPENING_PASS_COUNT)
+                == Some(candidate_work.leaf_hash_query_count)
+        })
+        .ok_or_else(|| "checkpoint root-pass leaf count is inexact".to_owned())?;
+    let root_pass_parent_hash_query_count = candidate_work
+        .merkle_parent_hash_query_count
+        .checked_div(ROOT_AND_OPENING_PASS_COUNT)
+        .filter(|count| {
+            count.checked_mul(ROOT_AND_OPENING_PASS_COUNT)
+                == Some(candidate_work.merkle_parent_hash_query_count)
+        })
+        .ok_or_else(|| "checkpoint root-pass parent count is inexact".to_owned())?;
+    let query_count = u64::try_from(candidate_construction.outer_query_count())
+        .map_err(|_| "checkpoint query count exceeds u64".to_owned())?;
+    let encoded_column_count_u64 = u64::try_from(encoded_column_count)
+        .map_err(|_| "checkpoint encoded-column count exceeds u64".to_owned())?;
+    let chunk_byte_length = u64::from(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH);
+    let digest_byte_length = u64::try_from(size_of::<ColumnDigest>())
+        .map_err(|_| "checkpoint digest size exceeds u64".to_owned())?;
+    let mut ledgers = Vec::new();
+    for checkpoint_level in 1_u32..=5 {
+        let checkpoint_leaf_count = 1_u64
+            .checked_shl(checkpoint_level)
+            .ok_or_else(|| "checkpoint leaf count overflowed".to_owned())?;
+        let maximum_recomputed_leaf_count_per_geometry = query_count
+            .checked_mul(checkpoint_leaf_count)
+            .ok_or_else(|| "checkpoint recomputed-leaf count overflowed".to_owned())?;
+        let checkpoint_root_count_per_geometry = encoded_column_count_u64
+            .checked_div(checkpoint_leaf_count)
+            .filter(|count| {
+                count.checked_mul(checkpoint_leaf_count) == Some(encoded_column_count_u64)
+            })
+            .ok_or_else(|| "checkpoint root count is inexact".to_owned())?;
+        let checkpoint_plane_byte_length = checkpoint_root_count_per_geometry
+            .checked_mul(digest_byte_length)
+            .and_then(|count| count.checked_mul(phase_geometry_count))
+            .ok_or_else(|| "checkpoint plane size overflowed".to_owned())?;
+        let checkpoint_chunk_count = checkpoint_plane_byte_length
+            .checked_div(chunk_byte_length)
+            .filter(|count| {
+                count.checked_mul(chunk_byte_length) == Some(checkpoint_plane_byte_length)
+            })
+            .ok_or_else(|| "checkpoint plane does not fill canonical chunks".to_owned())?;
+        let checkpoint_object_count = phase_geometry_count;
+        let combined_scratch_stored_byte_length = baseline
+            .maximum_scratch_stored_byte_length
+            .checked_add(checkpoint_plane_byte_length)
+            .ok_or_else(|| "checkpoint scratch peak overflowed".to_owned())?;
+        let scratch_hard_bound_headroom_byte_length =
+            MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH
+                .saturating_sub(combined_scratch_stored_byte_length);
+        let scratch_hard_bound_overage_byte_length = combined_scratch_stored_byte_length
+            .saturating_sub(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH);
+        let checkpoint_control_transaction_count = checkpoint_object_count
+            .checked_mul(3)
+            .ok_or_else(|| "checkpoint control-transaction count overflowed".to_owned())?;
+        let checkpoint_transaction_count = checkpoint_chunk_count
+            .checked_mul(2)
+            .and_then(|count| count.checked_add(checkpoint_control_transaction_count))
+            .ok_or_else(|| "checkpoint transaction count overflowed".to_owned())?;
+        let append_round_trip_byte_length =
+            MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_APPEND_REQUEST_BYTE_LENGTH
+                .checked_add(COMMON_PROOF_EXTERNAL_MEMORY_EMPTY_RESPONSE_BYTE_LENGTH)
+                .ok_or_else(|| "checkpoint append framing overflowed".to_owned())?;
+        let read_round_trip_byte_length = COMMON_PROOF_EXTERNAL_MEMORY_READ_REQUEST_BYTE_LENGTH
+            .checked_add(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_READ_RESPONSE_BYTE_LENGTH)
+            .ok_or_else(|| "checkpoint read framing overflowed".to_owned())?;
+        let control_round_trip_byte_length = COMMON_PROOF_EXTERNAL_MEMORY_READ_REQUEST_BYTE_LENGTH
+            .checked_add(COMMON_PROOF_EXTERNAL_MEMORY_EMPTY_RESPONSE_BYTE_LENGTH)
+            .ok_or_else(|| "checkpoint control framing overflowed".to_owned())?;
+        let checkpoint_boundary_transport_byte_length = checkpoint_chunk_count
+            .checked_mul(append_round_trip_byte_length)
+            .and_then(|count| {
+                checkpoint_chunk_count
+                    .checked_mul(read_round_trip_byte_length)
+                    .and_then(|read| count.checked_add(read))
+            })
+            .and_then(|count| {
+                checkpoint_control_transaction_count
+                    .checked_mul(control_round_trip_byte_length)
+                    .and_then(|control| count.checked_add(control))
+            })
+            .ok_or_else(|| "checkpoint boundary traffic overflowed".to_owned())?;
+        let maximum_recomputed_leaf_count =
+            usize::try_from(maximum_recomputed_leaf_count_per_geometry)
+                .map_err(|_| "checkpoint recomputed-leaf count exceeds usize".to_owned())?;
+        let lower_selected_output_count = maximum_recomputed_leaf_count / lane_count;
+        let higher_selected_output_count = maximum_recomputed_leaf_count.div_ceil(lane_count);
+        let higher_output_lane_count = maximum_recomputed_leaf_count % lane_count;
+        let lower_output_lane_count = lane_count
+            .checked_sub(higher_output_lane_count)
+            .ok_or_else(|| "checkpoint lower-lane count underflowed".to_owned())?;
+        if lower_selected_output_count == 0 {
+            return Err("checkpoint selected-output schedule is empty".to_owned());
+        }
+        let lower_selected_indices = (0..lower_selected_output_count).collect::<Vec<_>>();
+        let lower_schedule =
+            SelectedBaseCosetLaneDftSchedule::new(lane_column_count, &lower_selected_indices)?;
+        let higher_schedule = if higher_selected_output_count == lower_selected_output_count {
+            None
+        } else {
+            let higher_selected_indices = (0..higher_selected_output_count).collect::<Vec<_>>();
+            Some(SelectedBaseCosetLaneDftSchedule::new(
+                lane_column_count,
+                &higher_selected_indices,
+            )?)
+        };
+        if lower_schedule.butterfly_count() != lower_schedule.maximum_butterfly_count_upper_bound()
+            || higher_schedule.as_ref().is_some_and(|schedule| {
+                schedule.butterfly_count() != schedule.maximum_butterfly_count_upper_bound()
+            })
+        {
+            return Err(
+                "checkpoint schedule does not attain its conservative work bound".to_owned(),
+            );
+        }
+        let higher_butterfly_count = higher_schedule
+            .as_ref()
+            .map_or(lower_schedule.butterfly_count(), |schedule| {
+                schedule.butterfly_count()
+            });
+        let selected_butterfly_count_per_physical_row = lower_schedule
+            .butterfly_count()
+            .checked_mul(lower_output_lane_count)
+            .and_then(|count| {
+                higher_butterfly_count
+                    .checked_mul(higher_output_lane_count)
+                    .and_then(|higher| count.checked_add(higher))
+            })
+            .ok_or_else(|| "checkpoint selected butterfly count overflowed".to_owned())?;
+        let opening_pass_butterfly_count = u64::try_from(selected_butterfly_count_per_physical_row)
+            .ok()
+            .and_then(|count| count.checked_mul(physical_row_count))
+            .ok_or_else(|| "checkpoint opening-pass butterfly count overflowed".to_owned())?;
+        let complete_butterfly_count = root_pass_butterfly_count
+            .checked_add(opening_pass_butterfly_count)
+            .ok_or_else(|| "checkpoint complete butterfly count overflowed".to_owned())?;
+        let opening_column_value_delivery_count = maximum_recomputed_leaf_count_per_geometry
+            .checked_mul(physical_row_count)
+            .ok_or_else(|| "checkpoint opening value-delivery count overflowed".to_owned())?;
+        let complete_column_value_delivery_count = root_pass_column_value_delivery_count
+            .checked_add(opening_column_value_delivery_count)
+            .ok_or_else(|| "checkpoint complete value-delivery count overflowed".to_owned())?;
+        let opening_leaf_hash_query_count = maximum_recomputed_leaf_count_per_geometry
+            .checked_mul(phase_geometry_count)
+            .ok_or_else(|| "checkpoint opening leaf-hash count overflowed".to_owned())?;
+        let complete_leaf_hash_query_count = root_pass_leaf_hash_query_count
+            .checked_add(opening_leaf_hash_query_count)
+            .ok_or_else(|| "checkpoint complete leaf-hash count overflowed".to_owned())?;
+        let opening_salted_leaf_permutation_count = maximum_recomputed_leaf_count_per_geometry
+            .checked_mul(candidate_leaf_permutation_count_per_column)
+            .ok_or_else(|| "checkpoint opening leaf permutation count overflowed".to_owned())?;
+        let complete_salted_leaf_keccak_permutation_count =
+            candidate_root_pass_salted_leaf_permutation_count
+                .checked_add(opening_salted_leaf_permutation_count)
+                .ok_or_else(|| {
+                    "checkpoint complete leaf permutation count overflowed".to_owned()
+                })?;
+        let opening_subtree_parent_hash_query_count = query_count
+            .checked_mul(checkpoint_leaf_count.saturating_sub(1))
+            .and_then(|count| count.checked_mul(phase_geometry_count))
+            .ok_or_else(|| "checkpoint subtree parent count overflowed".to_owned())?;
+        let opening_checkpoint_plane_parent_hash_query_count = checkpoint_root_count_per_geometry
+            .saturating_sub(1)
+            .checked_mul(phase_geometry_count)
+            .ok_or_else(|| "checkpoint plane parent count overflowed".to_owned())?;
+        let complete_merkle_parent_hash_query_count = root_pass_parent_hash_query_count
+            .checked_add(opening_subtree_parent_hash_query_count)
+            .and_then(|count| count.checked_add(opening_checkpoint_plane_parent_hash_query_count))
+            .ok_or_else(|| "checkpoint complete parent-hash count overflowed".to_owned())?;
+        let lower_schedule_heap_byte_length = lower_schedule.exact_heap_byte_length()?;
+        let higher_schedule_heap_byte_length = higher_schedule
+            .as_ref()
+            .map(SelectedBaseCosetLaneDftSchedule::exact_heap_byte_length)
+            .transpose()?
+            .unwrap_or(0);
+        let active_schedule_heap_byte_length =
+            lower_schedule_heap_byte_length.max(higher_schedule_heap_byte_length);
+        let schedule_catalog_heap_byte_length = lower_schedule_heap_byte_length
+            .checked_add(higher_schedule_heap_byte_length)
+            .ok_or_else(|| "checkpoint schedule catalog size overflowed".to_owned())?;
+        let selected_output_byte_length = higher_selected_output_count
+            .checked_mul(size_of::<(usize, ProofBaseFieldElement)>())
+            .ok_or_else(|| "checkpoint selected-output size overflowed".to_owned())?;
+        let schedule_runtime_owned_byte_length = schedule_catalog_heap_byte_length
+            .checked_add(active_schedule_heap_byte_length)
+            .and_then(|count| count.checked_add(selected_output_byte_length))
+            .and_then(|count| count.checked_add(size_of::<BoundedSelectedBaseCosetLaneDft>()))
+            .ok_or_else(|| "checkpoint schedule runtime size overflowed".to_owned())?;
+        let maximum_schedule_construction_workspace_byte_length = lower_schedule
+            .maximum_construction_workspace_byte_length()?
+            .max(
+                higher_schedule
+                    .as_ref()
+                    .map(SelectedBaseCosetLaneDftSchedule::maximum_construction_workspace_byte_length)
+                    .transpose()?
+                    .unwrap_or(0),
+            );
+        let schedule_construction_owned_byte_length = schedule_catalog_heap_byte_length
+            .checked_add(maximum_schedule_construction_workspace_byte_length)
+            .ok_or_else(|| "checkpoint schedule construction size overflowed".to_owned())?;
+        let maximum_selected_schedule_owned_byte_length = u64::try_from(
+            schedule_runtime_owned_byte_length.max(schedule_construction_owned_byte_length),
+        )
+        .map_err(|_| "checkpoint schedule live set exceeds u64".to_owned())?;
+        let phase_commitment_live_set_upper_bound_byte_length = baseline
+            .phase_commitment_live_set_byte_length
+            .checked_add(maximum_selected_schedule_owned_byte_length)
+            .and_then(|count| {
+                count.checked_add(maximum_selected_schedule_owned_byte_length.div_ceil(8))
+            })
+            .ok_or_else(|| "checkpoint phase live-set upper bound overflowed".to_owned())?;
+        let combined_wasm_live_set_upper_bound_byte_length = baseline
+            .maximum_wasm_live_set_byte_length
+            .max(phase_commitment_live_set_upper_bound_byte_length);
+        let wasm_hard_bound_headroom_byte_length = MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
+            .checked_sub(combined_wasm_live_set_upper_bound_byte_length)
+            .ok_or_else(|| "checkpoint candidate exceeds the hard WASM bound".to_owned())?;
+        let has_tenfold_butterfly_reduction = complete_butterfly_count
+            .checked_mul(10)
+            .is_some_and(|count| count <= selected_work.butterfly_count);
+        let has_tenfold_coset_reduction = candidate_work
+            .coset_multiplication_count
+            .checked_mul(10)
+            .is_some_and(|count| count <= selected_work.coset_multiplication_count);
+        let has_tenfold_column_delivery_reduction = complete_column_value_delivery_count
+            .checked_mul(10)
+            .is_some_and(|count| count <= selected_work.column_value_delivery_count);
+        let has_tenfold_salted_leaf_permutation_reduction =
+            complete_salted_leaf_keccak_permutation_count
+                .checked_mul(10)
+                .is_some_and(|count| count <= selected_salted_leaf_permutation_count);
+        let scratch_within_hard_bound = combined_scratch_stored_byte_length
+            <= MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH;
+        let eligible_for_focused_browser_measurement = scratch_within_hard_bound
+            && has_tenfold_butterfly_reduction
+            && has_tenfold_coset_reduction
+            && has_tenfold_column_delivery_reduction
+            && has_tenfold_salted_leaf_permutation_reduction;
+        ledgers.push(VssPersistedCheckpointReplayCandidateLedger {
+            checkpoint_level,
+            phase_geometry_count,
+            physical_row_count,
+            checkpoint_leaf_count,
+            maximum_recomputed_leaf_count_per_geometry,
+            checkpoint_root_count_per_geometry,
+            checkpoint_plane_byte_length,
+            checkpoint_object_count,
+            checkpoint_chunk_count,
+            combined_scratch_stored_byte_length,
+            scratch_hard_bound_headroom_byte_length,
+            scratch_hard_bound_overage_byte_length,
+            combined_scratch_total_written_byte_length: baseline
+                .scratch_total_written_byte_length
+                .checked_add(checkpoint_plane_byte_length)
+                .ok_or_else(|| "checkpoint total written bytes overflowed".to_owned())?,
+            combined_scratch_total_read_byte_length: baseline
+                .scratch_total_read_byte_length
+                .checked_add(checkpoint_plane_byte_length)
+                .ok_or_else(|| "checkpoint total read bytes overflowed".to_owned())?,
+            combined_scratch_transaction_count: baseline
+                .scratch_transaction_count
+                .checked_add(checkpoint_transaction_count)
+                .ok_or_else(|| "checkpoint total transaction count overflowed".to_owned())?,
+            combined_scratch_object_count: baseline
+                .scratch_object_count
+                .checked_add(checkpoint_object_count)
+                .ok_or_else(|| "checkpoint total object count overflowed".to_owned())?,
+            checkpoint_boundary_transport_byte_length,
+            checkpoint_local_record_seal_invocation_count: 0,
+            lower_selected_output_count_per_lane: u64::try_from(lower_selected_output_count)
+                .map_err(|_| "checkpoint lower output count exceeds u64".to_owned())?,
+            higher_selected_output_count_per_lane: u64::try_from(higher_selected_output_count)
+                .map_err(|_| "checkpoint higher output count exceeds u64".to_owned())?,
+            lower_output_lane_count: u64::try_from(lower_output_lane_count)
+                .map_err(|_| "checkpoint lower-lane count exceeds u64".to_owned())?,
+            higher_output_lane_count: u64::try_from(higher_output_lane_count)
+                .map_err(|_| "checkpoint higher-lane count exceeds u64".to_owned())?,
+            selected_butterfly_count_per_physical_row: u64::try_from(
+                selected_butterfly_count_per_physical_row,
+            )
+            .map_err(|_| "checkpoint per-row butterfly count exceeds u64".to_owned())?,
+            root_pass_butterfly_count,
+            opening_pass_butterfly_count,
+            complete_butterfly_count,
+            complete_lane_dft_count: candidate_work.lane_dft_count,
+            complete_coefficient_fold_count: candidate_work.coefficient_fold_count,
+            complete_coset_multiplication_count: candidate_work.coset_multiplication_count,
+            complete_bit_reversal_visit_count: candidate_work.coset_multiplication_count,
+            complete_column_value_delivery_count,
+            complete_leaf_hash_query_count,
+            complete_salted_leaf_keccak_permutation_count,
+            complete_merkle_parent_hash_query_count,
+            complete_private_leaf_salt_derivation_count: complete_leaf_hash_query_count,
+            selected_vss_complete_butterfly_count: selected_work.butterfly_count,
+            selected_vss_complete_coset_multiplication_count: selected_work
+                .coset_multiplication_count,
+            selected_vss_complete_column_value_delivery_count: selected_work
+                .column_value_delivery_count,
+            selected_vss_complete_salted_leaf_keccak_permutation_count:
+                selected_salted_leaf_permutation_count,
+            maximum_selected_schedule_owned_byte_length,
+            phase_commitment_live_set_upper_bound_byte_length,
+            combined_wasm_live_set_upper_bound_byte_length,
+            wasm_hard_bound_headroom_byte_length,
+            scratch_within_hard_bound,
+            has_tenfold_butterfly_reduction,
+            has_tenfold_coset_reduction,
+            has_tenfold_column_delivery_reduction,
+            has_tenfold_salted_leaf_permutation_reduction,
+            eligible_for_focused_browser_measurement,
+        });
+    }
+    Ok(ledgers)
 }
 
 fn derive_vss_opening_claim_quotient_candidate_ledger(

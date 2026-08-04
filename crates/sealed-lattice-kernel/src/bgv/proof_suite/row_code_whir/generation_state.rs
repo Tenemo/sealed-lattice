@@ -7917,7 +7917,10 @@ mod tests {
         GenerationPhaseLivenessKind, derive_phase_commitment_geometry_accounting,
     };
     #[cfg(feature = "primitive-measurement-evidence")]
-    use super::super::primitive_measurements::derive_bounded_vss_opening_claim_quotient_candidate;
+    use super::super::primitive_measurements::{
+        VssPersistedCheckpointReplayBaseline, derive_bounded_vss_opening_claim_quotient_candidate,
+        derive_vss_persisted_checkpoint_replay_candidate_ledgers,
+    };
     use super::*;
     use crate::{
         bgv::proof_suite::{
@@ -9088,6 +9091,213 @@ mod tests {
         assert!(
             complete_liveness.maximum_live_set_byte_length()
                 <= MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
+        );
+
+        let phase_commitment_live_set_byte_length = complete_liveness
+            .rows()
+            .iter()
+            .find(|row| row.phase() == GenerationPhaseLivenessKind::PhaseCommitment)
+            .expect("the bounded VSS quotient phase-commitment row exists")
+            .total_byte_length();
+        let checkpoint_candidates = derive_vss_persisted_checkpoint_replay_candidate_ledgers(
+            VssPersistedCheckpointReplayBaseline {
+                maximum_wasm_live_set_byte_length: complete_liveness.maximum_live_set_byte_length(),
+                phase_commitment_live_set_byte_length,
+                maximum_scratch_stored_byte_length: external_memory_requirement
+                    .peak_stored_byte_length(),
+                scratch_total_written_byte_length: external_memory_requirement
+                    .total_written_byte_length(),
+                scratch_total_read_byte_length: external_memory_requirement
+                    .total_read_byte_length(),
+                scratch_transaction_count: external_memory_requirement.transaction_count(),
+                scratch_object_count: u64::from(
+                    external_memory_requirement.distinct_physical_object_count(),
+                ),
+            },
+        )
+        .expect("the persisted-checkpoint replay candidate family derives");
+        assert_eq!(checkpoint_candidates.len(), 5);
+        assert_eq!(
+            checkpoint_candidates
+                .iter()
+                .map(|candidate| (
+                    candidate.checkpoint_level,
+                    candidate.phase_geometry_count,
+                    candidate.physical_row_count,
+                    candidate.checkpoint_leaf_count,
+                    candidate.maximum_recomputed_leaf_count_per_geometry,
+                    candidate.checkpoint_root_count_per_geometry,
+                    candidate.checkpoint_plane_byte_length,
+                    candidate.checkpoint_chunk_count,
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (1, 2, 185, 2, 774, 8_388_608, 1_073_741_824, 1_024),
+                (2, 2, 185, 4, 1_548, 4_194_304, 536_870_912, 512),
+                (3, 2, 185, 8, 3_096, 2_097_152, 268_435_456, 256),
+                (4, 2, 185, 16, 6_192, 1_048_576, 134_217_728, 128),
+                (5, 2, 185, 32, 12_384, 524_288, 67_108_864, 64),
+            ],
+        );
+        assert_eq!(
+            checkpoint_candidates
+                .iter()
+                .map(|candidate| (
+                    candidate.combined_scratch_stored_byte_length,
+                    candidate.scratch_hard_bound_headroom_byte_length,
+                    candidate.scratch_hard_bound_overage_byte_length,
+                    candidate.combined_scratch_total_written_byte_length,
+                    candidate.combined_scratch_total_read_byte_length,
+                    candidate.combined_scratch_transaction_count,
+                    candidate.combined_scratch_object_count,
+                    candidate.checkpoint_boundary_transport_byte_length,
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    1_944_434_144,
+                    0,
+                    870_692_320,
+                    16_355_460_576,
+                    135_513_647_904,
+                    161_605,
+                    31,
+                    2_148_124_232,
+                ),
+                (
+                    1_407_563_232,
+                    0,
+                    333_821_408,
+                    15_818_589_664,
+                    134_976_776_992,
+                    160_581,
+                    31,
+                    1_074_062_920,
+                ),
+                (
+                    1_139_127_776,
+                    0,
+                    65_385_952,
+                    15_550_154_208,
+                    134_708_341_536,
+                    160_069,
+                    31,
+                    537_032_264,
+                ),
+                (
+                    1_004_910_048,
+                    68_831_776,
+                    0,
+                    15_415_936_480,
+                    134_574_123_808,
+                    159_813,
+                    31,
+                    268_516_936,
+                ),
+                (
+                    937_801_184,
+                    135_940_640,
+                    0,
+                    15_348_827_616,
+                    134_507_014_944,
+                    159_685,
+                    31,
+                    134_259_272,
+                ),
+            ],
+        );
+        assert_eq!(
+            checkpoint_candidates
+                .iter()
+                .map(|candidate| (
+                    candidate.lower_selected_output_count_per_lane,
+                    candidate.higher_selected_output_count_per_lane,
+                    candidate.lower_output_lane_count,
+                    candidate.higher_output_lane_count,
+                    candidate.selected_butterfly_count_per_physical_row,
+                    candidate.opening_pass_butterfly_count,
+                    candidate.complete_butterfly_count,
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (24, 25, 26, 6, 54_623_482, 10_105_344_170, 39_591_301_290),
+                (48, 49, 20, 12, 63_011_316, 11_657_093_460, 41_143_050_580),
+                (96, 97, 8, 24, 71_398_376, 13_208_699_560, 42_694_656_680),
+                (193, 194, 16, 16, 79_783_888, 14_760_019_280, 44_245_976_400),
+                (387, 387, 32, 0, 88_166_304, 16_310_766_240, 45_796_723_360),
+            ],
+        );
+        assert_eq!(
+            checkpoint_candidates
+                .iter()
+                .map(|candidate| (
+                    candidate.complete_column_value_delivery_count,
+                    candidate.complete_leaf_hash_query_count,
+                    candidate.complete_salted_leaf_keccak_permutation_count,
+                    candidate.complete_merkle_parent_hash_query_count,
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (3_103_928_150, 33_555_980, 251_669_850, 50_332_418),
+                (3_104_071_340, 33_557_528, 251_681_460, 41_945_358),
+                (3_104_357_720, 33_560_624, 251_704_680, 37_754_150),
+                (3_104_930_480, 33_566_816, 251_751_120, 35_663_190),
+                (3_106_076_000, 33_579_200, 251_844_000, 34_626_998),
+            ],
+        );
+        for candidate in &checkpoint_candidates {
+            assert_eq!(candidate.checkpoint_object_count, 2);
+            assert_eq!(candidate.checkpoint_local_record_seal_invocation_count, 0);
+            assert_eq!(candidate.root_pass_butterfly_count, 29_485_957_120);
+            assert_eq!(candidate.complete_lane_dft_count, 11_840);
+            assert_eq!(candidate.complete_coefficient_fold_count, 43_452_989_440);
+            assert_eq!(candidate.complete_coset_multiplication_count, 6_207_569_920);
+            assert_eq!(candidate.complete_bit_reversal_visit_count, 6_207_569_920);
+            assert_eq!(
+                candidate.complete_private_leaf_salt_derivation_count,
+                candidate.complete_leaf_hash_query_count
+            );
+            assert_eq!(
+                candidate.selected_vss_complete_butterfly_count,
+                365_944_635_392
+            );
+            assert_eq!(
+                candidate.selected_vss_complete_coset_multiplication_count,
+                38_520_487_936,
+            );
+            assert_eq!(
+                candidate.selected_vss_complete_column_value_delivery_count,
+                38_520_487_936,
+            );
+            assert_eq!(
+                candidate.selected_vss_complete_salted_leaf_keccak_permutation_count,
+                2_382_364_672,
+            );
+            assert!(candidate.maximum_selected_schedule_owned_byte_length < 1_048_576);
+            assert!(
+                candidate.phase_commitment_live_set_upper_bound_byte_length
+                    < complete_liveness.maximum_live_set_byte_length(),
+            );
+            assert_eq!(
+                candidate.combined_wasm_live_set_upper_bound_byte_length,
+                661_380_505,
+            );
+            assert_eq!(candidate.wasm_hard_bound_headroom_byte_length, 9_708_135);
+            assert!(!candidate.has_tenfold_butterfly_reduction);
+            assert!(!candidate.has_tenfold_coset_reduction);
+            assert!(candidate.has_tenfold_column_delivery_reduction);
+            assert!(!candidate.has_tenfold_salted_leaf_permutation_reduction);
+            assert!(!candidate.eligible_for_focused_browser_measurement);
+        }
+        assert!(
+            checkpoint_candidates[..3]
+                .iter()
+                .all(|candidate| !candidate.scratch_within_hard_bound)
+        );
+        assert!(
+            checkpoint_candidates[3..]
+                .iter()
+                .all(|candidate| candidate.scratch_within_hard_bound)
         );
     }
 

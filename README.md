@@ -462,6 +462,25 @@ Works today:
   This fails the required order-of-magnitude work reduction, so the candidate
   remains unselected. No production verifier equation, masking theorem, proof
   ledger, native measurement, or WebAssembly measurement consumes it. The
+  follow-up persisted-subtree comparator removes the second full leaf pass in
+  the static model, but it also fails before measurement. It charges both
+  production phase trees, all 387 outer queries in separate worst-case
+  checkpoint blocks, a complete streamed checkpoint-plane read and upper-tree
+  rebuild, the existing scratch lifetime, and every coefficient fold, coset
+  multiplication, bit-reversal visit, leaf hash, salt, and parent hash. Levels
+  one through three exceed the `1,073,741,824`-byte scratch bound. Levels four
+  and five fit at `1,004,910,048` and `937,801,184` bytes, respectively, but
+  their complete butterfly counts are `44,245,976,400` and `45,796,723,360`
+  against the selected VSS count of `365,944,635,392`. All levels still perform
+  `6,207,569,920` coset multiplications and bit-reversal visits plus
+  `43,452,989,440` coefficient folds. The one-pass roots alone consume
+  `251,658,240` salted-leaf Keccak-f permutations; complete level-four and
+  level-five replay consume `251,751,120` and `251,844,000`, so neither reaches
+  a tenfold reduction from the selected complete count of `2,382,364,672`.
+  The two streamed root planes are modeled as untrusted public-integrity
+  scratch, are fully rehashed to the committed roots, and add no secret-record
+  seals. No checkpoint level clears the static measurement-admission gate, so
+  none is implemented, benchmarked, or selectable. The
   fastest comparator accepted by the existing one-aggregate construction is
   instead factor 1, width 32. It has 331 rows, 21,184 lane DFTs,
   `105,511,911,424` butterflies, `11,106,516,992` value deliveries, and
