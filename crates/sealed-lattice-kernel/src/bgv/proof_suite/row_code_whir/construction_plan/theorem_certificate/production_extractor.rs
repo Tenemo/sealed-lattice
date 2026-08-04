@@ -756,6 +756,13 @@ fn expected_opening_batches(
                 }
                 opening_point_columns.push(column_ordinal);
             }
+            #[cfg(feature = "primitive-measurement-evidence")]
+            RowCodeWhirAggregateColumnRole::OpeningClaimQuotientBatch { .. } => {
+                return Err(
+                    "production extraction does not authorize an opening-claim quotient batch"
+                        .to_owned(),
+                );
+            }
             RowCodeWhirAggregateColumnRole::BoundReduction => {
                 if bound_reduction_column.replace(column_ordinal).is_some() {
                     return Err("production aggregate has two bound-reduction columns".to_owned());

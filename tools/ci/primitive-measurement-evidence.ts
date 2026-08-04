@@ -190,6 +190,28 @@ export const primitiveMeasurementCaseCatalog = Object.freeze([
             modeledCandidateBoundReductionAggregateColumnCount: 1,
             modeledCandidateAggregateColumnRoleCount: 25,
             modeledCandidateAggregateTableWidth: 4,
+            modeledCandidateDirectAggregateColumnRoleCount: 25,
+            modeledCandidateQuotientAggregateColumnRoleCount: 2,
+            modeledCandidateQuotientSourceDegreeBoundExclusive: 4_194_304,
+            modeledCandidateQuotientOpeningClaimCount: 24,
+            modeledCandidateBatchedQuotientDegreeBoundExclusive: 4_194_303,
+            modeledCandidateQuotientDiscrepancyNumeratorDegreeBoundInclusive: 4_194_326,
+            modeledCandidateQuotientQueryDomainSize: 16_777_216,
+            modeledCandidateQuotientQueryCount: 387,
+            modeledCandidateQuotientAgreementCeiling: 4_194_326,
+            modeledCandidateQuotientConstructionIdentityHashByteLength: 64,
+            modeledCandidateQuotientOracleEquationCatalogHashByteLength: 64,
+            modeledCandidateQuotientPhysicalRowWitnessVariableCount: 21,
+            modeledCandidateQuotientTableVariableCount: 22,
+            modeledCandidateQuotientPolynomialCommitmentVariableCount: 24,
+            modeledCandidateQuotientRowCodeLogInverseRate: 2,
+            modeledCandidateQuotientAggregateLogicalColumnCount: 2,
+            modeledCandidateQuotientAggregateTableWidth: 4,
+            modeledCandidateQuotientOuterOpeningBatchCount: 387,
+            modeledCandidateQuotientBoundReductionBlockCount: 1,
+            modeledCandidateQuotientBoundQueryCount: 266,
+            modeledCandidateQuotientBoundDegreeTestCount: 4,
+            modeledCandidateQuotientBoundOpeningBatchCount: 536,
             modeledCandidatePhysicalRowWidth: 64,
             modeledCandidatePrivateHighHalfValueGenerationCount: 14_495_514_624,
             modeledCandidatePrivateLeafSaltDerivationCount: 33_554_432,
@@ -502,6 +524,14 @@ export const validatePrimitiveMeasurementRecord = (
             'basePhaseSaltedLeafKeccakPermutationCount',
             'basePhaseMerkleParentHashQueryCount',
             'basePhasePrivateLeafSaltDerivationCount',
+            'modeledCandidateQuotientConstructionIdentityByteLength',
+            'modeledCandidateQuotientPhaseOrderCount',
+            'modeledCandidateQuotientTranscriptOperationCount',
+            'modeledCandidateQuotientOpeningBatchCount',
+            'modeledCandidateQuotientProofSectionCount',
+            'modeledCandidateQuotientCheckpointCount',
+            'modeledCandidateQuotientMaximumTranscriptHashQueryCount',
+            'modeledCandidateQuotientLogicalVerifierMessageCount',
         ]) {
             requireSafeUnsignedInteger(
                 dimensionsByName.get(dimensionName),
@@ -620,6 +650,79 @@ export const validatePrimitiveMeasurementRecord = (
         )!;
         const modeledCandidateAggregateTableWidth = dimensionsByName.get(
             'modeledCandidateAggregateTableWidth',
+        )!;
+        const modeledCandidateDirectAggregateColumnRoleCount =
+            dimensionsByName.get(
+                'modeledCandidateDirectAggregateColumnRoleCount',
+            )!;
+        const modeledCandidateQuotientAggregateColumnRoleCount =
+            dimensionsByName.get(
+                'modeledCandidateQuotientAggregateColumnRoleCount',
+            )!;
+        const modeledCandidateQuotientSourceDegreeBoundExclusive =
+            dimensionsByName.get(
+                'modeledCandidateQuotientSourceDegreeBoundExclusive',
+            )!;
+        const modeledCandidateQuotientOpeningClaimCount = dimensionsByName.get(
+            'modeledCandidateQuotientOpeningClaimCount',
+        )!;
+        const modeledCandidateBatchedQuotientDegreeBoundExclusive =
+            dimensionsByName.get(
+                'modeledCandidateBatchedQuotientDegreeBoundExclusive',
+            )!;
+        const modeledCandidateQuotientDiscrepancyDegreeBound =
+            dimensionsByName.get(
+                'modeledCandidateQuotientDiscrepancyNumeratorDegreeBoundInclusive',
+            )!;
+        const modeledCandidateQuotientQueryDomainSize = dimensionsByName.get(
+            'modeledCandidateQuotientQueryDomainSize',
+        )!;
+        const modeledCandidateQuotientQueryCount = dimensionsByName.get(
+            'modeledCandidateQuotientQueryCount',
+        )!;
+        const modeledCandidateQuotientAgreementCeiling = dimensionsByName.get(
+            'modeledCandidateQuotientAgreementCeiling',
+        )!;
+        const modeledCandidateQuotientPhysicalRowWitnessVariableCount =
+            dimensionsByName.get(
+                'modeledCandidateQuotientPhysicalRowWitnessVariableCount',
+            )!;
+        const modeledCandidateQuotientTableVariableCount = dimensionsByName.get(
+            'modeledCandidateQuotientTableVariableCount',
+        )!;
+        const modeledCandidateQuotientPolynomialCommitmentVariableCount =
+            dimensionsByName.get(
+                'modeledCandidateQuotientPolynomialCommitmentVariableCount',
+            )!;
+        const modeledCandidateQuotientRowCodeLogInverseRate =
+            dimensionsByName.get(
+                'modeledCandidateQuotientRowCodeLogInverseRate',
+            )!;
+        const modeledCandidateQuotientAggregateLogicalColumnCount =
+            dimensionsByName.get(
+                'modeledCandidateQuotientAggregateLogicalColumnCount',
+            )!;
+        const modeledCandidateQuotientAggregateTableWidth =
+            dimensionsByName.get(
+                'modeledCandidateQuotientAggregateTableWidth',
+            )!;
+        const modeledCandidateQuotientOuterOpeningBatchCount =
+            dimensionsByName.get(
+                'modeledCandidateQuotientOuterOpeningBatchCount',
+            )!;
+        const modeledCandidateQuotientBoundQueryCount = dimensionsByName.get(
+            'modeledCandidateQuotientBoundQueryCount',
+        )!;
+        const modeledCandidateQuotientBoundDegreeTestCount =
+            dimensionsByName.get(
+                'modeledCandidateQuotientBoundDegreeTestCount',
+            )!;
+        const modeledCandidateQuotientBoundOpeningBatchCount =
+            dimensionsByName.get(
+                'modeledCandidateQuotientBoundOpeningBatchCount',
+            )!;
+        const modeledCandidateQuotientOpeningBatchCount = dimensionsByName.get(
+            'modeledCandidateQuotientOpeningBatchCount',
         )!;
         const singleAggregateCandidateTracePackingFactor = dimensionsByName.get(
             'singleAggregateCandidateTracePackingFactor',
@@ -848,6 +951,15 @@ export const validatePrimitiveMeasurementRecord = (
             materializationPassCount;
         const independentlyDerivedModeledSourceMaterializationCount =
             modeledCandidateProverColumnCount * materializationPassCount;
+        const independentlyDerivedQuotientSourceDegreeBoundExclusive =
+            2 ** modeledCandidateQuotientTableVariableCount;
+        const independentlyDerivedQuotientDiscrepancyDegreeBound =
+            independentlyDerivedQuotientSourceDegreeBoundExclusive +
+            modeledCandidateOpeningPointCount -
+            2;
+        const independentlyDerivedQuotientBoundOpeningBatchCount =
+            modeledCandidateQuotientBoundQueryCount * 2 +
+            modeledCandidateQuotientBoundDegreeTestCount;
         const identitiesHold =
             Number.isInteger(messageTraceValueCount) &&
             physicalRowWidth * logicalPolynomialCoefficientCount >
@@ -983,6 +1095,75 @@ export const validatePrimitiveMeasurementRecord = (
                 dimensionsByName.get('modeledCandidateRowCodeInverseRate') &&
             modeledCandidateAggregateColumnRoleCount >
                 modeledCandidateAggregateTableWidth &&
+            modeledCandidateDirectAggregateColumnRoleCount ===
+                modeledCandidateAggregateColumnRoleCount &&
+            modeledCandidateQuotientAggregateColumnRoleCount ===
+                1 + modeledCandidateBoundReductionAggregateColumnCount &&
+            modeledCandidateQuotientSourceDegreeBoundExclusive ===
+                independentlyDerivedQuotientSourceDegreeBoundExclusive &&
+            modeledCandidateQuotientOpeningClaimCount ===
+                modeledCandidateOpeningPointCount &&
+            modeledCandidateBatchedQuotientDegreeBoundExclusive ===
+                modeledCandidateQuotientSourceDegreeBoundExclusive - 1 &&
+            modeledCandidateQuotientDiscrepancyDegreeBound ===
+                independentlyDerivedQuotientDiscrepancyDegreeBound &&
+            modeledCandidateQuotientAgreementCeiling ===
+                independentlyDerivedQuotientDiscrepancyDegreeBound &&
+            modeledCandidateQuotientQueryDomainSize === fullDomainSize &&
+            modeledCandidateQuotientQueryCount ===
+                dimensionsByName.get('basePhaseOpeningQueryCount') &&
+            modeledCandidateQuotientPhysicalRowWitnessVariableCount ===
+                Math.log2(modeledCandidateOpeningDegreeBoundExclusive) &&
+            modeledCandidateQuotientTableVariableCount ===
+                modeledCandidateQuotientPhysicalRowWitnessVariableCount + 1 &&
+            modeledCandidateQuotientPolynomialCommitmentVariableCount ===
+                Math.log2(fullDomainSize) &&
+            modeledCandidateQuotientRowCodeLogInverseRate ===
+                modeledCandidateQuotientPolynomialCommitmentVariableCount -
+                    modeledCandidateQuotientTableVariableCount &&
+            modeledCandidateQuotientAggregateLogicalColumnCount ===
+                modeledCandidateQuotientAggregateColumnRoleCount &&
+            modeledCandidateQuotientAggregateTableWidth ===
+                2 ** modeledCandidateQuotientRowCodeLogInverseRate &&
+            modeledCandidateQuotientAggregateLogicalColumnCount <=
+                modeledCandidateQuotientAggregateTableWidth &&
+            modeledCandidateQuotientOuterOpeningBatchCount ===
+                modeledCandidateQuotientQueryCount &&
+            dimensionsByName.get(
+                'modeledCandidateQuotientBoundReductionBlockCount',
+            ) === 1 &&
+            modeledCandidateQuotientBoundOpeningBatchCount ===
+                independentlyDerivedQuotientBoundOpeningBatchCount &&
+            modeledCandidateQuotientOpeningBatchCount ===
+                modeledCandidateQuotientOuterOpeningBatchCount +
+                    modeledCandidateQuotientBoundOpeningBatchCount &&
+            dimensionsByName.get(
+                'modeledCandidateQuotientConstructionIdentityHashByteLength',
+            ) === 64 &&
+            dimensionsByName.get(
+                'modeledCandidateQuotientOracleEquationCatalogHashByteLength',
+            ) === 64 &&
+            dimensionsByName.get(
+                'modeledCandidateQuotientConstructionIdentityByteLength',
+            )! > 0 &&
+            dimensionsByName.get('modeledCandidateQuotientPhaseOrderCount') ===
+                2 &&
+            dimensionsByName.get(
+                'modeledCandidateQuotientTranscriptOperationCount',
+            )! >
+                dimensionsByName.get(
+                    'modeledCandidateQuotientLogicalVerifierMessageCount',
+                )! &&
+            dimensionsByName.get('modeledCandidateQuotientProofSectionCount')! >
+                0 &&
+            dimensionsByName.get('modeledCandidateQuotientCheckpointCount')! >
+                0 &&
+            dimensionsByName.get(
+                'modeledCandidateQuotientMaximumTranscriptHashQueryCount',
+            )! >
+                dimensionsByName.get(
+                    'modeledCandidateQuotientLogicalVerifierMessageCount',
+                )! &&
             independentlySelectedSingleAggregateCandidate !== undefined &&
             singleAggregateCandidateTracePackingFactor ===
                 independentlySelectedSingleAggregateCandidate.tracePackingFactor &&

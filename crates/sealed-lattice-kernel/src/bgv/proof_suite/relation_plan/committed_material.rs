@@ -14,7 +14,7 @@ const MATERIAL_DIGIT_RADIX: u64 = 129_140_163;
 pub(super) const COMMITTED_MATERIAL_TRACE_PACKING_FACTOR: u64 = 4;
 const COMMITTED_MATERIAL_RANGE_CONSTRAINT_ARITY: u64 = TERNARY_DIGIT_RADIX;
 
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(feature = "primitive-measurement-evidence")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct VssRelationPackingCandidateGeometry {
     pub(crate) trace_packing_factor: u64,
@@ -141,7 +141,7 @@ impl CommittedMaterialRelationPlanInput {
     }
 }
 
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(feature = "primitive-measurement-evidence")]
 pub(crate) fn derive_vss_relation_packing_candidate_geometry(
     input: &CommittedMaterialRelationPlanInput,
     context: &RelationPlanCheckContext,

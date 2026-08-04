@@ -427,11 +427,20 @@ Works today:
   gives the exact without-replacement term
   `C(4,194,326, 387) / C(16,777,216, 387) < 2^-774`. The 393-coordinate
   aggregate-mask query vector is separate and is not used in this term. This
-  establishes the candidate's algebraic identity and finite-population bound,
-  but it does not yet bind the reduction into the construction identity,
-  transcript graph, materializer, opening schedule, verifier, masking theorem,
-  proof ledger, or complete live-set accounting. The factor-16 comparator
-  therefore remains unselected. The fastest comparator accepted by the
+  establishes the candidate's algebraic identity and finite-population bound.
+  A feature-scoped construction-plan route now binds the quotient role and its
+  24-claim count under a distinct canonical tag while leaving every selected
+  direct-role encoding unchanged. It derives two logical columns in the
+  four-column table, 387 quotient openings and 536 bound openings, 923 opening
+  batches in total, 2,625 transcript operations, 2,158 logical verifier
+  messages, and a maximum of 329,471 transcript hash queries. The canonical
+  construction identity is 749,188 bytes. The release-native measurement
+  validator independently reconciles the source, discrepancy, domain, query,
+  role, variable, and batch formulas. Ordinary selected-profile construction
+  still cannot call this route, and production extraction explicitly refuses
+  the quotient tag. No materializer, verifier equation, masking theorem, proof
+  ledger, or complete live-set accounting consumes it yet, so the factor-16
+  comparator remains unselected. The fastest comparator accepted by the
   existing one-aggregate construction is instead factor 1, width 32. It has
   331 rows, 21,184 lane
   DFTs, `105,511,911,424` butterflies, `11,106,516,992` value deliveries, and

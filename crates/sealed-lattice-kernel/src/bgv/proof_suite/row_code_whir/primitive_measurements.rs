@@ -32,7 +32,8 @@ use super::{
     construction_plan::{
         ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT,
         ROW_CODE_WHIR_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW, ROW_CODE_WHIR_OUTER_QUERY_COUNT,
-        RowCodeWhirConstructionPlan, RowCodeWhirConstructionPlanError,
+        RowCodeWhirAggregateColumnRole, RowCodeWhirConstructionPlan,
+        RowCodeWhirConstructionPlanError,
     },
     hiding_whir::selected_hiding_whir_config,
     opening_claim_reduction::OpeningClaimQuotientBatchGeometry,
@@ -905,6 +906,31 @@ fn derive_vss_relation_replay_candidate_construction_plan(
     })
 }
 
+fn derive_vss_relation_replay_opening_claim_quotient_candidate_construction_plan(
+    candidate: VssRelationReplayCandidateLedger,
+) -> Result<RowCodeWhirConstructionPlan, String> {
+    let (artifact, context) =
+        SelectedVssSourceReplayMeasurement::validated_relation_replay_candidate(
+            candidate.trace_packing_factor,
+            candidate.opening_degree_bound_exclusive,
+        )?;
+    let variant = artifact
+        .compiled_plan()
+        .variants()
+        .first()
+        .ok_or_else(|| "VSS relation-replay candidate variant is absent".to_owned())?;
+    RowCodeWhirConstructionPlan::for_primitive_measurement_opening_claim_quotient_candidate_variant(
+        &artifact,
+        &context,
+        variant.schedule_position(),
+        variant.top_count(),
+        vss_relation_replay_candidate_bound_root_source_trace_domain_size,
+    )
+    .map_err(|error| {
+        format!("VSS opening-claim quotient candidate construction does not derive: {error:?}")
+    })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct VssRelationReplayCandidateCapacityRefusal {
     opening_point_count: u64,
@@ -1280,6 +1306,53 @@ fn measure_selected_vss_source_replay() -> Result<PrimitiveMeasurementRecord, St
         derive_vss_relation_replay_candidate_capacity_refusal(modeled_candidate)?;
     let modeled_candidate_quotient_batch =
         derive_vss_opening_claim_quotient_candidate_ledger(modeled_candidate)?;
+    let modeled_candidate_quotient_construction =
+        derive_vss_relation_replay_opening_claim_quotient_candidate_construction_plan(
+            modeled_candidate,
+        )?;
+    let modeled_candidate_quotient_parameters =
+        modeled_candidate_quotient_construction.selected_parameters();
+    let modeled_candidate_quotient_identity_bytes = modeled_candidate_quotient_construction
+        .canonical_identity_bytes()
+        .map_err(|_| "modeled VSS quotient construction identity does not encode".to_owned())?;
+    let modeled_candidate_quotient_identity_hash = modeled_candidate_quotient_construction
+        .canonical_identity_hash()
+        .map_err(|_| "modeled VSS quotient construction identity does not hash".to_owned())?;
+    let modeled_candidate_quotient_oracle_catalog = modeled_candidate_quotient_construction
+        .oracle_equation_catalog()
+        .map_err(|_| "modeled VSS quotient oracle catalog does not derive".to_owned())?;
+    let modeled_candidate_quotient_oracle_catalog_hash = modeled_candidate_quotient_construction
+        .oracle_equation_catalog_hash()
+        .map_err(|_| "modeled VSS quotient oracle catalog does not hash".to_owned())?;
+    let (
+        modeled_candidate_quotient_bound_query_count,
+        modeled_candidate_quotient_bound_degree_test_count,
+    ) = modeled_candidate_quotient_construction
+        .bound_reduction_blocks
+        .iter()
+        .try_fold((0_usize, 0_usize), |(query_total, degree_total), block| {
+            let degree_test_count = 1_usize
+                .checked_add(block.degree_suffix_prefixes.len())
+                .ok_or_else(|| {
+                    "modeled VSS quotient bound degree-test count overflowed".to_owned()
+                })?;
+            Ok::<_, String>((
+                query_total.checked_add(block.query_count).ok_or_else(|| {
+                    "modeled VSS quotient bound-query count overflowed".to_owned()
+                })?,
+                degree_total.checked_add(degree_test_count).ok_or_else(|| {
+                    "modeled VSS quotient bound degree-test count overflowed".to_owned()
+                })?,
+            ))
+        })?;
+    let modeled_candidate_quotient_bound_batch_count = modeled_candidate_quotient_bound_query_count
+        .checked_mul(2)
+        .and_then(|count| count.checked_add(modeled_candidate_quotient_bound_degree_test_count))
+        .ok_or_else(|| "modeled VSS quotient bound-batch count overflowed".to_owned())?;
+    let modeled_candidate_quotient_opening_batches =
+        modeled_candidate_quotient_construction.opening_batches();
+    let modeled_candidate_quotient_outer_query_count =
+        modeled_candidate_quotient_construction.outer_query_count();
     let single_aggregate_candidate = candidate_grid
         .iter()
         .copied()
@@ -1310,6 +1383,12 @@ fn measure_selected_vss_source_replay() -> Result<PrimitiveMeasurementRecord, St
     let single_aggregate_oracle_catalog_hash = single_aggregate_construction
         .oracle_equation_catalog_hash()
         .map_err(|_| "single-aggregate VSS oracle catalog does not hash".to_owned())?;
+    let modeled_candidate_quotient_source_degree_bound_exclusive = 1_u64
+        .checked_shl(
+            u32::try_from(modeled_candidate_quotient_parameters.table_variable_count)
+                .map_err(|_| "modeled VSS quotient table width exceeds u32".to_owned())?,
+        )
+        .ok_or_else(|| "modeled VSS quotient source degree overflowed".to_owned())?;
     if candidate_grid
         .iter()
         .any(|candidate| candidate.physical_row_count < modeled_candidate.physical_row_count)
@@ -1336,6 +1415,57 @@ fn measure_selected_vss_source_replay() -> Result<PrimitiveMeasurementRecord, St
         || modeled_candidate_quotient_batch.query_count != work_ledger.opening_query_count
         || modeled_candidate_quotient_batch.agreement_ceiling
             >= modeled_candidate_quotient_batch.query_domain_size
+        || modeled_candidate_quotient_construction.application_statement_schema_identifier()
+            != ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+        || modeled_candidate_quotient_construction.trace_domain_size
+            != modeled_candidate.relation_trace_domain_size
+        || modeled_candidate_quotient_construction.evaluation_domain_size
+            != modeled_candidate_quotient_batch.query_domain_size
+        || modeled_candidate_quotient_construction.opening_degree_bound_exclusive
+            != modeled_candidate.opening_degree_bound_exclusive
+        || modeled_candidate_quotient_parameters.logical_polynomial_coefficient_count
+            != ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT
+        || u64::try_from(modeled_candidate_quotient_parameters.logical_polynomials_per_physical_row)
+            .ok()
+            != Some(modeled_candidate.logical_polynomials_per_physical_row)
+        || modeled_candidate_quotient_parameters.physical_row_witness_variable_count != 21
+        || modeled_candidate_quotient_parameters.table_variable_count != 22
+        || modeled_candidate_quotient_parameters.polynomial_commitment_variable_count != 24
+        || modeled_candidate_quotient_parameters.row_code_log_inverse_rate != 2
+        || modeled_candidate_quotient_source_degree_bound_exclusive
+            != modeled_candidate_quotient_batch.source_degree_bound_exclusive
+        || modeled_candidate_quotient_construction.aggregate_column_roles
+            != [
+                RowCodeWhirAggregateColumnRole::OpeningClaimQuotientBatch {
+                    opening_point_count: 24,
+                },
+                RowCodeWhirAggregateColumnRole::BoundReduction,
+            ]
+        || modeled_candidate_quotient_construction.aggregate_logical_column_count() != 2
+        || modeled_candidate_quotient_construction.aggregate_table_width() != 4
+        || modeled_candidate_quotient_construction
+            .aggregate_opening_point_count()
+            .ok()
+            != Some(24)
+        || modeled_candidate_quotient_construction
+            .uses_opening_claim_quotient_batch()
+            .ok()
+            != Some(true)
+        || modeled_candidate_quotient_outer_query_count
+            != usize::try_from(modeled_candidate_quotient_batch.query_count)
+                .map_err(|_| "modeled VSS quotient query count exceeds usize".to_owned())?
+        || modeled_candidate_quotient_opening_batches.len()
+            != modeled_candidate_quotient_outer_query_count
+                .checked_add(modeled_candidate_quotient_bound_batch_count)
+                .ok_or_else(|| "modeled VSS quotient opening-batch count overflowed".to_owned())?
+        || modeled_candidate_quotient_opening_batches
+            [..modeled_candidate_quotient_outer_query_count]
+            .iter()
+            .any(|batch| batch.requested_aggregate_column_ordinals != [0])
+        || modeled_candidate_quotient_opening_batches
+            [modeled_candidate_quotient_outer_query_count..]
+            .iter()
+            .any(|batch| batch.requested_aggregate_column_ordinals != [1])
         || single_aggregate_candidate.trace_packing_factor != 1
         || single_aggregate_candidate.logical_polynomials_per_physical_row != 32
         || single_aggregate_candidate.physical_row_count != 331
@@ -1434,15 +1564,19 @@ fn measure_selected_vss_source_replay() -> Result<PrimitiveMeasurementRecord, St
         Ok(checksum)
     })?;
     for hash in [
+        modeled_candidate_quotient_identity_hash,
+        modeled_candidate_quotient_oracle_catalog_hash,
         single_aggregate_identity_hash,
         single_aggregate_oracle_catalog_hash,
     ] {
         for hash_word in hash.chunks_exact(size_of::<u64>()) {
             checksum = checksum
                 .rotate_left(17)
-                .wrapping_add(u64::from_le_bytes(hash_word.try_into().map_err(|_| {
-                    "single-aggregate VSS identity hash is malformed".to_owned()
-                })?))
+                .wrapping_add(u64::from_le_bytes(
+                    hash_word
+                        .try_into()
+                        .map_err(|_| "VSS candidate identity hash is malformed".to_owned())?,
+                ))
                 .wrapping_mul(0x1000_0000_01b3);
         }
     }
@@ -1717,6 +1851,140 @@ fn measure_selected_vss_source_replay() -> Result<PrimitiveMeasurementRecord, St
             dimension_u64(
                 "modeledCandidateLogicalRowChunkByteLength",
                 modeled_candidate.logical_row_chunk_byte_length,
+            ),
+            dimension_u64(
+                "modeledCandidateDirectAggregateColumnRoleCount",
+                modeled_candidate_quotient_batch.direct_aggregate_column_role_count,
+            ),
+            dimension_u64(
+                "modeledCandidateQuotientAggregateColumnRoleCount",
+                modeled_candidate_quotient_batch.quotient_aggregate_column_role_count,
+            ),
+            dimension_u64(
+                "modeledCandidateQuotientSourceDegreeBoundExclusive",
+                modeled_candidate_quotient_batch.source_degree_bound_exclusive,
+            ),
+            dimension_u64(
+                "modeledCandidateQuotientOpeningClaimCount",
+                modeled_candidate_quotient_batch.opening_claim_count,
+            ),
+            dimension_u64(
+                "modeledCandidateBatchedQuotientDegreeBoundExclusive",
+                modeled_candidate_quotient_batch.batched_quotient_degree_bound_exclusive,
+            ),
+            dimension_u64(
+                "modeledCandidateQuotientDiscrepancyNumeratorDegreeBoundInclusive",
+                modeled_candidate_quotient_batch.discrepancy_numerator_degree_bound_inclusive,
+            ),
+            dimension_u64(
+                "modeledCandidateQuotientQueryDomainSize",
+                modeled_candidate_quotient_batch.query_domain_size,
+            ),
+            dimension_u64(
+                "modeledCandidateQuotientQueryCount",
+                modeled_candidate_quotient_batch.query_count,
+            ),
+            dimension_u64(
+                "modeledCandidateQuotientAgreementCeiling",
+                modeled_candidate_quotient_batch.agreement_ceiling,
+            ),
+            dimension(
+                "modeledCandidateQuotientConstructionIdentityByteLength",
+                modeled_candidate_quotient_identity_bytes.len(),
+            )?,
+            dimension(
+                "modeledCandidateQuotientConstructionIdentityHashByteLength",
+                modeled_candidate_quotient_identity_hash.len(),
+            )?,
+            dimension(
+                "modeledCandidateQuotientOracleEquationCatalogHashByteLength",
+                modeled_candidate_quotient_oracle_catalog_hash.len(),
+            )?,
+            dimension(
+                "modeledCandidateQuotientPhysicalRowWitnessVariableCount",
+                modeled_candidate_quotient_parameters.physical_row_witness_variable_count,
+            )?,
+            dimension(
+                "modeledCandidateQuotientTableVariableCount",
+                modeled_candidate_quotient_parameters.table_variable_count,
+            )?,
+            dimension(
+                "modeledCandidateQuotientPolynomialCommitmentVariableCount",
+                modeled_candidate_quotient_parameters.polynomial_commitment_variable_count,
+            )?,
+            dimension(
+                "modeledCandidateQuotientRowCodeLogInverseRate",
+                modeled_candidate_quotient_parameters.row_code_log_inverse_rate,
+            )?,
+            dimension(
+                "modeledCandidateQuotientAggregateLogicalColumnCount",
+                modeled_candidate_quotient_construction.aggregate_logical_column_count(),
+            )?,
+            dimension(
+                "modeledCandidateQuotientAggregateTableWidth",
+                modeled_candidate_quotient_construction.aggregate_table_width(),
+            )?,
+            dimension(
+                "modeledCandidateQuotientPhaseOrderCount",
+                modeled_candidate_quotient_construction.phase_order.len(),
+            )?,
+            dimension(
+                "modeledCandidateQuotientTranscriptOperationCount",
+                modeled_candidate_quotient_construction
+                    .transcript_operations()
+                    .len(),
+            )?,
+            dimension(
+                "modeledCandidateQuotientOpeningBatchCount",
+                modeled_candidate_quotient_opening_batches.len(),
+            )?,
+            dimension(
+                "modeledCandidateQuotientOuterOpeningBatchCount",
+                modeled_candidate_quotient_outer_query_count,
+            )?,
+            dimension(
+                "modeledCandidateQuotientBoundOpeningBatchCount",
+                modeled_candidate_quotient_bound_batch_count,
+            )?,
+            dimension(
+                "modeledCandidateQuotientBoundReductionBlockCount",
+                modeled_candidate_quotient_construction
+                    .bound_reduction_blocks
+                    .len(),
+            )?,
+            dimension(
+                "modeledCandidateQuotientBoundQueryCount",
+                modeled_candidate_quotient_bound_query_count,
+            )?,
+            dimension(
+                "modeledCandidateQuotientBoundDegreeTestCount",
+                modeled_candidate_quotient_bound_degree_test_count,
+            )?,
+            dimension(
+                "modeledCandidateQuotientProofSectionCount",
+                modeled_candidate_quotient_construction
+                    .proof_sections()
+                    .len(),
+            )?,
+            dimension(
+                "modeledCandidateQuotientCheckpointCount",
+                modeled_candidate_quotient_construction.checkpoints().len(),
+            )?,
+            dimension_u64(
+                "modeledCandidateQuotientMaximumTranscriptHashQueryCount",
+                modeled_candidate_quotient_oracle_catalog
+                    .maximum_transcript_hash_query_count()
+                    .map_err(|_| {
+                        "modeled VSS quotient transcript query count does not derive".to_owned()
+                    })?,
+            ),
+            dimension_u64(
+                "modeledCandidateQuotientLogicalVerifierMessageCount",
+                modeled_candidate_quotient_oracle_catalog
+                    .logical_verifier_message_count()
+                    .map_err(|_| {
+                        "modeled VSS quotient verifier message count does not derive".to_owned()
+                    })?,
             ),
             dimension_u64(
                 "singleAggregateCandidateTracePackingFactor",
@@ -2678,6 +2946,112 @@ mod tests {
             quotient_batch_candidate.quotient_aggregate_column_role_count
                 <= quotient_batch_candidate.aggregate_table_width
         );
+        let quotient_batch_construction =
+            derive_vss_relation_replay_opening_claim_quotient_candidate_construction_plan(modeled)
+                .expect("the quotient-batch candidate construction derives");
+        let repeated_quotient_batch_construction =
+            derive_vss_relation_replay_opening_claim_quotient_candidate_construction_plan(modeled)
+                .expect("the quotient-batch candidate construction re-derives");
+        assert_eq!(
+            quotient_batch_construction.aggregate_column_roles,
+            vec![
+                RowCodeWhirAggregateColumnRole::OpeningClaimQuotientBatch {
+                    opening_point_count: 24,
+                },
+                RowCodeWhirAggregateColumnRole::BoundReduction,
+            ]
+        );
+        assert_eq!(
+            quotient_batch_construction
+                .aggregate_opening_point_count()
+                .expect("the quotient-batch logical point count derives"),
+            24
+        );
+        assert!(
+            quotient_batch_construction
+                .uses_opening_claim_quotient_batch()
+                .expect("the quotient-batch layout derives")
+        );
+        let opening_batches = quotient_batch_construction.opening_batches();
+        let outer_query_count = quotient_batch_construction.outer_query_count();
+        assert_eq!(outer_query_count, 387);
+        assert!(opening_batches.len() > outer_query_count);
+        assert!(
+            opening_batches[..outer_query_count]
+                .iter()
+                .all(|batch| batch.requested_aggregate_column_ordinals == [0])
+        );
+        assert!(
+            opening_batches[outer_query_count..]
+                .iter()
+                .all(|batch| batch.requested_aggregate_column_ordinals == [1])
+        );
+        let derived_bound_batch_count = quotient_batch_construction
+            .bound_reduction_blocks
+            .iter()
+            .map(|block| block.query_count * 2 + 1 + block.degree_suffix_prefixes.len())
+            .sum::<usize>();
+        assert_eq!(
+            opening_batches.len(),
+            outer_query_count + derived_bound_batch_count
+        );
+        assert_eq!(
+            quotient_batch_construction.canonical_identity_hash(),
+            repeated_quotient_batch_construction.canonical_identity_hash()
+        );
+        assert_eq!(
+            quotient_batch_construction.oracle_equation_catalog_hash(),
+            repeated_quotient_batch_construction.oracle_equation_catalog_hash()
+        );
+        let quotient_batch_identity = quotient_batch_construction
+            .canonical_identity_hash()
+            .expect("the quotient-batch identity hashes");
+        let mut wrong_claim_count_construction = quotient_batch_construction.clone();
+        wrong_claim_count_construction.aggregate_column_roles[0] =
+            RowCodeWhirAggregateColumnRole::OpeningClaimQuotientBatch {
+                opening_point_count: 23,
+            };
+        assert_ne!(
+            wrong_claim_count_construction.canonical_identity_hash(),
+            Ok(quotient_batch_identity),
+            "the canonical identity binds the quotient-batch claim count"
+        );
+        let mut zero_claim_construction = quotient_batch_construction.clone();
+        zero_claim_construction.aggregate_column_roles[0] =
+            RowCodeWhirAggregateColumnRole::OpeningClaimQuotientBatch {
+                opening_point_count: 0,
+            };
+        assert_eq!(
+            zero_claim_construction.aggregate_opening_point_count(),
+            Err(RowCodeWhirConstructionPlanError::InvalidOpeningCatalog),
+            "an empty quotient batch refuses"
+        );
+        let mut mixed_reduction_construction = quotient_batch_construction.clone();
+        mixed_reduction_construction.aggregate_column_roles.insert(
+            0,
+            RowCodeWhirAggregateColumnRole::OpeningPoint {
+                opening_point_ordinal: 0,
+            },
+        );
+        assert_eq!(
+            mixed_reduction_construction.aggregate_opening_point_count(),
+            Err(RowCodeWhirConstructionPlanError::InvalidOpeningCatalog),
+            "direct and quotient opening reductions cannot be mixed"
+        );
+        let mut duplicate_quotient_construction = quotient_batch_construction.clone();
+        duplicate_quotient_construction
+            .aggregate_column_roles
+            .insert(
+                1,
+                RowCodeWhirAggregateColumnRole::OpeningClaimQuotientBatch {
+                    opening_point_count: 24,
+                },
+            );
+        assert_eq!(
+            duplicate_quotient_construction.aggregate_opening_point_count(),
+            Err(RowCodeWhirConstructionPlanError::InvalidOpeningCatalog),
+            "two quotient batches refuse"
+        );
         let single_aggregate_candidate = grid
             .iter()
             .copied()
@@ -2716,6 +3090,11 @@ mod tests {
             single_aggregate_construction.aggregate_table_width(),
             usize::try_from(single_aggregate_candidate.aggregate_table_width)
                 .expect("the single-aggregate table width fits usize")
+        );
+        assert!(
+            !single_aggregate_construction
+                .uses_opening_claim_quotient_batch()
+                .expect("the direct aggregate layout derives")
         );
         assert_eq!(
             RowCodeWhirConstructionPlan::for_selected_variant(

@@ -523,8 +523,41 @@ impl RowCodeWhirBoundReductionBlockPlan {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum RowCodeWhirAggregateColumnRole {
-    OpeningPoint { opening_point_ordinal: u32 },
+    OpeningPoint {
+        opening_point_ordinal: u32,
+    },
+    #[cfg(feature = "primitive-measurement-evidence")]
+    OpeningClaimQuotientBatch {
+        opening_point_count: u32,
+    },
     BoundReduction,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RowCodeWhirAggregateOpeningReduction {
+    DirectColumns,
+    #[cfg(feature = "primitive-measurement-evidence")]
+    DistinctPointQuotientBatch,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct RowCodeWhirAggregateOpeningLayout {
+    opening_point_count: usize,
+    direct_column_ordinals: Vec<u32>,
+    quotient_batch_column_ordinal: Option<u32>,
+}
+
+impl RowCodeWhirAggregateOpeningLayout {
+    fn outer_query_column_ordinals(&self) -> Vec<u32> {
+        self.quotient_batch_column_ordinal.map_or_else(
+            || self.direct_column_ordinals.clone(),
+            |column_ordinal| vec![column_ordinal],
+        )
+    }
+
+    const fn uses_quotient_batch(&self) -> bool {
+        self.quotient_batch_column_ordinal.is_some()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -1111,6 +1144,7 @@ impl RowCodeWhirConstructionPlan {
             top_count,
             parameters,
             selected_bound_root_source_trace_domain_size,
+            RowCodeWhirAggregateOpeningReduction::DirectColumns,
         )
     }
 
@@ -1143,6 +1177,38 @@ impl RowCodeWhirConstructionPlan {
             top_count,
             parameters,
             bound_root_source_trace_domain_size,
+            RowCodeWhirAggregateOpeningReduction::DirectColumns,
+        )
+    }
+
+    /// Builds the production-shaped distinct-point quotient comparator.
+    ///
+    /// This opt-in route has no selected-profile caller. It exists so the
+    /// complete construction and transcript geometry can be derived before a
+    /// materializer or verifier is authorized to consume the candidate.
+    #[cfg(feature = "primitive-measurement-evidence")]
+    pub(crate) fn for_primitive_measurement_opening_claim_quotient_candidate_variant(
+        artifact: &ValidatedRelationPlanArtifact,
+        context: &RelationPlanCheckContext,
+        schedule_position: Option<u32>,
+        top_count: Option<u16>,
+        bound_root_source_trace_domain_size: BoundRootSourceTraceDomainSizeResolver,
+    ) -> Result<Self, RowCodeWhirConstructionPlanError> {
+        if artifact.checked_context() != context {
+            return Err(RowCodeWhirConstructionPlanError::InvalidSelectedProfile);
+        }
+        let variant = artifact
+            .compiled_plan()
+            .select_variant(schedule_position, top_count)?;
+        let parameters = RowCodeWhirSelectedParameters::for_selected_variant_geometry(variant)?;
+        Self::for_context_variant(
+            artifact,
+            context,
+            schedule_position,
+            top_count,
+            parameters,
+            bound_root_source_trace_domain_size,
+            RowCodeWhirAggregateOpeningReduction::DistinctPointQuotientBatch,
         )
     }
 
@@ -1167,6 +1233,7 @@ impl RowCodeWhirConstructionPlan {
             top_count,
             parameters,
             checked_fixture_bound_root_source_trace_domain_size,
+            RowCodeWhirAggregateOpeningReduction::DirectColumns,
         )
     }
 
@@ -1177,6 +1244,7 @@ impl RowCodeWhirConstructionPlan {
         top_count: Option<u16>,
         parameters: RowCodeWhirSelectedParameters,
         bound_root_source_trace_domain_size: BoundRootSourceTraceDomainSizeResolver,
+        aggregate_opening_reduction: RowCodeWhirAggregateOpeningReduction,
     ) -> Result<Self, RowCodeWhirConstructionPlanError> {
         let application_statement_schema_identifier =
             artifact.application_statement_schema_identifier();
@@ -1216,18 +1284,38 @@ impl RowCodeWhirConstructionPlan {
         )?;
         let bound_reduction_blocks = bound_reduction_block_plans(&bound_trees, parameters)?;
 
+        let opening_point_count = variant.ordered_opening_points().len();
+        if opening_point_count == 0 {
+            return Err(RowCodeWhirConstructionPlanError::InvalidOpeningCatalog);
+        }
+        let opening_role_count = match aggregate_opening_reduction {
+            RowCodeWhirAggregateOpeningReduction::DirectColumns => opening_point_count,
+            #[cfg(feature = "primitive-measurement-evidence")]
+            RowCodeWhirAggregateOpeningReduction::DistinctPointQuotientBatch => 1,
+        };
         let mut aggregate_column_roles = Vec::with_capacity(
-            variant
-                .ordered_opening_points()
-                .len()
+            opening_role_count
                 .checked_add(usize::from(!bound_reduction_blocks.is_empty()))
                 .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)?,
         );
-        for opening_point_index in 0..variant.ordered_opening_points().len() {
-            aggregate_column_roles.push(RowCodeWhirAggregateColumnRole::OpeningPoint {
-                opening_point_ordinal: u32::try_from(opening_point_index)
-                    .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?,
-            });
+        match aggregate_opening_reduction {
+            RowCodeWhirAggregateOpeningReduction::DirectColumns => {
+                for opening_point_index in 0..opening_point_count {
+                    aggregate_column_roles.push(RowCodeWhirAggregateColumnRole::OpeningPoint {
+                        opening_point_ordinal: u32::try_from(opening_point_index)
+                            .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?,
+                    });
+                }
+            }
+            #[cfg(feature = "primitive-measurement-evidence")]
+            RowCodeWhirAggregateOpeningReduction::DistinctPointQuotientBatch => {
+                aggregate_column_roles.push(
+                    RowCodeWhirAggregateColumnRole::OpeningClaimQuotientBatch {
+                        opening_point_count: u32::try_from(opening_point_count)
+                            .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?,
+                    },
+                );
+            }
         }
         if !bound_reduction_blocks.is_empty() {
             aggregate_column_roles.push(RowCodeWhirAggregateColumnRole::BoundReduction);
@@ -1472,6 +1560,13 @@ impl RowCodeWhirConstructionPlan {
                     encoder.push_u32(*opening_point_ordinal);
                 }
                 RowCodeWhirAggregateColumnRole::BoundReduction => encoder.push_u16(2),
+                #[cfg(feature = "primitive-measurement-evidence")]
+                RowCodeWhirAggregateColumnRole::OpeningClaimQuotientBatch {
+                    opening_point_count,
+                } => {
+                    encoder.push_u16(3);
+                    encoder.push_u32(*opening_point_count);
+                }
             }
         }
 
@@ -1735,6 +1830,18 @@ impl RowCodeWhirConstructionPlan {
         self.aggregate_column_roles.len()
     }
 
+    pub(super) fn aggregate_opening_point_count(
+        &self,
+    ) -> Result<usize, RowCodeWhirConstructionPlanError> {
+        Ok(aggregate_opening_layout(&self.aggregate_column_roles)?.opening_point_count)
+    }
+
+    pub(super) fn uses_opening_claim_quotient_batch(
+        &self,
+    ) -> Result<bool, RowCodeWhirConstructionPlanError> {
+        Ok(aggregate_opening_layout(&self.aggregate_column_roles)?.uses_quotient_batch())
+    }
+
     /// Physical interleaved table width consumed by the selected PCS. Logical
     /// aggregate roles occupy the leading columns and every remaining column
     /// is canonically zero. Accounting must use this width, not the number of
@@ -1874,24 +1981,22 @@ fn opening_batch_plans(
     bound_reduction_blocks: &[RowCodeWhirBoundReductionBlockPlan],
     parameters: RowCodeWhirSelectedParameters,
 ) -> Result<Vec<RowCodeWhirOpeningBatchPlan>, RowCodeWhirConstructionPlanError> {
-    let opening_point_column_ordinals = aggregate_column_roles
+    let opening_layout = aggregate_opening_layout(aggregate_column_roles)?;
+    let outer_query_column_ordinals = opening_layout.outer_query_column_ordinals();
+    let bound_reduction_column_ordinals = aggregate_column_roles
         .iter()
         .enumerate()
         .filter_map(|(column_index, role)| {
-            matches!(role, RowCodeWhirAggregateColumnRole::OpeningPoint { .. })
+            matches!(role, RowCodeWhirAggregateColumnRole::BoundReduction)
                 .then_some(u32::try_from(column_index))
         })
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?;
-    if opening_point_column_ordinals.is_empty() {
-        return Err(RowCodeWhirConstructionPlanError::InvalidOpeningCatalog);
-    }
-    let bound_reduction_column_ordinal = aggregate_column_roles
-        .iter()
-        .position(|role| matches!(role, RowCodeWhirAggregateColumnRole::BoundReduction))
-        .map(u32::try_from)
-        .transpose()
-        .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?;
+    let bound_reduction_column_ordinal = match bound_reduction_column_ordinals.as_slice() {
+        [] => None,
+        [column_ordinal] => Some(*column_ordinal),
+        _ => return Err(RowCodeWhirConstructionPlanError::InvalidOpeningCatalog),
+    };
 
     let bound_batch_count = bound_reduction_blocks
         .iter()
@@ -1905,7 +2010,8 @@ fn opening_batch_plans(
                 .and_then(|block_count| total.checked_add(block_count))
                 .ok_or(RowCodeWhirConstructionPlanError::CountOverflow)
         })?;
-    let capacity = opening_point_column_ordinals
+    let capacity = opening_layout
+        .direct_column_ordinals
         .len()
         .checked_add(parameters.outer_query_count)
         .and_then(|count| count.checked_add(bound_batch_count))
@@ -1921,11 +2027,11 @@ fn opening_batch_plans(
         });
         Ok(())
     };
-    for column_ordinal in &opening_point_column_ordinals {
+    for column_ordinal in &opening_layout.direct_column_ordinals {
         push_batch(vec![*column_ordinal])?;
     }
     for _ in 0..parameters.outer_query_count {
-        push_batch(opening_point_column_ordinals.clone())?;
+        push_batch(outer_query_column_ordinals.clone())?;
     }
     if !bound_reduction_blocks.is_empty() {
         let bound_reduction_column_ordinal = bound_reduction_column_ordinal
@@ -1947,6 +2053,63 @@ fn opening_batch_plans(
         return Err(RowCodeWhirConstructionPlanError::InvalidOpeningCatalog);
     }
     Ok(batches)
+}
+
+fn aggregate_opening_layout(
+    aggregate_column_roles: &[RowCodeWhirAggregateColumnRole],
+) -> Result<RowCodeWhirAggregateOpeningLayout, RowCodeWhirConstructionPlanError> {
+    let mut direct_column_ordinals = Vec::new();
+    #[cfg(feature = "primitive-measurement-evidence")]
+    let mut quotient_batch = None;
+    #[cfg(not(feature = "primitive-measurement-evidence"))]
+    let quotient_batch: Option<(u32, usize)> = None;
+    for (column_index, role) in aggregate_column_roles.iter().enumerate() {
+        let column_ordinal = u32::try_from(column_index)
+            .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?;
+        match role {
+            RowCodeWhirAggregateColumnRole::OpeningPoint {
+                opening_point_ordinal,
+            } => {
+                if quotient_batch.is_some()
+                    || usize::try_from(*opening_point_ordinal).ok()
+                        != Some(direct_column_ordinals.len())
+                {
+                    return Err(RowCodeWhirConstructionPlanError::InvalidOpeningCatalog);
+                }
+                direct_column_ordinals.push(column_ordinal);
+            }
+            #[cfg(feature = "primitive-measurement-evidence")]
+            RowCodeWhirAggregateColumnRole::OpeningClaimQuotientBatch {
+                opening_point_count,
+            } => {
+                let opening_point_count = usize::try_from(*opening_point_count)
+                    .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)?;
+                if opening_point_count == 0
+                    || quotient_batch.is_some()
+                    || !direct_column_ordinals.is_empty()
+                {
+                    return Err(RowCodeWhirConstructionPlanError::InvalidOpeningCatalog);
+                }
+                quotient_batch = Some((column_ordinal, opening_point_count));
+            }
+            RowCodeWhirAggregateColumnRole::BoundReduction => {}
+        }
+    }
+    match (direct_column_ordinals.is_empty(), quotient_batch) {
+        (false, None) => Ok(RowCodeWhirAggregateOpeningLayout {
+            opening_point_count: direct_column_ordinals.len(),
+            direct_column_ordinals,
+            quotient_batch_column_ordinal: None,
+        }),
+        (true, Some((column_ordinal, opening_point_count))) => {
+            Ok(RowCodeWhirAggregateOpeningLayout {
+                opening_point_count,
+                direct_column_ordinals,
+                quotient_batch_column_ordinal: Some(column_ordinal),
+            })
+        }
+        _ => Err(RowCodeWhirConstructionPlanError::InvalidOpeningCatalog),
+    }
 }
 
 struct RowCodeWhirTranscriptCatalogInput<'a> {
@@ -2903,10 +3066,7 @@ fn append_opening_point_transcript_operations(
     aggregate_column_roles: &[RowCodeWhirAggregateColumnRole],
     parameters: RowCodeWhirSelectedParameters,
 ) -> Result<(), RowCodeWhirConstructionPlanError> {
-    let opening_point_count = aggregate_column_roles
-        .iter()
-        .filter(|role| matches!(role, RowCodeWhirAggregateColumnRole::OpeningPoint { .. }))
-        .count();
+    let opening_point_count = aggregate_opening_layout(aggregate_column_roles)?.opening_point_count;
     if !parameters
         .logical_polynomials_per_physical_row
         .is_power_of_two()

@@ -441,10 +441,8 @@ pub(super) fn derive_point_row_weights(
     }
     let selector_count = logical_polynomial_count.ilog2() as usize;
     let logical_opening_point_count = construction_plan
-        .aggregate_column_roles
-        .iter()
-        .filter(|role| matches!(role, RowCodeWhirAggregateColumnRole::OpeningPoint { .. }))
-        .count();
+        .aggregate_opening_point_count()
+        .map_err(|error| format!("derive aggregate opening layout: {error:?}"))?;
     if logical_opening_point_count != opening_points.len()
         || opening_points.len() != relation_variant.ordered_opening_points().len()
         || construction_plan.aggregate_logical_column_count()
@@ -738,22 +736,27 @@ pub(super) fn derive_opening_schedule_after_observed_commitment(
         .checked_sub(selector_count)
         .and_then(|count| count.checked_sub(logical_polynomial_variable_count))
         .ok_or_else(|| "aggregate point variable geometry underflowed".to_owned())?;
-    for (opening_point, row_weights) in opening_points
-        .iter()
-        .copied()
-        .zip(&continuation.point_row_weights)
+    if !construction_plan
+        .uses_opening_claim_quotient_batch()
+        .map_err(|error| format!("derive aggregate opening layout: {error:?}"))?
     {
-        let reduction = polynomial_extension_opening_reduction(
-            challenge_from_production(opening_point),
-            logical_polynomial_variable_count,
-        )?;
-        let mut coordinates = vec![ChallengeField::ZERO; fixed_zero_count];
-        coordinates.extend_from_slice(row_weights.selectors());
-        coordinates.extend_from_slice(reduction.multilinear_point.as_slice());
-        if coordinates.len() != parameters.table_variable_count {
-            return Err("aggregate out-of-domain point has the wrong width".to_owned());
+        for (opening_point, row_weights) in opening_points
+            .iter()
+            .copied()
+            .zip(&continuation.point_row_weights)
+        {
+            let reduction = polynomial_extension_opening_reduction(
+                challenge_from_production(opening_point),
+                logical_polynomial_variable_count,
+            )?;
+            let mut coordinates = vec![ChallengeField::ZERO; fixed_zero_count];
+            coordinates.extend_from_slice(row_weights.selectors());
+            coordinates.extend_from_slice(reduction.multilinear_point.as_slice());
+            if coordinates.len() != parameters.table_variable_count {
+                return Err("aggregate out-of-domain point has the wrong width".to_owned());
+            }
+            points.push(Point::new(coordinates));
         }
-        points.push(Point::new(coordinates));
     }
     let encoded_column_variable_count = outer_encoded_column_count.ilog2() as usize;
     for column_index in outer_traversal_query_indices.iter().copied() {

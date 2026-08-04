@@ -91,6 +91,38 @@ const recordFor = (
                 name: 'basePhasePrivateLeafSaltDerivationCount',
                 value: leafHashQueryCount,
             },
+            {
+                name: 'modeledCandidateQuotientConstructionIdentityByteLength',
+                value: 749_188,
+            },
+            {
+                name: 'modeledCandidateQuotientPhaseOrderCount',
+                value: 2,
+            },
+            {
+                name: 'modeledCandidateQuotientTranscriptOperationCount',
+                value: 2_625,
+            },
+            {
+                name: 'modeledCandidateQuotientOpeningBatchCount',
+                value: 923,
+            },
+            {
+                name: 'modeledCandidateQuotientProofSectionCount',
+                value: 121,
+            },
+            {
+                name: 'modeledCandidateQuotientCheckpointCount',
+                value: 11,
+            },
+            {
+                name: 'modeledCandidateQuotientMaximumTranscriptHashQueryCount',
+                value: 329_471,
+            },
+            {
+                name: 'modeledCandidateQuotientLogicalVerifierMessageCount',
+                value: 2_158,
+            },
         );
     }
     if (caseIdentifier === 7) {
@@ -275,6 +307,10 @@ describe('Primitive measurement evidence', () => {
             ['modeledCandidateTracePackingFactor', 8],
             ['modeledCandidateOpeningPointCount', 23],
             ['modeledCandidateAggregateColumnRoleCount', 24],
+            ['modeledCandidateQuotientSourceDegreeBoundExclusive', 4_194_303],
+            ['modeledCandidateQuotientQueryCount', 393],
+            ['modeledCandidateQuotientAgreementCeiling', 4_194_325],
+            ['modeledCandidateQuotientBoundOpeningBatchCount', 535],
             ['singleAggregateCandidateRowCount', 330],
             [
                 'singleAggregateCandidateBasePhaseAlgorithmLiveSetByteLength',
@@ -295,6 +331,29 @@ describe('Primitive measurement evidence', () => {
             expect(() =>
                 validatePrimitiveMeasurementRecord(staleVssGeometry),
             ).toThrow(/production geometry/u);
+        }
+
+        for (const [dimensionName, wrongValue] of [
+            ['modeledCandidateQuotientOpeningBatchCount', 922],
+            ['modeledCandidateQuotientConstructionIdentityByteLength', 0],
+            ['modeledCandidateQuotientMaximumTranscriptHashQueryCount', 2_158],
+        ] as const) {
+            const inconsistentQuotientConstruction = recordFor(5);
+            const staleDimension = (
+                inconsistentQuotientConstruction.dimensions as Array<{
+                    name: string;
+                    value: number;
+                }>
+            ).find((dimension) => dimension.name === dimensionName);
+            if (staleDimension === undefined) {
+                throw new Error(`Test ${dimensionName} dimension is absent.`);
+            }
+            staleDimension.value = wrongValue;
+            expect(() =>
+                validatePrimitiveMeasurementRecord(
+                    inconsistentQuotientConstruction,
+                ),
+            ).toThrow(/inconsistent|unsigned integer/u);
         }
     });
 

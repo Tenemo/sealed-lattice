@@ -7584,6 +7584,8 @@ fn derive_production_construction_masking_correspondence(
             RowCodeWhirAggregateColumnRole::OpeningPoint {
                 opening_point_ordinal,
             } => Some(*opening_point_ordinal),
+            #[cfg(feature = "primitive-measurement-evidence")]
+            RowCodeWhirAggregateColumnRole::OpeningClaimQuotientBatch { .. } => None,
             RowCodeWhirAggregateColumnRole::BoundReduction => None,
         })
         .collect::<Vec<_>>();

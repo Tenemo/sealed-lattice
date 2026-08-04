@@ -29,6 +29,7 @@ const SHAKE256_RATE_WORD_LENGTH: usize = 17;
 const SHAKE256_DELIMITER: u64 = 0x1f;
 const SHAKE256_FINAL_RATE_BYTE: u64 = 0x80_u64 << 56;
 
+#[cfg(feature = "primitive-measurement-evidence")]
 pub(super) fn salted_phase_column_leaf_keccak_permutation_count(
     logical_leaf_width: usize,
 ) -> Result<u64, String> {
