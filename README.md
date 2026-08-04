@@ -480,7 +480,24 @@ Works today:
   The two streamed root planes are modeled as untrusted public-integrity
   scratch, are fully rehashed to the committed roots, and add no secret-record
   seals. No checkpoint level clears the static measurement-admission gate, so
-  none is implemented, benchmarked, or selectable. The
+  none is implemented, benchmarked, or selectable. The next feature-scoped
+  comparator reconstructs the compiled base-phase batches by their exact
+  opening pattern and coefficient-chunk count before changing the range-check
+  arity. The deployed ternary plan has 640 material-range digit columns, 20
+  quotient-range digit columns, 753 prover columns, 135 base rows, and 50
+  quotient rows. Arity seven is the largest single-polynomial range check below
+  the `2,097,152` opening bound: its maximum numerator degree is `1,849,337`,
+  and it reduces those counts to 384 material-range digit columns, 20
+  quotient-range digit columns, 497 prover columns, 99 base rows, and the
+  unchanged 50 quotient rows. The complete 149-row result performs 9,536 lane
+  DFTs, `47,496,298,496` butterflies, `4,999,610,368` value deliveries, and
+  `436,207,616` salted-leaf Keccak-f permutations while retaining all
+  `67,108,864` phase-leaf hashes. That is only about a 7.7-fold transform and
+  value-delivery reduction and about a 5.5-fold salted-leaf reduction. Arity
+  eight is refused because its numerator degree reaches the opening bound. No
+  range-arity candidate clears the tenfold static admission gate, so none
+  changes the production relation, witness, construction identity, or selected
+  profile. The
   fastest comparator accepted by the existing one-aggregate construction is
   instead factor 1, width 32. It has 331 rows, 21,184 lane DFTs,
   `105,511,911,424` butterflies, `11,106,516,992` value deliveries, and

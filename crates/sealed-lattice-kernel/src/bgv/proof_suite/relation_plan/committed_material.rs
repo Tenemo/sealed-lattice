@@ -18,10 +18,13 @@ const COMMITTED_MATERIAL_RANGE_CONSTRAINT_ARITY: u64 = TERNARY_DIGIT_RADIX;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct VssRelationPackingCandidateGeometry {
     pub(crate) trace_packing_factor: u64,
+    pub(crate) range_constraint_arity: u64,
     pub(crate) relation_trace_domain_size: u64,
     pub(crate) material_group_count: u64,
+    pub(crate) material_range_digit_prover_column_count: u64,
     pub(crate) material_prover_column_count: u64,
     pub(crate) quotient_group_count: u64,
+    pub(crate) quotient_range_digit_prover_column_count: u64,
     pub(crate) quotient_prover_column_count: u64,
     pub(crate) shift_selector_column_count: u64,
     pub(crate) prover_column_count: u64,
@@ -147,8 +150,26 @@ pub(crate) fn derive_vss_relation_packing_candidate_geometry(
     context: &RelationPlanCheckContext,
     trace_packing_factor: u64,
 ) -> Result<VssRelationPackingCandidateGeometry, RelationPlanError> {
+    derive_vss_relation_range_arity_candidate_geometry(
+        input,
+        context,
+        trace_packing_factor,
+        COMMITTED_MATERIAL_RANGE_CONSTRAINT_ARITY,
+    )
+}
+
+#[cfg(feature = "primitive-measurement-evidence")]
+pub(crate) fn derive_vss_relation_range_arity_candidate_geometry(
+    input: &CommittedMaterialRelationPlanInput,
+    context: &RelationPlanCheckContext,
+    trace_packing_factor: u64,
+    range_constraint_arity: u64,
+) -> Result<VssRelationPackingCandidateGeometry, RelationPlanError> {
     if trace_packing_factor == 0 || !trace_packing_factor.is_power_of_two() {
         return Err(RelationPlanError::InvalidDomain);
+    }
+    if range_constraint_arity < 2 {
+        return Err(RelationPlanError::InvalidConstraint);
     }
     let resolved_moduli = input.validate(context)?;
     let relation_trace_domain_size = input
@@ -161,28 +182,29 @@ pub(crate) fn derive_vss_relation_packing_candidate_geometry(
         .ok_or(RelationPlanError::DegreeBoundExceeded)?;
     let maximum_range_constraint_numerator_degree = prover_column_degree_bound_exclusive
         .checked_sub(1)
-        .and_then(|maximum_source_degree| {
-            maximum_source_degree.checked_mul(COMMITTED_MATERIAL_RANGE_CONSTRAINT_ARITY)
-        })
+        .and_then(|maximum_source_degree| maximum_source_degree.checked_mul(range_constraint_arity))
         .ok_or(RelationPlanError::DegreeBoundExceeded)?;
     let roots_per_limb = u64::from(input.threshold)
         .checked_add(u64::from(input.participant_count))
         .ok_or(RelationPlanError::CountOverflow)?;
     let groups_per_limb = roots_per_limb.div_ceil(trace_packing_factor);
+    let material_digit_range_digit_count =
+        minimum_unsigned_digit_count(MATERIAL_DIGIT_RADIX - 1, range_constraint_arity)?;
     let mut material_group_count = 0_u64;
+    let mut material_range_digit_prover_column_count = 0_u64;
     let mut material_prover_column_count = 0_u64;
     for (_, modulus) in resolved_moduli.iter().copied() {
         let maximum_digits = fixed_material_digits(modulus - 1)?;
-        let high_digit_ternary_digit_count =
-            u64::try_from(minimum_unsigned_ternary_digit_count(maximum_digits[1]))
-                .map_err(|_| RelationPlanError::CountOverflow)?;
-        let columns_per_physical_half = u64::try_from(MATERIAL_DIGIT_TERNARY_DIGIT_COUNT)
-            .map_err(|_| RelationPlanError::CountOverflow)?
-            .checked_add(high_digit_ternary_digit_count)
-            .and_then(|count| {
-                count.checked_add(1 + u64::try_from(MATERIAL_DIGIT_TERNARY_DIGIT_COUNT).ok()?)
-            })
-            .and_then(|count| count.checked_add(1 + high_digit_ternary_digit_count))
+        let high_digit_range_digit_count =
+            minimum_unsigned_digit_count(maximum_digits[1], range_constraint_arity)?;
+        let range_digit_columns_per_physical_half = material_digit_range_digit_count
+            .checked_add(high_digit_range_digit_count)
+            .and_then(|count| count.checked_mul(2))
+            .ok_or(RelationPlanError::CountOverflow)?;
+        let columns_per_physical_half = material_digit_range_digit_count
+            .checked_add(high_digit_range_digit_count)
+            .and_then(|count| count.checked_add(1 + material_digit_range_digit_count))
+            .and_then(|count| count.checked_add(1 + high_digit_range_digit_count))
             .and_then(|count| count.checked_add(1))
             .ok_or(RelationPlanError::CountOverflow)?;
         let columns_per_material_group = 4_u64
@@ -194,6 +216,14 @@ pub(crate) fn derive_vss_relation_packing_candidate_geometry(
             .ok_or(RelationPlanError::CountOverflow)?;
         material_group_count = material_group_count
             .checked_add(groups_per_limb)
+            .ok_or(RelationPlanError::CountOverflow)?;
+        material_range_digit_prover_column_count = material_range_digit_prover_column_count
+            .checked_add(
+                groups_per_limb
+                    .checked_mul(2)
+                    .and_then(|count| count.checked_mul(range_digit_columns_per_physical_half))
+                    .ok_or(RelationPlanError::CountOverflow)?,
+            )
             .ok_or(RelationPlanError::CountOverflow)?;
         material_prover_column_count = material_prover_column_count
             .checked_add(
@@ -209,20 +239,23 @@ pub(crate) fn derive_vss_relation_packing_candidate_geometry(
         .checked_mul(2)
         .and_then(|count| count.checked_mul(u64::from(input.participant_count)))
         .ok_or(RelationPlanError::CountOverflow)?;
-    let mut quotient_ternary_digit_count = 1_u64;
-    let mut quotient_ternary_capacity = TERNARY_DIGIT_RADIX;
-    while (quotient_ternary_capacity - 1) / 2 < u64::from(input.threshold) {
-        quotient_ternary_digit_count = quotient_ternary_digit_count
+    let mut quotient_range_digit_count = 1_u64;
+    let mut quotient_range_capacity = range_constraint_arity;
+    while (quotient_range_capacity - 1) / 2 < u64::from(input.threshold) {
+        quotient_range_digit_count = quotient_range_digit_count
             .checked_add(1)
             .ok_or(RelationPlanError::CountOverflow)?;
-        quotient_ternary_capacity = quotient_ternary_capacity
-            .checked_mul(TERNARY_DIGIT_RADIX)
+        quotient_range_capacity = quotient_range_capacity
+            .checked_mul(range_constraint_arity)
             .ok_or(RelationPlanError::IntegerBoundOverflow)?;
     }
     let quotient_group_count = quotient_count.div_ceil(trace_packing_factor);
+    let quotient_range_digit_prover_column_count = quotient_group_count
+        .checked_mul(quotient_range_digit_count)
+        .ok_or(RelationPlanError::CountOverflow)?;
     let quotient_prover_column_count = quotient_group_count
         .checked_mul(
-            quotient_ternary_digit_count
+            quotient_range_digit_count
                 .checked_add(1)
                 .ok_or(RelationPlanError::CountOverflow)?,
         )
@@ -273,10 +306,13 @@ pub(crate) fn derive_vss_relation_packing_candidate_geometry(
 
     Ok(VssRelationPackingCandidateGeometry {
         trace_packing_factor,
+        range_constraint_arity,
         relation_trace_domain_size,
         material_group_count,
+        material_range_digit_prover_column_count,
         material_prover_column_count,
         quotient_group_count,
+        quotient_range_digit_prover_column_count,
         quotient_prover_column_count,
         shift_selector_column_count,
         prover_column_count,
@@ -284,6 +320,37 @@ pub(crate) fn derive_vss_relation_packing_candidate_geometry(
         maximum_range_constraint_numerator_degree,
         opening_point_count,
     })
+}
+
+#[cfg(feature = "primitive-measurement-evidence")]
+pub(crate) fn vss_relation_trinary_prover_column_ordinals(
+    variant: &RelationPlanVariant,
+) -> Result<BTreeSet<u32>, RelationPlanError> {
+    let mut column_ordinals = BTreeSet::new();
+    for cell in &variant.ordered_semantic_cells {
+        if !matches!(
+            cell.bound_certificate,
+            RelationBoundCertificate::Trinary { .. }
+        ) {
+            continue;
+        }
+        let column = variant
+            .ordered_columns
+            .get(
+                usize::try_from(cell.column_ordinal)
+                    .map_err(|_| RelationPlanError::CountOverflow)?,
+            )
+            .ok_or(RelationPlanError::InvalidColumn)?;
+        if *column.origin() != RelationColumnOrigin::Prover
+            || !column_ordinals.insert(cell.column_ordinal)
+        {
+            return Err(RelationPlanError::InvalidSemanticCell);
+        }
+    }
+    if column_ordinals.is_empty() {
+        return Err(RelationPlanError::InvalidSemanticCell);
+    }
+    Ok(column_ordinals)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -3397,6 +3464,22 @@ fn minimum_unsigned_ternary_digit_count(maximum_value: u64) -> usize {
         digit_count += 1;
     }
     digit_count
+}
+
+#[cfg(feature = "primitive-measurement-evidence")]
+fn minimum_unsigned_digit_count(maximum_value: u64, radix: u64) -> Result<u64, RelationPlanError> {
+    if radix < 2 {
+        return Err(RelationPlanError::InvalidConstraint);
+    }
+    let mut digit_count = 1_u64;
+    let mut remaining = maximum_value;
+    while remaining >= radix {
+        remaining /= radix;
+        digit_count = digit_count
+            .checked_add(1)
+            .ok_or(RelationPlanError::CountOverflow)?;
+    }
+    Ok(digit_count)
 }
 
 #[derive(Clone)]

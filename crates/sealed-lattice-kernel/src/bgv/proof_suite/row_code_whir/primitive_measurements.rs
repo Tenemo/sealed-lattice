@@ -17,6 +17,8 @@ use zeroize::Zeroizing;
 
 use super::super::relation_plan::{
     COMMITTED_MATERIAL_TRACE_PACKING_FACTOR, derive_vss_relation_packing_candidate_geometry,
+    derive_vss_relation_range_arity_candidate_geometry,
+    vss_relation_trinary_prover_column_ordinals,
 };
 #[cfg(test)]
 use super::commitment_liveness::derive_phase_commitment_work_accounting;
@@ -35,7 +37,7 @@ use super::{
         ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT,
         ROW_CODE_WHIR_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW, ROW_CODE_WHIR_OUTER_QUERY_COUNT,
         RowCodeWhirAggregateColumnRole, RowCodeWhirConstructionPlan,
-        RowCodeWhirConstructionPlanError,
+        RowCodeWhirConstructionPlanError, RowCodeWhirTracePhasePlan,
     },
     hiding_whir::selected_hiding_whir_config,
     opening_claim_reduction::OpeningClaimQuotientBatchGeometry,
@@ -633,6 +635,26 @@ struct VssRelationReplayCandidateLedger {
     source_trace_value_generation_count: u64,
     retained_coefficient_group_byte_length: u64,
     logical_row_chunk_byte_length: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct VssRangeConstraintArityCandidateLedger {
+    range_constraint_arity: u64,
+    material_range_digit_prover_column_count: u64,
+    quotient_range_digit_prover_column_count: u64,
+    prover_column_count: u64,
+    maximum_range_constraint_numerator_degree: u64,
+    base_phase_row_count: u64,
+    quotient_phase_row_count: u64,
+    complete_phase_row_count: u64,
+    lane_dft_count: u64,
+    butterfly_count: u64,
+    coefficient_fold_count: u64,
+    coset_multiplication_count: u64,
+    column_value_delivery_count: u64,
+    leaf_hash_query_count: u64,
+    salted_leaf_keccak_permutation_count: u64,
+    merkle_parent_hash_query_count: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1470,6 +1492,356 @@ fn derive_vss_relation_replay_candidate_construction_plan(
     .map_err(|error| {
         format!("VSS relation-replay candidate construction does not derive: {error:?}")
     })
+}
+
+fn trace_phase_columns_by_opening_pattern_and_chunk_count(
+    phase: &RowCodeWhirTracePhasePlan,
+    logical_polynomials_per_physical_row: u64,
+) -> Result<BTreeMap<(Vec<u32>, u64), BTreeSet<u32>>, String> {
+    let mut rows_by_column_group = BTreeMap::<u32, (Vec<u32>, BTreeMap<u32, BTreeSet<u32>>)>::new();
+    for row in &phase.rows {
+        let group = rows_by_column_group
+            .entry(row.column_group_ordinal)
+            .or_insert_with(|| (row.opening_point_ordinals.clone(), BTreeMap::new()));
+        if group.0 != row.opening_point_ordinals {
+            return Err("VSS range-arity column group changes opening pattern".to_owned());
+        }
+        let mut column_ordinals = BTreeSet::new();
+        for chunk in row.logical_polynomial_chunks.iter().flatten() {
+            if chunk.coefficient_chunk_ordinal != row.coefficient_chunk_ordinal
+                || !column_ordinals.insert(chunk.column_ordinal)
+            {
+                return Err("VSS range-arity row contains a malformed column chunk".to_owned());
+            }
+        }
+        if column_ordinals.is_empty()
+            || u64::try_from(column_ordinals.len())
+                .map_err(|_| "VSS range-arity row width exceeds u64".to_owned())?
+                > logical_polynomials_per_physical_row
+            || group
+                .1
+                .insert(row.coefficient_chunk_ordinal, column_ordinals)
+                .is_some()
+        {
+            return Err("VSS range-arity column group has duplicate or empty rows".to_owned());
+        }
+    }
+
+    let mut columns_by_pattern = BTreeMap::<(Vec<u32>, u64), BTreeSet<u32>>::new();
+    for (_, (opening_point_ordinals, columns_by_chunk)) in rows_by_column_group {
+        let coefficient_chunk_count = u64::try_from(columns_by_chunk.len())
+            .map_err(|_| "VSS range-arity chunk count exceeds u64".to_owned())?;
+        if coefficient_chunk_count == 0
+            || columns_by_chunk.keys().copied().enumerate().any(
+                |(expected_ordinal, actual_ordinal)| {
+                    u32::try_from(expected_ordinal).ok() != Some(actual_ordinal)
+                },
+            )
+        {
+            return Err("VSS range-arity chunks are not canonical".to_owned());
+        }
+        let mut ordered_chunk_columns = columns_by_chunk.into_values();
+        let first_chunk_columns = ordered_chunk_columns
+            .next()
+            .ok_or_else(|| "VSS range-arity group is empty".to_owned())?;
+        if ordered_chunk_columns.any(|columns| columns != first_chunk_columns) {
+            return Err("VSS range-arity group changes columns between chunks".to_owned());
+        }
+        let pattern_columns = columns_by_pattern
+            .entry((opening_point_ordinals, coefficient_chunk_count))
+            .or_default();
+        for column_ordinal in first_chunk_columns {
+            if !pattern_columns.insert(column_ordinal) {
+                return Err("VSS range-arity column appears in multiple groups".to_owned());
+            }
+        }
+    }
+
+    let reproduced_row_count = columns_by_pattern.iter().try_fold(
+        0_u64,
+        |total, ((_, coefficient_chunk_count), column_ordinals)| {
+            u64::try_from(column_ordinals.len())
+                .ok()
+                .and_then(|column_count| {
+                    column_count
+                        .div_ceil(logical_polynomials_per_physical_row)
+                        .checked_mul(*coefficient_chunk_count)
+                })
+                .and_then(|row_count| total.checked_add(row_count))
+                .ok_or_else(|| "VSS range-arity phase row count overflowed".to_owned())
+        },
+    )?;
+    if reproduced_row_count
+        != u64::try_from(phase.rows.len())
+            .map_err(|_| "VSS range-arity phase row count exceeds u64".to_owned())?
+    {
+        return Err("VSS range-arity phase inventory does not reproduce its rows".to_owned());
+    }
+    Ok(columns_by_pattern)
+}
+
+fn derive_vss_range_constraint_arity_candidate_ledger(
+    range_constraint_arity: u64,
+) -> Result<Option<VssRangeConstraintArityCandidateLedger>, String> {
+    let relation_candidate = derive_vss_relation_replay_candidate_ledger(
+        VSS_RELATION_REPLAY_CANDIDATE_TRACE_PACKING_FACTOR,
+        VSS_RELATION_REPLAY_CANDIDATE_RETAINED_GROUP_WIDTH as u64,
+    )?
+    .ok_or_else(|| "VSS range-arity baseline exceeds its opening bound".to_owned())?;
+    let (artifact, relation_context) =
+        SelectedVssSourceReplayMeasurement::validated_relation_replay_candidate(
+            relation_candidate.trace_packing_factor,
+            relation_candidate.opening_degree_bound_exclusive,
+        )?;
+    let variant = artifact
+        .compiled_plan()
+        .variants()
+        .first()
+        .ok_or_else(|| "VSS range-arity relation variant is absent".to_owned())?;
+    let construction_plan =
+        derive_vss_relation_replay_opening_claim_quotient_candidate_construction_plan(
+            relation_candidate,
+        )?;
+    let base_phase = construction_plan
+        .base_phase
+        .as_ref()
+        .ok_or_else(|| "VSS range-arity base phase is absent".to_owned())?;
+    if construction_plan.auxiliary_phase.is_some() {
+        return Err("VSS range-arity candidate unexpectedly has an auxiliary phase".to_owned());
+    }
+
+    let relation_input = selected_committed_material_relation_plan_input()
+        .map_err(|_| "VSS range-arity relation input is invalid".to_owned())?;
+    let current_geometry = derive_vss_relation_range_arity_candidate_geometry(
+        &relation_input,
+        &relation_context,
+        relation_candidate.trace_packing_factor,
+        3,
+    )
+    .map_err(|_| "VSS range-arity baseline geometry does not derive".to_owned())?;
+    let candidate_geometry = derive_vss_relation_range_arity_candidate_geometry(
+        &relation_input,
+        &relation_context,
+        relation_candidate.trace_packing_factor,
+        range_constraint_arity,
+    )
+    .map_err(|_| "VSS range-arity candidate geometry does not derive".to_owned())?;
+    if candidate_geometry.maximum_range_constraint_numerator_degree
+        >= relation_candidate.opening_degree_bound_exclusive
+    {
+        return Ok(None);
+    }
+
+    let current_range_digit_column_count = current_geometry
+        .material_range_digit_prover_column_count
+        .checked_add(current_geometry.quotient_range_digit_prover_column_count)
+        .ok_or_else(|| "VSS range-arity baseline digit count overflowed".to_owned())?;
+    let candidate_range_digit_column_count = candidate_geometry
+        .material_range_digit_prover_column_count
+        .checked_add(candidate_geometry.quotient_range_digit_prover_column_count)
+        .ok_or_else(|| "VSS range-arity candidate digit count overflowed".to_owned())?;
+    let current_trinary_column_ordinals = vss_relation_trinary_prover_column_ordinals(variant)
+        .map_err(|_| "VSS range-arity trinary-column inventory is invalid".to_owned())?;
+    if u64::try_from(current_trinary_column_ordinals.len())
+        .map_err(|_| "VSS range-arity trinary-column count exceeds u64".to_owned())?
+        != current_range_digit_column_count
+    {
+        return Err("VSS range-arity digit formulas do not match the compiled plan".to_owned());
+    }
+
+    let logical_polynomials_per_physical_row = u64::try_from(
+        construction_plan
+            .parameters
+            .logical_polynomials_per_physical_row,
+    )
+    .map_err(|_| "VSS range-arity row width exceeds u64".to_owned())?;
+    if logical_polynomials_per_physical_row
+        != relation_candidate.logical_polynomials_per_physical_row
+    {
+        return Err("VSS range-arity construction row width changed".to_owned());
+    }
+    let columns_by_pattern = trace_phase_columns_by_opening_pattern_and_chunk_count(
+        base_phase,
+        logical_polynomials_per_physical_row,
+    )?;
+    let compiled_prover_column_count =
+        columns_by_pattern
+            .values()
+            .try_fold(0_u64, |total, columns| {
+                u64::try_from(columns.len())
+                    .ok()
+                    .and_then(|count| total.checked_add(count))
+                    .ok_or_else(|| "VSS range-arity prover-column count overflowed".to_owned())
+            })?;
+    if compiled_prover_column_count != current_geometry.prover_column_count {
+        return Err("VSS range-arity phase inventory omits prover columns".to_owned());
+    }
+    let range_digit_pattern_keys = columns_by_pattern
+        .iter()
+        .filter_map(|(key, columns)| {
+            columns
+                .iter()
+                .any(|column| current_trinary_column_ordinals.contains(column))
+                .then_some(key.clone())
+        })
+        .collect::<Vec<_>>();
+    if range_digit_pattern_keys.len() != 1 {
+        return Err(
+            "VSS range-arity digits do not share one production opening pattern".to_owned(),
+        );
+    }
+    let range_digit_pattern_key = &range_digit_pattern_keys[0];
+    let compiled_range_digit_column_count = u64::try_from(
+        columns_by_pattern[range_digit_pattern_key]
+            .iter()
+            .filter(|column| current_trinary_column_ordinals.contains(column))
+            .count(),
+    )
+    .map_err(|_| "VSS range-arity pattern digit count exceeds u64".to_owned())?;
+    if compiled_range_digit_column_count != current_range_digit_column_count {
+        return Err("VSS range-arity pattern omits compiled range digits".to_owned());
+    }
+
+    let mut candidate_base_phase_row_count = 0_u64;
+    let mut candidate_prover_column_count = 0_u64;
+    for (key, columns) in &columns_by_pattern {
+        let current_column_count = u64::try_from(columns.len())
+            .map_err(|_| "VSS range-arity pattern column count exceeds u64".to_owned())?;
+        let candidate_column_count = if key == range_digit_pattern_key {
+            current_column_count
+                .checked_sub(current_range_digit_column_count)
+                .and_then(|count| count.checked_add(candidate_range_digit_column_count))
+                .ok_or_else(|| "VSS range-arity pattern column count overflowed".to_owned())?
+        } else {
+            current_column_count
+        };
+        candidate_prover_column_count = candidate_prover_column_count
+            .checked_add(candidate_column_count)
+            .ok_or_else(|| "VSS range-arity prover-column count overflowed".to_owned())?;
+        candidate_base_phase_row_count = candidate_base_phase_row_count
+            .checked_add(
+                candidate_column_count
+                    .div_ceil(logical_polynomials_per_physical_row)
+                    .checked_mul(key.1)
+                    .ok_or_else(|| "VSS range-arity pattern row count overflowed".to_owned())?,
+            )
+            .ok_or_else(|| "VSS range-arity base row count overflowed".to_owned())?;
+    }
+    if candidate_prover_column_count != candidate_geometry.prover_column_count {
+        return Err("VSS range-arity candidate column formulas disagree".to_owned());
+    }
+
+    let quotient_phase_row_count = u64::try_from(construction_plan.quotient_phase.rows.len())
+        .map_err(|_| "VSS range-arity quotient row count exceeds u64".to_owned())?;
+    let complete_phase_row_count = candidate_base_phase_row_count
+        .checked_add(quotient_phase_row_count)
+        .ok_or_else(|| "VSS range-arity complete row count overflowed".to_owned())?;
+    let candidate_base_geometry = RowEncodingGeometry::new_weighted_batch_with_log_inverse_rate(
+        usize::try_from(candidate_base_phase_row_count)
+            .map_err(|_| "VSS range-arity base row count exceeds usize".to_owned())?,
+        construction_plan
+            .parameters
+            .physical_row_witness_variable_count,
+        construction_plan.parameters.row_code_log_inverse_rate,
+    )?;
+    let candidate_quotient_geometry =
+        RowEncodingGeometry::new_weighted_batch_with_log_inverse_rate(
+            usize::try_from(quotient_phase_row_count)
+                .map_err(|_| "VSS range-arity quotient row count exceeds usize".to_owned())?,
+            construction_plan
+                .parameters
+                .physical_row_witness_variable_count,
+            construction_plan.parameters.row_code_log_inverse_rate,
+        )?;
+    if candidate_quotient_geometry != construction_plan.quotient_phase.geometry {
+        return Err("VSS range-arity changed the quotient-phase geometry".to_owned());
+    }
+    let base_accounting = derive_phase_commitment_geometry_accounting(candidate_base_geometry)?;
+    let quotient_accounting =
+        derive_phase_commitment_geometry_accounting(candidate_quotient_geometry)?;
+    let complete_count = |base_count: u64, quotient_count: u64, role: &str| {
+        base_count
+            .checked_add(quotient_count)
+            .and_then(|count| count.checked_mul(ROOT_AND_OPENING_PASS_COUNT))
+            .ok_or_else(|| format!("VSS range-arity {role} count overflowed"))
+    };
+    let leaf_hash_query_count = complete_count(
+        base_accounting.leaf_hash_query_count_per_pass,
+        quotient_accounting.leaf_hash_query_count_per_pass,
+        "leaf-hash",
+    )?;
+    let salted_leaf_keccak_permutation_count = [base_accounting, quotient_accounting]
+        .into_iter()
+        .try_fold(0_u64, |total, accounting| {
+        salted_phase_column_leaf_keccak_permutation_count(
+            usize::try_from(accounting.row_count)
+                .map_err(|_| "VSS range-arity leaf width exceeds usize".to_owned())?,
+        )?
+        .checked_mul(accounting.encoded_column_count)
+        .and_then(|count| count.checked_mul(ROOT_AND_OPENING_PASS_COUNT))
+        .and_then(|count| total.checked_add(count))
+        .ok_or_else(|| "VSS range-arity salted-leaf work overflowed".to_owned())
+    })?;
+
+    Ok(Some(VssRangeConstraintArityCandidateLedger {
+        range_constraint_arity,
+        material_range_digit_prover_column_count: candidate_geometry
+            .material_range_digit_prover_column_count,
+        quotient_range_digit_prover_column_count: candidate_geometry
+            .quotient_range_digit_prover_column_count,
+        prover_column_count: candidate_geometry.prover_column_count,
+        maximum_range_constraint_numerator_degree: candidate_geometry
+            .maximum_range_constraint_numerator_degree,
+        base_phase_row_count: candidate_base_phase_row_count,
+        quotient_phase_row_count,
+        complete_phase_row_count,
+        lane_dft_count: complete_count(
+            base_accounting.lane_dft_count_per_pass,
+            quotient_accounting.lane_dft_count_per_pass,
+            "lane DFT",
+        )?,
+        butterfly_count: complete_count(
+            base_accounting.butterfly_count_per_pass,
+            quotient_accounting.butterfly_count_per_pass,
+            "butterfly",
+        )?,
+        coefficient_fold_count: complete_count(
+            base_accounting.coefficient_fold_count_per_pass,
+            quotient_accounting.coefficient_fold_count_per_pass,
+            "coefficient-fold",
+        )?,
+        coset_multiplication_count: complete_count(
+            base_accounting.coset_multiplication_count_per_pass,
+            quotient_accounting.coset_multiplication_count_per_pass,
+            "coset multiplication",
+        )?,
+        column_value_delivery_count: complete_count(
+            base_accounting.column_value_delivery_count_per_pass,
+            quotient_accounting.column_value_delivery_count_per_pass,
+            "value delivery",
+        )?,
+        leaf_hash_query_count,
+        salted_leaf_keccak_permutation_count,
+        merkle_parent_hash_query_count: complete_count(
+            base_accounting.merkle_parent_hash_query_count_per_pass,
+            quotient_accounting.merkle_parent_hash_query_count_per_pass,
+            "Merkle-parent",
+        )?,
+    }))
+}
+
+fn derive_vss_range_constraint_arity_candidate_grid()
+-> Result<Vec<VssRangeConstraintArityCandidateLedger>, String> {
+    (3_u64..=7)
+        .map(derive_vss_range_constraint_arity_candidate_ledger)
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .map(|candidate| {
+            candidate.ok_or_else(|| {
+                "VSS range-arity candidate grid unexpectedly exceeds the opening bound".to_owned()
+            })
+        })
+        .collect()
 }
 
 fn derive_vss_relation_replay_opening_claim_quotient_candidate_construction_plan(
@@ -3761,6 +4133,140 @@ mod tests {
             .is_err(),
             "a non-power-of-two trace packing factor refuses"
         );
+    }
+
+    #[test]
+    fn vss_range_constraint_arity_candidates_preserve_exact_phase_patterns() {
+        let candidates = derive_vss_range_constraint_arity_candidate_grid()
+            .expect("the VSS range-arity candidate grid derives");
+        assert_eq!(
+            candidates,
+            vec![
+                VssRangeConstraintArityCandidateLedger {
+                    range_constraint_arity: 3,
+                    material_range_digit_prover_column_count: 640,
+                    quotient_range_digit_prover_column_count: 20,
+                    prover_column_count: 753,
+                    maximum_range_constraint_numerator_degree: 792_573,
+                    base_phase_row_count: 135,
+                    quotient_phase_row_count: 50,
+                    complete_phase_row_count: 185,
+                    lane_dft_count: 11_840,
+                    butterfly_count: 58_971_914_240,
+                    coefficient_fold_count: 43_452_989_440,
+                    coset_multiplication_count: 6_207_569_920,
+                    column_value_delivery_count: 6_207_569_920,
+                    leaf_hash_query_count: 67_108_864,
+                    salted_leaf_keccak_permutation_count: 503_316_480,
+                    merkle_parent_hash_query_count: 67_108_860,
+                },
+                VssRangeConstraintArityCandidateLedger {
+                    range_constraint_arity: 4,
+                    material_range_digit_prover_column_count: 540,
+                    quotient_range_digit_prover_column_count: 20,
+                    prover_column_count: 653,
+                    maximum_range_constraint_numerator_degree: 1_056_764,
+                    base_phase_row_count: 117,
+                    quotient_phase_row_count: 50,
+                    complete_phase_row_count: 167,
+                    lane_dft_count: 10_688,
+                    butterfly_count: 53_234_106_368,
+                    coefficient_fold_count: 39_225_131_008,
+                    coset_multiplication_count: 5_603_590_144,
+                    column_value_delivery_count: 5_603_590_144,
+                    leaf_hash_query_count: 67_108_864,
+                    salted_leaf_keccak_permutation_count: 469_762_048,
+                    merkle_parent_hash_query_count: 67_108_860,
+                },
+                VssRangeConstraintArityCandidateLedger {
+                    range_constraint_arity: 5,
+                    material_range_digit_prover_column_count: 452,
+                    quotient_range_digit_prover_column_count: 20,
+                    prover_column_count: 565,
+                    maximum_range_constraint_numerator_degree: 1_320_955,
+                    base_phase_row_count: 108,
+                    quotient_phase_row_count: 50,
+                    complete_phase_row_count: 158,
+                    lane_dft_count: 10_112,
+                    butterfly_count: 50_365_202_432,
+                    coefficient_fold_count: 37_111_201_792,
+                    coset_multiplication_count: 5_301_600_256,
+                    column_value_delivery_count: 5_301_600_256,
+                    leaf_hash_query_count: 67_108_864,
+                    salted_leaf_keccak_permutation_count: 436_207_616,
+                    merkle_parent_hash_query_count: 67_108_860,
+                },
+                VssRangeConstraintArityCandidateLedger {
+                    range_constraint_arity: 6,
+                    material_range_digit_prover_column_count: 416,
+                    quotient_range_digit_prover_column_count: 20,
+                    prover_column_count: 529,
+                    maximum_range_constraint_numerator_degree: 1_585_146,
+                    base_phase_row_count: 99,
+                    quotient_phase_row_count: 50,
+                    complete_phase_row_count: 149,
+                    lane_dft_count: 9_536,
+                    butterfly_count: 47_496_298_496,
+                    coefficient_fold_count: 34_997_272_576,
+                    coset_multiplication_count: 4_999_610_368,
+                    column_value_delivery_count: 4_999_610_368,
+                    leaf_hash_query_count: 67_108_864,
+                    salted_leaf_keccak_permutation_count: 436_207_616,
+                    merkle_parent_hash_query_count: 67_108_860,
+                },
+                VssRangeConstraintArityCandidateLedger {
+                    range_constraint_arity: 7,
+                    material_range_digit_prover_column_count: 384,
+                    quotient_range_digit_prover_column_count: 20,
+                    prover_column_count: 497,
+                    maximum_range_constraint_numerator_degree: 1_849_337,
+                    base_phase_row_count: 99,
+                    quotient_phase_row_count: 50,
+                    complete_phase_row_count: 149,
+                    lane_dft_count: 9_536,
+                    butterfly_count: 47_496_298_496,
+                    coefficient_fold_count: 34_997_272_576,
+                    coset_multiplication_count: 4_999_610_368,
+                    column_value_delivery_count: 4_999_610_368,
+                    leaf_hash_query_count: 67_108_864,
+                    salted_leaf_keccak_permutation_count: 436_207_616,
+                    merkle_parent_hash_query_count: 67_108_860,
+                },
+            ]
+        );
+        let production_construction = selected_vss_construction_plan_for_checkpoint_comparison()
+            .expect("the selected VSS construction derives");
+        let production = derive_phase_commitment_work_accounting(&production_construction)
+            .expect("the selected VSS work ledger derives");
+        let production_salted_leaf_keccak_permutation_count =
+            complete_phase_salted_leaf_keccak_permutation_count(
+                &production_construction,
+                ROOT_AND_OPENING_PASS_COUNT,
+            )
+            .expect("the selected VSS salted-leaf work derives");
+        let best_candidate = candidates
+            .last()
+            .expect("the VSS range-arity candidate grid is nonempty");
+        assert!(best_candidate.lane_dft_count * 10 > production.lane_dft_count);
+        assert!(best_candidate.butterfly_count * 10 > production.butterfly_count);
+        assert!(
+            best_candidate.column_value_delivery_count * 10
+                > production.column_value_delivery_count
+        );
+        assert!(
+            best_candidate.salted_leaf_keccak_permutation_count * 10
+                > production_salted_leaf_keccak_permutation_count
+        );
+        assert_eq!(
+            best_candidate.leaf_hash_query_count,
+            production.leaf_hash_query_count
+        );
+        assert_eq!(
+            derive_vss_range_constraint_arity_candidate_ledger(8)
+                .expect("the degree-exceeding VSS range-arity comparator is classified"),
+            None
+        );
+        assert!(derive_vss_range_constraint_arity_candidate_ledger(1).is_err());
     }
 
     #[test]
