@@ -161,6 +161,10 @@ type BoundRootSourceTraceDomainSizeResolver =
 pub(in crate::bgv::proof_suite) enum RowCodeWhirConstructionPlanError {
     InvalidSelectedProfile,
     InvalidVariantGeometry,
+    InsufficientAggregateTableWidth {
+        aggregate_column_role_count: usize,
+        aggregate_table_width: usize,
+    },
     InvalidOpeningCatalog,
     UnsupportedColumnValueType,
     CountOverflow,
@@ -1110,6 +1114,38 @@ impl RowCodeWhirConstructionPlan {
         )
     }
 
+    /// Builds one production-shaped relation/replay comparator without making
+    /// it a selected-suite construction.
+    ///
+    /// The primitive-measurement feature owns this route. It accepts the exact
+    /// checked context used to compile the comparator, derives every downstream
+    /// construction parameter from that validated variant, and remains absent
+    /// from ordinary proving and verification builds.
+    #[cfg(feature = "primitive-measurement-evidence")]
+    pub(crate) fn for_primitive_measurement_candidate_variant(
+        artifact: &ValidatedRelationPlanArtifact,
+        context: &RelationPlanCheckContext,
+        schedule_position: Option<u32>,
+        top_count: Option<u16>,
+        bound_root_source_trace_domain_size: BoundRootSourceTraceDomainSizeResolver,
+    ) -> Result<Self, RowCodeWhirConstructionPlanError> {
+        if artifact.checked_context() != context {
+            return Err(RowCodeWhirConstructionPlanError::InvalidSelectedProfile);
+        }
+        let variant = artifact
+            .compiled_plan()
+            .select_variant(schedule_position, top_count)?;
+        let parameters = RowCodeWhirSelectedParameters::for_selected_variant_geometry(variant)?;
+        Self::for_context_variant(
+            artifact,
+            context,
+            schedule_position,
+            top_count,
+            parameters,
+            bound_root_source_trace_domain_size,
+        )
+    }
+
     #[cfg(test)]
     pub(in crate::bgv::proof_suite) fn for_checked_fixture_variant(
         artifact: &ValidatedRelationPlanArtifact,
@@ -1196,10 +1232,17 @@ impl RowCodeWhirConstructionPlan {
         if !bound_reduction_blocks.is_empty() {
             aggregate_column_roles.push(RowCodeWhirAggregateColumnRole::BoundReduction);
         }
-        if aggregate_column_roles.is_empty()
-            || aggregate_column_roles.len() > aggregate_table_width_from_parameters(parameters)?
-        {
+        if aggregate_column_roles.is_empty() {
             return Err(RowCodeWhirConstructionPlanError::InvalidVariantGeometry);
+        }
+        let aggregate_table_width = aggregate_table_width_from_parameters(parameters)?;
+        if aggregate_column_roles.len() > aggregate_table_width {
+            return Err(
+                RowCodeWhirConstructionPlanError::InsufficientAggregateTableWidth {
+                    aggregate_column_role_count: aggregate_column_roles.len(),
+                    aggregate_table_width,
+                },
+            );
         }
 
         let mut phase_order = Vec::with_capacity(3);

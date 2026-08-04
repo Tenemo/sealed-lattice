@@ -32,6 +32,7 @@ use super::{
     construction_plan::{
         ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT,
         ROW_CODE_WHIR_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW, RowCodeWhirConstructionPlan,
+        RowCodeWhirConstructionPlanError,
     },
     hiding_whir::selected_hiding_whir_config,
     private_leaf_salt::{
@@ -45,10 +46,11 @@ use super::{
 };
 use crate::bgv::proof_suite::{
     PROOF_BASE_FIELD_MODULUS, PROOF_EVALUATION_COSET_OFFSET, ProofBaseFieldElement,
-    ProofEvaluationDomain, SelectedVssSourceReplayMeasurement, ValidatedRelationPlanArtifact,
+    ProofEvaluationDomain, ProofProfileError, RelationTreeDescriptor,
+    SelectedVssSourceReplayMeasurement, ValidatedRelationPlanArtifact,
     compile_vss_share_linkage_relation_plan,
     prover::relation_reversed_column_bindings,
-    relation_plan::{ProofPrivacyMode, RelationColumnOrigin},
+    relation_plan::{BoundTreeConstructionKind, ProofPrivacyMode, RelationColumnOrigin},
     selected_committed_material_relation_plan_input, selected_relation_plan_check_context,
 };
 use crate::foundation::{
@@ -594,6 +596,10 @@ struct VssRelationReplayCandidateLedger {
     maximum_range_constraint_numerator_degree: u64,
     opening_degree_bound_exclusive: u64,
     row_code_inverse_rate: u64,
+    opening_point_count: u64,
+    bound_reduction_aggregate_column_count: u64,
+    aggregate_column_role_count: u64,
+    aggregate_table_width: u64,
     coefficient_chunk_count_per_source: u64,
     physical_row_count: u64,
     lane_dft_count: u64,
@@ -666,6 +672,12 @@ fn derive_vss_relation_replay_candidate_ledger(
     let coefficient_chunk_count_per_source = relation
         .prover_column_degree_bound_exclusive
         .div_ceil(logical_polynomial_coefficient_count);
+    let opening_point_count = relation.opening_point_count;
+    let bound_reduction_aggregate_column_count = 1_u64;
+    let aggregate_column_role_count = opening_point_count
+        .checked_add(bound_reduction_aggregate_column_count)
+        .ok_or_else(|| "VSS candidate aggregate-column count overflowed".to_owned())?;
+    let aggregate_table_width = row_code_inverse_rate;
     let physical_column_group_count = relation
         .prover_column_count
         .div_ceil(logical_polynomials_per_physical_row);
@@ -759,6 +771,10 @@ fn derive_vss_relation_replay_candidate_ledger(
             .maximum_range_constraint_numerator_degree,
         opening_degree_bound_exclusive,
         row_code_inverse_rate,
+        opening_point_count,
+        bound_reduction_aggregate_column_count,
+        aggregate_column_role_count,
+        aggregate_table_width,
         coefficient_chunk_count_per_source,
         physical_row_count,
         lane_dft_count,
@@ -796,6 +812,145 @@ fn derive_vss_relation_replay_candidate_grid()
         return Err("VSS relation-replay candidate grid is empty".to_owned());
     }
     Ok(candidates)
+}
+
+fn derive_vss_relation_replay_candidate_construction_plan(
+    candidate: VssRelationReplayCandidateLedger,
+) -> Result<RowCodeWhirConstructionPlan, String> {
+    let (artifact, context) =
+        SelectedVssSourceReplayMeasurement::validated_relation_replay_candidate(
+            candidate.trace_packing_factor,
+            candidate.opening_degree_bound_exclusive,
+        )?;
+    let variant = artifact
+        .compiled_plan()
+        .variants()
+        .first()
+        .ok_or_else(|| "VSS relation-replay candidate variant is absent".to_owned())?;
+    RowCodeWhirConstructionPlan::for_primitive_measurement_candidate_variant(
+        &artifact,
+        &context,
+        variant.schedule_position(),
+        variant.top_count(),
+        vss_relation_replay_candidate_bound_root_source_trace_domain_size,
+    )
+    .map_err(|error| {
+        format!("VSS relation-replay candidate construction does not derive: {error:?}")
+    })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct VssRelationReplayCandidateCapacityRefusal {
+    opening_point_count: u64,
+    bound_reduction_aggregate_column_count: u64,
+    aggregate_column_role_count: u64,
+    aggregate_table_width: u64,
+}
+
+fn derive_vss_relation_replay_candidate_capacity_refusal(
+    candidate: VssRelationReplayCandidateLedger,
+) -> Result<VssRelationReplayCandidateCapacityRefusal, String> {
+    let (artifact, context) =
+        SelectedVssSourceReplayMeasurement::validated_relation_replay_candidate(
+            candidate.trace_packing_factor,
+            candidate.opening_degree_bound_exclusive,
+        )?;
+    let variant = artifact
+        .compiled_plan()
+        .variants()
+        .first()
+        .ok_or_else(|| "VSS relation-replay candidate variant is absent".to_owned())?;
+    let opening_point_count = u64::try_from(variant.ordered_opening_points().len())
+        .map_err(|_| "VSS candidate opening-point count exceeds u64".to_owned())?;
+    let bound_reduction_aggregate_column_count = u64::from(
+        variant
+            .ordered_trees()
+            .iter()
+            .any(|tree| matches!(tree, RelationTreeDescriptor::BoundPublic { .. })),
+    );
+    let refusal = match RowCodeWhirConstructionPlan::for_primitive_measurement_candidate_variant(
+        &artifact,
+        &context,
+        variant.schedule_position(),
+        variant.top_count(),
+        vss_relation_replay_candidate_bound_root_source_trace_domain_size,
+    ) {
+        Ok(_) => {
+            return Err(
+                "the capacity-refused VSS candidate unexpectedly derived a construction".to_owned(),
+            );
+        }
+        Err(error) => error,
+    };
+    let RowCodeWhirConstructionPlanError::InsufficientAggregateTableWidth {
+        aggregate_column_role_count,
+        aggregate_table_width,
+    } = refusal
+    else {
+        return Err(format!(
+            "VSS relation-replay candidate has an unexpected construction refusal: {refusal:?}"
+        ));
+    };
+    let refusal = VssRelationReplayCandidateCapacityRefusal {
+        opening_point_count,
+        bound_reduction_aggregate_column_count,
+        aggregate_column_role_count: u64::try_from(aggregate_column_role_count)
+            .map_err(|_| "VSS candidate aggregate-column count exceeds u64".to_owned())?,
+        aggregate_table_width: u64::try_from(aggregate_table_width)
+            .map_err(|_| "VSS candidate aggregate-table width exceeds u64".to_owned())?,
+    };
+    if refusal.opening_point_count != candidate.opening_point_count
+        || refusal.bound_reduction_aggregate_column_count
+            != candidate.bound_reduction_aggregate_column_count
+        || refusal.aggregate_column_role_count != candidate.aggregate_column_role_count
+        || refusal.aggregate_table_width != candidate.aggregate_table_width
+    {
+        return Err("VSS candidate capacity model and construction refusal disagree".to_owned());
+    }
+    Ok(refusal)
+}
+
+fn vss_relation_replay_candidate_bound_root_source_trace_domain_size(
+    application_statement_schema_identifier: u16,
+    construction_kind: BoundTreeConstructionKind,
+    relation_trace_domain_size: u64,
+    evaluation_domain_size: u64,
+) -> Result<u64, ProofProfileError> {
+    if application_statement_schema_identifier
+        != ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+        || construction_kind != BoundTreeConstructionKind::CommittedMaterial
+        || evaluation_domain_size
+            != u64::try_from(PHASE_ENCODED_COLUMN_COUNT)
+                .map_err(|_| ProofProfileError::CountOverflow)?
+    {
+        return Err(ProofProfileError::InvalidRootTopology);
+    }
+    let selected_relation_trace_domain_size =
+        selected_committed_material_relation_plan_input()?.relation_trace_domain_size()?;
+    let physical_trace_domain_size = selected_relation_trace_domain_size
+        .checked_div(COMMITTED_MATERIAL_TRACE_PACKING_FACTOR)
+        .filter(|physical_domain_size| {
+            physical_domain_size.checked_mul(COMMITTED_MATERIAL_TRACE_PACKING_FACTOR)
+                == Some(selected_relation_trace_domain_size)
+        })
+        .ok_or(ProofProfileError::InvalidRelationPlan)?;
+    let candidate_trace_packing_factor = relation_trace_domain_size
+        .checked_div(physical_trace_domain_size)
+        .filter(|packing_factor| {
+            packing_factor.is_power_of_two()
+                && *packing_factor <= 64
+                && physical_trace_domain_size.checked_mul(*packing_factor)
+                    == Some(relation_trace_domain_size)
+        })
+        .ok_or(ProofProfileError::InvalidRelationPlan)?;
+    if candidate_trace_packing_factor == 0
+        || physical_trace_domain_size == 0
+        || !physical_trace_domain_size.is_power_of_two()
+        || !evaluation_domain_size.is_multiple_of(physical_trace_domain_size)
+    {
+        return Err(ProofProfileError::InvalidRelationPlan);
+    }
+    Ok(physical_trace_domain_size)
 }
 
 fn derive_selected_vss_base_phase_work_ledger() -> Result<SelectedVssBasePhaseWorkLedger, String> {
@@ -1055,6 +1210,38 @@ fn measure_selected_vss_source_replay() -> Result<PrimitiveMeasurementRecord, St
                 && candidate.logical_polynomials_per_physical_row == 64
         })
         .ok_or_else(|| "modeled VSS relation-replay candidate is absent".to_owned())?;
+    let modeled_candidate_capacity_refusal =
+        derive_vss_relation_replay_candidate_capacity_refusal(modeled_candidate)?;
+    let single_aggregate_candidate = candidate_grid
+        .iter()
+        .copied()
+        .filter(|candidate| {
+            candidate.aggregate_column_role_count <= candidate.aggregate_table_width
+        })
+        .min_by_key(|candidate| candidate.physical_row_count)
+        .ok_or_else(|| "single-aggregate VSS relation-replay candidate is absent".to_owned())?;
+    let single_aggregate_construction =
+        derive_vss_relation_replay_candidate_construction_plan(single_aggregate_candidate)?;
+    let single_aggregate_parameters = single_aggregate_construction.selected_parameters();
+    let single_aggregate_base_phase = single_aggregate_construction
+        .base_phase
+        .as_ref()
+        .ok_or_else(|| "single-aggregate VSS relation-replay base phase is absent".to_owned())?;
+    let single_aggregate_commitment =
+        derive_phase_commitment_geometry_accounting(single_aggregate_base_phase.geometry)?;
+    let single_aggregate_identity_bytes = single_aggregate_construction
+        .canonical_identity_bytes()
+        .map_err(|_| "single-aggregate VSS construction identity does not encode".to_owned())?;
+    let single_aggregate_identity_hash = single_aggregate_construction
+        .canonical_identity_hash()
+        .map_err(|_| "single-aggregate VSS construction identity does not hash".to_owned())?;
+    let single_aggregate_oracle_catalog =
+        single_aggregate_construction
+            .oracle_equation_catalog()
+            .map_err(|_| "single-aggregate VSS oracle catalog does not derive".to_owned())?;
+    let single_aggregate_oracle_catalog_hash = single_aggregate_construction
+        .oracle_equation_catalog_hash()
+        .map_err(|_| "single-aggregate VSS oracle catalog does not hash".to_owned())?;
     if candidate_grid
         .iter()
         .any(|candidate| candidate.physical_row_count < modeled_candidate.physical_row_count)
@@ -1070,6 +1257,69 @@ fn measure_selected_vss_source_replay() -> Result<PrimitiveMeasurementRecord, St
         || current_geometry.column_value_delivery_count != work_ledger.column_value_delivery_count
         || current_geometry.salted_leaf_keccak_permutation_count
             != work_ledger.salted_leaf_keccak_permutation_count
+        || modeled_candidate_capacity_refusal.aggregate_column_role_count
+            <= modeled_candidate_capacity_refusal.aggregate_table_width
+        || single_aggregate_candidate.trace_packing_factor != 1
+        || single_aggregate_candidate.logical_polynomials_per_physical_row != 32
+        || single_aggregate_candidate.physical_row_count != 331
+        || single_aggregate_candidate.aggregate_column_role_count
+            > single_aggregate_candidate.aggregate_table_width
+        || single_aggregate_candidate
+            .physical_row_count
+            .checked_mul(10)
+            .is_none_or(|tenfold_candidate_rows| {
+                current_geometry.physical_row_count >= tenfold_candidate_rows
+            })
+        || single_aggregate_construction.application_statement_schema_identifier()
+            != ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+        || single_aggregate_construction.trace_domain_size
+            != single_aggregate_candidate.relation_trace_domain_size
+        || single_aggregate_construction.evaluation_domain_size
+            != u64::try_from(PHASE_ENCODED_COLUMN_COUNT)
+                .map_err(|_| "single-aggregate VSS evaluation domain exceeds u64".to_owned())?
+        || single_aggregate_construction.opening_degree_bound_exclusive
+            != single_aggregate_candidate.opening_degree_bound_exclusive
+        || single_aggregate_parameters.logical_polynomial_coefficient_count
+            != ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT
+        || u64::try_from(single_aggregate_parameters.logical_polynomials_per_physical_row).ok()
+            != Some(single_aggregate_candidate.logical_polynomials_per_physical_row)
+        || single_aggregate_parameters.physical_row_witness_variable_count != 20
+        || single_aggregate_parameters.table_variable_count != 21
+        || single_aggregate_parameters.polynomial_commitment_variable_count != 24
+        || single_aggregate_parameters.row_code_log_inverse_rate != 3
+        || single_aggregate_commitment.row_count != single_aggregate_candidate.physical_row_count
+        || single_aggregate_commitment.encoded_column_count
+            != u64::try_from(PHASE_ENCODED_COLUMN_COUNT)
+                .map_err(|_| "single-aggregate VSS encoded domain exceeds u64".to_owned())?
+        || single_aggregate_commitment.lane_count != 32
+        || single_aggregate_commitment
+            .lane_dft_count_per_pass
+            .checked_mul(ROOT_AND_OPENING_PASS_COUNT)
+            != Some(single_aggregate_candidate.lane_dft_count)
+        || single_aggregate_commitment
+            .butterfly_count_per_pass
+            .checked_mul(ROOT_AND_OPENING_PASS_COUNT)
+            != Some(single_aggregate_candidate.butterfly_count)
+        || single_aggregate_commitment
+            .coefficient_fold_count_per_pass
+            .checked_mul(ROOT_AND_OPENING_PASS_COUNT)
+            != Some(single_aggregate_candidate.coefficient_fold_count)
+        || single_aggregate_commitment
+            .coset_multiplication_count_per_pass
+            .checked_mul(ROOT_AND_OPENING_PASS_COUNT)
+            != Some(single_aggregate_candidate.coset_multiplication_count)
+        || single_aggregate_commitment
+            .column_value_delivery_count_per_pass
+            .checked_mul(ROOT_AND_OPENING_PASS_COUNT)
+            != Some(single_aggregate_candidate.column_value_delivery_count)
+        || single_aggregate_commitment
+            .leaf_hash_query_count_per_pass
+            .checked_mul(ROOT_AND_OPENING_PASS_COUNT)
+            != Some(single_aggregate_candidate.leaf_hash_query_count)
+        || single_aggregate_commitment
+            .merkle_parent_hash_query_count_per_pass
+            .checked_mul(ROOT_AND_OPENING_PASS_COUNT)
+            != Some(single_aggregate_candidate.merkle_parent_hash_query_count)
     {
         return Err("VSS relation-replay model does not reproduce production geometry".to_owned());
     }
@@ -1078,7 +1328,7 @@ fn measure_selected_vss_source_replay() -> Result<PrimitiveMeasurementRecord, St
     if measurement.logical_root_count() != 112 || nonzero_source_coefficient_count == 0 {
         return Err("selected VSS measurement source geometry is incomplete".to_owned());
     }
-    let (checksum, elapsed_nanoseconds) = measure_elapsed_nanoseconds(|| {
+    let (mut checksum, elapsed_nanoseconds) = measure_elapsed_nanoseconds(|| {
         let mut checksum = 0xcbf2_9ce4_8422_2325_u64;
         for iteration_ordinal in 0..SOURCE_REPLAY_ITERATION_COUNT {
             let coefficients = measurement.replay_once()?;
@@ -1106,6 +1356,19 @@ fn measure_selected_vss_source_replay() -> Result<PrimitiveMeasurementRecord, St
         }
         Ok(checksum)
     })?;
+    for hash in [
+        single_aggregate_identity_hash,
+        single_aggregate_oracle_catalog_hash,
+    ] {
+        for hash_word in hash.chunks_exact(size_of::<u64>()) {
+            checksum = checksum
+                .rotate_left(17)
+                .wrapping_add(u64::from_le_bytes(hash_word.try_into().map_err(|_| {
+                    "single-aggregate VSS identity hash is malformed".to_owned()
+                })?))
+                .wrapping_mul(0x1000_0000_01b3);
+        }
+    }
     black_box(checksum);
     let replay_buffer_byte_length = u64::try_from(measurement.trace_value_count())
         .ok()
@@ -1295,6 +1558,22 @@ fn measure_selected_vss_source_replay() -> Result<PrimitiveMeasurementRecord, St
                 modeled_candidate.row_code_inverse_rate,
             ),
             dimension_u64(
+                "modeledCandidateOpeningPointCount",
+                modeled_candidate_capacity_refusal.opening_point_count,
+            ),
+            dimension_u64(
+                "modeledCandidateBoundReductionAggregateColumnCount",
+                modeled_candidate_capacity_refusal.bound_reduction_aggregate_column_count,
+            ),
+            dimension_u64(
+                "modeledCandidateAggregateColumnRoleCount",
+                modeled_candidate_capacity_refusal.aggregate_column_role_count,
+            ),
+            dimension_u64(
+                "modeledCandidateAggregateTableWidth",
+                modeled_candidate_capacity_refusal.aggregate_table_width,
+            ),
+            dimension_u64(
                 "modeledCandidateCoefficientChunkCountPerSource",
                 modeled_candidate.coefficient_chunk_count_per_source,
             ),
@@ -1361,6 +1640,118 @@ fn measure_selected_vss_source_replay() -> Result<PrimitiveMeasurementRecord, St
             dimension_u64(
                 "modeledCandidateLogicalRowChunkByteLength",
                 modeled_candidate.logical_row_chunk_byte_length,
+            ),
+            dimension_u64(
+                "singleAggregateCandidateTracePackingFactor",
+                single_aggregate_candidate.trace_packing_factor,
+            ),
+            dimension_u64(
+                "singleAggregateCandidatePhysicalRowWidth",
+                single_aggregate_candidate.logical_polynomials_per_physical_row,
+            ),
+            dimension_u64(
+                "singleAggregateCandidateOpeningDegreeBoundExclusive",
+                single_aggregate_candidate.opening_degree_bound_exclusive,
+            ),
+            dimension_u64(
+                "singleAggregateCandidateRowCount",
+                single_aggregate_candidate.physical_row_count,
+            ),
+            dimension_u64(
+                "singleAggregateCandidateLaneDftCount",
+                single_aggregate_candidate.lane_dft_count,
+            ),
+            dimension_u64(
+                "singleAggregateCandidateSaltedLeafKeccakPermutationCount",
+                single_aggregate_candidate.salted_leaf_keccak_permutation_count,
+            ),
+            dimension_u64(
+                "singleAggregateCandidateAggregateColumnRoleCount",
+                single_aggregate_candidate.aggregate_column_role_count,
+            ),
+            dimension_u64(
+                "singleAggregateCandidateAggregateTableWidth",
+                single_aggregate_candidate.aggregate_table_width,
+            ),
+            dimension(
+                "singleAggregateCandidateConstructionIdentityByteLength",
+                single_aggregate_identity_bytes.len(),
+            )?,
+            dimension(
+                "singleAggregateCandidateConstructionIdentityHashByteLength",
+                single_aggregate_identity_hash.len(),
+            )?,
+            dimension(
+                "singleAggregateCandidateOracleEquationCatalogHashByteLength",
+                single_aggregate_oracle_catalog_hash.len(),
+            )?,
+            dimension(
+                "singleAggregateCandidatePhysicalRowWitnessVariableCount",
+                single_aggregate_parameters.physical_row_witness_variable_count,
+            )?,
+            dimension(
+                "singleAggregateCandidateTableVariableCount",
+                single_aggregate_parameters.table_variable_count,
+            )?,
+            dimension(
+                "singleAggregateCandidatePolynomialCommitmentVariableCount",
+                single_aggregate_parameters.polynomial_commitment_variable_count,
+            )?,
+            dimension(
+                "singleAggregateCandidateRowCodeLogInverseRate",
+                single_aggregate_parameters.row_code_log_inverse_rate,
+            )?,
+            dimension(
+                "singleAggregateCandidatePhaseOrderCount",
+                single_aggregate_construction.phase_order.len(),
+            )?,
+            dimension(
+                "singleAggregateCandidateTranscriptOperationCount",
+                single_aggregate_construction.transcript_operations().len(),
+            )?,
+            dimension(
+                "singleAggregateCandidateOpeningBatchCount",
+                single_aggregate_construction.opening_batches().len(),
+            )?,
+            dimension(
+                "singleAggregateCandidateProofSectionCount",
+                single_aggregate_construction.proof_sections().len(),
+            )?,
+            dimension(
+                "singleAggregateCandidateCheckpointCount",
+                single_aggregate_construction.checkpoints().len(),
+            )?,
+            dimension_u64(
+                "singleAggregateCandidateMaximumTranscriptHashQueryCount",
+                single_aggregate_oracle_catalog
+                    .maximum_transcript_hash_query_count()
+                    .map_err(|_| {
+                        "single-aggregate VSS transcript query count does not derive".to_owned()
+                    })?,
+            ),
+            dimension_u64(
+                "singleAggregateCandidateLogicalVerifierMessageCount",
+                single_aggregate_oracle_catalog
+                    .logical_verifier_message_count()
+                    .map_err(|_| {
+                        "single-aggregate VSS verifier message count does not derive".to_owned()
+                    })?,
+            ),
+            dimension_u64(
+                "singleAggregateCandidateBasePhaseWorkingBufferByteLength",
+                single_aggregate_commitment.working_buffer_byte_length,
+            ),
+            dimension_u64(
+                "singleAggregateCandidateBasePhaseHashStateByteLength",
+                single_aggregate_commitment.hash_state_byte_length,
+            ),
+            dimension_u64(
+                "singleAggregateCandidateBasePhaseDigestPlaneByteLength",
+                single_aggregate_commitment.digest_plane_byte_length,
+            ),
+            dimension_u64(
+                "singleAggregateCandidateBasePhaseAlgorithmLiveSetByteLength",
+                single_aggregate_commitment.algorithm_live_set_byte_length,
             ),
         ],
     })
@@ -1999,6 +2390,10 @@ mod tests {
                 maximum_range_constraint_numerator_degree: 202_749,
                 opening_degree_bound_exclusive: 262_144,
                 row_code_inverse_rate: 32,
+                opening_point_count: 12,
+                bound_reduction_aggregate_column_count: 1,
+                aggregate_column_role_count: 13,
+                aggregate_table_width: 32,
                 coefficient_chunk_count_per_source: 3,
                 physical_row_count: 1_128,
                 lane_dft_count: 72_192,
@@ -2038,6 +2433,10 @@ mod tests {
                 maximum_range_constraint_numerator_degree: 792_573,
                 opening_degree_bound_exclusive: 2_097_152,
                 row_code_inverse_rate: 4,
+                opening_point_count: 24,
+                bound_reduction_aggregate_column_count: 1,
+                aggregate_column_role_count: 25,
+                aggregate_table_width: 4,
                 coefficient_chunk_count_per_source: 9,
                 physical_row_count: 108,
                 lane_dft_count: 6_912,
@@ -2121,6 +2520,126 @@ mod tests {
                 .expect("the modeled prover-column count fits usize")
         );
         assert_ne!(compiled_candidate.relation_plan_hash(), selected_plan_hash);
+        let (candidate_artifact, candidate_context) =
+            SelectedVssSourceReplayMeasurement::validated_relation_replay_candidate(
+                modeled.trace_packing_factor,
+                modeled.opening_degree_bound_exclusive,
+            )
+            .expect("the modeled VSS candidate artifact derives");
+        let candidate_variant = candidate_artifact
+            .compiled_plan()
+            .variants()
+            .first()
+            .expect("the modeled VSS candidate has one variant");
+        assert_eq!(
+            ValidatedRelationPlanArtifact::from_owned_compiled_plan(
+                candidate_artifact.compiled_plan().clone(),
+                &candidate_context,
+            ),
+            Err(crate::bgv::proof_suite::ProofProfileError::InvalidSchedule),
+            "the candidate context cannot become a selected profile artifact"
+        );
+        assert_eq!(
+            candidate_variant.ordered_opening_points().len(),
+            usize::try_from(modeled.opening_point_count)
+                .expect("the modeled opening-point count fits usize")
+        );
+        assert!(
+            candidate_variant
+                .ordered_trees()
+                .iter()
+                .any(|tree| matches!(tree, RelationTreeDescriptor::BoundPublic { .. }))
+        );
+        assert_eq!(
+            RowCodeWhirConstructionPlan::for_primitive_measurement_candidate_variant(
+                &candidate_artifact,
+                &candidate_context,
+                candidate_variant.schedule_position(),
+                candidate_variant.top_count(),
+                vss_relation_replay_candidate_bound_root_source_trace_domain_size,
+            ),
+            Err(
+                RowCodeWhirConstructionPlanError::InsufficientAggregateTableWidth {
+                    aggregate_column_role_count: 25,
+                    aggregate_table_width: 4,
+                }
+            ),
+            "the 24 rotations plus bound reduction cannot fit a width-four aggregate table"
+        );
+        assert_eq!(
+            derive_vss_relation_replay_candidate_capacity_refusal(modeled)
+                .expect("the modeled candidate capacity refusal derives"),
+            VssRelationReplayCandidateCapacityRefusal {
+                opening_point_count: 24,
+                bound_reduction_aggregate_column_count: 1,
+                aggregate_column_role_count: 25,
+                aggregate_table_width: 4,
+            }
+        );
+        let single_aggregate_candidate = grid
+            .iter()
+            .copied()
+            .filter(|candidate| {
+                candidate.aggregate_column_role_count <= candidate.aggregate_table_width
+            })
+            .min_by_key(|candidate| candidate.physical_row_count)
+            .expect("the single-aggregate comparator grid is nonempty");
+        assert_eq!(
+            (
+                single_aggregate_candidate.trace_packing_factor,
+                single_aggregate_candidate.logical_polynomials_per_physical_row,
+                single_aggregate_candidate.physical_row_count,
+            ),
+            (1, 32, 331)
+        );
+        assert!(
+            current.physical_row_count < single_aggregate_candidate.physical_row_count * 10,
+            "the fastest compatible single-aggregate comparator is not a tenfold row reduction"
+        );
+        let single_aggregate_construction =
+            derive_vss_relation_replay_candidate_construction_plan(single_aggregate_candidate)
+                .expect("the fastest single-aggregate comparator construction derives");
+        let repeated_single_aggregate_construction =
+            derive_vss_relation_replay_candidate_construction_plan(single_aggregate_candidate)
+                .expect("the fastest single-aggregate comparator construction re-derives");
+        assert_eq!(
+            single_aggregate_construction.canonical_identity_hash(),
+            repeated_single_aggregate_construction.canonical_identity_hash()
+        );
+        assert_eq!(
+            single_aggregate_construction.oracle_equation_catalog_hash(),
+            repeated_single_aggregate_construction.oracle_equation_catalog_hash()
+        );
+        assert_eq!(
+            single_aggregate_construction.aggregate_table_width(),
+            usize::try_from(single_aggregate_candidate.aggregate_table_width)
+                .expect("the single-aggregate table width fits usize")
+        );
+        assert_eq!(
+            RowCodeWhirConstructionPlan::for_selected_variant(
+                &candidate_artifact,
+                candidate_variant.schedule_position(),
+                candidate_variant.top_count(),
+            ),
+            Err(RowCodeWhirConstructionPlanError::InvalidSelectedProfile),
+            "the measurement-only geometry cannot enter the selected construction route"
+        );
+        let mut wrong_context = candidate_context.clone();
+        wrong_context.maximum_fiat_shamir_candidate_draws_per_output = wrong_context
+            .maximum_fiat_shamir_candidate_draws_per_output
+            .checked_add(1)
+            .expect("the hostile context mutation does not overflow");
+        assert_eq!(
+            RowCodeWhirConstructionPlan::for_primitive_measurement_candidate_variant(
+                &candidate_artifact,
+                &wrong_context,
+                candidate_variant.schedule_position(),
+                candidate_variant.top_count(),
+                vss_relation_replay_candidate_bound_root_source_trace_domain_size,
+            ),
+            Err(RowCodeWhirConstructionPlanError::InvalidSelectedProfile),
+            "the measurement route refuses a context not authenticated by the artifact"
+        );
         let first_replay = compiled_candidate
             .replay_once()
             .expect("the modeled VSS source replays");

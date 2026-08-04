@@ -186,6 +186,10 @@ export const primitiveMeasurementCaseCatalog = Object.freeze([
             modeledCandidateMaximumRangeConstraintNumeratorDegree: 792_573,
             modeledCandidateMerkleParentHashQueryCount: 33_554_430,
             modeledCandidateOpeningDegreeBoundExclusive: 2_097_152,
+            modeledCandidateOpeningPointCount: 24,
+            modeledCandidateBoundReductionAggregateColumnCount: 1,
+            modeledCandidateAggregateColumnRoleCount: 25,
+            modeledCandidateAggregateTableWidth: 4,
             modeledCandidatePhysicalRowWidth: 64,
             modeledCandidatePrivateHighHalfValueGenerationCount: 14_495_514_624,
             modeledCandidatePrivateLeafSaltDerivationCount: 33_554_432,
@@ -203,6 +207,32 @@ export const primitiveMeasurementCaseCatalog = Object.freeze([
             modeledCandidateSourceTraceValueGenerationCount: 394_788_864,
             modeledCandidateTracePackingFactor: 16,
             modeledCandidateTransportedValueByteLength: 28_991_029_248,
+            singleAggregateCandidateAggregateColumnRoleCount: 6,
+            singleAggregateCandidateAggregateTableWidth: 8,
+            singleAggregateCandidateBasePhaseAlgorithmLiveSetByteLength: 289_406_976,
+            singleAggregateCandidateBasePhaseDigestPlaneByteLength: 167_772_160,
+            singleAggregateCandidateBasePhaseHashStateByteLength: 104_857_600,
+            singleAggregateCandidateBasePhaseWorkingBufferByteLength: 16_777_216,
+            singleAggregateCandidateCheckpointCount: 11,
+            singleAggregateCandidateConstructionIdentityByteLength: 2_239_344,
+            singleAggregateCandidateConstructionIdentityHashByteLength: 64,
+            singleAggregateCandidateLaneDftCount: 21_184,
+            singleAggregateCandidateLogicalVerifierMessageCount: 12_487,
+            singleAggregateCandidateMaximumTranscriptHashQueryCount: 1_672_271,
+            singleAggregateCandidateOpeningBatchCount: 928,
+            singleAggregateCandidateOpeningDegreeBoundExclusive: 1_048_576,
+            singleAggregateCandidateOracleEquationCatalogHashByteLength: 64,
+            singleAggregateCandidatePhaseOrderCount: 2,
+            singleAggregateCandidatePhysicalRowWidth: 32,
+            singleAggregateCandidatePhysicalRowWitnessVariableCount: 20,
+            singleAggregateCandidatePolynomialCommitmentVariableCount: 24,
+            singleAggregateCandidateProofSectionCount: 121,
+            singleAggregateCandidateRowCodeLogInverseRate: 3,
+            singleAggregateCandidateRowCount: 331,
+            singleAggregateCandidateSaltedLeafKeccakPermutationCount: 704_643_072,
+            singleAggregateCandidateTableVariableCount: 21,
+            singleAggregateCandidateTracePackingFactor: 1,
+            singleAggregateCandidateTranscriptOperationCount: 2_802,
             traceValueCount: 65_536,
         }),
     }),
@@ -578,9 +608,221 @@ export const validatePrimitiveMeasurementRecord = (
         const modeledCandidateLeafHashQueryCount = dimensionsByName.get(
             'modeledCandidateLeafHashQueryCount',
         )!;
+        const modeledCandidateOpeningPointCount = dimensionsByName.get(
+            'modeledCandidateOpeningPointCount',
+        )!;
+        const modeledCandidateBoundReductionAggregateColumnCount =
+            dimensionsByName.get(
+                'modeledCandidateBoundReductionAggregateColumnCount',
+            )!;
+        const modeledCandidateAggregateColumnRoleCount = dimensionsByName.get(
+            'modeledCandidateAggregateColumnRoleCount',
+        )!;
+        const modeledCandidateAggregateTableWidth = dimensionsByName.get(
+            'modeledCandidateAggregateTableWidth',
+        )!;
+        const singleAggregateCandidateTracePackingFactor = dimensionsByName.get(
+            'singleAggregateCandidateTracePackingFactor',
+        )!;
+        const singleAggregateCandidatePhysicalRowWidth = dimensionsByName.get(
+            'singleAggregateCandidatePhysicalRowWidth',
+        )!;
+        const singleAggregateCandidateRowCount = dimensionsByName.get(
+            'singleAggregateCandidateRowCount',
+        )!;
+        const singleAggregateCandidateLaneDftCount = dimensionsByName.get(
+            'singleAggregateCandidateLaneDftCount',
+        )!;
+        const singleAggregateCandidateAggregateColumnRoleCount =
+            dimensionsByName.get(
+                'singleAggregateCandidateAggregateColumnRoleCount',
+            )!;
+        const singleAggregateCandidateAggregateTableWidth =
+            dimensionsByName.get(
+                'singleAggregateCandidateAggregateTableWidth',
+            )!;
+        const singleAggregateCandidateWorkingBufferByteLength =
+            dimensionsByName.get(
+                'singleAggregateCandidateBasePhaseWorkingBufferByteLength',
+            )!;
+        const singleAggregateCandidateHashStateByteLength =
+            dimensionsByName.get(
+                'singleAggregateCandidateBasePhaseHashStateByteLength',
+            )!;
+        const singleAggregateCandidateDigestPlaneByteLength =
+            dimensionsByName.get(
+                'singleAggregateCandidateBasePhaseDigestPlaneByteLength',
+            )!;
+        const singleAggregateCandidateAlgorithmLiveSetByteLength =
+            dimensionsByName.get(
+                'singleAggregateCandidateBasePhaseAlgorithmLiveSetByteLength',
+            )!;
         const phaseLeafPermutationCount = (logicalLeafWidth: number): number =>
             Math.floor((7 + 128 / 8 + logicalLeafWidth) / 17) + 1;
         const messageTraceValueCount = traceValueCount / tracePackingFactor;
+        const deriveVssOpeningPointCount = (
+            candidateTracePackingFactor: number,
+        ): number => {
+            const ringDegree = 32_768;
+            const messageTraceDomainSize = ringDegree / 2;
+            const twiceRingDegree = ringDegree * 2;
+            const paddedParticipantCount = 16;
+            const participantCount = 10;
+            const threshold = 4;
+            const pointStride = twiceRingDegree / paddedParticipantCount;
+            const packedRotations = new Set<number>();
+            for (
+                let packedLaneOrdinal = 0;
+                packedLaneOrdinal < candidateTracePackingFactor;
+                packedLaneOrdinal += 1
+            ) {
+                packedRotations.add(packedLaneOrdinal);
+            }
+            let hasShiftSelector = false;
+            for (
+                let recipientOrdinal = 0;
+                recipientOrdinal < participantCount;
+                recipientOrdinal += 1
+            ) {
+                for (
+                    let coefficientOrdinal = 0;
+                    coefficientOrdinal < threshold;
+                    coefficientOrdinal += 1
+                ) {
+                    const exponent =
+                        recipientOrdinal * coefficientOrdinal * pointStride;
+                    const reducedExponent = exponent % twiceRingDegree;
+                    const sourceRowOffset =
+                        (reducedExponent % ringDegree) % messageTraceDomainSize;
+                    const rotationMagnitude =
+                        sourceRowOffset === 0
+                            ? 0
+                            : messageTraceDomainSize - sourceRowOffset;
+                    const coefficientPackedLaneOrdinal =
+                        coefficientOrdinal % candidateTracePackingFactor;
+                    packedRotations.add(
+                        rotationMagnitude * candidateTracePackingFactor +
+                            coefficientPackedLaneOrdinal,
+                    );
+                    hasShiftSelector ||= rotationMagnitude !== 0;
+                }
+            }
+            if (hasShiftSelector) {
+                packedRotations.add(candidateTracePackingFactor);
+            }
+            return packedRotations.size;
+        };
+        const sharingLimbCount = 8;
+        const rootsPerSharingLimb = 14;
+        const materialColumnsPerGroup = 90;
+        const quotientValueCount = 160;
+        const quotientColumnsPerGroup = 3;
+        const shiftSelectorColumnCount = 3;
+        const singleAggregateCandidateMaterialGroupCount =
+            sharingLimbCount *
+            Math.ceil(
+                rootsPerSharingLimb /
+                    singleAggregateCandidateTracePackingFactor,
+            );
+        const singleAggregateCandidateProverColumnCount =
+            singleAggregateCandidateMaterialGroupCount *
+                materialColumnsPerGroup +
+            Math.ceil(
+                quotientValueCount / singleAggregateCandidateTracePackingFactor,
+            ) *
+                quotientColumnsPerGroup +
+            shiftSelectorColumnCount;
+        const singleAggregateCandidateSourceDegreeBoundExclusive =
+            messageTraceValueCount *
+                singleAggregateCandidateTracePackingFactor +
+            traceMaskDegreeBoundExclusive;
+        const singleAggregateCandidateCoefficientChunkCount = Math.ceil(
+            singleAggregateCandidateSourceDegreeBoundExclusive /
+                logicalPolynomialCoefficientCount,
+        );
+        const independentlyDerivedSingleAggregateCandidateRowCount =
+            Math.ceil(
+                singleAggregateCandidateProverColumnCount /
+                    singleAggregateCandidatePhysicalRowWidth,
+            ) * singleAggregateCandidateCoefficientChunkCount;
+        const singleAggregateCandidateOpeningPointCount =
+            deriveVssOpeningPointCount(
+                singleAggregateCandidateTracePackingFactor,
+            );
+        const independentlyDerivedSingleAggregateCandidates: Array<{
+            aggregateColumnRoleCount: number;
+            aggregateTableWidth: number;
+            physicalRowWidth: number;
+            rowCount: number;
+            tracePackingFactor: number;
+        }> = [];
+        for (const candidateTracePackingFactor of [1, 2, 4, 8, 16, 32, 64]) {
+            const candidateRelationTraceValueCount =
+                messageTraceValueCount * candidateTracePackingFactor;
+            const candidateSourceDegreeBoundExclusive =
+                candidateRelationTraceValueCount +
+                traceMaskDegreeBoundExclusive;
+            const candidateMaximumRangeConstraintNumeratorDegree =
+                (candidateSourceDegreeBoundExclusive - 1) * 3;
+            const candidateMaterialGroupCount =
+                sharingLimbCount *
+                Math.ceil(rootsPerSharingLimb / candidateTracePackingFactor);
+            const candidateProverColumnCount =
+                candidateMaterialGroupCount * materialColumnsPerGroup +
+                Math.ceil(quotientValueCount / candidateTracePackingFactor) *
+                    quotientColumnsPerGroup +
+                shiftSelectorColumnCount;
+            const candidateOpeningPointCount = deriveVssOpeningPointCount(
+                candidateTracePackingFactor,
+            );
+            const candidateAggregateColumnRoleCount =
+                candidateOpeningPointCount + 1;
+            for (const candidatePhysicalRowWidth of [8, 16, 32, 64]) {
+                const candidateOpeningDegreeBoundExclusive =
+                    logicalPolynomialCoefficientCount *
+                    candidatePhysicalRowWidth;
+                const candidateAggregateTableWidth =
+                    fullDomainSize / (candidateOpeningDegreeBoundExclusive * 2);
+                if (
+                    candidateSourceDegreeBoundExclusive >
+                        candidateOpeningDegreeBoundExclusive ||
+                    candidateMaximumRangeConstraintNumeratorDegree >=
+                        candidateOpeningDegreeBoundExclusive ||
+                    !Number.isInteger(candidateAggregateTableWidth) ||
+                    candidateAggregateTableWidth < 4 ||
+                    !Number.isInteger(
+                        Math.log2(candidateAggregateTableWidth),
+                    ) ||
+                    candidateAggregateColumnRoleCount >
+                        candidateAggregateTableWidth
+                ) {
+                    continue;
+                }
+                const candidateCoefficientChunkCount = Math.ceil(
+                    candidateSourceDegreeBoundExclusive /
+                        logicalPolynomialCoefficientCount,
+                );
+                independentlyDerivedSingleAggregateCandidates.push({
+                    aggregateColumnRoleCount: candidateAggregateColumnRoleCount,
+                    aggregateTableWidth: candidateAggregateTableWidth,
+                    physicalRowWidth: candidatePhysicalRowWidth,
+                    rowCount:
+                        Math.ceil(
+                            candidateProverColumnCount /
+                                candidatePhysicalRowWidth,
+                        ) * candidateCoefficientChunkCount,
+                    tracePackingFactor: candidateTracePackingFactor,
+                });
+            }
+        }
+        independentlyDerivedSingleAggregateCandidates.sort(
+            (left, right) =>
+                left.rowCount - right.rowCount ||
+                left.tracePackingFactor - right.tracePackingFactor ||
+                left.physicalRowWidth - right.physicalRowWidth,
+        );
+        const independentlySelectedSingleAggregateCandidate =
+            independentlyDerivedSingleAggregateCandidates[0];
         const independentlyDerivedModeledRelationTraceValueCount =
             messageTraceValueCount * modeledCandidateTracePackingFactor;
         const independentlyDerivedModeledSourceDegreeBoundExclusive =
@@ -729,6 +971,92 @@ export const validatePrimitiveMeasurementRecord = (
                 'modeledCandidateLogicalRowChunkByteLength',
             ) ===
                 modeledCandidateOpeningDegreeBoundExclusive * 8 &&
+            modeledCandidateOpeningPointCount ===
+                deriveVssOpeningPointCount(
+                    modeledCandidateTracePackingFactor,
+                ) &&
+            modeledCandidateBoundReductionAggregateColumnCount === 1 &&
+            modeledCandidateAggregateColumnRoleCount ===
+                modeledCandidateOpeningPointCount +
+                    modeledCandidateBoundReductionAggregateColumnCount &&
+            modeledCandidateAggregateTableWidth ===
+                dimensionsByName.get('modeledCandidateRowCodeInverseRate') &&
+            modeledCandidateAggregateColumnRoleCount >
+                modeledCandidateAggregateTableWidth &&
+            independentlySelectedSingleAggregateCandidate !== undefined &&
+            singleAggregateCandidateTracePackingFactor ===
+                independentlySelectedSingleAggregateCandidate.tracePackingFactor &&
+            singleAggregateCandidatePhysicalRowWidth ===
+                independentlySelectedSingleAggregateCandidate.physicalRowWidth &&
+            singleAggregateCandidateRowCount ===
+                independentlySelectedSingleAggregateCandidate.rowCount &&
+            singleAggregateCandidateRowCount ===
+                independentlyDerivedSingleAggregateCandidateRowCount &&
+            singleAggregateCandidateAggregateColumnRoleCount ===
+                independentlySelectedSingleAggregateCandidate.aggregateColumnRoleCount &&
+            singleAggregateCandidateAggregateColumnRoleCount ===
+                singleAggregateCandidateOpeningPointCount + 1 &&
+            singleAggregateCandidateAggregateTableWidth ===
+                independentlySelectedSingleAggregateCandidate.aggregateTableWidth &&
+            singleAggregateCandidateAggregateColumnRoleCount <=
+                singleAggregateCandidateAggregateTableWidth &&
+            dimensionsByName.get(
+                'singleAggregateCandidateOpeningDegreeBoundExclusive',
+            ) ===
+                logicalPolynomialCoefficientCount *
+                    singleAggregateCandidatePhysicalRowWidth &&
+            singleAggregateCandidateLaneDftCount ===
+                singleAggregateCandidateRowCount *
+                    laneCount *
+                    materializationPassCount &&
+            dimensionsByName.get(
+                'singleAggregateCandidateSaltedLeafKeccakPermutationCount',
+            ) ===
+                fullDomainSize *
+                    materializationPassCount *
+                    phaseLeafPermutationCount(
+                        singleAggregateCandidateRowCount,
+                    ) &&
+            rowCount < singleAggregateCandidateRowCount * 10 &&
+            dimensionsByName.get(
+                'singleAggregateCandidatePhysicalRowWitnessVariableCount',
+            ) ===
+                Math.log2(
+                    logicalPolynomialCoefficientCount *
+                        singleAggregateCandidatePhysicalRowWidth,
+                ) &&
+            dimensionsByName.get(
+                'singleAggregateCandidateTableVariableCount',
+            ) ===
+                dimensionsByName.get(
+                    'singleAggregateCandidatePhysicalRowWitnessVariableCount',
+                )! +
+                    1 &&
+            dimensionsByName.get(
+                'singleAggregateCandidatePolynomialCommitmentVariableCount',
+            ) === Math.log2(fullDomainSize) &&
+            dimensionsByName.get(
+                'singleAggregateCandidateRowCodeLogInverseRate',
+            ) === Math.log2(singleAggregateCandidateAggregateTableWidth) &&
+            dimensionsByName.get(
+                'singleAggregateCandidateConstructionIdentityHashByteLength',
+            ) === 64 &&
+            dimensionsByName.get(
+                'singleAggregateCandidateOracleEquationCatalogHashByteLength',
+            ) === 64 &&
+            dimensionsByName.get(
+                'singleAggregateCandidateConstructionIdentityByteLength',
+            )! > 0 &&
+            singleAggregateCandidateAlgorithmLiveSetByteLength ===
+                singleAggregateCandidateWorkingBufferByteLength +
+                    singleAggregateCandidateHashStateByteLength +
+                    singleAggregateCandidateDigestPlaneByteLength &&
+            dimensionsByName.get(
+                'singleAggregateCandidateMaximumTranscriptHashQueryCount',
+            )! >
+                dimensionsByName.get(
+                    'singleAggregateCandidateLogicalVerifierMessageCount',
+                )! &&
             independentlyDerivedModeledLaneDftCount * 10 <= laneDftCount &&
             modeledPeakLiveByteLength ===
                 retainedInputByteLength + traceValueCount * 8;

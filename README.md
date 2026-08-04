@@ -410,45 +410,40 @@ Works today:
   reproducible WebAssembly binary. No such replacement browser catalog exists
   yet. The feature-scoped selected-output DFT is measured but not consumed by
   production generation.
-  A production-derived fast relation/replay model now first reproduces the
-  current factor-four, width-eight plan and then enumerates power-of-two
-  packing and row-width comparators. Its minimum-row eligible comparator uses
-  factor-16 packing and 64 logical polynomials per physical row: a `262,144`-
-  value relation trace, 753 prover columns, degree bound `264,192`, 108
-  physical rows, and inverse rate four. Under a retained coefficient-group
-  replay model, its two passes require 6,912 lane DFTs,
-  `34,426,847,232` butterflies, `25,367,150,592` coefficient folds,
-  `3,623,878,656` coset multiplications and the same number of value
-  deliveries, `14,495,514,624` private high-half value generations,
-  `268,435,456` salted-leaf Keccak-f permutations, and `394,788,864` source
-  trace-value generations. The previously reported lane, butterfly, delivery,
-  leaf, and source-generation counts are respectively about 10.44, 10.44,
-  10.44, 8.5, and 95.71 times below the current repeated-replay schedule. The
-  real relation compiler, checked interpreter, witness layout, and restartable
-  source provider now accept that factor-16 comparator without changing the
-  selected factor-four profile. One guarded release-native measurement retained
-  64 exact compiled recipe polynomials at their `264,192`-coefficient bound in
-  `1.5941774` seconds. It records `135,266,304` bytes of retained coefficient
-  payload and a `167,365,192`-byte measurement-owned modeled peak, with checksum
-  `81424b3d16d06e7f`. A second guarded release-native measurement assembled the
-  nine exact row chunks, generated each private high half, folded the
-  coefficients, and transformed one lane per chunk in `0.7330316` seconds. Its
-  measurement-owned modeled peak is `198,822,816` bytes and its checksum is
-  `b69db63f6299b533`. Scaling that measured owner across the exact 768 stripes
-  gives `562.9682688` seconds, or about 9.38 minutes, of native row assembly,
-  private-padding, fold, and lane-DFT work. Both guards completed without a
-  memory violation. Neither modeled peak is a complete phase live set, and the
-  second guard's `5,225,570,304`-byte process-tree peak belongs to its cold
-  release compilation rather than the measured phase. The projection excludes
-  retained-group materialization, leaf and parent hashing, salt derivation,
-  authenticated storage, codec, allocator, browser-boundary, and proof work.
-  The comparator still has no proof-size or transcript-parity result, same-build
-  browser measurement, production proof integration, or suite status and is
-  not selected.
-  This is a primitive projection for one VSS base-materialization phase, not a
-  full proof. Chromium is about 13.7 times and Firefox about 71.7 times the
-  20-minute complete-setup planning target before the rest of setup, so relation
-  and replay redesign is required before another full-width run.
+  A production-derived relation/replay model now reproduces the current
+  factor-four, width-eight plan and derives the complete verifier rotation set
+  for every power-of-two packing and row-width comparator. The raw minimum-row
+  comparator remains factor 16, width 64: a `262,144`-value relation trace, 753
+  prover columns, degree bound `264,192`, and 108 physical rows. It is not a
+  valid construction. The compiled relation has 24 distinct opening points and
+  one bound-reduction aggregate role, while that row geometry leaves only four
+  aggregate columns; construction now refuses the exact `25 > 4` capacity
+  mismatch. The fastest comparator accepted by the existing one-aggregate
+  construction is instead factor 1, width 32. It has 331 rows, 21,184 lane
+  DFTs, `105,511,911,424` butterflies, `11,106,516,992` value deliveries, and
+  `704,643,072` salted-leaf Keccak-f permutations. Its six aggregate roles fit
+  eight columns, and its base commitment algorithm accounts for `289,406,976`
+  live bytes before shared runtime, source, encoder, allocator, and bridge
+  allocations. The 331-row result is only about a 3.4-fold reduction, so it is
+  a valid comparator but not an eligible replay redesign.
+
+    The factor-16 compiler, checked interpreter, witness layout, and restartable
+    source provider remain useful lower-bound measurement owners without changing
+    the selected factor-four profile. One guarded release-native measurement
+    retained 64 exact compiled recipe polynomials at their `264,192`-coefficient
+    bound in `1.5941774` seconds, with `135,266,304` bytes of coefficient payload
+    and a `167,365,192`-byte measurement-owned peak. A second guarded measurement
+    processed nine exact row chunks in `0.7330316` seconds with a
+    `198,822,816`-byte measurement-owned peak. Scaling those chunks across 768
+    stripes gives about 9.38 minutes of native row assembly, private padding,
+    folding, and lane-DFT work for the now-refused comparator. Both guards
+    completed without a memory violation; the second guard's
+    `5,225,570,304`-byte process-tree peak is cold compilation, not phase memory.
+    These measurements exclude complete hashing, salts, authenticated storage,
+    codec, allocator, browser-boundary, proof, and lifecycle costs. No comparator
+    has a same-build Chromium and Firefox result, proof-size and transcript-parity
+    result, production-proof integration, or suite status. Relation, aggregate,
+    and replay redesign remains required before another full-width run.
 
 Not yet:
 

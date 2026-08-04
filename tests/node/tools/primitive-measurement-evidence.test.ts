@@ -273,20 +273,27 @@ describe('Primitive measurement evidence', () => {
             ['aggregateWidePadQueryCount', 387],
             ['modeledCandidateRowCount', 107],
             ['modeledCandidateTracePackingFactor', 8],
+            ['modeledCandidateOpeningPointCount', 23],
+            ['modeledCandidateAggregateColumnRoleCount', 24],
+            ['singleAggregateCandidateRowCount', 330],
+            [
+                'singleAggregateCandidateBasePhaseAlgorithmLiveSetByteLength',
+                289_406_975,
+            ],
         ] as const) {
-            const conflatedQuerySchedule = recordFor(5);
-            const queryDimension = (
-                conflatedQuerySchedule.dimensions as Array<{
+            const staleVssGeometry = recordFor(5);
+            const staleDimension = (
+                staleVssGeometry.dimensions as Array<{
                     name: string;
                     value: number;
                 }>
             ).find((dimension) => dimension.name === dimensionName);
-            if (queryDimension === undefined) {
+            if (staleDimension === undefined) {
                 throw new Error(`Test ${dimensionName} dimension is absent.`);
             }
-            queryDimension.value = wrongValue;
+            staleDimension.value = wrongValue;
             expect(() =>
-                validatePrimitiveMeasurementRecord(conflatedQuerySchedule),
+                validatePrimitiveMeasurementRecord(staleVssGeometry),
             ).toThrow(/production geometry/u);
         }
     });

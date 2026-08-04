@@ -508,6 +508,23 @@ impl ValidatedRelationPlanArtifact {
         Self::from_checked_plan(plan, context, application_statement_schema_identifier)
     }
 
+    /// Validates one opt-in primitive-measurement comparator under the exact
+    /// context that compiled it without admitting that context to the selected
+    /// proof profile.
+    ///
+    /// Ordinary artifacts still require `matches_selected_relation_context`.
+    /// This constructor is absent unless the measurement feature is enabled,
+    /// and its artifacts have no proving, verification, or suite-selection
+    /// entry point.
+    #[cfg(feature = "primitive-measurement-evidence")]
+    pub(crate) fn from_primitive_measurement_compiled_plan(
+        plan: CompiledRelationPlan,
+        context: &RelationPlanCheckContext,
+    ) -> Result<Self, ProofProfileError> {
+        let application_statement_schema_identifier = Self::check_plan_for_family(&plan, context)?;
+        Self::from_checked_plan(plan, context, application_statement_schema_identifier)
+    }
+
     #[cfg(test)]
     pub(crate) fn from_checked_fixture_plan(
         plan: &CompiledRelationPlan,

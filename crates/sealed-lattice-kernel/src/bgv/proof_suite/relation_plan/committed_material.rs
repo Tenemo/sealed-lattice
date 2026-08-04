@@ -27,6 +27,7 @@ pub(crate) struct VssRelationPackingCandidateGeometry {
     pub(crate) prover_column_count: u64,
     pub(crate) prover_column_degree_bound_exclusive: u64,
     pub(crate) maximum_range_constraint_numerator_degree: u64,
+    pub(crate) opening_point_count: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -229,6 +230,7 @@ pub(crate) fn derive_vss_relation_packing_candidate_geometry(
 
     let point_stride = input.point_stride()?;
     let mut shift_selector_rotations = BTreeSet::new();
+    let mut used_packed_rotations = (0..trace_packing_factor).collect::<BTreeSet<_>>();
     for recipient_ordinal in 0..u64::from(input.participant_count) {
         for coefficient_ordinal in 0..u64::from(input.threshold) {
             let exponent = recipient_ordinal
@@ -239,6 +241,15 @@ pub(crate) fn derive_vss_relation_packing_candidate_geometry(
                 for branch in
                     monomial_action_branches(input.ring_degree, exponent, physical_half_ordinal)?
                 {
+                    let coefficient_packed_lane_ordinal =
+                        coefficient_ordinal % trace_packing_factor;
+                    let packed_rotation_magnitude = branch
+                        .rotation_magnitude
+                        .checked_mul(trace_packing_factor)
+                        .and_then(|rotation| rotation.checked_add(coefficient_packed_lane_ordinal))
+                        .filter(|rotation| *rotation < relation_trace_domain_size)
+                        .ok_or(RelationPlanError::InvalidConstraint)?;
+                    used_packed_rotations.insert(packed_rotation_magnitude);
                     if branch.use_upper_row_selector.is_some() {
                         shift_selector_rotations.insert(branch.rotation_magnitude);
                     }
@@ -248,6 +259,13 @@ pub(crate) fn derive_vss_relation_packing_candidate_geometry(
     }
     let shift_selector_column_count = u64::try_from(shift_selector_rotations.len())
         .map_err(|_| RelationPlanError::CountOverflow)?;
+    if !shift_selector_rotations.is_empty() {
+        used_packed_rotations.insert(trace_packing_factor);
+    }
+    let opening_point_count = u64::try_from(used_packed_rotations.len())
+        .map_err(|_| RelationPlanError::CountOverflow)?
+        .checked_mul(u64::from(context.out_of_domain_point_count))
+        .ok_or(RelationPlanError::CountOverflow)?;
     let prover_column_count = material_prover_column_count
         .checked_add(quotient_prover_column_count)
         .and_then(|count| count.checked_add(shift_selector_column_count))
@@ -264,6 +282,7 @@ pub(crate) fn derive_vss_relation_packing_candidate_geometry(
         prover_column_count,
         prover_column_degree_bound_exclusive,
         maximum_range_constraint_numerator_degree,
+        opening_point_count,
     })
 }
 
@@ -2276,6 +2295,46 @@ impl SelectedVssSourceReplayMeasurement {
         trace_packing_factor: u64,
         opening_degree_bound_exclusive: u64,
     ) -> Result<Self, String> {
+        let (input, context) = Self::relation_replay_candidate_definition(
+            trace_packing_factor,
+            opening_degree_bound_exclusive,
+        )?;
+        Self::prepare_for_relation(input, context)
+    }
+
+    pub(crate) fn validated_relation_replay_candidate(
+        trace_packing_factor: u64,
+        opening_degree_bound_exclusive: u64,
+    ) -> Result<
+        (
+            crate::bgv::proof_suite::ValidatedRelationPlanArtifact,
+            RelationPlanCheckContext,
+        ),
+        String,
+    > {
+        let (input, context) = Self::relation_replay_candidate_definition(
+            trace_packing_factor,
+            opening_degree_bound_exclusive,
+        )?;
+        let compiled =
+            super::vss_share_linkage::compile_vss_share_linkage_relation_plan(&input, &context)
+                .map_err(|error| {
+                    format!("VSS relation-replay candidate relation is invalid: {error:?}")
+                })?;
+        let artifact = crate::bgv::proof_suite::ValidatedRelationPlanArtifact::from_primitive_measurement_compiled_plan(
+            compiled,
+            &context,
+        )
+        .map_err(|error| {
+            format!("VSS relation-replay candidate artifact is invalid: {error:?}")
+        })?;
+        Ok((artifact, context))
+    }
+
+    fn relation_replay_candidate_definition(
+        trace_packing_factor: u64,
+        opening_degree_bound_exclusive: u64,
+    ) -> Result<(CommittedMaterialRelationPlanInput, RelationPlanCheckContext), String> {
         let mut input = crate::bgv::proof_suite::selected_committed_material_relation_plan_input()
             .map_err(|_| "VSS relation-replay candidate input is invalid".to_owned())?;
         input.trace_packing_factor = trace_packing_factor;
@@ -2302,7 +2361,7 @@ impl SelectedVssSourceReplayMeasurement {
                 )
             })
             .ok_or_else(|| "VSS relation-replay quotient degree overflowed".to_owned())?;
-        Self::prepare_for_relation(input, context)
+        Ok((input, context))
     }
 
     fn prepare_for_relation(
