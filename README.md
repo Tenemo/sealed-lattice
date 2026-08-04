@@ -401,11 +401,12 @@ Works today:
   Chromium, and 38.85 hours in Firefox. A modeled level-two checkpoint candidate
   uses `268,576,000` bytes of scratch and projects about 1.06, 4.58, and 23.91
   hours respectively. It is not an implemented authenticated production
-  checkpoint: unchanged roots and proof bytes are hardcoded model assumptions,
-  and the displayed owner total excludes the separately recorded checkpoint
+  checkpoint and makes no root, transcript, proof-byte, or verifier-equivalence
+  claim. The displayed owner total excludes the separately recorded checkpoint
   storage, codec, and boundary-copy time. The latest projection also combines
   base and supplemental cases measured from two different WebAssembly binaries.
-  Its selected-output DFT is measured but not consumed by production generation.
+  Its feature-scoped selected-output DFT is measured but not consumed by
+  production generation.
   This is a primitive projection for one VSS base-materialization phase, not a
   full proof. Chromium is about 13.7 times and Firefox about 71.7 times the
   20-minute complete-setup planning target before the rest of setup, so relation

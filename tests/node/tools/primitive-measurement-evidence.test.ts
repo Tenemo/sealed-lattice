@@ -511,19 +511,17 @@ describe('Primitive measurement evidence', () => {
             browserEvidence: [chromiumEvidence, firefoxEvidence],
             nativeEvidence,
         });
-        const selectedCheckpoint = projection.checkpointCandidates.find(
-            (candidate) => candidate.selected === true,
+        const modeledCheckpoint = projection.checkpointCandidates.find(
+            (candidate) => candidate.modeled === true,
         );
         expect(projection.currentTwoPass.sourceReplayCount).toBe(576_576);
-        expect(selectedCheckpoint).toMatchObject({
+        expect(modeledCheckpoint).toMatchObject({
             checkpointLevel: 2,
             checkpointNodeCount: 4_194_304,
             checkpointPlaintextByteLength: 268_435_456,
             engineeringReviewRequired: false,
             maximumRecomputedLeafCount: 1_548,
             persistedScratchByteLength: 268_576_000,
-            proofByteLengthDelta: 0,
-            rootAndTranscriptGeometryChanged: false,
             scratchRecordCount: 256,
             selectiveEvaluationBenchmarkRequired: false,
             reusableStrategyMaximumRecomputedLeafCount: 1_572,
@@ -532,7 +530,7 @@ describe('Primitive measurement evidence', () => {
         });
         expect(
             (
-                selectedCheckpoint?.optimizedWork as
+                modeledCheckpoint?.optimizedWork as
                     | { sourceReplayCount: number }
                     | undefined
             )?.sourceReplayCount,

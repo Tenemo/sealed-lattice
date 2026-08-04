@@ -10,7 +10,7 @@ const scratchRecordPlaintextByteLength = 1_048_576;
 const nominalScratchByteLength = 268_435_456;
 const automaticScratchByteLength = 402_653_184;
 const maximumScratchByteLength = 1_073_741_824;
-const selectedCheckpointLevel = 2;
+const modeledCheckpointLevel = 2;
 
 type ProjectionTarget = Readonly<{
     browserEngine?: 'chromium' | 'firefox';
@@ -49,7 +49,7 @@ export type VssBaseMaterializationProjection = Readonly<{
         aggregateWidePadQueryCount: number;
     }>;
     schemaVersion: 1;
-    selectedCheckpointLevel: 2;
+    modeledCheckpointLevel: 2;
     targetProjections: readonly Readonly<Record<string, unknown>>[];
 }>;
 
@@ -413,8 +413,8 @@ export const deriveVssBaseMaterializationProjection = (input: {
                 target.primitiveCases,
                 optimizedWork,
             );
-            const selectedCheckpointOpeningLaneDftNanoseconds =
-                checkpointLevel === selectedCheckpointLevel
+            const modeledCheckpointOpeningLaneDftNanoseconds =
+                checkpointLevel === modeledCheckpointLevel
                     ? scaleElapsedNanoseconds(
                           requireCase(target.primitiveCases, 7)
                               .elapsedNanoseconds,
@@ -423,16 +423,16 @@ export const deriveVssBaseMaterializationProjection = (input: {
                       )
                     : undefined;
             const completeOwnersTotalNanoseconds =
-                selectedCheckpointOpeningLaneDftNanoseconds === undefined
+                modeledCheckpointOpeningLaneDftNanoseconds === undefined
                     ? undefined
                     : fixedOwners.totalNanoseconds +
-                      selectedCheckpointOpeningLaneDftNanoseconds;
+                      modeledCheckpointOpeningLaneDftNanoseconds;
             if (
                 completeOwnersTotalNanoseconds !== undefined &&
                 !Number.isSafeInteger(completeOwnersTotalNanoseconds)
             ) {
                 throw new Error(
-                    'Selected checkpoint complete-owner projection exceeds a safe integer.',
+                    'Modeled checkpoint complete-owner projection exceeds a safe integer.',
                 );
             }
             return Object.freeze({
@@ -440,11 +440,11 @@ export const deriveVssBaseMaterializationProjection = (input: {
                     ? {}
                     : { browserEngine: target.browserEngine }),
                 ...(completeOwnersTotalNanoseconds === undefined ||
-                selectedCheckpointOpeningLaneDftNanoseconds === undefined
+                modeledCheckpointOpeningLaneDftNanoseconds === undefined
                     ? {}
                     : {
                           completeOwnersTotalNanoseconds,
-                          selectedCheckpointOpeningLaneDftNanoseconds,
+                          modeledCheckpointOpeningLaneDftNanoseconds,
                       }),
                 fixedOwners,
                 ...(projectCheckpointStorage(target, scratchRecordCount) ===
@@ -481,12 +481,10 @@ export const deriveVssBaseMaterializationProjection = (input: {
                 maximumRecomputedLeafCount * rowCount,
             optimizedWork,
             persistedScratchByteLength,
-            proofByteLengthDelta: 0,
-            rootAndTranscriptGeometryChanged: false,
             scratchRecordCount,
-            selected: checkpointLevel === selectedCheckpointLevel,
+            modeled: checkpointLevel === modeledCheckpointLevel,
             selectiveEvaluationBenchmarkRequired:
-                checkpointLevel !== selectedCheckpointLevel,
+                checkpointLevel !== modeledCheckpointLevel,
             targetFixedOwnerProjections,
             withinAutomaticScratchBound:
                 persistedScratchByteLength <= automaticScratchByteLength,
@@ -494,16 +492,16 @@ export const deriveVssBaseMaterializationProjection = (input: {
                 persistedScratchByteLength <= maximumScratchByteLength,
         });
     });
-    const selectedCandidate = checkpointCandidates.find(
-        (candidate) => candidate.selected,
+    const modeledCandidate = checkpointCandidates.find(
+        (candidate) => candidate.modeled,
     );
     if (
-        selectedCandidate === undefined ||
-        !selectedCandidate.withinAutomaticScratchBound ||
+        modeledCandidate === undefined ||
+        !modeledCandidate.withinAutomaticScratchBound ||
         checkpointCandidates[0]?.withinAutomaticScratchBound
     ) {
         throw new Error(
-            'Selected VSS checkpoint level is not the smallest automatic-bound candidate.',
+            'Modeled VSS checkpoint level is not the smallest automatic-bound candidate.',
         );
     }
 
@@ -538,7 +536,7 @@ export const deriveVssBaseMaterializationProjection = (input: {
             aggregateWidePadQueryCount,
         }),
         schemaVersion: 1,
-        selectedCheckpointLevel,
+        modeledCheckpointLevel,
         targetProjections: Object.freeze(currentTargetProjections),
     });
 };

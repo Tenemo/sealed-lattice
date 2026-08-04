@@ -209,12 +209,12 @@ export const runVssBaseMaterializationProjection = async (): Promise<void> => {
             runLog.writeEvent({
                 details: {
                     attachmentFilePath,
-                    selectedCheckpointLevel: projection.selectedCheckpointLevel,
+                    modeledCheckpointLevel: projection.modeledCheckpointLevel,
                 },
                 eventType: 'vss-base-materialization-projection-written',
             });
             runLog.writeCombinedOutput(
-                `Selected VSS base-materialization projection completed; evidence: ${attachmentFilePath}\n`,
+                `Modeled VSS base-materialization projection completed; evidence: ${attachmentFilePath}\n`,
             );
         },
     );

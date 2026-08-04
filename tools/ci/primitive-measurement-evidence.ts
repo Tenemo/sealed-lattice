@@ -584,7 +584,7 @@ export const validatePrimitiveMeasurementRecord = (
             modeledPeakLiveByteLength >= 671_088_640
         ) {
             throw new Error(
-                'Primitive measurement selected checkpoint DFT identities are inconsistent.',
+                'Primitive measurement modeled checkpoint DFT identities are inconsistent.',
             );
         }
     }
@@ -674,12 +674,12 @@ export const requireCompletePrimitiveMeasurementCatalog = (
     }
     const saltedLeafRecord = records[1];
     const selectedVssRecord = records[4];
-    const selectedCheckpointDftRecord = records[6];
+    const modeledCheckpointDftRecord = records[6];
     const productionWeightedSourceReplayRecord = records[7];
     if (
         saltedLeafRecord === undefined ||
         selectedVssRecord === undefined ||
-        selectedCheckpointDftRecord === undefined ||
+        modeledCheckpointDftRecord === undefined ||
         productionWeightedSourceReplayRecord === undefined
     ) {
         throw new Error('Primitive measurement catalog work ledger is absent.');
@@ -696,8 +696,8 @@ export const requireCompletePrimitiveMeasurementCatalog = (
             dimension.value,
         ]),
     );
-    const selectedCheckpointDftDimensions = new Map(
-        selectedCheckpointDftRecord.dimensions.map((dimension) => [
+    const modeledCheckpointDftDimensions = new Map(
+        modeledCheckpointDftRecord.dimensions.map((dimension) => [
             dimension.name,
             dimension.value,
         ]),
@@ -731,14 +731,14 @@ export const requireCompletePrimitiveMeasurementCatalog = (
         );
     }
     if (
-        selectedCheckpointDftDimensions.get('laneCount') !==
+        modeledCheckpointDftDimensions.get('laneCount') !==
             selectedVssDimensions.get('basePhaseLaneCount') ||
-        selectedCheckpointDftDimensions.get('maximumRecomputedLeafCount') !==
+        modeledCheckpointDftDimensions.get('maximumRecomputedLeafCount') !==
             selectedVssDimensions.get('basePhaseOpeningQueryCount')! *
-                selectedCheckpointDftDimensions.get('checkpointLeafCount')!
+                modeledCheckpointDftDimensions.get('checkpointLeafCount')!
     ) {
         throw new Error(
-            'Primitive measurement selected checkpoint projection is inconsistent.',
+            'Primitive measurement modeled checkpoint projection is inconsistent.',
         );
     }
     if (
