@@ -12,15 +12,24 @@ use serde::Serialize;
 use sha3::Shake256;
 use zeroize::Zeroizing;
 
+use super::super::relation_plan::{
+    COMMITTED_MATERIAL_TRACE_PACKING_FACTOR, derive_vss_relation_packing_candidate_geometry,
+};
 use super::{
     bounded_dft::{
         BoundedBaseCosetLaneDft, BoundedSelectedBaseCosetLaneDft, SelectedBaseCosetLaneDftSchedule,
     },
-    column_commitment::{ColumnDigest, hash_merkle_parent, hash_opened_column_with_salt},
+    column_commitment::{
+        ColumnDigest, hash_merkle_parent, hash_opened_column_with_salt,
+        salted_phase_column_leaf_keccak_permutation_count,
+    },
     commitment_liveness::{
         ROOT_AND_OPENING_PASS_COUNT, derive_phase_commitment_geometry_accounting,
     },
-    construction_plan::RowCodeWhirConstructionPlan,
+    construction_plan::{
+        ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT,
+        ROW_CODE_WHIR_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW, RowCodeWhirConstructionPlan,
+    },
     hiding_whir::selected_hiding_whir_config,
     private_leaf_salt::{
         PRIVATE_LEAF_SALT_BYTE_LENGTH, derive_private_leaf_salt,
@@ -45,7 +54,6 @@ const PHASE_ENCODED_COLUMN_COUNT: usize = 1 << 24;
 const PHASE_LANE_COLUMN_COUNT: usize = 1 << 19;
 const PHASE_LOGICAL_LEAF_WIDTH: usize = 1_128;
 const DFT_BUTTERFLY_COUNT: u64 = 4_980_736;
-const SALTED_LEAF_PERMUTATION_COUNT: u64 = 68;
 const SALTED_LEAF_ITERATION_COUNT: usize = 512;
 const PRIVATE_SALT_ITERATION_COUNT: usize = 4_096;
 const FIVE_LEVEL_CARRY_ITERATION_COUNT: usize = 32_768;
@@ -400,6 +408,8 @@ fn measurement_leaf_values() -> Result<Vec<Goldilocks>, String> {
 
 fn measure_salted_phase_leaf() -> Result<PrimitiveMeasurementRecord, String> {
     let values = measurement_leaf_values()?;
+    let per_leaf_keccak_permutation_count =
+        salted_phase_column_leaf_keccak_permutation_count(PHASE_LOGICAL_LEAF_WIDTH)?;
     let salt = derive_private_leaf_salt(
         &[0x63_u8; 64],
         b"relation-phase/base",
@@ -448,7 +458,13 @@ fn measure_salted_phase_leaf() -> Result<PrimitiveMeasurementRecord, String> {
             dimension("saltByteLength", PRIVATE_LEAF_SALT_BYTE_LENGTH)?,
             dimension(
                 "keccakPermutationCount",
-                SALTED_LEAF_ITERATION_COUNT * SALTED_LEAF_PERMUTATION_COUNT as usize,
+                SALTED_LEAF_ITERATION_COUNT
+                    .checked_mul(usize::try_from(per_leaf_keccak_permutation_count).map_err(
+                        |_| "salted phase-leaf permutation count exceeds usize".to_owned(),
+                    )?)
+                    .ok_or_else(|| {
+                        "salted phase-leaf measured permutation count overflowed".to_owned()
+                    })?,
             )?,
         ],
     })
@@ -528,6 +544,7 @@ fn measure_five_level_digest_carry() -> Result<PrimitiveMeasurementRecord, Strin
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct SelectedVssBasePhaseWorkLedger {
     materialization_pass_count: u64,
+    logical_polynomials_per_physical_row: u64,
     row_count: u64,
     lane_count: u64,
     opening_query_count: u64,
@@ -550,6 +567,201 @@ struct SelectedVssBasePhaseWorkLedger {
     salted_leaf_keccak_permutation_count: u64,
     merkle_parent_hash_query_count: u64,
     private_leaf_salt_derivation_count: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct VssRelationReplayCandidateLedger {
+    trace_packing_factor: u64,
+    logical_polynomials_per_physical_row: u64,
+    relation_trace_domain_size: u64,
+    material_group_count: u64,
+    material_prover_column_count: u64,
+    quotient_group_count: u64,
+    quotient_prover_column_count: u64,
+    shift_selector_column_count: u64,
+    prover_column_count: u64,
+    prover_column_degree_bound_exclusive: u64,
+    maximum_range_constraint_numerator_degree: u64,
+    opening_degree_bound_exclusive: u64,
+    row_code_inverse_rate: u64,
+    coefficient_chunk_count_per_source: u64,
+    physical_row_count: u64,
+    lane_dft_count: u64,
+    butterfly_count: u64,
+    column_value_delivery_count: u64,
+    transported_value_byte_length: u64,
+    leaf_hash_query_count: u64,
+    salted_leaf_keccak_permutation_count: u64,
+    merkle_parent_hash_query_count: u64,
+    private_leaf_salt_derivation_count: u64,
+    retained_source_materialization_count: u64,
+    source_trace_value_generation_count: u64,
+    retained_coefficient_group_byte_length: u64,
+    logical_row_chunk_byte_length: u64,
+}
+
+fn derive_vss_relation_replay_candidate_ledger(
+    trace_packing_factor: u64,
+    logical_polynomials_per_physical_row: u64,
+) -> Result<Option<VssRelationReplayCandidateLedger>, String> {
+    if logical_polynomials_per_physical_row == 0
+        || !logical_polynomials_per_physical_row.is_power_of_two()
+        || logical_polynomials_per_physical_row
+            > u64::try_from(ROW_CODE_WHIR_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW)
+                .map_err(|_| "VSS candidate maximum row width exceeds u64".to_owned())?
+    {
+        return Err("VSS candidate physical row width is unsupported".to_owned());
+    }
+    let schema_identifier =
+        ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER;
+    let relation_context = selected_relation_plan_check_context(schema_identifier)
+        .ok_or_else(|| "VSS candidate relation context is absent".to_owned())?;
+    let relation_input = selected_committed_material_relation_plan_input()
+        .map_err(|_| "VSS candidate relation input is invalid".to_owned())?;
+    let relation = derive_vss_relation_packing_candidate_geometry(
+        &relation_input,
+        &relation_context,
+        trace_packing_factor,
+    )
+    .map_err(|_| "VSS candidate relation packing does not derive".to_owned())?;
+    let logical_polynomial_coefficient_count =
+        u64::try_from(ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT)
+            .map_err(|_| "VSS candidate coefficient count exceeds u64".to_owned())?;
+    let opening_degree_bound_exclusive = logical_polynomial_coefficient_count
+        .checked_mul(logical_polynomials_per_physical_row)
+        .ok_or_else(|| "VSS candidate opening degree bound overflowed".to_owned())?;
+    if relation.prover_column_degree_bound_exclusive > opening_degree_bound_exclusive
+        || relation.maximum_range_constraint_numerator_degree >= opening_degree_bound_exclusive
+        || relation_input.material_column_degree_bound_exclusive > opening_degree_bound_exclusive
+    {
+        return Ok(None);
+    }
+    let prefix_stacking_factor = 2_u64;
+    let row_encoding_denominator = opening_degree_bound_exclusive
+        .checked_mul(prefix_stacking_factor)
+        .ok_or_else(|| "VSS candidate row-encoding denominator overflowed".to_owned())?;
+    let row_code_inverse_rate = relation_input
+        .evaluation_domain_size
+        .checked_div(row_encoding_denominator)
+        .filter(|inverse_rate| {
+            *inverse_rate >= 4
+                && inverse_rate.is_power_of_two()
+                && row_encoding_denominator.checked_mul(*inverse_rate)
+                    == Some(relation_input.evaluation_domain_size)
+        })
+        .ok_or_else(|| "VSS candidate row-code inverse rate is unsupported".to_owned())?;
+    let coefficient_chunk_count_per_source = relation
+        .prover_column_degree_bound_exclusive
+        .div_ceil(logical_polynomial_coefficient_count);
+    let physical_column_group_count = relation
+        .prover_column_count
+        .div_ceil(logical_polynomials_per_physical_row);
+    let physical_row_count = physical_column_group_count
+        .checked_mul(coefficient_chunk_count_per_source)
+        .ok_or_else(|| "VSS candidate physical row count overflowed".to_owned())?;
+    let lane_count = u64::try_from(PHASE_ENCODED_COLUMN_COUNT / PHASE_LANE_COLUMN_COUNT)
+        .map_err(|_| "VSS candidate lane count exceeds u64".to_owned())?;
+    let materialization_pass_count = ROOT_AND_OPENING_PASS_COUNT;
+    let lane_dft_count = physical_row_count
+        .checked_mul(lane_count)
+        .and_then(|count| count.checked_mul(materialization_pass_count))
+        .ok_or_else(|| "VSS candidate lane DFT count overflowed".to_owned())?;
+    let butterfly_count = lane_dft_count
+        .checked_mul(DFT_BUTTERFLY_COUNT)
+        .ok_or_else(|| "VSS candidate butterfly count overflowed".to_owned())?;
+    let evaluation_domain_size = u64::try_from(PHASE_ENCODED_COLUMN_COUNT)
+        .map_err(|_| "VSS candidate evaluation domain exceeds u64".to_owned())?;
+    if evaluation_domain_size != relation_input.evaluation_domain_size {
+        return Err("VSS candidate evaluation domains disagree".to_owned());
+    }
+    let column_value_delivery_count = physical_row_count
+        .checked_mul(evaluation_domain_size)
+        .and_then(|count| count.checked_mul(materialization_pass_count))
+        .ok_or_else(|| "VSS candidate column-value count overflowed".to_owned())?;
+    let transported_value_byte_length = column_value_delivery_count
+        .checked_mul(size_of::<ProofBaseFieldElement>() as u64)
+        .ok_or_else(|| "VSS candidate transported-value size overflowed".to_owned())?;
+    let leaf_hash_query_count = evaluation_domain_size
+        .checked_mul(materialization_pass_count)
+        .ok_or_else(|| "VSS candidate leaf-hash count overflowed".to_owned())?;
+    let per_leaf_keccak_permutation_count = salted_phase_column_leaf_keccak_permutation_count(
+        usize::try_from(physical_row_count)
+            .map_err(|_| "VSS candidate row count exceeds usize".to_owned())?,
+    )?;
+    let salted_leaf_keccak_permutation_count = leaf_hash_query_count
+        .checked_mul(per_leaf_keccak_permutation_count)
+        .ok_or_else(|| "VSS candidate leaf permutation count overflowed".to_owned())?;
+    let merkle_parent_hash_query_count = evaluation_domain_size
+        .checked_sub(1)
+        .and_then(|count| count.checked_mul(materialization_pass_count))
+        .ok_or_else(|| "VSS candidate Merkle-parent count overflowed".to_owned())?;
+    let retained_source_materialization_count = relation
+        .prover_column_count
+        .checked_mul(materialization_pass_count)
+        .ok_or_else(|| "VSS candidate source-materialization count overflowed".to_owned())?;
+    let source_trace_value_generation_count = retained_source_materialization_count
+        .checked_mul(relation.relation_trace_domain_size)
+        .ok_or_else(|| "VSS candidate source-value count overflowed".to_owned())?;
+    let retained_group_width = relation
+        .prover_column_count
+        .min(logical_polynomials_per_physical_row);
+    let retained_coefficient_group_byte_length = retained_group_width
+        .checked_mul(relation.prover_column_degree_bound_exclusive)
+        .and_then(|count| count.checked_mul(size_of::<ProofBaseFieldElement>() as u64))
+        .ok_or_else(|| "VSS candidate retained coefficient group overflowed".to_owned())?;
+    let logical_row_chunk_byte_length = opening_degree_bound_exclusive
+        .checked_mul(size_of::<ProofBaseFieldElement>() as u64)
+        .ok_or_else(|| "VSS candidate logical-row chunk size overflowed".to_owned())?;
+
+    Ok(Some(VssRelationReplayCandidateLedger {
+        trace_packing_factor: relation.trace_packing_factor,
+        logical_polynomials_per_physical_row,
+        relation_trace_domain_size: relation.relation_trace_domain_size,
+        material_group_count: relation.material_group_count,
+        material_prover_column_count: relation.material_prover_column_count,
+        quotient_group_count: relation.quotient_group_count,
+        quotient_prover_column_count: relation.quotient_prover_column_count,
+        shift_selector_column_count: relation.shift_selector_column_count,
+        prover_column_count: relation.prover_column_count,
+        prover_column_degree_bound_exclusive: relation.prover_column_degree_bound_exclusive,
+        maximum_range_constraint_numerator_degree: relation
+            .maximum_range_constraint_numerator_degree,
+        opening_degree_bound_exclusive,
+        row_code_inverse_rate,
+        coefficient_chunk_count_per_source,
+        physical_row_count,
+        lane_dft_count,
+        butterfly_count,
+        column_value_delivery_count,
+        transported_value_byte_length,
+        leaf_hash_query_count,
+        salted_leaf_keccak_permutation_count,
+        merkle_parent_hash_query_count,
+        private_leaf_salt_derivation_count: leaf_hash_query_count,
+        retained_source_materialization_count,
+        source_trace_value_generation_count,
+        retained_coefficient_group_byte_length,
+        logical_row_chunk_byte_length,
+    }))
+}
+
+fn derive_vss_relation_replay_candidate_grid()
+-> Result<Vec<VssRelationReplayCandidateLedger>, String> {
+    let mut candidates = Vec::new();
+    for trace_packing_factor in [1_u64, 2, 4, 8, 16, 32, 64] {
+        for logical_polynomials_per_physical_row in [8_u64, 16, 32, 64] {
+            if let Some(candidate) = derive_vss_relation_replay_candidate_ledger(
+                trace_packing_factor,
+                logical_polynomials_per_physical_row,
+            )? {
+                candidates.push(candidate);
+            }
+        }
+    }
+    if candidates.is_empty() {
+        return Err("VSS relation-replay candidate grid is empty".to_owned());
+    }
+    Ok(candidates)
 }
 
 fn derive_selected_vss_base_phase_work_ledger() -> Result<SelectedVssBasePhaseWorkLedger, String> {
@@ -742,6 +954,12 @@ fn derive_selected_vss_base_phase_work_ledger() -> Result<SelectedVssBasePhaseWo
 
     Ok(SelectedVssBasePhaseWorkLedger {
         materialization_pass_count: ROOT_AND_OPENING_PASS_COUNT,
+        logical_polynomials_per_physical_row: u64::try_from(
+            construction_plan
+                .parameters
+                .logical_polynomials_per_physical_row,
+        )
+        .map_err(|_| "selected VSS physical row width exceeds u64".to_owned())?,
         row_count: commitment.row_count,
         lane_count: commitment.lane_count,
         opening_query_count: u64::try_from(construction_plan.parameters.outer_query_count)
@@ -769,7 +987,10 @@ fn derive_selected_vss_base_phase_work_ledger() -> Result<SelectedVssBasePhaseWo
             .ok_or_else(|| "selected VSS transported-value size overflowed".to_owned())?,
         leaf_hash_query_count,
         salted_leaf_keccak_permutation_count: leaf_hash_query_count
-            .checked_mul(SALTED_LEAF_PERMUTATION_COUNT)
+            .checked_mul(salted_phase_column_leaf_keccak_permutation_count(
+                usize::try_from(commitment.row_count)
+                    .map_err(|_| "selected VSS row count exceeds usize".to_owned())?,
+            )?)
             .ok_or_else(|| "selected VSS leaf permutation count overflowed".to_owned())?,
         merkle_parent_hash_query_count: scale_per_pass(
             commitment.merkle_parent_hash_query_count_per_pass,
@@ -782,6 +1003,42 @@ fn derive_selected_vss_base_phase_work_ledger() -> Result<SelectedVssBasePhaseWo
 fn measure_selected_vss_source_replay() -> Result<PrimitiveMeasurementRecord, String> {
     let measurement = SelectedVssSourceReplayMeasurement::prepare()?;
     let work_ledger = derive_selected_vss_base_phase_work_ledger()?;
+    let candidate_grid = derive_vss_relation_replay_candidate_grid()?;
+    let current_geometry = candidate_grid
+        .iter()
+        .copied()
+        .find(|candidate| {
+            candidate.trace_packing_factor == COMMITTED_MATERIAL_TRACE_PACKING_FACTOR
+                && candidate.logical_polynomials_per_physical_row
+                    == work_ledger.logical_polynomials_per_physical_row
+        })
+        .ok_or_else(|| "current VSS relation-replay geometry is absent".to_owned())?;
+    let modeled_candidate = candidate_grid
+        .iter()
+        .copied()
+        .find(|candidate| {
+            candidate.trace_packing_factor == 16
+                && candidate.logical_polynomials_per_physical_row == 64
+        })
+        .ok_or_else(|| "modeled VSS relation-replay candidate is absent".to_owned())?;
+    if candidate_grid
+        .iter()
+        .any(|candidate| candidate.physical_row_count < modeled_candidate.physical_row_count)
+        || current_geometry.relation_trace_domain_size
+            != u64::try_from(measurement.trace_value_count())
+                .map_err(|_| "current VSS trace size exceeds u64".to_owned())?
+        || current_geometry.prover_column_count != work_ledger.direct_source_column_count_per_lane
+        || current_geometry.coefficient_chunk_count_per_source
+            != work_ledger.coefficient_chunk_count_per_source
+        || current_geometry.physical_row_count != work_ledger.row_count
+        || current_geometry.lane_dft_count != work_ledger.lane_dft_count
+        || current_geometry.butterfly_count != work_ledger.butterfly_count
+        || current_geometry.column_value_delivery_count != work_ledger.column_value_delivery_count
+        || current_geometry.salted_leaf_keccak_permutation_count
+            != work_ledger.salted_leaf_keccak_permutation_count
+    {
+        return Err("VSS relation-replay model does not reproduce production geometry".to_owned());
+    }
     let retained_input_byte_length = measurement.retained_input_byte_length()?;
     let nonzero_source_coefficient_count = measurement.nonzero_source_coefficient_count()?;
     if measurement.logical_root_count() != 112 || nonzero_source_coefficient_count == 0 {
@@ -846,6 +1103,34 @@ fn measure_selected_vss_source_replay() -> Result<PrimitiveMeasurementRecord, St
             dimension_u64(
                 "basePhaseMaterializationPassCount",
                 work_ledger.materialization_pass_count,
+            ),
+            dimension_u64(
+                "basePhaseTracePackingFactor",
+                current_geometry.trace_packing_factor,
+            ),
+            dimension_u64(
+                "basePhasePhysicalRowWidth",
+                work_ledger.logical_polynomials_per_physical_row,
+            ),
+            dimension_u64(
+                "basePhaseLogicalPolynomialCoefficientCount",
+                u64::try_from(ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT)
+                    .map_err(|_| "selected VSS coefficient count exceeds u64".to_owned())?,
+            ),
+            dimension_u64(
+                "basePhaseTraceMaskDegreeBoundExclusive",
+                current_geometry
+                    .prover_column_degree_bound_exclusive
+                    .checked_sub(current_geometry.relation_trace_domain_size)
+                    .ok_or_else(|| "selected VSS trace-mask degree underflowed".to_owned())?,
+            ),
+            dimension_u64(
+                "basePhaseProverColumnDegreeBoundExclusive",
+                current_geometry.prover_column_degree_bound_exclusive,
+            ),
+            dimension_u64(
+                "basePhaseMaximumRangeConstraintNumeratorDegree",
+                current_geometry.maximum_range_constraint_numerator_degree,
             ),
             dimension_u64("basePhaseRowCount", work_ledger.row_count),
             dimension_u64("basePhaseLaneCount", work_ledger.lane_count),
@@ -922,6 +1207,114 @@ fn measure_selected_vss_source_replay() -> Result<PrimitiveMeasurementRecord, St
             dimension_u64(
                 "basePhasePrivateLeafSaltDerivationCount",
                 work_ledger.private_leaf_salt_derivation_count,
+            ),
+            dimension_u64(
+                "modeledCandidateTracePackingFactor",
+                modeled_candidate.trace_packing_factor,
+            ),
+            dimension_u64(
+                "modeledCandidatePhysicalRowWidth",
+                modeled_candidate.logical_polynomials_per_physical_row,
+            ),
+            dimension_u64(
+                "modeledCandidateRelationTraceValueCount",
+                modeled_candidate.relation_trace_domain_size,
+            ),
+            dimension_u64(
+                "modeledCandidateMaterialGroupCount",
+                modeled_candidate.material_group_count,
+            ),
+            dimension_u64(
+                "modeledCandidateMaterialProverColumnCount",
+                modeled_candidate.material_prover_column_count,
+            ),
+            dimension_u64(
+                "modeledCandidateQuotientGroupCount",
+                modeled_candidate.quotient_group_count,
+            ),
+            dimension_u64(
+                "modeledCandidateQuotientProverColumnCount",
+                modeled_candidate.quotient_prover_column_count,
+            ),
+            dimension_u64(
+                "modeledCandidateShiftSelectorColumnCount",
+                modeled_candidate.shift_selector_column_count,
+            ),
+            dimension_u64(
+                "modeledCandidateProverColumnCount",
+                modeled_candidate.prover_column_count,
+            ),
+            dimension_u64(
+                "modeledCandidateProverColumnDegreeBoundExclusive",
+                modeled_candidate.prover_column_degree_bound_exclusive,
+            ),
+            dimension_u64(
+                "modeledCandidateMaximumRangeConstraintNumeratorDegree",
+                modeled_candidate.maximum_range_constraint_numerator_degree,
+            ),
+            dimension_u64(
+                "modeledCandidateOpeningDegreeBoundExclusive",
+                modeled_candidate.opening_degree_bound_exclusive,
+            ),
+            dimension_u64(
+                "modeledCandidateRowCodeInverseRate",
+                modeled_candidate.row_code_inverse_rate,
+            ),
+            dimension_u64(
+                "modeledCandidateCoefficientChunkCountPerSource",
+                modeled_candidate.coefficient_chunk_count_per_source,
+            ),
+            dimension_u64(
+                "modeledCandidateRowCount",
+                modeled_candidate.physical_row_count,
+            ),
+            dimension_u64(
+                "modeledCandidateLaneDftCount",
+                modeled_candidate.lane_dft_count,
+            ),
+            dimension_u64(
+                "modeledCandidateButterflyCount",
+                modeled_candidate.butterfly_count,
+            ),
+            dimension_u64(
+                "modeledCandidateColumnValueDeliveryCount",
+                modeled_candidate.column_value_delivery_count,
+            ),
+            dimension_u64(
+                "modeledCandidateTransportedValueByteLength",
+                modeled_candidate.transported_value_byte_length,
+            ),
+            dimension_u64(
+                "modeledCandidateLeafHashQueryCount",
+                modeled_candidate.leaf_hash_query_count,
+            ),
+            dimension_u64(
+                "modeledCandidateSaltedLeafKeccakPermutationCount",
+                modeled_candidate.salted_leaf_keccak_permutation_count,
+            ),
+            dimension_u64(
+                "modeledCandidateMerkleParentHashQueryCount",
+                modeled_candidate.merkle_parent_hash_query_count,
+            ),
+            dimension_u64(
+                "modeledCandidatePrivateLeafSaltDerivationCount",
+                modeled_candidate.private_leaf_salt_derivation_count,
+            ),
+            dimension_u64(
+                "modeledCandidateRetainedSourceMaterializationCount",
+                modeled_candidate.retained_source_materialization_count,
+            ),
+            dimension_u64(
+                "modeledCandidateSourceTraceValueGenerationCount",
+                modeled_candidate.source_trace_value_generation_count,
+            ),
+            dimension_u64(
+                "modeledCandidateRetainedCoefficientGroupByteLength",
+                modeled_candidate.retained_coefficient_group_byte_length,
+            ),
+            dimension_u64(
+                "modeledCandidateLogicalRowChunkByteLength",
+                modeled_candidate.logical_row_chunk_byte_length,
             ),
         ],
     })
@@ -1120,6 +1513,120 @@ mod tests {
         assert_eq!(
             run_primitive_measurement(u32::MAX),
             Err("primitive measurement case is unsupported".to_owned())
+        );
+    }
+
+    #[test]
+    fn vss_relation_replay_candidate_model_reproduces_production_and_ranks_the_grid() {
+        let current = derive_vss_relation_replay_candidate_ledger(4, 8)
+            .expect("the production VSS geometry derives")
+            .expect("the production VSS geometry fits its opening bound");
+        assert_eq!(
+            current,
+            VssRelationReplayCandidateLedger {
+                trace_packing_factor: 4,
+                logical_polynomials_per_physical_row: 8,
+                relation_trace_domain_size: 65_536,
+                material_group_count: 32,
+                material_prover_column_count: 2_880,
+                quotient_group_count: 40,
+                quotient_prover_column_count: 120,
+                shift_selector_column_count: 3,
+                prover_column_count: 3_003,
+                prover_column_degree_bound_exclusive: 67_584,
+                maximum_range_constraint_numerator_degree: 202_749,
+                opening_degree_bound_exclusive: 262_144,
+                row_code_inverse_rate: 32,
+                coefficient_chunk_count_per_source: 3,
+                physical_row_count: 1_128,
+                lane_dft_count: 72_192,
+                butterfly_count: 359_569_293_312,
+                column_value_delivery_count: 37_849_399_296,
+                transported_value_byte_length: 302_795_194_368,
+                leaf_hash_query_count: 33_554_432,
+                salted_leaf_keccak_permutation_count: 2_281_701_376,
+                merkle_parent_hash_query_count: 33_554_430,
+                private_leaf_salt_derivation_count: 33_554_432,
+                retained_source_materialization_count: 6_006,
+                source_trace_value_generation_count: 393_609_216,
+                retained_coefficient_group_byte_length: 4_325_376,
+                logical_row_chunk_byte_length: 2_097_152,
+            }
+        );
+
+        let modeled = derive_vss_relation_replay_candidate_ledger(16, 64)
+            .expect("the modeled VSS geometry derives")
+            .expect("the modeled VSS geometry fits its opening bound");
+        assert_eq!(
+            modeled,
+            VssRelationReplayCandidateLedger {
+                trace_packing_factor: 16,
+                logical_polynomials_per_physical_row: 64,
+                relation_trace_domain_size: 262_144,
+                material_group_count: 8,
+                material_prover_column_count: 720,
+                quotient_group_count: 10,
+                quotient_prover_column_count: 30,
+                shift_selector_column_count: 3,
+                prover_column_count: 753,
+                prover_column_degree_bound_exclusive: 264_192,
+                maximum_range_constraint_numerator_degree: 792_573,
+                opening_degree_bound_exclusive: 2_097_152,
+                row_code_inverse_rate: 4,
+                coefficient_chunk_count_per_source: 9,
+                physical_row_count: 108,
+                lane_dft_count: 6_912,
+                butterfly_count: 34_426_847_232,
+                column_value_delivery_count: 3_623_878_656,
+                transported_value_byte_length: 28_991_029_248,
+                leaf_hash_query_count: 33_554_432,
+                salted_leaf_keccak_permutation_count: 268_435_456,
+                merkle_parent_hash_query_count: 33_554_430,
+                private_leaf_salt_derivation_count: 33_554_432,
+                retained_source_materialization_count: 1_506,
+                source_trace_value_generation_count: 394_788_864,
+                retained_coefficient_group_byte_length: 135_266_304,
+                logical_row_chunk_byte_length: 16_777_216,
+            }
+        );
+
+        let grid = derive_vss_relation_replay_candidate_grid()
+            .expect("the VSS relation-replay candidate grid derives");
+        let minimum_row_count = grid
+            .iter()
+            .map(|candidate| candidate.physical_row_count)
+            .min()
+            .expect("the VSS candidate grid is nonempty");
+        assert_eq!(minimum_row_count, modeled.physical_row_count);
+        assert!(
+            grid.iter().any(|candidate| {
+                candidate.trace_packing_factor == 32
+                    && candidate.logical_polynomials_per_physical_row == 64
+                    && candidate.physical_row_count == 204
+            }),
+            "the wider trace comparator remains in the grid"
+        );
+        assert_eq!(
+            derive_vss_relation_replay_candidate_ledger(16, 8)
+                .expect("the under-capacity candidate is structurally defined"),
+            None
+        );
+        assert!(derive_vss_relation_replay_candidate_ledger(16, 128).is_err());
+
+        let production_work = derive_selected_vss_base_phase_work_ledger()
+            .expect("the selected VSS work ledger derives");
+        let current_recomputed_source_value_count = production_work
+            .source_replay_count
+            .checked_mul(current.relation_trace_domain_size)
+            .expect("the current source-value count derives");
+        assert!(modeled.lane_dft_count * 10 <= production_work.lane_dft_count);
+        assert!(
+            modeled.source_trace_value_generation_count * 90
+                <= current_recomputed_source_value_count
+        );
+        assert!(
+            modeled.salted_leaf_keccak_permutation_count * 8
+                <= production_work.salted_leaf_keccak_permutation_count
         );
     }
 

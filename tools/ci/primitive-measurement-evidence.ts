@@ -174,14 +174,47 @@ export const primitiveMeasurementCaseCatalog = Object.freeze([
             basePhaseDirectSourceColumnCountPerLane: 3_003,
             basePhaseDirectSourceChunkCountPerLane: 9_009,
             basePhaseLaneCount: 32,
+            basePhaseLogicalPolynomialCoefficientCount: 32_768,
             basePhaseLogicalChunkCountPerLane: 9_009,
             basePhaseMaterializationPassCount: 2,
+            basePhaseMaximumRangeConstraintNumeratorDegree: 202_749,
             basePhaseOpeningQueryCount: 387,
+            basePhasePhysicalRowWidth: 8,
+            basePhaseProverColumnDegreeBoundExclusive: 67_584,
             basePhaseReversedPolynomialReconstructionCount: 0,
             basePhaseReversedSourceChunkCountPerLane: 0,
             basePhaseRowCount: 1_128,
+            basePhaseTraceMaskDegreeBoundExclusive: 2_048,
+            basePhaseTracePackingFactor: 4,
             aggregateWidePadQueryCount: 393,
             logicalRootCount: 112,
+            modeledCandidateButterflyCount: 34_426_847_232,
+            modeledCandidateCoefficientChunkCountPerSource: 9,
+            modeledCandidateColumnValueDeliveryCount: 3_623_878_656,
+            modeledCandidateLaneDftCount: 6_912,
+            modeledCandidateLeafHashQueryCount: 33_554_432,
+            modeledCandidateLogicalRowChunkByteLength: 16_777_216,
+            modeledCandidateMaterialGroupCount: 8,
+            modeledCandidateMaterialProverColumnCount: 720,
+            modeledCandidateMaximumRangeConstraintNumeratorDegree: 792_573,
+            modeledCandidateMerkleParentHashQueryCount: 33_554_430,
+            modeledCandidateOpeningDegreeBoundExclusive: 2_097_152,
+            modeledCandidatePhysicalRowWidth: 64,
+            modeledCandidatePrivateLeafSaltDerivationCount: 33_554_432,
+            modeledCandidateProverColumnCount: 753,
+            modeledCandidateProverColumnDegreeBoundExclusive: 264_192,
+            modeledCandidateQuotientGroupCount: 10,
+            modeledCandidateQuotientProverColumnCount: 30,
+            modeledCandidateRelationTraceValueCount: 262_144,
+            modeledCandidateRetainedCoefficientGroupByteLength: 135_266_304,
+            modeledCandidateRetainedSourceMaterializationCount: 1_506,
+            modeledCandidateRowCodeInverseRate: 4,
+            modeledCandidateRowCount: 108,
+            modeledCandidateSaltedLeafKeccakPermutationCount: 268_435_456,
+            modeledCandidateShiftSelectorColumnCount: 3,
+            modeledCandidateSourceTraceValueGenerationCount: 394_788_864,
+            modeledCandidateTracePackingFactor: 16,
+            modeledCandidateTransportedValueByteLength: 28_991_029_248,
             traceValueCount: 65_536,
         }),
     }),
@@ -430,6 +463,21 @@ export const validatePrimitiveMeasurementRecord = (
         const materializationPassCount = dimensionsByName.get(
             'basePhaseMaterializationPassCount',
         )!;
+        const physicalRowWidth = dimensionsByName.get(
+            'basePhasePhysicalRowWidth',
+        )!;
+        const logicalPolynomialCoefficientCount = dimensionsByName.get(
+            'basePhaseLogicalPolynomialCoefficientCount',
+        )!;
+        const tracePackingFactor = dimensionsByName.get(
+            'basePhaseTracePackingFactor',
+        )!;
+        const traceMaskDegreeBoundExclusive = dimensionsByName.get(
+            'basePhaseTraceMaskDegreeBoundExclusive',
+        )!;
+        const proverColumnDegreeBoundExclusive = dimensionsByName.get(
+            'basePhaseProverColumnDegreeBoundExclusive',
+        )!;
         const rowCount = dimensionsByName.get('basePhaseRowCount')!;
         const laneCount = dimensionsByName.get('basePhaseLaneCount')!;
         const logicalChunkCountPerLane = dimensionsByName.get(
@@ -470,8 +518,77 @@ export const validatePrimitiveMeasurementRecord = (
         const butterflyCountPerLaneDft =
             primitiveMeasurementCaseCatalog[0].requiredDimensions
                 .butterflyCount;
+        const modeledCandidateTracePackingFactor = dimensionsByName.get(
+            'modeledCandidateTracePackingFactor',
+        )!;
+        const modeledCandidatePhysicalRowWidth = dimensionsByName.get(
+            'modeledCandidatePhysicalRowWidth',
+        )!;
+        const modeledCandidateRelationTraceValueCount = dimensionsByName.get(
+            'modeledCandidateRelationTraceValueCount',
+        )!;
+        const modeledCandidateProverColumnCount = dimensionsByName.get(
+            'modeledCandidateProverColumnCount',
+        )!;
+        const modeledCandidateProverColumnDegreeBoundExclusive =
+            dimensionsByName.get(
+                'modeledCandidateProverColumnDegreeBoundExclusive',
+            )!;
+        const modeledCandidateOpeningDegreeBoundExclusive =
+            dimensionsByName.get(
+                'modeledCandidateOpeningDegreeBoundExclusive',
+            )!;
+        const modeledCandidateCoefficientChunkCountPerSource =
+            dimensionsByName.get(
+                'modeledCandidateCoefficientChunkCountPerSource',
+            )!;
+        const modeledCandidateRowCount = dimensionsByName.get(
+            'modeledCandidateRowCount',
+        )!;
+        const modeledCandidateLeafHashQueryCount = dimensionsByName.get(
+            'modeledCandidateLeafHashQueryCount',
+        )!;
+        const phaseLeafPermutationCount = (logicalLeafWidth: number): number =>
+            Math.floor((7 + 128 / 8 + logicalLeafWidth) / 17) + 1;
+        const messageTraceValueCount = traceValueCount / tracePackingFactor;
+        const independentlyDerivedModeledRelationTraceValueCount =
+            messageTraceValueCount * modeledCandidateTracePackingFactor;
+        const independentlyDerivedModeledSourceDegreeBoundExclusive =
+            modeledCandidateRelationTraceValueCount +
+            traceMaskDegreeBoundExclusive;
+        const independentlyDerivedModeledOpeningDegreeBoundExclusive =
+            logicalPolynomialCoefficientCount *
+            modeledCandidatePhysicalRowWidth;
+        const independentlyDerivedModeledCoefficientChunkCount = Math.ceil(
+            modeledCandidateProverColumnDegreeBoundExclusive /
+                logicalPolynomialCoefficientCount,
+        );
+        const independentlyDerivedModeledRowCount =
+            Math.ceil(
+                modeledCandidateProverColumnCount /
+                    modeledCandidatePhysicalRowWidth,
+            ) * modeledCandidateCoefficientChunkCountPerSource;
+        const independentlyDerivedModeledLaneDftCount =
+            modeledCandidateRowCount * laneCount * materializationPassCount;
+        const independentlyDerivedModeledColumnValueDeliveryCount =
+            modeledCandidateRowCount *
+            fullDomainSize *
+            materializationPassCount;
+        const independentlyDerivedModeledSourceMaterializationCount =
+            modeledCandidateProverColumnCount * materializationPassCount;
         const identitiesHold =
-            logicalChunkCountPerLane <= rowCount * 8 &&
+            Number.isInteger(messageTraceValueCount) &&
+            physicalRowWidth * logicalPolynomialCoefficientCount >
+                dimensionsByName.get(
+                    'basePhaseMaximumRangeConstraintNumeratorDegree',
+                )! &&
+            proverColumnDegreeBoundExclusive ===
+                traceValueCount + traceMaskDegreeBoundExclusive &&
+            dimensionsByName.get(
+                'basePhaseMaximumRangeConstraintNumeratorDegree',
+            ) ===
+                (proverColumnDegreeBoundExclusive - 1) * 3 &&
+            logicalChunkCountPerLane <= rowCount * physicalRowWidth &&
             directSourceChunkCountPerLane + reversedSourceChunkCountPerLane ===
                 logicalChunkCountPerLane &&
             directSourceColumnCountPerLane * coefficientChunkCountPerSource ===
@@ -503,6 +620,86 @@ export const validatePrimitiveMeasurementRecord = (
                 (fullDomainSize - 1) * materializationPassCount &&
             dimensionsByName.get('basePhasePrivateLeafSaltDerivationCount') ===
                 fullDomainSize * materializationPassCount &&
+            dimensionsByName.get(
+                'basePhaseSaltedLeafKeccakPermutationCount',
+            ) ===
+                dimensionsByName.get('basePhaseLeafHashQueryCount')! *
+                    phaseLeafPermutationCount(rowCount) &&
+            modeledCandidateRelationTraceValueCount ===
+                independentlyDerivedModeledRelationTraceValueCount &&
+            modeledCandidateProverColumnDegreeBoundExclusive ===
+                independentlyDerivedModeledSourceDegreeBoundExclusive &&
+            dimensionsByName.get(
+                'modeledCandidateMaximumRangeConstraintNumeratorDegree',
+            ) ===
+                (modeledCandidateProverColumnDegreeBoundExclusive - 1) * 3 &&
+            modeledCandidateOpeningDegreeBoundExclusive ===
+                independentlyDerivedModeledOpeningDegreeBoundExclusive &&
+            modeledCandidateOpeningDegreeBoundExclusive >
+                dimensionsByName.get(
+                    'modeledCandidateMaximumRangeConstraintNumeratorDegree',
+                )! &&
+            dimensionsByName.get('modeledCandidateRowCodeInverseRate') ===
+                fullDomainSize /
+                    (modeledCandidateOpeningDegreeBoundExclusive * 2) &&
+            modeledCandidateCoefficientChunkCountPerSource ===
+                independentlyDerivedModeledCoefficientChunkCount &&
+            modeledCandidateRowCount === independentlyDerivedModeledRowCount &&
+            dimensionsByName.get('modeledCandidateMaterialProverColumnCount')! +
+                dimensionsByName.get(
+                    'modeledCandidateQuotientProverColumnCount',
+                )! +
+                dimensionsByName.get(
+                    'modeledCandidateShiftSelectorColumnCount',
+                )! ===
+                modeledCandidateProverColumnCount &&
+            dimensionsByName.get('modeledCandidateLaneDftCount') ===
+                independentlyDerivedModeledLaneDftCount &&
+            dimensionsByName.get('modeledCandidateButterflyCount') ===
+                independentlyDerivedModeledLaneDftCount *
+                    butterflyCountPerLaneDft &&
+            dimensionsByName.get('modeledCandidateColumnValueDeliveryCount') ===
+                independentlyDerivedModeledColumnValueDeliveryCount &&
+            dimensionsByName.get(
+                'modeledCandidateTransportedValueByteLength',
+            ) ===
+                independentlyDerivedModeledColumnValueDeliveryCount * 8 &&
+            modeledCandidateLeafHashQueryCount ===
+                fullDomainSize * materializationPassCount &&
+            dimensionsByName.get(
+                'modeledCandidateSaltedLeafKeccakPermutationCount',
+            ) ===
+                modeledCandidateLeafHashQueryCount *
+                    phaseLeafPermutationCount(modeledCandidateRowCount) &&
+            dimensionsByName.get(
+                'modeledCandidateMerkleParentHashQueryCount',
+            ) ===
+                (fullDomainSize - 1) * materializationPassCount &&
+            dimensionsByName.get(
+                'modeledCandidatePrivateLeafSaltDerivationCount',
+            ) === modeledCandidateLeafHashQueryCount &&
+            dimensionsByName.get(
+                'modeledCandidateRetainedSourceMaterializationCount',
+            ) === independentlyDerivedModeledSourceMaterializationCount &&
+            dimensionsByName.get(
+                'modeledCandidateSourceTraceValueGenerationCount',
+            ) ===
+                independentlyDerivedModeledSourceMaterializationCount *
+                    modeledCandidateRelationTraceValueCount &&
+            dimensionsByName.get(
+                'modeledCandidateRetainedCoefficientGroupByteLength',
+            ) ===
+                Math.min(
+                    modeledCandidateProverColumnCount,
+                    modeledCandidatePhysicalRowWidth,
+                ) *
+                    modeledCandidateProverColumnDegreeBoundExclusive *
+                    8 &&
+            dimensionsByName.get(
+                'modeledCandidateLogicalRowChunkByteLength',
+            ) ===
+                modeledCandidateOpeningDegreeBoundExclusive * 8 &&
+            independentlyDerivedModeledLaneDftCount * 10 <= laneDftCount &&
             modeledPeakLiveByteLength ===
                 retainedInputByteLength + traceValueCount * 8;
         if (!identitiesHold) {

@@ -143,6 +143,8 @@ pub(crate) use collective_public_key_adapter::{
 };
 #[cfg(feature = "primitive-measurement-evidence")]
 pub(crate) use committed_material::SelectedVssSourceReplayMeasurement;
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+pub(crate) use committed_material::derive_vss_relation_packing_candidate_geometry;
 #[cfg(test)]
 pub(crate) use committed_material::vss_share_linkage_trace_witness_structure_memory_accounting;
 pub(crate) use committed_material::{

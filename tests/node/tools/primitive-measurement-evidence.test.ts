@@ -192,6 +192,8 @@ describe('Primitive measurement evidence', () => {
         for (const [dimensionName, wrongValue] of [
             ['basePhaseOpeningQueryCount', 393],
             ['aggregateWidePadQueryCount', 387],
+            ['modeledCandidateRowCount', 107],
+            ['modeledCandidateTracePackingFactor', 8],
         ] as const) {
             const conflatedQuerySchedule = recordFor(5);
             const queryDimension = (
@@ -514,7 +516,39 @@ describe('Primitive measurement evidence', () => {
         const modeledCheckpoint = projection.checkpointCandidates.find(
             (candidate) => candidate.modeled === true,
         );
+        expect(projection.schemaVersion).toBe(2);
         expect(projection.currentTwoPass.sourceReplayCount).toBe(576_576);
+        expect(projection.modeledRelationReplayCandidate).toMatchObject({
+            coefficientChunkCountPerSource: 9,
+            logicalRowChunkByteLength: 16_777_216,
+            maximumRangeConstraintNumeratorDegree: 792_573,
+            openingDegreeBoundExclusive: 2_097_152,
+            physicalRowWidth: 64,
+            proverColumnCount: 753,
+            proverColumnDegreeBoundExclusive: 264_192,
+            relationTraceValueCount: 262_144,
+            retainedCoefficientGroupByteLength: 135_266_304,
+            rowCodeInverseRate: 4,
+            rowCount: 108,
+            sourceTraceValueGenerationCount: 394_788_864,
+            tracePackingFactor: 16,
+            transportedValueByteLength: 28_991_029_248,
+        });
+        const modeledCandidateTargetProjections = projection
+            .modeledRelationReplayCandidate.targetProjections as
+            | Array<{
+                  currentOwnerTotalNanoseconds: number;
+                  modeledOwners: { totalNanoseconds: number };
+              }>
+            | undefined;
+        expect(modeledCandidateTargetProjections).toHaveLength(3);
+        expect(
+            modeledCandidateTargetProjections?.every(
+                (target) =>
+                    target.modeledOwners.totalNanoseconds <
+                    target.currentOwnerTotalNanoseconds,
+            ),
+        ).toBe(true);
         expect(modeledCheckpoint).toMatchObject({
             checkpointLevel: 2,
             checkpointNodeCount: 4_194_304,

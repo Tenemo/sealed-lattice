@@ -29,6 +29,25 @@ const SHAKE256_RATE_WORD_LENGTH: usize = 17;
 const SHAKE256_DELIMITER: u64 = 0x1f;
 const SHAKE256_FINAL_RATE_BYTE: u64 = 0x80_u64 << 56;
 
+pub(super) fn salted_phase_column_leaf_keccak_permutation_count(
+    logical_leaf_width: usize,
+) -> Result<u64, String> {
+    if logical_leaf_width == 0 {
+        return Err("salted phase-column leaf width is empty".to_owned());
+    }
+    let absorbed_word_count = 7_usize
+        .checked_add(PRIVATE_LEAF_SALT_BYTE_LENGTH / size_of::<u64>())
+        .and_then(|count| count.checked_add(logical_leaf_width))
+        .ok_or_else(|| "salted phase-column leaf word count overflowed".to_owned())?;
+    let completed_rate_blocks = absorbed_word_count / SHAKE256_RATE_WORD_LENGTH;
+    u64::try_from(
+        completed_rate_blocks
+            .checked_add(1)
+            .ok_or_else(|| "salted phase-column leaf permutation count overflowed".to_owned())?,
+    )
+    .map_err(|_| "salted phase-column leaf permutation count exceeds u64".to_owned())
+}
+
 pub(super) type ColumnDigest = [u64; COLUMN_DIGEST_WORD_LENGTH];
 
 pub(super) struct PrivateColumnLeafSaltContext {

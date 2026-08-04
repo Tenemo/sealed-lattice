@@ -22,10 +22,12 @@ type ProjectionTarget = Readonly<{
 
 type WorkCounts = Readonly<{
     laneDftCount: number;
+    leafHashKeccakPermutationCount: number;
     leafHashQueryCount: number;
     merkleParentHashQueryCount: number;
     privateLeafSaltDerivationCount: number;
     sourceReplayCount: number;
+    sourceTraceValueGenerationCount: number;
 }>;
 
 export type VssBaseMaterializationProjection = Readonly<{
@@ -45,10 +47,12 @@ export type VssBaseMaterializationProjection = Readonly<{
         basePhaseLogicalChunkCountPerLane: number;
         basePhaseMaterializationPassCount: number;
         basePhaseOpeningQueryCount: number;
+        basePhasePhysicalRowWidth: number;
         basePhaseRowCount: number;
         aggregateWidePadQueryCount: number;
     }>;
-    schemaVersion: 1;
+    modeledRelationReplayCandidate: Readonly<Record<string, unknown>>;
+    schemaVersion: 2;
     modeledCheckpointLevel: 2;
     targetProjections: readonly Readonly<Record<string, unknown>>[];
 }>;
@@ -129,8 +133,8 @@ const projectPrimitiveOwners = (
     );
     const leafHashNanoseconds = scaleElapsedNanoseconds(
         leafHash.elapsedNanoseconds,
-        work.leafHashQueryCount,
-        leafHash.iterationCount,
+        work.leafHashKeccakPermutationCount,
+        requireDimension(leafHash, 'keccakPermutationCount'),
     );
     const privateLeafSaltNanoseconds = scaleElapsedNanoseconds(
         privateLeafSalt.elapsedNanoseconds,
@@ -146,17 +150,13 @@ const projectPrimitiveOwners = (
         sourceReplay,
         'productionRecipeCount',
     );
-    if (!Number.isSafeInteger(work.sourceReplayCount / productionRecipeCount)) {
-        throw new Error(
-            'VSS source-replay count is not an integral production-catalog pass count.',
-        );
-    }
-    const sourceCatalogPassCount =
-        work.sourceReplayCount / productionRecipeCount;
+    const measuredSourceTraceValueGenerationCount =
+        productionRecipeCount *
+        requireDimension(sourceReplay, 'traceValueCount');
     const sourceReplayNanoseconds = scaleElapsedNanoseconds(
         sourceReplay.elapsedNanoseconds,
-        sourceCatalogPassCount,
-        sourceReplay.iterationCount,
+        work.sourceTraceValueGenerationCount,
+        measuredSourceTraceValueGenerationCount,
     );
     const totalNanoseconds = [
         laneDftNanoseconds,
@@ -312,6 +312,10 @@ export const deriveVssBaseMaterializationProjection = (input: {
     );
     const currentWork: WorkCounts = Object.freeze({
         laneDftCount: requireDimension(ledgerRecord, 'basePhaseLaneDftCount'),
+        leafHashKeccakPermutationCount: requireDimension(
+            ledgerRecord,
+            'basePhaseSaltedLeafKeccakPermutationCount',
+        ),
         leafHashQueryCount: requireDimension(
             ledgerRecord,
             'basePhaseLeafHashQueryCount',
@@ -328,6 +332,9 @@ export const deriveVssBaseMaterializationProjection = (input: {
             ledgerRecord,
             'basePhaseSourceReplayCount',
         ),
+        sourceTraceValueGenerationCount:
+            requireDimension(ledgerRecord, 'basePhaseSourceReplayCount') *
+            requireDimension(ledgerRecord, 'traceValueCount'),
     });
     const leafCountPerPass =
         currentWork.leafHashQueryCount / materializationPassCount;
@@ -374,6 +381,62 @@ export const deriveVssBaseMaterializationProjection = (input: {
             target: target.target,
         }),
     );
+    const modeledCandidateWork: WorkCounts = Object.freeze({
+        laneDftCount: requireDimension(
+            ledgerRecord,
+            'modeledCandidateLaneDftCount',
+        ),
+        leafHashKeccakPermutationCount: requireDimension(
+            ledgerRecord,
+            'modeledCandidateSaltedLeafKeccakPermutationCount',
+        ),
+        leafHashQueryCount: requireDimension(
+            ledgerRecord,
+            'modeledCandidateLeafHashQueryCount',
+        ),
+        merkleParentHashQueryCount: requireDimension(
+            ledgerRecord,
+            'modeledCandidateMerkleParentHashQueryCount',
+        ),
+        privateLeafSaltDerivationCount: requireDimension(
+            ledgerRecord,
+            'modeledCandidatePrivateLeafSaltDerivationCount',
+        ),
+        sourceReplayCount: requireDimension(
+            ledgerRecord,
+            'modeledCandidateRetainedSourceMaterializationCount',
+        ),
+        sourceTraceValueGenerationCount: requireDimension(
+            ledgerRecord,
+            'modeledCandidateSourceTraceValueGenerationCount',
+        ),
+    });
+    const modeledCandidateTargetProjections = targets.map(
+        (target, targetIndex) => {
+            const owners = projectPrimitiveOwners(
+                target.primitiveCases,
+                modeledCandidateWork,
+            );
+            const currentProjection = currentTargetProjections[targetIndex];
+            const currentOwners = currentProjection?.currentTwoPassOwners;
+            if (
+                currentOwners === undefined ||
+                currentOwners.totalNanoseconds <= owners.totalNanoseconds
+            ) {
+                throw new Error(
+                    'Modeled VSS relation-replay candidate does not reduce every target owner total.',
+                );
+            }
+            return Object.freeze({
+                ...(target.browserEngine === undefined
+                    ? {}
+                    : { browserEngine: target.browserEngine }),
+                currentOwnerTotalNanoseconds: currentOwners.totalNanoseconds,
+                modeledOwners: owners,
+                target: target.target,
+            });
+        },
+    );
 
     const scratchCodecRecord = requireCase(nativeCases, 6);
     const scratchRecordByteLength = requireDimension(
@@ -394,8 +457,17 @@ export const deriveVssBaseMaterializationProjection = (input: {
         const reusableStrategyMaximumRecomputedLeafCount =
             Math.max(openingQueryCount, aggregateWidePadQueryCount) *
             leavesPerCheckpoint;
+        const leafHashKeccakPermutationCountPerQuery =
+            currentWork.leafHashKeccakPermutationCount /
+            currentWork.leafHashQueryCount;
+        const optimizedSourceReplayCount =
+            currentWork.sourceReplayCount / materializationPassCount +
+            logicalChunkCountPerLane;
         const optimizedWork: WorkCounts = Object.freeze({
             laneDftCount: currentWork.laneDftCount / materializationPassCount,
+            leafHashKeccakPermutationCount:
+                (leafCountPerPass + maximumRecomputedLeafCount) *
+                leafHashKeccakPermutationCountPerQuery,
             leafHashQueryCount: leafCountPerPass + maximumRecomputedLeafCount,
             merkleParentHashQueryCount:
                 leafCountPerPass -
@@ -404,9 +476,10 @@ export const deriveVssBaseMaterializationProjection = (input: {
                 openingQueryCount * (leavesPerCheckpoint - 1),
             privateLeafSaltDerivationCount:
                 leafCountPerPass + maximumRecomputedLeafCount,
-            sourceReplayCount:
-                currentWork.sourceReplayCount / materializationPassCount +
-                logicalChunkCountPerLane,
+            sourceReplayCount: optimizedSourceReplayCount,
+            sourceTraceValueGenerationCount:
+                optimizedSourceReplayCount *
+                requireDimension(ledgerRecord, 'traceValueCount'),
         });
         const targetFixedOwnerProjections = targets.map((target) => {
             const fixedOwners = projectPrimitiveOwners(
@@ -532,10 +605,75 @@ export const deriveVssBaseMaterializationProjection = (input: {
             basePhaseLogicalChunkCountPerLane: logicalChunkCountPerLane,
             basePhaseMaterializationPassCount: materializationPassCount,
             basePhaseOpeningQueryCount: openingQueryCount,
+            basePhasePhysicalRowWidth: requireDimension(
+                ledgerRecord,
+                'basePhasePhysicalRowWidth',
+            ),
             basePhaseRowCount: rowCount,
             aggregateWidePadQueryCount,
         }),
-        schemaVersion: 1,
+        modeledRelationReplayCandidate: Object.freeze({
+            coefficientChunkCountPerSource: requireDimension(
+                ledgerRecord,
+                'modeledCandidateCoefficientChunkCountPerSource',
+            ),
+            columnValueDeliveryCount: requireDimension(
+                ledgerRecord,
+                'modeledCandidateColumnValueDeliveryCount',
+            ),
+            logicalRowChunkByteLength: requireDimension(
+                ledgerRecord,
+                'modeledCandidateLogicalRowChunkByteLength',
+            ),
+            maximumRangeConstraintNumeratorDegree: requireDimension(
+                ledgerRecord,
+                'modeledCandidateMaximumRangeConstraintNumeratorDegree',
+            ),
+            openingDegreeBoundExclusive: requireDimension(
+                ledgerRecord,
+                'modeledCandidateOpeningDegreeBoundExclusive',
+            ),
+            physicalRowWidth: requireDimension(
+                ledgerRecord,
+                'modeledCandidatePhysicalRowWidth',
+            ),
+            proverColumnCount: requireDimension(
+                ledgerRecord,
+                'modeledCandidateProverColumnCount',
+            ),
+            proverColumnDegreeBoundExclusive: requireDimension(
+                ledgerRecord,
+                'modeledCandidateProverColumnDegreeBoundExclusive',
+            ),
+            relationTraceValueCount: requireDimension(
+                ledgerRecord,
+                'modeledCandidateRelationTraceValueCount',
+            ),
+            retainedCoefficientGroupByteLength: requireDimension(
+                ledgerRecord,
+                'modeledCandidateRetainedCoefficientGroupByteLength',
+            ),
+            rowCodeInverseRate: requireDimension(
+                ledgerRecord,
+                'modeledCandidateRowCodeInverseRate',
+            ),
+            rowCount: requireDimension(
+                ledgerRecord,
+                'modeledCandidateRowCount',
+            ),
+            sourceTraceValueGenerationCount:
+                modeledCandidateWork.sourceTraceValueGenerationCount,
+            targetProjections: Object.freeze(modeledCandidateTargetProjections),
+            tracePackingFactor: requireDimension(
+                ledgerRecord,
+                'modeledCandidateTracePackingFactor',
+            ),
+            transportedValueByteLength: requireDimension(
+                ledgerRecord,
+                'modeledCandidateTransportedValueByteLength',
+            ),
+        }),
+        schemaVersion: 2,
         modeledCheckpointLevel,
         targetProjections: Object.freeze(currentTargetProjections),
     });

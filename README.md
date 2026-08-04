@@ -407,6 +407,21 @@ Works today:
   base and supplemental cases measured from two different WebAssembly binaries.
   Its feature-scoped selected-output DFT is measured but not consumed by
   production generation.
+  A production-derived fast relation/replay model now first reproduces the
+  current factor-four, width-eight plan and then enumerates power-of-two
+  packing and row-width comparators. Its minimum-row eligible comparator uses
+  factor-16 packing and 64 logical polynomials per physical row: a `262,144`-
+  value relation trace, 753 prover columns, degree bound `264,192`, 108
+  physical rows, and inverse rate four. Under a retained coefficient-group
+  replay model, its two passes require 6,912 lane DFTs,
+  `34,426,847,232` butterflies, `3,623,878,656` value deliveries,
+  `268,435,456` salted-leaf Keccak-f permutations, and `394,788,864` source
+  trace-value generations. These counts are respectively about 10.44, 10.44,
+  10.44, 8.5, and 95.71 times below the current repeated-replay schedule. The
+  `135,266,304`-byte retained coefficient-group buffer is one modeled
+  allocation, not a complete live-set bound. The comparator has no production
+  compiler, proof-size or transcript-parity result, same-build native/browser
+  measurement, or suite status and is not selected.
   This is a primitive projection for one VSS base-materialization phase, not a
   full proof. Chromium is about 13.7 times and Firefox about 71.7 times the
   20-minute complete-setup planning target before the rest of setup, so relation
