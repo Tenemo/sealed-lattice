@@ -12,6 +12,8 @@ use zeroize::Zeroize;
 
 pub(crate) const PROOF_BASE_FIELD_MODULUS: u64 = 18_446_744_069_414_584_321;
 const GOLDILOCKS_TWO_TO_64_RESIDUE: u64 = (1_u64 << 32) - 1;
+#[cfg(any(target_arch = "wasm32", test))]
+const GOLDILOCKS_LOW_WORD_MASK: u64 = u32::MAX as u64;
 pub(crate) const PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR: u64 = 1_753_635_133_440_165_772;
 pub(crate) const PROOF_CHALLENGE_EXTENSION_DEGREE: usize = 5;
 pub(crate) const PROOF_CHALLENGE_EXTENSION_POLYNOMIAL_COEFFICIENTS: [u64;
@@ -88,8 +90,14 @@ impl ProofBaseFieldElement {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn multiply(self, other: Self) -> Self {
         Self::from_reduced(u128::from(self.0) * u128::from(other.0))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn multiply(self, other: Self) -> Self {
+        Self(multiply_goldilocks_words(self.0, other.0))
     }
 
     pub(crate) fn square(self) -> Self {
@@ -130,6 +138,47 @@ fn reduce_goldilocks_u128(value: u128) -> u64 {
     }
     debug_assert_eq!(folded >> 64, 0);
     let candidate = folded as u64;
+    candidate
+        .checked_sub(PROOF_BASE_FIELD_MODULUS)
+        .unwrap_or(candidate)
+}
+
+// wasm32 lowers a u128 product to a software helper. Reconstructing its high
+// and low halves from four u32-limb products keeps the hot proof-field path in
+// native WebAssembly integer operations. For high = high_low + 2^32 *
+// high_high, the Goldilocks identity 2^64 = 2^32 - 1 gives
+// high * 2^64 = high_low * (2^32 - 1) - high_high (mod p).
+#[cfg(any(target_arch = "wasm32", test))]
+fn multiply_goldilocks_words(left: u64, right: u64) -> u64 {
+    let left_low = left & GOLDILOCKS_LOW_WORD_MASK;
+    let left_high = left >> 32;
+    let right_low = right & GOLDILOCKS_LOW_WORD_MASK;
+    let right_high = right >> 32;
+
+    let low_by_low = left_low * right_low;
+    let low_by_high = left_low * right_high;
+    let high_by_low = left_high * right_low;
+    let high_by_high = left_high * right_high;
+    let middle = (low_by_low >> 32)
+        .wrapping_add(low_by_high & GOLDILOCKS_LOW_WORD_MASK)
+        .wrapping_add(high_by_low & GOLDILOCKS_LOW_WORD_MASK);
+    let product_low = (low_by_low & GOLDILOCKS_LOW_WORD_MASK) | (middle << 32);
+    let product_high = high_by_high
+        .wrapping_add(low_by_high >> 32)
+        .wrapping_add(high_by_low >> 32)
+        .wrapping_add(middle >> 32);
+
+    let product_high_high = product_high >> 32;
+    let product_high_low = product_high & GOLDILOCKS_LOW_WORD_MASK;
+    let (mut reduced_low, subtraction_borrowed) = product_low.overflowing_sub(product_high_high);
+    if subtraction_borrowed {
+        reduced_low = reduced_low.wrapping_sub(GOLDILOCKS_TWO_TO_64_RESIDUE);
+    }
+    let high_residue = product_high_low * GOLDILOCKS_TWO_TO_64_RESIDUE;
+    let (mut candidate, addition_carried) = reduced_low.overflowing_add(high_residue);
+    if addition_carried {
+        candidate = candidate.wrapping_add(GOLDILOCKS_TWO_TO_64_RESIDUE);
+    }
     candidate
         .checked_sub(PROOF_BASE_FIELD_MODULUS)
         .unwrap_or(candidate)
@@ -722,7 +771,32 @@ mod tests {
                     left_element.multiply(right_element).canonical(),
                     ((u128::from(left) * u128::from(right)) % modulus_wide) as u64,
                 );
+                assert_eq!(
+                    multiply_goldilocks_words(left, right),
+                    ((u128::from(left) * u128::from(right)) % modulus_wide) as u64,
+                );
             }
+        }
+    }
+
+    #[test]
+    fn word_limb_multiplication_matches_reference_arithmetic_across_a_broad_corpus() {
+        let modulus_wide = u128::from(PROOF_BASE_FIELD_MODULUS);
+        let mut deterministic_state = 0x243f_6a88_85a3_08d3_u64;
+        for sample_ordinal in 0..100_000_u32 {
+            deterministic_state ^= deterministic_state << 13;
+            deterministic_state ^= deterministic_state >> 7;
+            deterministic_state ^= deterministic_state << 17;
+            let left = deterministic_state % PROOF_BASE_FIELD_MODULUS;
+            deterministic_state = deterministic_state
+                .wrapping_mul(0x9e37_79b9_7f4a_7c15)
+                .wrapping_add(u64::from(sample_ordinal));
+            let right = deterministic_state % PROOF_BASE_FIELD_MODULUS;
+            assert_eq!(
+                multiply_goldilocks_words(left, right),
+                ((u128::from(left) * u128::from(right)) % modulus_wide) as u64,
+                "deterministic word-limb product {sample_ordinal}",
+            );
         }
     }
 
