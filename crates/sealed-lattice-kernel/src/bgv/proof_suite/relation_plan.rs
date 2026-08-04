@@ -155,7 +155,7 @@ pub(crate) use committed_material::{
 pub(crate) use committed_material::{
     derive_vss_relation_packing_candidate_geometry,
     derive_vss_relation_range_arity_candidate_geometry,
-    vss_relation_trinary_prover_column_ordinals,
+    vss_relation_range_digit_prover_column_ordinals, vss_relation_trinary_prover_column_ordinals,
 };
 pub(crate) use committed_material_adapter::CommittedMaterialSourcePolynomialAdapter;
 #[cfg(test)]

@@ -16,9 +16,10 @@ use sha3::Shake256;
 use zeroize::Zeroizing;
 
 use super::super::relation_plan::{
-    COMMITTED_MATERIAL_TRACE_PACKING_FACTOR, derive_vss_relation_packing_candidate_geometry,
+    COMMITTED_MATERIAL_TRACE_PACKING_FACTOR, RelationOpeningSourceClass,
+    derive_vss_relation_packing_candidate_geometry,
     derive_vss_relation_range_arity_candidate_geometry,
-    vss_relation_trinary_prover_column_ordinals,
+    vss_relation_range_digit_prover_column_ordinals, vss_relation_trinary_prover_column_ordinals,
 };
 #[cfg(test)]
 use super::commitment_liveness::derive_phase_commitment_work_accounting;
@@ -648,6 +649,10 @@ struct VssRangeConstraintArityCandidateLedger {
     quotient_range_digit_prover_column_count: u64,
     prover_column_count: u64,
     maximum_range_constraint_numerator_degree: u64,
+    maximum_required_quotient_coefficient_count: u64,
+    quotient_component_count: u64,
+    quotient_decomposition_stride: u64,
+    quotient_coefficient_capacity: u64,
     base_phase_row_count: u64,
     quotient_phase_row_count: u64,
     complete_phase_row_count: u64,
@@ -1604,7 +1609,7 @@ fn derive_vss_range_constraint_candidate_ledger(
         logical_polynomials_per_physical_row,
     )?
     .ok_or_else(|| "VSS range-arity baseline exceeds its opening bound".to_owned())?;
-    let (artifact, relation_context) =
+    let (artifact, baseline_relation_context) =
         SelectedVssSourceReplayMeasurement::validated_relation_replay_candidate(
             relation_candidate.trace_packing_factor,
             relation_candidate.opening_degree_bound_exclusive,
@@ -1630,14 +1635,14 @@ fn derive_vss_range_constraint_candidate_ledger(
         .map_err(|_| "VSS range-arity relation input is invalid".to_owned())?;
     let current_geometry = derive_vss_relation_range_arity_candidate_geometry(
         &relation_input,
-        &relation_context,
+        &baseline_relation_context,
         relation_candidate.trace_packing_factor,
         3,
     )
     .map_err(|_| "VSS range-arity baseline geometry does not derive".to_owned())?;
     let candidate_geometry = derive_vss_relation_range_arity_candidate_geometry(
         &relation_input,
-        &relation_context,
+        &baseline_relation_context,
         relation_candidate.trace_packing_factor,
         range_constraint_arity,
     )
@@ -1646,6 +1651,54 @@ fn derive_vss_range_constraint_candidate_ledger(
         >= relation_candidate.opening_degree_bound_exclusive
     {
         return Ok(None);
+    }
+    let (candidate_input, candidate_relation_context) =
+        SelectedVssSourceReplayMeasurement::range_packing_candidate_definition(
+            relation_candidate.trace_packing_factor,
+            relation_candidate.opening_degree_bound_exclusive,
+            range_constraint_arity,
+        )?;
+    let quotient_component_count = u64::from(candidate_relation_context.quotient_component_count);
+    let rounded_quotient_mask_degree = quotient_component_count
+        .checked_add(1)
+        .and_then(|count| count.checked_mul(candidate_input.trace_mask_degree_bound_exclusive))
+        .and_then(|degree| degree.checked_add(quotient_component_count.checked_sub(1)?))
+        .and_then(|degree| degree.checked_div(quotient_component_count))
+        .ok_or_else(|| "VSS range-arity quotient mask degree overflowed".to_owned())?;
+    let quotient_decomposition_stride = candidate_geometry
+        .relation_trace_domain_size
+        .checked_add(rounded_quotient_mask_degree)
+        .ok_or_else(|| "VSS range-arity quotient stride overflowed".to_owned())?;
+    let quotient_coefficient_capacity = quotient_decomposition_stride
+        .checked_mul(quotient_component_count)
+        .ok_or_else(|| "VSS range-arity quotient capacity overflowed".to_owned())?;
+    let maximum_required_quotient_coefficient_count = candidate_geometry
+        .maximum_range_constraint_numerator_degree
+        .checked_sub(candidate_geometry.relation_trace_domain_size)
+        .map_or(Ok(1), |quotient_degree| {
+            quotient_degree
+                .checked_add(1)
+                .ok_or_else(|| "VSS range-arity quotient degree overflowed".to_owned())
+        })?;
+    if quotient_coefficient_capacity < maximum_required_quotient_coefficient_count {
+        return Err("VSS range-arity quotient capacity does not close".to_owned());
+    }
+    if range_constraint_arity != 3 && quotient_component_count > 2 {
+        let preceding_component_count = quotient_component_count - 1;
+        let preceding_rounded_mask_degree = preceding_component_count
+            .checked_add(1)
+            .and_then(|count| count.checked_mul(candidate_input.trace_mask_degree_bound_exclusive))
+            .and_then(|degree| degree.checked_add(preceding_component_count - 1))
+            .and_then(|degree| degree.checked_div(preceding_component_count))
+            .ok_or_else(|| "VSS range-arity predecessor mask degree overflowed".to_owned())?;
+        let preceding_capacity = candidate_geometry
+            .relation_trace_domain_size
+            .checked_add(preceding_rounded_mask_degree)
+            .and_then(|stride| stride.checked_mul(preceding_component_count))
+            .ok_or_else(|| "VSS range-arity predecessor capacity overflowed".to_owned())?;
+        if preceding_capacity >= maximum_required_quotient_coefficient_count {
+            return Err("VSS range-arity quotient component count is not minimal".to_owned());
+        }
     }
 
     let current_range_digit_column_count = current_geometry
@@ -1747,8 +1800,36 @@ fn derive_vss_range_constraint_candidate_ledger(
         return Err("VSS range-arity candidate column formulas disagree".to_owned());
     }
 
-    let quotient_phase_row_count = u64::try_from(construction_plan.quotient_phase.rows.len())
-        .map_err(|_| "VSS range-arity quotient row count exceeds u64".to_owned())?;
+    let quotient_coefficient_chunk_count = candidate_relation_context
+        .quotient_component_degree_bound_exclusive
+        .div_ceil(
+            u64::try_from(
+                construction_plan
+                    .parameters
+                    .logical_polynomial_coefficient_count,
+            )
+            .map_err(|_| "VSS range-arity coefficient count exceeds u64".to_owned())?,
+        );
+    let quotient_component_group_count =
+        quotient_component_count.div_ceil(logical_polynomials_per_physical_row);
+    let opening_batch_mask_row_count = u64::try_from(
+        construction_plan
+            .quotient_phase
+            .rows
+            .iter()
+            .filter(|row| row.source_class == RelationOpeningSourceClass::BatchMask)
+            .count(),
+    )
+    .map_err(|_| "VSS range-arity batch-mask row count exceeds u64".to_owned())?;
+    let quotient_phase_row_count = quotient_coefficient_chunk_count
+        .checked_mul(quotient_component_group_count)
+        .and_then(|count| {
+            count.checked_mul(u64::from(
+                candidate_relation_context.challenge_extension_degree,
+            ))
+        })
+        .and_then(|count| count.checked_add(opening_batch_mask_row_count))
+        .ok_or_else(|| "VSS range-arity quotient row count overflowed".to_owned())?;
     let complete_phase_row_count = candidate_base_phase_row_count
         .checked_add(quotient_phase_row_count)
         .ok_or_else(|| "VSS range-arity complete row count overflowed".to_owned())?;
@@ -1769,9 +1850,6 @@ fn derive_vss_range_constraint_candidate_ledger(
                 .physical_row_witness_variable_count,
             construction_plan.parameters.row_code_log_inverse_rate,
         )?;
-    if candidate_quotient_geometry != construction_plan.quotient_phase.geometry {
-        return Err("VSS range-arity changed the quotient-phase geometry".to_owned());
-    }
     let base_accounting = derive_phase_commitment_geometry_accounting(candidate_base_geometry)?;
     let quotient_accounting =
         derive_phase_commitment_geometry_accounting(candidate_quotient_geometry)?;
@@ -1812,6 +1890,10 @@ fn derive_vss_range_constraint_candidate_ledger(
         prover_column_count: candidate_geometry.prover_column_count,
         maximum_range_constraint_numerator_degree: candidate_geometry
             .maximum_range_constraint_numerator_degree,
+        maximum_required_quotient_coefficient_count,
+        quotient_component_count,
+        quotient_decomposition_stride,
+        quotient_coefficient_capacity,
         base_phase_row_count: candidate_base_phase_row_count,
         quotient_phase_row_count,
         complete_phase_row_count,
@@ -1921,6 +2003,30 @@ fn derive_vss_relation_replay_opening_claim_quotient_candidate_construction_plan
     .map_err(|error| {
         format!("VSS opening-claim quotient candidate construction does not derive: {error:?}")
     })
+}
+
+fn derive_vss_range_packing_candidate_construction_plan(
+    candidate: VssRangeConstraintArityCandidateLedger,
+) -> Result<RowCodeWhirConstructionPlan, String> {
+    let (_, artifact, context) =
+        SelectedVssSourceReplayMeasurement::validated_range_packing_candidate_with_input(
+            candidate.trace_packing_factor,
+            candidate.opening_degree_bound_exclusive,
+            candidate.range_constraint_arity,
+        )?;
+    let variant = artifact
+        .compiled_plan()
+        .variants()
+        .first()
+        .ok_or_else(|| "VSS range-packing candidate variant is absent".to_owned())?;
+    RowCodeWhirConstructionPlan::for_primitive_measurement_opening_claim_quotient_candidate_variant(
+        &artifact,
+        &context,
+        variant.schedule_position(),
+        variant.top_count(),
+        vss_relation_replay_candidate_bound_root_source_trace_domain_size,
+    )
+    .map_err(|error| format!("VSS range-packing candidate construction does not derive: {error:?}"))
 }
 
 #[cfg(test)]
@@ -4206,6 +4312,10 @@ mod tests {
                     quotient_range_digit_prover_column_count: 20,
                     prover_column_count: 753,
                     maximum_range_constraint_numerator_degree: 792_573,
+                    maximum_required_quotient_coefficient_count: 530_430,
+                    quotient_component_count: 3,
+                    quotient_decomposition_stride: 264_875,
+                    quotient_coefficient_capacity: 794_625,
                     base_phase_row_count: 135,
                     quotient_phase_row_count: 50,
                     complete_phase_row_count: 185,
@@ -4228,6 +4338,10 @@ mod tests {
                     quotient_range_digit_prover_column_count: 20,
                     prover_column_count: 653,
                     maximum_range_constraint_numerator_degree: 1_056_764,
+                    maximum_required_quotient_coefficient_count: 794_621,
+                    quotient_component_count: 3,
+                    quotient_decomposition_stride: 264_875,
+                    quotient_coefficient_capacity: 794_625,
                     base_phase_row_count: 117,
                     quotient_phase_row_count: 50,
                     complete_phase_row_count: 167,
@@ -4250,6 +4364,10 @@ mod tests {
                     quotient_range_digit_prover_column_count: 20,
                     prover_column_count: 565,
                     maximum_range_constraint_numerator_degree: 1_320_955,
+                    maximum_required_quotient_coefficient_count: 1_058_812,
+                    quotient_component_count: 4,
+                    quotient_decomposition_stride: 264_704,
+                    quotient_coefficient_capacity: 1_058_816,
                     base_phase_row_count: 108,
                     quotient_phase_row_count: 50,
                     complete_phase_row_count: 158,
@@ -4272,6 +4390,10 @@ mod tests {
                     quotient_range_digit_prover_column_count: 20,
                     prover_column_count: 529,
                     maximum_range_constraint_numerator_degree: 1_585_146,
+                    maximum_required_quotient_coefficient_count: 1_323_003,
+                    quotient_component_count: 5,
+                    quotient_decomposition_stride: 264_602,
+                    quotient_coefficient_capacity: 1_323_010,
                     base_phase_row_count: 99,
                     quotient_phase_row_count: 50,
                     complete_phase_row_count: 149,
@@ -4294,6 +4416,10 @@ mod tests {
                     quotient_range_digit_prover_column_count: 20,
                     prover_column_count: 497,
                     maximum_range_constraint_numerator_degree: 1_849_337,
+                    maximum_required_quotient_coefficient_count: 1_587_194,
+                    quotient_component_count: 6,
+                    quotient_decomposition_stride: 264_534,
+                    quotient_coefficient_capacity: 1_587_204,
                     base_phase_row_count: 99,
                     quotient_phase_row_count: 50,
                     complete_phase_row_count: 149,
@@ -4350,6 +4476,41 @@ mod tests {
                     candidate.trace_packing_factor,
                     candidate.logical_polynomials_per_physical_row,
                     candidate.range_constraint_arity,
+                    candidate.maximum_range_constraint_numerator_degree,
+                    candidate.maximum_required_quotient_coefficient_count,
+                    candidate.quotient_component_count,
+                    candidate.quotient_decomposition_stride,
+                    candidate.quotient_coefficient_capacity,
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (1, 8, 14, 258_034, 241_651, 13, 18_590, 241_670),
+                (1, 16, 28, 516_068, 499_685, 27, 18_508, 499_716),
+                (1, 32, 56, 1_032_136, 1_015_753, 55, 18_470, 1_015_850),
+                (1, 64, 113, 2_082_703, 2_066_320, 112, 18_451, 2_066_512,),
+                (2, 8, 7, 243_705, 210_938, 6, 35_158, 210_948),
+                (2, 16, 15, 522_225, 489_458, 14, 34_963, 489_482),
+                (2, 32, 30, 1_044_450, 1_011_683, 29, 34_887, 1_011_723),
+                (2, 64, 60, 2_088_900, 2_056_133, 59, 34_851, 2_056_209),
+                (4, 8, 3, 202_749, 137_214, 3, 68_267, 204_801),
+                (4, 16, 7, 473_081, 407_546, 6, 67_926, 407_556),
+                (4, 32, 15, 1_013_745, 948_210, 14, 67_731, 948_234),
+                (4, 64, 31, 2_095_073, 2_029_538, 30, 67_653, 2_029_590),
+                (8, 16, 3, 399_357, 268_286, 3, 133_803, 401_409),
+                (8, 32, 7, 931_833, 800_762, 6, 133_462, 800_772),
+                (8, 64, 15, 1_996_785, 1_865_714, 14, 133_267, 1_865_738),
+                (16, 32, 3, 792_573, 530_430, 3, 264_875, 794_625),
+                (16, 64, 7, 1_849_337, 1_587_194, 6, 264_534, 1_587_204),
+                (32, 64, 3, 1_579_005, 1_054_718, 3, 527_019, 1_581_057),
+            ]
+        );
+        assert_eq!(
+            maximum_arity_candidates
+                .iter()
+                .map(|candidate| (
+                    candidate.trace_packing_factor,
+                    candidate.logical_polynomials_per_physical_row,
+                    candidate.range_constraint_arity,
                     candidate.prover_column_count,
                     candidate.base_phase_row_count,
                     candidate.quotient_phase_row_count,
@@ -4366,11 +4527,11 @@ mod tests {
                     14,
                     5_923,
                     741,
-                    10,
-                    751,
-                    48_064,
-                    239_394_095_104,
-                    1_577_058_304
+                    15,
+                    756,
+                    48_384,
+                    240_987_930_624,
+                    1_610_612_736
                 ),
                 (
                     1,
@@ -4378,11 +4539,11 @@ mod tests {
                     28,
                     4_579,
                     287,
-                    10,
-                    297,
-                    19_008,
-                    94_673_829_888,
-                    704_643_072
+                    15,
+                    302,
+                    19_328,
+                    96_267_665_408,
+                    738_197_504
                 ),
                 (
                     1,
@@ -4390,11 +4551,11 @@ mod tests {
                     56,
                     4_131,
                     130,
-                    10,
-                    140,
-                    8_960,
-                    44_627_394_560,
-                    402_653_184
+                    15,
+                    145,
+                    9_280,
+                    46_221_230_080,
+                    436_207_616
                 ),
                 (
                     1,
@@ -4402,11 +4563,11 @@ mod tests {
                     113,
                     3_683,
                     59,
-                    10,
-                    69,
-                    4_416,
-                    21_994_930_176,
-                    234_881_024
+                    15,
+                    74,
+                    4_736,
+                    23_588_765_696,
+                    268_435_456
                 ),
                 (
                     2,
@@ -4578,33 +4739,124 @@ mod tests {
                 ),
             ]
         );
-        let admitted_candidate = maximum_arity_candidates
+        let compiler_validated_candidate = maximum_arity_candidates
             .iter()
             .find(|candidate| {
                 candidate.trace_packing_factor == 1
                     && candidate.logical_polynomials_per_physical_row == 64
             })
             .expect("the factor-one width-64 range candidate exists");
-        assert_eq!(admitted_candidate.range_constraint_arity, 113);
-        assert_eq!(admitted_candidate.complete_phase_row_count, 69);
-        assert!(admitted_candidate.lane_dft_count * 10 <= production.lane_dft_count);
-        assert!(admitted_candidate.butterfly_count * 10 <= production.butterfly_count);
+        assert_eq!(compiler_validated_candidate.range_constraint_arity, 113);
+        assert_eq!(compiler_validated_candidate.complete_phase_row_count, 74);
+        assert!(compiler_validated_candidate.lane_dft_count * 10 <= production.lane_dft_count);
+        assert!(compiler_validated_candidate.butterfly_count * 10 <= production.butterfly_count);
         assert!(
-            admitted_candidate.column_value_delivery_count * 10
+            compiler_validated_candidate.column_value_delivery_count * 10
                 <= production.column_value_delivery_count
         );
         assert!(
-            admitted_candidate.salted_leaf_keccak_permutation_count * 10
+            compiler_validated_candidate.salted_leaf_keccak_permutation_count * 8
                 <= production_salted_leaf_keccak_permutation_count
         );
+        assert!(
+            compiler_validated_candidate.salted_leaf_keccak_permutation_count * 10
+                > production_salted_leaf_keccak_permutation_count
+        );
         assert_eq!(
-            admitted_candidate.leaf_hash_query_count,
+            compiler_validated_candidate.leaf_hash_query_count,
             production.leaf_hash_query_count
         );
         assert_eq!(
             derive_vss_range_constraint_candidate_ledger(1, 64, 114)
                 .expect("the factor-one degree boundary is classified"),
             None
+        );
+        let (_, candidate_artifact, candidate_context) =
+            SelectedVssSourceReplayMeasurement::validated_range_packing_candidate_with_input(
+                compiler_validated_candidate.trace_packing_factor,
+                compiler_validated_candidate.opening_degree_bound_exclusive,
+                compiler_validated_candidate.range_constraint_arity,
+            )
+            .expect("the compiler-validated VSS range-packing relation validates");
+        assert_eq!(candidate_context.quotient_component_count, 112);
+        assert_eq!(
+            candidate_context.quotient_component_degree_bound_exclusive,
+            18_839
+        );
+        let candidate_variant = candidate_artifact
+            .compiled_plan()
+            .variants()
+            .first()
+            .expect("the compiler-validated VSS range-packing variant exists");
+        assert_eq!(
+            candidate_variant
+                .quotient_decomposition_stride(&candidate_context)
+                .expect("the compiler-validated VSS quotient stride derives"),
+            18_451
+        );
+        let candidate_range_digit_columns = vss_relation_range_digit_prover_column_ordinals(
+            candidate_variant,
+            compiler_validated_candidate.range_constraint_arity,
+        )
+        .expect("the admitted VSS range-digit catalog derives");
+        assert_eq!(candidate_range_digit_columns.len(), 2_400);
+        let candidate_construction =
+            derive_vss_range_packing_candidate_construction_plan(*compiler_validated_candidate)
+                .expect("the compiler-validated VSS range-packing construction derives");
+        assert_eq!(
+            candidate_construction
+                .base_phase
+                .as_ref()
+                .expect("the compiler-validated VSS range-packing base phase exists")
+                .rows
+                .len(),
+            59
+        );
+        assert_eq!(candidate_construction.quotient_phase.rows.len(), 15);
+        let candidate_work = derive_phase_commitment_work_accounting(&candidate_construction)
+            .expect("the compiler-validated VSS range-packing work derives");
+        assert_eq!(
+            candidate_work.lane_dft_count,
+            compiler_validated_candidate.lane_dft_count
+        );
+        assert_eq!(
+            candidate_work.butterfly_count,
+            compiler_validated_candidate.butterfly_count
+        );
+        assert_eq!(
+            candidate_work.column_value_delivery_count,
+            compiler_validated_candidate.column_value_delivery_count
+        );
+
+        let (_, baseline_artifact, _) =
+            SelectedVssSourceReplayMeasurement::validated_relation_replay_candidate_with_input(
+                16, 2_097_152,
+            )
+            .expect("the ternary VSS relation baseline validates");
+        let (_, generic_ternary_artifact, _) =
+            SelectedVssSourceReplayMeasurement::validated_range_packing_candidate_with_input(
+                16, 2_097_152, 3,
+            )
+            .expect("the generic ternary VSS relation validates");
+        assert_eq!(
+            generic_ternary_artifact.canonical_plan_hash(),
+            baseline_artifact.canonical_plan_hash()
+        );
+        assert_eq!(
+            generic_ternary_artifact
+                .compiled_plan()
+                .canonical_bytes()
+                .expect("the generic ternary plan encodes"),
+            baseline_artifact
+                .compiled_plan()
+                .canonical_bytes()
+                .expect("the baseline ternary plan encodes")
+        );
+        assert!(
+            SelectedVssSourceReplayMeasurement::validated_range_packing_candidate_with_input(
+                1, 2_097_152, 114,
+            )
+            .is_err()
         );
     }
 

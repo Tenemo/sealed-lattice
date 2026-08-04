@@ -13,6 +13,27 @@ pub(crate) fn compile_vss_share_linkage_relation_plan(
     input: &CommittedMaterialRelationPlanInput,
     check_context: &RelationPlanCheckContext,
 ) -> Result<CompiledRelationPlan, RelationPlanError> {
+    compile_vss_share_linkage_relation_plan_with_range_digit_radix(input, check_context, 3)
+}
+
+#[cfg(feature = "primitive-measurement-evidence")]
+pub(crate) fn compile_vss_share_linkage_range_candidate_relation_plan(
+    input: &CommittedMaterialRelationPlanInput,
+    check_context: &RelationPlanCheckContext,
+    range_digit_radix: u64,
+) -> Result<CompiledRelationPlan, RelationPlanError> {
+    compile_vss_share_linkage_relation_plan_with_range_digit_radix(
+        input,
+        check_context,
+        range_digit_radix,
+    )
+}
+
+fn compile_vss_share_linkage_relation_plan_with_range_digit_radix(
+    input: &CommittedMaterialRelationPlanInput,
+    check_context: &RelationPlanCheckContext,
+    range_digit_radix: u64,
+) -> Result<CompiledRelationPlan, RelationPlanError> {
     let sharing_limb_count = input.sharing_data_modulus_indices.len();
     let threshold = usize::from(input.threshold);
     let participant_count = usize::from(input.participant_count);
@@ -48,11 +69,12 @@ pub(crate) fn compile_vss_share_linkage_relation_plan(
         }
     }
 
-    let mut builder = CommittedMaterialPlanBuilder::new(
+    let mut builder = CommittedMaterialPlanBuilder::new_with_range_digit_radix(
         VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
         input,
         check_context,
         root_paths,
+        range_digit_radix,
     )?;
     let mut coefficient_messages = Vec::with_capacity(sharing_limb_count);
     let mut recipient_messages = Vec::with_capacity(sharing_limb_count);

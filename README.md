@@ -497,23 +497,27 @@ Works today:
   eight is refused because its numerator degree reaches the opening bound. No
   factor-16 range-arity candidate clears the tenfold static admission gate, so
   none changes the production relation, witness, construction identity, or
-  selected profile. An exact maximum-degree grid then evaluates every 18
-  degree-valid packing-width pair without changing the compiler. Its unique
-  candidate that clears the transform, value-delivery, and salted-leaf static
-  gates is factor one, width 64, arity 113. It has a `16,384`-value relation
-  trace, maximum range numerator degree `2,082,703` below the `2,097,152`
-  opening bound, 3,683 prover columns, 59 base rows, 10 quotient rows, and 69
-  rows in total. The exact work ledger gives 4,416 lane DFTs,
-  `21,994,930,176` butterflies, `2,315,255,808` delivered values, and
-  `234,881,024` salted-leaf Keccak-f permutations: about 16.6-fold, 16.6-fold,
-  and 10.1-fold reductions from the selected VSS construction. All
-  `67,108,864` leaf hashes and `67,108,860` Merkle-parent hashes remain. The
-  candidate is admitted only to feature-scoped compiler, interpreter, witness,
-  liveness, and focused one-build measurement work. It has no production
-  construction identity, proof bytes, theorem regeneration, browser result,
-  or selected-suite status. The
-  fastest comparator accepted by the existing one-aggregate construction is
-  instead factor 1, width 32. It has 331 rows, 21,184 lane DFTs,
+  selected profile. An exact maximum-degree grid then evaluates all 18
+  degree-valid packing-width pairs. Its factor-one, width-64, arity-113 row
+  initially appeared to clear all three static work gates, but that model
+  omitted quotient coefficient capacity. The corrected feature-only compiler
+  derives a `16,384`-value relation trace, maximum range numerator degree
+  `2,082,703`, and `2,066,320` required quotient coefficients. Component count
+  111 is insufficient; the exact minimum is 112, with decomposition stride
+  `18,451` and capacity `2,066,512`. The checked relation and construction now
+  validate with 3,683 prover columns, 59 base rows, 15 quotient rows, and 74
+  rows in total. The corrected work ledger gives 4,736 lane DFTs,
+  `23,588,765,696` butterflies, `2,483,027,968` delivered values, and
+  `268,435,456` salted-leaf Keccak-f permutations: about 15.2-fold, 15.2-fold,
+  and 8.5-fold reductions from the selected VSS construction. All `67,108,864`
+  leaf hashes and `67,108,860` Merkle-parent hashes remain. The generic
+  radix-three feature compiler reproduces the selected relation's canonical
+  bytes and hash, while the ordinary production compiler remains unchanged.
+  Because the corrected candidate misses the tenfold salted-leaf gate, it is
+  unselected and has no candidate witness, production construction identity,
+  proof bytes, theorem regeneration, browser result, or selected-suite status.
+  The fastest comparator accepted by the existing one-aggregate construction
+  is instead factor 1, width 32. It has 331 rows, 21,184 lane DFTs,
   `105,511,911,424` butterflies, `11,106,516,992` value deliveries, and
   `704,643,072` salted-leaf Keccak-f permutations. Its six aggregate roles fit
   eight columns, and its base commitment algorithm accounts for `289,406,976`
