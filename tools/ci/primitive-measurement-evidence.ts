@@ -174,8 +174,10 @@ export const primitiveMeasurementCaseCatalog = Object.freeze([
             aggregateWidePadQueryCount: 393,
             logicalRootCount: 112,
             modeledCandidateButterflyCount: 34_426_847_232,
+            modeledCandidateCoefficientFoldCount: 25_367_150_592,
             modeledCandidateCoefficientChunkCountPerSource: 9,
             modeledCandidateColumnValueDeliveryCount: 3_623_878_656,
+            modeledCandidateCosetMultiplicationCount: 3_623_878_656,
             modeledCandidateLaneDftCount: 6_912,
             modeledCandidateLeafHashQueryCount: 33_554_432,
             modeledCandidateLogicalRowChunkByteLength: 16_777_216,
@@ -185,6 +187,7 @@ export const primitiveMeasurementCaseCatalog = Object.freeze([
             modeledCandidateMerkleParentHashQueryCount: 33_554_430,
             modeledCandidateOpeningDegreeBoundExclusive: 2_097_152,
             modeledCandidatePhysicalRowWidth: 64,
+            modeledCandidatePrivateHighHalfValueGenerationCount: 14_495_514_624,
             modeledCandidatePrivateLeafSaltDerivationCount: 33_554_432,
             modeledCandidateProverColumnCount: 753,
             modeledCandidateProverColumnDegreeBoundExclusive: 264_192,
@@ -266,6 +269,39 @@ export const primitiveMeasurementCaseCatalog = Object.freeze([
             retainedRecipeCount: 64,
             tracePackingFactor: 16,
             traceValueCount: 262_144,
+        }),
+    }),
+    Object.freeze({
+        caseIdentifier: 10,
+        caseName: 'vss-relation-replay-candidate-row-lane-stripe',
+        expectedIterationCount: 9,
+        requiredDimensions: Object.freeze({
+            butterflyCountPerLane: 4_980_736,
+            coefficientChunkCount: 9,
+            coefficientFoldCountPerLane: 3_670_016,
+            copiedCoefficientValueCount: 16_908_288,
+            fullDomainSize: 16_777_216,
+            laneColumnCount: 524_288,
+            laneCount: 32,
+            laneOrdinal: 0,
+            logicalPolynomialCoefficientCount: 32_768,
+            paddedCoefficientCount: 4_194_304,
+            physicalRowCount: 108,
+            physicalRowWidth: 64,
+            productionRecipeCount: 753,
+            proverColumnDegreeBoundExclusive: 264_192,
+            relationPlanHashByteLength: 64,
+            replayBufferByteLength: 2_097_152,
+            retainedCoefficientPayloadByteLength: 135_266_304,
+            retainedRecipeCount: 64,
+            rowWorkingBufferByteLength: 33_554_432,
+            stripeButterflyCount: 44_826_624,
+            stripeCoefficientFoldCount: 33_030_144,
+            stripeCosetMultiplicationCount: 4_718_592,
+            stripePrivateHighHalfValueCount: 18_874_368,
+            tracePackingFactor: 16,
+            traceValueCount: 262_144,
+            witnessValueCount: 2_097_152,
         }),
     }),
 ] as const);
@@ -861,6 +897,124 @@ export const validatePrimitiveMeasurementRecord = (
             );
         }
     }
+    if (caseIdentifier === 10) {
+        const retainedInputByteLength = requireSafeUnsignedInteger(
+            dimensionsByName.get('retainedInputByteLength'),
+            'Primitive measurement retainedInputByteLength',
+        );
+        const retainedGroupHeaderByteLength = requireSafeUnsignedInteger(
+            dimensionsByName.get('retainedGroupHeaderByteLength'),
+            'Primitive measurement retainedGroupHeaderByteLength',
+        );
+        const retainedGroupContainerByteLength = requireSafeUnsignedInteger(
+            dimensionsByName.get('retainedGroupContainerByteLength'),
+            'Primitive measurement retainedGroupContainerByteLength',
+        );
+        const ownedFixedStateByteLength = requireSafeUnsignedInteger(
+            dimensionsByName.get('ownedFixedStateByteLength'),
+            'Primitive measurement ownedFixedStateByteLength',
+        );
+        const materializationPeakLiveByteLength = requireSafeUnsignedInteger(
+            dimensionsByName.get('materializationPeakLiveByteLength'),
+            'Primitive measurement materializationPeakLiveByteLength',
+        );
+        const stripePeakLiveByteLength = requireSafeUnsignedInteger(
+            dimensionsByName.get('stripePeakLiveByteLength'),
+            'Primitive measurement stripePeakLiveByteLength',
+        );
+        requireSafeUnsignedInteger(
+            dimensionsByName.get('pollCount'),
+            'Primitive measurement VSS row-lane poll count',
+        );
+        const traceValueCount = dimensionsByName.get('traceValueCount')!;
+        const physicalRowWidth = dimensionsByName.get('physicalRowWidth')!;
+        const productionRecipeCount = dimensionsByName.get(
+            'productionRecipeCount',
+        )!;
+        const degreeBound = dimensionsByName.get(
+            'proverColumnDegreeBoundExclusive',
+        )!;
+        const logicalPolynomialCoefficientCount = dimensionsByName.get(
+            'logicalPolynomialCoefficientCount',
+        )!;
+        const coefficientChunkCount = dimensionsByName.get(
+            'coefficientChunkCount',
+        )!;
+        const witnessValueCount = dimensionsByName.get('witnessValueCount')!;
+        const paddedCoefficientCount = dimensionsByName.get(
+            'paddedCoefficientCount',
+        )!;
+        const fullDomainSize = dimensionsByName.get('fullDomainSize')!;
+        const laneColumnCount = dimensionsByName.get('laneColumnCount')!;
+        const laneCount = dimensionsByName.get('laneCount')!;
+        const retainedCoefficientPayloadByteLength = dimensionsByName.get(
+            'retainedCoefficientPayloadByteLength',
+        )!;
+        const replayBufferByteLength = dimensionsByName.get(
+            'replayBufferByteLength',
+        )!;
+        const rowWorkingBufferByteLength = dimensionsByName.get(
+            'rowWorkingBufferByteLength',
+        )!;
+        const coefficientFoldCountPerLane = dimensionsByName.get(
+            'coefficientFoldCountPerLane',
+        )!;
+        if (
+            dimensionsByName.get('retainedRecipeCount') !== physicalRowWidth ||
+            witnessValueCount !==
+                physicalRowWidth * logicalPolynomialCoefficientCount ||
+            paddedCoefficientCount !== witnessValueCount * 2 ||
+            fullDomainSize !== paddedCoefficientCount * 4 ||
+            fullDomainSize !== laneCount * laneColumnCount ||
+            dimensionsByName.get('laneOrdinal')! >= laneCount ||
+            coefficientChunkCount !==
+                Math.ceil(degreeBound / logicalPolynomialCoefficientCount) ||
+            dimensionsByName.get('physicalRowCount') !==
+                Math.ceil(productionRecipeCount / physicalRowWidth) *
+                    coefficientChunkCount ||
+            coefficientFoldCountPerLane !==
+                paddedCoefficientCount - laneColumnCount ||
+            dimensionsByName.get('stripeCoefficientFoldCount') !==
+                coefficientFoldCountPerLane * coefficientChunkCount ||
+            dimensionsByName.get('stripeButterflyCount') !==
+                dimensionsByName.get('butterflyCountPerLane')! *
+                    coefficientChunkCount ||
+            dimensionsByName.get('stripeCosetMultiplicationCount') !==
+                laneColumnCount * coefficientChunkCount ||
+            dimensionsByName.get('copiedCoefficientValueCount') !==
+                physicalRowWidth * degreeBound ||
+            dimensionsByName.get('stripePrivateHighHalfValueCount') !==
+                witnessValueCount * coefficientChunkCount ||
+            retainedCoefficientPayloadByteLength !==
+                physicalRowWidth * degreeBound * 8 ||
+            replayBufferByteLength !== traceValueCount * 8 ||
+            rowWorkingBufferByteLength !== paddedCoefficientCount * 8 ||
+            ownedFixedStateByteLength <=
+                retainedGroupContainerByteLength + 64 ||
+            materializationPeakLiveByteLength !==
+                retainedInputByteLength +
+                    retainedCoefficientPayloadByteLength +
+                    replayBufferByteLength +
+                    retainedGroupHeaderByteLength +
+                    retainedGroupContainerByteLength ||
+            stripePeakLiveByteLength !==
+                retainedInputByteLength +
+                    retainedCoefficientPayloadByteLength +
+                    retainedGroupHeaderByteLength +
+                    rowWorkingBufferByteLength +
+                    ownedFixedStateByteLength ||
+            modeledPeakLiveByteLength !==
+                Math.max(
+                    materializationPeakLiveByteLength,
+                    stripePeakLiveByteLength,
+                ) ||
+            modeledPeakLiveByteLength >= 671_088_640
+        ) {
+            throw new Error(
+                'Primitive measurement VSS row-lane stripe identities are inconsistent.',
+            );
+        }
+    }
 
     const iterationCount = requireSafeUnsignedInteger(
         value.iterationCount,
@@ -910,12 +1064,14 @@ export const requireCompletePrimitiveMeasurementCatalog = (
     const modeledCheckpointDftRecord = records[6];
     const productionWeightedSourceReplayRecord = records[7];
     const retainedGroupCandidateRecord = records[8];
+    const rowLaneCandidateRecord = records[9];
     if (
         saltedLeafRecord === undefined ||
         selectedVssRecord === undefined ||
         modeledCheckpointDftRecord === undefined ||
         productionWeightedSourceReplayRecord === undefined ||
-        retainedGroupCandidateRecord === undefined
+        retainedGroupCandidateRecord === undefined ||
+        rowLaneCandidateRecord === undefined
     ) {
         throw new Error('Primitive measurement catalog work ledger is absent.');
     }
@@ -945,6 +1101,12 @@ export const requireCompletePrimitiveMeasurementCatalog = (
     );
     const retainedGroupCandidateDimensions = new Map(
         retainedGroupCandidateRecord.dimensions.map((dimension) => [
+            dimension.name,
+            dimension.value,
+        ]),
+    );
+    const rowLaneCandidateDimensions = new Map(
+        rowLaneCandidateRecord.dimensions.map((dimension) => [
             dimension.name,
             dimension.value,
         ]),
@@ -1032,6 +1194,71 @@ export const requireCompletePrimitiveMeasurementCatalog = (
                 'Primitive measurement retained-group candidate disagrees with the modeled relation geometry.',
             );
         }
+    }
+    for (const [modeledDimensionName, measuredDimensionName] of [
+        ['modeledCandidateTracePackingFactor', 'tracePackingFactor'],
+        ['modeledCandidatePhysicalRowWidth', 'physicalRowWidth'],
+        ['modeledCandidateRelationTraceValueCount', 'traceValueCount'],
+        ['modeledCandidateProverColumnCount', 'productionRecipeCount'],
+        [
+            'modeledCandidateProverColumnDegreeBoundExclusive',
+            'proverColumnDegreeBoundExclusive',
+        ],
+        [
+            'modeledCandidateCoefficientChunkCountPerSource',
+            'coefficientChunkCount',
+        ],
+        ['modeledCandidateRowCount', 'physicalRowCount'],
+        [
+            'modeledCandidateRetainedCoefficientGroupByteLength',
+            'retainedCoefficientPayloadByteLength',
+        ],
+    ] as const) {
+        if (
+            selectedVssDimensions.get(modeledDimensionName) !==
+            rowLaneCandidateDimensions.get(measuredDimensionName)
+        ) {
+            throw new Error(
+                'Primitive measurement row-lane candidate disagrees with the modeled relation geometry.',
+            );
+        }
+    }
+    const candidateLaneDftCount = selectedVssDimensions.get(
+        'modeledCandidateLaneDftCount',
+    )!;
+    const candidateCoefficientChunkCount = rowLaneCandidateDimensions.get(
+        'coefficientChunkCount',
+    )!;
+    const candidateStripeCount =
+        candidateLaneDftCount / candidateCoefficientChunkCount;
+    if (
+        !Number.isSafeInteger(candidateStripeCount) ||
+        candidateLaneDftCount !==
+            rowLaneCandidateDimensions.get('physicalRowCount')! *
+                rowLaneCandidateDimensions.get('laneCount')! *
+                selectedVssDimensions.get(
+                    'basePhaseMaterializationPassCount',
+                )! ||
+        selectedVssDimensions.get('modeledCandidateButterflyCount') !==
+            rowLaneCandidateDimensions.get('stripeButterflyCount')! *
+                candidateStripeCount ||
+        selectedVssDimensions.get('modeledCandidateCoefficientFoldCount') !==
+            rowLaneCandidateDimensions.get('stripeCoefficientFoldCount')! *
+                candidateStripeCount ||
+        selectedVssDimensions.get(
+            'modeledCandidateCosetMultiplicationCount',
+        ) !==
+            rowLaneCandidateDimensions.get('stripeCosetMultiplicationCount')! *
+                candidateStripeCount ||
+        selectedVssDimensions.get(
+            'modeledCandidatePrivateHighHalfValueGenerationCount',
+        ) !==
+            rowLaneCandidateDimensions.get('stripePrivateHighHalfValueCount')! *
+                candidateStripeCount
+    ) {
+        throw new Error(
+            'Primitive measurement row-lane workload does not reconcile to the modeled candidate.',
+        );
     }
 };
 

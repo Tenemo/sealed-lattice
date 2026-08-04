@@ -75,9 +75,9 @@ export const runReleaseNativePrimitiveMeasurementCatalog =
                     'test:evidence:release-native-primitive-measurements',
             },
             async (runLog) => {
-                if (commandArguments.length !== 9) {
+                if (commandArguments.length !== 10) {
                     throw new Error(
-                        'Release-native primitive measurement catalog assembly requires nine focused run directories in case order.',
+                        'Release-native primitive measurement catalog assembly requires ten focused run directories in case order.',
                     );
                 }
                 const sourceRuns = await Promise.all(

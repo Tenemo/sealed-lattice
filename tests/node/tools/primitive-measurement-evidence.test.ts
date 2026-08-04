@@ -112,6 +112,52 @@ const recordFor = (
             },
         );
     }
+    if (caseIdentifier === 10) {
+        const retainedInputByteLength = 2_097_152;
+        const retainedGroupHeaderByteLength =
+            executionTarget === 'release-native' ? 1_536 : 768;
+        const retainedGroupContainerByteLength =
+            executionTarget === 'release-native' ? 32 : 24;
+        const ownedFixedStateByteLength =
+            executionTarget === 'release-native' ? 256 : 192;
+        const retainedCoefficientPayloadByteLength = 135_266_304;
+        const replayBufferByteLength = 2_097_152;
+        const rowWorkingBufferByteLength = 33_554_432;
+        dimensions.push(
+            { name: 'pollCount', value: 10_000 },
+            { name: 'retainedInputByteLength', value: retainedInputByteLength },
+            {
+                name: 'retainedGroupHeaderByteLength',
+                value: retainedGroupHeaderByteLength,
+            },
+            {
+                name: 'retainedGroupContainerByteLength',
+                value: retainedGroupContainerByteLength,
+            },
+            {
+                name: 'ownedFixedStateByteLength',
+                value: ownedFixedStateByteLength,
+            },
+            {
+                name: 'materializationPeakLiveByteLength',
+                value:
+                    retainedInputByteLength +
+                    retainedCoefficientPayloadByteLength +
+                    replayBufferByteLength +
+                    retainedGroupHeaderByteLength +
+                    retainedGroupContainerByteLength,
+            },
+            {
+                name: 'stripePeakLiveByteLength',
+                value:
+                    retainedInputByteLength +
+                    retainedCoefficientPayloadByteLength +
+                    retainedGroupHeaderByteLength +
+                    rowWorkingBufferByteLength +
+                    ownedFixedStateByteLength,
+            },
+        );
+    }
     const retainedInputByteLength = dimensions.find(
         (dimension) => dimension.name === 'retainedInputByteLength',
     )?.value;
@@ -124,6 +170,12 @@ const recordFor = (
     )?.value;
     const retainedGroupHeaderByteLength = dimensions.find(
         (dimension) => dimension.name === 'retainedGroupHeaderByteLength',
+    )?.value;
+    const materializationPeakLiveByteLength = dimensions.find(
+        (dimension) => dimension.name === 'materializationPeakLiveByteLength',
+    )?.value;
+    const stripePeakLiveByteLength = dimensions.find(
+        (dimension) => dimension.name === 'stripePeakLiveByteLength',
     )?.value;
     return {
         caseIdentifier,
@@ -144,7 +196,12 @@ const recordFor = (
                             dimension.name === 'replayBufferByteLength',
                     )!.value +
                     retainedGroupHeaderByteLength!
-                  : 4_194_304,
+                  : caseIdentifier === 10
+                    ? Math.max(
+                          materializationPeakLiveByteLength!,
+                          stripePeakLiveByteLength!,
+                      )
+                    : 4_194_304,
         schemaVersion: 2,
     };
 };
@@ -542,15 +599,19 @@ describe('Primitive measurement evidence', () => {
             .modeledRelationReplayCandidate.targetProjections as
             | Array<{
                   currentOwnerTotalNanoseconds: number;
-                  modeledOwners: { totalNanoseconds: number };
+                  modeledOwners: {
+                      rowLaneOwnerCaseIdentifier: number;
+                      totalNanoseconds: number;
+                  };
               }>
             | undefined;
         expect(modeledCandidateTargetProjections).toHaveLength(3);
         expect(
             modeledCandidateTargetProjections?.every(
                 (target) =>
+                    target.modeledOwners.rowLaneOwnerCaseIdentifier === 10 &&
                     target.modeledOwners.totalNanoseconds <
-                    target.currentOwnerTotalNanoseconds,
+                        target.currentOwnerTotalNanoseconds,
             ),
         ).toBe(true);
         expect(modeledCheckpoint).toMatchObject({
@@ -704,6 +765,17 @@ describe('Primitive measurement evidence', () => {
         ).toEqual({
             browserEngines: ['chromium'],
             focusedCaseIdentifier: 9,
+        });
+        expect(
+            parseDesktopBrowserPrimitiveMeasurementArguments([
+                'firefox',
+                'case-10',
+                'reuse-wasm',
+            ]),
+        ).toEqual({
+            browserEngines: ['firefox'],
+            focusedCaseIdentifier: 10,
+            reuseMeasurementWasm: true,
         });
         expect(() =>
             parseDesktopBrowserPrimitiveMeasurementArguments(['webkit']),

@@ -114,15 +114,17 @@ const projectPrimitiveOwners = (
     primitiveCases: readonly PrimitiveMeasurementRecord[],
     work: WorkCounts,
     sourceReplayCaseIdentifier: 8 | 9,
+    rowLaneCaseIdentifier: 1 | 10,
 ): Readonly<{
-    laneDftNanoseconds: number;
     leafHashNanoseconds: number;
     merkleParentHashNanoseconds: number;
     privateLeafSaltNanoseconds: number;
+    rowLaneNanoseconds: number;
+    rowLaneOwnerCaseIdentifier: 1 | 10;
     sourceReplayNanoseconds: number;
     totalNanoseconds: number;
 }> => {
-    const laneDft = requireCase(primitiveCases, 1);
+    const rowLane = requireCase(primitiveCases, rowLaneCaseIdentifier);
     const leafHash = requireCase(primitiveCases, 2);
     const privateLeafSalt = requireCase(primitiveCases, 3);
     const merkleParentHash = requireCase(primitiveCases, 4);
@@ -130,10 +132,10 @@ const projectPrimitiveOwners = (
         primitiveCases,
         sourceReplayCaseIdentifier,
     );
-    const laneDftNanoseconds = scaleElapsedNanoseconds(
-        laneDft.elapsedNanoseconds,
+    const rowLaneNanoseconds = scaleElapsedNanoseconds(
+        rowLane.elapsedNanoseconds,
         work.laneDftCount,
-        laneDft.iterationCount,
+        rowLane.iterationCount,
     );
     const leafHashNanoseconds = scaleElapsedNanoseconds(
         leafHash.elapsedNanoseconds,
@@ -164,7 +166,7 @@ const projectPrimitiveOwners = (
                   requireDimension(sourceReplay, 'retainedRecipeCount'),
               );
     const totalNanoseconds = [
-        laneDftNanoseconds,
+        rowLaneNanoseconds,
         leafHashNanoseconds,
         privateLeafSaltNanoseconds,
         merkleParentHashNanoseconds,
@@ -174,10 +176,11 @@ const projectPrimitiveOwners = (
         throw new Error('Primitive owner total exceeds a safe integer.');
     }
     return Object.freeze({
-        laneDftNanoseconds,
         leafHashNanoseconds,
         merkleParentHashNanoseconds,
         privateLeafSaltNanoseconds,
+        rowLaneNanoseconds,
+        rowLaneOwnerCaseIdentifier: rowLaneCaseIdentifier,
         sourceReplayNanoseconds,
         totalNanoseconds,
     });
@@ -200,12 +203,21 @@ const assertCatalogCorrespondence = (
                 ? ['retainedInputByteLength']
                 : nativeRecord.caseIdentifier === 9
                   ? ['retainedInputByteLength', 'retainedGroupHeaderByteLength']
-                  : nativeRecord.caseIdentifier === 7
+                  : nativeRecord.caseIdentifier === 10
                     ? [
-                          'lowerScheduleHeapByteLength',
-                          'higherScheduleHeapByteLength',
+                          'retainedInputByteLength',
+                          'retainedGroupHeaderByteLength',
+                          'retainedGroupContainerByteLength',
+                          'ownedFixedStateByteLength',
+                          'materializationPeakLiveByteLength',
+                          'stripePeakLiveByteLength',
                       ]
-                    : [],
+                    : nativeRecord.caseIdentifier === 7
+                      ? [
+                            'lowerScheduleHeapByteLength',
+                            'higherScheduleHeapByteLength',
+                        ]
+                      : [],
         );
         const dimensionsCorrespond =
             nativeRecord.dimensions.length ===
@@ -385,6 +397,7 @@ export const deriveVssBaseMaterializationProjection = (input: {
                 target.primitiveCases,
                 currentWork,
                 8,
+                1,
             ),
             target: target.target,
         }),
@@ -425,6 +438,7 @@ export const deriveVssBaseMaterializationProjection = (input: {
                 target.primitiveCases,
                 modeledCandidateWork,
                 9,
+                10,
             );
             const currentProjection = currentTargetProjections[targetIndex];
             const currentOwners = currentProjection?.currentTwoPassOwners;
@@ -495,6 +509,7 @@ export const deriveVssBaseMaterializationProjection = (input: {
                 target.primitiveCases,
                 optimizedWork,
                 8,
+                1,
             );
             const modeledCheckpointOpeningLaneDftNanoseconds =
                 checkpointLevel === modeledCheckpointLevel

@@ -4,7 +4,10 @@
 //! verification, source-authentication, or capability surface; only a small
 //! deterministic result record crosses the Wasm boundary.
 
-use core::{hint::black_box, mem::size_of};
+use core::{
+    hint::black_box,
+    mem::{size_of, size_of_val},
+};
 use std::collections::{BTreeMap, BTreeSet};
 
 use p3_goldilocks::Goldilocks;
@@ -35,6 +38,10 @@ use super::{
         PRIVATE_LEAF_SALT_BYTE_LENGTH, derive_private_leaf_salt,
         private_leaf_salt_derivation_workspace_byte_length,
     },
+    row_encoding::{
+        PRIVATE_ROW_PAD_SEED_BYTE_LENGTH, RowCodeHighHalfSource, RowEncodingGeometry,
+        padded_base_row_coefficients,
+    },
 };
 use crate::bgv::proof_suite::{
     PROOF_BASE_FIELD_MODULUS, PROOF_EVALUATION_COSET_OFFSET, ProofBaseFieldElement,
@@ -60,6 +67,8 @@ const FIVE_LEVEL_CARRY_ITERATION_COUNT: usize = 32_768;
 const SOURCE_REPLAY_ITERATION_COUNT: usize = 4;
 const PRODUCTION_WEIGHTED_SOURCE_REPLAY_ITERATION_COUNT: usize = 1;
 const VSS_RELATION_REPLAY_CANDIDATE_RETAINED_GROUP_WIDTH: usize = 64;
+const VSS_RELATION_REPLAY_CANDIDATE_TRACE_PACKING_FACTOR: u64 = 16;
+const VSS_RELATION_REPLAY_CANDIDATE_LANE_ORDINAL: usize = 0;
 const AUTHENTICATED_SCRATCH_RECORD_ITERATION_COUNT: usize = 8;
 const SELECTED_CHECKPOINT_LEVEL: u32 = 2;
 
@@ -589,6 +598,9 @@ struct VssRelationReplayCandidateLedger {
     physical_row_count: u64,
     lane_dft_count: u64,
     butterfly_count: u64,
+    coefficient_fold_count: u64,
+    coset_multiplication_count: u64,
+    private_high_half_value_generation_count: u64,
     column_value_delivery_count: u64,
     transported_value_byte_length: u64,
     leaf_hash_query_count: u64,
@@ -670,6 +682,24 @@ fn derive_vss_relation_replay_candidate_ledger(
     let butterfly_count = lane_dft_count
         .checked_mul(DFT_BUTTERFLY_COUNT)
         .ok_or_else(|| "VSS candidate butterfly count overflowed".to_owned())?;
+    let padded_coefficient_count = opening_degree_bound_exclusive
+        .checked_mul(prefix_stacking_factor)
+        .ok_or_else(|| "VSS candidate padded coefficient count overflowed".to_owned())?;
+    let lane_column_count = u64::try_from(PHASE_LANE_COLUMN_COUNT)
+        .map_err(|_| "VSS candidate lane width exceeds u64".to_owned())?;
+    let coefficient_fold_count_per_lane =
+        padded_coefficient_count
+            .checked_sub(lane_column_count)
+            .ok_or_else(|| "VSS candidate lane exceeds its coefficient message".to_owned())?;
+    let coefficient_fold_count = lane_dft_count
+        .checked_mul(coefficient_fold_count_per_lane)
+        .ok_or_else(|| "VSS candidate coefficient-fold count overflowed".to_owned())?;
+    let coset_multiplication_count = lane_dft_count
+        .checked_mul(lane_column_count)
+        .ok_or_else(|| "VSS candidate coset multiplication count overflowed".to_owned())?;
+    let private_high_half_value_generation_count = lane_dft_count
+        .checked_mul(opening_degree_bound_exclusive)
+        .ok_or_else(|| "VSS candidate private high-half count overflowed".to_owned())?;
     let evaluation_domain_size = u64::try_from(PHASE_ENCODED_COLUMN_COUNT)
         .map_err(|_| "VSS candidate evaluation domain exceeds u64".to_owned())?;
     if evaluation_domain_size != relation_input.evaluation_domain_size {
@@ -733,6 +763,9 @@ fn derive_vss_relation_replay_candidate_ledger(
         physical_row_count,
         lane_dft_count,
         butterfly_count,
+        coefficient_fold_count,
+        coset_multiplication_count,
+        private_high_half_value_generation_count,
         column_value_delivery_count,
         transported_value_byte_length,
         leaf_hash_query_count,
@@ -1278,6 +1311,18 @@ fn measure_selected_vss_source_replay() -> Result<PrimitiveMeasurementRecord, St
                 modeled_candidate.butterfly_count,
             ),
             dimension_u64(
+                "modeledCandidateCoefficientFoldCount",
+                modeled_candidate.coefficient_fold_count,
+            ),
+            dimension_u64(
+                "modeledCandidateCosetMultiplicationCount",
+                modeled_candidate.coset_multiplication_count,
+            ),
+            dimension_u64(
+                "modeledCandidatePrivateHighHalfValueGenerationCount",
+                modeled_candidate.private_high_half_value_generation_count,
+            ),
+            dimension_u64(
                 "modeledCandidateColumnValueDeliveryCount",
                 modeled_candidate.column_value_delivery_count,
             ),
@@ -1403,8 +1448,11 @@ fn measure_selected_vss_production_weighted_source_replay()
 
 fn measure_vss_relation_replay_candidate_retained_group()
 -> Result<PrimitiveMeasurementRecord, String> {
-    let candidate = derive_vss_relation_replay_candidate_ledger(16, 64)?
-        .ok_or_else(|| "VSS retained-group candidate does not fit its opening bound".to_owned())?;
+    let candidate = derive_vss_relation_replay_candidate_ledger(
+        VSS_RELATION_REPLAY_CANDIDATE_TRACE_PACKING_FACTOR,
+        VSS_RELATION_REPLAY_CANDIDATE_RETAINED_GROUP_WIDTH as u64,
+    )?
+    .ok_or_else(|| "VSS retained-group candidate does not fit its opening bound".to_owned())?;
     let measurement = SelectedVssSourceReplayMeasurement::prepare_relation_replay_candidate(
         candidate.trace_packing_factor,
         candidate.opening_degree_bound_exclusive,
@@ -1493,6 +1541,325 @@ fn measure_vss_relation_replay_candidate_retained_group()
     })
 }
 
+fn assemble_vss_relation_replay_candidate_row_chunk(
+    retained_coefficients: &[Zeroizing<Vec<ProofBaseFieldElement>>],
+    logical_polynomial_coefficient_count: usize,
+    coefficient_chunk_ordinal: usize,
+    geometry: RowEncodingGeometry,
+) -> Result<Zeroizing<Vec<ProofBaseFieldElement>>, String> {
+    if retained_coefficients.is_empty() || logical_polynomial_coefficient_count == 0 {
+        return Err("VSS candidate row chunk source is empty".to_owned());
+    }
+    let prover_column_degree_bound_exclusive = retained_coefficients[0].len();
+    if prover_column_degree_bound_exclusive == 0
+        || retained_coefficients
+            .iter()
+            .any(|coefficients| coefficients.len() != prover_column_degree_bound_exclusive)
+    {
+        return Err("VSS candidate row chunk source widths disagree".to_owned());
+    }
+    let expected_witness_value_count = retained_coefficients
+        .len()
+        .checked_mul(logical_polynomial_coefficient_count)
+        .ok_or_else(|| "VSS candidate row witness size overflowed".to_owned())?;
+    if geometry.witness_values_per_row != expected_witness_value_count {
+        return Err("VSS candidate row width disagrees with its geometry".to_owned());
+    }
+    let coefficient_chunk_count =
+        prover_column_degree_bound_exclusive.div_ceil(logical_polynomial_coefficient_count);
+    if coefficient_chunk_ordinal >= coefficient_chunk_count {
+        return Err("VSS candidate coefficient chunk is outside the source".to_owned());
+    }
+    let source_start = coefficient_chunk_ordinal
+        .checked_mul(logical_polynomial_coefficient_count)
+        .ok_or_else(|| "VSS candidate coefficient chunk offset overflowed".to_owned())?;
+    let source_end = source_start
+        .checked_add(logical_polynomial_coefficient_count)
+        .map(|end| end.min(prover_column_degree_bound_exclusive))
+        .ok_or_else(|| "VSS candidate coefficient chunk end overflowed".to_owned())?;
+    let copied_coefficient_count = source_end
+        .checked_sub(source_start)
+        .ok_or_else(|| "VSS candidate coefficient chunk is reversed".to_owned())?;
+    let mut row_witness = Vec::new();
+    row_witness
+        .try_reserve_exact(geometry.padded_coefficient_count)
+        .map_err(|_| "VSS candidate row allocation failed".to_owned())?;
+    row_witness.resize(geometry.witness_values_per_row, ProofBaseFieldElement::ZERO);
+    for (recipe_ordinal, coefficients) in retained_coefficients.iter().enumerate() {
+        let destination_start = recipe_ordinal
+            .checked_mul(logical_polynomial_coefficient_count)
+            .ok_or_else(|| "VSS candidate row destination offset overflowed".to_owned())?;
+        let destination_end = destination_start
+            .checked_add(copied_coefficient_count)
+            .ok_or_else(|| "VSS candidate row destination end overflowed".to_owned())?;
+        row_witness[destination_start..destination_end]
+            .copy_from_slice(&coefficients[source_start..source_end]);
+    }
+    Ok(Zeroizing::new(row_witness))
+}
+
+fn measure_vss_relation_replay_candidate_row_lane_stripe()
+-> Result<PrimitiveMeasurementRecord, String> {
+    let candidate = derive_vss_relation_replay_candidate_ledger(
+        VSS_RELATION_REPLAY_CANDIDATE_TRACE_PACKING_FACTOR,
+        VSS_RELATION_REPLAY_CANDIDATE_RETAINED_GROUP_WIDTH as u64,
+    )?
+    .ok_or_else(|| "VSS row-lane candidate does not fit its opening bound".to_owned())?;
+    let measurement = SelectedVssSourceReplayMeasurement::prepare_relation_replay_candidate(
+        candidate.trace_packing_factor,
+        candidate.opening_degree_bound_exclusive,
+    )?;
+    let retained_group = measurement
+        .materialize_retained_recipe_group(VSS_RELATION_REPLAY_CANDIDATE_RETAINED_GROUP_WIDTH)?;
+    let logical_polynomial_coefficient_count = ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT;
+    let witness_value_count = usize::try_from(candidate.opening_degree_bound_exclusive)
+        .map_err(|_| "VSS row-lane witness size exceeds usize".to_owned())?;
+    if !witness_value_count.is_power_of_two() || !candidate.row_code_inverse_rate.is_power_of_two()
+    {
+        return Err("VSS row-lane geometry is not power-of-two".to_owned());
+    }
+    let geometry = RowEncodingGeometry::new_weighted_batch_with_log_inverse_rate(
+        usize::try_from(candidate.physical_row_count)
+            .map_err(|_| "VSS row-lane row count exceeds usize".to_owned())?,
+        witness_value_count.ilog2() as usize,
+        candidate.row_code_inverse_rate.ilog2() as usize,
+    )?;
+    let coefficient_chunk_count = usize::try_from(candidate.coefficient_chunk_count_per_source)
+        .map_err(|_| "VSS row-lane chunk count exceeds usize".to_owned())?;
+    let retained_recipe_count = retained_group.coefficients.len();
+    let expected_retained_payload_byte_length = u64::try_from(retained_recipe_count)
+        .ok()
+        .and_then(|count| {
+            count
+                .checked_mul(candidate.prover_column_degree_bound_exclusive)
+                .and_then(|value_count| {
+                    value_count.checked_mul(size_of::<ProofBaseFieldElement>() as u64)
+                })
+        })
+        .ok_or_else(|| "VSS row-lane retained payload size overflowed".to_owned())?;
+    let expected_chunk_count = measurement
+        .prover_column_degree_bound_exclusive()
+        .div_ceil(logical_polynomial_coefficient_count);
+    let lane_count = geometry
+        .encoded_column_count
+        .checked_div(PHASE_LANE_COLUMN_COUNT)
+        .filter(|count| count.is_power_of_two())
+        .ok_or_else(|| "VSS row-lane count is invalid".to_owned())?;
+    if retained_recipe_count != VSS_RELATION_REPLAY_CANDIDATE_RETAINED_GROUP_WIDTH
+        || measurement.prover_column_degree_bound_exclusive()
+            != usize::try_from(candidate.prover_column_degree_bound_exclusive)
+                .map_err(|_| "VSS row-lane degree bound exceeds usize".to_owned())?
+        || expected_retained_payload_byte_length != candidate.retained_coefficient_group_byte_length
+        || geometry.witness_values_per_row != witness_value_count
+        || geometry.padded_coefficient_count != witness_value_count * 2
+        || geometry.encoded_column_count != PHASE_ENCODED_COLUMN_COUNT
+        || coefficient_chunk_count != expected_chunk_count
+        || lane_count != PHASE_ENCODED_COLUMN_COUNT / PHASE_LANE_COLUMN_COUNT
+    {
+        return Err("VSS row-lane candidate disagrees with production geometry".to_owned());
+    }
+
+    let full_domain =
+        ProofEvaluationDomain::new(PHASE_ENCODED_COLUMN_COUNT, PROOF_EVALUATION_COSET_OFFSET)
+            .map_err(|_| "VSS row-lane domain is invalid".to_owned())?;
+    let private_row_pad_seed = [0x6d_u8; PRIVATE_ROW_PAD_SEED_BYTE_LENGTH];
+    let ((checksum, poll_count), elapsed_nanoseconds) = measure_elapsed_nanoseconds(|| {
+        let mut checksum = retained_group.checksum;
+        let mut poll_count = 0_usize;
+        for coefficient_chunk_ordinal in 0..coefficient_chunk_count {
+            let row_witness = assemble_vss_relation_replay_candidate_row_chunk(
+                &retained_group.coefficients,
+                logical_polynomial_coefficient_count,
+                coefficient_chunk_ordinal,
+                geometry,
+            )?;
+            let padded_coefficients = padded_base_row_coefficients(
+                geometry,
+                coefficient_chunk_ordinal,
+                row_witness,
+                RowCodeHighHalfSource::PrivateMaskSeed(&private_row_pad_seed),
+            )?;
+            let mut transform = BoundedBaseCosetLaneDft::new(
+                padded_coefficients,
+                full_domain,
+                PHASE_LANE_COLUMN_COUNT,
+                VSS_RELATION_REPLAY_CANDIDATE_LANE_ORDINAL,
+            )?;
+            loop {
+                poll_count = poll_count
+                    .checked_add(1)
+                    .ok_or_else(|| "VSS row-lane poll count overflowed".to_owned())?;
+                if transform.poll()? {
+                    break;
+                }
+            }
+            let values = transform.into_values()?;
+            if values.len() != PHASE_LANE_COLUMN_COUNT {
+                return Err("VSS row-lane output width is inconsistent".to_owned());
+            }
+            let middle_ordinal = values.len() / 2;
+            let sampled_value = values[0].canonical()
+                ^ values[middle_ordinal].canonical().rotate_left(21)
+                ^ values[values.len() - 1].canonical().rotate_left(42)
+                ^ u64::try_from(coefficient_chunk_ordinal)
+                    .map_err(|_| "VSS row-lane chunk ordinal exceeds u64".to_owned())?
+                    .rotate_left(7);
+            checksum = checksum
+                .rotate_left(17)
+                .wrapping_add(sampled_value)
+                .wrapping_mul(0x1000_0000_01b3);
+            black_box(&values);
+        }
+        Ok((checksum, poll_count))
+    })?;
+    black_box(checksum);
+
+    let retained_input_byte_length = measurement.retained_input_byte_length()?;
+    let replay_buffer_byte_length = u64::try_from(measurement.trace_value_count())
+        .ok()
+        .and_then(|count| count.checked_mul(size_of::<ProofBaseFieldElement>() as u64))
+        .ok_or_else(|| "VSS row-lane replay buffer size overflowed".to_owned())?;
+    let retained_group_header_byte_length = u64::try_from(retained_recipe_count)
+        .ok()
+        .and_then(|count| {
+            count.checked_mul(size_of::<Zeroizing<Vec<ProofBaseFieldElement>>>() as u64)
+        })
+        .ok_or_else(|| "VSS row-lane group header size overflowed".to_owned())?;
+    let row_working_buffer_byte_length = u64::try_from(geometry.padded_coefficient_count)
+        .ok()
+        .and_then(|count| count.checked_mul(size_of::<ProofBaseFieldElement>() as u64))
+        .ok_or_else(|| "VSS row-lane working buffer size overflowed".to_owned())?;
+    let retained_group_container_byte_length = u64::try_from(size_of_val(&retained_group))
+        .map_err(|_| "VSS row-lane group container exceeds u64".to_owned())?;
+    let owned_fixed_state_byte_length = u64::try_from(
+        size_of_val(&retained_group)
+            + size_of::<BoundedBaseCosetLaneDft>()
+            + size_of::<RowEncodingGeometry>()
+            + size_of::<ProofEvaluationDomain>()
+            + size_of_val(&private_row_pad_seed),
+    )
+    .map_err(|_| "VSS row-lane fixed state exceeds u64".to_owned())?;
+    let materialization_peak_live_byte_length = retained_input_byte_length
+        .checked_add(expected_retained_payload_byte_length)
+        .and_then(|value| value.checked_add(replay_buffer_byte_length))
+        .and_then(|value| value.checked_add(retained_group_header_byte_length))
+        .and_then(|value| value.checked_add(retained_group_container_byte_length))
+        .ok_or_else(|| "VSS row-lane materialization live set overflowed".to_owned())?;
+    let stripe_peak_live_byte_length = retained_input_byte_length
+        .checked_add(expected_retained_payload_byte_length)
+        .and_then(|value| value.checked_add(retained_group_header_byte_length))
+        .and_then(|value| value.checked_add(row_working_buffer_byte_length))
+        .and_then(|value| value.checked_add(owned_fixed_state_byte_length))
+        .ok_or_else(|| "VSS row-lane stripe live set overflowed".to_owned())?;
+    let modeled_peak_live_byte_length =
+        materialization_peak_live_byte_length.max(stripe_peak_live_byte_length);
+    let copied_coefficient_value_count = u64::try_from(retained_recipe_count)
+        .ok()
+        .and_then(|count| count.checked_mul(candidate.prover_column_degree_bound_exclusive))
+        .ok_or_else(|| "VSS row-lane copied coefficient count overflowed".to_owned())?;
+    let stripe_private_high_half_value_count = candidate
+        .opening_degree_bound_exclusive
+        .checked_mul(candidate.coefficient_chunk_count_per_source)
+        .ok_or_else(|| "VSS row-lane private high-half count overflowed".to_owned())?;
+    let coefficient_fold_count_per_lane = u64::try_from(geometry.padded_coefficient_count)
+        .ok()
+        .and_then(|count| count.checked_sub(PHASE_LANE_COLUMN_COUNT as u64))
+        .ok_or_else(|| "VSS row-lane coefficient-fold count underflowed".to_owned())?;
+    let stripe_coefficient_fold_count = coefficient_fold_count_per_lane
+        .checked_mul(candidate.coefficient_chunk_count_per_source)
+        .ok_or_else(|| "VSS row-lane coefficient-fold count overflowed".to_owned())?;
+    let stripe_butterfly_count = DFT_BUTTERFLY_COUNT
+        .checked_mul(candidate.coefficient_chunk_count_per_source)
+        .ok_or_else(|| "VSS row-lane butterfly count overflowed".to_owned())?;
+    let stripe_coset_multiplication_count = u64::try_from(PHASE_LANE_COLUMN_COUNT)
+        .ok()
+        .and_then(|count| count.checked_mul(candidate.coefficient_chunk_count_per_source))
+        .ok_or_else(|| "VSS row-lane coset multiplication count overflowed".to_owned())?;
+
+    Ok(PrimitiveMeasurementRecord {
+        schema_version: MEASUREMENT_SCHEMA_VERSION,
+        case_identifier: 10,
+        case_name: "vss-relation-replay-candidate-row-lane-stripe",
+        execution_target: execution_target(),
+        iteration_count: candidate.coefficient_chunk_count_per_source,
+        elapsed_nanoseconds,
+        modeled_peak_live_byte_length,
+        checksum_hex: format!("{checksum:016x}"),
+        dimensions: vec![
+            dimension_u64("tracePackingFactor", candidate.trace_packing_factor),
+            dimension_u64("traceValueCount", candidate.relation_trace_domain_size),
+            dimension_u64(
+                "logicalPolynomialCoefficientCount",
+                u64::try_from(logical_polynomial_coefficient_count)
+                    .map_err(|_| "VSS row-lane logical width exceeds u64".to_owned())?,
+            ),
+            dimension("physicalRowWidth", retained_recipe_count)?,
+            dimension_u64("physicalRowCount", candidate.physical_row_count),
+            dimension_u64("productionRecipeCount", candidate.prover_column_count),
+            dimension_u64(
+                "proverColumnDegreeBoundExclusive",
+                candidate.prover_column_degree_bound_exclusive,
+            ),
+            dimension("coefficientChunkCount", coefficient_chunk_count)?,
+            dimension("witnessValueCount", geometry.witness_values_per_row)?,
+            dimension("paddedCoefficientCount", geometry.padded_coefficient_count)?,
+            dimension("fullDomainSize", geometry.encoded_column_count)?,
+            dimension("laneColumnCount", PHASE_LANE_COLUMN_COUNT)?,
+            dimension("laneCount", lane_count)?,
+            dimension("laneOrdinal", VSS_RELATION_REPLAY_CANDIDATE_LANE_ORDINAL)?,
+            dimension_u64(
+                "coefficientFoldCountPerLane",
+                coefficient_fold_count_per_lane,
+            ),
+            dimension_u64("stripeCoefficientFoldCount", stripe_coefficient_fold_count),
+            dimension_u64("butterflyCountPerLane", DFT_BUTTERFLY_COUNT),
+            dimension_u64("stripeButterflyCount", stripe_butterfly_count),
+            dimension_u64(
+                "stripeCosetMultiplicationCount",
+                stripe_coset_multiplication_count,
+            ),
+            dimension_u64(
+                "copiedCoefficientValueCount",
+                copied_coefficient_value_count,
+            ),
+            dimension_u64(
+                "stripePrivateHighHalfValueCount",
+                stripe_private_high_half_value_count,
+            ),
+            dimension("pollCount", poll_count)?,
+            dimension("retainedRecipeCount", retained_recipe_count)?,
+            dimension_u64(
+                "retainedCoefficientPayloadByteLength",
+                expected_retained_payload_byte_length,
+            ),
+            PrimitiveMeasurementDimension {
+                name: "retainedInputByteLength",
+                value: retained_input_byte_length,
+            },
+            dimension_u64("replayBufferByteLength", replay_buffer_byte_length),
+            dimension_u64(
+                "retainedGroupHeaderByteLength",
+                retained_group_header_byte_length,
+            ),
+            dimension_u64(
+                "retainedGroupContainerByteLength",
+                retained_group_container_byte_length,
+            ),
+            dimension_u64("rowWorkingBufferByteLength", row_working_buffer_byte_length),
+            dimension_u64("ownedFixedStateByteLength", owned_fixed_state_byte_length),
+            dimension_u64(
+                "materializationPeakLiveByteLength",
+                materialization_peak_live_byte_length,
+            ),
+            dimension_u64("stripePeakLiveByteLength", stripe_peak_live_byte_length),
+            dimension(
+                "relationPlanHashByteLength",
+                measurement.relation_plan_hash().len(),
+            )?,
+        ],
+    })
+}
+
 fn measure_authenticated_scratch_record_codec() -> Result<PrimitiveMeasurementRecord, String> {
     let mut plaintext = Vec::new();
     plaintext
@@ -1554,6 +1921,7 @@ fn derive_primitive_measurement(
         7 => measure_selected_vss_checkpoint_opening_lane_dfts(),
         8 => measure_selected_vss_production_weighted_source_replay(),
         9 => measure_vss_relation_replay_candidate_retained_group(),
+        10 => measure_vss_relation_replay_candidate_row_lane_stripe(),
         _ => Err("primitive measurement case is unsupported".to_owned()),
     }
 }
@@ -1635,6 +2003,9 @@ mod tests {
                 physical_row_count: 1_128,
                 lane_dft_count: 72_192,
                 butterfly_count: 359_569_293_312,
+                coefficient_fold_count: 0,
+                coset_multiplication_count: 37_849_399_296,
+                private_high_half_value_generation_count: 18_924_699_648,
                 column_value_delivery_count: 37_849_399_296,
                 transported_value_byte_length: 302_795_194_368,
                 leaf_hash_query_count: 33_554_432,
@@ -1671,6 +2042,9 @@ mod tests {
                 physical_row_count: 108,
                 lane_dft_count: 6_912,
                 butterfly_count: 34_426_847_232,
+                coefficient_fold_count: 25_367_150_592,
+                coset_multiplication_count: 3_623_878_656,
+                private_high_half_value_generation_count: 14_495_514_624,
                 column_value_delivery_count: 3_623_878_656,
                 transported_value_byte_length: 28_991_029_248,
                 leaf_hash_query_count: 33_554_432,
@@ -1785,6 +2159,83 @@ mod tests {
     }
 
     #[test]
+    fn vss_relation_replay_candidate_row_chunks_preserve_order_and_zero_tail() {
+        let geometry = RowEncodingGeometry::new_weighted_batch_with_log_inverse_rate(2, 3, 2)
+            .expect("the focused row geometry derives");
+        let retained_coefficients = vec![
+            Zeroizing::new(
+                (1_u64..=6)
+                    .map(|value| ProofBaseFieldElement::from_reduced(u128::from(value)))
+                    .collect::<Vec<_>>(),
+            ),
+            Zeroizing::new(
+                (7_u64..=12)
+                    .map(|value| ProofBaseFieldElement::from_reduced(u128::from(value)))
+                    .collect::<Vec<_>>(),
+            ),
+        ];
+        let first = assemble_vss_relation_replay_candidate_row_chunk(
+            &retained_coefficients,
+            4,
+            0,
+            geometry,
+        )
+        .expect("the first focused row chunk assembles");
+        let tail = assemble_vss_relation_replay_candidate_row_chunk(
+            &retained_coefficients,
+            4,
+            1,
+            geometry,
+        )
+        .expect("the focused tail row chunk assembles");
+        assert_eq!(
+            first
+                .iter()
+                .map(|value| value.canonical())
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3, 4, 7, 8, 9, 10],
+        );
+        assert_eq!(
+            tail.iter()
+                .map(|value| value.canonical())
+                .collect::<Vec<_>>(),
+            vec![5, 6, 0, 0, 11, 12, 0, 0],
+        );
+        assert!(first.capacity() >= geometry.padded_coefficient_count);
+        assert!(tail.capacity() >= geometry.padded_coefficient_count);
+
+        assert!(assemble_vss_relation_replay_candidate_row_chunk(&[], 4, 0, geometry).is_err());
+        assert!(
+            assemble_vss_relation_replay_candidate_row_chunk(
+                &retained_coefficients,
+                4,
+                2,
+                geometry,
+            )
+            .is_err()
+        );
+        let mismatched_widths = vec![
+            Zeroizing::new(vec![ProofBaseFieldElement::ONE; 6]),
+            Zeroizing::new(vec![ProofBaseFieldElement::ONE; 5]),
+        ];
+        assert!(
+            assemble_vss_relation_replay_candidate_row_chunk(&mismatched_widths, 4, 0, geometry,)
+                .is_err()
+        );
+        let wrong_geometry = RowEncodingGeometry::new_weighted_batch_with_log_inverse_rate(2, 2, 2)
+            .expect("the hostile row geometry derives");
+        assert!(
+            assemble_vss_relation_replay_candidate_row_chunk(
+                &retained_coefficients,
+                4,
+                0,
+                wrong_geometry,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     #[ignore = "guarded release-native bounded lane DFT measurement"]
     fn selected_bounded_lane_dft_emits_measurement() {
         run_and_validate(1, "bounded-phase-lane-dft");
@@ -1836,5 +2287,11 @@ mod tests {
     #[ignore = "guarded release-native VSS relation-replay candidate retained-group measurement"]
     fn vss_relation_replay_candidate_retained_group_emits_measurement() {
         run_and_validate(9, "vss-relation-replay-candidate-retained-group");
+    }
+
+    #[test]
+    #[ignore = "guarded release-native VSS relation-replay candidate row-lane stripe measurement"]
+    fn vss_relation_replay_candidate_row_lane_stripe_emits_measurement() {
+        run_and_validate(10, "vss-relation-replay-candidate-row-lane-stripe");
     }
 }

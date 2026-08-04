@@ -2255,6 +2255,12 @@ pub(crate) struct SelectedVssSourceReplayMeasurement {
 }
 
 #[cfg(feature = "primitive-measurement-evidence")]
+pub(crate) struct VssRelationReplayRetainedRecipeGroup {
+    pub(crate) coefficients: Vec<Zeroizing<Vec<ProofBaseFieldElement>>>,
+    pub(crate) checksum: u64,
+}
+
+#[cfg(feature = "primitive-measurement-evidence")]
 impl SelectedVssSourceReplayMeasurement {
     pub(crate) fn prepare() -> Result<Self, String> {
         let input = crate::bgv::proof_suite::selected_committed_material_relation_plan_input()
@@ -2625,10 +2631,10 @@ impl SelectedVssSourceReplayMeasurement {
         Ok(checksum)
     }
 
-    pub(crate) fn materialize_retained_recipe_group_once(
+    pub(crate) fn materialize_retained_recipe_group(
         &self,
         retained_recipe_count: usize,
-    ) -> Result<u64, String> {
+    ) -> Result<VssRelationReplayRetainedRecipeGroup, String> {
         if retained_recipe_count == 0 || retained_recipe_count > self.provider.ordered_recipes.len()
         {
             return Err("VSS retained replay group width is invalid".to_owned());
@@ -2637,13 +2643,11 @@ impl SelectedVssSourceReplayMeasurement {
         retained_coefficients
             .try_reserve_exact(retained_recipe_count)
             .map_err(|_| "VSS retained replay group allocation failed".to_owned())?;
-        let mut checksum = 0xcbf2_9ce4_8422_2325_u64;
-        for (recipe_ordinal, (column_ordinal, _)) in self
+        for (column_ordinal, _) in self
             .provider
             .ordered_recipes
             .iter()
             .take(retained_recipe_count)
-            .enumerate()
         {
             let mut coefficients = self
                 .provider
@@ -2659,6 +2663,33 @@ impl SelectedVssSourceReplayMeasurement {
                 self.prover_column_degree_bound_exclusive,
                 ProofBaseFieldElement::ZERO,
             );
+            retained_coefficients.push(Zeroizing::new(coefficients));
+        }
+        let checksum = self.retained_recipe_group_checksum(&retained_coefficients)?;
+        Ok(VssRelationReplayRetainedRecipeGroup {
+            coefficients: retained_coefficients,
+            checksum,
+        })
+    }
+
+    fn retained_recipe_group_checksum(
+        &self,
+        retained_coefficients: &[Zeroizing<Vec<ProofBaseFieldElement>>],
+    ) -> Result<u64, String> {
+        if retained_coefficients.is_empty()
+            || retained_coefficients.len() > self.provider.ordered_recipes.len()
+        {
+            return Err("VSS retained replay group width is invalid".to_owned());
+        }
+        let mut checksum = 0xcbf2_9ce4_8422_2325_u64;
+        for (recipe_ordinal, (coefficients, (column_ordinal, _))) in retained_coefficients
+            .iter()
+            .zip(self.provider.ordered_recipes.iter())
+            .enumerate()
+        {
+            if coefficients.len() != self.prover_column_degree_bound_exclusive {
+                return Err("VSS retained replay coefficient count is inconsistent".to_owned());
+            }
             let middle_ordinal = coefficients.len() / 2;
             let sampled_value = coefficients
                 .first()
@@ -2680,7 +2711,6 @@ impl SelectedVssSourceReplayMeasurement {
                 .wrapping_add(sampled_value)
                 .wrapping_add(ordinal.wrapping_mul(0x9e37_79b1_85eb_ca87))
                 .wrapping_mul(0x1000_0000_01b3);
-            retained_coefficients.push(Zeroizing::new(coefficients));
         }
         for hash_word in self.relation_plan_hash().chunks_exact(size_of::<u64>()) {
             let hash_word = u64::from_le_bytes(
@@ -2693,8 +2723,16 @@ impl SelectedVssSourceReplayMeasurement {
                 .wrapping_add(hash_word)
                 .wrapping_mul(0x1000_0000_01b3);
         }
-        core::hint::black_box(&retained_coefficients);
         Ok(checksum)
+    }
+
+    pub(crate) fn materialize_retained_recipe_group_once(
+        &self,
+        retained_recipe_count: usize,
+    ) -> Result<u64, String> {
+        let retained_group = self.materialize_retained_recipe_group(retained_recipe_count)?;
+        core::hint::black_box(&retained_group.coefficients);
+        Ok(retained_group.checksum)
     }
 }
 
