@@ -31,10 +31,11 @@ use super::{
     },
     construction_plan::{
         ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT,
-        ROW_CODE_WHIR_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW, RowCodeWhirConstructionPlan,
-        RowCodeWhirConstructionPlanError,
+        ROW_CODE_WHIR_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW, ROW_CODE_WHIR_OUTER_QUERY_COUNT,
+        RowCodeWhirConstructionPlan, RowCodeWhirConstructionPlanError,
     },
     hiding_whir::selected_hiding_whir_config,
+    opening_claim_reduction::OpeningClaimQuotientBatchGeometry,
     private_leaf_salt::{
         PRIVATE_LEAF_SALT_BYTE_LENGTH, derive_private_leaf_salt,
         private_leaf_salt_derivation_workspace_byte_length,
@@ -617,6 +618,71 @@ struct VssRelationReplayCandidateLedger {
     source_trace_value_generation_count: u64,
     retained_coefficient_group_byte_length: u64,
     logical_row_chunk_byte_length: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct VssOpeningClaimQuotientCandidateLedger {
+    direct_aggregate_column_role_count: u64,
+    quotient_aggregate_column_role_count: u64,
+    aggregate_table_width: u64,
+    source_degree_bound_exclusive: u64,
+    opening_claim_count: u64,
+    batched_quotient_degree_bound_exclusive: u64,
+    discrepancy_numerator_degree_bound_inclusive: u64,
+    query_domain_size: u64,
+    query_count: u64,
+    agreement_ceiling: u64,
+}
+
+fn derive_vss_opening_claim_quotient_candidate_ledger(
+    candidate: VssRelationReplayCandidateLedger,
+) -> Result<VssOpeningClaimQuotientCandidateLedger, String> {
+    let source_degree_bound_exclusive = candidate
+        .opening_degree_bound_exclusive
+        .checked_mul(2)
+        .ok_or_else(|| "VSS quotient-batch source degree overflowed".to_owned())?;
+    let geometry = OpeningClaimQuotientBatchGeometry::derive(
+        usize::try_from(source_degree_bound_exclusive)
+            .map_err(|_| "VSS quotient-batch source degree exceeds usize".to_owned())?,
+        usize::try_from(candidate.opening_point_count)
+            .map_err(|_| "VSS quotient-batch claim count exceeds usize".to_owned())?,
+        PHASE_ENCODED_COLUMN_COUNT,
+        ROW_CODE_WHIR_OUTER_QUERY_COUNT,
+    )?;
+    let quotient_aggregate_column_role_count = 1_u64
+        .checked_add(candidate.bound_reduction_aggregate_column_count)
+        .ok_or_else(|| "VSS quotient-batch aggregate role count overflowed".to_owned())?;
+    if geometry.source_degree_bound_exclusive()
+        != usize::try_from(source_degree_bound_exclusive)
+            .map_err(|_| "VSS quotient-batch source degree exceeds usize".to_owned())?
+        || geometry.opening_claim_count()
+            != usize::try_from(candidate.opening_point_count)
+                .map_err(|_| "VSS quotient-batch claim count exceeds usize".to_owned())?
+        || quotient_aggregate_column_role_count > candidate.aggregate_table_width
+    {
+        return Err("VSS quotient-batch geometry does not fit its aggregate table".to_owned());
+    }
+    Ok(VssOpeningClaimQuotientCandidateLedger {
+        direct_aggregate_column_role_count: candidate.aggregate_column_role_count,
+        quotient_aggregate_column_role_count,
+        aggregate_table_width: candidate.aggregate_table_width,
+        source_degree_bound_exclusive,
+        opening_claim_count: candidate.opening_point_count,
+        batched_quotient_degree_bound_exclusive: u64::try_from(
+            geometry.batched_quotient_degree_bound_exclusive(),
+        )
+        .map_err(|_| "VSS quotient-batch degree exceeds u64".to_owned())?,
+        discrepancy_numerator_degree_bound_inclusive: u64::try_from(
+            geometry.discrepancy_numerator_degree_bound_inclusive(),
+        )
+        .map_err(|_| "VSS quotient-batch discrepancy degree exceeds u64".to_owned())?,
+        query_domain_size: u64::try_from(geometry.query_domain_size())
+            .map_err(|_| "VSS quotient-batch query domain exceeds u64".to_owned())?,
+        query_count: u64::try_from(geometry.query_count())
+            .map_err(|_| "VSS quotient-batch query count exceeds u64".to_owned())?,
+        agreement_ceiling: u64::try_from(geometry.agreement_ceiling())
+            .map_err(|_| "VSS quotient-batch agreement ceiling exceeds u64".to_owned())?,
+    })
 }
 
 fn derive_vss_relation_replay_candidate_ledger(
@@ -1212,6 +1278,8 @@ fn measure_selected_vss_source_replay() -> Result<PrimitiveMeasurementRecord, St
         .ok_or_else(|| "modeled VSS relation-replay candidate is absent".to_owned())?;
     let modeled_candidate_capacity_refusal =
         derive_vss_relation_replay_candidate_capacity_refusal(modeled_candidate)?;
+    let modeled_candidate_quotient_batch =
+        derive_vss_opening_claim_quotient_candidate_ledger(modeled_candidate)?;
     let single_aggregate_candidate = candidate_grid
         .iter()
         .copied()
@@ -1259,6 +1327,15 @@ fn measure_selected_vss_source_replay() -> Result<PrimitiveMeasurementRecord, St
             != work_ledger.salted_leaf_keccak_permutation_count
         || modeled_candidate_capacity_refusal.aggregate_column_role_count
             <= modeled_candidate_capacity_refusal.aggregate_table_width
+        || modeled_candidate_quotient_batch.direct_aggregate_column_role_count
+            != modeled_candidate.aggregate_column_role_count
+        || modeled_candidate_quotient_batch.quotient_aggregate_column_role_count
+            > modeled_candidate_quotient_batch.aggregate_table_width
+        || modeled_candidate_quotient_batch.opening_claim_count
+            != modeled_candidate.opening_point_count
+        || modeled_candidate_quotient_batch.query_count != work_ledger.opening_query_count
+        || modeled_candidate_quotient_batch.agreement_ceiling
+            >= modeled_candidate_quotient_batch.query_domain_size
         || single_aggregate_candidate.trace_packing_factor != 1
         || single_aggregate_candidate.logical_polynomials_per_physical_row != 32
         || single_aggregate_candidate.physical_row_count != 331
@@ -2575,6 +2652,31 @@ mod tests {
                 aggregate_column_role_count: 25,
                 aggregate_table_width: 4,
             }
+        );
+        let quotient_batch_candidate = derive_vss_opening_claim_quotient_candidate_ledger(modeled)
+            .expect("the modeled quotient-batch candidate derives");
+        assert_eq!(
+            quotient_batch_candidate,
+            VssOpeningClaimQuotientCandidateLedger {
+                direct_aggregate_column_role_count: 25,
+                quotient_aggregate_column_role_count: 2,
+                aggregate_table_width: 4,
+                source_degree_bound_exclusive: 4_194_304,
+                opening_claim_count: 24,
+                batched_quotient_degree_bound_exclusive: 4_194_303,
+                discrepancy_numerator_degree_bound_inclusive: 4_194_326,
+                query_domain_size: 16_777_216,
+                query_count: 387,
+                agreement_ceiling: 4_194_326,
+            }
+        );
+        assert!(
+            quotient_batch_candidate.direct_aggregate_column_role_count
+                > quotient_batch_candidate.aggregate_table_width
+        );
+        assert!(
+            quotient_batch_candidate.quotient_aggregate_column_role_count
+                <= quotient_batch_candidate.aggregate_table_width
         );
         let single_aggregate_candidate = grid
             .iter()

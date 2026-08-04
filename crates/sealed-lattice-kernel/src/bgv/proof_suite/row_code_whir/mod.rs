@@ -22,6 +22,8 @@ mod coordinate_derived_hiding_mmcs;
 mod exact_same_secret;
 mod generation_state;
 mod hiding_whir;
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+mod opening_claim_reduction;
 mod opening_schedule;
 mod oracle_geometry;
 #[cfg(feature = "primitive-measurement-evidence")]

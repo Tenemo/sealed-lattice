@@ -418,8 +418,22 @@ Works today:
   valid construction. The compiled relation has 24 distinct opening points and
   one bound-reduction aggregate role, while that row geometry leaves only four
   aggregate columns; construction now refuses the exact `25 > 4` capacity
-  mismatch. The fastest comparator accepted by the existing one-aggregate
-  construction is instead factor 1, width 32. It has 331 rows, 21,184 lane
+  mismatch. A focused static comparator now reuses the live exact synthetic
+  division primitive to reduce the 24 already-fixed, distinct-point opening
+  claims to one opening-claim quotient role. Together with bound reduction,
+  that gives two roles in the same four-column table. Its common-denominator
+  discrepancy has agreement ceiling `4,194,326` over the `16,777,216`-point
+  query domain, and the production-owned 387-coordinate outer query vector
+  gives the exact without-replacement term
+  `C(4,194,326, 387) / C(16,777,216, 387) < 2^-774`. The 393-coordinate
+  aggregate-mask query vector is separate and is not used in this term. This
+  establishes the candidate's algebraic identity and finite-population bound,
+  but it does not yet bind the reduction into the construction identity,
+  transcript graph, materializer, opening schedule, verifier, masking theorem,
+  proof ledger, or complete live-set accounting. The factor-16 comparator
+  therefore remains unselected. The fastest comparator accepted by the
+  existing one-aggregate construction is instead factor 1, width 32. It has
+  331 rows, 21,184 lane
   DFTs, `105,511,911,424` butterflies, `11,106,516,992` value deliveries, and
   `704,643,072` salted-leaf Keccak-f permutations. Its six aggregate roles fit
   eight columns, and its base commitment algorithm accounts for `289,406,976`
