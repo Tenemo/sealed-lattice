@@ -30,6 +30,7 @@ export const measurementRustTests = [
     'bgv::proof_suite::row_code_whir::primitive_measurements::tests::selected_authenticated_scratch_record_codec_emits_measurement',
     'bgv::proof_suite::row_code_whir::primitive_measurements::tests::selected_vss_checkpoint_opening_lane_dfts_emit_measurement',
     'bgv::proof_suite::row_code_whir::primitive_measurements::tests::selected_vss_production_weighted_source_replay_emits_measurement',
+    'bgv::proof_suite::row_code_whir::primitive_measurements::tests::vss_relation_replay_candidate_retained_group_emits_measurement',
 ] as const;
 
 export const phaseLivenessEvidenceRustTests = [

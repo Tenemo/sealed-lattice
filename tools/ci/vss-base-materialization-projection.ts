@@ -113,6 +113,7 @@ const scaleElapsedNanoseconds = (
 const projectPrimitiveOwners = (
     primitiveCases: readonly PrimitiveMeasurementRecord[],
     work: WorkCounts,
+    sourceReplayCaseIdentifier: 8 | 9,
 ): Readonly<{
     laneDftNanoseconds: number;
     leafHashNanoseconds: number;
@@ -125,7 +126,10 @@ const projectPrimitiveOwners = (
     const leafHash = requireCase(primitiveCases, 2);
     const privateLeafSalt = requireCase(primitiveCases, 3);
     const merkleParentHash = requireCase(primitiveCases, 4);
-    const sourceReplay = requireCase(primitiveCases, 8);
+    const sourceReplay = requireCase(
+        primitiveCases,
+        sourceReplayCaseIdentifier,
+    );
     const laneDftNanoseconds = scaleElapsedNanoseconds(
         laneDft.elapsedNanoseconds,
         work.laneDftCount,
@@ -146,18 +150,19 @@ const projectPrimitiveOwners = (
         work.merkleParentHashQueryCount,
         requireDimension(merkleParentHash, 'merkleParentHashCount'),
     );
-    const productionRecipeCount = requireDimension(
-        sourceReplay,
-        'productionRecipeCount',
-    );
-    const measuredSourceTraceValueGenerationCount =
-        productionRecipeCount *
-        requireDimension(sourceReplay, 'traceValueCount');
-    const sourceReplayNanoseconds = scaleElapsedNanoseconds(
-        sourceReplay.elapsedNanoseconds,
-        work.sourceTraceValueGenerationCount,
-        measuredSourceTraceValueGenerationCount,
-    );
+    const sourceReplayNanoseconds =
+        sourceReplayCaseIdentifier === 8
+            ? scaleElapsedNanoseconds(
+                  sourceReplay.elapsedNanoseconds,
+                  work.sourceTraceValueGenerationCount,
+                  requireDimension(sourceReplay, 'productionRecipeCount') *
+                      requireDimension(sourceReplay, 'traceValueCount'),
+              )
+            : scaleElapsedNanoseconds(
+                  sourceReplay.elapsedNanoseconds,
+                  work.sourceReplayCount,
+                  requireDimension(sourceReplay, 'retainedRecipeCount'),
+              );
     const totalNanoseconds = [
         laneDftNanoseconds,
         leafHashNanoseconds,
@@ -193,12 +198,14 @@ const assertCatalogCorrespondence = (
             nativeRecord.caseIdentifier === 5 ||
                 nativeRecord.caseIdentifier === 8
                 ? ['retainedInputByteLength']
-                : nativeRecord.caseIdentifier === 7
-                  ? [
-                        'lowerScheduleHeapByteLength',
-                        'higherScheduleHeapByteLength',
-                    ]
-                  : [],
+                : nativeRecord.caseIdentifier === 9
+                  ? ['retainedInputByteLength', 'retainedGroupHeaderByteLength']
+                  : nativeRecord.caseIdentifier === 7
+                    ? [
+                          'lowerScheduleHeapByteLength',
+                          'higherScheduleHeapByteLength',
+                      ]
+                    : [],
         );
         const dimensionsCorrespond =
             nativeRecord.dimensions.length ===
@@ -377,6 +384,7 @@ export const deriveVssBaseMaterializationProjection = (input: {
             currentTwoPassOwners: projectPrimitiveOwners(
                 target.primitiveCases,
                 currentWork,
+                8,
             ),
             target: target.target,
         }),
@@ -416,6 +424,7 @@ export const deriveVssBaseMaterializationProjection = (input: {
             const owners = projectPrimitiveOwners(
                 target.primitiveCases,
                 modeledCandidateWork,
+                9,
             );
             const currentProjection = currentTargetProjections[targetIndex];
             const currentOwners = currentProjection?.currentTwoPassOwners;
@@ -485,6 +494,7 @@ export const deriveVssBaseMaterializationProjection = (input: {
             const fixedOwners = projectPrimitiveOwners(
                 target.primitiveCases,
                 optimizedWork,
+                8,
             );
             const modeledCheckpointOpeningLaneDftNanoseconds =
                 checkpointLevel === modeledCheckpointLevel

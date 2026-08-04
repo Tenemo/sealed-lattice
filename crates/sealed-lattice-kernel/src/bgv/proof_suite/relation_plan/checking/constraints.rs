@@ -6,7 +6,6 @@ use crate::foundation::ProofApplicationSlotCeilings;
 
 use super::super::{
     bounds::SignedIntegerInterval,
-    committed_material::COMMITTED_MATERIAL_TRACE_PACKING_FACTOR,
     expressions::{
         RelationExpressionInstruction, canonical_nested_list, check_expression,
         compile_base_field_polynomial, evaluate_integer_interval, evaluate_polynomial,
@@ -339,8 +338,19 @@ impl RelationPlanChecker<'_> {
             .collect::<BTreeSet<_>>();
         let mut seen_batch_coordinates = BTreeSet::new();
         let mut matched_constraint_ordinals = BTreeSet::new();
-        let expected_identity_zeroifier =
-            packed_coefficient_local_identity_zeroifier(variant.trace_domain_size)?;
+        let first_identity_constraint = variant
+            .ordered_coefficient_local_identity_batches
+            .first()
+            .and_then(|batch| {
+                variant
+                    .ordered_constraints
+                    .get(batch.constraint_ordinal as usize)
+            })
+            .ok_or(RelationPlanError::InvalidConstraint)?;
+        let expected_identity_zeroifier = packed_coefficient_local_identity_zeroifier(
+            variant.trace_domain_size,
+            &first_identity_constraint.zeroifier_postfix_expression,
+        )?;
 
         for batch in &variant.ordered_coefficient_local_identity_batches {
             let modulus_ordinal = u16::try_from(
@@ -553,8 +563,14 @@ impl RelationPlanChecker<'_> {
         }
 
         let mut residuals_by_modulus = BTreeMap::<SuiteModulusReference, BTreeSet<Vec<u8>>>::new();
-        let expected_identity_zeroifier =
-            packed_coefficient_local_identity_zeroifier(variant.trace_domain_size)?;
+        let first_identity_constraint = deterministic_constraints
+            .first()
+            .map(|(_, constraint)| *constraint)
+            .ok_or(RelationPlanError::InvalidConstraint)?;
+        let expected_identity_zeroifier = packed_coefficient_local_identity_zeroifier(
+            variant.trace_domain_size,
+            &first_identity_constraint.zeroifier_postfix_expression,
+        )?;
         for (deterministic_ordinal, (_, constraint)) in
             deterministic_constraints.into_iter().enumerate()
         {
@@ -677,15 +693,26 @@ impl RelationPlanChecker<'_> {
 
 fn packed_coefficient_local_identity_zeroifier(
     trace_domain_size: u64,
+    zeroifier_postfix_expression: &[RelationExpressionInstruction],
 ) -> Result<Vec<RelationExpressionInstruction>, RelationPlanError> {
     // Coefficient-local identities hold on the logical-row subgroup, not on
     // every coset of the packed trace. The relation owner is the sole packing
     // authority, so the compiler and checker cannot silently drift apart.
-    if !trace_domain_size.is_multiple_of(COMMITTED_MATERIAL_TRACE_PACKING_FACTOR) {
-        return Err(RelationPlanError::InvalidConstraint);
-    }
-    let identity_domain_size = trace_domain_size / COMMITTED_MATERIAL_TRACE_PACKING_FACTOR;
-    if identity_domain_size == 0 || !identity_domain_size.is_power_of_two() {
+    let identity_domain_size = match zeroifier_postfix_expression {
+        [
+            RelationExpressionInstruction::EvaluationVariable,
+            RelationExpressionInstruction::NonnegativePower(identity_domain_size),
+            RelationExpressionInstruction::BaseFieldConstant(1),
+            RelationExpressionInstruction::Negation,
+            RelationExpressionInstruction::Addition,
+        ] => *identity_domain_size,
+        _ => return Err(RelationPlanError::InvalidConstraint),
+    };
+    if identity_domain_size == 0
+        || !identity_domain_size.is_power_of_two()
+        || !trace_domain_size.is_multiple_of(identity_domain_size)
+        || !(trace_domain_size / identity_domain_size).is_power_of_two()
+    {
         return Err(RelationPlanError::InvalidConstraint);
     }
     Ok(full_trace_zeroifier_expression(identity_domain_size))
@@ -755,11 +782,10 @@ pub(in crate::bgv::proof_suite::relation_plan) fn full_trace_zeroifier_expressio
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        COMMITTED_MATERIAL_TRACE_PACKING_FACTOR, full_trace_zeroifier_expression,
-        packed_coefficient_local_identity_zeroifier,
+    use super::{full_trace_zeroifier_expression, packed_coefficient_local_identity_zeroifier};
+    use crate::bgv::proof_suite::relation_plan::committed_material::{
+        COMMITTED_MATERIAL_TRACE_PACKING_FACTOR, CommittedMaterialRelationPlanInput,
     };
-    use crate::bgv::proof_suite::relation_plan::committed_material::CommittedMaterialRelationPlanInput;
 
     #[test]
     fn coefficient_local_zeroifier_uses_the_relation_owned_packing_factor() {
@@ -768,6 +794,7 @@ mod tests {
             evaluation_domain_size: 1_024,
             opening_degree_bound_exclusive: 512,
             material_column_degree_bound_exclusive: 10,
+            trace_packing_factor: COMMITTED_MATERIAL_TRACE_PACKING_FACTOR,
             participant_count: 3,
             threshold: 2,
             sharing_data_modulus_indices: vec![0],
@@ -783,10 +810,18 @@ mod tests {
             relation_trace_domain_size,
             message_trace_domain_size * COMMITTED_MATERIAL_TRACE_PACKING_FACTOR
         );
+        let zeroifier = full_trace_zeroifier_expression(message_trace_domain_size);
         assert_eq!(
-            packed_coefficient_local_identity_zeroifier(relation_trace_domain_size)
+            packed_coefficient_local_identity_zeroifier(relation_trace_domain_size, &zeroifier,)
                 .expect("packed coefficient-local zeroifier derives"),
-            full_trace_zeroifier_expression(message_trace_domain_size)
+            zeroifier
+        );
+        assert!(
+            packed_coefficient_local_identity_zeroifier(
+                relation_trace_domain_size,
+                &full_trace_zeroifier_expression(12),
+            )
+            .is_err()
         );
     }
 }

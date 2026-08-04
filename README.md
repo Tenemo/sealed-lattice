@@ -404,8 +404,11 @@ Works today:
   checkpoint and makes no root, transcript, proof-byte, or verifier-equivalence
   claim. The displayed owner total excludes the separately recorded checkpoint
   storage, codec, and boundary-copy time. The latest projection also combines
-  base and supplemental cases measured from two different WebAssembly binaries.
-  Its feature-scoped selected-output DFT is measured but not consumed by
+  base and supplemental cases measured from two different WebAssembly binaries;
+  the current evidence validator refuses that stitched catalog and requires one
+  complete native catalog plus complete Chromium and Firefox catalogs from one
+  reproducible WebAssembly binary. No such replacement browser catalog exists
+  yet. The feature-scoped selected-output DFT is measured but not consumed by
   production generation.
   A production-derived fast relation/replay model now first reproduces the
   current factor-four, width-eight plan and then enumerates power-of-two
@@ -418,10 +421,17 @@ Works today:
   `268,435,456` salted-leaf Keccak-f permutations, and `394,788,864` source
   trace-value generations. These counts are respectively about 10.44, 10.44,
   10.44, 8.5, and 95.71 times below the current repeated-replay schedule. The
-  `135,266,304`-byte retained coefficient-group buffer is one modeled
-  allocation, not a complete live-set bound. The comparator has no production
-  compiler, proof-size or transcript-parity result, same-build native/browser
-  measurement, or suite status and is not selected.
+  real relation compiler, checked interpreter, witness layout, and restartable
+  source provider now accept that factor-16 comparator without changing the
+  selected factor-four profile. A guarded release-native measurement retained
+  64 exact compiled recipe polynomials at their `264,192`-coefficient bound in
+  `1.5941774` seconds. It records `135,266,304` bytes of retained coefficient
+  payload and a `167,365,192`-byte measurement-owned modeled peak, with checksum
+  `81424b3d16d06e7f`; the guard completed without a memory violation. This is
+  not a complete phase live set, and the guard's cold-build process peak is not
+  a phase-memory measurement. The comparator still has no proof-size or
+  transcript-parity result, same-build browser measurement, production proof
+  integration, or suite status and is not selected.
   This is a primitive projection for one VSS base-materialization phase, not a
   full proof. Chromium is about 13.7 times and Firefox about 71.7 times the
   20-minute complete-setup planning target before the rest of setup, so relation

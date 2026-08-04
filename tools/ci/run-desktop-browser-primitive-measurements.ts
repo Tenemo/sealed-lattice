@@ -70,7 +70,7 @@ export const parseDesktopBrowserPrimitiveMeasurementArguments = (
     }
     const browserEngine: SupportedBrowserEngine =
         browserEngineArgument === 'chromium' ? 'chromium' : 'firefox';
-    const focusedCaseMatch = /^case-(5|8)$/u.exec(
+    const focusedCaseMatch = /^case-(5|8|9)$/u.exec(
         argumentsWithoutSeparator[1] ?? '',
     );
     if (focusedCaseMatch !== null) {
@@ -100,7 +100,7 @@ export const parseDesktopBrowserPrimitiveMeasurementArguments = (
             argumentsWithoutSeparator[1] !== 'reuse-wasm')
     ) {
         throw new Error(
-            'The desktop-browser primitive-measurement runner accepts chromium or firefox with an optional authenticated-storage, boundary-copies, case-5, case-8, or reuse-wasm selector.',
+            'The desktop-browser primitive-measurement runner accepts chromium or firefox with an optional authenticated-storage, boundary-copies, case-5, case-8, case-9, or reuse-wasm selector.',
         );
     }
     return Object.freeze({

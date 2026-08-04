@@ -86,15 +86,6 @@ export type DesktopBrowserPrimitiveMeasurementEvidence = Readonly<{
     storage: DesktopBrowserAuthenticatedStorageMeasurement;
 }>;
 
-export type DesktopBrowserPrimitiveMeasurementBaseEvidence = Readonly<{
-    boundaryCopies: DesktopBrowserBoundaryCopyMeasurement;
-    browserEngine: 'chromium' | 'firefox';
-    browserUserAgent: string;
-    primitiveCases: readonly DesktopBrowserPrimitiveCaseMeasurement[];
-    schemaVersion: 1;
-    storage: DesktopBrowserAuthenticatedStorageMeasurement;
-}>;
-
 export type ReleaseNativePrimitiveMeasurementEvidence = Readonly<{
     primitiveCases: readonly PrimitiveMeasurementRecord[];
     schemaVersion: 1;
@@ -107,12 +98,6 @@ export type DesktopBrowserPrimitiveMeasurementBundle = Readonly<{
         normalizedSha256Hex: string;
         rawSha256Hex: string;
     }>;
-    schemaVersion: 1;
-}>;
-
-export type DesktopBrowserPrimitiveMeasurementBaseBundle = Readonly<{
-    browserEvidence: readonly DesktopBrowserPrimitiveMeasurementBaseEvidence[];
-    measurementWasm: DesktopBrowserPrimitiveMeasurementBundle['measurementWasm'];
     schemaVersion: 1;
 }>;
 
@@ -266,14 +251,23 @@ export const primitiveMeasurementCaseCatalog = Object.freeze([
             traceValueCount: 65_536,
         }),
     }),
-] as const);
-
-export const primitiveMeasurementBaseCaseIdentifiers = Object.freeze([
-    1, 2, 3, 4, 6, 7,
-] as const);
-
-export const primitiveMeasurementSupplementalCaseIdentifiers = Object.freeze([
-    5, 8,
+    Object.freeze({
+        caseIdentifier: 9,
+        caseName: 'vss-relation-replay-candidate-retained-group',
+        expectedIterationCount: 1,
+        requiredDimensions: Object.freeze({
+            logicalRowChunkByteLength: 16_777_216,
+            physicalRowWidth: 64,
+            productionRecipeCount: 753,
+            proverColumnDegreeBoundExclusive: 264_192,
+            relationPlanHashByteLength: 64,
+            replayBufferByteLength: 2_097_152,
+            retainedCoefficientPayloadByteLength: 135_266_304,
+            retainedRecipeCount: 64,
+            tracePackingFactor: 16,
+            traceValueCount: 262_144,
+        }),
+    }),
 ] as const);
 
 type JsonObject = Record<string, unknown>;
@@ -825,6 +819,48 @@ export const validatePrimitiveMeasurementRecord = (
             );
         }
     }
+    if (caseIdentifier === 9) {
+        const retainedInputByteLength = requireSafeUnsignedInteger(
+            dimensionsByName.get('retainedInputByteLength'),
+            'Primitive measurement retainedInputByteLength',
+        );
+        const retainedGroupHeaderByteLength = requireSafeUnsignedInteger(
+            dimensionsByName.get('retainedGroupHeaderByteLength'),
+            'Primitive measurement retainedGroupHeaderByteLength',
+        );
+        const traceValueCount = dimensionsByName.get('traceValueCount')!;
+        const degreeBound = dimensionsByName.get(
+            'proverColumnDegreeBoundExclusive',
+        )!;
+        const retainedRecipeCount = dimensionsByName.get(
+            'retainedRecipeCount',
+        )!;
+        const physicalRowWidth = dimensionsByName.get('physicalRowWidth')!;
+        const replayBufferByteLength = dimensionsByName.get(
+            'replayBufferByteLength',
+        )!;
+        const retainedCoefficientPayloadByteLength = dimensionsByName.get(
+            'retainedCoefficientPayloadByteLength',
+        )!;
+        if (
+            retainedRecipeCount !== physicalRowWidth ||
+            replayBufferByteLength !== traceValueCount * 8 ||
+            retainedCoefficientPayloadByteLength !==
+                retainedRecipeCount * degreeBound * 8 ||
+            dimensionsByName.get('logicalRowChunkByteLength') !==
+                physicalRowWidth * 32_768 * 8 ||
+            modeledPeakLiveByteLength !==
+                retainedInputByteLength +
+                    retainedCoefficientPayloadByteLength +
+                    replayBufferByteLength +
+                    retainedGroupHeaderByteLength ||
+            modeledPeakLiveByteLength >= 671_088_640
+        ) {
+            throw new Error(
+                'Primitive measurement VSS retained-group identities are inconsistent.',
+            );
+        }
+    }
 
     const iterationCount = requireSafeUnsignedInteger(
         value.iterationCount,
@@ -873,11 +909,13 @@ export const requireCompletePrimitiveMeasurementCatalog = (
     const selectedVssRecord = records[4];
     const modeledCheckpointDftRecord = records[6];
     const productionWeightedSourceReplayRecord = records[7];
+    const retainedGroupCandidateRecord = records[8];
     if (
         saltedLeafRecord === undefined ||
         selectedVssRecord === undefined ||
         modeledCheckpointDftRecord === undefined ||
-        productionWeightedSourceReplayRecord === undefined
+        productionWeightedSourceReplayRecord === undefined ||
+        retainedGroupCandidateRecord === undefined
     ) {
         throw new Error('Primitive measurement catalog work ledger is absent.');
     }
@@ -901,6 +939,12 @@ export const requireCompletePrimitiveMeasurementCatalog = (
     );
     const productionWeightedSourceReplayDimensions = new Map(
         productionWeightedSourceReplayRecord.dimensions.map((dimension) => [
+            dimension.name,
+            dimension.value,
+        ]),
+    );
+    const retainedGroupCandidateDimensions = new Map(
+        retainedGroupCandidateRecord.dimensions.map((dimension) => [
             dimension.name,
             dimension.value,
         ]),
@@ -961,6 +1005,33 @@ export const requireCompletePrimitiveMeasurementCatalog = (
         throw new Error(
             'Primitive measurement source-replay catalogs are inconsistent.',
         );
+    }
+    for (const [modeledDimensionName, measuredDimensionName] of [
+        ['modeledCandidateTracePackingFactor', 'tracePackingFactor'],
+        ['modeledCandidatePhysicalRowWidth', 'physicalRowWidth'],
+        ['modeledCandidateRelationTraceValueCount', 'traceValueCount'],
+        ['modeledCandidateProverColumnCount', 'productionRecipeCount'],
+        [
+            'modeledCandidateProverColumnDegreeBoundExclusive',
+            'proverColumnDegreeBoundExclusive',
+        ],
+        [
+            'modeledCandidateRetainedCoefficientGroupByteLength',
+            'retainedCoefficientPayloadByteLength',
+        ],
+        [
+            'modeledCandidateLogicalRowChunkByteLength',
+            'logicalRowChunkByteLength',
+        ],
+    ] as const) {
+        if (
+            selectedVssDimensions.get(modeledDimensionName) !==
+            retainedGroupCandidateDimensions.get(measuredDimensionName)
+        ) {
+            throw new Error(
+                'Primitive measurement retained-group candidate disagrees with the modeled relation geometry.',
+            );
+        }
     }
 };
 
@@ -1470,180 +1541,6 @@ export const validateDesktopBrowserPrimitiveMeasurementEvidence = (
     });
 };
 
-export const validateDesktopBrowserPrimitiveMeasurementBaseEvidence = (
-    value: unknown,
-    expectedBrowserEngine?: 'chromium' | 'firefox',
-): DesktopBrowserPrimitiveMeasurementBaseEvidence => {
-    if (!isJsonObject(value)) {
-        throw new Error(
-            'Desktop-browser primitive base evidence is not an object.',
-        );
-    }
-    requireExactKeys(
-        value,
-        [
-            'boundaryCopies',
-            'browserEngine',
-            'browserUserAgent',
-            'primitiveCases',
-            'schemaVersion',
-            'storage',
-        ],
-        'Desktop-browser primitive base evidence',
-    );
-    if (value.schemaVersion !== 1 || !Array.isArray(value.primitiveCases)) {
-        throw new Error(
-            'Desktop-browser primitive base evidence has an invalid schema.',
-        );
-    }
-    const browserIdentity = validateBrowserIdentity(
-        value,
-        expectedBrowserEngine,
-    );
-    if (value.primitiveCases.length !== 7) {
-        throw new Error(
-            'Desktop-browser primitive base cases lack the preserved seven-case framing.',
-        );
-    }
-    const primitiveCases = value.primitiveCases.flatMap(
-        (rawCase, caseIndex) => {
-            if (caseIndex !== 4) {
-                return [
-                    validateDesktopBrowserPrimitiveCaseMeasurement(rawCase),
-                ];
-            }
-            if (!isJsonObject(rawCase)) {
-                throw new Error(
-                    'Excluded stale primitive case 5 is not an object.',
-                );
-            }
-            requireExactKeys(
-                rawCase,
-                [
-                    'record',
-                    'wallElapsedMilliseconds',
-                    'wasmMemoryByteLengthAfter',
-                    'wasmMemoryByteLengthBefore',
-                ],
-                'Excluded stale primitive case 5',
-            );
-            if (!isJsonObject(rawCase.record)) {
-                throw new Error(
-                    'Excluded stale primitive case 5 record is absent.',
-                );
-            }
-            requireExactKeys(
-                rawCase.record,
-                [
-                    'caseIdentifier',
-                    'caseName',
-                    'checksumHex',
-                    'dimensions',
-                    'elapsedNanoseconds',
-                    'executionTarget',
-                    'iterationCount',
-                    'modeledPeakLiveByteLength',
-                    'schemaVersion',
-                ],
-                'Excluded stale primitive case 5 record',
-            );
-            if (
-                rawCase.record.caseIdentifier !== 5 ||
-                rawCase.record.caseName !== 'selected-vss-source-replay' ||
-                rawCase.record.executionTarget !== 'wasm32-unknown-unknown' ||
-                rawCase.record.schemaVersion !== 2
-            ) {
-                throw new Error(
-                    'Excluded stale primitive case 5 has the wrong identity.',
-                );
-            }
-            return [];
-        },
-    );
-    const caseIdentifiers = primitiveCases.map(
-        (measurement) => measurement.record.caseIdentifier,
-    );
-    if (
-        caseIdentifiers.length !==
-            primitiveMeasurementBaseCaseIdentifiers.length ||
-        caseIdentifiers.some(
-            (caseIdentifier, caseIndex) =>
-                caseIdentifier !==
-                primitiveMeasurementBaseCaseIdentifiers[caseIndex],
-        )
-    ) {
-        throw new Error(
-            'Desktop-browser primitive base cases are incomplete, duplicated, or reordered.',
-        );
-    }
-    const scratchCodec = primitiveCases.find(
-        (measurement) => measurement.record.caseIdentifier === 6,
-    );
-    const expectedRecordByteLength = scratchCodec?.record.dimensions.find(
-        (dimension) => dimension.name === 'canonicalEnvelopeByteLength',
-    )?.value;
-    if (expectedRecordByteLength === undefined) {
-        throw new Error(
-            'Desktop-browser primitive base scratch-record extent is absent.',
-        );
-    }
-    return Object.freeze({
-        boundaryCopies: validateDesktopBrowserBoundaryCopyMeasurement(
-            value.boundaryCopies,
-            expectedRecordByteLength,
-        ),
-        ...browserIdentity,
-        primitiveCases: Object.freeze(primitiveCases),
-        schemaVersion: 1,
-        storage: validateDesktopBrowserAuthenticatedStorageMeasurement(
-            value.storage,
-            expectedRecordByteLength,
-        ),
-    });
-};
-
-export const assembleDesktopBrowserPrimitiveMeasurementEvidence = (input: {
-    baseEvidence: DesktopBrowserPrimitiveMeasurementBaseEvidence;
-    supplementalEvidence: readonly DesktopBrowserFocusedPrimitiveMeasurementEvidence[];
-}): DesktopBrowserPrimitiveMeasurementEvidence => {
-    if (
-        input.supplementalEvidence.length !==
-            primitiveMeasurementSupplementalCaseIdentifiers.length ||
-        input.supplementalEvidence.some(
-            (evidence, evidenceIndex) =>
-                evidence.browserEngine !== input.baseEvidence.browserEngine ||
-                evidence.primitiveCase.record.caseIdentifier !==
-                    primitiveMeasurementSupplementalCaseIdentifiers[
-                        evidenceIndex
-                    ],
-        )
-    ) {
-        throw new Error(
-            'Desktop-browser primitive evidence cannot combine different engines or incomplete, duplicated, or reordered supplements.',
-        );
-    }
-    const primitiveCases = [
-        ...input.baseEvidence.primitiveCases,
-        ...input.supplementalEvidence.map((evidence) => evidence.primitiveCase),
-    ].sort(
-        (left, right) =>
-            left.record.caseIdentifier - right.record.caseIdentifier,
-    );
-    return validateDesktopBrowserPrimitiveMeasurementEvidence(
-        {
-            boundaryCopies: input.baseEvidence.boundaryCopies,
-            browserEngine: input.baseEvidence.browserEngine,
-            browserUserAgent:
-                input.supplementalEvidence[0]?.browserUserAgent ??
-                input.baseEvidence.browserUserAgent,
-            primitiveCases,
-            schemaVersion: 1,
-            storage: input.baseEvidence.storage,
-        },
-        input.baseEvidence.browserEngine,
-    );
-};
-
 const validateMeasurementWasmIdentity = (
     value: unknown,
 ): DesktopBrowserPrimitiveMeasurementBundle['measurementWasm'] => {
@@ -1723,37 +1620,6 @@ export const validateDesktopBrowserPrimitiveMeasurementBundle = (
     return Object.freeze({
         browserEvidence: Object.freeze(browserEvidence),
         measurementWasm,
-        schemaVersion: 1,
-    });
-};
-
-export const validateDesktopBrowserPrimitiveMeasurementBaseBundle = (
-    value: unknown,
-): DesktopBrowserPrimitiveMeasurementBaseBundle => {
-    if (!isJsonObject(value)) {
-        throw new Error(
-            'Desktop-browser primitive-measurement base bundle is not an object.',
-        );
-    }
-    requireExactKeys(
-        value,
-        ['browserEvidence', 'measurementWasm', 'schemaVersion'],
-        'Desktop-browser primitive-measurement base bundle',
-    );
-    if (value.schemaVersion !== 1 || !Array.isArray(value.browserEvidence)) {
-        throw new Error(
-            'Desktop-browser primitive-measurement base bundle has an invalid schema.',
-        );
-    }
-    const browserEvidence = value.browserEvidence.map((evidence) =>
-        validateDesktopBrowserPrimitiveMeasurementBaseEvidence(evidence),
-    );
-    requireCanonicalBrowserEngineOrder(
-        browserEvidence.map((evidence) => evidence.browserEngine),
-    );
-    return Object.freeze({
-        browserEvidence: Object.freeze(browserEvidence),
-        measurementWasm: validateMeasurementWasmIdentity(value.measurementWasm),
         schemaVersion: 1,
     });
 };

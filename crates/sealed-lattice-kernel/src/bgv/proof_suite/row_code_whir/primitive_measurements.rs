@@ -59,6 +59,7 @@ const PRIVATE_SALT_ITERATION_COUNT: usize = 4_096;
 const FIVE_LEVEL_CARRY_ITERATION_COUNT: usize = 32_768;
 const SOURCE_REPLAY_ITERATION_COUNT: usize = 4;
 const PRODUCTION_WEIGHTED_SOURCE_REPLAY_ITERATION_COUNT: usize = 1;
+const VSS_RELATION_REPLAY_CANDIDATE_RETAINED_GROUP_WIDTH: usize = 64;
 const AUTHENTICATED_SCRATCH_RECORD_ITERATION_COUNT: usize = 8;
 const SELECTED_CHECKPOINT_LEVEL: u32 = 2;
 
@@ -618,18 +619,18 @@ fn derive_vss_relation_replay_candidate_ledger(
         .ok_or_else(|| "VSS candidate relation context is absent".to_owned())?;
     let relation_input = selected_committed_material_relation_plan_input()
         .map_err(|_| "VSS candidate relation input is invalid".to_owned())?;
-    let relation = derive_vss_relation_packing_candidate_geometry(
-        &relation_input,
-        &relation_context,
-        trace_packing_factor,
-    )
-    .map_err(|_| "VSS candidate relation packing does not derive".to_owned())?;
     let logical_polynomial_coefficient_count =
         u64::try_from(ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT)
             .map_err(|_| "VSS candidate coefficient count exceeds u64".to_owned())?;
     let opening_degree_bound_exclusive = logical_polynomial_coefficient_count
         .checked_mul(logical_polynomials_per_physical_row)
         .ok_or_else(|| "VSS candidate opening degree bound overflowed".to_owned())?;
+    let relation = derive_vss_relation_packing_candidate_geometry(
+        &relation_input,
+        &relation_context,
+        trace_packing_factor,
+    )
+    .map_err(|_| "VSS candidate relation packing does not derive".to_owned())?;
     if relation.prover_column_degree_bound_exclusive > opening_degree_bound_exclusive
         || relation.maximum_range_constraint_numerator_degree >= opening_degree_bound_exclusive
         || relation_input.material_column_degree_bound_exclusive > opening_degree_bound_exclusive
@@ -1400,6 +1401,98 @@ fn measure_selected_vss_production_weighted_source_replay()
     })
 }
 
+fn measure_vss_relation_replay_candidate_retained_group()
+-> Result<PrimitiveMeasurementRecord, String> {
+    let candidate = derive_vss_relation_replay_candidate_ledger(16, 64)?
+        .ok_or_else(|| "VSS retained-group candidate does not fit its opening bound".to_owned())?;
+    let measurement = SelectedVssSourceReplayMeasurement::prepare_relation_replay_candidate(
+        candidate.trace_packing_factor,
+        candidate.opening_degree_bound_exclusive,
+    )?;
+    let retained_recipe_count = VSS_RELATION_REPLAY_CANDIDATE_RETAINED_GROUP_WIDTH;
+    let retained_input_byte_length = measurement.retained_input_byte_length()?;
+    let prover_column_degree_bound_exclusive =
+        u64::try_from(measurement.prover_column_degree_bound_exclusive())
+            .map_err(|_| "VSS retained-group degree bound exceeds u64".to_owned())?;
+    let replay_buffer_byte_length = u64::try_from(measurement.trace_value_count())
+        .ok()
+        .and_then(|count| count.checked_mul(size_of::<ProofBaseFieldElement>() as u64))
+        .ok_or_else(|| "VSS retained-group replay buffer size overflowed".to_owned())?;
+    let retained_group_header_byte_length = u64::try_from(retained_recipe_count)
+        .ok()
+        .and_then(|count| {
+            count.checked_mul(size_of::<Zeroizing<Vec<ProofBaseFieldElement>>>() as u64)
+        })
+        .ok_or_else(|| "VSS retained-group header size overflowed".to_owned())?;
+    if measurement.trace_packing_factor() != candidate.trace_packing_factor
+        || measurement.trace_value_count()
+            != usize::try_from(candidate.relation_trace_domain_size)
+                .map_err(|_| "VSS retained-group trace size exceeds usize".to_owned())?
+        || measurement.production_recipe_count()
+            != usize::try_from(candidate.prover_column_count)
+                .map_err(|_| "VSS retained-group recipe count exceeds usize".to_owned())?
+        || prover_column_degree_bound_exclusive != candidate.prover_column_degree_bound_exclusive
+        || u64::try_from(retained_recipe_count).ok().and_then(|width| {
+            width
+                .checked_mul(prover_column_degree_bound_exclusive)
+                .and_then(|count| count.checked_mul(size_of::<ProofBaseFieldElement>() as u64))
+        }) != Some(candidate.retained_coefficient_group_byte_length)
+    {
+        return Err("VSS retained-group candidate disagrees with the compiler".to_owned());
+    }
+    let (checksum, elapsed_nanoseconds) = measure_elapsed_nanoseconds(|| {
+        measurement.materialize_retained_recipe_group_once(retained_recipe_count)
+    })?;
+    black_box(checksum);
+    let modeled_peak_live_byte_length = retained_input_byte_length
+        .checked_add(candidate.retained_coefficient_group_byte_length)
+        .and_then(|value| value.checked_add(replay_buffer_byte_length))
+        .and_then(|value| value.checked_add(retained_group_header_byte_length))
+        .ok_or_else(|| "VSS retained-group owned live set overflowed".to_owned())?;
+    Ok(PrimitiveMeasurementRecord {
+        schema_version: MEASUREMENT_SCHEMA_VERSION,
+        case_identifier: 9,
+        case_name: "vss-relation-replay-candidate-retained-group",
+        execution_target: execution_target(),
+        iteration_count: 1,
+        elapsed_nanoseconds,
+        modeled_peak_live_byte_length,
+        checksum_hex: format!("{checksum:016x}"),
+        dimensions: vec![
+            dimension_u64("tracePackingFactor", candidate.trace_packing_factor),
+            dimension_u64("physicalRowWidth", 64),
+            dimension_u64("traceValueCount", candidate.relation_trace_domain_size),
+            dimension_u64(
+                "proverColumnDegreeBoundExclusive",
+                candidate.prover_column_degree_bound_exclusive,
+            ),
+            dimension_u64("productionRecipeCount", candidate.prover_column_count),
+            dimension("retainedRecipeCount", retained_recipe_count)?,
+            dimension_u64(
+                "retainedCoefficientPayloadByteLength",
+                candidate.retained_coefficient_group_byte_length,
+            ),
+            dimension_u64("replayBufferByteLength", replay_buffer_byte_length),
+            dimension_u64(
+                "retainedGroupHeaderByteLength",
+                retained_group_header_byte_length,
+            ),
+            PrimitiveMeasurementDimension {
+                name: "retainedInputByteLength",
+                value: retained_input_byte_length,
+            },
+            dimension_u64(
+                "logicalRowChunkByteLength",
+                candidate.logical_row_chunk_byte_length,
+            ),
+            dimension(
+                "relationPlanHashByteLength",
+                measurement.relation_plan_hash().len(),
+            )?,
+        ],
+    })
+}
+
 fn measure_authenticated_scratch_record_codec() -> Result<PrimitiveMeasurementRecord, String> {
     let mut plaintext = Vec::new();
     plaintext
@@ -1460,6 +1553,7 @@ fn derive_primitive_measurement(
         6 => measure_authenticated_scratch_record_codec(),
         7 => measure_selected_vss_checkpoint_opening_lane_dfts(),
         8 => measure_selected_vss_production_weighted_source_replay(),
+        9 => measure_vss_relation_replay_candidate_retained_group(),
         _ => Err("primitive measurement case is unsupported".to_owned()),
     }
 }
@@ -1628,6 +1722,66 @@ mod tests {
             modeled.salted_leaf_keccak_permutation_count * 8
                 <= production_work.salted_leaf_keccak_permutation_count
         );
+
+        let selected_plan_hash = SelectedVssSourceReplayMeasurement::prepare()
+            .expect("the selected VSS replay source prepares")
+            .relation_plan_hash();
+        let compiled_candidate =
+            SelectedVssSourceReplayMeasurement::prepare_relation_replay_candidate(
+                modeled.trace_packing_factor,
+                modeled.opening_degree_bound_exclusive,
+            )
+            .expect("the modeled VSS compiler and replay source agree");
+        assert_eq!(
+            compiled_candidate.trace_packing_factor(),
+            modeled.trace_packing_factor
+        );
+        assert_eq!(
+            compiled_candidate.trace_value_count(),
+            usize::try_from(modeled.relation_trace_domain_size)
+                .expect("the modeled trace count fits usize")
+        );
+        assert_eq!(
+            compiled_candidate.production_recipe_count(),
+            usize::try_from(modeled.prover_column_count)
+                .expect("the modeled prover-column count fits usize")
+        );
+        assert_ne!(compiled_candidate.relation_plan_hash(), selected_plan_hash);
+        let first_replay = compiled_candidate
+            .replay_once()
+            .expect("the modeled VSS source replays");
+        let second_replay = compiled_candidate
+            .replay_once()
+            .expect("the modeled VSS source replay is restartable");
+        assert_eq!(first_replay, second_replay);
+        assert!(first_replay.iter().any(|value| value.canonical() != 0));
+        assert!(
+            compiled_candidate
+                .materialize_retained_recipe_group_once(0)
+                .is_err(),
+            "an empty retained recipe group refuses"
+        );
+        assert!(
+            compiled_candidate
+                .materialize_retained_recipe_group_once(
+                    compiled_candidate.production_recipe_count() + 1,
+                )
+                .is_err(),
+            "a retained recipe group wider than the compiled catalog refuses"
+        );
+        assert!(
+            SelectedVssSourceReplayMeasurement::prepare_relation_replay_candidate(16, 262_144)
+                .is_err(),
+            "the wider relation refuses the selected width-eight opening bound"
+        );
+        assert!(
+            SelectedVssSourceReplayMeasurement::prepare_relation_replay_candidate(
+                3,
+                modeled.opening_degree_bound_exclusive,
+            )
+            .is_err(),
+            "a non-power-of-two trace packing factor refuses"
+        );
     }
 
     #[test]
@@ -1676,5 +1830,11 @@ mod tests {
     #[ignore = "guarded release-native production-weighted VSS source-replay measurement"]
     fn selected_vss_production_weighted_source_replay_emits_measurement() {
         run_and_validate(8, "selected-vss-production-weighted-source-replay");
+    }
+
+    #[test]
+    #[ignore = "guarded release-native VSS relation-replay candidate retained-group measurement"]
+    fn vss_relation_replay_candidate_retained_group_emits_measurement() {
+        run_and_validate(9, "vss-relation-replay-candidate-retained-group");
     }
 }

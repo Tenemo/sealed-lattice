@@ -35,6 +35,7 @@ pub(crate) struct CommittedMaterialRelationPlanInput {
     pub(crate) evaluation_domain_size: u64,
     pub(crate) opening_degree_bound_exclusive: u64,
     pub(crate) material_column_degree_bound_exclusive: u64,
+    pub(crate) trace_packing_factor: u64,
     pub(crate) participant_count: u16,
     pub(crate) threshold: u16,
     pub(crate) sharing_data_modulus_indices: Vec<u16>,
@@ -51,7 +52,7 @@ impl CommittedMaterialRelationPlanInput {
 
     pub(crate) fn relation_trace_domain_size(&self) -> Result<u64, RelationPlanError> {
         self.message_trace_domain_size()?
-            .checked_mul(COMMITTED_MATERIAL_TRACE_PACKING_FACTOR)
+            .checked_mul(self.trace_packing_factor)
             .ok_or(RelationPlanError::InvalidDomain)
     }
 
@@ -97,6 +98,8 @@ impl CommittedMaterialRelationPlanInput {
             crate::foundation::derive_foundation_roster_parameters(self.participant_count)
                 .ok_or(RelationPlanError::InvalidDomain)?;
         if !self.ring_degree.is_power_of_two()
+            || self.trace_packing_factor == 0
+            || !self.trace_packing_factor.is_power_of_two()
             || self.threshold != roster_parameters.reconstruction_threshold
             || self.sharing_data_modulus_indices.is_empty()
             || !strictly_sorted_unique(&self.sharing_data_modulus_indices)
@@ -147,12 +150,10 @@ pub(crate) fn derive_vss_relation_packing_candidate_geometry(
         return Err(RelationPlanError::InvalidDomain);
     }
     let resolved_moduli = input.validate(context)?;
-    let message_trace_domain_size = input.message_trace_domain_size()?;
-    let relation_trace_domain_size = message_trace_domain_size
+    let relation_trace_domain_size = input
+        .message_trace_domain_size()?
         .checked_mul(trace_packing_factor)
-        .filter(|domain_size| {
-            *domain_size > 0 && input.evaluation_domain_size.is_multiple_of(*domain_size)
-        })
+        .filter(|domain_size| input.evaluation_domain_size.is_multiple_of(*domain_size))
         .ok_or(RelationPlanError::InvalidDomain)?;
     let prover_column_degree_bound_exclusive = relation_trace_domain_size
         .checked_add(input.trace_mask_degree_bound_exclusive)
@@ -643,7 +644,9 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
             minimum_unsigned_ternary_digit_count(maximum_digits[1]);
         let mut messages = Vec::with_capacity(ordered_roots.len());
 
-        for root_group in ordered_roots.chunks(COMMITTED_MATERIAL_TRACE_PACKING_FACTOR as usize) {
+        let trace_packing_factor = usize::try_from(self.geometry.trace_packing_factor)
+            .map_err(|_| RelationPlanError::CountOverflow)?;
+        for root_group in ordered_roots.chunks(trace_packing_factor) {
             let mut bound_columns_by_lane = Vec::<[u32; 4]>::with_capacity(root_group.len());
             for (logical_root_ordinal, root_use) in root_group.iter().copied() {
                 let source_ordinal = self
@@ -699,7 +702,7 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
                     vec![low_digit_column, high_digit_column];
             }
 
-            for packed_lane_ordinal in 0..COMMITTED_MATERIAL_TRACE_PACKING_FACTOR {
+            for packed_lane_ordinal in 0..self.geometry.trace_packing_factor {
                 self.used_rotations.insert((false, packed_lane_ordinal));
                 if let Some(bound_columns) = bound_columns_by_lane.get(
                     usize::try_from(packed_lane_ordinal)
@@ -749,9 +752,9 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
         }
         let ternary_digit_count = minimum_unsigned_ternary_digit_count(required_maximum);
         let mut quotients = Vec::with_capacity(quotient_count);
-        for group_start in
-            (0..quotient_count).step_by(COMMITTED_MATERIAL_TRACE_PACKING_FACTOR as usize)
-        {
+        let trace_packing_factor = usize::try_from(self.geometry.trace_packing_factor)
+            .map_err(|_| RelationPlanError::CountOverflow)?;
+        for group_start in (0..quotient_count).step_by(trace_packing_factor) {
             let target = self.push_prover_column()?;
             let digits = self.add_ternary_digit_columns(ternary_digit_count)?;
             self.certify_unsigned_recomposition(target, &digits)?;
@@ -784,9 +787,9 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
         let offset = (ternary_capacity - 1) / 2;
         let offset_magnitude = BigUint::from(offset);
         let mut quotients = Vec::with_capacity(quotient_count);
-        for group_start in
-            (0..quotient_count).step_by(COMMITTED_MATERIAL_TRACE_PACKING_FACTOR as usize)
-        {
+        let trace_packing_factor = usize::try_from(self.geometry.trace_packing_factor)
+            .map_err(|_| RelationPlanError::CountOverflow)?;
+        for group_start in (0..quotient_count).step_by(trace_packing_factor) {
             let target = self.push_prover_column()?;
             let digits = self.add_ternary_digit_columns(ternary_digit_count)?;
             let expression = radix_recomposition_expression(
@@ -823,9 +826,10 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
         total_count: usize,
     ) -> Result<(), RelationPlanError> {
         let remaining_count = total_count.saturating_sub(group_start);
-        let actual_lane_count =
-            remaining_count.min(COMMITTED_MATERIAL_TRACE_PACKING_FACTOR as usize);
-        for packed_lane_ordinal in 0..COMMITTED_MATERIAL_TRACE_PACKING_FACTOR {
+        let trace_packing_factor = usize::try_from(self.geometry.trace_packing_factor)
+            .map_err(|_| RelationPlanError::CountOverflow)?;
+        let actual_lane_count = remaining_count.min(trace_packing_factor);
+        for packed_lane_ordinal in 0..self.geometry.trace_packing_factor {
             self.used_rotations.insert((false, packed_lane_ordinal));
             if usize::try_from(packed_lane_ordinal).map_err(|_| RelationPlanError::CountOverflow)?
                 < actual_lane_count
@@ -1005,7 +1009,7 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
             .ok_or(RelationPlanError::InvalidConstraint)?;
         let relation_trace_domain_size = self.geometry.relation_trace_domain_size()?;
         let packed_rotation_magnitude = message_row_rotation_magnitude
-            .checked_mul(COMMITTED_MATERIAL_TRACE_PACKING_FACTOR)
+            .checked_mul(self.geometry.trace_packing_factor)
             .and_then(|rotation| rotation.checked_add(message.packed_lane_ordinal))
             .filter(|rotation| *rotation < relation_trace_domain_size)
             .ok_or(RelationPlanError::InvalidConstraint)?;
@@ -1051,11 +1055,11 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
         let transition_row = message_trace_domain_size - row_shift - 1;
         let last_row = message_trace_domain_size - 1;
         self.used_rotations
-            .insert((false, COMMITTED_MATERIAL_TRACE_PACKING_FACTOR));
+            .insert((false, self.geometry.trace_packing_factor));
         let difference = subtract_rotated_columns(
             selector,
             false,
-            COMMITTED_MATERIAL_TRACE_PACKING_FACTOR,
+            self.geometry.trace_packing_factor,
             selector,
             false,
             0,
@@ -1530,6 +1534,7 @@ impl CommittedMaterialColumnRecipe {
 #[derive(Clone, Copy, Debug)]
 struct CommittedMaterialTraceWitnessInput {
     ring_degree: u64,
+    trace_packing_factor: u64,
     participant_count: u16,
     threshold: u16,
 }
@@ -1538,6 +1543,7 @@ impl CommittedMaterialTraceWitnessInput {
     const fn from_relation_input(input: &CommittedMaterialRelationPlanInput) -> Self {
         Self {
             ring_degree: input.ring_degree,
+            trace_packing_factor: input.trace_packing_factor,
             participant_count: input.participant_count,
             threshold: input.threshold,
         }
@@ -1552,7 +1558,7 @@ impl CommittedMaterialTraceWitnessInput {
 
     fn relation_trace_domain_size(self) -> Result<u64, RelationPlanError> {
         self.message_trace_domain_size()?
-            .checked_mul(COMMITTED_MATERIAL_TRACE_PACKING_FACTOR)
+            .checked_mul(self.trace_packing_factor)
             .ok_or(RelationPlanError::InvalidDomain)
     }
 
@@ -1904,7 +1910,7 @@ impl<Source: CommittedMaterialTraceSource> CommittedMaterialTraceWitnessProvider
                 let trace_domain_size = self.input.message_trace_domain_size()?;
                 let message_row_ordinal = u64::try_from(row_ordinal)
                     .map_err(|_| RelationPlanError::CountOverflow)?
-                    / COMMITTED_MATERIAL_TRACE_PACKING_FACTOR;
+                    / self.input.trace_packing_factor;
                 i128::from(message_row_ordinal >= trace_domain_size - row_shift)
             }
         };
@@ -1947,13 +1953,13 @@ impl<Source: CommittedMaterialTraceSource> CommittedMaterialTraceWitnessProvider
             CommittedMaterialIntegerRecipe::Packed {
                 ordered_lane_sources,
             } => {
-                if ordered_lane_sources.len() != COMMITTED_MATERIAL_TRACE_PACKING_FACTOR as usize {
+                let trace_packing_factor = usize::try_from(self.input.trace_packing_factor)
+                    .map_err(|_| RelationPlanError::CountOverflow)?;
+                if ordered_lane_sources.len() != trace_packing_factor {
                     return Err(RelationPlanError::InvalidColumn);
                 }
-                let packed_lane_ordinal =
-                    row_ordinal % COMMITTED_MATERIAL_TRACE_PACKING_FACTOR as usize;
-                let message_row_ordinal =
-                    row_ordinal / COMMITTED_MATERIAL_TRACE_PACKING_FACTOR as usize;
+                let packed_lane_ordinal = row_ordinal % trace_packing_factor;
+                let message_row_ordinal = row_ordinal / trace_packing_factor;
                 self.integer_value(
                     ordered_lane_sources
                         .get(packed_lane_ordinal)
@@ -2244,6 +2250,7 @@ pub(crate) struct SelectedVssSourceReplayMeasurement {
     provider: CommittedMaterialTraceWitnessProvider<PrimitiveMeasurementCommittedMaterialSource>,
     trace_domain: crate::bgv::proof_suite::ProofEvaluationDomain,
     column_ordinal: u32,
+    prover_column_degree_bound_exclusive: usize,
     trace_value_count: usize,
 }
 
@@ -2256,9 +2263,49 @@ impl SelectedVssSourceReplayMeasurement {
             crate::foundation::ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
         )
         .ok_or_else(|| "selected VSS source-replay context is absent".to_owned())?;
+        Self::prepare_for_relation(input, context)
+    }
+
+    pub(crate) fn prepare_relation_replay_candidate(
+        trace_packing_factor: u64,
+        opening_degree_bound_exclusive: u64,
+    ) -> Result<Self, String> {
+        let mut input = crate::bgv::proof_suite::selected_committed_material_relation_plan_input()
+            .map_err(|_| "VSS relation-replay candidate input is invalid".to_owned())?;
+        input.trace_packing_factor = trace_packing_factor;
+        input.opening_degree_bound_exclusive = opening_degree_bound_exclusive;
+        let mut context = crate::bgv::proof_suite::selected_relation_plan_check_context(
+            crate::foundation::ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        .ok_or_else(|| "VSS relation-replay candidate context is absent".to_owned())?;
+        let quotient_component_count = u64::from(context.quotient_component_count);
+        let rounded_mask_degree = quotient_component_count
+            .checked_add(1)
+            .and_then(|count| count.checked_mul(input.trace_mask_degree_bound_exclusive))
+            .and_then(|degree| degree.checked_add(quotient_component_count.checked_sub(1)?))
+            .and_then(|degree| degree.checked_div(quotient_component_count))
+            .ok_or_else(|| "VSS relation-replay quotient mask degree overflowed".to_owned())?;
+        context.quotient_component_degree_bound_exclusive = input
+            .relation_trace_domain_size()
+            .map_err(|_| "VSS relation-replay candidate trace domain is invalid".to_owned())?
+            .checked_add(rounded_mask_degree)
+            .and_then(|stride| {
+                stride.checked_add(
+                    u64::from(context.phase_column_query_coordinate_count)
+                        .checked_add(u64::from(context.out_of_domain_point_count))?,
+                )
+            })
+            .ok_or_else(|| "VSS relation-replay quotient degree overflowed".to_owned())?;
+        Self::prepare_for_relation(input, context)
+    }
+
+    fn prepare_for_relation(
+        input: CommittedMaterialRelationPlanInput,
+        context: RelationPlanCheckContext,
+    ) -> Result<Self, String> {
         let resolved_moduli = input
             .validate(&context)
-            .map_err(|_| "selected VSS source-replay moduli are invalid".to_owned())?;
+            .map_err(|error| format!("selected VSS source-replay moduli are invalid: {error:?}"))?;
         let roots_per_limb = usize::from(input.threshold)
             .checked_add(usize::from(input.participant_count))
             .ok_or_else(|| "selected VSS root count overflowed".to_owned())?;
@@ -2377,8 +2424,12 @@ impl SelectedVssSourceReplayMeasurement {
         if ordered_sources.len() != expected_root_count {
             return Err("selected VSS source catalog is incomplete".to_owned());
         }
+        super::vss_share_linkage::compile_vss_share_linkage_relation_plan(&input, &context)
+            .map_err(|error| {
+                format!("selected VSS source-replay relation is invalid: {error:?}")
+            })?;
         let layout = derive_vss_share_linkage_trace_witness_layout(&input, &context)
-            .map_err(|_| "selected VSS trace-witness layout is invalid".to_owned())?;
+            .map_err(|error| format!("selected VSS trace-witness layout is invalid: {error:?}"))?;
         let provider = CommittedMaterialTraceWitnessProvider {
             input: CommittedMaterialTraceWitnessInput::from_relation_input(&input),
             ordered_roots: ordered_sources.into_boxed_slice(),
@@ -2424,10 +2475,17 @@ impl SelectedVssSourceReplayMeasurement {
         let trace_domain =
             crate::bgv::proof_suite::ProofEvaluationDomain::new_subgroup(trace_value_count)
                 .map_err(|_| "selected VSS source-replay trace domain is invalid".to_owned())?;
+        let prover_column_degree_bound_exclusive = usize::try_from(
+            input
+                .prover_column_degree_bound_exclusive()
+                .map_err(|_| "selected VSS source-replay degree bound is invalid".to_owned())?,
+        )
+        .map_err(|_| "selected VSS source-replay degree bound exceeds usize".to_owned())?;
         Ok(Self {
             provider,
             trace_domain,
             column_ordinal,
+            prover_column_degree_bound_exclusive,
             trace_value_count,
         })
     }
@@ -2440,12 +2498,24 @@ impl SelectedVssSourceReplayMeasurement {
         self.trace_value_count
     }
 
+    pub(crate) const fn trace_packing_factor(&self) -> u64 {
+        self.provider.input.trace_packing_factor
+    }
+
     pub(crate) const fn column_ordinal(&self) -> u32 {
         self.column_ordinal
     }
 
     pub(crate) fn production_recipe_count(&self) -> usize {
         self.provider.ordered_recipes.len()
+    }
+
+    pub(crate) const fn relation_plan_hash(&self) -> [u8; 64] {
+        self.provider.relation_plan_hash
+    }
+
+    pub(crate) const fn prover_column_degree_bound_exclusive(&self) -> usize {
+        self.prover_column_degree_bound_exclusive
     }
 
     pub(crate) fn nonzero_source_coefficient_count(&self) -> Result<u64, String> {
@@ -2554,16 +2624,96 @@ impl SelectedVssSourceReplayMeasurement {
         }
         Ok(checksum)
     }
+
+    pub(crate) fn materialize_retained_recipe_group_once(
+        &self,
+        retained_recipe_count: usize,
+    ) -> Result<u64, String> {
+        if retained_recipe_count == 0 || retained_recipe_count > self.provider.ordered_recipes.len()
+        {
+            return Err("VSS retained replay group width is invalid".to_owned());
+        }
+        let mut retained_coefficients = Vec::new();
+        retained_coefficients
+            .try_reserve_exact(retained_recipe_count)
+            .map_err(|_| "VSS retained replay group allocation failed".to_owned())?;
+        let mut checksum = 0xcbf2_9ce4_8422_2325_u64;
+        for (recipe_ordinal, (column_ordinal, _)) in self
+            .provider
+            .ordered_recipes
+            .iter()
+            .take(retained_recipe_count)
+            .enumerate()
+        {
+            let mut coefficients = self
+                .provider
+                .column_trace_field_values(*column_ordinal)
+                .map_err(|_| "VSS retained replay rows are invalid".to_owned())?;
+            if coefficients.len() != self.trace_value_count {
+                return Err("VSS retained replay row count is inconsistent".to_owned());
+            }
+            self.trace_domain
+                .interpolate_base_polynomial_in_place(&mut coefficients)
+                .map_err(|_| "VSS retained replay interpolation failed".to_owned())?;
+            coefficients.resize(
+                self.prover_column_degree_bound_exclusive,
+                ProofBaseFieldElement::ZERO,
+            );
+            let middle_ordinal = coefficients.len() / 2;
+            let sampled_value = coefficients
+                .first()
+                .ok_or_else(|| "VSS retained replay coefficients are empty".to_owned())?
+                .canonical()
+                ^ coefficients[middle_ordinal].canonical().rotate_left(21)
+                ^ coefficients
+                    .last()
+                    .ok_or_else(|| "VSS retained replay coefficients are empty".to_owned())?
+                    .canonical()
+                    .rotate_left(42)
+                ^ u64::from(*column_ordinal).rotate_left(7)
+                ^ u64::try_from(coefficients.len())
+                    .map_err(|_| "VSS retained replay value count exceeds u64".to_owned())?;
+            let ordinal = u64::try_from(recipe_ordinal)
+                .map_err(|_| "VSS retained replay recipe ordinal exceeds u64".to_owned())?;
+            checksum = checksum
+                .rotate_left(17)
+                .wrapping_add(sampled_value)
+                .wrapping_add(ordinal.wrapping_mul(0x9e37_79b1_85eb_ca87))
+                .wrapping_mul(0x1000_0000_01b3);
+            retained_coefficients.push(Zeroizing::new(coefficients));
+        }
+        for hash_word in self.relation_plan_hash().chunks_exact(size_of::<u64>()) {
+            let hash_word = u64::from_le_bytes(
+                hash_word
+                    .try_into()
+                    .map_err(|_| "VSS retained replay plan hash is malformed".to_owned())?,
+            );
+            checksum = checksum
+                .rotate_left(17)
+                .wrapping_add(hash_word)
+                .wrapping_mul(0x1000_0000_01b3);
+        }
+        core::hint::black_box(&retained_coefficients);
+        Ok(checksum)
+    }
 }
 
 struct CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
     variant: &'plan RelationPlanVariant,
+    trace_packing_factor: usize,
     next_column_ordinal: usize,
     ordered_recipes: Vec<(u32, CommittedMaterialColumnRecipe)>,
 }
 
 impl<'plan> CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
-    fn new(variant: &'plan RelationPlanVariant) -> Result<Self, RelationPlanError> {
+    fn new(
+        variant: &'plan RelationPlanVariant,
+        trace_packing_factor: u64,
+    ) -> Result<Self, RelationPlanError> {
+        let trace_packing_factor = usize::try_from(trace_packing_factor)
+            .ok()
+            .filter(|factor| *factor > 0 && factor.is_power_of_two())
+            .ok_or(RelationPlanError::InvalidDomain)?;
         let recipe_count = variant
             .ordered_columns
             .iter()
@@ -2575,6 +2725,7 @@ impl<'plan> CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
             .map_err(|_| RelationPlanError::CountOverflow)?;
         Ok(Self {
             variant,
+            trace_packing_factor,
             next_column_ordinal: 0,
             ordered_recipes,
         })
@@ -2659,36 +2810,31 @@ impl<'plan> CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
     }
 
     fn packed_source(
+        &self,
         actual_sources: impl IntoIterator<Item = CommittedMaterialIntegerRecipe>,
         padding_source: CommittedMaterialIntegerRecipe,
     ) -> Result<CommittedMaterialIntegerRecipe, RelationPlanError> {
-        let mut ordered_lane_sources = Vec::with_capacity(
-            usize::try_from(COMMITTED_MATERIAL_TRACE_PACKING_FACTOR)
-                .map_err(|_| RelationPlanError::CountOverflow)?,
-        );
+        let mut ordered_lane_sources = Vec::with_capacity(self.trace_packing_factor);
         ordered_lane_sources.extend(actual_sources);
-        if ordered_lane_sources.is_empty()
-            || ordered_lane_sources.len() > COMMITTED_MATERIAL_TRACE_PACKING_FACTOR as usize
+        if ordered_lane_sources.is_empty() || ordered_lane_sources.len() > self.trace_packing_factor
         {
             return Err(RelationPlanError::InvalidColumn);
         }
-        ordered_lane_sources.resize(
-            COMMITTED_MATERIAL_TRACE_PACKING_FACTOR as usize,
-            padding_source,
-        );
+        ordered_lane_sources.resize(self.trace_packing_factor, padding_source);
         Ok(CommittedMaterialIntegerRecipe::Packed {
             ordered_lane_sources: ordered_lane_sources.into_boxed_slice(),
         })
     }
 
     fn packed_material_source(
+        &self,
         first_logical_root_ordinal: usize,
         root_count: usize,
         physical_column_ordinal: usize,
     ) -> Result<CommittedMaterialIntegerRecipe, RelationPlanError> {
         let physical_half_ordinal = physical_column_ordinal % 2;
         let material_digit_ordinal = physical_column_ordinal / 2;
-        Self::packed_source(
+        self.packed_source(
             (0..root_count).map(|lane_ordinal| CommittedMaterialIntegerRecipe::BoundDigit {
                 logical_root_ordinal: first_logical_root_ordinal + lane_ordinal,
                 physical_half_ordinal,
@@ -2705,7 +2851,7 @@ impl<'plan> CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
         modulus_ordinal: usize,
         modulus: u64,
     ) -> Result<(), RelationPlanError> {
-        if root_count == 0 || root_count > COMMITTED_MATERIAL_TRACE_PACKING_FACTOR as usize {
+        if root_count == 0 || root_count > self.trace_packing_factor {
             return Err(RelationPlanError::InvalidRoot);
         }
         for _ in 0..root_count {
@@ -2716,7 +2862,7 @@ impl<'plan> CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
             minimum_unsigned_ternary_digit_count(maximum_digits[1]);
         for physical_column_ordinal in 0..4 {
             self.push_recipe(CommittedMaterialColumnRecipe::Integer(
-                Self::packed_material_source(
+                self.packed_material_source(
                     first_logical_root_ordinal,
                     root_count,
                     physical_column_ordinal,
@@ -2725,7 +2871,7 @@ impl<'plan> CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
         }
         for physical_half_ordinal in 0..2 {
             self.add_ternary_digits(
-                Self::packed_material_source(
+                self.packed_material_source(
                     first_logical_root_ordinal,
                     root_count,
                     physical_half_ordinal,
@@ -2734,7 +2880,7 @@ impl<'plan> CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
                 0,
             )?;
             self.add_ternary_digits(
-                Self::packed_material_source(
+                self.packed_material_source(
                     first_logical_root_ordinal,
                     root_count,
                     2 + physical_half_ordinal,
@@ -2746,7 +2892,7 @@ impl<'plan> CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
                 (0, MATERIAL_DIGIT_TERNARY_DIGIT_COUNT),
                 (1, high_digit_ternary_digit_count),
             ] {
-                let difference = Self::packed_source(
+                let difference = self.packed_source(
                     (0..root_count).map(|lane_ordinal| {
                         CommittedMaterialIntegerRecipe::ComparatorDifference {
                             logical_root_ordinal: first_logical_root_ordinal + lane_ordinal,
@@ -2762,7 +2908,7 @@ impl<'plan> CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
                 self.push_recipe(CommittedMaterialColumnRecipe::Integer(difference.clone()))?;
                 self.add_ternary_digits(difference, ternary_digit_count, 0)?;
             }
-            let borrow = Self::packed_source(
+            let borrow = self.packed_source(
                 (0..root_count).map(|lane_ordinal| {
                     CommittedMaterialIntegerRecipe::ComparatorBorrow {
                         logical_root_ordinal: first_logical_root_ordinal + lane_ordinal,
@@ -2808,10 +2954,8 @@ impl<'plan> CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
         let offset = (ternary_capacity - 1) / 2;
         let mut ordered_sources = ordered_sources.into_iter().peekable();
         while ordered_sources.peek().is_some() {
-            let source = Self::packed_source(
-                ordered_sources
-                    .by_ref()
-                    .take(COMMITTED_MATERIAL_TRACE_PACKING_FACTOR as usize),
+            let source = self.packed_source(
+                ordered_sources.by_ref().take(self.trace_packing_factor),
                 CommittedMaterialIntegerRecipe::Constant(0),
             )?;
             self.push_recipe(CommittedMaterialColumnRecipe::Integer(source.clone()))?;
@@ -2828,10 +2972,8 @@ impl<'plan> CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
         let ternary_digit_count = minimum_unsigned_ternary_digit_count(required_maximum);
         let mut ordered_sources = ordered_sources.into_iter().peekable();
         while ordered_sources.peek().is_some() {
-            let source = Self::packed_source(
-                ordered_sources
-                    .by_ref()
-                    .take(COMMITTED_MATERIAL_TRACE_PACKING_FACTOR as usize),
+            let source = self.packed_source(
+                ordered_sources.by_ref().take(self.trace_packing_factor),
                 CommittedMaterialIntegerRecipe::Constant(0),
             )?;
             self.push_recipe(CommittedMaterialColumnRecipe::Integer(source.clone()))?;
@@ -2880,16 +3022,16 @@ fn derive_vss_share_linkage_trace_witness_layout(
     let roots_per_limb = threshold
         .checked_add(participant_count)
         .ok_or(RelationPlanError::CountOverflow)?;
-    let mut layout = CommittedMaterialTraceWitnessLayoutBuilder::new(variant)?;
+    let trace_packing_factor = usize::try_from(input.trace_packing_factor)
+        .map_err(|_| RelationPlanError::CountOverflow)?;
+    let mut layout =
+        CommittedMaterialTraceWitnessLayoutBuilder::new(variant, input.trace_packing_factor)?;
     let mut logical_root_ordinal = 0_usize;
     for (modulus_ordinal, (_, modulus)) in resolved.iter().copied().enumerate() {
-        for group_start in
-            (0..roots_per_limb).step_by(COMMITTED_MATERIAL_TRACE_PACKING_FACTOR as usize)
-        {
+        for group_start in (0..roots_per_limb).step_by(trace_packing_factor) {
             layout.add_material_group(
                 logical_root_ordinal + group_start,
-                (roots_per_limb - group_start)
-                    .min(COMMITTED_MATERIAL_TRACE_PACKING_FACTOR as usize),
+                (roots_per_limb - group_start).min(trace_packing_factor),
                 modulus_ordinal,
                 modulus,
             )?;
@@ -3008,16 +3150,16 @@ fn derive_aggregate_threshold_share_trace_witness_layout(
     let roots_per_limb = participant_count
         .checked_add(1)
         .ok_or(RelationPlanError::CountOverflow)?;
-    let mut layout = CommittedMaterialTraceWitnessLayoutBuilder::new(variant)?;
+    let trace_packing_factor = usize::try_from(input.trace_packing_factor)
+        .map_err(|_| RelationPlanError::CountOverflow)?;
+    let mut layout =
+        CommittedMaterialTraceWitnessLayoutBuilder::new(variant, input.trace_packing_factor)?;
     let mut logical_root_ordinal = 0_usize;
     for (modulus_ordinal, (_, modulus)) in resolved.iter().copied().enumerate() {
-        for group_start in
-            (0..roots_per_limb).step_by(COMMITTED_MATERIAL_TRACE_PACKING_FACTOR as usize)
-        {
+        for group_start in (0..roots_per_limb).step_by(trace_packing_factor) {
             layout.add_material_group(
                 logical_root_ordinal + group_start,
-                (roots_per_limb - group_start)
-                    .min(COMMITTED_MATERIAL_TRACE_PACKING_FACTOR as usize),
+                (roots_per_limb - group_start).min(trace_packing_factor),
                 modulus_ordinal,
                 modulus,
             )?;
@@ -3338,6 +3480,7 @@ mod tests {
             evaluation_domain_size: 4_096,
             opening_degree_bound_exclusive: 512,
             material_column_degree_bound_exclusive: 64,
+            trace_packing_factor: COMMITTED_MATERIAL_TRACE_PACKING_FACTOR,
             participant_count: 3,
             threshold: 2,
             sharing_data_modulus_indices: vec![0],
@@ -3770,6 +3913,7 @@ mod tests {
                 evaluation_domain_size: RING_DEGREE,
                 opening_degree_bound_exclusive: RING_DEGREE,
                 material_column_degree_bound_exclusive: RING_DEGREE / 2,
+                trace_packing_factor: COMMITTED_MATERIAL_TRACE_PACKING_FACTOR,
                 participant_count,
                 threshold: roster_parameters.reconstruction_threshold,
                 sharing_data_modulus_indices: vec![0],

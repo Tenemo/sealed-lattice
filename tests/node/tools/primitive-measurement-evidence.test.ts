@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import { deriveDesktopBrowserAuthenticatedStorageConfiguration } from '#tools/ci/desktop-browser-primitive-measurement-page';
 import {
-    assembleDesktopBrowserPrimitiveMeasurementEvidence,
     desktopBrowserBoundaryCopyIterationCount,
     parseReleaseNativePrimitiveMeasurementOutput,
     primitiveMeasurementCaseCatalog,
@@ -12,7 +11,7 @@ import {
     validateDesktopBrowserBoundaryCopyMeasurement,
     validateDesktopBrowserFocusedPrimitiveMeasurementBundle,
     validateDesktopBrowserFocusedPrimitiveMeasurementEvidence,
-    validateDesktopBrowserPrimitiveMeasurementBaseBundle,
+    validateDesktopBrowserPrimitiveMeasurementBundle,
     validateDesktopBrowserPrimitiveMeasurementEvidence,
     validatePrimitiveMeasurementRecord,
     validateReleaseNativePrimitiveMeasurementEvidence,
@@ -104,6 +103,28 @@ const recordFor = (
     if (caseIdentifier === 8) {
         dimensions.push({ name: 'retainedInputByteLength', value: 2_097_152 });
     }
+    if (caseIdentifier === 9) {
+        dimensions.push(
+            { name: 'retainedInputByteLength', value: 2_097_152 },
+            {
+                name: 'retainedGroupHeaderByteLength',
+                value: executionTarget === 'release-native' ? 1_536 : 768,
+            },
+        );
+    }
+    const retainedInputByteLength = dimensions.find(
+        (dimension) => dimension.name === 'retainedInputByteLength',
+    )?.value;
+    const traceValueCount = dimensions.find(
+        (dimension) => dimension.name === 'traceValueCount',
+    )?.value;
+    const retainedCoefficientPayloadByteLength = dimensions.find(
+        (dimension) =>
+            dimension.name === 'retainedCoefficientPayloadByteLength',
+    )?.value;
+    const retainedGroupHeaderByteLength = dimensions.find(
+        (dimension) => dimension.name === 'retainedGroupHeaderByteLength',
+    )?.value;
     return {
         caseIdentifier,
         caseName: catalogEntry.caseName,
@@ -114,15 +135,16 @@ const recordFor = (
         iterationCount: catalogEntry.expectedIterationCount,
         modeledPeakLiveByteLength:
             caseIdentifier === 5 || caseIdentifier === 8
-                ? dimensions.find(
-                      (dimension) =>
-                          dimension.name === 'retainedInputByteLength',
-                  )!.value +
-                  dimensions.find(
-                      (dimension) => dimension.name === 'traceValueCount',
-                  )!.value *
-                      8
-                : 4_194_304,
+                ? retainedInputByteLength! + traceValueCount! * 8
+                : caseIdentifier === 9
+                  ? retainedInputByteLength! +
+                    retainedCoefficientPayloadByteLength! +
+                    dimensions.find(
+                        (dimension) =>
+                            dimension.name === 'replayBufferByteLength',
+                    )!.value +
+                    retainedGroupHeaderByteLength!
+                  : 4_194_304,
         schemaVersion: 2,
     };
 };
@@ -262,7 +284,11 @@ describe('Primitive measurement evidence', () => {
                 serializedRecords,
                 true,
             ).primitiveCases.map((record) => record.caseIdentifier),
-        ).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+        ).toEqual(
+            primitiveMeasurementCaseCatalog.map(
+                (entry) => entry.caseIdentifier,
+            ),
+        );
         expect(() =>
             parseReleaseNativePrimitiveMeasurementOutput('no record', true),
         ).toThrow(/no measurement record/u);
@@ -296,7 +322,11 @@ describe('Primitive measurement evidence', () => {
                 exactEvidence,
                 true,
             ).primitiveCases.map((record) => record.caseIdentifier),
-        ).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+        ).toEqual(
+            primitiveMeasurementCaseCatalog.map(
+                (entry) => entry.caseIdentifier,
+            ),
+        );
         const reorderedEvidence = structuredClone(exactEvidence);
         [
             reorderedEvidence.primitiveCases[0],
@@ -428,87 +458,61 @@ describe('Primitive measurement evidence', () => {
                 { ...structuredClone(evidence), browserEngine: 'firefox' },
                 'firefox',
             );
-        const baseEvidence = structuredClone(evidence);
-        baseEvidence.primitiveCases = baseEvidence.primitiveCases.slice(0, 7);
-        const baseBundle = validateDesktopBrowserPrimitiveMeasurementBaseBundle(
-            {
-                browserEvidence: [baseEvidence],
-                measurementWasm: {
-                    byteLength: 1_000_000,
-                    normalizedSha256Hex: 'a'.repeat(64),
-                    rawSha256Hex: 'b'.repeat(64),
-                },
-                schemaVersion: 1,
-            },
-        );
-        const focusedCaseFive =
-            validateDesktopBrowserFocusedPrimitiveMeasurementEvidence(
-                {
-                    browserEngine: 'chromium',
-                    browserUserAgent: 'focused browser',
-                    primitiveCase: evidence.primitiveCases[4],
-                    schemaVersion: 1,
-                },
-                'chromium',
-                5,
-            );
-        const focusedCaseEight =
-            validateDesktopBrowserFocusedPrimitiveMeasurementEvidence(
-                {
-                    browserEngine: 'chromium',
-                    browserUserAgent: 'focused browser',
-                    primitiveCase: evidence.primitiveCases[7],
-                    schemaVersion: 1,
-                },
-                'chromium',
-                8,
-            );
-        const validatedBaseEvidence = baseBundle.browserEvidence[0];
-        if (validatedBaseEvidence === undefined) {
-            throw new Error('Test browser base evidence is absent.');
-        }
-        expect(
-            assembleDesktopBrowserPrimitiveMeasurementEvidence({
-                baseEvidence: validatedBaseEvidence,
-                supplementalEvidence: [focusedCaseFive, focusedCaseEight],
-            }).primitiveCases.map(
-                (measurement) => measurement.record.caseIdentifier,
-            ),
-        ).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
-
-        const reorderedBase = structuredClone(baseEvidence);
-        const firstBaseCase = reorderedBase.primitiveCases[0];
-        const secondBaseCase = reorderedBase.primitiveCases[1];
-        if (firstBaseCase === undefined || secondBaseCase === undefined) {
-            throw new Error('Test browser base cases are absent.');
-        }
-        [reorderedBase.primitiveCases[0], reorderedBase.primitiveCases[1]] = [
-            secondBaseCase,
-            firstBaseCase,
-        ];
-        expect(() =>
-            validateDesktopBrowserPrimitiveMeasurementBaseBundle({
-                browserEvidence: [reorderedBase],
-                measurementWasm: {
-                    byteLength: 1_000_000,
-                    normalizedSha256Hex: 'a'.repeat(64),
-                    rawSha256Hex: 'b'.repeat(64),
-                },
-                schemaVersion: 1,
-            }),
-        ).toThrow(/incomplete, duplicated, or reordered/u);
-        expect(() =>
-            assembleDesktopBrowserPrimitiveMeasurementEvidence({
-                baseEvidence: validatedBaseEvidence,
-                supplementalEvidence: [
-                    focusedCaseFive,
+        const measurementWasm = {
+            byteLength: 1_000_000,
+            normalizedSha256Hex: 'a'.repeat(64),
+            rawSha256Hex: 'b'.repeat(64),
+        };
+        const singleBuildBundle =
+            validateDesktopBrowserPrimitiveMeasurementBundle({
+                browserEvidence: [
+                    evidence,
                     {
-                        ...focusedCaseEight,
+                        ...structuredClone(evidence),
                         browserEngine: 'firefox',
                     },
                 ],
+                measurementWasm,
+                schemaVersion: 1,
+            });
+        expect(singleBuildBundle.browserEvidence).toHaveLength(2);
+        expect(
+            singleBuildBundle.browserEvidence[0]?.primitiveCases.map(
+                (measurement) => measurement.record.caseIdentifier,
+            ),
+        ).toEqual(
+            primitiveMeasurementCaseCatalog.map(
+                (entry) => entry.caseIdentifier,
+            ),
+        );
+
+        const incompleteBrowserEvidence = structuredClone(evidence);
+        incompleteBrowserEvidence.primitiveCases.pop();
+        expect(() =>
+            validateDesktopBrowserPrimitiveMeasurementBundle({
+                browserEvidence: [incompleteBrowserEvidence],
+                measurementWasm,
+                schemaVersion: 1,
             }),
-        ).toThrow(/different engines/u);
+        ).toThrow(/incomplete/u);
+
+        const reorderedBrowserEvidence = structuredClone(evidence);
+        const firstCase = reorderedBrowserEvidence.primitiveCases[0];
+        const secondCase = reorderedBrowserEvidence.primitiveCases[1];
+        if (firstCase === undefined || secondCase === undefined) {
+            throw new Error('Test browser cases are absent.');
+        }
+        [
+            reorderedBrowserEvidence.primitiveCases[0],
+            reorderedBrowserEvidence.primitiveCases[1],
+        ] = [secondCase, firstCase];
+        expect(() =>
+            validateDesktopBrowserPrimitiveMeasurementBundle({
+                browserEvidence: [reorderedBrowserEvidence],
+                measurementWasm,
+                schemaVersion: 1,
+            }),
+        ).toThrow(/reordered/u);
         const projection = deriveVssBaseMaterializationProjection({
             browserEvidence: [chromiumEvidence, firefoxEvidence],
             nativeEvidence,
@@ -691,6 +695,15 @@ describe('Primitive measurement evidence', () => {
             browserEngines: ['firefox'],
             focusedCaseIdentifier: 8,
             reuseMeasurementWasm: true,
+        });
+        expect(
+            parseDesktopBrowserPrimitiveMeasurementArguments([
+                'chromium',
+                'case-9',
+            ]),
+        ).toEqual({
+            browserEngines: ['chromium'],
+            focusedCaseIdentifier: 9,
         });
         expect(() =>
             parseDesktopBrowserPrimitiveMeasurementArguments(['webkit']),

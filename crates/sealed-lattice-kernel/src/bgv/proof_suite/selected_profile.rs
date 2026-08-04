@@ -707,6 +707,7 @@ pub(crate) fn selected_committed_material_relation_plan_input()
             committed_material_profile.material_column_degree_bound_exclusive(),
         )
         .map_err(|_| ProofProfileError::CountOverflow)?,
+        trace_packing_factor: super::relation_plan::COMMITTED_MATERIAL_TRACE_PACKING_FACTOR,
         participant_count: FOUNDATION_PROFILE.participant_count,
         threshold: FOUNDATION_PROFILE.reconstruction_threshold,
         sharing_data_modulus_indices: selected_sharing_data_modulus_indices()?,

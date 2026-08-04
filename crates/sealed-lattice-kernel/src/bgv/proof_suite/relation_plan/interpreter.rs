@@ -2603,6 +2603,7 @@ mod tests {
             evaluation_domain_size,
             opening_degree_bound_exclusive,
             material_column_degree_bound_exclusive: 10,
+            trace_packing_factor: COMMITTED_MATERIAL_TRACE_PACKING_FACTOR,
             participant_count: 3,
             threshold: 2,
             sharing_data_modulus_indices: vec![0],
