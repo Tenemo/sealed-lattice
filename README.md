@@ -495,9 +495,23 @@ Works today:
   `67,108,864` phase-leaf hashes. That is only about a 7.7-fold transform and
   value-delivery reduction and about a 5.5-fold salted-leaf reduction. Arity
   eight is refused because its numerator degree reaches the opening bound. No
-  range-arity candidate clears the tenfold static admission gate, so none
-  changes the production relation, witness, construction identity, or selected
-  profile. The
+  factor-16 range-arity candidate clears the tenfold static admission gate, so
+  none changes the production relation, witness, construction identity, or
+  selected profile. An exact maximum-degree grid then evaluates every 18
+  degree-valid packing-width pair without changing the compiler. Its unique
+  candidate that clears the transform, value-delivery, and salted-leaf static
+  gates is factor one, width 64, arity 113. It has a `16,384`-value relation
+  trace, maximum range numerator degree `2,082,703` below the `2,097,152`
+  opening bound, 3,683 prover columns, 59 base rows, 10 quotient rows, and 69
+  rows in total. The exact work ledger gives 4,416 lane DFTs,
+  `21,994,930,176` butterflies, `2,315,255,808` delivered values, and
+  `234,881,024` salted-leaf Keccak-f permutations: about 16.6-fold, 16.6-fold,
+  and 10.1-fold reductions from the selected VSS construction. All
+  `67,108,864` leaf hashes and `67,108,860` Merkle-parent hashes remain. The
+  candidate is admitted only to feature-scoped compiler, interpreter, witness,
+  liveness, and focused one-build measurement work. It has no production
+  construction identity, proof bytes, theorem regeneration, browser result,
+  or selected-suite status. The
   fastest comparator accepted by the existing one-aggregate construction is
   instead factor 1, width 32. It has 331 rows, 21,184 lane DFTs,
   `105,511,911,424` butterflies, `11,106,516,992` value deliveries, and

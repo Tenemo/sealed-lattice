@@ -639,7 +639,11 @@ struct VssRelationReplayCandidateLedger {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct VssRangeConstraintArityCandidateLedger {
+    trace_packing_factor: u64,
+    logical_polynomials_per_physical_row: u64,
     range_constraint_arity: u64,
+    relation_trace_domain_size: u64,
+    opening_degree_bound_exclusive: u64,
     material_range_digit_prover_column_count: u64,
     quotient_range_digit_prover_column_count: u64,
     prover_column_count: u64,
@@ -1583,9 +1587,21 @@ fn trace_phase_columns_by_opening_pattern_and_chunk_count(
 fn derive_vss_range_constraint_arity_candidate_ledger(
     range_constraint_arity: u64,
 ) -> Result<Option<VssRangeConstraintArityCandidateLedger>, String> {
-    let relation_candidate = derive_vss_relation_replay_candidate_ledger(
+    derive_vss_range_constraint_candidate_ledger(
         VSS_RELATION_REPLAY_CANDIDATE_TRACE_PACKING_FACTOR,
         VSS_RELATION_REPLAY_CANDIDATE_RETAINED_GROUP_WIDTH as u64,
+        range_constraint_arity,
+    )
+}
+
+fn derive_vss_range_constraint_candidate_ledger(
+    trace_packing_factor: u64,
+    logical_polynomials_per_physical_row: u64,
+    range_constraint_arity: u64,
+) -> Result<Option<VssRangeConstraintArityCandidateLedger>, String> {
+    let relation_candidate = derive_vss_relation_replay_candidate_ledger(
+        trace_packing_factor,
+        logical_polynomials_per_physical_row,
     )?
     .ok_or_else(|| "VSS range-arity baseline exceeds its opening bound".to_owned())?;
     let (artifact, relation_context) =
@@ -1784,7 +1800,11 @@ fn derive_vss_range_constraint_arity_candidate_ledger(
     })?;
 
     Ok(Some(VssRangeConstraintArityCandidateLedger {
+        trace_packing_factor,
+        logical_polynomials_per_physical_row,
         range_constraint_arity,
+        relation_trace_domain_size: candidate_geometry.relation_trace_domain_size,
+        opening_degree_bound_exclusive: relation_candidate.opening_degree_bound_exclusive,
         material_range_digit_prover_column_count: candidate_geometry
             .material_range_digit_prover_column_count,
         quotient_range_digit_prover_column_count: candidate_geometry
@@ -1842,6 +1862,40 @@ fn derive_vss_range_constraint_arity_candidate_grid()
             })
         })
         .collect()
+}
+
+fn derive_vss_maximum_range_arity_candidate_grid()
+-> Result<Vec<VssRangeConstraintArityCandidateLedger>, String> {
+    let mut candidates = Vec::new();
+    for relation_candidate in derive_vss_relation_replay_candidate_grid()? {
+        let maximum_source_degree = relation_candidate
+            .prover_column_degree_bound_exclusive
+            .checked_sub(1)
+            .ok_or_else(|| "VSS maximum range-arity source degree is empty".to_owned())?;
+        let maximum_numerator_degree = relation_candidate
+            .opening_degree_bound_exclusive
+            .checked_sub(1)
+            .ok_or_else(|| "VSS maximum range-arity opening degree is empty".to_owned())?;
+        let maximum_range_constraint_arity = maximum_numerator_degree
+            .checked_div(maximum_source_degree)
+            .filter(|arity| *arity >= 3)
+            .ok_or_else(|| {
+                "VSS maximum range-arity candidate cannot retain the ternary relation".to_owned()
+            })?;
+        let candidate = derive_vss_range_constraint_candidate_ledger(
+            relation_candidate.trace_packing_factor,
+            relation_candidate.logical_polynomials_per_physical_row,
+            maximum_range_constraint_arity,
+        )?
+        .ok_or_else(|| {
+            "VSS maximum range-arity candidate exceeds its derived opening bound".to_owned()
+        })?;
+        if candidate.maximum_range_constraint_numerator_degree > maximum_numerator_degree {
+            return Err("VSS maximum range-arity numerator exceeds its opening bound".to_owned());
+        }
+        candidates.push(candidate);
+    }
+    Ok(candidates)
 }
 
 fn derive_vss_relation_replay_opening_claim_quotient_candidate_construction_plan(
@@ -4143,7 +4197,11 @@ mod tests {
             candidates,
             vec![
                 VssRangeConstraintArityCandidateLedger {
+                    trace_packing_factor: 16,
+                    logical_polynomials_per_physical_row: 64,
                     range_constraint_arity: 3,
+                    relation_trace_domain_size: 262_144,
+                    opening_degree_bound_exclusive: 2_097_152,
                     material_range_digit_prover_column_count: 640,
                     quotient_range_digit_prover_column_count: 20,
                     prover_column_count: 753,
@@ -4161,7 +4219,11 @@ mod tests {
                     merkle_parent_hash_query_count: 67_108_860,
                 },
                 VssRangeConstraintArityCandidateLedger {
+                    trace_packing_factor: 16,
+                    logical_polynomials_per_physical_row: 64,
                     range_constraint_arity: 4,
+                    relation_trace_domain_size: 262_144,
+                    opening_degree_bound_exclusive: 2_097_152,
                     material_range_digit_prover_column_count: 540,
                     quotient_range_digit_prover_column_count: 20,
                     prover_column_count: 653,
@@ -4179,7 +4241,11 @@ mod tests {
                     merkle_parent_hash_query_count: 67_108_860,
                 },
                 VssRangeConstraintArityCandidateLedger {
+                    trace_packing_factor: 16,
+                    logical_polynomials_per_physical_row: 64,
                     range_constraint_arity: 5,
+                    relation_trace_domain_size: 262_144,
+                    opening_degree_bound_exclusive: 2_097_152,
                     material_range_digit_prover_column_count: 452,
                     quotient_range_digit_prover_column_count: 20,
                     prover_column_count: 565,
@@ -4197,7 +4263,11 @@ mod tests {
                     merkle_parent_hash_query_count: 67_108_860,
                 },
                 VssRangeConstraintArityCandidateLedger {
+                    trace_packing_factor: 16,
+                    logical_polynomials_per_physical_row: 64,
                     range_constraint_arity: 6,
+                    relation_trace_domain_size: 262_144,
+                    opening_degree_bound_exclusive: 2_097_152,
                     material_range_digit_prover_column_count: 416,
                     quotient_range_digit_prover_column_count: 20,
                     prover_column_count: 529,
@@ -4215,7 +4285,11 @@ mod tests {
                     merkle_parent_hash_query_count: 67_108_860,
                 },
                 VssRangeConstraintArityCandidateLedger {
+                    trace_packing_factor: 16,
+                    logical_polynomials_per_physical_row: 64,
                     range_constraint_arity: 7,
+                    relation_trace_domain_size: 262_144,
+                    opening_degree_bound_exclusive: 2_097_152,
                     material_range_digit_prover_column_count: 384,
                     quotient_range_digit_prover_column_count: 20,
                     prover_column_count: 497,
@@ -4267,6 +4341,271 @@ mod tests {
             None
         );
         assert!(derive_vss_range_constraint_arity_candidate_ledger(1).is_err());
+        let maximum_arity_candidates = derive_vss_maximum_range_arity_candidate_grid()
+            .expect("the maximum range-arity VSS candidate grid derives");
+        assert_eq!(
+            maximum_arity_candidates
+                .iter()
+                .map(|candidate| (
+                    candidate.trace_packing_factor,
+                    candidate.logical_polynomials_per_physical_row,
+                    candidate.range_constraint_arity,
+                    candidate.prover_column_count,
+                    candidate.base_phase_row_count,
+                    candidate.quotient_phase_row_count,
+                    candidate.complete_phase_row_count,
+                    candidate.lane_dft_count,
+                    candidate.butterfly_count,
+                    candidate.salted_leaf_keccak_permutation_count,
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    1,
+                    8,
+                    14,
+                    5_923,
+                    741,
+                    10,
+                    751,
+                    48_064,
+                    239_394_095_104,
+                    1_577_058_304
+                ),
+                (
+                    1,
+                    16,
+                    28,
+                    4_579,
+                    287,
+                    10,
+                    297,
+                    19_008,
+                    94_673_829_888,
+                    704_643_072
+                ),
+                (
+                    1,
+                    32,
+                    56,
+                    4_131,
+                    130,
+                    10,
+                    140,
+                    8_960,
+                    44_627_394_560,
+                    402_653_184
+                ),
+                (
+                    1,
+                    64,
+                    113,
+                    3_683,
+                    59,
+                    10,
+                    69,
+                    4_416,
+                    21_994_930_176,
+                    234_881_024
+                ),
+                (
+                    2,
+                    8,
+                    7,
+                    3_491,
+                    874,
+                    15,
+                    889,
+                    56_896,
+                    283_383_955_456,
+                    1_879_048_192
+                ),
+                (
+                    2,
+                    16,
+                    15,
+                    2_739,
+                    344,
+                    15,
+                    359,
+                    22_976,
+                    114_437_390_336,
+                    838_860_800
+                ),
+                (
+                    2,
+                    32,
+                    30,
+                    2_291,
+                    146,
+                    15,
+                    161,
+                    10_304,
+                    51_321_503_744,
+                    436_207_616
+                ),
+                (
+                    2,
+                    64,
+                    60,
+                    2_067,
+                    70,
+                    15,
+                    85,
+                    5_440,
+                    27_095_203_840,
+                    301_989_888
+                ),
+                (
+                    4,
+                    8,
+                    3,
+                    3_003,
+                    1_128,
+                    20,
+                    1_148,
+                    73_472,
+                    365_944_635_392,
+                    2_382_364_672
+                ),
+                (
+                    4,
+                    16,
+                    7,
+                    1_979,
+                    375,
+                    20,
+                    395,
+                    25_280,
+                    125_913_006_080,
+                    905_969_664
+                ),
+                (
+                    4,
+                    32,
+                    15,
+                    1_555,
+                    153,
+                    20,
+                    173,
+                    11_072,
+                    55_146_708_992,
+                    469_762_048
+                ),
+                (
+                    4,
+                    64,
+                    31,
+                    1_299,
+                    69,
+                    20,
+                    89,
+                    5_696,
+                    28_370_272_256,
+                    301_989_888
+                ),
+                (
+                    8,
+                    16,
+                    3,
+                    1_503,
+                    480,
+                    30,
+                    510,
+                    32_640,
+                    162_571_223_040,
+                    1_140_850_688
+                ),
+                (
+                    8,
+                    32,
+                    7,
+                    991,
+                    165,
+                    30,
+                    195,
+                    12_480,
+                    62_159_585_280,
+                    536_870_912
+                ),
+                (
+                    8,
+                    64,
+                    15,
+                    779,
+                    70,
+                    30,
+                    100,
+                    6_400,
+                    31_876_710_400,
+                    335_544_320
+                ),
+                (
+                    16,
+                    32,
+                    3,
+                    753,
+                    234,
+                    50,
+                    284,
+                    18_176,
+                    90_529_857_536,
+                    704_643_072
+                ),
+                (
+                    16,
+                    64,
+                    7,
+                    497,
+                    99,
+                    50,
+                    149,
+                    9_536,
+                    47_496_298_496,
+                    436_207_616
+                ),
+                (
+                    32,
+                    64,
+                    3,
+                    738,
+                    238,
+                    90,
+                    328,
+                    20_992,
+                    104_555_610_112,
+                    771_751_936
+                ),
+            ]
+        );
+        let admitted_candidate = maximum_arity_candidates
+            .iter()
+            .find(|candidate| {
+                candidate.trace_packing_factor == 1
+                    && candidate.logical_polynomials_per_physical_row == 64
+            })
+            .expect("the factor-one width-64 range candidate exists");
+        assert_eq!(admitted_candidate.range_constraint_arity, 113);
+        assert_eq!(admitted_candidate.complete_phase_row_count, 69);
+        assert!(admitted_candidate.lane_dft_count * 10 <= production.lane_dft_count);
+        assert!(admitted_candidate.butterfly_count * 10 <= production.butterfly_count);
+        assert!(
+            admitted_candidate.column_value_delivery_count * 10
+                <= production.column_value_delivery_count
+        );
+        assert!(
+            admitted_candidate.salted_leaf_keccak_permutation_count * 10
+                <= production_salted_leaf_keccak_permutation_count
+        );
+        assert_eq!(
+            admitted_candidate.leaf_hash_query_count,
+            production.leaf_hash_query_count
+        );
+        assert_eq!(
+            derive_vss_range_constraint_candidate_ledger(1, 64, 114)
+                .expect("the factor-one degree boundary is classified"),
+            None
+        );
     }
 
     #[test]
