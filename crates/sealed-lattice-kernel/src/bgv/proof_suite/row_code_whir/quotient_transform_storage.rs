@@ -19,7 +19,7 @@ use crate::bgv::proof_suite::{
     external_polynomial::{ExternalPolynomialError, ExternalPolynomialVector},
     prover::{
         CommonProofQuotientConstraintTransformKey, CommonProofReplayPolynomialPlan,
-        common_proof_quotient_constraint_catalog,
+        common_proof_quotient_constraint_catalog, common_proof_quotient_evaluation_read_accounting,
     },
     relation_plan::RelationColumnValueType,
 };
@@ -252,6 +252,31 @@ pub(in crate::bgv::proof_suite) fn plan_row_code_whir_quotient_transform_storage
             let output_append_transaction_count = output_plan
                 .exact_byte_length()
                 .div_ceil(maximum_chunk_byte_length);
+            let mut evaluation_read_byte_length = 0_u64;
+            let mut evaluation_read_transaction_count = 0_u64;
+            for query in variant.constraint_column_queries(constraint_index)? {
+                if query.column_ordinal() != *column_ordinal {
+                    continue;
+                }
+                let read_accounting = common_proof_quotient_evaluation_read_accounting(
+                    variant,
+                    relation_context,
+                    evaluation_domain,
+                    query,
+                    source_plan.value_type(),
+                    u32::try_from(maximum_chunk_byte_length)
+                        .map_err(|_| CommonProofProverError::CountOverflow)?,
+                )?;
+                evaluation_read_byte_length = evaluation_read_byte_length
+                    .checked_add(read_accounting.total_byte_length())
+                    .ok_or(CommonProofProverError::CountOverflow)?;
+                evaluation_read_transaction_count = evaluation_read_transaction_count
+                    .checked_add(read_accounting.transaction_count())
+                    .ok_or(CommonProofProverError::CountOverflow)?;
+            }
+            if evaluation_read_byte_length == 0 || evaluation_read_transaction_count == 0 {
+                return Err(CommonProofProverError::InvalidQuotient);
+            }
             let transform_plan = RowCodeWhirQuotientColumnTransformPlan {
                 evaluation_domain,
                 source: source_plan,
@@ -260,9 +285,10 @@ pub(in crate::bgv::proof_suite) fn plan_row_code_whir_quotient_transform_storage
                 object_plans: [object_plan],
                 next_executor_step: expected_next_transform_step,
                 total_written_byte_length: output_plan.exact_byte_length(),
-                total_read_byte_length: 0,
+                total_read_byte_length: evaluation_read_byte_length,
                 transaction_count_excluding_deletions: output_append_transaction_count
                     .checked_add(2)
+                    .and_then(|count| count.checked_add(evaluation_read_transaction_count))
                     .ok_or(CommonProofProverError::CountOverflow)?,
             };
             object_plans

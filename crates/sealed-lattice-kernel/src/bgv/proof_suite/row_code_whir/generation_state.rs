@@ -77,7 +77,7 @@ use crate::bgv::proof_suite::external_memory::{
 };
 use crate::bgv::proof_suite::external_polynomial::{
     ExternalPolynomialReadError, ExternalPolynomialVector, map_external_polynomial_read_error,
-    read_external_polynomial_extension_values,
+    read_external_polynomial_values_as_extension,
 };
 use crate::bgv::proof_suite::prover::{
     CommonProofAuxiliaryColumnReconstructionCatalog,
@@ -4178,7 +4178,7 @@ impl RowCodeWhirGenerationStateMachine {
         }
 
         if let Some(request) = self.pending_quotient_evaluation_read {
-            let values = read_external_polynomial_extension_values(
+            let values = read_external_polynomial_values_as_extension(
                 self.external_memory_executor.as_mut().ok_or(
                     CommonProofGenerationError::Prover(CommonProofProverError::InvalidInput),
                 )?,
@@ -8827,9 +8827,9 @@ mod tests {
         );
         assert_eq!(
             external_memory_requirement.total_read_byte_length(),
-            67_746_897_240
+            73_344_195_928
         );
-        assert_eq!(external_memory_requirement.transaction_count(), 133_112);
+        assert_eq!(external_memory_requirement.transaction_count(), 2_866_177);
         assert_eq!(
             external_memory_requirement.local_record_seal_invocation_count(),
             55_525
@@ -8842,7 +8842,7 @@ mod tests {
             storage_plan.external_memory_read_traffic,
             RowCodeWhirExternalMemoryReadTraffic {
                 opened_polynomial_replay_byte_length: 44_549_590_360,
-                quotient_transform_byte_length: 0,
+                quotient_transform_byte_length: 5_597_298_688,
                 aggregate_source_byte_length: 23_197_306_880,
             }
         );
@@ -8857,7 +8857,7 @@ mod tests {
             RowCodeWhirExternalMemoryTransactionTraffic {
                 initialization_count: 1,
                 opened_polynomial_replay_count: 48_568,
-                quotient_transform_count: 54_621,
+                quotient_transform_count: 2_787_686,
                 pre_retained_deletion_count: 5_888,
                 aggregate_source_count: 24_034,
             }
@@ -9243,9 +9243,9 @@ mod tests {
         );
         assert_eq!(
             external_memory_requirement.total_read_byte_length(),
-            149_238_851_680
+            194_914_822_240
         );
-        assert_eq!(external_memory_requirement.transaction_count(), 174_465);
+        assert_eq!(external_memory_requirement.transaction_count(), 22_485_444);
         assert_eq!(
             external_memory_requirement.local_record_seal_invocation_count(),
             21_473
@@ -9258,7 +9258,7 @@ mod tests {
             external_memory_read_traffic,
             RowCodeWhirExternalMemoryReadTraffic {
                 opened_polynomial_replay_byte_length: 126_041_544_800,
-                quotient_transform_byte_length: 0,
+                quotient_transform_byte_length: 45_675_970_560,
                 aggregate_source_byte_length: 23_197_306_880,
             },
         );
@@ -9271,7 +9271,7 @@ mod tests {
             RowCodeWhirExternalMemoryTransactionTraffic {
                 initialization_count: 1,
                 opened_polynomial_replay_count: 128_410,
-                quotient_transform_count: 20_598,
+                quotient_transform_count: 22_331_577,
                 pre_retained_deletion_count: 1_422,
                 aggregate_source_count: 24_034,
             },
@@ -9619,8 +9619,8 @@ mod tests {
                     0,
                     870_692_320,
                     16_355_460_576,
-                    150_312_593_504,
-                    176_519,
+                    195_988_564_064,
+                    22_487_498,
                     31,
                     2_148_124_232,
                 ),
@@ -9629,8 +9629,8 @@ mod tests {
                     0,
                     333_821_408,
                     15_818_589_664,
-                    149_775_722_592,
-                    175_495,
+                    195_451_693_152,
+                    22_486_474,
                     31,
                     1_074_062_920,
                 ),
@@ -9639,8 +9639,8 @@ mod tests {
                     0,
                     65_385_952,
                     15_550_154_208,
-                    149_507_287_136,
-                    174_983,
+                    195_183_257_696,
+                    22_485_962,
                     31,
                     537_032_264,
                 ),
@@ -9649,8 +9649,8 @@ mod tests {
                     68_831_776,
                     0,
                     15_415_936_480,
-                    149_373_069_408,
-                    174_727,
+                    195_049_039_968,
+                    22_485_706,
                     31,
                     268_516_936,
                 ),
@@ -9659,8 +9659,8 @@ mod tests {
                     135_940_640,
                     0,
                     15_348_827_616,
-                    149_305_960_544,
-                    174_599,
+                    194_981_931_104,
+                    22_485_578,
                     31,
                     134_259_272,
                 ),

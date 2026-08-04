@@ -161,6 +161,108 @@ pub(crate) fn construct_composed_quotient_polynomial(
 
 const COMMON_PROOF_RELATION_EVALUATION_BLOCK_LENGTH: usize = 256;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CommonProofQuotientEvaluationReadAccounting {
+    total_byte_length: u64,
+    transaction_count: u64,
+}
+
+impl CommonProofQuotientEvaluationReadAccounting {
+    pub(crate) const fn total_byte_length(self) -> u64 {
+        self.total_byte_length
+    }
+
+    pub(crate) const fn transaction_count(self) -> u64 {
+        self.transaction_count
+    }
+}
+
+/// Replays the exact range partition used by `next_read_request` without
+/// touching external storage. This keeps the executor's authenticated-read
+/// ceiling and transaction ceiling bound to the production quotient cursor,
+/// including rotation wraparound and sub-block chunking.
+pub(crate) fn common_proof_quotient_evaluation_read_accounting(
+    variant: &RelationPlanVariant,
+    context: &RelationPlanCheckContext,
+    evaluation_domain: ProofEvaluationDomain,
+    query: RelationConstraintColumnQuery,
+    value_type: RelationColumnValueType,
+    maximum_external_read_chunk_byte_length: u32,
+) -> Result<CommonProofQuotientEvaluationReadAccounting, CommonProofProverError> {
+    let trace_domain_size = usize::try_from(variant.trace_domain_size())
+        .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let trace_rotation_stride =
+        quotient_evaluation_trace_rotation_stride(variant, context, evaluation_domain)?;
+    let value_byte_length = usize::try_from(external_value_byte_length(value_type))
+        .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let maximum_chunk_element_count = usize::try_from(maximum_external_read_chunk_byte_length)
+        .map_err(|_| CommonProofProverError::CountOverflow)?
+        .checked_div(value_byte_length)
+        .filter(|count| *count != 0)
+        .ok_or(CommonProofProverError::InvalidInput)?;
+    let mut total_element_count = 0_u64;
+    let mut transaction_count = 0_u64;
+    let mut block_start = 0_usize;
+    while block_start < evaluation_domain.size() {
+        let block_end = block_start
+            .checked_add(COMMON_PROOF_RELATION_EVALUATION_BLOCK_LENGTH)
+            .ok_or(CommonProofProverError::CountOverflow)?
+            .min(evaluation_domain.size());
+        let block_element_count = block_end
+            .checked_sub(block_start)
+            .filter(|count| *count != 0)
+            .ok_or(CommonProofProverError::InvalidQuotient)?;
+        let rotated_block_start = rotated_relation_evaluation_position(
+            block_start,
+            evaluation_domain.size(),
+            trace_domain_size,
+            trace_rotation_stride,
+            query.rotation_is_negative(),
+            query.rotation_magnitude(),
+        )?;
+        let mut logical_value_offset = 0_usize;
+        while logical_value_offset < block_element_count {
+            let element_offset = rotated_block_start
+                .checked_add(logical_value_offset)
+                .ok_or(CommonProofProverError::CountOverflow)?
+                % evaluation_domain.size();
+            let element_count = (block_element_count - logical_value_offset)
+                .min(evaluation_domain.size() - element_offset)
+                .min(maximum_chunk_element_count);
+            if element_count == 0 {
+                return Err(CommonProofProverError::InvalidQuotient);
+            }
+            logical_value_offset = logical_value_offset
+                .checked_add(element_count)
+                .ok_or(CommonProofProverError::CountOverflow)?;
+            total_element_count = total_element_count
+                .checked_add(
+                    u64::try_from(element_count)
+                        .map_err(|_| CommonProofProverError::CountOverflow)?,
+                )
+                .ok_or(CommonProofProverError::CountOverflow)?;
+            transaction_count = transaction_count
+                .checked_add(1)
+                .ok_or(CommonProofProverError::CountOverflow)?;
+        }
+        block_start = block_end;
+    }
+    let expected_element_count = u64::try_from(evaluation_domain.size())
+        .map_err(|_| CommonProofProverError::CountOverflow)?;
+    if total_element_count != expected_element_count || transaction_count == 0 {
+        return Err(CommonProofProverError::InvalidQuotient);
+    }
+    Ok(CommonProofQuotientEvaluationReadAccounting {
+        total_byte_length: total_element_count
+            .checked_mul(
+                u64::try_from(value_byte_length)
+                    .map_err(|_| CommonProofProverError::CountOverflow)?,
+            )
+            .ok_or(CommonProofProverError::CountOverflow)?,
+        transaction_count,
+    })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct CommonProofQuotientConstraintTransformKey {
     constraint_ordinal: u32,

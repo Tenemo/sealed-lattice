@@ -193,6 +193,7 @@ pub(crate) use quotient::{
     CommonProofConstraintStreamQuotientBuilder, CommonProofQuotientComponentCursor,
     CommonProofQuotientConstraintTransformKey, CommonProofQuotientEvaluationProgress,
     CommonProofQuotientEvaluationReadRequest, common_proof_quotient_constraint_catalog,
+    common_proof_quotient_evaluation_read_accounting,
     common_proof_quotient_materialization_liveness,
 };
 #[cfg(test)]

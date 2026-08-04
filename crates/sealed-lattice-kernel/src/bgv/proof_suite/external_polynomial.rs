@@ -89,7 +89,7 @@ impl<StorageError> From<ProofExternalMemoryExecutorError<StorageError>>
     }
 }
 
-pub(crate) fn read_external_polynomial_extension_values<Storage: ProofExternalMemory>(
+pub(crate) fn read_external_polynomial_values_as_extension<Storage: ProofExternalMemory>(
     executor: &mut ProofExternalMemoryExecutor,
     storage: &mut Storage,
     vector: ExternalPolynomialVector,
@@ -99,8 +99,7 @@ pub(crate) fn read_external_polynomial_extension_values<Storage: ProofExternalMe
     Zeroizing<Vec<ProofChallengeExtensionElement>>,
     ExternalPolynomialReadError<Storage::Error>,
 > {
-    if vector.value_type() != RelationColumnValueType::ChallengeExtension
-        || element_count == 0
+    if element_count == 0
         || element_offset
             .checked_add(element_count)
             .filter(|end| *end <= vector.element_count())
@@ -109,12 +108,14 @@ pub(crate) fn read_external_polynomial_extension_values<Storage: ProofExternalMe
         return Err(ExternalPolynomialError::InvalidVector.into());
     }
 
+    let element_byte_length = usize::try_from(external_value_byte_length(vector.value_type()))
+        .map_err(|_| ExternalPolynomialError::CountOverflow)?;
     let byte_offset = element_offset
-        .checked_mul(EXTENSION_FIELD_ELEMENT_BYTE_LENGTH)
+        .checked_mul(element_byte_length)
         .and_then(|offset| u64::try_from(offset).ok())
         .ok_or(ExternalPolynomialError::CountOverflow)?;
     let byte_length = element_count
-        .checked_mul(EXTENSION_FIELD_ELEMENT_BYTE_LENGTH)
+        .checked_mul(element_byte_length)
         .ok_or(ExternalPolynomialError::CountOverflow)?;
     let mut encoded_values = Zeroizing::new(Vec::new());
     encoded_values
@@ -127,12 +128,16 @@ pub(crate) fn read_external_polynomial_extension_values<Storage: ProofExternalMe
     values
         .try_reserve_exact(element_count)
         .map_err(|_| ExternalPolynomialError::AllocationLimitExceeded)?;
-    for encoded_value in encoded_values.chunks_exact(EXTENSION_FIELD_ELEMENT_BYTE_LENGTH) {
+    for encoded_value in encoded_values.chunks_exact(element_byte_length) {
         let mut coordinates = [0_u64; PROOF_CHALLENGE_EXTENSION_DEGREE];
-        for (coordinate, encoded_coordinate) in coordinates
-            .iter_mut()
-            .zip(encoded_value.chunks_exact(BASE_FIELD_ELEMENT_BYTE_LENGTH))
-        {
+        for (coordinate, encoded_coordinate) in coordinates.iter_mut().zip(
+            encoded_value
+                .chunks_exact(BASE_FIELD_ELEMENT_BYTE_LENGTH)
+                .take(match vector.value_type() {
+                    RelationColumnValueType::BaseField => 1,
+                    RelationColumnValueType::ChallengeExtension => PROOF_CHALLENGE_EXTENSION_DEGREE,
+                }),
+        ) {
             let mut canonical_coordinate = [0_u8; BASE_FIELD_ELEMENT_BYTE_LENGTH];
             canonical_coordinate.copy_from_slice(encoded_coordinate);
             *coordinate = u64::from_le_bytes(canonical_coordinate);
@@ -166,5 +171,153 @@ pub(crate) fn map_external_polynomial_read_error(
         ExternalPolynomialError::InvalidVector | ExternalPolynomialError::Field(_) => {
             ProofExternalMemoryError::InvalidPlan
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bgv::proof_suite::{
+        PROOF_BASE_FIELD_MODULUS,
+        external_memory::{
+            ProofExternalMemoryObjectPlan, ProofExternalMemoryPlan, ProofExternalMemoryProtection,
+            tests::TestStorage,
+        },
+    };
+
+    fn prepared_external_polynomial(
+        value_type: RelationColumnValueType,
+        element_count: usize,
+        encoded_values: &[u8],
+        maximum_total_read_byte_length: u64,
+    ) -> (
+        ProofExternalMemoryExecutor,
+        TestStorage,
+        ExternalPolynomialVector,
+    ) {
+        let object = ProofExternalMemoryObject::new(0);
+        let exact_byte_length =
+            u64::try_from(encoded_values.len()).expect("the test polynomial byte length fits u64");
+        let maximum_chunk_byte_length =
+            u32::try_from(encoded_values.len()).expect("the test polynomial byte length fits u32");
+        let plan = ProofExternalMemoryPlan::new(
+            1,
+            maximum_chunk_byte_length,
+            exact_byte_length,
+            1,
+            exact_byte_length,
+            exact_byte_length,
+            maximum_total_read_byte_length,
+            8,
+            vec![ProofExternalMemoryObjectPlan::new(
+                object,
+                ProofExternalMemoryProtection::SecretAuthenticatedEncryption,
+                exact_byte_length,
+                0,
+                0,
+                0,
+            )],
+        )
+        .expect("the test external-polynomial plan is valid");
+        let mut executor = ProofExternalMemoryExecutor::new(plan);
+        let mut storage = TestStorage::default();
+        executor
+            .begin_object(&mut storage, object)
+            .expect("the test polynomial object begins");
+        executor
+            .append_object_bytes(&mut storage, object, encoded_values)
+            .expect("the test polynomial bytes append");
+        executor
+            .seal_object(&mut storage, object)
+            .expect("the test polynomial object seals");
+        let vector = ExternalPolynomialVector::new(object, value_type, element_count)
+            .expect("the test external-polynomial vector is valid");
+        (executor, storage, vector)
+    }
+
+    fn encode_extension_values(values: &[[u64; PROOF_CHALLENGE_EXTENSION_DEGREE]]) -> Vec<u8> {
+        values
+            .iter()
+            .flat_map(|coordinates| coordinates.iter())
+            .flat_map(|coordinate| coordinate.to_le_bytes())
+            .collect()
+    }
+
+    #[test]
+    fn base_field_polynomial_reads_embed_values_in_the_extension_field() {
+        let encoded_values = [3_u64, 5, PROOF_BASE_FIELD_MODULUS - 1]
+            .into_iter()
+            .flat_map(u64::to_le_bytes)
+            .collect::<Vec<_>>();
+        let (mut executor, mut storage, vector) = prepared_external_polynomial(
+            RelationColumnValueType::BaseField,
+            3,
+            &encoded_values,
+            16,
+        );
+
+        let values =
+            read_external_polynomial_values_as_extension(&mut executor, &mut storage, vector, 1, 2)
+                .expect("the base-field range embeds canonically");
+        assert_eq!(values[0].canonical_coordinates(), [5, 0, 0, 0, 0]);
+        assert_eq!(
+            values[1].canonical_coordinates(),
+            [PROOF_BASE_FIELD_MODULUS - 1, 0, 0, 0, 0]
+        );
+        executor
+            .complete_step(&mut storage)
+            .expect("the test polynomial lifecycle completes");
+        assert_eq!(
+            executor
+                .finish()
+                .expect("the test external-memory executor finishes")
+                .total_read_byte_length(),
+            16
+        );
+    }
+
+    #[test]
+    fn extension_field_polynomial_reads_preserve_every_coordinate() {
+        let expected_values = [[1_u64, 2, 3, 4, 5], [8, 13, 21, 34, 55]];
+        let encoded_values = encode_extension_values(&expected_values);
+        let (mut executor, mut storage, vector) = prepared_external_polynomial(
+            RelationColumnValueType::ChallengeExtension,
+            expected_values.len(),
+            &encoded_values,
+            EXTENSION_FIELD_ELEMENT_BYTE_LENGTH as u64,
+        );
+
+        let values =
+            read_external_polynomial_values_as_extension(&mut executor, &mut storage, vector, 1, 1)
+                .expect("the extension-field range decodes canonically");
+        assert_eq!(values[0].canonical_coordinates(), expected_values[1]);
+        executor
+            .complete_step(&mut storage)
+            .expect("the test polynomial lifecycle completes");
+        assert_eq!(
+            executor
+                .finish()
+                .expect("the test external-memory executor finishes")
+                .total_read_byte_length(),
+            EXTENSION_FIELD_ELEMENT_BYTE_LENGTH as u64
+        );
+    }
+
+    #[test]
+    fn external_polynomial_reads_refuse_noncanonical_field_values() {
+        let encoded_values = PROOF_BASE_FIELD_MODULUS.to_le_bytes();
+        let (mut executor, mut storage, vector) = prepared_external_polynomial(
+            RelationColumnValueType::BaseField,
+            1,
+            &encoded_values,
+            BASE_FIELD_ELEMENT_BYTE_LENGTH as u64,
+        );
+
+        assert!(matches!(
+            read_external_polynomial_values_as_extension(&mut executor, &mut storage, vector, 0, 1,),
+            Err(ExternalPolynomialReadError::Polynomial(
+                ExternalPolynomialError::Field(_)
+            ))
+        ));
     }
 }
