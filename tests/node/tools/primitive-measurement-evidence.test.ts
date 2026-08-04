@@ -244,7 +244,21 @@ const recordFor = (
                           materializationPeakLiveByteLength!,
                           stripePeakLiveByteLength!,
                       )
-                    : 4_194_304,
+                    : caseIdentifier === 13
+                      ? (dimensions.find(
+                            (dimension) =>
+                                dimension.name === 'planFieldElementCount',
+                        )!.value +
+                            dimensions.find(
+                                (dimension) =>
+                                    dimension.name ===
+                                    'retainedFieldElementCount',
+                            )!.value) *
+                        dimensions.find(
+                            (dimension) =>
+                                dimension.name === 'fieldElementByteLength',
+                        )!.value
+                      : 4_194_304,
         schemaVersion: 2,
     };
 };
@@ -978,6 +992,15 @@ describe('Primitive measurement evidence', () => {
             browserEngines: ['firefox'],
             focusedCaseIdentifiers: [12],
             reuseMeasurementWasm: true,
+        });
+        expect(
+            parseDesktopBrowserPrimitiveMeasurementArguments([
+                'chromium',
+                'case-13',
+            ]),
+        ).toEqual({
+            browserEngines: ['chromium'],
+            focusedCaseIdentifiers: [13],
         });
         expect(
             parseDesktopBrowserPrimitiveMeasurementArguments([

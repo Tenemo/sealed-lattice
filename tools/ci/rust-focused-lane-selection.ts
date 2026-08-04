@@ -34,6 +34,7 @@ export const primitiveMeasurementRustTestCases = [
     'bgv::proof_suite::row_code_whir::primitive_measurements::tests::vss_relation_replay_candidate_row_lane_stripe_emits_measurement',
     'bgv::proof_suite::row_code_whir::primitive_measurements::tests::vss_fused_bound_range_candidate_retained_group_emits_measurement',
     'bgv::proof_suite::row_code_whir::primitive_measurements::tests::vss_fused_bound_range_candidate_row_lane_stripe_emits_measurement',
+    'bgv::proof_suite::row_code_whir::primitive_measurements::tests::ring_native_proof_field_ntt_round_trip_emits_measurement',
 ].map((testName, testIndex) =>
     Object.freeze({ caseIdentifier: testIndex + 1, testName }),
 );

@@ -373,6 +373,34 @@ fn candidate_maps_the_complete_production_inventory_without_dropping_a_secret_re
 fn candidate_outer_packet_schedule_follows_the_three_setup_dependency_barriers() {
     let participant_count = u32::from(FOUNDATION_PROFILE.participant_count);
 
+    let ceilings = ProofApplicationSlotCeilings::derive(
+        FOUNDATION_PROFILE.participant_count,
+        1,
+        1,
+        SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION,
+    )
+    .expect("selected proof-family ceilings derive");
+    let inventory = ceilings
+        .derive_proof_family_application_inventory(6, 7)
+        .expect("selected proof-family inventory derives");
+
+    let logical_relations_per_participant_packet = |epoch: RingNativeCandidateEpoch| -> u32 {
+        RING_NATIVE_CANDIDATE_FAMILIES
+            .iter()
+            .filter(|family| family.epoch == epoch)
+            .map(|family| {
+                let family_inventory = inventory
+                    .family_entry(family.application_statement_schema_identifier)
+                    .expect("candidate family has production inventory");
+                assert_eq!(
+                    family_inventory.physical_proof_application_count(),
+                    participant_count
+                );
+                family_inventory.logical_relation_instance_count() / participant_count
+            })
+            .sum()
+    };
+
     let setup_packet_count = participant_count
         .checked_mul(3)
         .expect("three setup packets per participant fit");
@@ -386,6 +414,46 @@ fn candidate_outer_packet_schedule_follows_the_three_setup_dependency_barriers()
     assert_eq!(
         candidate_outer_packet_schedule_count,
         CANDIDATE_OUTER_PACKET_SCHEDULE_COUNT
+    );
+    assert_eq!(
+        logical_relations_per_participant_packet(RingNativeCandidateEpoch::DealerVss),
+        1
+    );
+    assert_eq!(
+        logical_relations_per_participant_packet(RingNativeCandidateEpoch::AfterVerifiedVss),
+        10
+    );
+    assert_eq!(
+        logical_relations_per_participant_packet(
+            RingNativeCandidateEpoch::AfterFrozenRoundOneAggregate
+        ),
+        1
+    );
+    assert_eq!(
+        logical_relations_per_participant_packet(RingNativeCandidateEpoch::TargetRelease),
+        1
+    );
+
+    let ballot_inventory = inventory
+        .family_entry(ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER)
+        .expect("ballot inventory exists");
+    assert_eq!(
+        ballot_inventory.physical_proof_application_count(),
+        SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION
+    );
+    assert_eq!(
+        ballot_inventory.logical_relation_instance_count()
+            / ballot_inventory.physical_proof_application_count(),
+        1
+    );
+
+    // The 159-relation value describes the complete ceremony inventory, not
+    // one packet or one participant operation. The post-VSS packet is the only
+    // packet currently known to combine more than one logical relation. Its
+    // committed-polynomial count remains a compiler output, not this count.
+    assert_eq!(
+        participant_count * (1 + 10 + 1 + 1) + SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION + 9,
+        159
     );
 
     let after_vss_family_identifiers = RING_NATIVE_CANDIDATE_FAMILIES

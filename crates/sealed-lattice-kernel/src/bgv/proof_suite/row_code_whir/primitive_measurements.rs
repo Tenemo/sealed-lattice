@@ -24,6 +24,16 @@ use super::super::relation_plan::{
     vss_fused_bound_range_candidate_inventory, vss_relation_range_digit_prover_column_ordinals,
     vss_relation_trinary_prover_column_ordinals,
 };
+use super::super::ring_native_field::{
+    RING_NATIVE_PROOF_FIELD_BIT_LENGTH, RING_NATIVE_PROOF_FIELD_ELEMENT_BYTE_LENGTH,
+    RING_NATIVE_PROOF_FIELD_LIMB_COUNT, RING_NATIVE_PROOF_NEGACYCLIC_ROOT_ORDER,
+    RING_NATIVE_PROOF_NTT_BUTTERFLY_COUNT, RING_NATIVE_PROOF_NTT_MODELED_PEAK_LIVE_BYTE_LENGTH,
+    RING_NATIVE_PROOF_NTT_PLAN_FIELD_ELEMENT_COUNT,
+    RING_NATIVE_PROOF_NTT_RETAINED_FIELD_ELEMENT_COUNT, RING_NATIVE_PROOF_NTT_TRANSFORM_COUNT,
+    RING_NATIVE_PROOF_NTT_TRANSFORM_FIELD_MULTIPLICATION_COUNT,
+    RING_NATIVE_PROOF_NTT_TWIST_MULTIPLICATION_COUNT, RING_NATIVE_PROOF_POLYNOMIAL_DEGREE,
+    ring_native_proof_field_ntt_round_trip,
+};
 use super::commitment_liveness::{
     PhaseCommitmentWorkAccounting, derive_phase_commitment_work_accounting,
 };
@@ -4778,6 +4788,54 @@ fn measure_authenticated_scratch_record_codec() -> Result<PrimitiveMeasurementRe
     })
 }
 
+fn measure_ring_native_proof_field_ntt_round_trip() -> Result<PrimitiveMeasurementRecord, String> {
+    let (checksum, elapsed_nanoseconds) =
+        measure_elapsed_nanoseconds(ring_native_proof_field_ntt_round_trip)?;
+    black_box(checksum);
+    Ok(PrimitiveMeasurementRecord {
+        schema_version: MEASUREMENT_SCHEMA_VERSION,
+        case_identifier: 13,
+        case_name: "ring-native-proof-field-ntt-round-trip",
+        execution_target: execution_target(),
+        iteration_count: RING_NATIVE_PROOF_NTT_TRANSFORM_COUNT as u64,
+        elapsed_nanoseconds,
+        modeled_peak_live_byte_length: RING_NATIVE_PROOF_NTT_MODELED_PEAK_LIVE_BYTE_LENGTH as u64,
+        checksum_hex: format!("{checksum:016x}"),
+        dimensions: vec![
+            dimension("fieldBitLength", RING_NATIVE_PROOF_FIELD_BIT_LENGTH)?,
+            dimension("fieldLimbCount", RING_NATIVE_PROOF_FIELD_LIMB_COUNT)?,
+            dimension(
+                "fieldElementByteLength",
+                RING_NATIVE_PROOF_FIELD_ELEMENT_BYTE_LENGTH,
+            )?,
+            dimension("polynomialDegree", RING_NATIVE_PROOF_POLYNOMIAL_DEGREE)?,
+            dimension(
+                "negacyclicRootOrder",
+                RING_NATIVE_PROOF_NEGACYCLIC_ROOT_ORDER,
+            )?,
+            dimension("transformCount", RING_NATIVE_PROOF_NTT_TRANSFORM_COUNT)?,
+            dimension("butterflyCount", RING_NATIVE_PROOF_NTT_BUTTERFLY_COUNT)?,
+            dimension(
+                "twistMultiplicationCount",
+                RING_NATIVE_PROOF_NTT_TWIST_MULTIPLICATION_COUNT,
+            )?,
+            dimension(
+                "transformFieldMultiplicationCount",
+                RING_NATIVE_PROOF_NTT_TRANSFORM_FIELD_MULTIPLICATION_COUNT,
+            )?,
+            dimension(
+                "planFieldElementCount",
+                RING_NATIVE_PROOF_NTT_PLAN_FIELD_ELEMENT_COUNT,
+            )?,
+            dimension(
+                "retainedFieldElementCount",
+                RING_NATIVE_PROOF_NTT_RETAINED_FIELD_ELEMENT_COUNT,
+            )?,
+            dimension("planConstructionIncluded", 1)?,
+        ],
+    })
+}
+
 fn derive_primitive_measurement(
     case_identifier: u32,
 ) -> Result<PrimitiveMeasurementRecord, String> {
@@ -4794,6 +4852,7 @@ fn derive_primitive_measurement(
         10 => measure_vss_relation_replay_candidate_row_lane_stripe(),
         11 => measure_vss_fused_bound_range_candidate_retained_group(),
         12 => measure_vss_fused_bound_range_candidate_row_lane_stripe(),
+        13 => measure_ring_native_proof_field_ntt_round_trip(),
         _ => Err("primitive measurement case is unsupported".to_owned()),
     }
 }
@@ -6270,5 +6329,11 @@ mod tests {
     #[ignore = "guarded release-native VSS fused-bound range candidate row-lane stripe measurement"]
     fn vss_fused_bound_range_candidate_row_lane_stripe_emits_measurement() {
         run_and_validate(12, "vss-fused-radix-51-row-lane-stripe");
+    }
+
+    #[test]
+    #[ignore = "guarded release-native ring-native proof-field NTT measurement"]
+    fn ring_native_proof_field_ntt_round_trip_emits_measurement() {
+        run_and_validate(13, "ring-native-proof-field-ntt-round-trip");
     }
 }

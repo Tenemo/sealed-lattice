@@ -432,6 +432,25 @@ export const primitiveMeasurementCaseCatalog = Object.freeze([
             witnessValueCount: 2_097_152,
         }),
     }),
+    Object.freeze({
+        caseIdentifier: 13,
+        caseName: 'ring-native-proof-field-ntt-round-trip',
+        expectedIterationCount: 2,
+        requiredDimensions: Object.freeze({
+            butterflyCount: 491_520,
+            fieldBitLength: 440,
+            fieldElementByteLength: 56,
+            fieldLimbCount: 7,
+            negacyclicRootOrder: 65_536,
+            planConstructionIncluded: 1,
+            planFieldElementCount: 131_070,
+            polynomialDegree: 32_768,
+            retainedFieldElementCount: 65_536,
+            transformCount: 2,
+            transformFieldMultiplicationCount: 557_056,
+            twistMultiplicationCount: 65_536,
+        }),
+    }),
 ] as const);
 
 type JsonObject = Record<string, unknown>;
@@ -1713,6 +1732,47 @@ export const validatePrimitiveMeasurementRecord = (
         ) {
             throw new Error(
                 'Primitive measurement fused VSS complete-work identities are inconsistent.',
+            );
+        }
+    }
+    if (caseIdentifier === 13) {
+        const fieldLimbCount = dimensionsByName.get('fieldLimbCount')!;
+        const fieldElementByteLength = dimensionsByName.get(
+            'fieldElementByteLength',
+        )!;
+        const polynomialDegree = dimensionsByName.get('polynomialDegree')!;
+        const butterflyCount = dimensionsByName.get('butterflyCount')!;
+        const twistMultiplicationCount = dimensionsByName.get(
+            'twistMultiplicationCount',
+        )!;
+        const planFieldElementCount = dimensionsByName.get(
+            'planFieldElementCount',
+        )!;
+        const retainedFieldElementCount = dimensionsByName.get(
+            'retainedFieldElementCount',
+        )!;
+        if (
+            dimensionsByName.get('fieldBitLength')! <=
+                (fieldLimbCount - 1) * 64 ||
+            dimensionsByName.get('fieldBitLength')! > fieldLimbCount * 64 ||
+            fieldElementByteLength !== fieldLimbCount * 8 ||
+            dimensionsByName.get('negacyclicRootOrder') !==
+                polynomialDegree * 2 ||
+            dimensionsByName.get('transformCount') !== 2 ||
+            butterflyCount !== polynomialDegree * Math.log2(polynomialDegree) ||
+            twistMultiplicationCount !== polynomialDegree * 2 ||
+            dimensionsByName.get('transformFieldMultiplicationCount') !==
+                butterflyCount + twistMultiplicationCount ||
+            planFieldElementCount !== polynomialDegree * 4 - 2 ||
+            retainedFieldElementCount !== polynomialDegree * 2 ||
+            dimensionsByName.get('planConstructionIncluded') !== 1 ||
+            modeledPeakLiveByteLength !==
+                (planFieldElementCount + retainedFieldElementCount) *
+                    fieldElementByteLength ||
+            modeledPeakLiveByteLength >= 671_088_640
+        ) {
+            throw new Error(
+                'Primitive measurement ring-native proof-field NTT identities are inconsistent.',
             );
         }
     }

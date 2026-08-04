@@ -41,6 +41,8 @@ mod relinearization_verification_runtime;
 mod resource_accounting_evidence;
 #[cfg(test)]
 mod ring_native_candidate;
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+mod ring_native_field;
 mod row_code_whir;
 mod runtime;
 mod runtime_ffi;

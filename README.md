@@ -116,29 +116,51 @@ post-VSS packet batching aggregate-share, same-secret, public-key, round-one,
 and Galois relations; and one round-two packet after the round-one aggregate
 freezes. Including the 20 ballot-attempt slots and ten target-share slots gives
 a 60-packet outer schedule, compared with the incumbent inventory of 103
-physical proof applications. The number of internal PCS lifecycle segments is
-unresolved until the exact oracle inventory is compiled, and no logical
-relation is removed by batching. At 234 committed polynomials, one
+physical proof applications. The complete 159-relation count is not one proof
+or one participant operation: the dealer, round-two, ballot, and release
+packets each contain one logical relation, while one participant's post-VSS
+packet contains ten. Committed-polynomial counts and internal PCS segments
+remain unresolved until each packet is compiled. At the formula-only
+234-polynomial sensitivity point, one
 uncompressed 440-bit field array would be `858,783,744` bytes and already
 exceed the WebAssembly hard-memory bound. The reference prover's resident
-opening lifecycle is therefore not a browser implementation candidate. The
-intended adapter emits commitments in a first pass, discards per-polynomial
-openings, and deterministically recomputes and streams them into one batched
-opening after challenge derivation. Independent proof segmentation is a
-fallback only if that two-pass lifecycle cannot be bounded.
+opening lifecycle is therefore not a browser implementation candidate.
 
-That candidate is not yet implemented or selected. The three public-only
+The earlier two-pass adapter sketch is also insufficient for the unmodified
+Jindo transcript. After commitments and the evaluation point, its prover first
+consumes every opening to emit blinder and split evaluations. Only then does it
+derive the batch challenge used to aggregate those openings; a rejected mask
+attempt derives a new challenge and repeats that aggregation. Discarding
+openings therefore requires at least three deterministic witness/opening
+traversals, plus one more for each rejected masking attempt. The packet
+compiler must choose between that replay schedule and packet-local retention
+using exact liveness and rejection-tail evidence. Changing transcript order or
+segmenting proofs requires its own extraction, hiding, soundness, and
+Fiat-Shamir composition.
+
+The clean-room seven-limb field and full degree-`32,768` negacyclic NTT
+round-trip are now implemented as a measurement-only kernel. The same release
+WASM completed plan construction, a forward transform, and an inverse
+transform in `210.9` ms in Chromium and `1,694` ms in Firefox, with
+`12,910,592` bytes of final WASM memory and an `11,009,936`-byte modeled live
+set; release native took `42.9545` ms and all three checksums matched. This
+removes the proof-field arithmetic and NTT as an orders-of-magnitude kill gate.
+It is desktop-browser component evidence, not a proof, verifier, packet
+runtime, phone measurement, or suite qualification.
+
+The complete candidate is not yet implemented or selected. The three public-only
 aggregate families may disappear only if canonical homomorphic source
 commitments and a streaming commitment to the aggregate bytes prove the same
 binding; otherwise their relations remain. The first required executable kill
-gate is the clean-room 440-bit field and degree-`32,768` NTT in release
-WebAssembly, followed by one public-key relation across its actual RNS limbs
-with the recomputable two-pass opening lifecycle, canonical statement binding,
-centered-lift and quotient uniqueness, exact norms, proof generation and
-verification, and one-build Chromium and Firefox resource evidence. Published
-native results and the external Go reference are research and differential-test
-inputs, not browser evidence, licensed reusable code, a project transcript, or
-a QROM theorem.
+gate is now the packet compiler: it must derive the exact relation, committed-
+polynomial, PCS-round, interval, transcript, proof-size, and liveness inventory
+for every packet, especially the ten-relation post-VSS packet. The next
+executable slice is one public-key relation across its actual RNS limbs, then
+the complete canonical post-VSS packet, with centered-lift and quotient
+uniqueness, randomized encoding, commitments, evaluation opening, canonical
+bytes, hostile refusal, and one-build Chromium and Firefox resource evidence.
+The external Go reference remains a research and differential-test input, not
+licensed reusable code, a project transcript, or a QROM theorem.
 
 Works today:
 
@@ -685,7 +707,8 @@ Not yet:
 - The direct-RNS ring candidate has no production prover, verifier, canonical
   encoding, complete per-constraint interval theorem, compiled oracle ledger,
   MLWE/MSIS estimate, extraction or hiding proof, Fiat-Shamir transform,
-  emitted bytes, or browser result. The
+  emitted proof bytes, or complete-proof browser result. The measurement-only
+  field and NTT result does not close any of those obligations. The
   row-code construction's masking, extractor, transcript, and QROM records do
   not transfer to it. The candidate cannot select or activate a suite until
   these obligations close for the emitted replacement bytes.

@@ -8,12 +8,17 @@ The implemented row-code/WHIR proof body is operationally rejected as the
 mobile proving direction. A test-only direct-RNS ring candidate map preserves
 the complete production family inventory and keeps every accepted BGV object
 in its existing RNS representation, but no replacement prover, verifier, wire,
-complete interval theorem, or browser evidence exists yet. The row-code
-mapped-soundness vector and setup imports do not transfer to that candidate,
-and neither backend can freeze the suite. The candidate's earlier 255-bit field
-is rejected under the active QROM query budget; the provisional 440-bit
-replacement and its recomputable two-pass opening lifecycle still require
-production compilation and release-WebAssembly evidence.
+or complete interval theorem exists yet. Its measurement-only 440-bit field
+and full degree-`32,768` NTT primitive pass release-WASM Chromium and Firefox,
+but that is component evidence rather than a compiled proof or packet runtime.
+The row-code mapped-soundness vector and setup imports do not transfer to that
+candidate, and neither backend can freeze the suite. The candidate's earlier 255-bit field
+is rejected under the active QROM query budget. Exact per-packet polynomial
+counts remain uncompiled, and the earlier two-pass opening sketch is
+incompatible with the reference challenge order unless openings are retained;
+a discarded-opening adapter needs at least three deterministic traversals plus
+rejection retries. The complete proof still requires production compilation,
+theorem evidence, and release-WebAssembly generation and verification.
 
 Enrollment, identity vetting, invite links, organizer orchestration, user interface, and visit cadence belong to the host application rather than this cryptographic library. A host-side organizer has no distinct cryptographic role or authority.
 
