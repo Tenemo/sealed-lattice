@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
+import { vssFusedRadix51ProjectionOwnerCaseIdentifiers } from '#tools/ci/primitive-measurement-evidence';
 import {
     fullProfileEvidenceRustTests,
     measurementRustTests,
     phaseLivenessEvidenceRustTests,
+    resolvePrimitiveMeasurementRustTestCases,
     theoremEvidenceRustTests,
     validateCompleteRustLaneOwnership,
     validateFocusedRustLaneSelection,
+    vssFusedRadix51ProjectionOwnerRustFilter,
 } from '#tools/ci/rust-focused-lane-selection';
 import { heavyRustKernelTestNamePrefix } from '#tools/ci/rust-kernel-test-arguments';
 
@@ -208,5 +211,18 @@ describe('focused Rust lane selection', () => {
                 ],
             }),
         ).toThrow('multiple Rust lanes');
+    });
+
+    it('binds the radix-51 projection selector to the shared primitive case set', () => {
+        expect(
+            resolvePrimitiveMeasurementRustTestCases(
+                vssFusedRadix51ProjectionOwnerRustFilter,
+            ).map(({ caseIdentifier }) => caseIdentifier),
+        ).toEqual(vssFusedRadix51ProjectionOwnerCaseIdentifiers);
+        expect(
+            resolvePrimitiveMeasurementRustTestCases(
+                'vss_fused_bound_range_candidate',
+            ).map(({ caseIdentifier }) => caseIdentifier),
+        ).toEqual([11, 12]);
     });
 });

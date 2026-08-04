@@ -15,10 +15,14 @@ import {
     validateDesktopBrowserPrimitiveMeasurementEvidence,
     validatePrimitiveMeasurementRecord,
     validateReleaseNativePrimitiveMeasurementEvidence,
+    vssFusedRadix51ProjectionOwnerCaseIdentifiers,
     type PrimitiveMeasurementRecord,
 } from '#tools/ci/primitive-measurement-evidence';
 import { parseDesktopBrowserPrimitiveMeasurementArguments } from '#tools/ci/run-desktop-browser-primitive-measurements';
-import { deriveVssBaseMaterializationProjection } from '#tools/ci/vss-base-materialization-projection';
+import {
+    deriveVssBaseMaterializationProjection,
+    deriveVssFusedRadix51OwnerProjection,
+} from '#tools/ci/vss-base-materialization-projection';
 
 const recordFor = (
     caseIdentifier: number,
@@ -903,7 +907,7 @@ describe('Primitive measurement evidence', () => {
             ]),
         ).toEqual({
             browserEngines: ['chromium'],
-            focusedCaseIdentifier: 5,
+            focusedCaseIdentifiers: [5],
             reuseMeasurementWasm: true,
         });
         expect(
@@ -913,7 +917,7 @@ describe('Primitive measurement evidence', () => {
             ]),
         ).toEqual({
             browserEngines: ['chromium'],
-            focusedCaseIdentifier: 8,
+            focusedCaseIdentifiers: [8],
         });
         expect(
             parseDesktopBrowserPrimitiveMeasurementArguments([
@@ -923,7 +927,7 @@ describe('Primitive measurement evidence', () => {
             ]),
         ).toEqual({
             browserEngines: ['firefox'],
-            focusedCaseIdentifier: 8,
+            focusedCaseIdentifiers: [8],
             reuseMeasurementWasm: true,
         });
         expect(
@@ -933,7 +937,7 @@ describe('Primitive measurement evidence', () => {
             ]),
         ).toEqual({
             browserEngines: ['chromium'],
-            focusedCaseIdentifier: 9,
+            focusedCaseIdentifiers: [9],
         });
         expect(
             parseDesktopBrowserPrimitiveMeasurementArguments([
@@ -943,7 +947,7 @@ describe('Primitive measurement evidence', () => {
             ]),
         ).toEqual({
             browserEngines: ['firefox'],
-            focusedCaseIdentifier: 10,
+            focusedCaseIdentifiers: [10],
             reuseMeasurementWasm: true,
         });
         expect(
@@ -953,7 +957,7 @@ describe('Primitive measurement evidence', () => {
             ]),
         ).toEqual({
             browserEngines: ['chromium'],
-            focusedCaseIdentifier: 11,
+            focusedCaseIdentifiers: [11],
         });
         expect(
             parseDesktopBrowserPrimitiveMeasurementArguments([
@@ -963,8 +967,17 @@ describe('Primitive measurement evidence', () => {
             ]),
         ).toEqual({
             browserEngines: ['firefox'],
-            focusedCaseIdentifier: 12,
+            focusedCaseIdentifiers: [12],
             reuseMeasurementWasm: true,
+        });
+        expect(
+            parseDesktopBrowserPrimitiveMeasurementArguments([
+                'chromium',
+                'fused-radix-51-projection-owners',
+            ]),
+        ).toEqual({
+            browserEngines: ['chromium'],
+            focusedCaseIdentifiers: [1, 2, 3, 4, 5, 8, 11, 12],
         });
         expect(() =>
             parseDesktopBrowserPrimitiveMeasurementArguments(['webkit']),
@@ -1029,6 +1042,63 @@ describe('Primitive measurement evidence', () => {
                 8,
             ).focusedPrimitiveEvidence,
         ).toHaveLength(1);
+        const projectionOwnerEvidence =
+            vssFusedRadix51ProjectionOwnerCaseIdentifiers.map(
+                (caseIdentifier) => ({
+                    ...focusedEvidence,
+                    primitiveCase: {
+                        ...focusedEvidence.primitiveCase,
+                        record: recordFor(caseIdentifier),
+                    },
+                }),
+            );
+        expect(
+            validateDesktopBrowserFocusedPrimitiveMeasurementBundle(
+                {
+                    focusedPrimitiveEvidence: projectionOwnerEvidence,
+                    measurementWasm: {
+                        byteLength: 1_000_000,
+                        normalizedSha256Hex: 'a'.repeat(64),
+                        rawSha256Hex: 'b'.repeat(64),
+                    },
+                    schemaVersion: 1,
+                },
+                vssFusedRadix51ProjectionOwnerCaseIdentifiers,
+            ).focusedPrimitiveEvidence.map(
+                (evidence) => evidence.primitiveCase.record.caseIdentifier,
+            ),
+        ).toEqual(vssFusedRadix51ProjectionOwnerCaseIdentifiers);
+        expect(() =>
+            validateDesktopBrowserFocusedPrimitiveMeasurementBundle(
+                {
+                    focusedPrimitiveEvidence: projectionOwnerEvidence.slice(
+                        0,
+                        -1,
+                    ),
+                    measurementWasm: {
+                        byteLength: 1_000_000,
+                        normalizedSha256Hex: 'a'.repeat(64),
+                        rawSha256Hex: 'b'.repeat(64),
+                    },
+                    schemaVersion: 1,
+                },
+                vssFusedRadix51ProjectionOwnerCaseIdentifiers,
+            ),
+        ).toThrow(/exact canonical case set/u);
+        expect(() =>
+            validateDesktopBrowserFocusedPrimitiveMeasurementBundle(
+                {
+                    focusedPrimitiveEvidence: projectionOwnerEvidence,
+                    measurementWasm: {
+                        byteLength: 1_000_000,
+                        normalizedSha256Hex: 'a'.repeat(64),
+                        rawSha256Hex: 'b'.repeat(64),
+                    },
+                    schemaVersion: 1,
+                },
+                [2, 1],
+            ),
+        ).toThrow(/noncanonical/u);
 
         expect(() =>
             validateDesktopBrowserFocusedPrimitiveMeasurementEvidence(
@@ -1066,6 +1136,102 @@ describe('Primitive measurement evidence', () => {
                 8,
             ),
         ).toThrow(/noncanonical fields/u);
+    });
+
+    it('derives the fused radix-51 comparison only from exact native and browser owner sets', () => {
+        const nativeEvidence =
+            validateReleaseNativePrimitiveMeasurementEvidence(
+                {
+                    primitiveCases:
+                        vssFusedRadix51ProjectionOwnerCaseIdentifiers.map(
+                            (caseIdentifier) =>
+                                recordFor(caseIdentifier, 'release-native'),
+                        ),
+                    schemaVersion: 1,
+                },
+                false,
+                vssFusedRadix51ProjectionOwnerCaseIdentifiers,
+            );
+        const browserEvidence = (['chromium', 'firefox'] as const).flatMap(
+            (browserEngine) =>
+                vssFusedRadix51ProjectionOwnerCaseIdentifiers.map(
+                    (caseIdentifier) =>
+                        validateDesktopBrowserFocusedPrimitiveMeasurementEvidence(
+                            {
+                                browserEngine,
+                                browserUserAgent: `${browserEngine} test`,
+                                primitiveCase: {
+                                    record: recordFor(caseIdentifier),
+                                    wallElapsedMilliseconds: caseIdentifier,
+                                    wasmMemoryByteLengthAfter: 67_108_864,
+                                    wasmMemoryByteLengthBefore: 16_777_216,
+                                },
+                                schemaVersion: 1,
+                            },
+                            browserEngine,
+                            caseIdentifier,
+                        ),
+                ),
+        );
+        const projection = deriveVssFusedRadix51OwnerProjection({
+            browserEvidence,
+            nativeEvidence,
+        });
+        expect(projection).toMatchObject({
+            candidateWork: {
+                laneDftCount: 3_328,
+                sourceReplayCount: 5_254,
+            },
+            schemaVersion: 1,
+            selectedWork: {
+                laneDftCount: 72_192,
+                sourceReplayCount: 576_576,
+            },
+        });
+        expect(projection.targetProjections).toHaveLength(3);
+        expect(
+            projection.targetProjections.map((target) =>
+                Number(target.ownerReductionFactor),
+            ),
+        ).toEqual(
+            expect.arrayContaining([
+                expect.any(Number),
+                expect.any(Number),
+                expect.any(Number),
+            ]),
+        );
+
+        expect(() =>
+            deriveVssFusedRadix51OwnerProjection({
+                browserEvidence: [
+                    browserEvidence[1],
+                    browserEvidence[0],
+                    ...browserEvidence.slice(2),
+                ],
+                nativeEvidence,
+            }),
+        ).toThrow(/duplicated or noncanonical/u);
+        const changedChecksumEvidence = browserEvidence.map(
+            (evidence, evidenceIndex) =>
+                evidenceIndex === 0
+                    ? {
+                          ...evidence,
+                          primitiveCase: {
+                              ...evidence.primitiveCase,
+                              record: {
+                                  ...evidence.primitiveCase.record,
+                                  checksumHex: '0'.repeat(16),
+                              },
+                          },
+                      }
+                    : evidence,
+        );
+        expect(() =>
+            deriveVssFusedRadix51OwnerProjection({
+                browserEvidence: changedChecksumEvidence,
+                nativeEvidence,
+            }),
+        ).toThrow(/differs across native and WASM/u);
     });
 
     it('makes cleanup batches admissible under the authenticated storage transaction limits', () => {

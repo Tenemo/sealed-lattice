@@ -1,4 +1,5 @@
 import type { ActiveLocalRunLog } from './local-run-log.js';
+import { vssFusedRadix51ProjectionOwnerCaseIdentifiers } from './primitive-measurement-evidence.js';
 import type { CommandInvocation } from './run-command.js';
 import { heavyRustKernelTestNamePrefix } from './rust-kernel-test-arguments.js';
 import {
@@ -20,7 +21,7 @@ export const fullProfileEvidenceRustTests = [
     'foundation::suite_artifact_preflight::tests::candidate_suite_artifacts_pass_semantic_preflight_and_refuse_mutations',
 ] as const;
 
-export const primitiveMeasurementRustTests = [
+export const primitiveMeasurementRustTestCases = [
     'bgv::proof_suite::row_code_whir::primitive_measurements::tests::selected_bounded_lane_dft_emits_measurement',
     'bgv::proof_suite::row_code_whir::primitive_measurements::tests::selected_salted_phase_leaf_emits_measurement',
     'bgv::proof_suite::row_code_whir::primitive_measurements::tests::selected_private_leaf_salt_derivation_emits_measurement',
@@ -33,7 +34,32 @@ export const primitiveMeasurementRustTests = [
     'bgv::proof_suite::row_code_whir::primitive_measurements::tests::vss_relation_replay_candidate_row_lane_stripe_emits_measurement',
     'bgv::proof_suite::row_code_whir::primitive_measurements::tests::vss_fused_bound_range_candidate_retained_group_emits_measurement',
     'bgv::proof_suite::row_code_whir::primitive_measurements::tests::vss_fused_bound_range_candidate_row_lane_stripe_emits_measurement',
-] as const;
+].map((testName, testIndex) =>
+    Object.freeze({ caseIdentifier: testIndex + 1, testName }),
+);
+
+export const primitiveMeasurementRustTests = Object.freeze(
+    primitiveMeasurementRustTestCases.map(({ testName }) => testName),
+);
+
+export const vssFusedRadix51ProjectionOwnerRustFilter =
+    'vss_fused_bound_range_projection_owners';
+const vssFusedRadix51ProjectionOwnerCaseIdentifierSet = new Set(
+    vssFusedRadix51ProjectionOwnerCaseIdentifiers,
+);
+
+export const resolvePrimitiveMeasurementRustTestCases = (
+    focusedFilter: string,
+): readonly (typeof primitiveMeasurementRustTestCases)[number][] =>
+    focusedFilter === vssFusedRadix51ProjectionOwnerRustFilter
+        ? primitiveMeasurementRustTestCases.filter(({ caseIdentifier }) =>
+              vssFusedRadix51ProjectionOwnerCaseIdentifierSet.has(
+                  caseIdentifier,
+              ),
+          )
+        : primitiveMeasurementRustTestCases.filter(({ testName }) =>
+              testName.includes(focusedFilter),
+          );
 
 export const measurementRustTests = [
     'bgv::proof_suite::resource_accounting_evidence::tests::selected_candidate_static_resource_accounting_emits_run_attachment',

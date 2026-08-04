@@ -640,18 +640,31 @@ export const runDesktopBrowserPrimitiveMeasurements = async (input: {
     });
 };
 
-export const runDesktopBrowserFocusedPrimitiveMeasurement = async (input: {
+export const runDesktopBrowserFocusedPrimitiveMeasurements = async (input: {
     browserEngine: 'chromium' | 'firefox';
-    caseIdentifier: number;
+    caseIdentifiers: readonly number[];
     wasmUrl: string;
-}): Promise<DesktopBrowserFocusedPrimitiveMeasurementEvidence> => {
+}): Promise<readonly DesktopBrowserFocusedPrimitiveMeasurementEvidence[]> => {
     if (
-        !primitiveMeasurementCaseCatalog.some(
-            (entry) => entry.caseIdentifier === input.caseIdentifier,
+        input.caseIdentifiers.length === 0 ||
+        new Set(input.caseIdentifiers).size !== input.caseIdentifiers.length ||
+        primitiveMeasurementCaseCatalog
+            .filter((entry) =>
+                input.caseIdentifiers.includes(entry.caseIdentifier),
+            )
+            .some(
+                (entry, entryIndex) =>
+                    entry.caseIdentifier !== input.caseIdentifiers[entryIndex],
+            ) ||
+        input.caseIdentifiers.some(
+            (caseIdentifier) =>
+                !primitiveMeasurementCaseCatalog.some(
+                    (entry) => entry.caseIdentifier === caseIdentifier,
+                ),
         )
     ) {
         throw new Error(
-            `Focused primitive-measurement case ${String(input.caseIdentifier)} is not catalog-owned.`,
+            'Focused primitive-measurement case set is empty, duplicated, unsupported, or noncanonical.',
         );
     }
     const response = await fetch(input.wasmUrl, { cache: 'no-store' });
@@ -664,19 +677,22 @@ export const runDesktopBrowserFocusedPrimitiveMeasurement = async (input: {
     if (wasmBytes.byteLength === 0) {
         throw new Error('Primitive-measurement WASM artifact is empty.');
     }
-    const primitiveCase = await runPrimitiveCase(
-        wasmBytes,
-        input.caseIdentifier,
-    );
-    if (primitiveCase.record.caseIdentifier !== input.caseIdentifier) {
-        throw new Error(
-            `Focused primitive-measurement WASM returned case ${String(primitiveCase.record.caseIdentifier)} instead of case ${String(input.caseIdentifier)}.`,
+    const evidence: DesktopBrowserFocusedPrimitiveMeasurementEvidence[] = [];
+    for (const caseIdentifier of input.caseIdentifiers) {
+        const primitiveCase = await runPrimitiveCase(wasmBytes, caseIdentifier);
+        if (primitiveCase.record.caseIdentifier !== caseIdentifier) {
+            throw new Error(
+                `Focused primitive-measurement WASM returned case ${String(primitiveCase.record.caseIdentifier)} instead of case ${String(caseIdentifier)}.`,
+            );
+        }
+        evidence.push(
+            Object.freeze({
+                browserEngine: input.browserEngine,
+                browserUserAgent: navigator.userAgent,
+                primitiveCase,
+                schemaVersion: 1,
+            }),
         );
     }
-    return Object.freeze({
-        browserEngine: input.browserEngine,
-        browserUserAgent: navigator.userAgent,
-        primitiveCase,
-        schemaVersion: 1,
-    });
+    return Object.freeze(evidence);
 };

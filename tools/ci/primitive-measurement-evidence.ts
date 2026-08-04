@@ -109,6 +109,9 @@ export type DesktopBrowserFocusedPrimitiveMeasurementBundle = Readonly<{
 
 export const selectedAuthenticatedScratchRecordByteLength = 1_049_125;
 export const desktopBrowserBoundaryCopyIterationCount = 256;
+export const vssFusedRadix51ProjectionOwnerCaseIdentifiers = Object.freeze([
+    1, 2, 3, 4, 5, 8, 11, 12,
+] as const);
 
 export const primitiveMeasurementCaseCatalog = Object.freeze([
     Object.freeze({
@@ -2114,6 +2117,7 @@ export const parseReleaseNativePrimitiveMeasurementOutput = (
 export const validateReleaseNativePrimitiveMeasurementEvidence = (
     value: unknown,
     requireCompleteCatalog: boolean,
+    expectedFocusedCaseIdentifiers?: readonly number[],
 ): ReleaseNativePrimitiveMeasurementEvidence => {
     if (!isJsonObject(value)) {
         throw new Error(
@@ -2140,10 +2144,31 @@ export const validateReleaseNativePrimitiveMeasurementEvidence = (
         );
     }
     if (requireCompleteCatalog) {
+        if (expectedFocusedCaseIdentifiers !== undefined) {
+            throw new Error(
+                'Complete release-native primitive measurement evidence cannot declare focused cases.',
+            );
+        }
         requireCompletePrimitiveMeasurementCatalog(primitiveCases);
-    } else if (primitiveCases.length !== 1) {
+    } else if (expectedFocusedCaseIdentifiers === undefined) {
+        if (primitiveCases.length !== 1) {
+            throw new Error(
+                'Focused release-native primitive measurement evidence must contain one case.',
+            );
+        }
+    } else if (
+        expectedFocusedCaseIdentifiers.length === 0 ||
+        new Set(expectedFocusedCaseIdentifiers).size !==
+            expectedFocusedCaseIdentifiers.length ||
+        primitiveCases.length !== expectedFocusedCaseIdentifiers.length ||
+        primitiveCases.some(
+            (record, recordIndex) =>
+                record.caseIdentifier !==
+                expectedFocusedCaseIdentifiers[recordIndex],
+        )
+    ) {
         throw new Error(
-            'Focused release-native primitive measurement evidence must contain one case.',
+            'Focused release-native primitive measurement evidence differs from its expected canonical case set.',
         );
     }
     return Object.freeze({
@@ -2652,7 +2677,7 @@ export const validateDesktopBrowserPrimitiveMeasurementBundle = (
 
 export const validateDesktopBrowserFocusedPrimitiveMeasurementBundle = (
     value: unknown,
-    expectedCaseIdentifier?: number,
+    expectedCaseIdentifiers?: number | readonly number[],
 ): DesktopBrowserFocusedPrimitiveMeasurementBundle => {
     if (!isJsonObject(value)) {
         throw new Error(
@@ -2674,23 +2699,89 @@ export const validateDesktopBrowserFocusedPrimitiveMeasurementBundle = (
     }
     const focusedPrimitiveEvidence = value.focusedPrimitiveEvidence.map(
         (evidence) =>
-            validateDesktopBrowserFocusedPrimitiveMeasurementEvidence(
-                evidence,
-                undefined,
-                expectedCaseIdentifier,
-            ),
+            validateDesktopBrowserFocusedPrimitiveMeasurementEvidence(evidence),
     );
-    requireCanonicalBrowserEngineOrder(
-        focusedPrimitiveEvidence.map((evidence) => evidence.browserEngine),
-    );
-    const caseIdentifiers = new Set(
-        focusedPrimitiveEvidence.map(
-            (evidence) => evidence.primitiveCase.record.caseIdentifier,
-        ),
-    );
-    if (caseIdentifiers.size !== 1) {
+    const normalizedExpectedCaseIdentifiers =
+        expectedCaseIdentifiers === undefined
+            ? undefined
+            : typeof expectedCaseIdentifiers === 'number'
+              ? [expectedCaseIdentifiers]
+              : [...expectedCaseIdentifiers];
+    if (
+        normalizedExpectedCaseIdentifiers !== undefined &&
+        (normalizedExpectedCaseIdentifiers.length === 0 ||
+            new Set(normalizedExpectedCaseIdentifiers).size !==
+                normalizedExpectedCaseIdentifiers.length ||
+            normalizedExpectedCaseIdentifiers.some(
+                (caseIdentifier, caseIndex) =>
+                    !Number.isSafeInteger(caseIdentifier) ||
+                    caseIdentifier <= 0 ||
+                    primitiveMeasurementCaseCatalog.findIndex(
+                        (entry) => entry.caseIdentifier === caseIdentifier,
+                    ) <
+                        (caseIndex === 0
+                            ? 0
+                            : primitiveMeasurementCaseCatalog.findIndex(
+                                  (entry) =>
+                                      entry.caseIdentifier ===
+                                      normalizedExpectedCaseIdentifiers[
+                                          caseIndex - 1
+                                      ],
+                              ) + 1),
+            ))
+    ) {
         throw new Error(
-            'Focused desktop-browser primitive-measurement bundle mixes case identifiers.',
+            'Focused desktop-browser primitive-measurement bundle expected case identifiers are empty, duplicated, unsupported, or noncanonical.',
+        );
+    }
+    const browserGroups: Array<{
+        browserEngine: 'chromium' | 'firefox';
+        caseIdentifiers: number[];
+    }> = [];
+    for (const evidence of focusedPrimitiveEvidence) {
+        let currentGroup = browserGroups[browserGroups.length - 1];
+        if (currentGroup?.browserEngine !== evidence.browserEngine) {
+            if (
+                browserGroups.some(
+                    (group) => group.browserEngine === evidence.browserEngine,
+                )
+            ) {
+                throw new Error(
+                    'Focused desktop-browser primitive-measurement bundle has noncontiguous browser groups.',
+                );
+            }
+            currentGroup = {
+                browserEngine: evidence.browserEngine,
+                caseIdentifiers: [],
+            };
+            browserGroups.push(currentGroup);
+        }
+        currentGroup.caseIdentifiers.push(
+            evidence.primitiveCase.record.caseIdentifier,
+        );
+    }
+    requireCanonicalBrowserEngineOrder(
+        browserGroups.map((group) => group.browserEngine),
+    );
+    const canonicalCaseIdentifiers =
+        normalizedExpectedCaseIdentifiers ??
+        (browserGroups[0]?.caseIdentifiers.length === 1
+            ? browserGroups[0].caseIdentifiers
+            : undefined);
+    if (
+        canonicalCaseIdentifiers === undefined ||
+        browserGroups.some(
+            (group) =>
+                group.caseIdentifiers.length !==
+                    canonicalCaseIdentifiers.length ||
+                group.caseIdentifiers.some(
+                    (caseIdentifier, caseIndex) =>
+                        caseIdentifier !== canonicalCaseIdentifiers[caseIndex],
+                ),
+        )
+    ) {
+        throw new Error(
+            'Focused desktop-browser primitive-measurement bundle differs from its exact canonical case set.',
         );
     }
     return Object.freeze({

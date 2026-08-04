@@ -5,8 +5,10 @@ import {
     fullProfileEvidenceRustTests,
     measurementRustTests,
     phaseLivenessEvidenceRustTests,
+    resolvePrimitiveMeasurementRustTestCases,
     theoremEvidenceRustTests,
     validateFocusedRustLaneSelection,
+    vssFusedRadix51ProjectionOwnerRustFilter,
 } from '#tools/ci/rust-focused-lane-selection';
 
 describe('manual Rust kernel preflight', () => {
@@ -225,5 +227,28 @@ describe('manual Rust kernel preflight', () => {
         expect(executedTestFilters).toEqual([
             'selected_authenticated_scratch_record_codec',
         ]);
+    });
+
+    it('expands the fused radix-51 projection owner selector to its exact release tests', async () => {
+        let executedTestFilters: readonly string[] = [];
+
+        await preflightAndRunManualRustKernelLane({
+            configuredTestNames: measurementRustTests,
+            focusedFilter: vssFusedRadix51ProjectionOwnerRustFilter,
+            lane: 'rust-measurements',
+            runGuardedCommands: (testFilters) => {
+                executedTestFilters = testFilters;
+                return Promise.resolve();
+            },
+            verifyLaneSelection: () =>
+                Promise.reject(new Error('Focused inventory must not run.')),
+        });
+
+        expect(executedTestFilters).toEqual(
+            resolvePrimitiveMeasurementRustTestCases(
+                vssFusedRadix51ProjectionOwnerRustFilter,
+            ).map(({ testName }) => testName),
+        );
+        expect(executedTestFilters).toHaveLength(8);
     });
 });

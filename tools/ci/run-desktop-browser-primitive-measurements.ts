@@ -18,6 +18,7 @@ import {
     validateDesktopBrowserBoundaryCopyMeasurement,
     validateDesktopBrowserFocusedPrimitiveMeasurementEvidence,
     validateDesktopBrowserPrimitiveMeasurementEvidence,
+    vssFusedRadix51ProjectionOwnerCaseIdentifiers,
     type DesktopBrowserAuthenticatedStorageMeasurement,
     type DesktopBrowserBoundaryCopyMeasurement,
     type DesktopBrowserFocusedPrimitiveMeasurementEvidence,
@@ -43,7 +44,7 @@ type SupportedMeasurementComponent =
 
 export type DesktopBrowserPrimitiveMeasurementArguments = Readonly<{
     browserEngines: readonly SupportedBrowserEngine[];
-    focusedCaseIdentifier?: number;
+    focusedCaseIdentifiers?: readonly number[];
     measurementComponent?: SupportedMeasurementComponent;
     reuseMeasurementWasm?: boolean;
 }>;
@@ -70,10 +71,17 @@ export const parseDesktopBrowserPrimitiveMeasurementArguments = (
     }
     const browserEngine: SupportedBrowserEngine =
         browserEngineArgument === 'chromium' ? 'chromium' : 'firefox';
-    const focusedCaseMatch = /^case-(5|8|9|10|11|12)$/u.exec(
+    const focusedCaseMatch = /^case-(1|2|3|4|5|8|9|10|11|12)$/u.exec(
         argumentsWithoutSeparator[1] ?? '',
     );
-    if (focusedCaseMatch !== null) {
+    const focusedCaseIdentifiers =
+        focusedCaseMatch === null
+            ? argumentsWithoutSeparator[1] ===
+              'fused-radix-51-projection-owners'
+                ? vssFusedRadix51ProjectionOwnerCaseIdentifiers
+                : undefined
+            : Object.freeze([Number(focusedCaseMatch[1])]);
+    if (focusedCaseIdentifiers !== undefined) {
         if (
             argumentsWithoutSeparator.length > 3 ||
             (argumentsWithoutSeparator.length === 3 &&
@@ -83,10 +91,9 @@ export const parseDesktopBrowserPrimitiveMeasurementArguments = (
                 'A focused primitive case accepts only an optional reuse-wasm argument.',
             );
         }
-        const focusedCaseIdentifier = Number(focusedCaseMatch[1]);
         return Object.freeze({
             browserEngines: Object.freeze([browserEngine]),
-            focusedCaseIdentifier,
+            focusedCaseIdentifiers,
             ...(argumentsWithoutSeparator[2] === 'reuse-wasm'
                 ? { reuseMeasurementWasm: true }
                 : {}),
@@ -100,7 +107,7 @@ export const parseDesktopBrowserPrimitiveMeasurementArguments = (
             argumentsWithoutSeparator[1] !== 'reuse-wasm')
     ) {
         throw new Error(
-            'The desktop-browser primitive-measurement runner accepts chromium or firefox with an optional authenticated-storage, boundary-copies, case-5, case-8, case-9, case-10, case-11, case-12, or reuse-wasm selector.',
+            'The desktop-browser primitive-measurement runner accepts chromium or firefox with an optional authenticated-storage, boundary-copies, case-1 through case-5, case-8 through case-12, fused-radix-51-projection-owners, or reuse-wasm selector.',
         );
     }
     return Object.freeze({
@@ -250,11 +257,11 @@ const runBrowserMeasurement = async (input: {
     }
 };
 
-const runBrowserFocusedPrimitiveMeasurement = async (input: {
+const runBrowserFocusedPrimitiveMeasurements = async (input: {
     readonly baseUrl: string;
     readonly browserEngine: SupportedBrowserEngine;
-    readonly caseIdentifier: number;
-}): Promise<DesktopBrowserFocusedPrimitiveMeasurementEvidence> => {
+    readonly caseIdentifiers: readonly number[];
+}): Promise<readonly DesktopBrowserFocusedPrimitiveMeasurementEvidence[]> => {
     const browser = await browserTypeFor(input.browserEngine).launch({
         headless: true,
     });
@@ -271,23 +278,23 @@ const runBrowserFocusedPrimitiveMeasurement = async (input: {
                     const loadedModule = (await import(
                         /* @vite-ignore */ evaluationInput.moduleUrl
                     )) as unknown as {
-                        runDesktopBrowserFocusedPrimitiveMeasurement(input: {
+                        runDesktopBrowserFocusedPrimitiveMeasurements(input: {
                             browserEngine: 'chromium' | 'firefox';
-                            caseIdentifier: number;
+                            caseIdentifiers: readonly number[];
                             wasmUrl: string;
-                        }): Promise<unknown>;
+                        }): Promise<readonly unknown[]>;
                     };
-                    return loadedModule.runDesktopBrowserFocusedPrimitiveMeasurement(
+                    return loadedModule.runDesktopBrowserFocusedPrimitiveMeasurements(
                         {
                             browserEngine: evaluationInput.browserEngine,
-                            caseIdentifier: evaluationInput.caseIdentifier,
+                            caseIdentifiers: evaluationInput.caseIdentifiers,
                             wasmUrl: evaluationInput.wasmUrl,
                         },
                     );
                 },
                 {
                     browserEngine: input.browserEngine,
-                    caseIdentifier: input.caseIdentifier,
+                    caseIdentifiers: input.caseIdentifiers,
                     moduleUrl: new URL(
                         browserMeasurementModulePath,
                         input.baseUrl,
@@ -296,10 +303,22 @@ const runBrowserFocusedPrimitiveMeasurement = async (input: {
                         .href,
                 },
             );
-            return validateDesktopBrowserFocusedPrimitiveMeasurementEvidence(
-                rawEvidence,
-                input.browserEngine,
-                input.caseIdentifier,
+            if (
+                !Array.isArray(rawEvidence) ||
+                rawEvidence.length !== input.caseIdentifiers.length
+            ) {
+                throw new Error(
+                    'Focused desktop-browser primitive measurement returned the wrong case count.',
+                );
+            }
+            return Object.freeze(
+                rawEvidence.map((evidence, evidenceIndex) =>
+                    validateDesktopBrowserFocusedPrimitiveMeasurementEvidence(
+                        evidence,
+                        input.browserEngine,
+                        input.caseIdentifiers[evidenceIndex],
+                    ),
+                ),
             );
         } finally {
             await context.close();
@@ -588,32 +607,34 @@ export const runDesktopBrowserPrimitiveMeasurements =
                             continue;
                         }
                         if (
-                            parsedArguments.focusedCaseIdentifier !== undefined
+                            parsedArguments.focusedCaseIdentifiers !== undefined
                         ) {
-                            const evidence =
-                                await runBrowserFocusedPrimitiveMeasurement({
+                            const evidenceSet =
+                                await runBrowserFocusedPrimitiveMeasurements({
                                     baseUrl,
                                     browserEngine,
-                                    caseIdentifier:
-                                        parsedArguments.focusedCaseIdentifier,
+                                    caseIdentifiers:
+                                        parsedArguments.focusedCaseIdentifiers,
                                 });
-                            focusedPrimitiveEvidence.push(evidence);
-                            runLog.writeEvent({
-                                details: {
-                                    browserEngine,
-                                    caseIdentifier:
-                                        evidence.primitiveCase.record
-                                            .caseIdentifier,
-                                    elapsedNanoseconds:
-                                        evidence.primitiveCase.record
-                                            .elapsedNanoseconds,
-                                    wasmMemoryByteLength:
-                                        evidence.primitiveCase
-                                            .wasmMemoryByteLengthAfter,
-                                },
-                                eventType:
-                                    'focused-primitive-measurement-browser-completed',
-                            });
+                            for (const evidence of evidenceSet) {
+                                focusedPrimitiveEvidence.push(evidence);
+                                runLog.writeEvent({
+                                    details: {
+                                        browserEngine,
+                                        caseIdentifier:
+                                            evidence.primitiveCase.record
+                                                .caseIdentifier,
+                                        elapsedNanoseconds:
+                                            evidence.primitiveCase.record
+                                                .elapsedNanoseconds,
+                                        wasmMemoryByteLength:
+                                            evidence.primitiveCase
+                                                .wasmMemoryByteLengthAfter,
+                                    },
+                                    eventType:
+                                        'focused-primitive-measurement-browser-completed',
+                                });
+                            }
                             continue;
                         }
                         const evidence = await runBrowserMeasurement({
@@ -651,7 +672,7 @@ export const runDesktopBrowserPrimitiveMeasurements =
                 );
                 await mkdir(attachmentDirectoryPath, { recursive: true });
                 const evidenceRecord = Object.freeze({
-                    ...(parsedArguments.focusedCaseIdentifier !== undefined
+                    ...(parsedArguments.focusedCaseIdentifiers !== undefined
                         ? {
                               focusedPrimitiveEvidence: Object.freeze(
                                   focusedPrimitiveEvidence,
@@ -683,8 +704,10 @@ export const runDesktopBrowserPrimitiveMeasurements =
                 });
                 const attachmentFilePath = path.join(
                     attachmentDirectoryPath,
-                    parsedArguments.focusedCaseIdentifier !== undefined
-                        ? 'desktop-browser-focused-primitive-measurement.json'
+                    parsedArguments.focusedCaseIdentifiers !== undefined
+                        ? parsedArguments.focusedCaseIdentifiers.length === 1
+                            ? 'desktop-browser-focused-primitive-measurement.json'
+                            : 'desktop-browser-focused-primitive-measurements.json'
                         : parsedArguments.measurementComponent === undefined
                           ? 'desktop-browser-primitive-measurements.json'
                           : parsedArguments.measurementComponent ===
@@ -698,7 +721,7 @@ export const runDesktopBrowserPrimitiveMeasurements =
                     'utf8',
                 );
                 runLog.writeCombinedOutput(
-                    `Desktop-browser ${parsedArguments.focusedCaseIdentifier === undefined ? (parsedArguments.measurementComponent ?? 'primitive measurements') : `primitive case ${String(parsedArguments.focusedCaseIdentifier)}`} completed for ${parsedArguments.browserEngines.join(', ')}; evidence: ${attachmentFilePath}\n`,
+                    `Desktop-browser ${parsedArguments.focusedCaseIdentifiers === undefined ? (parsedArguments.measurementComponent ?? 'primitive measurements') : `primitive cases ${parsedArguments.focusedCaseIdentifiers.join(', ')}`} completed for ${parsedArguments.browserEngines.join(', ')}; evidence: ${attachmentFilePath}\n`,
                 );
             },
         );

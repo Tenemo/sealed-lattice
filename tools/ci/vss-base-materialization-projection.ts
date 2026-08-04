@@ -1,5 +1,7 @@
 import {
     requireCompletePrimitiveMeasurementCatalog,
+    vssFusedRadix51ProjectionOwnerCaseIdentifiers,
+    type DesktopBrowserFocusedPrimitiveMeasurementEvidence,
     type DesktopBrowserPrimitiveMeasurementEvidence,
     type PrimitiveMeasurementRecord,
     type ReleaseNativePrimitiveMeasurementEvidence,
@@ -187,12 +189,77 @@ const projectPrimitiveOwners = (
     });
 };
 
-const assertCatalogCorrespondence = (
+const deriveSelectedVssWork = (
+    primitiveCases: readonly PrimitiveMeasurementRecord[],
+): WorkCounts => {
+    const ledgerRecord = requireCase(primitiveCases, 5);
+    const sourceReplayCount = requireDimension(
+        ledgerRecord,
+        'basePhaseSourceReplayCount',
+    );
+    return Object.freeze({
+        laneDftCount: requireDimension(ledgerRecord, 'basePhaseLaneDftCount'),
+        leafHashKeccakPermutationCount: requireDimension(
+            ledgerRecord,
+            'basePhaseSaltedLeafKeccakPermutationCount',
+        ),
+        leafHashQueryCount: requireDimension(
+            ledgerRecord,
+            'basePhaseLeafHashQueryCount',
+        ),
+        merkleParentHashQueryCount: requireDimension(
+            ledgerRecord,
+            'basePhaseMerkleParentHashQueryCount',
+        ),
+        privateLeafSaltDerivationCount: requireDimension(
+            ledgerRecord,
+            'basePhasePrivateLeafSaltDerivationCount',
+        ),
+        sourceReplayCount,
+        sourceTraceValueGenerationCount:
+            sourceReplayCount *
+            requireDimension(ledgerRecord, 'traceValueCount'),
+    });
+};
+
+const deriveFusedRadix51Work = (
+    primitiveCases: readonly PrimitiveMeasurementRecord[],
+): WorkCounts => {
+    const retainedGroupRecord = requireCase(primitiveCases, 11);
+    const rowLaneRecord = requireCase(primitiveCases, 12);
+    return Object.freeze({
+        laneDftCount: requireDimension(rowLaneRecord, 'completeLaneDftCount'),
+        leafHashKeccakPermutationCount: requireDimension(
+            rowLaneRecord,
+            'completeSaltedLeafKeccakPermutationCount',
+        ),
+        leafHashQueryCount: requireDimension(
+            rowLaneRecord,
+            'completeLeafHashQueryCount',
+        ),
+        merkleParentHashQueryCount: requireDimension(
+            rowLaneRecord,
+            'completeMerkleParentHashQueryCount',
+        ),
+        privateLeafSaltDerivationCount: requireDimension(
+            rowLaneRecord,
+            'completePrivateLeafSaltDerivationCount',
+        ),
+        sourceReplayCount: requireDimension(
+            retainedGroupRecord,
+            'completeSourceMaterializationCount',
+        ),
+        sourceTraceValueGenerationCount: requireDimension(
+            retainedGroupRecord,
+            'completeSourceTraceValueGenerationCount',
+        ),
+    });
+};
+
+const assertMeasurementCorrespondence = (
     nativeCases: readonly PrimitiveMeasurementRecord[],
     browserCases: readonly PrimitiveMeasurementRecord[],
 ): void => {
-    requireCompletePrimitiveMeasurementCatalog(nativeCases);
-    requireCompletePrimitiveMeasurementCatalog(browserCases);
     for (const nativeRecord of nativeCases) {
         const browserRecord = requireCase(
             browserCases,
@@ -246,6 +313,15 @@ const assertCatalogCorrespondence = (
     }
 };
 
+const assertCatalogCorrespondence = (
+    nativeCases: readonly PrimitiveMeasurementRecord[],
+    browserCases: readonly PrimitiveMeasurementRecord[],
+): void => {
+    requireCompletePrimitiveMeasurementCatalog(nativeCases);
+    requireCompletePrimitiveMeasurementCatalog(browserCases);
+    assertMeasurementCorrespondence(nativeCases, browserCases);
+};
+
 const projectCheckpointStorage = (
     target: ProjectionTarget,
     recordCount: number,
@@ -286,6 +362,157 @@ const projectCheckpointStorage = (
         storageCleanupMilliseconds,
         storageReadMilliseconds,
         storageWriteMilliseconds,
+    });
+};
+
+const requireFusedRadix51ProjectionOwnerCaseSet = (
+    primitiveCases: readonly PrimitiveMeasurementRecord[],
+    expectedExecutionTarget: PrimitiveMeasurementRecord['executionTarget'],
+): void => {
+    if (
+        primitiveCases.length !==
+            vssFusedRadix51ProjectionOwnerCaseIdentifiers.length ||
+        primitiveCases.some(
+            (record, recordIndex) =>
+                record.caseIdentifier !==
+                    vssFusedRadix51ProjectionOwnerCaseIdentifiers[
+                        recordIndex
+                    ] || record.executionTarget !== expectedExecutionTarget,
+        )
+    ) {
+        throw new Error(
+            'VSS fused radix-51 projection owner evidence differs from its exact canonical case set or execution target.',
+        );
+    }
+};
+
+export type VssFusedRadix51OwnerProjection = Readonly<{
+    candidateWork: WorkCounts;
+    schemaVersion: 1;
+    selectedWork: WorkCounts;
+    targetProjections: readonly Readonly<Record<string, unknown>>[];
+}>;
+
+export const deriveVssFusedRadix51OwnerProjection = (input: {
+    readonly browserEvidence: readonly DesktopBrowserFocusedPrimitiveMeasurementEvidence[];
+    readonly nativeEvidence: ReleaseNativePrimitiveMeasurementEvidence;
+}): VssFusedRadix51OwnerProjection => {
+    const nativeCases = input.nativeEvidence.primitiveCases;
+    requireFusedRadix51ProjectionOwnerCaseSet(nativeCases, 'release-native');
+    const expectedBrowserEvidenceCount =
+        vssFusedRadix51ProjectionOwnerCaseIdentifiers.length * 2;
+    if (input.browserEvidence.length !== expectedBrowserEvidenceCount) {
+        throw new Error(
+            'VSS fused radix-51 projection requires exact Chromium and Firefox owner sets.',
+        );
+    }
+    const browserTargets = (['chromium', 'firefox'] as const).map(
+        (browserEngine, browserIndex) => {
+            const firstEvidenceIndex =
+                browserIndex *
+                vssFusedRadix51ProjectionOwnerCaseIdentifiers.length;
+            const evidence = input.browserEvidence.slice(
+                firstEvidenceIndex,
+                firstEvidenceIndex +
+                    vssFusedRadix51ProjectionOwnerCaseIdentifiers.length,
+            );
+            if (
+                evidence.some(
+                    (entry, entryIndex) =>
+                        entry.browserEngine !== browserEngine ||
+                        entry.primitiveCase.record.caseIdentifier !==
+                            vssFusedRadix51ProjectionOwnerCaseIdentifiers[
+                                entryIndex
+                            ],
+                )
+            ) {
+                throw new Error(
+                    'VSS fused radix-51 projection browser owner sets are duplicated or noncanonical.',
+                );
+            }
+            const primitiveCases = evidence.map(
+                (entry) => entry.primitiveCase.record,
+            );
+            requireFusedRadix51ProjectionOwnerCaseSet(
+                primitiveCases,
+                'wasm32-unknown-unknown',
+            );
+            assertMeasurementCorrespondence(nativeCases, primitiveCases);
+            return Object.freeze({
+                browserEngine,
+                evidence,
+                primitiveCases,
+            });
+        },
+    );
+    const selectedWork = deriveSelectedVssWork(nativeCases);
+    const candidateWork = deriveFusedRadix51Work(nativeCases);
+    const targets = [
+        Object.freeze({
+            primitiveCases: nativeCases,
+            target: 'release-native' as const,
+        }),
+        ...browserTargets.map((browserTarget) =>
+            Object.freeze({
+                browserEngine: browserTarget.browserEngine,
+                evidence: browserTarget.evidence,
+                primitiveCases: browserTarget.primitiveCases,
+                target: 'wasm32-unknown-unknown' as const,
+            }),
+        ),
+    ];
+    const targetProjections = targets.map((target) => {
+        const selectedOwners = projectPrimitiveOwners(
+            target.primitiveCases,
+            selectedWork,
+            8,
+            1,
+        );
+        const candidateOwners = projectPrimitiveOwners(
+            target.primitiveCases,
+            candidateWork,
+            11,
+            12,
+        );
+        return Object.freeze({
+            ...('browserEngine' in target
+                ? { browserEngine: target.browserEngine }
+                : {}),
+            candidateOwners,
+            maximumModeledPrimitiveLiveByteLength: Math.max(
+                ...target.primitiveCases.map(
+                    (record) => record.modeledPeakLiveByteLength,
+                ),
+            ),
+            ...('evidence' in target
+                ? {
+                      maximumWasmMemoryByteLength: Math.max(
+                          ...target.evidence.map(
+                              (entry) =>
+                                  entry.primitiveCase.wasmMemoryByteLengthAfter,
+                          ),
+                      ),
+                      measuredOwnerWallElapsedMilliseconds:
+                          target.evidence.reduce(
+                              (total, entry) =>
+                                  total +
+                                  entry.primitiveCase.wallElapsedMilliseconds,
+                              0,
+                          ),
+                  }
+                : {}),
+            ownerReductionFactor:
+                selectedOwners.totalNanoseconds /
+                candidateOwners.totalNanoseconds,
+            selectedOwners,
+            target: target.target,
+        });
+    });
+    return Object.freeze({
+        candidateWork,
+        schemaVersion: 1,
+        selectedWork,
+        targetProjections: Object.freeze(targetProjections),
     });
 };
 
@@ -332,32 +559,7 @@ export const deriveVssBaseMaterializationProjection = (input: {
         ledgerRecord,
         'aggregateWidePadQueryCount',
     );
-    const currentWork: WorkCounts = Object.freeze({
-        laneDftCount: requireDimension(ledgerRecord, 'basePhaseLaneDftCount'),
-        leafHashKeccakPermutationCount: requireDimension(
-            ledgerRecord,
-            'basePhaseSaltedLeafKeccakPermutationCount',
-        ),
-        leafHashQueryCount: requireDimension(
-            ledgerRecord,
-            'basePhaseLeafHashQueryCount',
-        ),
-        merkleParentHashQueryCount: requireDimension(
-            ledgerRecord,
-            'basePhaseMerkleParentHashQueryCount',
-        ),
-        privateLeafSaltDerivationCount: requireDimension(
-            ledgerRecord,
-            'basePhasePrivateLeafSaltDerivationCount',
-        ),
-        sourceReplayCount: requireDimension(
-            ledgerRecord,
-            'basePhaseSourceReplayCount',
-        ),
-        sourceTraceValueGenerationCount:
-            requireDimension(ledgerRecord, 'basePhaseSourceReplayCount') *
-            requireDimension(ledgerRecord, 'traceValueCount'),
-    });
+    const currentWork = deriveSelectedVssWork(nativeCases);
     const leafCountPerPass =
         currentWork.leafHashQueryCount / materializationPassCount;
     if (
@@ -465,36 +667,7 @@ export const deriveVssBaseMaterializationProjection = (input: {
     );
     const fusedCandidateRetainedGroupRecord = requireCase(nativeCases, 11);
     const fusedCandidateRowLaneRecord = requireCase(nativeCases, 12);
-    const fusedCandidateWork: WorkCounts = Object.freeze({
-        laneDftCount: requireDimension(
-            fusedCandidateRowLaneRecord,
-            'completeLaneDftCount',
-        ),
-        leafHashKeccakPermutationCount: requireDimension(
-            fusedCandidateRowLaneRecord,
-            'completeSaltedLeafKeccakPermutationCount',
-        ),
-        leafHashQueryCount: requireDimension(
-            fusedCandidateRowLaneRecord,
-            'completeLeafHashQueryCount',
-        ),
-        merkleParentHashQueryCount: requireDimension(
-            fusedCandidateRowLaneRecord,
-            'completeMerkleParentHashQueryCount',
-        ),
-        privateLeafSaltDerivationCount: requireDimension(
-            fusedCandidateRowLaneRecord,
-            'completePrivateLeafSaltDerivationCount',
-        ),
-        sourceReplayCount: requireDimension(
-            fusedCandidateRetainedGroupRecord,
-            'completeSourceMaterializationCount',
-        ),
-        sourceTraceValueGenerationCount: requireDimension(
-            fusedCandidateRetainedGroupRecord,
-            'completeSourceTraceValueGenerationCount',
-        ),
-    });
+    const fusedCandidateWork = deriveFusedRadix51Work(nativeCases);
     const fusedCandidateTargetProjections = targets.map(
         (target, targetIndex) => {
             const owners = projectPrimitiveOwners(

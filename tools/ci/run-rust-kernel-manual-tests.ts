@@ -16,8 +16,9 @@ import {
     fullProfileEvidenceRustTests,
     measurementRustTests,
     phaseLivenessEvidenceRustTests,
-    primitiveMeasurementRustTests,
+    resolvePrimitiveMeasurementRustTestCases,
     theoremEvidenceRustTests,
+    vssFusedRadix51ProjectionOwnerRustFilter,
     verifyFocusedRustLaneSelection,
 } from './rust-focused-lane-selection.js';
 import { normalizeRustTestFilter } from './rust-kernel-test-arguments.js';
@@ -72,6 +73,25 @@ const resolveManualRustKernelTestFilters = (input: {
     }
     if (focusedFilter === '') {
         throw new Error(`${requestedScript} requires a non-empty filter.`);
+    }
+    if (
+        input.lane === 'rust-measurements' &&
+        focusedFilter === vssFusedRadix51ProjectionOwnerRustFilter
+    ) {
+        const selectedTests = resolvePrimitiveMeasurementRustTestCases(
+            focusedFilter,
+        ).map(({ testName }) => testName);
+        if (
+            selectedTests.length === 0 ||
+            selectedTests.some(
+                (testName) => !input.configuredTestNames.includes(testName),
+            )
+        ) {
+            throw new Error(
+                `${requestedScript} projection-owner filter is absent from the exact registry.`,
+            );
+        }
+        return selectedTests;
     }
     if (
         !input.configuredTestNames.some((testName) =>
@@ -277,15 +297,9 @@ export const runRustKernelManualTests = async (): Promise<void> => {
                 const expectedFocusedCaseIdentifiers =
                     focusedFilter === undefined
                         ? undefined
-                        : primitiveMeasurementRustTests
-                              .map((testName, testIndex) => ({
-                                  caseIdentifier: testIndex + 1,
-                                  testName,
-                              }))
-                              .filter(({ testName }) =>
-                                  testName.includes(focusedFilter),
-                              )
-                              .map(({ caseIdentifier }) => caseIdentifier);
+                        : resolvePrimitiveMeasurementRustTestCases(
+                              focusedFilter,
+                          ).map(({ caseIdentifier }) => caseIdentifier);
                 const evidence = parseReleaseNativePrimitiveMeasurementOutput(
                     await readFile(
                         path.join(runLog.runDirectoryPath, 'output.log'),
