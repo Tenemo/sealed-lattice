@@ -516,17 +516,22 @@ Works today:
   Because the corrected candidate misses the tenfold salted-leaf gate, it is
   unselected and has no candidate witness, production construction identity,
   proof bytes, theorem regeneration, browser result, or selected-suite status.
-  A narrower feature-scoped model now admits one follow-up design to compiler
-  work without selecting it. At factor one and width 64, it models reuse of the
-  already authenticated material-bound columns, decomposition of each low
-  material digit and its bounded difference into five radix-42 digits, two
-  binary borrows per material group, direct finite-set checks for the high
-  material digit and signed quotient, and the three shift selectors. The resulting
-  formulas give 2,240 range-digit columns, 224 borrow columns, 160 quotient
-  columns, three selector columns, and 2,627 prover columns in total. The
-  maximum numerator degree is `774,102`; 41 quotient components are necessary
-  and sufficient at stride `18,482`, capacity `757,762`, and component degree
-  bound `18,870`. The modeled construction has 43 base rows, 10 quotient rows,
+  The first fused-bound model used radix 42 but omitted the proof that each
+  five-digit recomposition stays below the material-digit radix. Its exact
+  lexicographic upper-bound constraint has degree `2,322,306`, above the
+  `2,097,152` opening bound, so that candidate is rejected. The corrected
+  feature-scoped grid checks every five-digit radix from 42 through 65. Radix 51
+  is the sole geometry that closes the canonical bound, keeps the quotient in
+  one 64-wide group, and clears every conservative count gate. It models reuse
+  of the already authenticated material-bound columns, five radix-51 digits for
+  each low material digit and its bounded difference, two binary borrows per
+  material group, direct finite-set checks for the high material digit and
+  signed quotient, and the three shift selectors. The formulas give 2,240
+  range-digit columns, 224 borrow columns, 160 quotient columns, three selector
+  columns, and 2,627 prover columns in total. The exact low-digit bound is the
+  largest constraint at degree `1,161,153`; 62 quotient components are necessary
+  and sufficient at stride `18,466`, capacity `1,144,892`, and component degree
+  bound `18,854`. The modeled construction has 43 base rows, 10 quotient rows,
   and 53 rows in total. Across its two passes it performs 3,392 lane DFTs,
   `16,894,656,512` butterflies, `12,448,694,272` coefficient folds,
   `1,778,384,896` coset multiplications and value deliveries, and `201,326,592`
@@ -537,9 +542,9 @@ Works today:
   remains more than tenfold below the selected base-phase total. Its transform,
   delivery, and salted-leaf counts also clear their conservative tenfold
   boundaries; all `67,108,864` leaf hashes and `67,108,860` Merkle-parent hashes
-  remain. Radices 41 and 66 miss the salted-leaf boundary, while radix 65 has
-  the same row count with a strictly larger numerator degree and
-  quotient-component count. The radix-42 result is still only a static
+  remain. Radix 50 needs 74 quotient components and radix 66 needs 112, so each
+  adds another quotient-row group and misses the salted-leaf boundary. The
+  radix-51 result is still only a static
   implementation candidate: its fused constraints, witness, checked compiler,
   construction identity, complete liveness, theorem, proof bytes, and native
   and browser measurements do not yet exist, so no replay redesign is selected.

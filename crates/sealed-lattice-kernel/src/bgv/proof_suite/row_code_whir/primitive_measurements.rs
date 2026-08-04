@@ -678,12 +678,14 @@ struct VssFusedBoundRangeCandidateLedger {
     range_digit_count_per_material_low_digit: u64,
     material_group_count: u64,
     maximum_material_high_digit: u64,
+    maximum_material_low_digit_radix_digit_sum: u64,
     material_range_digit_prover_column_count: u64,
     material_borrow_prover_column_count: u64,
     quotient_prover_column_count: u64,
     shift_selector_column_count: u64,
     prover_column_count: u64,
     maximum_range_digit_constraint_numerator_degree: u64,
+    maximum_material_low_digit_constraint_numerator_degree: u64,
     maximum_high_digit_constraint_numerator_degree: u64,
     maximum_constraint_numerator_degree: u64,
     maximum_required_quotient_coefficient_count: u64,
@@ -2086,6 +2088,25 @@ fn derive_vss_fused_bound_range_candidate_ledger(
     let maximum_range_digit_constraint_numerator_degree = maximum_prover_column_degree
         .checked_mul(range_digit_radix)
         .ok_or_else(|| "VSS fused-bound range numerator degree overflowed".to_owned())?;
+    let mut remaining_maximum_material_low_digit = geometry
+        .material_digit_radix
+        .checked_sub(1)
+        .ok_or_else(|| "VSS fused-bound material radix is empty".to_owned())?;
+    let mut maximum_material_low_digit_radix_digit_sum = 0_u64;
+    for _ in 0..range_digit_count_per_material_low_digit {
+        maximum_material_low_digit_radix_digit_sum = maximum_material_low_digit_radix_digit_sum
+            .checked_add(remaining_maximum_material_low_digit % range_digit_radix)
+            .ok_or_else(|| "VSS fused-bound maximum digit sum overflowed".to_owned())?;
+        remaining_maximum_material_low_digit /= range_digit_radix;
+    }
+    if remaining_maximum_material_low_digit != 0 {
+        return Err("VSS fused-bound range digits do not cover the material radix".to_owned());
+    }
+    let maximum_material_low_digit_constraint_numerator_degree =
+        maximum_material_low_digit_radix_digit_sum
+            .checked_add(1)
+            .and_then(|factor_count| maximum_prover_column_degree.checked_mul(factor_count))
+            .ok_or_else(|| "VSS fused-bound material low-digit degree overflowed".to_owned())?;
     let maximum_high_digit_constraint_numerator_degree = maximum_material_column_degree
         .checked_mul(
             geometry
@@ -2107,6 +2128,7 @@ fn derive_vss_fused_bound_range_candidate_ledger(
         .ok_or_else(|| "VSS fused-bound conditional degree overflowed".to_owned())?;
     let maximum_constraint_numerator_degree = [
         maximum_range_digit_constraint_numerator_degree,
+        maximum_material_low_digit_constraint_numerator_degree,
         maximum_high_digit_constraint_numerator_degree,
         signed_quotient_constraint_numerator_degree,
         conditional_high_digit_constraint_numerator_degree,
@@ -2275,12 +2297,14 @@ fn derive_vss_fused_bound_range_candidate_ledger(
         range_digit_count_per_material_low_digit,
         material_group_count: geometry.material_group_count,
         maximum_material_high_digit: geometry.maximum_material_high_digit,
+        maximum_material_low_digit_radix_digit_sum,
         material_range_digit_prover_column_count,
         material_borrow_prover_column_count,
         quotient_prover_column_count,
         shift_selector_column_count: geometry.shift_selector_column_count,
         prover_column_count,
         maximum_range_digit_constraint_numerator_degree,
+        maximum_material_low_digit_constraint_numerator_degree,
         maximum_high_digit_constraint_numerator_degree,
         maximum_constraint_numerator_degree,
         maximum_required_quotient_coefficient_count,
@@ -5218,18 +5242,23 @@ mod tests {
 
     #[test]
     fn vss_fused_bound_range_candidates_clear_the_static_work_boundary() {
-        let radix_41 = derive_vss_fused_bound_range_candidate_ledger(41)
-            .expect("the radix-41 fused-bound VSS comparator derives");
-        let radix_42 = derive_vss_fused_bound_range_candidate_ledger(42)
-            .expect("the radix-42 fused-bound VSS candidate derives");
-        let radix_65 = derive_vss_fused_bound_range_candidate_ledger(65)
-            .expect("the radix-65 fused-bound VSS comparator derives");
+        assert_eq!(
+            derive_vss_fused_bound_range_candidate_ledger(42),
+            Err("VSS fused-bound maximum degree reaches the opening bound".to_owned())
+        );
+        let radix_50 = derive_vss_fused_bound_range_candidate_ledger(50)
+            .expect("the radix-50 fused-bound VSS comparator derives");
+        let radix_51 = derive_vss_fused_bound_range_candidate_ledger(51)
+            .expect("the radix-51 fused-bound VSS candidate derives");
         let radix_66 = derive_vss_fused_bound_range_candidate_ledger(66)
             .expect("the radix-66 fused-bound VSS comparator derives");
+        let radix_80 = derive_vss_fused_bound_range_candidate_ledger(80)
+            .expect("the radix-80 fused-bound VSS comparator derives");
         assert_eq!(
-            [radix_41, radix_42, radix_65, radix_66].map(|candidate| (
+            [radix_50, radix_51, radix_66, radix_80].map(|candidate| (
                 candidate.range_digit_radix,
                 candidate.range_digit_count_per_material_low_digit,
+                candidate.maximum_material_low_digit_radix_digit_sum,
                 candidate.prover_column_count,
                 candidate.maximum_constraint_numerator_degree,
                 candidate.maximum_required_quotient_coefficient_count,
@@ -5238,14 +5267,22 @@ mod tests {
                 candidate.quotient_coefficient_capacity,
             )),
             [
-                (41, 6, 3_075, 755_671, 739_288, 40, 18_484, 739_360),
-                (42, 5, 2_627, 774_102, 757_719, 41, 18_482, 757_762),
-                (65, 5, 2_627, 1_198_015, 1_181_632, 64, 18_464, 1_181_696),
-                (66, 5, 2_627, 1_216_446, 1_200_063, 65, 18_464, 1_200_160),
+                (
+                    50, 5, 74, 2_627, 1_382_325, 1_365_942, 74, 18_460, 1_366_040
+                ),
+                (
+                    51, 5, 62, 2_627, 1_161_153, 1_144_770, 62, 18_466, 1_144_892
+                ),
+                (
+                    66, 5, 112, 2_627, 2_082_703, 2_066_320, 112, 18_451, 2_066_512
+                ),
+                (
+                    80, 5, 47, 2_627, 1_474_480, 1_458_097, 79, 18_458, 1_458_182
+                ),
             ]
         );
         assert_eq!(
-            [radix_41, radix_42, radix_65, radix_66].map(|candidate| (
+            [radix_50, radix_51, radix_66, radix_80].map(|candidate| (
                 candidate.quotient_component_degree_bound_exclusive,
                 candidate.base_phase_row_count,
                 candidate.quotient_phase_row_count,
@@ -5253,68 +5290,72 @@ mod tests {
                 candidate.salted_leaf_keccak_permutation_count,
             )),
             [
-                (18_872, 50, 10, 60, 234_881_024),
-                (18_870, 43, 10, 53, 201_326_592),
-                (18_852, 43, 10, 53, 201_326_592),
-                (18_852, 43, 15, 58, 234_881_024),
+                (18_848, 43, 15, 58, 234_881_024),
+                (18_854, 43, 10, 53, 201_326_592),
+                (18_839, 43, 15, 58, 234_881_024),
+                (18_846, 43, 15, 58, 234_881_024),
             ]
         );
-        assert_eq!(radix_42.material_group_count, 112);
-        assert_eq!(radix_42.maximum_material_high_digit, 26);
-        assert_eq!(radix_42.material_range_digit_prover_column_count, 2_240);
-        assert_eq!(radix_42.material_borrow_prover_column_count, 224);
-        assert_eq!(radix_42.quotient_prover_column_count, 160);
-        assert_eq!(radix_42.shift_selector_column_count, 3);
+        assert_eq!(radix_51.material_group_count, 112);
+        assert_eq!(radix_51.maximum_material_high_digit, 26);
+        assert_eq!(radix_51.material_range_digit_prover_column_count, 2_240);
+        assert_eq!(radix_51.material_borrow_prover_column_count, 224);
+        assert_eq!(radix_51.quotient_prover_column_count, 160);
+        assert_eq!(radix_51.shift_selector_column_count, 3);
         assert_eq!(
-            radix_42.maximum_range_digit_constraint_numerator_degree,
-            774_102
+            radix_51.maximum_range_digit_constraint_numerator_degree,
+            939_981
         );
         assert_eq!(
-            radix_42.maximum_high_digit_constraint_numerator_degree,
+            radix_51.maximum_material_low_digit_constraint_numerator_degree,
+            1_161_153
+        );
+        assert_eq!(
+            radix_51.maximum_high_digit_constraint_numerator_degree,
             497_637
         );
-        assert_eq!(radix_42.lane_dft_count, 3_392);
-        assert_eq!(radix_42.butterfly_count, 16_894_656_512);
-        assert_eq!(radix_42.physical_row_witness_variable_count, 21);
-        assert_eq!(radix_42.padded_coefficient_count, 4_194_304);
-        assert_eq!(radix_42.lane_column_count, 524_288);
-        assert_eq!(radix_42.coefficient_fold_count_per_lane_dft, 3_670_016);
-        assert_eq!(radix_42.coefficient_fold_count, 12_448_694_272);
+        assert_eq!(radix_51.lane_dft_count, 3_392);
+        assert_eq!(radix_51.butterfly_count, 16_894_656_512);
+        assert_eq!(radix_51.physical_row_witness_variable_count, 21);
+        assert_eq!(radix_51.padded_coefficient_count, 4_194_304);
+        assert_eq!(radix_51.lane_column_count, 524_288);
+        assert_eq!(radix_51.coefficient_fold_count_per_lane_dft, 3_670_016);
+        assert_eq!(radix_51.coefficient_fold_count, 12_448_694_272);
         assert_eq!(
-            radix_42.coefficient_fold_count,
-            radix_42.lane_dft_count * radix_42.coefficient_fold_count_per_lane_dft
+            radix_51.coefficient_fold_count,
+            radix_51.lane_dft_count * radix_51.coefficient_fold_count_per_lane_dft
         );
-        assert_eq!(radix_42.coset_multiplication_count, 1_778_384_896);
-        assert_eq!(radix_42.column_value_delivery_count, 1_778_384_896);
-        assert_eq!(radix_42.leaf_hash_query_count, 67_108_864);
-        assert_eq!(radix_42.merkle_parent_hash_query_count, 67_108_860);
+        assert_eq!(radix_51.coset_multiplication_count, 1_778_384_896);
+        assert_eq!(radix_51.column_value_delivery_count, 1_778_384_896);
+        assert_eq!(radix_51.leaf_hash_query_count, 67_108_864);
+        assert_eq!(radix_51.merkle_parent_hash_query_count, 67_108_860);
 
         let production_work = derive_selected_vss_base_phase_work_ledger()
             .expect("the selected VSS base-phase work ledger derives");
-        assert!(radix_42.lane_dft_count * 10 <= production_work.lane_dft_count);
-        assert!(radix_42.butterfly_count * 10 <= production_work.butterfly_count);
-        let radix_42_counted_row_code_operations = radix_42
+        assert!(radix_51.lane_dft_count * 10 <= production_work.lane_dft_count);
+        assert!(radix_51.butterfly_count * 10 <= production_work.butterfly_count);
+        let radix_51_counted_row_code_operations = radix_51
             .butterfly_count
-            .checked_add(radix_42.coefficient_fold_count)
-            .and_then(|count| count.checked_add(radix_42.coset_multiplication_count))
-            .expect("the radix-42 counted row-code operation total fits");
+            .checked_add(radix_51.coefficient_fold_count)
+            .and_then(|count| count.checked_add(radix_51.coset_multiplication_count))
+            .expect("the radix-51 counted row-code operation total fits");
         let production_counted_row_code_operations = production_work
             .butterfly_count
             .checked_add(production_work.coset_multiplication_count)
             .expect("the selected counted row-code operation total fits");
         assert!(
-            radix_42_counted_row_code_operations * 10 <= production_counted_row_code_operations
+            radix_51_counted_row_code_operations * 10 <= production_counted_row_code_operations
         );
         assert!(
-            radix_42.column_value_delivery_count * 10
+            radix_51.column_value_delivery_count * 10
                 <= production_work.column_value_delivery_count
         );
         assert!(
-            radix_42.salted_leaf_keccak_permutation_count * 10
+            radix_51.salted_leaf_keccak_permutation_count * 10
                 <= production_work.salted_leaf_keccak_permutation_count
         );
         assert!(
-            radix_41.salted_leaf_keccak_permutation_count * 10
+            radix_50.salted_leaf_keccak_permutation_count * 10
                 > production_work.salted_leaf_keccak_permutation_count
         );
         assert!(
@@ -5322,10 +5363,30 @@ mod tests {
                 > production_work.salted_leaf_keccak_permutation_count
         );
         assert!(
-            radix_42.maximum_constraint_numerator_degree
-                < radix_65.maximum_constraint_numerator_degree
+            radix_51.maximum_constraint_numerator_degree
+                < radix_50.maximum_constraint_numerator_degree
         );
-        assert!(radix_42.quotient_component_count < radix_65.quotient_component_count);
+        assert!(radix_51.quotient_component_count < radix_50.quotient_component_count);
+        let admitted_five_digit_radices = (42_u64..=65)
+            .filter_map(|radix| derive_vss_fused_bound_range_candidate_ledger(radix).ok())
+            .filter(|candidate| {
+                let counted_row_code_operations = candidate
+                    .butterfly_count
+                    .checked_add(candidate.coefficient_fold_count)
+                    .and_then(|count| count.checked_add(candidate.coset_multiplication_count))
+                    .expect("the candidate counted row-code operation total fits");
+                candidate.range_digit_count_per_material_low_digit == 5
+                    && candidate.lane_dft_count * 10 <= production_work.lane_dft_count
+                    && candidate.butterfly_count * 10 <= production_work.butterfly_count
+                    && counted_row_code_operations * 10 <= production_counted_row_code_operations
+                    && candidate.column_value_delivery_count * 10
+                        <= production_work.column_value_delivery_count
+                    && candidate.salted_leaf_keccak_permutation_count * 10
+                        <= production_work.salted_leaf_keccak_permutation_count
+            })
+            .map(|candidate| candidate.range_digit_radix)
+            .collect::<Vec<_>>();
+        assert_eq!(admitted_five_digit_radices, [51]);
     }
 
     #[test]
