@@ -156,9 +156,12 @@ pub(crate) use committed_material::{
 #[cfg(all(feature = "primitive-measurement-evidence", test))]
 pub(crate) use committed_material::{
     derive_vss_relation_range_arity_candidate_geometry, vss_fused_bound_range_candidate_inventory,
+    vss_fused_bound_range_trace_witness_structure_memory_accounting,
     vss_relation_range_digit_prover_column_ordinals, vss_relation_trinary_prover_column_ordinals,
 };
 pub(crate) use committed_material_adapter::CommittedMaterialSourcePolynomialAdapter;
+#[cfg(all(feature = "primitive-measurement-evidence", test))]
+pub(crate) use committed_material_adapter::fused_vss_radix_51_source_provider_memory_accounting;
 #[cfg(test)]
 pub(crate) use committed_material_adapter::selected_vss_source_provider_memory_accounting;
 pub(crate) use galois_key_share_adapter::{

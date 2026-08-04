@@ -170,6 +170,19 @@ impl ExactSameSecretAggregateSourceBatch {
     pub(in crate::bgv::proof_suite::row_code_whir) fn columns(&self) -> &[Vec<ChallengeField>] {
         &self.columns
     }
+
+    pub(in crate::bgv::proof_suite::row_code_whir) const fn column_count(&self) -> usize {
+        self.columns.len()
+    }
+
+    pub(in crate::bgv::proof_suite::row_code_whir) fn is_final_batch(
+        &self,
+        aggregate_table_width: usize,
+    ) -> bool {
+        self.first_column_index
+            .checked_add(self.columns.len())
+            .is_some_and(|end| end == aggregate_table_width)
+    }
 }
 
 impl Drop for ExactSameSecretAggregateSourceBatch {
@@ -178,6 +191,47 @@ impl Drop for ExactSameSecretAggregateSourceBatch {
             column.fill(ChallengeField::ZERO);
         }
     }
+}
+
+pub(in crate::bgv::proof_suite::row_code_whir) fn aggregate_source_resident_batch_column_count(
+    construction_plan: &RowCodeWhirConstructionPlan,
+) -> Result<usize, CommonProofProverError> {
+    let aggregate_table_width = construction_plan.aggregate_table_width();
+    if aggregate_table_width < 2 || !aggregate_table_width.is_power_of_two() {
+        return Err(CommonProofProverError::InvalidColumn);
+    }
+    let half_table_width = aggregate_table_width / 2;
+    #[cfg(feature = "primitive-measurement-evidence")]
+    let resident_batch_column_count = if construction_plan
+        .uses_opening_claim_quotient_batch()
+        .map_err(|_| CommonProofProverError::InvalidColumn)?
+    {
+        1
+    } else {
+        half_table_width
+    };
+    #[cfg(not(feature = "primitive-measurement-evidence"))]
+    let resident_batch_column_count = half_table_width;
+    if resident_batch_column_count == 0
+        || resident_batch_column_count > half_table_width
+        || !aggregate_table_width.is_multiple_of(resident_batch_column_count)
+    {
+        return Err(CommonProofProverError::InvalidColumn);
+    }
+    Ok(resident_batch_column_count)
+}
+
+pub(in crate::bgv::proof_suite::row_code_whir) fn aggregate_source_materialization_pass_count(
+    construction_plan: &RowCodeWhirConstructionPlan,
+) -> Result<u64, CommonProofProverError> {
+    let resident_batch_column_count =
+        aggregate_source_resident_batch_column_count(construction_plan)?;
+    u64::try_from(
+        construction_plan
+            .aggregate_table_width()
+            .div_ceil(resident_batch_column_count),
+    )
+    .map_err(|_| CommonProofProverError::CountOverflow)
 }
 
 /// Transcript- and construction-bound continuation metadata. The internal
@@ -272,7 +326,8 @@ pub(in crate::bgv::proof_suite::row_code_whir) struct ExactSameSecretAggregateSo
     row_pad_seeds: Option<Zeroizing<Box<[PrivateRowPadSeed]>>>,
     phase_row_witness: Vec<Goldilocks>,
     aggregate_columns: Option<Vec<Vec<ChallengeField>>>,
-    current_batch_ordinal: usize,
+    current_batch_first_column_index: usize,
+    resident_batch_column_count: usize,
     coefficient_count: usize,
     aggregate_table_width: usize,
     relation_context: Option<RelationPlanCheckContext>,
@@ -423,8 +478,10 @@ impl ExactSameSecretAggregateSource {
         if aggregate_table_width < 2 {
             return Err(CommonProofProverError::InvalidColumn);
         }
+        let resident_batch_column_count =
+            aggregate_source_resident_batch_column_count(construction_plan)?;
         let aggregate_columns =
-            allocate_aggregate_batch(coefficient_count, aggregate_table_width / 2)?;
+            allocate_aggregate_batch(coefficient_count, resident_batch_column_count)?;
         let action_count = actions.len();
         Ok(Self {
             construction_plan: construction_plan.clone(),
@@ -433,7 +490,8 @@ impl ExactSameSecretAggregateSource {
             row_pad_seeds,
             phase_row_witness: Vec::new(),
             aggregate_columns: Some(aggregate_columns),
-            current_batch_ordinal: 0,
+            current_batch_first_column_index: 0,
+            resident_batch_column_count,
             coefficient_count,
             aggregate_table_width,
             relation_context: Some(relation_context.clone()),
@@ -515,7 +573,7 @@ impl ExactSameSecretAggregateSource {
         Ok(())
     }
 
-    /// Moves the completed resident half into the external-storage bridge.
+    /// Moves the completed resident column segment into the external-storage bridge.
     pub(in crate::bgv::proof_suite::row_code_whir) fn take_completed_batch(
         &mut self,
     ) -> Result<ExactSameSecretAggregateSourceBatch, CommonProofProverError> {
@@ -526,47 +584,57 @@ impl ExactSameSecretAggregateSource {
             .aggregate_columns
             .take()
             .ok_or(CommonProofProverError::InvalidInput)?;
-        let first_column_index = self
-            .current_batch_ordinal
-            .checked_mul(self.aggregate_table_width / 2)
-            .ok_or(CommonProofProverError::CountOverflow)?;
+        let first_column_index = self.current_batch_first_column_index;
         Ok(ExactSameSecretAggregateSourceBatch {
             first_column_index,
             columns,
         })
     }
 
-    /// Allocates the second half only after the first half has been sealed and
-    /// released by its writer.
-    pub(in crate::bgv::proof_suite::row_code_whir) fn begin_second_batch(
+    /// Allocates the next segment only after the completed segment has been
+    /// sealed and released by its writer.
+    pub(in crate::bgv::proof_suite::row_code_whir) fn begin_next_batch(
         &mut self,
     ) -> Result<(), CommonProofProverError> {
-        if self.current_batch_ordinal != 0
-            || self.aggregate_columns.is_some()
-            || self.next_action_index != self.actions.len()
-        {
+        if self.aggregate_columns.is_some() || self.next_action_index != self.actions.len() {
             return Err(CommonProofProverError::InvalidInput);
         }
-        self.current_batch_ordinal = 1;
+        let current_batch_column_count = self
+            .aggregate_table_width
+            .saturating_sub(self.current_batch_first_column_index)
+            .min(self.resident_batch_column_count);
+        let next_batch_first_column_index = self
+            .current_batch_first_column_index
+            .checked_add(current_batch_column_count)
+            .filter(|index| *index < self.aggregate_table_width)
+            .ok_or(CommonProofProverError::InvalidInput)?;
+        let next_batch_column_count = self
+            .aggregate_table_width
+            .checked_sub(next_batch_first_column_index)
+            .map(|remaining| remaining.min(self.resident_batch_column_count))
+            .filter(|count| *count > 0)
+            .ok_or(CommonProofProverError::InvalidInput)?;
+        self.current_batch_first_column_index = next_batch_first_column_index;
         self.next_action_index = 0;
         self.aggregate_columns = Some(allocate_aggregate_batch(
             self.coefficient_count,
-            self.aggregate_table_width / 2,
+            next_batch_column_count,
         )?);
-        #[cfg(feature = "primitive-measurement-evidence")]
-        if self.opening_claim_quotient_column_index.is_some()
-            && self.construction_plan.aggregate_logical_column_count()
-                <= self.aggregate_table_width / 2
-        {
-            self.next_action_index = self.actions.len();
-        }
         Ok(())
     }
 
     pub(in crate::bgv::proof_suite::row_code_whir) fn finish(
         mut self,
     ) -> Result<ExactSameSecretAggregateMaterializedSource, CommonProofProverError> {
-        if self.current_batch_ordinal != 1
+        let completed_column_count = self
+            .current_batch_first_column_index
+            .checked_add(
+                self.aggregate_table_width
+                    .saturating_sub(self.current_batch_first_column_index)
+                    .min(self.resident_batch_column_count),
+            )
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        if completed_column_count != self.aggregate_table_width
             || self.next_action_index != self.actions.len()
             || !self.phase_row_witness.is_empty()
             || self.aggregate_columns.is_some()
@@ -762,13 +830,15 @@ impl ExactSameSecretAggregateSource {
             if weight == ChallengeField::ZERO {
                 continue;
             }
-            let first_column_index = self
-                .current_batch_ordinal
-                .checked_mul(self.aggregate_table_width / 2)
-                .ok_or(CommonProofProverError::CountOverflow)?;
+            let first_column_index = self.current_batch_first_column_index;
+            let current_batch_column_count = self
+                .aggregate_columns
+                .as_ref()
+                .map(Vec::len)
+                .ok_or(CommonProofProverError::InvalidInput)?;
             if let Some(batch_column_index) = aggregate_column_index
                 .checked_sub(first_column_index)
-                .filter(|index| *index < self.aggregate_table_width / 2)
+                .filter(|index| *index < current_batch_column_count)
             {
                 let aggregate_column = self
                     .aggregate_columns
@@ -800,13 +870,15 @@ impl ExactSameSecretAggregateSource {
             let aggregate_column_index = self
                 .opening_claim_quotient_column_index
                 .ok_or(CommonProofProverError::InvalidInput)?;
-            let first_column_index = self
-                .current_batch_ordinal
-                .checked_mul(self.aggregate_table_width / 2)
-                .ok_or(CommonProofProverError::CountOverflow)?;
+            let first_column_index = self.current_batch_first_column_index;
+            let current_batch_column_count = self
+                .aggregate_columns
+                .as_ref()
+                .map(Vec::len)
+                .ok_or(CommonProofProverError::InvalidInput)?;
             let Some(batch_column_index) = aggregate_column_index
                 .checked_sub(first_column_index)
-                .filter(|index| *index < self.aggregate_table_width / 2)
+                .filter(|index| *index < current_batch_column_count)
             else {
                 return Ok(());
             };
@@ -917,13 +989,15 @@ impl ExactSameSecretAggregateSource {
             aggregate_bound_reduction_column_index(&self.construction_plan)
                 .map_err(|_| CommonProofProverError::InvalidOpening)?
                 .ok_or(CommonProofProverError::InvalidOpening)?;
-        let first_column_index = self
-            .current_batch_ordinal
-            .checked_mul(self.aggregate_table_width / 2)
-            .ok_or(CommonProofProverError::CountOverflow)?;
+        let first_column_index = self.current_batch_first_column_index;
+        let current_batch_column_count = self
+            .aggregate_columns
+            .as_ref()
+            .map(Vec::len)
+            .ok_or(CommonProofProverError::InvalidInput)?;
         if let Some(batch_column_index) = aggregate_column_index
             .checked_sub(first_column_index)
-            .filter(|index| *index < self.aggregate_table_width / 2)
+            .filter(|index| *index < current_batch_column_count)
         {
             let aggregate_column = self
                 .aggregate_columns
@@ -1563,7 +1637,8 @@ mod tests {
             ))),
             phase_row_witness: Vec::new(),
             aggregate_columns: None,
-            current_batch_ordinal: 0,
+            current_batch_first_column_index: 0,
+            resident_batch_column_count: 1,
             coefficient_count: 1,
             aggregate_table_width: 2,
             relation_context: None,
@@ -1602,23 +1677,23 @@ mod tests {
 
     #[cfg(feature = "primitive-measurement-evidence")]
     #[test]
-    fn quotient_candidate_skips_replay_for_its_canonical_zero_second_half() {
-        let (mut construction_plan, _, actions) = selected_plan_actions();
+    fn quotient_candidate_advances_one_resident_column_at_a_time() {
+        let (mut construction_plan, _, _) = selected_plan_actions();
         construction_plan.aggregate_column_roles = vec![
             super::super::super::construction_plan::RowCodeWhirAggregateColumnRole::OpeningClaimQuotientBatch {
                 opening_point_count: 3,
             },
             super::super::super::construction_plan::RowCodeWhirAggregateColumnRole::BoundReduction,
         ];
-        let expected_action = actions[0];
         let mut materializer = ExactSameSecretAggregateSource {
             construction_plan,
-            actions: vec![expected_action],
-            next_action_index: 1,
+            actions: Vec::new(),
+            next_action_index: 0,
             row_pad_seeds: None,
             phase_row_witness: Vec::new(),
             aggregate_columns: None,
-            current_batch_ordinal: 0,
+            current_batch_first_column_index: 0,
+            resident_batch_column_count: 1,
             coefficient_count: 4,
             aggregate_table_width: 4,
             relation_context: None,
@@ -1636,17 +1711,23 @@ mod tests {
             challenger: None,
         };
 
-        materializer
-            .begin_second_batch()
-            .expect("the zero second half begins without replay");
-        assert_eq!(materializer.next_action(), None);
-        let batch = materializer
-            .take_completed_batch()
-            .expect("the canonical zero second half completes immediately");
-        assert_eq!(batch.first_column_index(), 2);
-        assert_eq!(batch.columns().len(), 2);
-        assert!(batch.columns().iter().all(|column| {
-            column.len() == 4 && column.iter().all(|value| *value == ChallengeField::ZERO)
-        }));
+        for expected_first_column_index in 1..4 {
+            materializer
+                .begin_next_batch()
+                .expect("the next one-column segment begins");
+            let batch = materializer
+                .take_completed_batch()
+                .expect("the empty one-column segment completes");
+            assert_eq!(batch.first_column_index(), expected_first_column_index);
+            assert_eq!(batch.columns().len(), 1);
+            assert_eq!(batch.is_final_batch(4), expected_first_column_index == 3);
+            assert!(batch.columns().iter().all(|column| {
+                column.len() == 4 && column.iter().all(|value| *value == ChallengeField::ZERO)
+            }));
+        }
+        assert!(matches!(
+            materializer.begin_next_batch(),
+            Err(CommonProofProverError::InvalidInput)
+        ));
     }
 }

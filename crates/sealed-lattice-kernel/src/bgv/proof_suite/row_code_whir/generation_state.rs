@@ -31,7 +31,8 @@ use super::exact_same_secret::{
     ExactSameSecretAggregateSourceBatch, ExactSameSecretAggregateSourceTarget,
     ExactSameSecretAggregateWitness, ExactSameSecretPhaseOpenings, ExactSameSecretProof,
     ExactSameSecretProofEncodingProgress, ExactSameSecretProofSinkEncoder,
-    ExactSameSecretProofSinkEncodingError,
+    ExactSameSecretProofSinkEncodingError, aggregate_source_materialization_pass_count,
+    aggregate_source_resident_batch_column_count,
 };
 use super::opening_schedule::{
     RowCodeWhirBoundOpeningClaim, RowCodeWhirOpeningSchedule, RowCodeWhirPointRowWeights,
@@ -1649,6 +1650,9 @@ impl RowCodeWhirGenerationStoragePlan {
 
         let mut opened_polynomial_plans = BTreeMap::new();
         let mut opened_descriptors = Vec::new();
+        let aggregate_source_materialization_pass_count =
+            aggregate_source_materialization_pass_count(construction_plan)
+                .map_err(CommonProofGenerationInitializationError::Prover)?;
         for source in expected_opened_sources.iter().copied() {
             let degree_bound_exclusive = match source {
                 RowCodeWhirOpenedPolynomialSource::QuotientComponent { .. } => {
@@ -1693,7 +1697,7 @@ impl RowCodeWhirGenerationStoragePlan {
                     opened_source_row_use_counts.get(&source).copied().and_then(
                         |aggregate_replay_count| {
                             aggregate_replay_count
-                                .checked_mul(2)
+                                .checked_mul(aggregate_source_materialization_pass_count)
                                 .and_then(|replay_count| count.checked_add(replay_count))
                         },
                     )
@@ -2557,6 +2561,39 @@ fn derive_generation_liveness(
     source_provider: CommonProofSourceProviderMemoryAccounting,
     proof_transport_bridge_byte_length: usize,
 ) -> Result<CompleteGenerationLiveness, CommonProofProverError> {
+    let input = derive_generation_liveness_input(
+        construction_plan,
+        relation_variant,
+        relation_context,
+        relation_trees,
+        bound_tree_entries,
+        canonical_header_bytes,
+        source_cursor,
+        same_secret_source_manifest,
+        reversed_column_bindings,
+        storage_plan,
+        source_provider,
+        proof_transport_bridge_byte_length,
+    )?;
+    derive_complete_generation_liveness(construction_plan, input)
+        .map_err(|_| CommonProofProverError::ResidentMemoryLimitExceeded)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn derive_generation_liveness_input(
+    construction_plan: &RowCodeWhirConstructionPlan,
+    relation_variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
+    relation_trees: &Vec<RelationProofTreeInput>,
+    bound_tree_entries: &Vec<ProofTreeCatalogEntry>,
+    canonical_header_bytes: &Vec<u8>,
+    source_cursor: &CommonProofPreChallengeSourceCursor,
+    same_secret_source_manifest: &SameSecretAuthenticatedSourceManifest,
+    reversed_column_bindings: &Vec<(u32, u32)>,
+    storage_plan: &RowCodeWhirGenerationStoragePlan,
+    source_provider: CommonProofSourceProviderMemoryAccounting,
+    proof_transport_bridge_byte_length: usize,
+) -> Result<CompleteGenerationLivenessInput, CommonProofProverError> {
     let mut engine_control_byte_length =
         u64::try_from(size_of::<RowCodeWhirGenerationStateMachine>())
             .map_err(|_| CommonProofProverError::CountOverflow)?;
@@ -2765,7 +2802,8 @@ fn derive_generation_liveness(
         .ok()
         .and_then(|count| count.checked_mul(extension_element_byte_length))
         .ok_or(CommonProofProverError::CountOverflow)?;
-    let aggregate_batch_column_count = aggregate_table_width / 2;
+    let aggregate_batch_column_count =
+        aggregate_source_resident_batch_column_count(construction_plan)?;
     let aggregate_source_batch_byte_length = u64::try_from(aggregate_batch_column_count)
         .ok()
         .and_then(|count| count.checked_mul(aggregate_column_byte_length))
@@ -2861,33 +2899,27 @@ fn derive_generation_liveness(
             })
             .ok_or(CommonProofProverError::CountOverflow)?;
 
-    derive_complete_generation_liveness(
-        construction_plan,
-        CompleteGenerationLivenessInput {
-            engine_control_byte_length,
-            source_provider,
-            maximum_replay_reader_byte_length,
-            auxiliary_materialization_byte_length,
-            quotient_preparation_byte_length,
-            aggregate_source_batch_byte_length,
-            aggregate_source_row_byte_length,
-            aggregate_opening_preparation_byte_length: aggregate_column_byte_length,
-            proof_encoder_byte_length: proof_accumulator_byte_length,
-            transcript_byte_length,
-            private_material_byte_length,
-            private_material_partition_transition_byte_length: u64::try_from(
-                private_material_shape
-                    .partitioned_material_dynamic_payload_byte_length()
-                    .map_err(|_| CommonProofProverError::CountOverflow)?,
-            )
+    Ok(CompleteGenerationLivenessInput {
+        engine_control_byte_length,
+        source_provider,
+        maximum_replay_reader_byte_length,
+        auxiliary_materialization_byte_length,
+        quotient_preparation_byte_length,
+        aggregate_source_batch_byte_length,
+        aggregate_source_row_byte_length,
+        aggregate_opening_preparation_byte_length: aggregate_column_byte_length,
+        proof_encoder_byte_length: proof_accumulator_byte_length,
+        transcript_byte_length,
+        private_material_byte_length,
+        private_material_partition_transition_byte_length: u64::try_from(
+            private_material_shape
+                .partitioned_material_dynamic_payload_byte_length()
+                .map_err(|_| CommonProofProverError::CountOverflow)?,
+        )
+        .map_err(|_| CommonProofProverError::CountOverflow)?,
+        proof_transport_bridge_byte_length: u64::try_from(proof_transport_bridge_byte_length)
             .map_err(|_| CommonProofProverError::CountOverflow)?,
-            proof_transport_bridge_byte_length: u64::try_from(proof_transport_bridge_byte_length)
-                .map_err(|_| {
-                CommonProofProverError::CountOverflow
-            })?,
-        },
-    )
-    .map_err(|_| CommonProofProverError::ResidentMemoryLimitExceeded)
+    })
 }
 
 /// The checked relation-plan state shared by every family as it migrates to
@@ -5075,16 +5107,27 @@ impl RowCodeWhirGenerationStateMachine {
                     ))?
                     .take_completed_batch()
                     .map_err(CommonProofGenerationError::Prover)?;
-                let half_width = self
+                let aggregate_table_width = self
                     .aggregate_source_table
                     .as_ref()
                     .ok_or(CommonProofGenerationError::Prover(
                         CommonProofProverError::InvalidInput,
                     ))?
-                    .table_width()
-                    / 2;
-                if batch.columns().len() != half_width
-                    || (batch.first_column_index() != 0 && batch.first_column_index() != half_width)
+                    .table_width();
+                let resident_batch_column_count =
+                    aggregate_source_resident_batch_column_count(&self.construction_plan)
+                        .map_err(CommonProofGenerationError::Prover)?;
+                let expected_batch_column_count = aggregate_table_width
+                    .checked_sub(batch.first_column_index())
+                    .map(|remaining| remaining.min(resident_batch_column_count))
+                    .ok_or(CommonProofGenerationError::Prover(
+                        CommonProofProverError::InvalidInput,
+                    ))?;
+                if batch.columns().len() != expected_batch_column_count
+                    || batch.first_column_index() >= aggregate_table_width
+                    || !batch
+                        .first_column_index()
+                        .is_multiple_of(resident_batch_column_count)
                     || self.active_aggregate_source_batch.replace(batch).is_some()
                     || self.aggregate_source_writer.is_some()
                     || self.aggregate_source_batch_column_offset != 0
@@ -5096,11 +5139,11 @@ impl RowCodeWhirGenerationStateMachine {
                 self.phase = if self
                     .active_aggregate_source_batch
                     .as_ref()
-                    .is_some_and(|batch| batch.first_column_index() == 0)
+                    .is_some_and(|batch| batch.is_final_batch(aggregate_table_width))
                 {
-                    RowCodeWhirGenerationPhase::PersistingAggregateSourceBatch
-                } else {
                     RowCodeWhirGenerationPhase::ReleasingAggregateReplayStorage
+                } else {
+                    RowCodeWhirGenerationPhase::PersistingAggregateSourceBatch
                 };
                 Ok(CommonProofGenerationPoll::ArithmeticStepCompleted)
             }
@@ -5162,22 +5205,39 @@ impl RowCodeWhirGenerationStateMachine {
                         ))?;
                     if self.aggregate_source_batch_column_offset == batch.columns().len() {
                         let completed_first_column_index = batch.first_column_index();
+                        let completed_column_count = batch.column_count();
                         self.active_aggregate_source_batch = None;
                         self.aggregate_source_batch_column_offset = 0;
-                        if completed_first_column_index == 0 {
+                        let completed_end = completed_first_column_index
+                            .checked_add(completed_column_count)
+                            .ok_or(CommonProofGenerationError::Prover(
+                                CommonProofProverError::CountOverflow,
+                            ))?;
+                        let aggregate_table_width = self
+                            .aggregate_source_table
+                            .as_ref()
+                            .ok_or(CommonProofGenerationError::Prover(
+                                CommonProofProverError::InvalidInput,
+                            ))?
+                            .table_width();
+                        if completed_end < aggregate_table_width {
                             self.exact_same_secret_aggregate_source
                                 .as_mut()
                                 .ok_or(CommonProofGenerationError::Prover(
                                     CommonProofProverError::InvalidInput,
                                 ))?
-                                .begin_second_batch()
+                                .begin_next_batch()
                                 .map_err(CommonProofGenerationError::Prover)?;
                             self.phase = RowCodeWhirGenerationPhase::MaterializingAggregateSource;
-                        } else {
+                        } else if completed_end == aggregate_table_width {
                             self.finish_aggregate_source_materialization()
                                 .map_err(CommonProofGenerationError::Prover)?;
                             self.phase =
                                 RowCodeWhirGenerationPhase::SamplingAggregateWideHidingMaterial;
+                        } else {
+                            return Err(CommonProofGenerationError::Prover(
+                                CommonProofProverError::InvalidInput,
+                            ));
                         }
                     }
                 } else {
@@ -7919,9 +7979,12 @@ mod tests {
     #[cfg(feature = "primitive-measurement-evidence")]
     use super::super::primitive_measurements::{
         VssPersistedCheckpointReplayBaseline, derive_bounded_vss_opening_claim_quotient_candidate,
+        derive_vss_fused_bound_range_candidate_construction_plan,
         derive_vss_persisted_checkpoint_replay_candidate_ledgers,
     };
     use super::*;
+    #[cfg(feature = "primitive-measurement-evidence")]
+    use crate::bgv::proof_suite::relation_plan::fused_vss_radix_51_source_provider_memory_accounting;
     use crate::{
         bgv::proof_suite::{
             SelectedApplicationStatementContext, ValidatedRelationPlanArtifact,
@@ -8520,8 +8583,8 @@ mod tests {
             phase_commitment.wasm_runtime_baseline_byte_length(),
             33_554_432
         );
-        assert_eq!(phase_commitment.engine_control_byte_length(), 19_216_877);
-        assert_eq!(phase_commitment.source_provider_byte_length(), 30_431_184);
+        assert_eq!(phase_commitment.engine_control_byte_length(), 19_216_973);
+        assert_eq!(phase_commitment.source_provider_byte_length(), 30_479_232);
         assert_eq!(phase_commitment.replay_reader_byte_length(), 11_534_336);
         assert_eq!(phase_commitment.dft_buffer_byte_length(), 4_194_304);
         assert_eq!(
@@ -8568,14 +8631,14 @@ mod tests {
         .into_iter()
         .try_fold(0_u64, |total, byte_length| total.checked_add(byte_length))
         .expect("the selected VSS owned live set adds");
-        assert_eq!(allocator_owned_byte_length, 389_533_011);
+        assert_eq!(allocator_owned_byte_length, 389_581_155);
         assert_eq!(
             phase_commitment.allocator_overhead_byte_length(),
             allocator_owned_byte_length.div_ceil(8),
         );
         assert_eq!(
             phase_commitment.allocator_overhead_byte_length(),
-            48_691_627
+            48_697_645
         );
         assert_eq!(
             phase_commitment.total_byte_length(),
@@ -8583,10 +8646,10 @@ mod tests {
                 + allocator_owned_byte_length
                 + allocator_owned_byte_length.div_ceil(8),
         );
-        assert_eq!(phase_commitment.total_byte_length(), 471_779_070);
+        assert_eq!(phase_commitment.total_byte_length(), 471_833_232);
         assert_eq!(
             complete_liveness.maximum_live_set_byte_length(),
-            597_023_349
+            557_779_965
         );
 
         let base_phase = construction_plan
@@ -8617,19 +8680,417 @@ mod tests {
                 .expect("the selected VSS grouped-lane total adds")
         };
         let two_lane_total_byte_length = grouped_phase_total(2);
-        assert_eq!(two_lane_total_byte_length, 594_462_462);
+        assert_eq!(two_lane_total_byte_length, 594_516_624);
         assert_eq!(
             crate::bgv::proof_suite::prover::AUTOMATIC_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
                 .checked_sub(two_lane_total_byte_length),
-            Some(9_517_314),
+            Some(9_463_152),
         );
         assert_eq!(
             MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH.checked_sub(two_lane_total_byte_length),
-            Some(76_626_178),
+            Some(76_572_016),
         );
         let three_lane_total_byte_length = grouped_phase_total(3);
-        assert_eq!(three_lane_total_byte_length, 712_427_262);
+        assert_eq!(three_lane_total_byte_length, 712_481_424);
         assert!(three_lane_total_byte_length > MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH);
+    }
+
+    #[cfg(feature = "primitive-measurement-evidence")]
+    #[test]
+    fn fused_vss_radix_51_candidate_complete_generation_liveness_derives() {
+        let (relation_input, artifact, relation_context, construction_plan) =
+            derive_vss_fused_bound_range_candidate_construction_plan(51)
+                .expect("the fused VSS radix-51 candidate derives");
+        let relation_variant = artifact
+            .compiled_plan()
+            .variants()
+            .first()
+            .expect("the fused VSS radix-51 candidate has one variant");
+        let source_provider = fused_vss_radix_51_source_provider_memory_accounting(
+            &relation_input,
+            &relation_context,
+            artifact.compiled_plan(),
+        )
+        .expect("the fused VSS radix-51 source-provider accounting derives");
+        let schema_identifier =
+            ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER;
+        let canonical_statement = canonical_selected_application_statement_for_ceiling(
+            schema_identifier,
+            SelectedApplicationStatementContext::new(
+                FOUNDATION_PROFILE.protocol_version,
+                [0_u8; Hash512::BYTE_LENGTH],
+                relation_variant.schedule_position(),
+                relation_variant.top_count(),
+            ),
+        )
+        .expect("the fused VSS radix-51 statement encodes");
+        let relation_trees = selected_relation_tree_inputs(relation_variant)
+            .expect("the fused VSS radix-51 relation trees derive");
+        let bound_tree_entries = build_relation_bound_public_tree_catalog_entries(&relation_trees)
+            .expect("the fused VSS radix-51 bound-tree entries derive");
+        let canonical_header_bytes = canonical_proof_object_header_bytes(&canonical_statement)
+            .expect("the fused VSS radix-51 proof header derives");
+        let relation_plan_hash = artifact
+            .compiled_plan()
+            .canonical_hash()
+            .expect("the fused VSS radix-51 relation plan hashes");
+        let relation_plan_variant_hash = relation_variant
+            .canonical_hash()
+            .expect("the fused VSS radix-51 relation variant hashes");
+        let source_request_context = CommonProofSourcePolynomialRequestContext::new(
+            FOUNDATION_PROFILE.protocol_version,
+            [0x51; HASH_BYTE_LENGTH],
+            schema_identifier,
+            [0x52; HASH_BYTE_LENGTH],
+            relation_plan_hash,
+            relation_plan_variant_hash,
+            relation_variant.schedule_position(),
+            relation_variant.top_count(),
+        );
+        let source_cursor =
+            CommonProofPreChallengeSourceCursor::new(relation_variant, source_request_context)
+                .expect("the fused VSS radix-51 source cursor derives");
+        let reversed_column_bindings = source_cursor.reversed_column_bindings().to_vec();
+        let source_manifest =
+            SameSecretAuthenticatedSourceManifest::derive_for_primitive_measurement_candidate(
+                &construction_plan,
+                relation_variant,
+                &relation_context,
+            )
+            .expect("the fused VSS radix-51 source manifest derives");
+        source_manifest
+            .validate_against_primitive_measurement_candidate(
+                &construction_plan,
+                relation_variant,
+                &relation_context,
+            )
+            .expect("the fused VSS radix-51 source manifest validates");
+        let storage_plan = RowCodeWhirGenerationStoragePlan::new(
+            &construction_plan,
+            relation_variant,
+            &relation_context,
+            &reversed_column_bindings,
+        )
+        .expect("the fused VSS radix-51 storage plan derives");
+        let external_memory_requirement =
+            CommonProofExternalMemoryRequirement::from_external_memory_plan(
+                &storage_plan.external_memory_plan,
+            )
+            .expect("the fused VSS radix-51 external-memory requirement derives");
+        let liveness_input = derive_generation_liveness_input(
+            &construction_plan,
+            relation_variant,
+            &relation_context,
+            &relation_trees,
+            &bound_tree_entries,
+            &canonical_header_bytes,
+            &source_cursor,
+            &source_manifest,
+            &reversed_column_bindings,
+            &storage_plan,
+            source_provider,
+            MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
+        )
+        .expect("the fused VSS radix-51 liveness input derives");
+        let complete_liveness =
+            derive_complete_generation_liveness(&construction_plan, liveness_input)
+                .expect("the fused VSS radix-51 complete live set closes the hard bound");
+        assert_eq!(
+            aggregate_source_resident_batch_column_count(&construction_plan),
+            Ok(1)
+        );
+        assert_eq!(
+            aggregate_source_materialization_pass_count(&construction_plan),
+            Ok(4)
+        );
+        assert_eq!(external_memory_requirement.step_count(), 24_104);
+        assert_eq!(
+            external_memory_requirement.maximum_chunk_byte_length(),
+            1_048_576
+        );
+        assert_eq!(
+            external_memory_requirement.maximum_transaction_payload_byte_length(),
+            1_048_576
+        );
+        assert_eq!(
+            external_memory_requirement.distinct_physical_object_count(),
+            58
+        );
+        assert_eq!(external_memory_requirement.object_lifecycle_count(), 18_218);
+        assert_eq!(
+            external_memory_requirement.peak_stored_byte_length(),
+            885_618_680
+        );
+        assert_eq!(
+            external_memory_requirement.total_written_byte_length(),
+            5_670_455_288
+        );
+        assert_eq!(
+            external_memory_requirement.total_read_byte_length(),
+            67_746_897_240
+        );
+        assert_eq!(external_memory_requirement.transaction_count(), 133_112);
+        assert_eq!(
+            external_memory_requirement.local_record_seal_invocation_count(),
+            55_525
+        );
+        assert_eq!(
+            external_memory_requirement.local_record_sealed_plaintext_byte_length(),
+            5_670_619_250
+        );
+        assert_eq!(
+            storage_plan.external_memory_read_traffic,
+            RowCodeWhirExternalMemoryReadTraffic {
+                opened_polynomial_replay_byte_length: 44_549_590_360,
+                quotient_transform_byte_length: 0,
+                aggregate_source_byte_length: 23_197_306_880,
+            }
+        );
+        assert_eq!(
+            storage_plan
+                .external_memory_read_traffic
+                .total_byte_length(),
+            Some(external_memory_requirement.total_read_byte_length())
+        );
+        assert_eq!(
+            storage_plan.external_memory_transaction_traffic,
+            RowCodeWhirExternalMemoryTransactionTraffic {
+                initialization_count: 1,
+                opened_polynomial_replay_count: 48_568,
+                quotient_transform_count: 54_621,
+                pre_retained_deletion_count: 5_888,
+                aggregate_source_count: 24_034,
+            }
+        );
+        assert_eq!(
+            storage_plan
+                .external_memory_transaction_traffic
+                .total_count(),
+            Some(external_memory_requirement.transaction_count())
+        );
+        assert_eq!(
+            external_memory_requirement
+                .peak_stored_byte_length()
+                .saturating_sub(NOMINAL_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH),
+            617_183_224
+        );
+        assert_eq!(
+            external_memory_requirement
+                .peak_stored_byte_length()
+                .saturating_sub(AUTOMATIC_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH),
+            482_965_496
+        );
+        assert_eq!(
+            MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH
+                .checked_sub(external_memory_requirement.peak_stored_byte_length()),
+            Some(188_123_144)
+        );
+        assert!(
+            external_memory_requirement.peak_stored_byte_length()
+                > AUTOMATIC_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH
+        );
+        assert!(
+            external_memory_requirement.peak_stored_byte_length()
+                <= MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH
+        );
+        assert!(!external_memory_requirement.exceeds_active_root_seal_custody_budget());
+        let external_object_plans = storage_plan
+            .external_memory_plan
+            .clone()
+            .into_object_plans();
+        assert_eq!(external_object_plans.len(), 18_218);
+        assert!(external_object_plans.iter().all(|object| {
+            object.protection() == ProofExternalMemoryProtection::SecretAuthenticatedEncryption
+                && object.issued_step() <= object.seal_step()
+                && object.seal_step() <= object.last_use_step()
+                && object.last_use_step() < external_memory_requirement.step_count()
+        }));
+
+        let expected_phase_totals = [
+            (
+                GenerationPhaseLivenessKind::LoadingAuthenticatedSources,
+                178_450_846,
+            ),
+            (GenerationPhaseLivenessKind::SourceReplay, 319_450_104),
+            (
+                GenerationPhaseLivenessKind::RelationMaterialization,
+                319_450_104,
+            ),
+            (GenerationPhaseLivenessKind::PhaseCommitment, 665_012_106),
+            (
+                GenerationPhaseLivenessKind::QuotientPreparation,
+                325_724_087,
+            ),
+            (GenerationPhaseLivenessKind::AggregateSource, 565_644_904),
+            (
+                GenerationPhaseLivenessKind::PrivateMaterialSampling,
+                224_710_101,
+            ),
+            (
+                GenerationPhaseLivenessKind::AggregateOpeningPreparation,
+                412_642_296,
+            ),
+            (
+                GenerationPhaseLivenessKind::AggregateCommitment,
+                639_135_873,
+            ),
+            (
+                GenerationPhaseLivenessKind::BoundTreeAuthentication,
+                450_391_644,
+            ),
+            (GenerationPhaseLivenessKind::WhirOpening, 607_111_227),
+            (GenerationPhaseLivenessKind::BaseCaseOpening, 273_640_707),
+            (GenerationPhaseLivenessKind::CanonicalEncoding, 196_928_091),
+        ];
+        assert_eq!(complete_liveness.rows().len(), expected_phase_totals.len());
+        for (row, (expected_phase, expected_total_byte_length)) in
+            complete_liveness.rows().iter().zip(expected_phase_totals)
+        {
+            assert_eq!(row.phase(), expected_phase);
+            assert_eq!(row.total_byte_length(), expected_total_byte_length);
+            let allocator_owned_byte_length = [
+                row.engine_control_byte_length(),
+                row.source_provider_byte_length(),
+                row.replay_reader_byte_length(),
+                row.dft_buffer_byte_length(),
+                row.merkle_and_frontier_byte_length(),
+                row.proof_encoder_non_salt_byte_length(),
+                row.transported_private_leaf_salt_byte_length(),
+                row.transcript_byte_length(),
+                row.private_material_byte_length(),
+                row.private_leaf_salt_state_byte_length(),
+                row.private_leaf_salt_workspace_byte_length(),
+                row.private_leaf_salt_uniqueness_set_byte_length(),
+                row.bridge_copy_byte_length(),
+                row.specialized_workspace_byte_length(),
+            ]
+            .into_iter()
+            .try_fold(0_u64, |total, byte_length| total.checked_add(byte_length))
+            .expect("the fused VSS radix-51 phase-owned live set adds");
+            assert_eq!(
+                row.allocator_overhead_byte_length(),
+                allocator_owned_byte_length.div_ceil(8)
+            );
+            assert_eq!(
+                row.total_byte_length(),
+                row.wasm_runtime_baseline_byte_length()
+                    + allocator_owned_byte_length
+                    + allocator_owned_byte_length.div_ceil(8)
+            );
+        }
+        let phase_commitment = complete_liveness
+            .rows()
+            .iter()
+            .find(|row| row.phase() == GenerationPhaseLivenessKind::PhaseCommitment)
+            .expect("the fused VSS radix-51 phase-commitment row exists");
+        assert_eq!(phase_commitment.engine_control_byte_length(), 95_769_616);
+        assert_eq!(phase_commitment.source_provider_byte_length(), 29_843_072);
+        assert_eq!(phase_commitment.replay_reader_byte_length(), 84_934_656);
+        assert_eq!(phase_commitment.dft_buffer_byte_length(), 33_554_432);
+        assert_eq!(
+            phase_commitment.merkle_and_frontier_byte_length(),
+            273_611_400
+        );
+        assert_eq!(
+            phase_commitment.proof_encoder_non_salt_byte_length(),
+            36_276_930
+        );
+        assert_eq!(
+            phase_commitment.transported_private_leaf_salt_byte_length(),
+            4_268_544
+        );
+        assert_eq!(phase_commitment.transcript_byte_length(), 217_888);
+        assert_eq!(phase_commitment.private_material_byte_length(), 721_272);
+        assert_eq!(phase_commitment.bridge_copy_byte_length(), 2_097_508);
+        assert_eq!(
+            phase_commitment.allocator_overhead_byte_length(),
+            70_161_964
+        );
+        let aggregate_source = complete_liveness
+            .rows()
+            .iter()
+            .find(|row| row.phase() == GenerationPhaseLivenessKind::AggregateSource)
+            .expect("the fused VSS radix-51 aggregate-source row exists");
+        assert_eq!(
+            aggregate_source.specialized_workspace_byte_length(),
+            218_839_822
+        );
+        let aggregate_commitment = complete_liveness
+            .rows()
+            .iter()
+            .find(|row| row.phase() == GenerationPhaseLivenessKind::AggregateCommitment)
+            .expect("the fused VSS radix-51 aggregate-commitment row exists");
+        assert_eq!(aggregate_commitment.dft_buffer_byte_length(), 335_544_320);
+        assert_eq!(
+            aggregate_commitment.merkle_and_frontier_byte_length(),
+            33_554_432
+        );
+        let whir_opening = complete_liveness
+            .rows()
+            .iter()
+            .find(|row| row.phase() == GenerationPhaseLivenessKind::WhirOpening)
+            .expect("the fused VSS radix-51 WHIR-opening row exists");
+        assert_eq!(whir_opening.source_provider_byte_length(), 0);
+        assert_eq!(
+            complete_liveness.maximum_live_set_byte_length(),
+            phase_commitment.total_byte_length()
+        );
+        assert_eq!(
+            complete_liveness.maximum_live_set_byte_length(),
+            665_012_106
+        );
+        assert_eq!(
+            complete_liveness
+                .maximum_live_set_byte_length()
+                .saturating_sub(
+                    crate::bgv::proof_suite::prover::NOMINAL_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
+                ),
+            262_358_922
+        );
+        assert_eq!(
+            complete_liveness
+                .maximum_live_set_byte_length()
+                .saturating_sub(
+                crate::bgv::proof_suite::prover::AUTOMATIC_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
+            ),
+            61_032_330
+        );
+        assert_eq!(
+            MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
+                .checked_sub(complete_liveness.maximum_live_set_byte_length()),
+            Some(6_076_534)
+        );
+        assert!(
+            complete_liveness.maximum_live_set_byte_length()
+                > crate::bgv::proof_suite::prover::AUTOMATIC_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
+        );
+        assert!(
+            complete_liveness.maximum_live_set_byte_length()
+                <= MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
+        );
+        let phase_commitment_work = complete_liveness.phase_commitment_work();
+        assert_eq!(phase_commitment_work.geometry_count, 2);
+        assert_eq!(phase_commitment_work.materialization_pass_count, 2);
+        assert_eq!(phase_commitment_work.lane_dft_count, 3_328);
+        assert_eq!(phase_commitment_work.butterfly_count, 16_575_889_408);
+        assert_eq!(phase_commitment_work.coefficient_fold_count, 12_213_813_248);
+        assert_eq!(
+            phase_commitment_work.coset_multiplication_count,
+            1_744_830_464
+        );
+        assert_eq!(
+            phase_commitment_work.column_value_delivery_count,
+            1_744_830_464
+        );
+        assert_eq!(phase_commitment_work.leaf_hash_query_count, 67_108_864);
+        assert_eq!(
+            phase_commitment_work.merkle_parent_hash_query_count,
+            67_108_860
+        );
+        assert_eq!(
+            phase_commitment_work.private_leaf_salt_derivation_count,
+            67_108_864
+        );
     }
 
     #[cfg(feature = "primitive-measurement-evidence")]
@@ -8782,9 +9243,9 @@ mod tests {
         );
         assert_eq!(
             external_memory_requirement.total_read_byte_length(),
-            134_439_906_080
+            149_238_851_680
         );
-        assert_eq!(external_memory_requirement.transaction_count(), 159_551);
+        assert_eq!(external_memory_requirement.transaction_count(), 174_465);
         assert_eq!(
             external_memory_requirement.local_record_seal_invocation_count(),
             21_473
@@ -8796,9 +9257,9 @@ mod tests {
         assert_eq!(
             external_memory_read_traffic,
             RowCodeWhirExternalMemoryReadTraffic {
-                opened_polynomial_replay_byte_length: 122_337_844_000,
+                opened_polynomial_replay_byte_length: 126_041_544_800,
                 quotient_transform_byte_length: 0,
-                aggregate_source_byte_length: 12_102_062_080,
+                aggregate_source_byte_length: 23_197_306_880,
             },
         );
         assert_eq!(
@@ -8809,10 +9270,10 @@ mod tests {
             external_memory_transaction_traffic,
             RowCodeWhirExternalMemoryTransactionTraffic {
                 initialization_count: 1,
-                opened_polynomial_replay_count: 124_640,
+                opened_polynomial_replay_count: 128_410,
                 quotient_transform_count: 20_598,
                 pre_retained_deletion_count: 1_422,
-                aggregate_source_count: 12_890,
+                aggregate_source_count: 24_034,
             },
         );
         assert_eq!(
@@ -8865,7 +9326,9 @@ mod tests {
             &relation_context,
         )
         .expect("the bounded VSS quotient aggregate control payload derives");
-        let aggregate_batch_column_count = construction_plan.aggregate_table_width() / 2;
+        let aggregate_batch_column_count =
+            aggregate_source_resident_batch_column_count(&construction_plan)
+                .expect("the bounded VSS quotient resident batch width derives");
         let aggregate_batch_byte_length = (1_u64
             << construction_plan.selected_parameters().table_variable_count)
             .checked_mul(
@@ -8896,48 +9359,48 @@ mod tests {
                 + aggregate_source_row_byte_length
                 + aggregate_source_control_byte_length,
         );
-        assert_eq!(aggregate_batch_byte_length, 335_544_368);
+        assert_eq!(aggregate_batch_byte_length, 167_772_184);
         assert_eq!(aggregate_source_row_byte_length, 50_334_528);
         assert_eq!(aggregate_source_control_byte_length, 1_393_198);
         assert_eq!(
             aggregate_source.specialized_workspace_byte_length(),
-            387_272_094,
+            219_499_910,
         );
         let expected_phase_totals = [
             (
                 GenerationPhaseLivenessKind::LoadingAuthenticatedSources,
-                86_488_945,
+                86_502_517,
             ),
-            (GenerationPhaseLivenessKind::SourceReplay, 225_699_399),
+            (GenerationPhaseLivenessKind::SourceReplay, 225_712_971),
             (
                 GenerationPhaseLivenessKind::RelationMaterialization,
-                225_699_399,
+                225_712_971,
             ),
-            (GenerationPhaseLivenessKind::PhaseCommitment, 571_585_320),
+            (GenerationPhaseLivenessKind::PhaseCommitment, 571_598_892),
             (
                 GenerationPhaseLivenessKind::QuotientPreparation,
-                269_522_622,
+                269_536_194,
             ),
-            (GenerationPhaseLivenessKind::AggregateSource, 661_380_505),
+            (GenerationPhaseLivenessKind::AggregateSource, 472_650_370),
             (
                 GenerationPhaseLivenessKind::PrivateMaterialSampling,
-                130_959_396,
+                130_972_968,
             ),
             (
                 GenerationPhaseLivenessKind::AggregateOpeningPreparation,
-                318_891_591,
+                318_905_163,
             ),
             (
                 GenerationPhaseLivenessKind::AggregateCommitment,
-                583_133_904,
+                545_398_740,
             ),
             (
                 GenerationPhaseLivenessKind::BoundTreeAuthentication,
-                356_640_939,
+                356_654_511,
             ),
-            (GenerationPhaseLivenessKind::WhirOpening, 584_682_714),
-            (GenerationPhaseLivenessKind::BaseCaseOpening, 213_463_458),
-            (GenerationPhaseLivenessKind::CanonicalEncoding, 136_750_842),
+            (GenerationPhaseLivenessKind::WhirOpening, 513_063_414),
+            (GenerationPhaseLivenessKind::BaseCaseOpening, 179_592_894),
+            (GenerationPhaseLivenessKind::CanonicalEncoding, 102_880_278),
         ];
         assert_eq!(complete_liveness.rows().len(), expected_phase_totals.len());
         for (row, (expected_phase, expected_total_byte_length)) in
@@ -8946,8 +9409,8 @@ mod tests {
             assert_eq!(row.phase(), expected_phase);
             assert_eq!(row.total_byte_length(), expected_total_byte_length);
         }
-        assert_eq!(aggregate_source.engine_control_byte_length(), 11_814_296);
-        assert_eq!(aggregate_source.source_provider_byte_length(), 30_107_184);
+        assert_eq!(aggregate_source.engine_control_byte_length(), 11_814_312);
+        assert_eq!(aggregate_source.source_provider_byte_length(), 30_119_232);
         assert_eq!(aggregate_source.replay_reader_byte_length(), 84_934_656);
         assert_eq!(
             aggregate_source.proof_encoder_non_salt_byte_length(),
@@ -8962,7 +9425,7 @@ mod tests {
         assert_eq!(aggregate_source.bridge_copy_byte_length(), 2_097_508);
         assert_eq!(
             aggregate_source.allocator_overhead_byte_length(),
-            69_758_453
+            48_788_438
         );
         let phase_commitment_work = complete_liveness.phase_commitment_work();
         assert_eq!(phase_commitment_work.geometry_count, 2);
@@ -9065,7 +9528,7 @@ mod tests {
         );
         assert_eq!(
             complete_liveness.maximum_live_set_byte_length(),
-            661_380_505
+            571_598_892
         );
         assert_eq!(
             complete_liveness
@@ -9073,20 +9536,17 @@ mod tests {
                 .saturating_sub(
                     crate::bgv::proof_suite::prover::NOMINAL_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
                 ),
-            258_727_321,
+            168_945_708,
         );
         assert_eq!(
-            complete_liveness
-                .maximum_live_set_byte_length()
-                .saturating_sub(
-                crate::bgv::proof_suite::prover::AUTOMATIC_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
-            ),
-            57_400_729,
+            crate::bgv::proof_suite::prover::AUTOMATIC_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
+                .checked_sub(complete_liveness.maximum_live_set_byte_length()),
+            Some(32_380_884),
         );
         assert_eq!(
             MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
                 .checked_sub(complete_liveness.maximum_live_set_byte_length()),
-            Some(9_708_135),
+            Some(99_489_748),
         );
         assert!(
             complete_liveness.maximum_live_set_byte_length()
@@ -9159,8 +9619,8 @@ mod tests {
                     0,
                     870_692_320,
                     16_355_460_576,
-                    135_513_647_904,
-                    161_605,
+                    150_312_593_504,
+                    176_519,
                     31,
                     2_148_124_232,
                 ),
@@ -9169,8 +9629,8 @@ mod tests {
                     0,
                     333_821_408,
                     15_818_589_664,
-                    134_976_776_992,
-                    160_581,
+                    149_775_722_592,
+                    175_495,
                     31,
                     1_074_062_920,
                 ),
@@ -9179,8 +9639,8 @@ mod tests {
                     0,
                     65_385_952,
                     15_550_154_208,
-                    134_708_341_536,
-                    160_069,
+                    149_507_287_136,
+                    174_983,
                     31,
                     537_032_264,
                 ),
@@ -9189,8 +9649,8 @@ mod tests {
                     68_831_776,
                     0,
                     15_415_936_480,
-                    134_574_123_808,
-                    159_813,
+                    149_373_069_408,
+                    174_727,
                     31,
                     268_516_936,
                 ),
@@ -9199,8 +9659,8 @@ mod tests {
                     135_940_640,
                     0,
                     15_348_827_616,
-                    134_507_014_944,
-                    159_685,
+                    149_305_960_544,
+                    174_599,
                     31,
                     134_259_272,
                 ),
@@ -9245,6 +9705,24 @@ mod tests {
                 (3_106_076_000, 33_579_200, 251_844_000, 34_626_998),
             ],
         );
+        assert_eq!(
+            checkpoint_candidates
+                .iter()
+                .map(|candidate| (
+                    candidate.maximum_selected_schedule_owned_byte_length,
+                    candidate.phase_commitment_live_set_upper_bound_byte_length,
+                    candidate.combined_wasm_live_set_upper_bound_byte_length,
+                    candidate.wasm_hard_bound_headroom_byte_length,
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (790_128, 572_487_786, 572_487_786, 98_600_854),
+                (428_568, 572_081_031, 572_081_031, 99_007_609),
+                (298_392, 571_934_583, 571_934_583, 99_154_057),
+                (234_536, 571_862_745, 571_862_745, 99_225_895),
+                (184_416, 571_806_360, 571_806_360, 99_282_280),
+            ],
+        );
         for candidate in &checkpoint_candidates {
             assert_eq!(candidate.checkpoint_object_count, 2);
             assert_eq!(candidate.checkpoint_local_record_seal_invocation_count, 0);
@@ -9276,13 +9754,12 @@ mod tests {
             assert!(candidate.maximum_selected_schedule_owned_byte_length < 1_048_576);
             assert!(
                 candidate.phase_commitment_live_set_upper_bound_byte_length
-                    < complete_liveness.maximum_live_set_byte_length(),
+                    > complete_liveness.maximum_live_set_byte_length(),
             );
             assert_eq!(
                 candidate.combined_wasm_live_set_upper_bound_byte_length,
-                661_380_505,
+                candidate.phase_commitment_live_set_upper_bound_byte_length,
             );
-            assert_eq!(candidate.wasm_hard_bound_headroom_byte_length, 9_708_135);
             assert!(!candidate.has_tenfold_butterfly_reduction);
             assert!(!candidate.has_tenfold_coset_reduction);
             assert!(candidate.has_tenfold_column_delivery_reduction);
@@ -9567,7 +10044,7 @@ mod tests {
         assert_eq!(relation_variant_payload_byte_length, 4_986_144);
         assert_eq!(relation_context_payload_byte_length, 736);
         assert_eq!(construction_identity_byte_length, 994_031);
-        assert_eq!(size_of::<RowCodeWhirGenerationStateMachine>(), 20_208);
+        assert_eq!(size_of::<RowCodeWhirGenerationStateMachine>(), 20_304);
         assert_eq!(size_of::<super::super::RowCodeWhirChallenger>(), 552);
         assert_eq!(
             accounting.loading_persistent_resident_byte_length(),
@@ -9757,7 +10234,7 @@ mod tests {
                 0,
                 0,
                 0,
-                65_180_283,
+                65_180_391,
             ),
             (
                 GenerationPhaseLivenessKind::SourceReplay,
@@ -9768,7 +10245,7 @@ mod tests {
                 0,
                 0,
                 0,
-                158_740_782,
+                158_740_890,
             ),
             (
                 GenerationPhaseLivenessKind::RelationMaterialization,
@@ -9779,7 +10256,7 @@ mod tests {
                 0,
                 0,
                 1_185_104,
-                160_074_024,
+                160_074_132,
             ),
             (
                 GenerationPhaseLivenessKind::PhaseCommitment,
@@ -9790,7 +10267,7 @@ mod tests {
                 392,
                 0,
                 0,
-                504_267_954,
+                504_268_062,
             ),
             (
                 GenerationPhaseLivenessKind::QuotientPreparation,
@@ -9801,7 +10278,7 @@ mod tests {
                 0,
                 0,
                 7_280_808,
-                166_931_691,
+                166_931_799,
             ),
             (
                 GenerationPhaseLivenessKind::AggregateSource,
@@ -9812,7 +10289,7 @@ mod tests {
                 0,
                 0,
                 386_426_745,
-                593_470_870,
+                593_470_978,
             ),
             (
                 GenerationPhaseLivenessKind::PrivateMaterialSampling,
@@ -9823,7 +10300,7 @@ mod tests {
                 0,
                 0,
                 721_320,
-                64_000_779,
+                64_000_887,
             ),
             (
                 GenerationPhaseLivenessKind::AggregateOpeningPreparation,
@@ -9834,18 +10311,18 @@ mod tests {
                 0,
                 0,
                 167_772_160,
-                251_932_974,
+                251_933_082,
             ),
             (
                 GenerationPhaseLivenessKind::AggregateCommitment,
                 0,
                 335_544_320,
-                67_108_864,
+                33_554_432,
                 56,
                 976,
                 0,
                 0,
-                516_175_287,
+                478_426_659,
             ),
             (
                 GenerationPhaseLivenessKind::BoundTreeAuthentication,
@@ -9856,18 +10333,18 @@ mod tests {
                 0,
                 0,
                 0,
-                289_682_322,
+                289_682_430,
             ),
             (
                 GenerationPhaseLivenessKind::WhirOpening,
                 0,
                 335_544_320,
-                67_108_864,
+                33_554_432,
                 56,
                 976,
                 0,
                 1_376_720,
-                517_724_097,
+                474_345_127,
             ),
             (
                 GenerationPhaseLivenessKind::BaseCaseOpening,
@@ -9878,7 +10355,7 @@ mod tests {
                 976,
                 0,
                 46_794_256,
-                146_504_841,
+                140_874_607,
             ),
             (
                 GenerationPhaseLivenessKind::CanonicalEncoding,
@@ -9889,7 +10366,7 @@ mod tests {
                 0,
                 750_312,
                 0,
-                64_033_395,
+                58_403_161,
             ),
         ];
         assert_eq!(complete_liveness.rows().len(), expected_rows.len());
@@ -9910,11 +10387,18 @@ mod tests {
         {
             assert_eq!(row.phase(), phase);
             assert_eq!(row.wasm_runtime_baseline_byte_length(), 33_554_432);
-            assert_eq!(row.engine_control_byte_length(), 10_200_529);
+            assert_eq!(row.engine_control_byte_length(), 10_200_625);
             assert_eq!(
                 row.source_provider_byte_length(),
                 if phase == GenerationPhaseLivenessKind::LoadingAuthenticatedSources {
                     14_754_062
+                } else if matches!(
+                    phase,
+                    GenerationPhaseLivenessKind::WhirOpening
+                        | GenerationPhaseLivenessKind::BaseCaseOpening
+                        | GenerationPhaseLivenessKind::CanonicalEncoding
+                ) {
+                    0
                 } else {
                     5_004_748
                 },
@@ -9988,7 +10472,7 @@ mod tests {
         }
         assert_eq!(
             complete_liveness.maximum_live_set_byte_length(),
-            593_470_870,
+            593_470_978,
         );
         assert_eq!(
             complete_liveness
@@ -9996,17 +10480,17 @@ mod tests {
                 .saturating_sub(
                     crate::bgv::proof_suite::prover::NOMINAL_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
                 ),
-            190_817_686,
+            190_817_794,
         );
         assert_eq!(
             crate::bgv::proof_suite::prover::AUTOMATIC_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
                 .checked_sub(complete_liveness.maximum_live_set_byte_length(),),
-            Some(10_508_906),
+            Some(10_508_798),
         );
         assert_eq!(
             MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
                 .checked_sub(complete_liveness.maximum_live_set_byte_length()),
-            Some(77_617_770),
+            Some(77_617_662),
         );
     }
 

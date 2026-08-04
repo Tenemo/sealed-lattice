@@ -36,7 +36,7 @@ type MerkleDigest = [u64; MERKLE_DIGEST_WORD_LENGTH];
 
 const ENCODED_ORACLE_WIDTH: usize = 8;
 const MAXIMUM_ARITHMETIC_ROWS_PER_POLL: usize = 1 << 15;
-pub(super) const AGGREGATE_ORACLE_LEAF_STATE_STRIPE_ROW_COUNT: usize = 1 << 20;
+pub(super) const AGGREGATE_ORACLE_LEAF_STATE_STRIPE_ROW_COUNT: usize = 1 << 19;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct RecomputableOracleEncodingGeometry {
@@ -1140,10 +1140,11 @@ mod tests {
                 .is_err(),
             );
         }
-        assert_eq!(aggregate_oracle_leaf_state_stripe_count(1 << 23), Ok(8));
-        assert_eq!(aggregate_oracle_leaf_state_stripe_count(1 << 22), Ok(4));
-        assert_eq!(aggregate_oracle_leaf_state_stripe_count(1 << 21), Ok(2));
-        assert_eq!(aggregate_oracle_leaf_state_stripe_count(1 << 20), Ok(1));
+        assert_eq!(aggregate_oracle_leaf_state_stripe_count(1 << 23), Ok(16));
+        assert_eq!(aggregate_oracle_leaf_state_stripe_count(1 << 22), Ok(8));
+        assert_eq!(aggregate_oracle_leaf_state_stripe_count(1 << 21), Ok(4));
+        assert_eq!(aggregate_oracle_leaf_state_stripe_count(1 << 20), Ok(2));
+        assert_eq!(aggregate_oracle_leaf_state_stripe_count(1 << 19), Ok(1));
         assert!(aggregate_oracle_leaf_state_stripe_count(0).is_err());
         assert!(aggregate_oracle_leaf_state_stripe_count(3).is_err());
     }

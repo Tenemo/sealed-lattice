@@ -26,6 +26,8 @@ use super::{
     derive_vss_share_linkage_trace_witness_provider,
 };
 
+#[cfg(all(feature = "primitive-measurement-evidence", test))]
+use super::vss_fused_bound_range_trace_witness_structure_memory_accounting;
 #[cfg(test)]
 use super::vss_share_linkage_trace_witness_structure_memory_accounting;
 
@@ -486,6 +488,24 @@ fn committed_material_source_provider_memory_accounting(
         }
     }
     .map_err(CommonProofProverError::Relation)?;
+    committed_material_source_provider_memory_accounting_for_expected_plan(
+        relation_kind,
+        input,
+        context,
+        compiled_relation_plan,
+        &expected_relation_plan,
+        trace_witness_structure,
+    )
+}
+
+fn committed_material_source_provider_memory_accounting_for_expected_plan(
+    relation_kind: SelectedCommittedMaterialRelationKind,
+    input: &CommittedMaterialRelationPlanInput,
+    context: &RelationPlanCheckContext,
+    compiled_relation_plan: &CompiledRelationPlan,
+    expected_relation_plan: &CompiledRelationPlan,
+    trace_witness_structure: CommittedMaterialTraceWitnessStructureMemoryAccounting,
+) -> Result<CommittedMaterialSourceProviderMemoryAccounting, CommonProofProverError> {
     if compiled_relation_plan
         .canonical_hash()
         .map_err(CommonProofProverError::Relation)?
@@ -589,6 +609,41 @@ pub(crate) fn selected_vss_source_provider_memory_accounting(
         compiled_relation_plan,
         vss_share_linkage_trace_witness_structure_memory_accounting(input, context)
             .map_err(CommonProofProverError::Relation)?,
+    )?;
+    Ok(CommonProofSourceProviderMemoryAccounting::new(
+        detailed.loading_persistent_resident_byte_length(),
+        detailed.post_source_polynomial_finish_persistent_resident_byte_length(),
+        detailed.additional_loading_source_polynomials_transient_byte_length(),
+        detailed.maximum_returned_source_polynomial_byte_length(),
+    ))
+}
+
+#[cfg(all(feature = "primitive-measurement-evidence", test))]
+pub(crate) fn fused_vss_radix_51_source_provider_memory_accounting(
+    input: &CommittedMaterialRelationPlanInput,
+    context: &RelationPlanCheckContext,
+    compiled_relation_plan: &CompiledRelationPlan,
+) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
+    const RANGE_DIGIT_RADIX: u64 = 51;
+    let expected_relation_plan =
+        super::vss_share_linkage::compile_vss_share_linkage_fused_bound_range_candidate_relation_plan(
+            input,
+            context,
+            RANGE_DIGIT_RADIX,
+        )
+        .map_err(CommonProofProverError::Relation)?;
+    let detailed = committed_material_source_provider_memory_accounting_for_expected_plan(
+        SelectedCommittedMaterialRelationKind::VssShareLinkage,
+        input,
+        context,
+        compiled_relation_plan,
+        &expected_relation_plan,
+        vss_fused_bound_range_trace_witness_structure_memory_accounting(
+            input,
+            context,
+            RANGE_DIGIT_RADIX,
+        )
+        .map_err(CommonProofProverError::Relation)?,
     )?;
     Ok(CommonProofSourceProviderMemoryAccounting::new(
         detailed.loading_persistent_resident_byte_length(),
@@ -1242,7 +1297,13 @@ impl CommonProofSourcePolynomialProvider for CommittedMaterialSourcePolynomialAd
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "primitive-measurement-evidence")]
+    use super::super::SelectedVssSourceReplayMeasurement;
     use super::*;
+    #[cfg(feature = "primitive-measurement-evidence")]
+    use crate::bgv::proof_suite::{
+        selected_committed_material_relation_plan_input, selected_relation_plan_check_context,
+    };
     use crate::foundation::{
         ACTION_RANDOMNESS_ROOT_BYTE_LENGTH, ActionPrivateRandomness,
         ActionRandomnessDerivationInput, ActionRandomnessRoot, Hash512, ParticipantIdentity,
@@ -1446,6 +1507,64 @@ mod tests {
                 Err(CommonProofProverError::CountOverflow)
             );
         }
+    }
+
+    #[cfg(feature = "primitive-measurement-evidence")]
+    #[test]
+    fn candidate_specific_source_accounting_refuses_cross_plan_substitution() {
+        let selected_input = selected_committed_material_relation_plan_input()
+            .expect("the selected VSS relation input derives");
+        let selected_context =
+            selected_relation_plan_check_context(VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER)
+                .expect("the selected VSS relation context derives");
+        let selected_plan =
+            compile_vss_share_linkage_relation_plan(&selected_input, &selected_context)
+                .expect("the selected VSS relation compiles");
+
+        let (fused_input, fused_context) =
+            SelectedVssSourceReplayMeasurement::fused_bound_range_candidate_definition(51)
+                .expect("the fused VSS radix-51 relation definition derives");
+        let fused_plan = super::super::vss_share_linkage::
+            compile_vss_share_linkage_fused_bound_range_candidate_relation_plan(
+                &fused_input,
+                &fused_context,
+                51,
+            )
+            .expect("the fused VSS radix-51 relation compiles");
+
+        let selected_accounting = selected_vss_source_provider_memory_accounting(
+            &selected_input,
+            &selected_context,
+            &selected_plan,
+        )
+        .expect("the selected VSS accounting authenticates its own plan");
+        let fused_accounting = fused_vss_radix_51_source_provider_memory_accounting(
+            &fused_input,
+            &fused_context,
+            &fused_plan,
+        )
+        .expect("the fused VSS radix-51 accounting authenticates its own plan");
+        assert!(selected_accounting.loading_persistent_resident_byte_length() > 0);
+        assert!(fused_accounting.loading_persistent_resident_byte_length() > 0);
+
+        assert!(
+            selected_vss_source_provider_memory_accounting(
+                &fused_input,
+                &fused_context,
+                &fused_plan,
+            )
+            .is_err(),
+            "selected VSS accounting accepted the fused candidate plan",
+        );
+        assert!(
+            fused_vss_radix_51_source_provider_memory_accounting(
+                &selected_input,
+                &selected_context,
+                &selected_plan,
+            )
+            .is_err(),
+            "fused VSS radix-51 accounting accepted the selected VSS plan",
+        );
     }
 
     #[test]

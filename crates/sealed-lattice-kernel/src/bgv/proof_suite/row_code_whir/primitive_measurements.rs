@@ -2409,17 +2409,18 @@ fn derive_vss_range_packing_candidate_construction_plan(
 }
 
 #[cfg(test)]
-fn derive_vss_fused_bound_range_candidate_construction_plan(
+pub(super) fn derive_vss_fused_bound_range_candidate_construction_plan(
     range_digit_radix: u64,
 ) -> Result<
     (
+        CommittedMaterialRelationPlanInput,
         ValidatedRelationPlanArtifact,
         RelationPlanCheckContext,
         RowCodeWhirConstructionPlan,
     ),
     String,
 > {
-    let (_, artifact, context) =
+    let (input, artifact, context) =
         SelectedVssSourceReplayMeasurement::validated_fused_bound_range_candidate_with_input(
             range_digit_radix,
         )?;
@@ -2439,7 +2440,7 @@ fn derive_vss_fused_bound_range_candidate_construction_plan(
         .map_err(|error| {
             format!("VSS fused-bound range candidate construction does not derive: {error:?}")
         })?;
-    Ok((artifact, context, construction_plan))
+    Ok((input, artifact, context, construction_plan))
 }
 
 #[cfg(test)]
@@ -5426,7 +5427,7 @@ mod tests {
     fn vss_fused_bound_range_compiler_matches_the_admitted_static_geometry() {
         let static_ledger = derive_vss_fused_bound_range_candidate_ledger(51)
             .expect("the admitted radix-51 VSS ledger derives");
-        let (artifact, context, construction_plan) =
+        let (_, artifact, context, construction_plan) =
             derive_vss_fused_bound_range_candidate_construction_plan(51)
                 .expect("the radix-51 fused-bound VSS construction validates");
         let variant = artifact
@@ -5529,10 +5530,10 @@ mod tests {
         let repeated = derive_vss_fused_bound_range_candidate_construction_plan(51)
             .expect("the repeated radix-51 fused-bound VSS construction validates");
         assert_eq!(
-            repeated.0.canonical_plan_hash(),
+            repeated.1.canonical_plan_hash(),
             artifact.canonical_plan_hash()
         );
-        assert_eq!(repeated.2, construction_plan);
+        assert_eq!(repeated.3, construction_plan);
         assert!(derive_vss_fused_bound_range_candidate_construction_plan(50).is_err());
         assert!(derive_vss_fused_bound_range_candidate_construction_plan(52).is_err());
     }

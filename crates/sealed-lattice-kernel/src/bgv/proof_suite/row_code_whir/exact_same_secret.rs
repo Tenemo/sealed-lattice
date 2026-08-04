@@ -91,6 +91,7 @@ pub(in crate::bgv::proof_suite::row_code_whir) use aggregate_source::{
     ExactSameSecretAggregateMetadata, ExactSameSecretAggregateSource,
     ExactSameSecretAggregateSourceAction, ExactSameSecretAggregateSourceBatch,
     ExactSameSecretAggregateSourceTarget, ExactSameSecretAggregateWitness,
+    aggregate_source_materialization_pass_count, aggregate_source_resident_batch_column_count,
 };
 #[cfg(test)]
 pub(in crate::bgv::proof_suite) use exact_proof::canonical_row_code_whir_aggregate_opening_section_byte_ledger;

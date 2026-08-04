@@ -100,8 +100,8 @@ Works today:
   remain below the absolute parser bound and require engineering review. These
   are static ceilings, not emitted-proof or browser evidence.
 - Aggregate-wide oracle commitments now use uniform 512-bit leaf transitions
-  in aligned `2^20`-row stripes. The selected construction derives a
-  `402,653,184`-byte DFT-plus-leaf-state core and preserves the canonical roots
+  in aligned `2^19`-row stripes. The selected construction derives a
+  `369,098,752`-byte DFT-plus-leaf-state core and preserves the canonical roots
   and proof-size ledger. These are contiguous commitment-row stripes in
   canonical leaf order, with 64-byte chaining values; they are not
   subgroup-coset DFT stripes.
@@ -348,16 +348,16 @@ Works today:
 - Production-derived phase-liveness accounting covers source ownership, replay
   readers, DFTs, Merkle frontiers, proof material, transcript state, private
   material, browser-bridge copies, a WebAssembly runtime reserve, and allocator
-  overhead. The selected VSS phase-commitment row now derives `471,779,070`
+  overhead. The selected VSS phase-commitment row now derives `471,833,232`
   bytes from the complete live set, including a `33,554,432`-byte runtime
-  reserve and `48,691,627` bytes of allocator overhead. The complete selected
-  VSS maximum is `597,023,349` bytes, leaving `6,956,427` bytes below the
-  automatic ceiling and `74,065,291` bytes below the hard WebAssembly bound.
+  reserve and `48,697,645` bytes of allocator overhead. The complete selected
+  VSS maximum is `557,779,965` bytes, leaving `46,199,811` bytes below the
+  automatic ceiling and `113,308,675` bytes below the hard WebAssembly bound.
   Aggregate-source accounting now includes the resident witness and its
   simultaneously allocated padded physical row, rather than substituting the
   already-released replay chunk. The selected same-secret aggregate-source
-  phase consequently derives `593,470,870` bytes, `10,508,906` below the
-  automatic ceiling and `77,617,770` below the hard bound.
+  phase consequently derives `593,470,978` bytes, `10,508,798` below the
+  automatic ceiling and `77,617,662` below the hard bound.
   This is static accounting, not a native or browser full-proof measurement;
   the narrow automatic-ceiling margin, allocator behavior, and phase lifecycle
   remain unmeasured, so memory feasibility is not closed.
@@ -557,9 +557,18 @@ Works today:
   one-to-one 2,627-column witness layout now exist. Focused correspondence
   checks cover every selected source row and direct VSS quotient, every radix
   decomposition and borrow identity, and every compiled constraint at
-  boundary-sensitive trace points through the checked interpreter. Complete
-  phase liveness, theorem integration, proof bytes, and native and browser
-  measurements do not yet exist, so no replay redesign is selected.
+  boundary-sensitive trace points through the checked interpreter. Its complete
+  static generation ledger uses four one-column aggregate-source passes and
+  peaks in phase commitment at `665,012,106` bytes. That is `61,032,330` bytes
+  above the automatic ceiling and leaves `6,076,534` bytes below the hard
+  WebAssembly bound, so it requires engineering review. The authenticated
+  scratch plan peaks at `885,618,680` bytes, writes `5,670,455,288` bytes, reads
+  `67,746,897,240` bytes, performs 133,112 transactions, and leaves
+  `188,123,144` bytes below the hard scratch bound. Focused segmented-oracle
+  checks preserve the configured MMCS root and authentication paths, but exact
+  whole-proof byte parity, theorem integration, native and browser measurement,
+  production integration, and a suite identity do not yet exist. No replay
+  redesign is selected.
   The fastest comparator accepted by the existing one-aggregate construction
   is instead factor 1, width 32. It has 331 rows, 21,184 lane DFTs,
   `105,511,911,424` butterflies, `11,106,516,992` value deliveries, and

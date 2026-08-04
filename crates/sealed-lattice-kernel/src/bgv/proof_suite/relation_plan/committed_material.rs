@@ -4294,6 +4294,20 @@ pub(crate) fn vss_share_linkage_trace_witness_structure_memory_accounting(
     )
 }
 
+#[cfg(all(feature = "primitive-measurement-evidence", test))]
+pub(crate) fn vss_fused_bound_range_trace_witness_structure_memory_accounting(
+    input: &CommittedMaterialRelationPlanInput,
+    context: &RelationPlanCheckContext,
+    range_digit_radix: u64,
+) -> Result<CommittedMaterialTraceWitnessStructureMemoryAccounting, RelationPlanError> {
+    let layout =
+        derive_vss_fused_bound_range_trace_witness_layout(input, context, range_digit_radix)?;
+    CommittedMaterialTraceWitnessStructureMemoryAccounting::from_catalog_dimensions(
+        layout.resolved_moduli.len(),
+        &layout.ordered_recipes,
+    )
+}
+
 pub(crate) fn derive_vss_share_linkage_trace_witness_provider(
     input: &CommittedMaterialRelationPlanInput,
     context: &RelationPlanCheckContext,

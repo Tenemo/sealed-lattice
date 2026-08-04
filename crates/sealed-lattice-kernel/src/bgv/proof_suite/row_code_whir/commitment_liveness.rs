@@ -868,6 +868,20 @@ pub(super) fn derive_complete_generation_liveness(
     construction_plan: &RowCodeWhirConstructionPlan,
     input: CompleteGenerationLivenessInput,
 ) -> Result<CompleteGenerationLiveness, String> {
+    let liveness = derive_complete_generation_liveness_rows(construction_plan, input)?;
+    if liveness.maximum_live_set_byte_length > MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH {
+        return Err(format!(
+            "complete proof-generation live set {} exceeds the hard WASM bound",
+            liveness.maximum_live_set_byte_length
+        ));
+    }
+    Ok(liveness)
+}
+
+fn derive_complete_generation_liveness_rows(
+    construction_plan: &RowCodeWhirConstructionPlan,
+    input: CompleteGenerationLivenessInput,
+) -> Result<CompleteGenerationLiveness, String> {
     if input.engine_control_byte_length == 0
         || input
             .source_provider
@@ -1093,7 +1107,7 @@ pub(super) fn derive_complete_generation_liveness(
         )?,
         common(
             GenerationPhaseLivenessKind::WhirOpening,
-            post_source_provider_byte_length,
+            0,
             0,
             aggregate.maximum_dft_buffer_byte_length,
             aggregate.maximum_leaf_state_stripe_byte_length,
@@ -1108,7 +1122,7 @@ pub(super) fn derive_complete_generation_liveness(
         )?,
         common(
             GenerationPhaseLivenessKind::BaseCaseOpening,
-            post_source_provider_byte_length,
+            0,
             0,
             u64::try_from(
                 aggregate
@@ -1145,7 +1159,7 @@ pub(super) fn derive_complete_generation_liveness(
         )?,
         common(
             GenerationPhaseLivenessKind::CanonicalEncoding,
-            post_source_provider_byte_length,
+            0,
             0,
             0,
             0,
@@ -1161,11 +1175,6 @@ pub(super) fn derive_complete_generation_liveness(
         .map(|row| row.total_byte_length)
         .max()
         .ok_or_else(|| "proof generation has no liveness rows".to_owned())?;
-    if maximum_live_set_byte_length > MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH {
-        return Err(format!(
-            "complete proof-generation live set {maximum_live_set_byte_length} exceeds the hard WASM bound"
-        ));
-    }
     rows.shrink_to_fit();
     Ok(CompleteGenerationLiveness {
         rows,
