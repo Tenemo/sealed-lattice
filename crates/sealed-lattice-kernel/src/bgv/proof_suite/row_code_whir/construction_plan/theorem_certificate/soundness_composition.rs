@@ -7,18 +7,18 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf};
 
-const MAPPED_SOUNDNESS_EVIDENCE_FORMAT_VERSION: u16 = 4;
+const MAPPED_SOUNDNESS_EVIDENCE_FORMAT_VERSION: u16 = 5;
 const MAPPED_SOUNDNESS_CHRONOLOGY_HASH_DOMAIN: &str =
-    "sealed-lattice/common-proof/mapped-soundness-chronology/v4";
+    "sealed-lattice/common-proof/mapped-soundness-chronology/v5";
 const MAPPED_SOUNDNESS_CHECKPOINT_HASH_DOMAIN: &str =
-    "sealed-lattice/common-proof/mapped-soundness-checkpoint/v4";
+    "sealed-lattice/common-proof/mapped-soundness-checkpoint/v5";
 const MAPPED_SOUNDNESS_REFRESH_ENVIRONMENT_VARIABLE: &str =
     "SEALED_LATTICE_REFRESH_COMMON_PROOF_SOUNDNESS_EVIDENCE";
 const MAPPED_SOUNDNESS_EVIDENCE_FILE_NAME: &str =
     "selected-common-proof-mapped-soundness-evidence.json";
-const MAPPED_SOUNDNESS_CHECKPOINT_FILE_STEM: &str = "selected-common-proof-mapped-soundness-v4";
+const MAPPED_SOUNDNESS_CHECKPOINT_FILE_STEM: &str = "selected-common-proof-mapped-soundness-v5";
 const MAPPED_SOUNDNESS_COMBINED_CHECKPOINT_FILE_NAME: &str =
-    "selected-common-proof-mapped-soundness-evidence-v4.json";
+    "selected-common-proof-mapped-soundness-evidence-v5.json";
 const MAPPED_SOUNDNESS_CONDITIONAL_ORACLE_MODEL: &str =
     "single-fixed-512-bit-qro-with-precommitted-auxiliary-restriction-v1";
 
@@ -305,13 +305,13 @@ struct MappedConstructionSoundnessSummary {
     accepting_database_equation_count: u64,
     oracle_output_bit_length: usize,
     fixed_output_sampler_reduction: Cms19FixedOutputSeededSamplerReduction,
+    fixed_output_oracle_graph_identity_hash: [u8; 64],
     classical_failure_probability_ceiling: ExactBigFraction,
     primary_oracle_qrom_failure_probability_at_declared_budget: ExactBigFraction,
     auxiliary_table_bad_event_probability_ceiling: ExactBigFraction,
     qrom_failure_probability_at_declared_budget: ExactBigFraction,
     every_failure_owner_is_mapped_once: bool,
     exact_query_products_are_bounded: bool,
-    mapped_transform_is_complete: bool,
     statement_challenge_chronology: ProductionStatementChallengeChronologyCertificate,
     requires_verified_vss_bound_prerequisite: bool,
     requires_verified_setup_polynomial_bound_prerequisite: bool,
@@ -331,6 +331,53 @@ impl MappedConstructionSoundnessSummary {
                 output_bit_length,
             } => output_bit_length,
         };
+        let fixed_output_oracle_graph_input = Cms19FixedOutputOracleGraphInput {
+            plan,
+            partition: &soundness
+                .cms19_arithmetic
+                .separated_oracle_projection
+                .concrete_shake256_partition,
+            selected_plan_state_predicate: &soundness.selected_plan_state_predicate,
+            whole_state_transitions: &soundness.cms19_whole_state_transitions,
+            whole_database_support: &soundness.cms19_whole_database_support,
+            commitment_subtree_extraction: &soundness.commitment_subtree_extraction,
+            nonlinear_commitment_binding: &soundness.nonlinear_commitment_binding,
+            atomic_round_semantics: &soundness.cms19_atomic_round_semantics,
+            deployed_leaf_oracle: &soundness.deployed_aggregate_leaf_oracle,
+            sampler_model: &soundness.cms19_fixed_output_seeded_sampler_model,
+            strong_round_semantics: &soundness.cms19_strong_round_by_round_semantics,
+            state_predicate: &soundness.cms19_state_predicate,
+            exact_failure: &soundness.exact_failure_magnitude,
+            arithmetic: &soundness.cms19_arithmetic,
+        };
+        if !soundness.cms19_state_predicate.is_complete()
+            || !soundness
+                .cms19_strong_round_by_round_semantics
+                .is_complete()
+            || !soundness
+                .cms19_fixed_output_oracle_graph
+                .is_complete_for(fixed_output_oracle_graph_input)
+            || !plan.oracle_equation_catalog().is_ok_and(|catalog| {
+                soundness
+                    .cms19_transcript_oracle_output_inventory
+                    .is_complete_for(plan, &catalog)
+                    && soundness
+                        .cms19_fixed_output_seeded_sampler_model
+                        .matches_production_width_inventory(
+                            &soundness.cms19_transcript_oracle_output_inventory,
+                        )
+                    && soundness
+                        .cms19_fixed_output_seeded_sampler_model
+                        .classical_sampler_distribution
+                        .relation_plan_variant_hash
+                        == plan.relation_plan_variant_hash
+            })
+        {
+            return Err(WhirTheoremCertificateError::IncompleteFixedOutputOracleGraph);
+        }
+        let fixed_output_oracle_graph_identity_hash = soundness
+            .cms19_fixed_output_oracle_graph
+            .canonical_identity_hash()?;
         let summary = Self {
             application_statement_schema_identifier: plan.application_statement_schema_identifier,
             schedule_position: plan.schedule_position,
@@ -347,6 +394,7 @@ impl MappedConstructionSoundnessSummary {
             fixed_output_sampler_reduction: soundness
                 .cms19_fixed_output_seeded_sampler_model
                 .reduction,
+            fixed_output_oracle_graph_identity_hash,
             classical_failure_probability_ceiling: exact_failure
                 .classical_failure_probability_ceiling
                 .clone(),
@@ -361,28 +409,6 @@ impl MappedConstructionSoundnessSummary {
                 .clone(),
             every_failure_owner_is_mapped_once: exact_failure.all_failure_owners_mapped_once,
             exact_query_products_are_bounded: exact_failure.exact_query_products_bounded,
-            mapped_transform_is_complete: soundness.cms19_state_predicate.is_complete()
-                && soundness
-                    .cms19_strong_round_by_round_semantics
-                    .is_complete()
-                && soundness
-                    .cms19_applicability
-                    .has_complete_structural_correspondence()
-                && plan.oracle_equation_catalog().is_ok_and(|catalog| {
-                    soundness
-                        .cms19_transcript_oracle_output_inventory
-                        .is_complete_for(plan, &catalog)
-                        && soundness
-                            .cms19_fixed_output_seeded_sampler_model
-                            .matches_production_width_inventory(
-                                &soundness.cms19_transcript_oracle_output_inventory,
-                            )
-                        && soundness
-                            .cms19_fixed_output_seeded_sampler_model
-                            .classical_sampler_distribution
-                            .relation_plan_variant_hash
-                            == plan.relation_plan_variant_hash
-                }),
             statement_challenge_chronology,
             requires_verified_vss_bound_prerequisite: plan
                 .requires_verified_vss_bound_prerequisite(),
@@ -406,6 +432,7 @@ impl MappedConstructionSoundnessSummary {
             && self.oracle_output_bit_length == CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH
             && self.fixed_output_sampler_reduction
                 == Cms19FixedOutputSeededSamplerReduction::DomainSeparatedPredecessorLinkedFixedHashSamplerV1
+            && self.fixed_output_oracle_graph_identity_hash != [0_u8; 64]
             && !self
                 .classical_failure_probability_ceiling
                 .numerator
@@ -424,7 +451,6 @@ impl MappedConstructionSoundnessSummary {
                 .is_zero()
             && self.every_failure_owner_is_mapped_once
             && self.exact_query_products_are_bounded
-            && self.mapped_transform_is_complete
             && self
                 .statement_challenge_chronology
                 .is_self_consistent(self.logical_verifier_message_count)
@@ -450,6 +476,7 @@ struct MappedConstructionSoundnessEvidenceRow {
     accepting_database_equation_count: u64,
     oracle_output_bit_length: usize,
     fixed_output_sampler_reduction: Cms19FixedOutputSeededSamplerReduction,
+    fixed_output_oracle_graph_identity_hash: [u8; 64],
     classical_failure_probability_ceiling: ExactBigFraction,
     primary_oracle_qrom_failure_probability_at_declared_budget: ExactBigFraction,
     auxiliary_table_bad_event_probability_ceiling: ExactBigFraction,
@@ -490,6 +517,8 @@ impl MappedConstructionSoundnessEvidenceRow {
             accepting_database_equation_count: summary.accepting_database_equation_count,
             oracle_output_bit_length: summary.oracle_output_bit_length,
             fixed_output_sampler_reduction: summary.fixed_output_sampler_reduction,
+            fixed_output_oracle_graph_identity_hash: summary
+                .fixed_output_oracle_graph_identity_hash,
             classical_failure_probability_ceiling: summary
                 .classical_failure_probability_ceiling
                 .clone(),
@@ -545,6 +574,7 @@ impl MappedConstructionSoundnessEvidenceRow {
             && self.oracle_output_bit_length == CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH
             && self.fixed_output_sampler_reduction
                 == Cms19FixedOutputSeededSamplerReduction::DomainSeparatedPredecessorLinkedFixedHashSamplerV1
+            && self.fixed_output_oracle_graph_identity_hash != [0_u8; 64]
             && !self
                 .classical_failure_probability_ceiling
                 .numerator
@@ -662,6 +692,7 @@ struct ConservativePhysicalProofFailureRow {
     application_statement_schema_identifier: u16,
     logical_relation_instance_count: u32,
     construction_plan_identity_hash: [u8; 64],
+    fixed_output_oracle_graph_identity_hash: [u8; 64],
     adversarial_query_bound: BigUint,
     classical_failure_probability_ceiling: ExactBigFraction,
     primary_oracle_qrom_failure_probability_ceiling: ExactBigFraction,
@@ -680,6 +711,7 @@ struct ConservativeProofFamilyFailureRow {
     physical_proof_application_count: u32,
     logical_relation_instance_count: u32,
     construction_plan_identity_hash: [u8; 64],
+    fixed_output_oracle_graph_identity_hash: [u8; 64],
     classical_failure_probability_ceiling: ExactBigFraction,
     primary_oracle_qrom_failure_probability_ceiling: ExactBigFraction,
     auxiliary_table_bad_event_probability_ceiling: ExactBigFraction,
@@ -774,6 +806,7 @@ fn mapped_complete_qrom_failure_for_query_bound(
         .add(&evidence_row.auxiliary_table_bad_event_probability_ceiling)
 }
 
+#[cfg(test)]
 fn composed_qrom_failure_for_query_bound(
     evidence_rows: &[MappedConstructionSoundnessEvidenceRow],
     inventory: &ProofFamilyApplicationInventory,
@@ -796,28 +829,178 @@ fn composed_qrom_failure_for_query_bound(
         })
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ExactComposedQromFailurePolynomial {
+    /// Coefficients in ascending degree order, over one exact denominator.
+    numerator_coefficients: [BigUint; 4],
+    denominator: BigUint,
+}
+
+impl ExactComposedQromFailurePolynomial {
+    fn derive(
+        evidence_rows: &[MappedConstructionSoundnessEvidenceRow],
+        inventory: &ProofFamilyApplicationInventory,
+    ) -> Result<Self, WhirTheoremCertificateError> {
+        let mut fractional_coefficients: [ExactBigFraction; 4] =
+            core::array::from_fn(|_| ExactBigFraction::zero());
+        let fixed_oracle_denominator = BigUint::one() << CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH;
+        for evidence_row in evidence_rows {
+            let physical_proof_count = inventory
+                .family_entry(evidence_row.application_statement_schema_identifier)
+                .ok_or(WhirTheoremCertificateError::InvalidSelectedGeometry)?
+                .physical_proof_application_count();
+            if u64::from(physical_proof_count) != evidence_row.family_application_multiplicity {
+                return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
+            }
+            let physical_proof_count = BigUint::from(physical_proof_count);
+            let verifier_hash_query_count = BigUint::from(evidence_row.verifier_hash_query_count);
+            let verifier_hash_query_count_squared =
+                &verifier_hash_query_count * &verifier_hash_query_count;
+            let verifier_hash_query_count_cubed =
+                &verifier_hash_query_count_squared * &verifier_hash_query_count;
+            let oracle_square_relaxation_constant = evidence_row
+                .fixed_output_sampler_reduction
+                .oracle_square_relaxation_constant();
+            let classical_soundness_coefficient = oracle_square_relaxation_constant
+                .checked_mul(
+                    evidence_row
+                        .fixed_output_sampler_reduction
+                        .database_lifting_constant(),
+                )
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+            let ideal_oracle_penalty_coefficient = classical_soundness_coefficient
+                .checked_mul(
+                    evidence_row
+                        .fixed_output_sampler_reduction
+                        .database_collision_coefficient(),
+                )
+                .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
+
+            let physical_classical_coefficient = evidence_row
+                .classical_failure_probability_ceiling
+                .multiply_integer(
+                    &(&physical_proof_count * BigUint::from(classical_soundness_coefficient)),
+                )?;
+            add_exact_fraction(
+                &mut fractional_coefficients[2],
+                &physical_classical_coefficient,
+            )?;
+            add_exact_fraction(
+                &mut fractional_coefficients[1],
+                &physical_classical_coefficient
+                    .multiply_integer(&(&verifier_hash_query_count << 1_usize))?,
+            )?;
+            add_exact_fraction(
+                &mut fractional_coefficients[0],
+                &physical_classical_coefficient
+                    .multiply_integer(&verifier_hash_query_count_squared)?,
+            )?;
+
+            let physical_ideal_oracle_coefficient = ExactBigFraction::new(
+                &physical_proof_count * BigUint::from(ideal_oracle_penalty_coefficient),
+                fixed_oracle_denominator.clone(),
+            )?;
+            add_exact_fraction(
+                &mut fractional_coefficients[3],
+                &physical_ideal_oracle_coefficient,
+            )?;
+            add_exact_fraction(
+                &mut fractional_coefficients[2],
+                &physical_ideal_oracle_coefficient
+                    .multiply_integer(&(BigUint::from(3_u8) * &verifier_hash_query_count))?,
+            )?;
+            add_exact_fraction(
+                &mut fractional_coefficients[1],
+                &physical_ideal_oracle_coefficient.multiply_integer(
+                    &(BigUint::from(3_u8) * &verifier_hash_query_count_squared),
+                )?,
+            )?;
+            add_exact_fraction(
+                &mut fractional_coefficients[0],
+                &physical_ideal_oracle_coefficient
+                    .multiply_integer(&verifier_hash_query_count_cubed)?,
+            )?;
+
+            let accepting_equation_penalty = ExactBigFraction::new(
+                &physical_proof_count
+                    * BigUint::from(oracle_square_relaxation_constant)
+                    * BigUint::from(evidence_row.accepting_database_equation_count),
+                fixed_oracle_denominator.clone(),
+            )?;
+            add_exact_fraction(&mut fractional_coefficients[0], &accepting_equation_penalty)?;
+            add_exact_fraction(
+                &mut fractional_coefficients[0],
+                &evidence_row
+                    .auxiliary_table_bad_event_probability_ceiling
+                    .multiply_integer(&physical_proof_count)?,
+            )?;
+        }
+
+        let denominator = fractional_coefficients.iter().fold(
+            BigUint::one(),
+            |common_denominator, coefficient| {
+                let common_divisor = greatest_common_divisor_big(
+                    common_denominator.clone(),
+                    coefficient.denominator.clone(),
+                );
+                common_denominator / common_divisor * &coefficient.denominator
+            },
+        );
+        if denominator.is_zero() {
+            return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
+        }
+        let numerator_coefficients = fractional_coefficients
+            .map(|coefficient| coefficient.numerator * (&denominator / coefficient.denominator));
+        Ok(Self {
+            numerator_coefficients,
+            denominator,
+        })
+    }
+
+    fn numerator_at(&self, adversarial_query_bound: &BigUint) -> BigUint {
+        self.numerator_coefficients
+            .iter()
+            .rev()
+            .fold(BigUint::zero(), |accumulated, coefficient| {
+                accumulated * adversarial_query_bound + coefficient
+            })
+    }
+
+    fn failure_fraction_at(
+        &self,
+        adversarial_query_bound: &BigUint,
+    ) -> Result<ExactBigFraction, WhirTheoremCertificateError> {
+        ExactBigFraction::new(
+            self.numerator_at(adversarial_query_bound),
+            self.denominator.clone(),
+        )
+    }
+
+    fn is_below_one_half_at(&self, adversarial_query_bound: &BigUint) -> bool {
+        (self.numerator_at(adversarial_query_bound) << 1_usize) < self.denominator
+    }
+}
+
+fn add_exact_fraction(
+    destination: &mut ExactBigFraction,
+    contribution: &ExactBigFraction,
+) -> Result<(), WhirTheoremCertificateError> {
+    *destination = destination.add(contribution)?;
+    Ok(())
+}
+
 fn constant_success_query_boundary(
-    evidence_rows: &[MappedConstructionSoundnessEvidenceRow],
-    inventory: &ProofFamilyApplicationInventory,
+    failure_polynomial: &ExactComposedQromFailurePolynomial,
     declared_adversarial_query_bound: &BigUint,
 ) -> Result<(BigUint, BigUint), WhirTheoremCertificateError> {
-    let one_half = ExactBigFraction::from_u64(1, 2)?;
-    if !composed_qrom_failure_for_query_bound(
-        evidence_rows,
-        inventory,
-        declared_adversarial_query_bound,
-    )?
-    .less_than(&one_half)
-    {
+    if !failure_polynomial.is_below_one_half_at(declared_adversarial_query_bound) {
         return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
     }
     let one = BigUint::one();
     let mut last_below = declared_adversarial_query_bound.clone();
     let mut first_at_least = (&last_below + &one) << 1_usize;
     let mut expansion_count = 0_usize;
-    while composed_qrom_failure_for_query_bound(evidence_rows, inventory, &first_at_least)?
-        .less_than(&one_half)
-    {
+    while failure_polynomial.is_below_one_half_at(&first_at_least) {
         last_below = first_at_least;
         first_at_least = (&last_below + &one) << 1_usize;
         expansion_count = expansion_count
@@ -829,9 +1012,7 @@ fn constant_success_query_boundary(
     }
     while &last_below + &one < first_at_least {
         let midpoint = (&last_below + &first_at_least) >> 1_usize;
-        if composed_qrom_failure_for_query_bound(evidence_rows, inventory, &midpoint)?
-            .less_than(&one_half)
-        {
+        if failure_polynomial.is_below_one_half_at(&midpoint) {
             last_below = midpoint;
         } else {
             first_at_least = midpoint;
@@ -922,6 +1103,8 @@ fn derive_conservative_action_soundness_composition(
             physical_proof_application_count: physical_count,
             logical_relation_instance_count: logical_count,
             construction_plan_identity_hash: evidence_row.construction_plan_identity_hash,
+            fixed_output_oracle_graph_identity_hash: evidence_row
+                .fixed_output_oracle_graph_identity_hash,
             classical_failure_probability_ceiling: family_classical,
             primary_oracle_qrom_failure_probability_ceiling: family_primary_oracle_qrom,
             auxiliary_table_bad_event_probability_ceiling: family_auxiliary_table_bad_event,
@@ -936,6 +1119,8 @@ fn derive_conservative_action_soundness_composition(
                     .application_statement_schema_identifier(),
                 logical_relation_instance_count: logical_count_per_proof,
                 construction_plan_identity_hash: evidence_row.construction_plan_identity_hash,
+                fixed_output_oracle_graph_identity_hash: evidence_row
+                    .fixed_output_oracle_graph_identity_hash,
                 adversarial_query_bound: evidence_row.adversarial_query_bound.clone(),
                 classical_failure_probability_ceiling: evidence_row
                     .classical_failure_probability_ceiling
@@ -980,6 +1165,7 @@ fn derive_conservative_action_soundness_composition(
                     || row.challenge_operation_count == 0
                     || row.adversarial_query_bound
                         != BigUint::from(DECLARED_ADVERSARIAL_QUERY_BUDGET)
+                    || row.fixed_output_oracle_graph_identity_hash == [0_u8; 64]
                     || row
                         .primary_oracle_qrom_failure_probability_ceiling
                         .add(&row.auxiliary_table_bad_event_probability_ceiling)
@@ -1020,12 +1206,18 @@ fn derive_conservative_action_soundness_composition(
         qrom_failure_probability_at_declared_budget
             .less_than_or_equal(&ExactBigFraction::from_u64(1, 4)?);
     let declared_adversarial_query_bound = BigUint::from(DECLARED_ADVERSARIAL_QUERY_BUDGET);
+    let composed_qrom_failure_polynomial =
+        ExactComposedQromFailurePolynomial::derive(evidence_rows, inventory)?;
+    if composed_qrom_failure_polynomial.failure_fraction_at(&declared_adversarial_query_bound)?
+        != qrom_failure_probability_at_declared_budget
+    {
+        return Err(WhirTheoremCertificateError::IncompleteFailureMagnitudeCorrespondence);
+    }
     let (
         last_query_bound_with_composed_qrom_ceiling_below_one_half,
         first_query_bound_with_composed_qrom_ceiling_at_least_one_half,
     ) = constant_success_query_boundary(
-        evidence_rows,
-        inventory,
+        &composed_qrom_failure_polynomial,
         &declared_adversarial_query_bound,
     )?;
     if !ordinary_invalid_acceptance_mass_gate_holds
@@ -1185,6 +1377,7 @@ struct MappedConstructionSoundnessEvidenceRecord {
     accepting_database_equation_count: u64,
     oracle_output_bit_length: u16,
     fixed_output_sampler_reduction: String,
+    fixed_output_oracle_graph_identity_hash_hex: String,
     classical_failure_probability_ceiling: ExactFractionEvidenceRecord,
     primary_oracle_qrom_failure_probability_at_declared_budget: ExactFractionEvidenceRecord,
     auxiliary_table_bad_event_probability_ceiling: ExactFractionEvidenceRecord,
@@ -1219,6 +1412,9 @@ impl MappedConstructionSoundnessEvidenceRecord {
                 .fixed_output_sampler_reduction
                 .evidence_identifier()
                 .to_owned(),
+            fixed_output_oracle_graph_identity_hash_hex: to_hex(
+                &row.fixed_output_oracle_graph_identity_hash,
+            ),
             classical_failure_probability_ceiling: ExactFractionEvidenceRecord::from_fraction(
                 &row.classical_failure_probability_ceiling,
             ),
@@ -1269,6 +1465,9 @@ impl MappedConstructionSoundnessEvidenceRecord {
                     &self.fixed_output_sampler_reduction,
                 )
                 .ok_or(WhirTheoremCertificateError::InvalidSelectedGeometry)?,
+            fixed_output_oracle_graph_identity_hash: decode_lowercase_hex_hash(
+                &self.fixed_output_oracle_graph_identity_hash_hex,
+            )?,
             classical_failure_probability_ceiling: self
                 .classical_failure_probability_ceiling
                 .to_fraction()?,
@@ -1525,6 +1724,12 @@ fn validate_mapped_soundness_evidence_rows(
     inventory: &ProofFamilyApplicationInventory,
     action_top_count: u16,
 ) -> Result<(), WhirTheoremCertificateError> {
+    // Each isolated schema owner derives its row from the current production
+    // plan before either comparing it with tracked evidence or persisting an
+    // authenticated checkpoint. Composition owns the imported row bytes,
+    // inventory order, multiplicities, and cross-proof arithmetic; rebuilding
+    // all production plans here would merge those independent owners into one
+    // long-running test without adding a second correspondence argument.
     if action_top_count != FOUNDATION_PROFILE.option_count
         || evidence_rows.len() != inventory.ordered_family_entries().len()
     {
@@ -1543,53 +1748,6 @@ fn validate_mapped_soundness_evidence_rows(
             } else {
                 row.top_count.is_some()
             }
-        {
-            return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
-        }
-        let artifact = selected_relation_plan_for_schema(schema_identifier)
-            .map_err(|_| WhirTheoremCertificateError::InvalidSelectedGeometry)?;
-        let matching_variants = artifact
-            .compiled_plan()
-            .variants()
-            .iter()
-            .filter(|variant| {
-                variant.schedule_position() == row.schedule_position
-                    && variant.top_count() == row.top_count
-            })
-            .collect::<Vec<_>>();
-        let [relation_variant] = matching_variants.as_slice() else {
-            return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
-        };
-        let plan = RowCodeWhirConstructionPlan::for_selected_variant(
-            &artifact,
-            relation_variant.schedule_position(),
-            relation_variant.top_count(),
-        )
-        .map_err(|_| WhirTheoremCertificateError::InvalidSelectedGeometry)?;
-        let catalog = plan
-            .oracle_equation_catalog()
-            .map_err(|_| WhirTheoremCertificateError::IncompleteTranscriptMapping)?;
-        let first_challenge_operation_ordinal = catalog
-            .operations
-            .iter()
-            .find(|operation| oracle_equation_operation_leaves_pending_challenge(&operation.kind))
-            .map(|operation| operation.operation_ordinal)
-            .ok_or(WhirTheoremCertificateError::IncompleteTranscriptMapping)?;
-        if plan.application_statement_schema_identifier != schema_identifier
-            || plan
-                .canonical_identity_hash()
-                .map_err(|_| WhirTheoremCertificateError::InvalidSelectedGeometry)?
-                != row.construction_plan_identity_hash
-            || catalog
-                .logical_verifier_message_count()
-                .map_err(|_| WhirTheoremCertificateError::ArithmeticOverflow)?
-                != row.logical_verifier_message_count
-            || row.first_challenge_operation_ordinal != first_challenge_operation_ordinal
-            || row.challenge_operation_count != row.logical_verifier_message_count
-            || row.requires_verified_vss_bound_prerequisite
-                != plan.requires_verified_vss_bound_prerequisite()
-            || row.requires_verified_setup_polynomial_bound_prerequisite
-                != plan.requires_verified_setup_polynomial_bound_prerequisite()
         {
             return Err(WhirTheoremCertificateError::InvalidSelectedGeometry);
         }
@@ -1700,6 +1858,10 @@ fn synthetic_mapped_soundness_summaries(
                 oracle_output_bit_length: CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH,
                 fixed_output_sampler_reduction:
                     Cms19FixedOutputSeededSamplerReduction::DomainSeparatedPredecessorLinkedFixedHashSamplerV1,
+                fixed_output_oracle_graph_identity_hash: hash_framed_parts_512(
+                    "sealed-lattice/test/synthetic-fixed-output-oracle-graph",
+                    &[&construction_plan_identity_hash],
+                ),
                 classical_failure_probability_ceiling: ExactBigFraction::new(
                     BigUint::one(),
                     BigUint::one() << 400_usize,
@@ -1762,12 +1924,6 @@ fn conservative_physical_proof_composition_rejects_accounting_mutations() {
     let inventory = derive_selected_proof_family_application_inventory()
         .expect("the selected proof inventory derives");
     let action_top_count = FOUNDATION_PROFILE.option_count;
-    let stale_tracked_bytes = fs::read(mapped_soundness_evidence_path())
-        .expect("the stale tracked mapped-soundness evidence remains available for refusal");
-    assert!(
-        parse_mapped_soundness_evidence_document(&stale_tracked_bytes).is_err(),
-        "the prior variable-output evidence format must remain refused",
-    );
     let evidence_rows = synthetic_mapped_soundness_summaries(&inventory, action_top_count);
     let canonical_document = MappedSoundnessEvidenceDocument {
         format_version: MAPPED_SOUNDNESS_EVIDENCE_FORMAT_VERSION,
@@ -1785,6 +1941,27 @@ fn conservative_physical_proof_composition_rejects_accounting_mutations() {
         parse_mapped_soundness_evidence_document(&canonical_document_bytes)
             .expect("the separated-oracle evidence decodes canonically");
     assert_eq!(decoded_evidence_rows, evidence_rows);
+    let mut stale_version_four_document =
+        serde_json::to_value(&canonical_document).expect("the stale document value encodes");
+    let stale_document_object = stale_version_four_document
+        .as_object_mut()
+        .expect("the evidence document is an object");
+    stale_document_object.insert("formatVersion".to_owned(), serde_json::Value::from(4_u16));
+    for row in stale_document_object
+        .get_mut("rows")
+        .and_then(serde_json::Value::as_array_mut)
+        .expect("the evidence rows form an array")
+    {
+        row.as_object_mut()
+            .expect("an evidence row is an object")
+            .remove("fixedOutputOracleGraphIdentityHashHex");
+    }
+    let stale_version_four_bytes = serde_json::to_vec(&stale_version_four_document)
+        .expect("the stale evidence document encodes");
+    assert!(
+        parse_mapped_soundness_evidence_document(&stale_version_four_bytes).is_err(),
+        "version-four evidence without a derived graph-certificate identity must remain refused",
+    );
     let mut wrong_sampler_reduction = canonical_document.clone();
     wrong_sampler_reduction.rows[0].fixed_output_sampler_reduction =
         "forged-fixed-output-sampler-reduction".to_owned();
@@ -1793,6 +1970,15 @@ fn conservative_physical_proof_composition_rejects_accounting_mutations() {
     assert!(
         parse_mapped_soundness_evidence_document(&wrong_sampler_reduction_bytes).is_err(),
         "a forged fixed-output sampler reduction identifier must refuse",
+    );
+    let mut omitted_graph_certificate = canonical_document.clone();
+    omitted_graph_certificate.rows[0].fixed_output_oracle_graph_identity_hash_hex =
+        to_hex(&[0_u8; 64]);
+    let omitted_graph_certificate_bytes = serde_json::to_vec(&omitted_graph_certificate)
+        .expect("the hostile graph-certificate document encodes");
+    assert!(
+        parse_mapped_soundness_evidence_document(&omitted_graph_certificate_bytes).is_err(),
+        "composition must refuse a row without an independently derived graph-certificate identity",
     );
     let mut wrong_oracle_model = canonical_document.clone();
     wrong_oracle_model.conditional_oracle_model =
@@ -1826,6 +2012,9 @@ fn conservative_physical_proof_composition_rejects_accounting_mutations() {
     let mut missing_chronology_binding = evidence_rows.clone();
     missing_chronology_binding[0].chronology_hash = [0_u8; 64];
     refuses_evidence_rows(&missing_chronology_binding);
+    let mut missing_graph_certificate = evidence_rows.clone();
+    missing_graph_certificate[0].fixed_output_oracle_graph_identity_hash = [0_u8; 64];
+    refuses_evidence_rows(&missing_graph_certificate);
     let mut changed_qrom_probability = evidence_rows.clone();
     changed_qrom_probability[0].qrom_failure_probability_at_declared_budget =
         ExactBigFraction::zero();
@@ -1840,6 +2029,37 @@ fn conservative_physical_proof_composition_rejects_accounting_mutations() {
         ExactBigFraction::new(BigUint::one(), BigUint::one() << 256_usize)
             .expect("the hostile primary-oracle probability derives");
     refuses_evidence_rows(&changed_primary_oracle_probability);
+    let exact_failure_polynomial =
+        ExactComposedQromFailurePolynomial::derive(&evidence_rows, &inventory)
+            .expect("the exact synthetic QROM polynomial derives");
+    let declared_query_bound = BigUint::from(DECLARED_ADVERSARIAL_QUERY_BUDGET);
+    let comparison_query_bounds = [
+        BigUint::zero(),
+        BigUint::one(),
+        &declared_query_bound - BigUint::one(),
+        declared_query_bound.clone(),
+        &declared_query_bound + BigUint::one(),
+        &declared_query_bound << 1_usize,
+    ];
+    let one_half = ExactBigFraction::from_u64(1, 2).expect("one half derives");
+    for comparison_query_bound in comparison_query_bounds {
+        let direct_failure = composed_qrom_failure_for_query_bound(
+            &evidence_rows,
+            &inventory,
+            &comparison_query_bound,
+        )
+        .expect("the direct synthetic QROM expression derives");
+        assert_eq!(
+            exact_failure_polynomial
+                .failure_fraction_at(&comparison_query_bound)
+                .expect("the polynomial synthetic QROM expression derives"),
+            direct_failure,
+        );
+        assert_eq!(
+            exact_failure_polynomial.is_below_one_half_at(&comparison_query_bound),
+            direct_failure.less_than(&one_half),
+        );
+    }
     let certificate = derive_conservative_action_soundness_composition(
         &evidence_rows,
         &inventory,
@@ -1871,6 +2091,10 @@ fn conservative_physical_proof_composition_rejects_accounting_mutations() {
     let mut reduced_query_budget = certificate.clone();
     reduced_query_budget.ordered_physical_proof_rows[0].adversarial_query_bound -= BigUint::one();
     rejects(reduced_query_budget);
+    let mut omitted_physical_graph_certificate = certificate.clone();
+    omitted_physical_graph_certificate.ordered_physical_proof_rows[0]
+        .fixed_output_oracle_graph_identity_hash = [0_u8; 64];
+    rejects(omitted_physical_graph_certificate);
     let mut challenge_dependent_statement = certificate.clone();
     challenge_dependent_statement.ordered_physical_proof_rows[0]
         .first_challenge_operation_ordinal = 0;

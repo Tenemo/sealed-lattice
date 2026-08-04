@@ -58,8 +58,6 @@ export const theoremEvidenceRustTests = [
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::production_private_leaf_salt_prf_binds_every_clean_and_replayed_derivation',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::public_key_share_schema_0x1212_derives_from_its_production_geometry',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::all_exact_ten_production_identities_have_construction_view_simulation_certificates',
-    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::setup_simulation_composition::tests::selected_setup_family_has_one_adaptive_classical_simulation_composition',
-    'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::setup_simulation_composition::tests::aggregate_threshold_share_schema_has_a_complete_nonlinear_simulator_owner',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::width_64_same_secret_through_rkg_round_one_aggregate_have_complete_geometry_certificates',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::width_64_relinearization_round_two_and_galois_share_have_complete_geometry_certificates',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::evaluator_width_64_top_count_one_has_a_complete_geometry_certificate',

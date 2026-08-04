@@ -15,6 +15,10 @@ export const selectedCollectiveSetupSecurityEvidencePath = path.join(
     repositoryRoot,
     'test-vectors/selected-collective-setup-security-evidence.json',
 );
+export const selectedCommonProofMappedSoundnessEvidencePath = path.join(
+    repositoryRoot,
+    'test-vectors/selected-common-proof-mapped-soundness-evidence.json',
+);
 
 const sourcePaths = [
     'Cargo.toml',
@@ -31,6 +35,7 @@ const sourcePaths = [
     'crates/sealed-lattice-kernel/src/foundation/private_randomness/generator_hybrid.rs',
     'crates/sealed-lattice-kernel/src/foundation/state.rs',
     'crates/sealed-lattice-kernel/src/foundation/setup_transcript_runtime.rs',
+    'crates/sealed-lattice-kernel/src/hashing/mod.rs',
     'crates/sealed-lattice-kernel/src/bgv/parameters.rs',
     'crates/sealed-lattice-kernel/src/bgv/parameters/root_parameters.rs',
     'crates/sealed-lattice-kernel/src/bgv/key_switch_topology.rs',
@@ -53,12 +58,15 @@ const sourcePaths = [
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/aggregate_wide_verifier.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/aggregate_wide_wire.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/compact_merkle_frontier.rs',
+    'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/column_commitment.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/linear_bcs_transcript.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate.rs',
+    'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate/fixed_output_oracle_graph.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate/soundness_composition.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/exact_same_secret/exact_proof.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/generation_state.rs',
+    'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/mod.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/verification.rs',
     'crates/sealed-lattice-kernel/src/bgv/setup/commitment/mod.rs',
     'crates/sealed-lattice-kernel/src/bgv/setup/sampling.rs',
@@ -102,6 +110,28 @@ const setupProofInventoryTotals = setupProofInventory.reduce(
         logicalRelationInstanceCount: 0,
     },
 );
+
+const commonProofMappedSoundnessInventory = [
+    ...setupProofInventory,
+    ['ballotValidity', 0x1302, 20, 20],
+    ['targetShare', 0x1621, 10, 10],
+] as const;
+
+const commonProofMappedSoundnessTotals =
+    commonProofMappedSoundnessInventory.reduce(
+        (totals, [, , physicalCount, logicalCount]) => ({
+            physicalProofApplicationCount:
+                totals.physicalProofApplicationCount + physicalCount,
+            logicalRelationInstanceCount:
+                totals.logicalRelationInstanceCount + logicalCount,
+        }),
+        {
+            physicalProofApplicationCount: 0,
+            logicalRelationInstanceCount: 0,
+        },
+    );
+
+const completeAdversarialQueryBudgetDecimal = ((1n << 80n) - 1n).toString();
 
 const exactWitnessJoinIdentifiers = [
     'secretContributionAcrossVssAnchorAndKeyShares',
@@ -319,6 +349,297 @@ const requireInteger = (
     }
     return value;
 };
+
+export type CommonProofMappedSoundnessImportSummary = {
+    readonly actionTopCount: number;
+    readonly adversarialQueryBudgetDecimal: string;
+    readonly conditionalOracleModel: string;
+    readonly constructionPlanIdentityCount: number;
+    readonly fixedOutputOracleGraphIdentityCount: number;
+    readonly formatVersion: number;
+    readonly logicalRelationInstanceCount: number;
+    readonly oracleOutputBitLength: number;
+    readonly physicalProofApplicationCount: number;
+    readonly rowCount: number;
+};
+
+const requireCommonProofMappedSoundnessImportSummary = (
+    value: JsonValue | undefined,
+): CommonProofMappedSoundnessImportSummary => {
+    const summary = requireRecord(
+        value,
+        'Common-proof mapped-soundness import',
+    );
+    const checkedSummary = {
+        actionTopCount: requireInteger(
+            summary.actionTopCount,
+            'Mapped-soundness import action top count',
+        ),
+        adversarialQueryBudgetDecimal: requireString(
+            summary.adversarialQueryBudgetDecimal,
+            'Mapped-soundness import adversarial query budget',
+        ),
+        conditionalOracleModel: requireString(
+            summary.conditionalOracleModel,
+            'Mapped-soundness import oracle model',
+        ),
+        constructionPlanIdentityCount: requireInteger(
+            summary.constructionPlanIdentityCount,
+            'Mapped-soundness construction identity count',
+        ),
+        fixedOutputOracleGraphIdentityCount: requireInteger(
+            summary.fixedOutputOracleGraphIdentityCount,
+            'Mapped-soundness graph identity count',
+        ),
+        formatVersion: requireInteger(
+            summary.formatVersion,
+            'Mapped-soundness import format version',
+        ),
+        logicalRelationInstanceCount: requireInteger(
+            summary.logicalRelationInstanceCount,
+            'Mapped-soundness logical instance count',
+        ),
+        oracleOutputBitLength: requireInteger(
+            summary.oracleOutputBitLength,
+            'Mapped-soundness oracle output bit length',
+        ),
+        physicalProofApplicationCount: requireInteger(
+            summary.physicalProofApplicationCount,
+            'Mapped-soundness physical proof count',
+        ),
+        rowCount: requireInteger(
+            summary.rowCount,
+            'Mapped-soundness row count',
+        ),
+    };
+    if (
+        checkedSummary.actionTopCount !== 10 ||
+        checkedSummary.adversarialQueryBudgetDecimal !==
+            completeAdversarialQueryBudgetDecimal ||
+        checkedSummary.conditionalOracleModel !==
+            'single-fixed-512-bit-qro-with-precommitted-auxiliary-restriction-v1' ||
+        checkedSummary.constructionPlanIdentityCount !==
+            commonProofMappedSoundnessInventory.length ||
+        checkedSummary.fixedOutputOracleGraphIdentityCount !==
+            commonProofMappedSoundnessInventory.length ||
+        checkedSummary.formatVersion !== 5 ||
+        checkedSummary.logicalRelationInstanceCount !==
+            commonProofMappedSoundnessTotals.logicalRelationInstanceCount ||
+        checkedSummary.oracleOutputBitLength !== 512 ||
+        checkedSummary.physicalProofApplicationCount !==
+            commonProofMappedSoundnessTotals.physicalProofApplicationCount ||
+        checkedSummary.rowCount !== commonProofMappedSoundnessInventory.length
+    ) {
+        throw new Error(
+            'The common-proof mapped-soundness import is stale or incomplete.',
+        );
+    }
+    return checkedSummary;
+};
+
+const lowercaseHash512Pattern = /^[0-9a-f]{128}$/u;
+const canonicalPositiveDecimalPattern = /^[1-9][0-9]*$/u;
+
+const requireCanonicalPositiveFraction = (
+    value: JsonValue | undefined,
+    description: string,
+): void => {
+    const fraction = requireRecord(value, description);
+    const numerator = requireString(
+        fraction.numeratorDecimal,
+        `${description} numerator`,
+    );
+    const denominator = requireString(
+        fraction.denominatorDecimal,
+        `${description} denominator`,
+    );
+    if (
+        !canonicalPositiveDecimalPattern.test(numerator) ||
+        !canonicalPositiveDecimalPattern.test(denominator)
+    ) {
+        throw new Error(
+            `${description} must be a positive canonical fraction.`,
+        );
+    }
+};
+
+export const validateCommonProofMappedSoundnessEvidence = (
+    evidence: JsonValue,
+): CommonProofMappedSoundnessImportSummary => {
+    const document = requireRecord(
+        evidence,
+        'Common-proof mapped-soundness evidence',
+    );
+    const formatVersion = requireInteger(
+        document.formatVersion,
+        'Mapped-soundness format version',
+    );
+    const actionTopCount = requireInteger(
+        document.actionTopCount,
+        'Mapped-soundness action top count',
+    );
+    const conditionalOracleModel = requireString(
+        document.conditionalOracleModel,
+        'Mapped-soundness conditional oracle model',
+    );
+    const rows = requireArray(document.rows, 'Mapped-soundness rows');
+    if (
+        formatVersion !== 5 ||
+        actionTopCount !== 10 ||
+        conditionalOracleModel !==
+            'single-fixed-512-bit-qro-with-precommitted-auxiliary-restriction-v1' ||
+        rows.length !== commonProofMappedSoundnessInventory.length
+    ) {
+        throw new Error(
+            'The common-proof mapped-soundness document geometry is stale.',
+        );
+    }
+
+    const constructionPlanIdentities = new Set<string>();
+    const fixedOutputOracleGraphIdentities = new Set<string>();
+    for (const [rowOrdinal, rowValue] of rows.entries()) {
+        const row = requireRecord(rowValue, 'Mapped-soundness row');
+        const [, expectedSchemaIdentifier, expectedPhysicalCount] =
+            commonProofMappedSoundnessInventory[rowOrdinal];
+        const schemaIdentifier = requireInteger(
+            row.applicationStatementSchemaIdentifier,
+            'Mapped-soundness schema identifier',
+        );
+        const expectedSchedulePosition =
+            schemaIdentifier >= 0x1214 && schemaIdentifier <= 0x1217 ? 0 : null;
+        const expectedTopCount = schemaIdentifier === 0x1218 ? 10 : null;
+        const constructionPlanIdentity = requireString(
+            row.constructionPlanIdentityHashHex,
+            'Construction-plan identity',
+        );
+        const fixedOutputOracleGraphIdentity = requireString(
+            row.fixedOutputOracleGraphIdentityHashHex,
+            'Fixed-output oracle-graph identity',
+        );
+        const chronologyIdentity = requireString(
+            row.chronologyHashHex,
+            'Mapped-soundness chronology identity',
+        );
+        const logicalVerifierMessageCount = requireInteger(
+            row.logicalVerifierMessageCount,
+            'Logical verifier-message count',
+        );
+        const verifierHashQueryCount = requireInteger(
+            row.verifierHashQueryCount,
+            'Verifier hash-query count',
+        );
+        const acceptingDatabaseEquationCount = requireInteger(
+            row.acceptingDatabaseEquationCount,
+            'Accepting-database equation count',
+        );
+        const oracleOutputBitLength = requireInteger(
+            row.oracleOutputBitLength,
+            'Oracle output bit length',
+        );
+        const firstChallengeOperationOrdinal = requireInteger(
+            row.firstChallengeOperationOrdinal,
+            'First challenge operation ordinal',
+        );
+        const challengeOperationCount = requireInteger(
+            row.challengeOperationCount,
+            'Challenge operation count',
+        );
+        const requiresVerifiedVssBoundPrerequisite =
+            row.requiresVerifiedVssBoundPrerequisite;
+        const requiresVerifiedSetupPolynomialBoundPrerequisite =
+            row.requiresVerifiedSetupPolynomialBoundPrerequisite;
+        if (
+            schemaIdentifier !== expectedSchemaIdentifier ||
+            row.schedulePosition !== expectedSchedulePosition ||
+            row.topCount !== expectedTopCount ||
+            row.familyApplicationMultiplicity !== expectedPhysicalCount ||
+            row.adversarialQueryBoundDecimal !==
+                completeAdversarialQueryBudgetDecimal ||
+            logicalVerifierMessageCount <= 0 ||
+            verifierHashQueryCount <= 0 ||
+            acceptingDatabaseEquationCount <= 0 ||
+            oracleOutputBitLength !== 512 ||
+            row.fixedOutputSamplerReduction !==
+                'domain-separated-predecessor-linked-fixed-hash-sampler-v1' ||
+            !lowercaseHash512Pattern.test(constructionPlanIdentity) ||
+            /^0+$/u.test(constructionPlanIdentity) ||
+            !lowercaseHash512Pattern.test(fixedOutputOracleGraphIdentity) ||
+            /^0+$/u.test(fixedOutputOracleGraphIdentity) ||
+            !lowercaseHash512Pattern.test(chronologyIdentity) ||
+            /^0+$/u.test(chronologyIdentity) ||
+            row.initialOperationOrdinal !== 0 ||
+            row.canonicalHeaderRootEquationSlotOrdinal !== 0 ||
+            row.initialAbsorptionEquationSlotOrdinal !== 1 ||
+            firstChallengeOperationOrdinal <= 0 ||
+            challengeOperationCount !== logicalVerifierMessageCount ||
+            typeof requiresVerifiedVssBoundPrerequisite !== 'boolean' ||
+            typeof requiresVerifiedSetupPolynomialBoundPrerequisite !==
+                'boolean' ||
+            (requiresVerifiedVssBoundPrerequisite &&
+                requiresVerifiedSetupPolynomialBoundPrerequisite)
+        ) {
+            throw new Error(
+                `Mapped-soundness row ${rowOrdinal} is stale or incomplete.`,
+            );
+        }
+        requireCanonicalPositiveFraction(
+            row.classicalFailureProbabilityCeiling,
+            'Classical failure probability',
+        );
+        requireCanonicalPositiveFraction(
+            row.primaryOracleQromFailureProbabilityAtDeclaredBudget,
+            'Primary-oracle QROM failure probability',
+        );
+        requireCanonicalPositiveFraction(
+            row.auxiliaryTableBadEventProbabilityCeiling,
+            'Auxiliary-table bad-event probability',
+        );
+        requireCanonicalPositiveFraction(
+            row.qromFailureProbabilityAtDeclaredBudget,
+            'Complete QROM failure probability',
+        );
+        constructionPlanIdentities.add(constructionPlanIdentity);
+        fixedOutputOracleGraphIdentities.add(fixedOutputOracleGraphIdentity);
+    }
+    if (
+        constructionPlanIdentities.size !== rows.length ||
+        fixedOutputOracleGraphIdentities.size !== rows.length
+    ) {
+        throw new Error(
+            'The mapped-soundness construction or graph identities are duplicated.',
+        );
+    }
+    return {
+        actionTopCount,
+        adversarialQueryBudgetDecimal: completeAdversarialQueryBudgetDecimal,
+        conditionalOracleModel,
+        constructionPlanIdentityCount: constructionPlanIdentities.size,
+        fixedOutputOracleGraphIdentityCount:
+            fixedOutputOracleGraphIdentities.size,
+        formatVersion,
+        logicalRelationInstanceCount:
+            commonProofMappedSoundnessTotals.logicalRelationInstanceCount,
+        oracleOutputBitLength: 512,
+        physicalProofApplicationCount:
+            commonProofMappedSoundnessTotals.physicalProofApplicationCount,
+        rowCount: rows.length,
+    };
+};
+
+const deriveCommonProofMappedSoundnessImport = async (
+    rootPath: string,
+): Promise<CommonProofMappedSoundnessImportSummary> =>
+    validateCommonProofMappedSoundnessEvidence(
+        parseJsonValue(
+            await readFile(
+                path.join(
+                    rootPath,
+                    'test-vectors/selected-common-proof-mapped-soundness-evidence.json',
+                ),
+                'utf8',
+            ),
+        ),
+    );
 
 const deriveSourceAuthority = async (
     rootPath: string,
@@ -734,6 +1055,7 @@ const checkedSourceBundleDigest = (
 
 const buildConstructionEvidenceImports = (
     sourceAuthority: readonly JsonValue[],
+    mappedSoundnessImport: CommonProofMappedSoundnessImportSummary,
 ): JsonValue => {
     const knowledgeOwnerSourcePaths = [
         'crates/sealed-lattice-kernel/src/bgv/proof_suite/relation_plan.rs',
@@ -744,11 +1066,15 @@ const buildConstructionEvidenceImports = (
     ] as const;
     const qromOwnerSourcePaths = [
         'crates/sealed-lattice-kernel/src/foundation/hash.rs',
+        'crates/sealed-lattice-kernel/src/hashing/mod.rs',
         'crates/sealed-lattice-kernel/src/bgv/proof_suite/transcript.rs',
         'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/compact_merkle_frontier.rs',
+        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/column_commitment.rs',
         'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan.rs',
         'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/linear_bcs_transcript.rs',
         'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate.rs',
+        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate/fixed_output_oracle_graph.rs',
+        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/mod.rs',
         'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/verification.rs',
     ] as const;
     const qromCompositionOwnerSourcePaths = [
@@ -794,8 +1120,11 @@ const buildConstructionEvidenceImports = (
                 sourceAuthority,
                 qromOwnerSourcePaths,
             ),
+            checkedMappedSoundnessImportDigest: canonicalJsonSha256(
+                mappedSoundnessImport,
+            ),
             missingEvidence:
-                'No independently derived fixed-output oracle-graph certificate yet proves coherent fragment, suffix, repeated, and overlapping block access; the exact half-preimage support; purification, recording, lifting, and extraction; and every accepted-path predecessor and verifier equation.',
+                'The independently derived fixed-output oracle graph now covers coherent fragment, suffix, repeated, and overlapping access, exact half-preimage support, purification, recording, lifting, extraction, and all twelve production rows. This import remains unresolved until one canonical transported proof instantiates the certified graph identity for the emitted verifier bytes.',
         },
         {
             identifier: exactConstructionEvidenceImportIdentifiers[2],
@@ -807,8 +1136,11 @@ const buildConstructionEvidenceImports = (
                 sourceAuthority,
                 qromCompositionOwnerSourcePaths,
             ),
+            checkedMappedSoundnessImportDigest: canonicalJsonSha256(
+                mappedSoundnessImport,
+            ),
             missingEvidence:
-                'The 103-physical-proof and 159-logical-instance census is component accounting only. Composition remains unresolved until the independently derived fixed-output graph certificate and every per-physical-proof transform are established under the complete adversarial query budget.',
+                'The conservative 103-physical-proof and 159-logical-instance union now derives with one transform per physical proof and the complete adversarial query budget. This import remains unresolved until the emitted transported proof instantiates the certified construction and graph identities.',
         },
         {
             identifier: exactConstructionEvidenceImportIdentifiers[3],
@@ -1071,7 +1403,7 @@ const buildReductionDag = (): JsonValue => [
         advantageExpression:
             'unresolved_common_construction_qrom_transform_error',
         statement:
-            'The typed seed and block calls, sampler chronology, accepting-database inventory, and deployed-call partition are component inputs. An independent graph certificate for coherent fragment, suffix, repeated, and overlapping access, exact half-preimage support, purification, recording, lifting, extraction, and accepted-path predecessor closure has not yet been derived. Concrete SHAKE256 remains only an explicit ideal-QRO assumption.',
+            'The independently derived fixed-output graph covers coherent fragment, suffix, repeated, overlapping, and out-of-order access; exact half-preimage support; purification, recording, lifting, extraction; accepted-path predecessor closure; and all twelve production rows under one conditional 512-bit ideal QRO. The imported status remains unresolved until emitted transported proof bytes instantiate the certified graph identity. Concrete SHAKE256 remains only an explicit ideal-QRO assumption.',
     },
     {
         identifier: 'commonProofQromComposition',
@@ -1080,7 +1412,7 @@ const buildReductionDag = (): JsonValue => [
         dependencies: ['commonConstructionQromTransform'],
         advantageExpression: 'unresolved_common_proof_qrom_composition_error',
         statement:
-            'Twelve construction-bound rows inventory 103 physical proofs and 159 logical instances, but the conservative action union is not a theorem until each physical proof owns a valid fixed-output transform under the complete adversarial query budget. The current numerical projection is refused as closure evidence.',
+            'The conservative action theorem maps one fixed-output transform to each of 103 physical proofs, internally unions 159 logical instances, charges the complete adversarial query budget to every proof, and assumes no cross-proof independence. The imported status remains unresolved until emitted transported proof bytes instantiate the certified construction and graph identities.',
     },
     {
         identifier: 'commonConstructionMaskingCorrespondence',
@@ -1275,6 +1607,7 @@ const buildNormativeCoverage = (): JsonValue =>
 const buildCertificateBody = (
     productionAuthority: JsonValue,
     sourceAuthority: readonly JsonValue[],
+    commonProofMappedSoundnessImport: CommonProofMappedSoundnessImportSummary,
 ): Record<string, JsonValue> => ({
     schemaIdentifier:
         'sealed-lattice/selected-collective-setup-security-evidence/v1',
@@ -1299,8 +1632,11 @@ const buildCertificateBody = (
     sampleRelations: buildSampleRelations(),
     jointSetupSampleHybridReduction: buildJointSetupSampleHybridReduction(),
     selectedSetupCorrectnessImport: buildSelectedSetupCorrectnessImport(),
-    constructionEvidenceImports:
-        buildConstructionEvidenceImports(sourceAuthority),
+    commonProofMappedSoundnessImport,
+    constructionEvidenceImports: buildConstructionEvidenceImports(
+        sourceAuthority,
+        commonProofMappedSoundnessImport,
+    ),
     protocolSchedule: buildProtocolSchedule(),
     hybridGames: buildHybridGames(),
     reductionDag: buildReductionDag(),
@@ -1320,9 +1656,15 @@ export const buildSelectedCollectiveSetupSecurityEvidence = async (
     rootPath = repositoryRoot,
 ): Promise<JsonValue> => {
     validateProductionAuthority(productionAuthority);
+    const [sourceAuthority, commonProofMappedSoundnessImport] =
+        await Promise.all([
+            deriveSourceAuthority(rootPath),
+            deriveCommonProofMappedSoundnessImport(rootPath),
+        ]);
     const certificateBody = buildCertificateBody(
         productionAuthority,
-        await deriveSourceAuthority(rootPath),
+        sourceAuthority,
+        commonProofMappedSoundnessImport,
     );
     return {
         ...certificateBody,
@@ -1993,6 +2335,22 @@ export const validateSelectedCollectiveSetupSecurityEvidence = (
             'The selected setup correctness import is stale or incomplete.',
         );
     }
+    const commonProofMappedSoundnessImport =
+        requireCommonProofMappedSoundnessImportSummary(
+            record.commonProofMappedSoundnessImport,
+        );
+    const expectedCommonProofMappedSoundnessImport =
+        requireCommonProofMappedSoundnessImportSummary(
+            expectedRecord.commonProofMappedSoundnessImport,
+        );
+    if (
+        canonicalJsonText(commonProofMappedSoundnessImport) !==
+        canonicalJsonText(expectedCommonProofMappedSoundnessImport)
+    ) {
+        throw new Error(
+            'The common-proof mapped-soundness import is stale or altered.',
+        );
+    }
     const constructionEvidenceImports = requireArray(
         record.constructionEvidenceImports,
         'Construction evidence imports',
@@ -2005,7 +2363,10 @@ export const validateSelectedCollectiveSetupSecurityEvidence = (
     if (
         canonicalJsonText(constructionEvidenceImports) !==
         canonicalJsonText(
-            buildConstructionEvidenceImports(expectedSourceAuthority),
+            buildConstructionEvidenceImports(
+                expectedSourceAuthority,
+                expectedCommonProofMappedSoundnessImport,
+            ),
         )
     ) {
         throw new Error(

@@ -468,12 +468,26 @@ impl CryptographicHasher<ChallengeField, [u64; MERKLE_DIGEST_WORD_LENGTH]>
 }
 
 impl DomainSeparatedShake256 {
+    fn visit_preamble(self, mut visit: impl FnMut(&[u8])) {
+        visit(ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN);
+        visit(&(self.domain.len() as u64).to_le_bytes());
+        visit(self.domain);
+    }
+
     fn initialized_state(self) -> Shake256 {
         let mut state = Shake256::default();
-        state.update(ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN);
-        state.update(&(self.domain.len() as u64).to_le_bytes());
-        state.update(self.domain);
+        self.visit_preamble(|bytes| state.update(bytes));
         state
+    }
+
+    #[cfg(all(test, feature = "theorem-evidence"))]
+    fn canonical_u64_oracle_input_bytes(self, input: impl IntoIterator<Item = u64>) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        self.visit_preamble(|part| bytes.extend_from_slice(part));
+        for word in input {
+            bytes.extend_from_slice(&word.to_le_bytes());
+        }
+        bytes
     }
 
     fn finish(state: Shake256) -> [u8; MERKLE_DIGEST_BYTE_LENGTH] {

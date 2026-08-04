@@ -34,6 +34,21 @@ pub fn to_hex(bytes: &[u8]) -> String {
 /// must pass the frozen ceremony, statement, and encoded object material as
 /// explicit framed parts rather than using an informal parallel convention.
 pub fn hash_framed_parts_512(domain: &str, parts: &[&[u8]]) -> [u8; 64] {
+    let preimage = framed_hash512_preimage(domain, parts);
+
+    let mut hasher = Shake256::default();
+    hasher.update(&preimage);
+    let mut reader = hasher.finalize_xof();
+    let mut output = [0_u8; 64];
+    reader.read(&mut output);
+
+    output
+}
+
+/// Returns the exact canonical byte string absorbed by
+/// [`hash_framed_parts_512`]. The common-proof oracle correspondence uses this
+/// to test its primary-preimage grammar against the deployed encoder.
+pub(crate) fn framed_hash512_preimage(domain: &str, parts: &[&[u8]]) -> Vec<u8> {
     // Length-framed, domain-separated preimage: fixed prefix, then the length-
     // framed domain, then a varuint part count, then each part length-prefixed.
     // This unambiguous framing is security-critical (no concatenation
@@ -46,14 +61,7 @@ pub fn hash_framed_parts_512(domain: &str, parts: &[&[u8]]) -> [u8; 64] {
     for part in parts {
         append_bytes(&mut preimage, part);
     }
-
-    let mut hasher = Shake256::default();
-    hasher.update(&preimage);
-    let mut reader = hasher.finalize_xof();
-    let mut output = [0_u8; 64];
-    reader.read(&mut output);
-
-    output
+    preimage
 }
 
 #[cfg(test)]

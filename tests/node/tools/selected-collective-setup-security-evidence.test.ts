@@ -8,7 +8,9 @@ import {
     canonicalJsonText,
     parseJsonValue,
     requireSelectedCollectiveSetupSecurityClosure,
+    selectedCommonProofMappedSoundnessEvidencePath,
     selectedCollectiveSetupSecurityEvidencePath,
+    validateCommonProofMappedSoundnessEvidence,
     validateSelectedCollectiveSetupSecurityEvidence,
     type JsonValue,
 } from '#tools/ci/selected-collective-setup-security-evidence';
@@ -52,12 +54,20 @@ const supersededTwentyOptionProductionAuthority = (
 describe('Selected collective-setup security evidence', () => {
     let checkedEvidence: JsonValue;
     let expectedEvidence: JsonValue;
+    let mappedSoundnessEvidence: JsonValue;
     let trackedEvidence: JsonValue;
 
     beforeAll(async () => {
-        trackedEvidence = parseJsonValue(
-            await readFile(selectedCollectiveSetupSecurityEvidencePath, 'utf8'),
-        );
+        const [trackedEvidenceText, mappedSoundnessEvidenceText] =
+            await Promise.all([
+                readFile(selectedCollectiveSetupSecurityEvidencePath, 'utf8'),
+                readFile(
+                    selectedCommonProofMappedSoundnessEvidencePath,
+                    'utf8',
+                ),
+            ]);
+        trackedEvidence = parseJsonValue(trackedEvidenceText);
+        mappedSoundnessEvidence = parseJsonValue(mappedSoundnessEvidenceText);
         const productionAuthority = requireRecord(trackedEvidence)
             .productionAuthority as JsonValue;
         expectedEvidence =
@@ -153,13 +163,14 @@ describe('Selected collective-setup security evidence', () => {
             throw new Error('Expected QROM graph missing evidence.');
         }
         expect(qromMissingEvidence).toContain(
-            'No independently derived fixed-output oracle-graph certificate',
+            'independently derived fixed-output oracle graph now covers',
         );
         expect(qromImport?.ownerSourcePaths).toEqual(
             expect.arrayContaining([
                 'crates/sealed-lattice-kernel/src/foundation/hash.rs',
                 'crates/sealed-lattice-kernel/src/bgv/proof_suite/transcript.rs',
                 'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate.rs',
+                'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate/fixed_output_oracle_graph.rs',
             ]),
         );
         const qromCompositionImport = constructionEvidenceImports
@@ -177,7 +188,7 @@ describe('Selected collective-setup security evidence', () => {
             throw new Error('Expected QROM composition missing evidence.');
         }
         expect(qromCompositionMissingEvidence).toContain(
-            'component accounting only',
+            'conservative 103-physical-proof and 159-logical-instance union now derives',
         );
         expect(qromCompositionImport?.ownerSourcePaths).toEqual(
             expect.arrayContaining([
@@ -204,6 +215,19 @@ describe('Selected collective-setup security evidence', () => {
                 }),
             ]),
         );
+        expect(record.commonProofMappedSoundnessImport).toEqual({
+            actionTopCount: 10,
+            adversarialQueryBudgetDecimal: ((1n << 80n) - 1n).toString(),
+            conditionalOracleModel:
+                'single-fixed-512-bit-qro-with-precommitted-auxiliary-restriction-v1',
+            constructionPlanIdentityCount: 12,
+            fixedOutputOracleGraphIdentityCount: 12,
+            formatVersion: 5,
+            logicalRelationInstanceCount: 159,
+            oracleOutputBitLength: 512,
+            physicalProofApplicationCount: 103,
+            rowCount: 12,
+        });
     });
 
     it('accepts the tracked evidence only when production and source authority are current', () => {
@@ -322,7 +346,45 @@ describe('Selected collective-setup security evidence', () => {
         }
     });
 
-    it('refuses QROM resolution without an independently derived graph certificate', () => {
+    it('refuses mapped soundness without every independently derived graph certificate', () => {
+        const hostileMappedEvidenceRecords = [
+            structuredClone(mappedSoundnessEvidence),
+            structuredClone(mappedSoundnessEvidence),
+            structuredClone(mappedSoundnessEvidence),
+            structuredClone(mappedSoundnessEvidence),
+            structuredClone(mappedSoundnessEvidence),
+            structuredClone(mappedSoundnessEvidence),
+        ] as Record<string, unknown>[];
+        requireRecord(
+            requireArray(hostileMappedEvidenceRecords[0].rows)[0],
+        ).fixedOutputOracleGraphIdentityHashHex = '0'.repeat(128);
+        delete requireRecord(
+            requireArray(hostileMappedEvidenceRecords[1].rows)[0],
+        ).fixedOutputOracleGraphIdentityHashHex;
+        const duplicatedIdentityRows = requireArray(
+            hostileMappedEvidenceRecords[2].rows,
+        );
+        requireRecord(
+            duplicatedIdentityRows[1],
+        ).fixedOutputOracleGraphIdentityHashHex = requireRecord(
+            duplicatedIdentityRows[0],
+        ).fixedOutputOracleGraphIdentityHashHex;
+        hostileMappedEvidenceRecords[3].formatVersion = 4;
+        requireRecord(
+            requireArray(hostileMappedEvidenceRecords[4].rows)[0],
+        ).adversarialQueryBoundDecimal = ((1n << 80n) - 2n).toString();
+        requireArray(hostileMappedEvidenceRecords[5].rows).reverse();
+
+        for (const hostileMappedEvidence of hostileMappedEvidenceRecords) {
+            expect(() =>
+                validateCommonProofMappedSoundnessEvidence(
+                    hostileMappedEvidence as JsonValue,
+                ),
+            ).toThrow();
+        }
+    });
+
+    it('keeps QROM resolution fail-closed before emitted-byte instantiation', () => {
         const overstatedImport = hostileRecord(checkedEvidence, (record) => {
             const qromImport = requireArray(record.constructionEvidenceImports)
                 .map((value) => requireRecord(value))

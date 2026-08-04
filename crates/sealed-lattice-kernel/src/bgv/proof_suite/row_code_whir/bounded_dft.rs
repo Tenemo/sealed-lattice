@@ -296,8 +296,7 @@ fn selected_dft_butterfly_count_upper_bound(
             .checked_shl(dependency_depth)
             .ok_or_else(|| "selected lane DFT dependency multiplier overflowed".to_owned())?;
         let layer_bound = selected_output_count
-            .checked_mul(dependency_multiplier)
-            .unwrap_or(usize::MAX)
+            .saturating_mul(dependency_multiplier)
             .min(maximum_per_layer);
         total
             .checked_add(layer_bound)

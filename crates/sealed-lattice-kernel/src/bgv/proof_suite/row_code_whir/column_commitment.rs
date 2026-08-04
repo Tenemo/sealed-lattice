@@ -1247,14 +1247,55 @@ pub(super) fn hash_opened_column_with_salt(
     finish_shake256(state)
 }
 
+#[cfg(all(test, feature = "theorem-evidence"))]
+pub(super) fn canonical_phase_column_leaf_oracle_input_bytes(
+    values: &[Goldilocks],
+    encoded_column_count: usize,
+    salt: Option<&PrivateLeafSalt>,
+) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for word in column_hash_preamble(
+        values.len(),
+        encoded_column_count,
+        salt.map_or(0, |_| PRIVATE_LEAF_SALT_BYTE_LENGTH),
+    ) {
+        bytes.extend_from_slice(&word.to_le_bytes());
+    }
+    if let Some(salt) = salt {
+        bytes.extend_from_slice(salt);
+    }
+    for value in values {
+        bytes.extend_from_slice(&value.as_canonical_u64().to_le_bytes());
+    }
+    bytes
+}
+
+fn visit_phase_column_parent_oracle_input(
+    left: &ColumnDigest,
+    right: &ColumnDigest,
+    mut visit: impl FnMut(&[u8]),
+) {
+    visit(&(super::ROW_CODE_WHIR_PHASE_COLUMN_NODE_DOMAIN.len() as u64).to_le_bytes());
+    visit(super::ROW_CODE_WHIR_PHASE_COLUMN_NODE_DOMAIN);
+    for word in left.iter().chain(right) {
+        visit(&word.to_le_bytes());
+    }
+}
+
 pub(super) fn hash_merkle_parent(left: &ColumnDigest, right: &ColumnDigest) -> ColumnDigest {
     let mut state = Shake256::default();
-    state.update(&(super::ROW_CODE_WHIR_PHASE_COLUMN_NODE_DOMAIN.len() as u64).to_le_bytes());
-    state.update(super::ROW_CODE_WHIR_PHASE_COLUMN_NODE_DOMAIN);
-    for word in left.iter().chain(right) {
-        state.update(&word.to_le_bytes());
-    }
+    visit_phase_column_parent_oracle_input(left, right, |bytes| state.update(bytes));
     finish_shake256(state)
+}
+
+#[cfg(all(test, feature = "theorem-evidence"))]
+pub(super) fn canonical_phase_column_parent_oracle_input_bytes(
+    left: &ColumnDigest,
+    right: &ColumnDigest,
+) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    visit_phase_column_parent_oracle_input(left, right, |part| bytes.extend_from_slice(part));
+    bytes
 }
 
 fn finish_shake256(state: Shake256) -> ColumnDigest {

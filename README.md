@@ -46,13 +46,16 @@ from that selected count, the selected evaluator aggregate derives exactly ten
 ordered `topOptionCount` variants, and focused structural tests cover every
 configurable count without generating cryptographic evidence for the other
 counts.
-The current version-four mapped-soundness vector contains the exact-ten
+The current version-five mapped-soundness vector contains the exact-ten
 construction identities, twelve family rows, and conservative 103-physical-
-proof, 159-logical-instance arithmetic. It is not accepted as a soundness
-ledger: its evidence builder and imported collective-setup record now keep the
-fixed-output QROM transform and proof composition unresolved. The required
-coherent seed-and-block predecessor-graph reduction and complete extraction
-mapping remain unfinished, so the vector is refused as soundness authority.
+proof, 159-logical-instance arithmetic. Its independently derived fixed-output
+graph certificate covers coherent seed-and-block access, exact predecessor
+support, database recording and extraction, and the conservative action union
+under one modeled 512-bit ideal QRO. It is not yet accepted as emitted-proof
+soundness authority: the evidence builder and imported collective-setup record
+keep the fixed-output transform and proof composition unresolved until one
+freshly transported canonical proof instantiates the certified construction
+and graph identities.
 Other checked construction records, resource ledgers, checkpoints, and runtime
 evidence still describe the superseded twenty-option candidate and are not
 eligible for suite freeze.
@@ -144,13 +147,18 @@ Works today:
   the complete auxiliary-table bad event outside the CMS19 multiplier, while
   treating the fixed auxiliary table as a unitary available to the primary
   restriction reduction. The certificate maps every complete-ledger SHAKE256
-  call to one canonical preimage restriction and checks a structural partition
-  of the modeled oracle inputs. It does not yet prove the coherent-access graph
-  reduction, exact half-preimage support, or extraction for that partition. All
-  21 exact selected production identities derive as structural inputs, but the
-  fixed-output QROM transform remains unresolved. Concrete SHAKE256 is an
-  explicit ideal-QRO assumption rather than a proven random oracle, and no
-  production proof has been emitted.
+  call to one canonical preimage restriction and proves the modeled oracle
+  inputs form two disjoint restrictions. It embeds every finite variable-length
+  adversary register into one fixed input register, factors the random function
+  and query unitary, treats fragments, suffixes, repeats, and overlaps as
+  computation on cached 512-bit answers, and absorbs a conditioned auxiliary
+  table into the adversary between primary queries. A canonical production
+  preimage parser then derives the exact CMS19 predecessor support with at most
+  two pointers per database entry and connects purification, recording,
+  lifting, state transition, and extraction. All 21 exact selected production
+  identities derive as structural inputs. Concrete SHAKE256 is an explicit
+  ideal-QRO assumption rather than a proven random oracle, and no production
+  proof has been emitted.
   The exact `604,801`-call transcript census contains `6,306` original-BCS
   rounds. The executable
   whole-state evaluator and collision-free accepting-database extractor bind
@@ -180,16 +188,17 @@ Works today:
   conservative composition code assigns the complete `2^80 - 1` adversarial
   query budget to each physical proof, unions logical failures inside that
   proof, and then unions the physical-proof rows without cross-proof
-  independence or shared-hybrid credit. The current version-four production
+  independence or shared-hybrid credit. The current version-five production
   vector expands 12 family entries into 103 physical proofs and 159 logical
   instances, charges the auxiliary-table bad event 103 times, and reports
   fixed-budget and constant-success metrics separately. The action arithmetic
-  reports classical failure in `(2^-188, 2^-187]`, a provisional fixed-budget
-  QROM interval of `(2^-25, 2^-24]`, and provisional 92-bit constant-success
-  query boundaries under the declared fixed 512-bit ideal-QRO model. The QROM
-  values are not theorem-backed until the graph reduction derives. Nonlinear
-  privacy, emitted transported-proof instantiation, and the remaining setup-
-  family and terminal composition arguments remain open.
+  reports classical failure in `(2^-188, 2^-187]`, a conditional fixed-budget
+  QROM interval of `(2^-25, 2^-24]`, and conditional 92-bit constant-success
+  query boundaries under the declared fixed 512-bit ideal-QRO model. Those
+  bounds now derive for the certified production rows, but the imported closure
+  leaves remain unresolved until emitted transported bytes instantiate their
+  construction and graph identities. Nonlinear privacy and the remaining
+  setup-family and terminal composition arguments remain open.
 - Secret-bearing phase-row padding now uses three KMAC-derived 512-bit seeds.
   The selected same-secret certificate inventories 62 framed SHAKE streams,
   130,023,424 accepted field outputs, seed collision, bounded rejection
@@ -408,20 +417,20 @@ Not yet:
   `topCount` evaluator streams while retaining deterministic structural
   compilation throughout `2..20`. The exact complete-action inventory, all 21
   selected production geometry identities, and all 12 mapped-soundness rows are
-  current as version-four structural and arithmetic records. Their QROM closure
-  statuses are not valid evidence. Remaining construction certificates,
+  current as version-five structural and arithmetic records. Their imported
+  QROM closure statuses remain unresolved pending emitted-byte instantiation.
+  Remaining construction certificates,
   resource ledgers, evidence vectors, checkpoints, and runtime results that
   inherit the exact-twenty profile must still be regenerated before any suite
   can be frozen.
 - The fixed-output sampler's classical distributions, chronology, rejection and
-  exhaustion accounting, deployed-call partition, and auxiliary-table
-  concentration arithmetic derive. The CMS19 reduction does not yet cover
-  arbitrary coherent fragment, suffix, repeated, or overlapping access to the
-  predecessor-linked seed-and-block graph, and its exact half-preimage support
-  and extraction mapping remain open. Therefore neither the per-proof QROM
-  transform nor the conservative 103-proof QROM action union is established,
-  even under the explicit ideal-QRO assumption. Concrete SHAKE256 and emitted
-  transported proof bytes remain separate open obligations.
+  exhaustion accounting, deployed-call partition, auxiliary-table
+  concentration, coherent-access graph, exact predecessor support, and
+  extraction mapping derive. The per-proof transform and conservative
+  103-proof action union are conditional theorems under the explicit ideal-QRO
+  assumption. Their imported closure leaves remain fail-closed until freshly
+  transported emitted proof bytes instantiate the certified identities;
+  concrete SHAKE256 remains a separate assumption.
 - The generic construction certificate does not establish family simulation,
   malicious-verifier zero knowledge, or quantum-random-oracle zero knowledge.
 - Exact emitted-byte complete-action soundness is not established. The
@@ -440,14 +449,14 @@ Not yet:
   sampler distributions, bounded rejection and exhaustion, atomic runtime
   chronology, and structural QRO-restriction partition derive. All 21 selected
   production identities and all 12 mapped failure rows are current inputs to the
-  modeled action arithmetic, but the graph-wide QROM theorem does not derive.
+  graph-wide conditional QROM theorem.
   The exact same-secret codec has a complete static
   section-to-decoder-to-verifier correspondence. The conservative
   103-physical-proof, 159-logical-instance union logic now consumes those
-  current rows and derives the classical action union. The reported fixed-budget
-  QROM interval remains a model output pending the graph reduction, not a
-  theorem-backed bound. Instantiation by one emitted and freshly transported
-  proof, nonlinear privacy, and adaptive setup-family composition remain open.
+  current rows and derives both the classical union and the conditional
+  fixed-budget QROM interval. Instantiation by one emitted and freshly
+  transported proof, nonlinear privacy, and adaptive setup-family composition
+  remain open.
 - The static liveness model has not yet been confirmed by a completed native
   proof or release-WebAssembly browser measurement. Complete participant
   transport accounting is also open. Production-derived sizes for 73 of the
@@ -469,11 +478,10 @@ Not yet:
   version 12, copied scratch-read total, and recovery-frame width 90 versus
   derived width 98 regressions also pass their focused owners. The `0x1212`
   production certificate passes its isolated owner. The fixed-output sampler's
-  inventory, classical distribution, chronology, structural restriction
-  partition, all 21 selected production geometries, all 12 mapped family rows,
-  and the conservative action composer pass focused owners; those focused passes
-  do not supply the missing coherent-access QROM graph theorem. The working tree
-  also
+  inventory, classical distribution, chronology, restriction partition,
+  coherent-access graph, exact predecessor support, all 21 selected production
+  geometries, all 12 mapped family rows, and the conservative action composer
+  pass focused owners. The working tree also
   regenerates the exact-ten collective-setup evidence from a guarded Rust
   production-authority export; its canonical Node checks and independent Rust
   tracked-authority owner pass. There is no complete current-HEAD routine rerun.
