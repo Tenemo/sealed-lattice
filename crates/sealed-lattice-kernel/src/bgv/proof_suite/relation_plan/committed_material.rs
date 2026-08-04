@@ -35,6 +35,18 @@ pub(crate) struct VssRelationPackingCandidateGeometry {
     pub(crate) opening_point_count: u64,
 }
 
+#[cfg(all(feature = "primitive-measurement-evidence", test))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct VssFusedBoundRangeCandidateInventory {
+    pub(crate) prover_column_count: u64,
+    pub(crate) range_digit_column_count: u64,
+    pub(crate) binary_column_count: u64,
+    pub(crate) direct_signed_quotient_column_count: u64,
+    pub(crate) bound_high_column_count: u64,
+    pub(crate) bound_low_recomposition_column_count: u64,
+    pub(crate) maximum_injective_factor_count: u64,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CommittedMaterialRelationPlanInput {
     pub(crate) ring_degree: u64,
@@ -400,6 +412,109 @@ pub(crate) fn vss_relation_range_digit_prover_column_ordinals(
     Ok(column_ordinals)
 }
 
+#[cfg(all(feature = "primitive-measurement-evidence", test))]
+pub(crate) fn vss_fused_bound_range_candidate_inventory(
+    variant: &RelationPlanVariant,
+    range_digit_radix: u64,
+    signed_quotient_absolute_bound: u64,
+) -> Result<VssFusedBoundRangeCandidateInventory, RelationPlanError> {
+    if range_digit_radix != 51 || signed_quotient_absolute_bound == 0 {
+        return Err(RelationPlanError::InvalidBoundCertificate);
+    }
+    let expected_range_values = (0..range_digit_radix).map(BigInt::from).collect::<Vec<_>>();
+    let signed_quotient_absolute_bound = i128::from(signed_quotient_absolute_bound);
+    let expected_signed_quotient_values = (-signed_quotient_absolute_bound
+        ..=signed_quotient_absolute_bound)
+        .map(BigInt::from)
+        .collect::<Vec<_>>();
+    let prover_column_count = u64::try_from(
+        variant
+            .ordered_columns
+            .iter()
+            .filter(|column| matches!(column.origin(), RelationColumnOrigin::Prover))
+            .count(),
+    )
+    .map_err(|_| RelationPlanError::CountOverflow)?;
+    let mut range_digit_column_count = 0_u64;
+    let mut binary_column_count = 0_u64;
+    let mut direct_signed_quotient_column_count = 0_u64;
+    let mut bound_high_column_count = 0_u64;
+    let mut bound_low_recomposition_column_count = 0_u64;
+    for cell in &variant.ordered_semantic_cells {
+        let column = variant
+            .ordered_columns
+            .get(
+                usize::try_from(cell.column_ordinal)
+                    .map_err(|_| RelationPlanError::CountOverflow)?,
+            )
+            .ok_or(RelationPlanError::InvalidColumn)?;
+        match (&cell.bound_certificate, column.origin()) {
+            (
+                RelationBoundCertificate::FiniteIntegerSet { ordered_values, .. },
+                RelationColumnOrigin::Prover,
+            ) if ordered_values == &expected_range_values => {
+                range_digit_column_count = range_digit_column_count
+                    .checked_add(1)
+                    .ok_or(RelationPlanError::CountOverflow)?;
+            }
+            (
+                RelationBoundCertificate::FiniteIntegerSet { ordered_values, .. },
+                RelationColumnOrigin::Prover,
+            ) if ordered_values == &expected_signed_quotient_values => {
+                direct_signed_quotient_column_count = direct_signed_quotient_column_count
+                    .checked_add(1)
+                    .ok_or(RelationPlanError::CountOverflow)?;
+            }
+            (
+                RelationBoundCertificate::FiniteIntegerSet { ordered_values, .. },
+                RelationColumnOrigin::BoundTree { .. },
+            ) if ordered_values.first() == Some(&BigInt::zero())
+                && ordered_values
+                    .last()
+                    .is_some_and(|value| value > &BigInt::zero()) =>
+            {
+                bound_high_column_count = bound_high_column_count
+                    .checked_add(1)
+                    .ok_or(RelationPlanError::CountOverflow)?;
+            }
+            (RelationBoundCertificate::Binary { .. }, RelationColumnOrigin::Prover) => {
+                binary_column_count = binary_column_count
+                    .checked_add(1)
+                    .ok_or(RelationPlanError::CountOverflow)?;
+            }
+            (
+                RelationBoundCertificate::UnsignedRadixRecomposition { radix, .. },
+                RelationColumnOrigin::BoundTree { .. },
+            ) if *radix == range_digit_radix => {
+                bound_low_recomposition_column_count = bound_low_recomposition_column_count
+                    .checked_add(1)
+                    .ok_or(RelationPlanError::CountOverflow)?;
+            }
+            _ => return Err(RelationPlanError::InvalidBoundCertificate),
+        }
+    }
+    let maximum_injective_factor_count = variant
+        .ordered_constraints
+        .iter()
+        .map(|constraint| {
+            constraint
+                .ordered_injective_integer_factor_expressions
+                .len()
+        })
+        .max()
+        .and_then(|count| u64::try_from(count).ok())
+        .ok_or(RelationPlanError::InvalidConstraint)?;
+    Ok(VssFusedBoundRangeCandidateInventory {
+        prover_column_count,
+        range_digit_column_count,
+        binary_column_count,
+        direct_signed_quotient_column_count,
+        bound_high_column_count,
+        bound_low_recomposition_column_count,
+        maximum_injective_factor_count,
+    })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum MaterialRootUse {
     Input,
@@ -436,11 +551,19 @@ enum ProofTreePhase {
     Base,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CommittedMaterialRangeDesign {
+    CopiedMessageColumns,
+    #[cfg(all(feature = "primitive-measurement-evidence", test))]
+    FusedBoundColumns,
+}
+
 pub(super) struct CommittedMaterialPlanBuilder<'context> {
     application_statement_schema_identifier: u16,
     geometry: &'context CommittedMaterialRelationPlanInput,
     context: &'context RelationPlanCheckContext,
     range_digit_radix: u64,
+    range_design: CommittedMaterialRangeDesign,
     ordered_non_native_moduli: Vec<SuiteModulusReference>,
     resolved_moduli: Vec<u64>,
     ordered_verifier_sources: Vec<RelationVerifierSource>,
@@ -479,6 +602,45 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
         root_paths: Vec<Vec<RelationSelectorPathStep>>,
         range_digit_radix: u64,
     ) -> Result<Self, RelationPlanError> {
+        Self::new_with_range_design(
+            application_statement_schema_identifier,
+            geometry,
+            context,
+            root_paths,
+            range_digit_radix,
+            CommittedMaterialRangeDesign::CopiedMessageColumns,
+        )
+    }
+
+    #[cfg(all(feature = "primitive-measurement-evidence", test))]
+    pub(super) fn new_with_fused_bound_range_design(
+        application_statement_schema_identifier: u16,
+        geometry: &'context CommittedMaterialRelationPlanInput,
+        context: &'context RelationPlanCheckContext,
+        root_paths: Vec<Vec<RelationSelectorPathStep>>,
+        range_digit_radix: u64,
+    ) -> Result<Self, RelationPlanError> {
+        if geometry.trace_packing_factor != 1 {
+            return Err(RelationPlanError::InvalidDomain);
+        }
+        Self::new_with_range_design(
+            application_statement_schema_identifier,
+            geometry,
+            context,
+            root_paths,
+            range_digit_radix,
+            CommittedMaterialRangeDesign::FusedBoundColumns,
+        )
+    }
+
+    fn new_with_range_design(
+        application_statement_schema_identifier: u16,
+        geometry: &'context CommittedMaterialRelationPlanInput,
+        context: &'context RelationPlanCheckContext,
+        root_paths: Vec<Vec<RelationSelectorPathStep>>,
+        range_digit_radix: u64,
+        range_design: CommittedMaterialRangeDesign,
+    ) -> Result<Self, RelationPlanError> {
         let resolved = geometry.validate(context)?;
         let maximum_range_constraint_numerator_degree = geometry
             .prover_column_degree_bound_exclusive()?
@@ -498,6 +660,7 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
             geometry,
             context,
             range_digit_radix,
+            range_design,
             ordered_non_native_moduli: resolved.iter().map(|(reference, _)| *reference).collect(),
             resolved_moduli: resolved.into_iter().map(|(_, modulus)| modulus).collect(),
             ordered_verifier_sources,
@@ -645,6 +808,14 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
         let ordered_values = (0..self.range_digit_radix)
             .map(BigInt::from)
             .collect::<Vec<_>>();
+        self.certify_finite_integer_set_column(column_ordinal, ordered_values)
+    }
+
+    fn certify_finite_integer_set_column(
+        &mut self,
+        column_ordinal: u32,
+        ordered_values: Vec<BigInt>,
+    ) -> Result<(), RelationPlanError> {
         let (expression, ordered_factor_expressions) =
             super::expressions::finite_integer_set_constraint_expressions(
                 column_ordinal,
@@ -659,12 +830,70 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
         )?;
         self.insert_semantic_cell(
             column_ordinal,
-            SignedIntegerInterval::new(0, i128::from(self.range_digit_radix - 1)),
+            SignedIntegerInterval::from_bigints(
+                ordered_values
+                    .first()
+                    .cloned()
+                    .ok_or(RelationPlanError::InvalidBoundCertificate)?,
+                ordered_values
+                    .last()
+                    .cloned()
+                    .ok_or(RelationPlanError::InvalidBoundCertificate)?,
+            )?,
             RelationBoundCertificate::FiniteIntegerSet {
                 constraint_ordinal,
                 ordered_values,
             },
         )
+    }
+
+    #[cfg(all(feature = "primitive-measurement-evidence", test))]
+    fn add_radix_digit_upper_bound_constraint(
+        &mut self,
+        ordered_digit_column_ordinals: &[u32],
+        ordered_maximum_digits: &[u64],
+    ) -> Result<(), RelationPlanError> {
+        if ordered_digit_column_ordinals.is_empty()
+            || ordered_digit_column_ordinals.len() != ordered_maximum_digits.len()
+            || ordered_maximum_digits
+                .iter()
+                .any(|maximum_digit| *maximum_digit >= self.range_digit_radix)
+        {
+            return Err(RelationPlanError::InvalidConstraint);
+        }
+        let mut more_significant_equality_factors = Vec::new();
+        for digit_ordinal in (0..ordered_digit_column_ordinals.len()).rev() {
+            let digit_column_ordinal = ordered_digit_column_ordinals[digit_ordinal];
+            let maximum_digit = ordered_maximum_digits[digit_ordinal];
+            let mut ordered_factor_expressions = more_significant_equality_factors.clone();
+            for allowed_value in 0..=maximum_digit {
+                ordered_factor_expressions.push(
+                    super::expressions::finite_integer_set_factor_expression(
+                        digit_column_ordinal,
+                        &BigInt::from(allowed_value),
+                        self.context.base_field_modulus,
+                    )?,
+                );
+            }
+            let expression =
+                ordered_injective_integer_factor_product_expression(&ordered_factor_expressions)?;
+            self.add_constraint_with_integer_factors(
+                expression,
+                full_trace_zeroifier_expression(self.geometry.relation_trace_domain_size()?),
+                false,
+                ordered_factor_expressions,
+            )?;
+            for smaller_value in 0..maximum_digit {
+                more_significant_equality_factors.push(
+                    super::expressions::finite_integer_set_factor_expression(
+                        digit_column_ordinal,
+                        &BigInt::from(smaller_value),
+                        self.context.base_field_modulus,
+                    )?,
+                );
+            }
+        }
+        Ok(())
     }
 
     fn certify_binary_column(&mut self, column_ordinal: u32) -> Result<(), RelationPlanError> {
@@ -817,7 +1046,152 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
         ordered_roots: &[(usize, MaterialRootUse)],
         modulus_ordinal: usize,
     ) -> Result<Vec<MaterialMessageColumns>, RelationPlanError> {
-        self.add_selected_material_messages(ordered_roots, modulus_ordinal)
+        match self.range_design {
+            CommittedMaterialRangeDesign::CopiedMessageColumns => {
+                self.add_selected_material_messages(ordered_roots, modulus_ordinal)
+            }
+            #[cfg(all(feature = "primitive-measurement-evidence", test))]
+            CommittedMaterialRangeDesign::FusedBoundColumns => {
+                self.add_fused_bound_material_messages(ordered_roots, modulus_ordinal)
+            }
+        }
+    }
+
+    #[cfg(all(feature = "primitive-measurement-evidence", test))]
+    fn add_fused_bound_material_messages(
+        &mut self,
+        ordered_roots: &[(usize, MaterialRootUse)],
+        modulus_ordinal: usize,
+    ) -> Result<Vec<MaterialMessageColumns>, RelationPlanError> {
+        if ordered_roots.is_empty()
+            || self.geometry.trace_packing_factor != 1
+            || self.range_digit_radix != 51
+        {
+            return Err(RelationPlanError::InvalidConstraint);
+        }
+        let modulus = self.modulus(modulus_ordinal)?;
+        let maximum_material_digits = fixed_material_digits(modulus - 1)?;
+        let range_digit_count = usize::try_from(minimum_unsigned_digit_count(
+            MATERIAL_DIGIT_RADIX - 1,
+            self.range_digit_radix,
+        )?)
+        .map_err(|_| RelationPlanError::CountOverflow)?;
+        let maximum_low_range_digits = fixed_radix_u64_digits(
+            MATERIAL_DIGIT_RADIX - 1,
+            range_digit_count,
+            self.range_digit_radix,
+        )?;
+        let mut messages = Vec::with_capacity(ordered_roots.len());
+        for (logical_root_ordinal, root_use) in ordered_roots.iter().copied() {
+            let source_ordinal = self
+                .root_source_ordinals
+                .get(logical_root_ordinal)
+                .copied()
+                .ok_or(RelationPlanError::InvalidSource)?;
+            let mut bound_columns = Vec::with_capacity(4);
+            for _ in 0..4 {
+                bound_columns.push(self.push_column(
+                    RelationColumnOrigin::BoundTree {
+                        expected_root_source_ordinal: source_ordinal,
+                    },
+                    None,
+                )?);
+            }
+            self.bound_trees.push(RelationTreeDescriptor::BoundPublic {
+                construction_kind: BoundTreeConstructionKind::CommittedMaterial,
+                expected_root_source_ordinal: source_ordinal,
+                root_use: match root_use {
+                    MaterialRootUse::Input => BoundTreeRootUse::Input,
+                    MaterialRootUse::Output => BoundTreeRootUse::Output,
+                },
+                ordered_column_ordinals: bound_columns.clone(),
+            });
+            let bound_columns: [u32; 4] = bound_columns
+                .try_into()
+                .map_err(|_| RelationPlanError::InvalidColumn)?;
+            let mut message_digits_by_half = [Vec::new(), Vec::new()];
+            for physical_half_ordinal in 0..2 {
+                let low_column_ordinal = bound_columns[physical_half_ordinal];
+                let high_column_ordinal = bound_columns[2 + physical_half_ordinal];
+
+                let low_range_digits = self.add_range_digit_columns(range_digit_count)?;
+                self.certify_unsigned_recomposition(low_column_ordinal, &low_range_digits)?;
+                self.add_radix_digit_upper_bound_constraint(
+                    &low_range_digits,
+                    &maximum_low_range_digits,
+                )?;
+
+                self.certify_finite_integer_set_column(
+                    high_column_ordinal,
+                    (0..=maximum_material_digits[1]).map(BigInt::from).collect(),
+                )?;
+
+                let difference_range_digits = self.add_range_digit_columns(range_digit_count)?;
+                self.add_radix_digit_upper_bound_constraint(
+                    &difference_range_digits,
+                    &maximum_low_range_digits,
+                )?;
+                let borrow_column_ordinal = self.add_binary_column()?;
+                let mut comparator_terms = vec![
+                    integer_term_constant(maximum_material_digits[0], false),
+                    integer_term_column(low_column_ordinal, false, 0, true),
+                    integer_term_scaled_column(
+                        borrow_column_ordinal,
+                        MATERIAL_DIGIT_RADIX,
+                        false,
+                        0,
+                        false,
+                    ),
+                ];
+                let mut range_digit_weight = 1_u64;
+                for difference_range_digit in difference_range_digits {
+                    comparator_terms.push(integer_term_scaled_column(
+                        difference_range_digit,
+                        range_digit_weight,
+                        false,
+                        0,
+                        true,
+                    ));
+                    range_digit_weight = range_digit_weight
+                        .checked_mul(self.range_digit_radix)
+                        .ok_or(RelationPlanError::IntegerBoundOverflow)?;
+                }
+                self.add_full_trace_constraint(sum_integer_terms(comparator_terms)?, true)?;
+
+                let mut conditional_high_factor_expressions =
+                    vec![super::expressions::finite_integer_set_factor_expression(
+                        borrow_column_ordinal,
+                        &BigInt::zero(),
+                        self.context.base_field_modulus,
+                    )?];
+                for allowed_high_value in 0..maximum_material_digits[1] {
+                    conditional_high_factor_expressions.push(
+                        super::expressions::finite_integer_set_factor_expression(
+                            high_column_ordinal,
+                            &BigInt::from(allowed_high_value),
+                            self.context.base_field_modulus,
+                        )?,
+                    );
+                }
+                let conditional_high_expression =
+                    ordered_injective_integer_factor_product_expression(
+                        &conditional_high_factor_expressions,
+                    )?;
+                self.add_constraint_with_integer_factors(
+                    conditional_high_expression,
+                    full_trace_zeroifier_expression(self.geometry.relation_trace_domain_size()?),
+                    false,
+                    conditional_high_factor_expressions,
+                )?;
+                message_digits_by_half[physical_half_ordinal] =
+                    vec![low_column_ordinal, high_column_ordinal];
+            }
+            messages.push(MaterialMessageColumns {
+                message_digits_by_half,
+                packed_lane_ordinal: 0,
+            });
+        }
+        Ok(messages)
     }
 
     fn add_selected_material_messages(
@@ -975,6 +1349,13 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
         if required_absolute_bound == 0 {
             return Err(RelationPlanError::InvalidBoundCertificate);
         }
+        #[cfg(all(feature = "primitive-measurement-evidence", test))]
+        if self.range_design == CommittedMaterialRangeDesign::FusedBoundColumns {
+            return self.add_direct_finite_signed_quotient_columns(
+                quotient_count,
+                required_absolute_bound,
+            );
+        }
         let mut range_digit_count = 1_usize;
         let mut range_capacity = self.range_digit_radix;
         while (range_capacity - 1) / 2 < required_absolute_bound {
@@ -1014,6 +1395,28 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
                     ordered_digit_column_ordinals: digits,
                 },
             )?;
+            self.append_packed_scalar_group(&mut quotients, target, group_start, quotient_count)?;
+        }
+        Ok(quotients)
+    }
+
+    #[cfg(all(feature = "primitive-measurement-evidence", test))]
+    fn add_direct_finite_signed_quotient_columns(
+        &mut self,
+        quotient_count: usize,
+        required_absolute_bound: u64,
+    ) -> Result<Vec<PackedScalarColumn>, RelationPlanError> {
+        if self.geometry.trace_packing_factor != 1 || quotient_count == 0 {
+            return Err(RelationPlanError::InvalidConstraint);
+        }
+        let required_absolute_bound = i128::from(required_absolute_bound);
+        let ordered_values = (-required_absolute_bound..=required_absolute_bound)
+            .map(BigInt::from)
+            .collect::<Vec<_>>();
+        let mut quotients = Vec::with_capacity(quotient_count);
+        for group_start in 0..quotient_count {
+            let target = self.push_prover_column()?;
+            self.certify_finite_integer_set_column(target, ordered_values.clone())?;
             self.append_packed_scalar_group(&mut quotients, target, group_start, quotient_count)?;
         }
         Ok(quotients)
@@ -2569,6 +2972,36 @@ impl SelectedVssSourceReplayMeasurement {
     }
 
     #[cfg(test)]
+    pub(crate) fn validated_fused_bound_range_candidate_with_input(
+        range_digit_radix: u64,
+    ) -> Result<
+        (
+            CommittedMaterialRelationPlanInput,
+            crate::bgv::proof_suite::ValidatedRelationPlanArtifact,
+            RelationPlanCheckContext,
+        ),
+        String,
+    > {
+        let (input, context) = Self::fused_bound_range_candidate_definition(range_digit_radix)?;
+        let compiled = super::vss_share_linkage::compile_vss_share_linkage_fused_bound_range_candidate_relation_plan(
+            &input,
+            &context,
+            range_digit_radix,
+        )
+        .map_err(|error| {
+            format!("VSS fused-bound range candidate relation is invalid: {error:?}")
+        })?;
+        let artifact = crate::bgv::proof_suite::ValidatedRelationPlanArtifact::from_primitive_measurement_compiled_plan(
+            compiled,
+            &context,
+        )
+        .map_err(|error| {
+            format!("VSS fused-bound range candidate artifact is invalid: {error:?}")
+        })?;
+        Ok((input, artifact, context))
+    }
+
+    #[cfg(test)]
     pub(crate) fn range_packing_candidate_definition(
         trace_packing_factor: u64,
         opening_degree_bound_exclusive: u64,
@@ -2591,18 +3024,122 @@ impl SelectedVssSourceReplayMeasurement {
             range_digit_radix,
         )
         .map_err(|error| format!("VSS range-packing candidate geometry is invalid: {error:?}"))?;
-        let maximum_required_quotient_coefficient_count = candidate_geometry
-            .maximum_range_constraint_numerator_degree
-            .checked_sub(candidate_geometry.relation_trace_domain_size)
+        Self::configure_candidate_quotient_context(
+            &input,
+            &mut context,
+            candidate_geometry.maximum_range_constraint_numerator_degree,
+            "range-packing",
+        )?;
+        Ok((input, context))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fused_bound_range_candidate_definition(
+        range_digit_radix: u64,
+    ) -> Result<(CommittedMaterialRelationPlanInput, RelationPlanCheckContext), String> {
+        if range_digit_radix != 51 {
+            return Err("VSS fused-bound range candidate requires radix 51".to_owned());
+        }
+        let (input, mut context) = Self::relation_replay_candidate_definition(1, 2_097_152)?;
+        let range_digit_count = usize::try_from(
+            minimum_unsigned_digit_count(MATERIAL_DIGIT_RADIX - 1, range_digit_radix)
+                .map_err(|_| "VSS fused-bound range digit count is invalid".to_owned())?,
+        )
+        .map_err(|_| "VSS fused-bound range digit count exceeds usize".to_owned())?;
+        let maximum_low_digits = fixed_radix_u64_digits(
+            MATERIAL_DIGIT_RADIX - 1,
+            range_digit_count,
+            range_digit_radix,
+        )
+        .map_err(|_| "VSS fused-bound maximum low digits are invalid".to_owned())?;
+        let maximum_low_digit_sum = maximum_low_digits.iter().try_fold(0_u64, |sum, digit| {
+            sum.checked_add(*digit)
+                .ok_or_else(|| "VSS fused-bound maximum digit sum overflowed".to_owned())
+        })?;
+        let maximum_prover_column_degree = input
+            .prover_column_degree_bound_exclusive()
+            .map_err(|_| "VSS fused-bound prover degree is invalid".to_owned())?
+            .checked_sub(1)
+            .ok_or_else(|| "VSS fused-bound prover degree is empty".to_owned())?;
+        let maximum_material_column_degree = input
+            .material_column_degree_bound_exclusive
+            .checked_sub(1)
+            .ok_or_else(|| "VSS fused-bound material degree is empty".to_owned())?;
+        let maximum_material_high_digit = input
+            .validate(&context)
+            .map_err(|error| format!("VSS fused-bound moduli are invalid: {error:?}"))?
+            .into_iter()
+            .try_fold(0_u64, |maximum_high_digit, (_, modulus)| {
+                fixed_material_digits(modulus - 1).map(|digits| maximum_high_digit.max(digits[1]))
+            })
+            .map_err(|_| "VSS fused-bound material digits are invalid".to_owned())?;
+        let maximum_constraint_numerator_degree =
+            [
+                maximum_prover_column_degree
+                    .checked_mul(range_digit_radix)
+                    .ok_or_else(|| "VSS fused-bound range degree overflowed".to_owned())?,
+                maximum_prover_column_degree
+                    .checked_mul(maximum_low_digit_sum.checked_add(1).ok_or_else(|| {
+                        "VSS fused-bound lexicographic degree overflowed".to_owned()
+                    })?)
+                    .ok_or_else(|| "VSS fused-bound lexicographic degree overflowed".to_owned())?,
+                maximum_material_column_degree
+                    .checked_mul(
+                        maximum_material_high_digit.checked_add(1).ok_or_else(|| {
+                            "VSS fused-bound high range degree overflowed".to_owned()
+                        })?,
+                    )
+                    .ok_or_else(|| "VSS fused-bound high range degree overflowed".to_owned())?,
+                maximum_prover_column_degree
+                    .checked_mul(
+                        u64::from(input.threshold)
+                            .checked_mul(2)
+                            .and_then(|count| count.checked_add(1))
+                            .ok_or_else(|| {
+                                "VSS fused-bound quotient range degree overflowed".to_owned()
+                            })?,
+                    )
+                    .ok_or_else(|| "VSS fused-bound quotient range degree overflowed".to_owned())?,
+                maximum_material_column_degree
+                    .checked_mul(maximum_material_high_digit)
+                    .and_then(|degree| degree.checked_add(maximum_prover_column_degree))
+                    .ok_or_else(|| "VSS fused-bound conditional degree overflowed".to_owned())?,
+            ]
+            .into_iter()
+            .max()
+            .ok_or_else(|| "VSS fused-bound constraint catalog is empty".to_owned())?;
+        if maximum_constraint_numerator_degree >= input.opening_degree_bound_exclusive {
+            return Err("VSS fused-bound maximum degree reaches the opening bound".to_owned());
+        }
+        Self::configure_candidate_quotient_context(
+            &input,
+            &mut context,
+            maximum_constraint_numerator_degree,
+            "fused-bound range",
+        )?;
+        Ok((input, context))
+    }
+
+    #[cfg(test)]
+    fn configure_candidate_quotient_context(
+        input: &CommittedMaterialRelationPlanInput,
+        context: &mut RelationPlanCheckContext,
+        maximum_constraint_numerator_degree: u64,
+        candidate_role: &str,
+    ) -> Result<(), String> {
+        let relation_trace_domain_size = input
+            .relation_trace_domain_size()
+            .map_err(|_| format!("VSS {candidate_role} trace domain is invalid"))?;
+        let maximum_required_quotient_coefficient_count = maximum_constraint_numerator_degree
+            .checked_sub(relation_trace_domain_size)
             .map_or(Ok(1), |quotient_degree| {
                 quotient_degree
                     .checked_add(1)
-                    .ok_or_else(|| "VSS range-packing quotient degree overflowed".to_owned())
+                    .ok_or_else(|| format!("VSS {candidate_role} quotient degree overflowed"))
             })?;
-        let minimum_stride_without_component_rounding = candidate_geometry
-            .relation_trace_domain_size
+        let minimum_stride_without_component_rounding = relation_trace_domain_size
             .checked_add(input.trace_mask_degree_bound_exclusive)
-            .ok_or_else(|| "VSS range-packing quotient stride overflowed".to_owned())?;
+            .ok_or_else(|| format!("VSS {candidate_role} quotient stride overflowed"))?;
         let mut quotient_component_count = maximum_required_quotient_coefficient_count
             .div_ceil(minimum_stride_without_component_rounding)
             .max(2);
@@ -2612,14 +3149,13 @@ impl SelectedVssSourceReplayMeasurement {
                 .and_then(|count| count.checked_mul(input.trace_mask_degree_bound_exclusive))
                 .and_then(|degree| degree.checked_add(component_count.checked_sub(1)?))
                 .and_then(|degree| degree.checked_div(component_count))
-                .ok_or_else(|| "VSS range-packing quotient mask degree overflowed".to_owned())?;
-            let decomposition_stride = candidate_geometry
-                .relation_trace_domain_size
+                .ok_or_else(|| format!("VSS {candidate_role} quotient mask degree overflowed"))?;
+            let decomposition_stride = relation_trace_domain_size
                 .checked_add(rounded_mask_degree)
-                .ok_or_else(|| "VSS range-packing quotient stride overflowed".to_owned())?;
+                .ok_or_else(|| format!("VSS {candidate_role} quotient stride overflowed"))?;
             let coefficient_capacity = decomposition_stride
                 .checked_mul(component_count)
-                .ok_or_else(|| "VSS range-packing quotient capacity overflowed".to_owned())?;
+                .ok_or_else(|| format!("VSS {candidate_role} quotient capacity overflowed"))?;
             Ok((decomposition_stride, coefficient_capacity))
         };
         while quotient_component_count > 2
@@ -2631,15 +3167,17 @@ impl SelectedVssSourceReplayMeasurement {
         let (quotient_decomposition_stride, quotient_coefficient_capacity) =
             quotient_geometry(quotient_component_count)?;
         if quotient_coefficient_capacity < maximum_required_quotient_coefficient_count {
-            return Err("VSS range-packing quotient capacity does not close".to_owned());
+            return Err(format!(
+                "VSS {candidate_role} quotient capacity does not close"
+            ));
         }
         context.quotient_component_count = u32::try_from(quotient_component_count)
-            .map_err(|_| "VSS range-packing quotient component count exceeds u32".to_owned())?;
+            .map_err(|_| format!("VSS {candidate_role} quotient component count exceeds u32"))?;
         context.quotient_component_degree_bound_exclusive = quotient_decomposition_stride
             .checked_add(u64::from(context.phase_column_query_coordinate_count))
             .and_then(|degree| degree.checked_add(u64::from(context.out_of_domain_point_count)))
-            .ok_or_else(|| "VSS range-packing quotient component degree overflowed".to_owned())?;
-        Ok((input, context))
+            .ok_or_else(|| format!("VSS {candidate_role} quotient component degree overflowed"))?;
+        Ok(())
     }
 
     fn relation_replay_candidate_definition(
@@ -3975,6 +4513,73 @@ mod tests {
             )
             .unwrap_err(),
             RelationPlanError::DegreeBoundExceeded
+        );
+    }
+
+    #[cfg(feature = "primitive-measurement-evidence")]
+    #[test]
+    fn fused_bound_range_plan_refuses_altered_and_omitted_bound_constraints() {
+        let (input, context) =
+            super::SelectedVssSourceReplayMeasurement::fused_bound_range_candidate_definition(51)
+                .expect("the radix-51 fused-bound definition derives");
+        let plan = super::super::vss_share_linkage::compile_vss_share_linkage_fused_bound_range_candidate_relation_plan(
+            &input,
+            &context,
+            51,
+        )
+        .expect("the radix-51 fused-bound plan derives");
+        plan.check(&context)
+            .expect("the unmodified radix-51 fused-bound plan validates");
+
+        let maximum_factor_constraint_ordinal = plan.plan.variants[0]
+            .ordered_constraints
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, constraint)| {
+                constraint
+                    .ordered_injective_integer_factor_expressions
+                    .len()
+            })
+            .map(|(constraint_ordinal, constraint)| {
+                assert_eq!(
+                    constraint
+                        .ordered_injective_integer_factor_expressions
+                        .len(),
+                    63
+                );
+                constraint_ordinal
+            })
+            .expect("the radix-51 bound constraint exists");
+
+        let mut reordered_factor_plan = plan.clone();
+        reordered_factor_plan.plan.variants[0].ordered_constraints
+            [maximum_factor_constraint_ordinal]
+            .ordered_injective_integer_factor_expressions
+            .swap(0, 1);
+        assert_eq!(
+            reordered_factor_plan.check(&context),
+            Err(RelationPlanError::InvalidConstraint)
+        );
+
+        let mut omitted_constraint_plan = plan.clone();
+        omitted_constraint_plan.plan.variants[0]
+            .ordered_constraints
+            .remove(maximum_factor_constraint_ordinal);
+        assert!(omitted_constraint_plan.check(&context).is_err());
+
+        let mut altered_radix_plan = plan;
+        let recomposition = altered_radix_plan.plan.variants[0]
+            .ordered_semantic_cells
+            .iter_mut()
+            .find_map(|cell| match &mut cell.bound_certificate {
+                RelationBoundCertificate::UnsignedRadixRecomposition { radix, .. } => Some(radix),
+                _ => None,
+            })
+            .expect("the radix-51 bound recomposition exists");
+        *recomposition = 50;
+        assert_eq!(
+            altered_radix_plan.check(&context),
+            Err(RelationPlanError::InvalidBoundCertificate)
         );
     }
 

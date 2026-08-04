@@ -528,14 +528,22 @@ Works today:
   material group, direct finite-set checks for the high material digit and
   signed quotient, and the three shift selectors. The formulas give 2,240
   range-digit columns, 224 borrow columns, 160 quotient columns, three selector
-  columns, and 2,627 prover columns in total. The exact low-digit bound is the
-  largest constraint at degree `1,161,153`; 62 quotient components are necessary
-  and sufficient at stride `18,466`, capacity `1,144,892`, and component degree
-  bound `18,854`. The modeled construction has 43 base rows, 10 quotient rows,
-  and 53 rows in total. Across its two passes it performs 3,392 lane DFTs,
-  `16,894,656,512` butterflies, `12,448,694,272` coefficient folds,
-  `1,778,384,896` coset multiplications and value deliveries, and `201,326,592`
-  salted-leaf Keccak-f permutations. The fold count follows from 3,392 DFTs
+  columns, and 2,627 prover columns in total. A feature-scoped compiler now
+  emits and checks that exact relation without changing the production
+  radix-three compiler. Its semantic inventory contains the 2,240 range-digit
+  columns, 224 bound-low recompositions, 224 finite high digits, 160 direct
+  signed quotients, and 227 binary columns, of which three are shift selectors.
+  The exact low-digit bound is the largest constraint at degree `1,161,153`;
+  62 quotient components are necessary and sufficient at stride `18,466`,
+  capacity `1,144,892`, and component degree bound `18,854`. The checked opening
+  map puts all 2,624 unrotated columns into exactly 41 width-64 rows and the
+  three shifted selectors into one further row. The construction therefore has
+  42 base rows, 10 quotient rows, and 52 rows in total, correcting the static
+  model that had unnecessarily separated material and quotient columns. Across
+  its two passes it performs 3,328 lane DFTs, `16,575,889,408` butterflies,
+  `12,213,813,248` coefficient folds, `1,744,830,464` coset multiplications and
+  value deliveries, and `201,326,592` salted-leaf Keccak-f permutations. The
+  fold count follows from 3,328 DFTs
   over a `4,194,304`-coefficient message in `524,288`-value lanes; the selected
   base phase has no folds. Even when each butterfly, fold, and coset
   multiplication is charged as one counted row-code operation, the candidate
@@ -544,10 +552,11 @@ Works today:
   boundaries; all `67,108,864` leaf hashes and `67,108,860` Merkle-parent hashes
   remain. Radix 50 needs 74 quotient components and radix 66 needs 112, so each
   adds another quotient-row group and misses the salted-leaf boundary. The
-  radix-51 result is still only a static
-  implementation candidate: its fused constraints, witness, checked compiler,
-  construction identity, complete liveness, theorem, proof bytes, and native
-  and browser measurements do not yet exist, so no replay redesign is selected.
+  radix-51 result is still only a feature-scoped implementation candidate. Its
+  canonical checked compiler and distinct repeatable construction identity now
+  exist, but its witness correspondence, checked interpreter parity, complete
+  liveness, theorem, proof bytes, and native and browser measurements do not,
+  so no replay redesign is selected.
   The fastest comparator accepted by the existing one-aggregate construction
   is instead factor 1, width 32. It has 331 rows, 21,184 lane DFTs,
   `105,511,911,424` butterflies, `11,106,516,992` value deliveries, and

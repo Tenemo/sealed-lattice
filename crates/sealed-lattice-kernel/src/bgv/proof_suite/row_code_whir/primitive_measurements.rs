@@ -21,7 +21,8 @@ use super::super::relation_plan::{
 #[cfg(test)]
 use super::super::relation_plan::{
     RelationOpeningSourceClass, derive_vss_relation_range_arity_candidate_geometry,
-    vss_relation_range_digit_prover_column_ordinals, vss_relation_trinary_prover_column_ordinals,
+    vss_fused_bound_range_candidate_inventory, vss_relation_range_digit_prover_column_ordinals,
+    vss_relation_trinary_prover_column_ordinals,
 };
 #[cfg(test)]
 use super::commitment_liveness::derive_phase_commitment_work_accounting;
@@ -2199,18 +2200,16 @@ fn derive_vss_fused_bound_range_candidate_ledger(
             .logical_polynomials_per_physical_row,
     )
     .map_err(|_| "VSS fused-bound row width exceeds u64".to_owned())?;
-    let material_phase_row_count = material_range_digit_prover_column_count
+    let unrotated_base_phase_row_count = material_range_digit_prover_column_count
         .checked_add(material_borrow_prover_column_count)
+        .and_then(|count| count.checked_add(quotient_prover_column_count))
         .map(|count| count.div_ceil(logical_polynomials_per_physical_row))
-        .ok_or_else(|| "VSS fused-bound material row count overflowed".to_owned())?;
-    let quotient_source_phase_row_count =
-        quotient_prover_column_count.div_ceil(logical_polynomials_per_physical_row);
+        .ok_or_else(|| "VSS fused-bound unrotated row count overflowed".to_owned())?;
     let shift_selector_phase_row_count = geometry
         .shift_selector_column_count
         .div_ceil(logical_polynomials_per_physical_row);
-    let base_phase_row_count = material_phase_row_count
-        .checked_add(quotient_source_phase_row_count)
-        .and_then(|count| count.checked_add(shift_selector_phase_row_count))
+    let base_phase_row_count = unrotated_base_phase_row_count
+        .checked_add(shift_selector_phase_row_count)
         .ok_or_else(|| "VSS fused-bound base row count overflowed".to_owned())?;
     let quotient_coefficient_chunk_count = quotient_component_degree_bound_exclusive.div_ceil(
         u64::try_from(
@@ -2407,6 +2406,40 @@ fn derive_vss_range_packing_candidate_construction_plan(
         vss_relation_replay_candidate_bound_root_source_trace_domain_size,
     )
     .map_err(|error| format!("VSS range-packing candidate construction does not derive: {error:?}"))
+}
+
+#[cfg(test)]
+fn derive_vss_fused_bound_range_candidate_construction_plan(
+    range_digit_radix: u64,
+) -> Result<
+    (
+        ValidatedRelationPlanArtifact,
+        RelationPlanCheckContext,
+        RowCodeWhirConstructionPlan,
+    ),
+    String,
+> {
+    let (_, artifact, context) =
+        SelectedVssSourceReplayMeasurement::validated_fused_bound_range_candidate_with_input(
+            range_digit_radix,
+        )?;
+    let variant = artifact
+        .compiled_plan()
+        .variants()
+        .first()
+        .ok_or_else(|| "VSS fused-bound range candidate variant is absent".to_owned())?;
+    let construction_plan =
+        RowCodeWhirConstructionPlan::for_primitive_measurement_opening_claim_quotient_candidate_variant(
+            &artifact,
+            &context,
+            variant.schedule_position(),
+            variant.top_count(),
+            vss_relation_replay_candidate_bound_root_source_trace_domain_size,
+        )
+        .map_err(|error| {
+            format!("VSS fused-bound range candidate construction does not derive: {error:?}")
+        })?;
+    Ok((artifact, context, construction_plan))
 }
 
 #[cfg(test)]
@@ -5290,10 +5323,10 @@ mod tests {
                 candidate.salted_leaf_keccak_permutation_count,
             )),
             [
-                (18_848, 43, 15, 58, 234_881_024),
-                (18_854, 43, 10, 53, 201_326_592),
-                (18_839, 43, 15, 58, 234_881_024),
-                (18_846, 43, 15, 58, 234_881_024),
+                (18_848, 42, 15, 57, 234_881_024),
+                (18_854, 42, 10, 52, 201_326_592),
+                (18_839, 42, 15, 57, 234_881_024),
+                (18_846, 42, 15, 57, 234_881_024),
             ]
         );
         assert_eq!(radix_51.material_group_count, 112);
@@ -5314,19 +5347,19 @@ mod tests {
             radix_51.maximum_high_digit_constraint_numerator_degree,
             497_637
         );
-        assert_eq!(radix_51.lane_dft_count, 3_392);
-        assert_eq!(radix_51.butterfly_count, 16_894_656_512);
+        assert_eq!(radix_51.lane_dft_count, 3_328);
+        assert_eq!(radix_51.butterfly_count, 16_575_889_408);
         assert_eq!(radix_51.physical_row_witness_variable_count, 21);
         assert_eq!(radix_51.padded_coefficient_count, 4_194_304);
         assert_eq!(radix_51.lane_column_count, 524_288);
         assert_eq!(radix_51.coefficient_fold_count_per_lane_dft, 3_670_016);
-        assert_eq!(radix_51.coefficient_fold_count, 12_448_694_272);
+        assert_eq!(radix_51.coefficient_fold_count, 12_213_813_248);
         assert_eq!(
             radix_51.coefficient_fold_count,
             radix_51.lane_dft_count * radix_51.coefficient_fold_count_per_lane_dft
         );
-        assert_eq!(radix_51.coset_multiplication_count, 1_778_384_896);
-        assert_eq!(radix_51.column_value_delivery_count, 1_778_384_896);
+        assert_eq!(radix_51.coset_multiplication_count, 1_744_830_464);
+        assert_eq!(radix_51.column_value_delivery_count, 1_744_830_464);
         assert_eq!(radix_51.leaf_hash_query_count, 67_108_864);
         assert_eq!(radix_51.merkle_parent_hash_query_count, 67_108_860);
 
@@ -5387,6 +5420,121 @@ mod tests {
             .map(|candidate| candidate.range_digit_radix)
             .collect::<Vec<_>>();
         assert_eq!(admitted_five_digit_radices, [51]);
+    }
+
+    #[test]
+    fn vss_fused_bound_range_compiler_matches_the_admitted_static_geometry() {
+        let static_ledger = derive_vss_fused_bound_range_candidate_ledger(51)
+            .expect("the admitted radix-51 VSS ledger derives");
+        let (artifact, context, construction_plan) =
+            derive_vss_fused_bound_range_candidate_construction_plan(51)
+                .expect("the radix-51 fused-bound VSS construction validates");
+        let variant = artifact
+            .compiled_plan()
+            .variants()
+            .first()
+            .expect("the radix-51 fused-bound VSS variant exists");
+        let prover_column_count = u64::try_from(
+            variant
+                .ordered_columns()
+                .iter()
+                .filter(|column| matches!(column.origin(), RelationColumnOrigin::Prover))
+                .count(),
+        )
+        .expect("the radix-51 prover-column count fits u64");
+        assert_eq!(prover_column_count, static_ledger.prover_column_count);
+        assert_eq!(prover_column_count, 2_627);
+        let semantic_inventory = vss_fused_bound_range_candidate_inventory(variant, 51, 4)
+            .expect("the radix-51 semantic inventory derives");
+        assert_eq!(semantic_inventory.prover_column_count, 2_627);
+        assert_eq!(semantic_inventory.range_digit_column_count, 2_240);
+        assert_eq!(semantic_inventory.binary_column_count, 227);
+        assert_eq!(semantic_inventory.direct_signed_quotient_column_count, 160);
+        assert_eq!(semantic_inventory.bound_high_column_count, 224);
+        assert_eq!(semantic_inventory.bound_low_recomposition_column_count, 224);
+        assert_eq!(semantic_inventory.maximum_injective_factor_count, 63);
+        assert_eq!(
+            variant
+                .ordered_trees()
+                .iter()
+                .filter(|tree| matches!(tree, RelationTreeDescriptor::BoundPublic { .. }))
+                .count(),
+            112
+        );
+        let base_phase = construction_plan
+            .base_phase
+            .as_ref()
+            .expect("the radix-51 base phase exists");
+        let base_patterns = trace_phase_columns_by_opening_pattern_and_chunk_count(base_phase, 64)
+            .expect("the radix-51 base opening patterns derive");
+        assert_eq!(
+            base_patterns
+                .iter()
+                .map(|((opening_points, chunk_count), columns)| (
+                    opening_points.clone(),
+                    *chunk_count,
+                    columns.len()
+                ))
+                .collect::<Vec<_>>(),
+            [(vec![0], 1, 2_624), (vec![0, 1], 1, 3)]
+        );
+        assert_eq!(context.quotient_component_count, 62);
+        assert_eq!(context.quotient_component_degree_bound_exclusive, 18_854);
+        assert_eq!(
+            variant
+                .quotient_decomposition_stride(&context)
+                .expect("the radix-51 quotient stride derives"),
+            18_466
+        );
+        assert_eq!(
+            base_phase.rows.len(),
+            usize::try_from(static_ledger.base_phase_row_count)
+                .expect("the radix-51 base row count fits usize")
+        );
+        assert_eq!(construction_plan.quotient_phase.rows.len(), 10);
+        assert_eq!(
+            construction_plan.quotient_phase.rows.len(),
+            usize::try_from(static_ledger.quotient_phase_row_count)
+                .expect("the radix-51 quotient row count fits usize")
+        );
+        assert!(construction_plan.auxiliary_phase.is_none());
+        assert_eq!(
+            construction_plan.relation_plan_hash,
+            artifact.canonical_plan_hash()
+        );
+        let exact_work = derive_phase_commitment_work_accounting(&construction_plan)
+            .expect("the radix-51 exact construction work derives");
+        assert_eq!(exact_work.lane_dft_count, static_ledger.lane_dft_count);
+        assert_eq!(exact_work.butterfly_count, static_ledger.butterfly_count);
+        assert_eq!(
+            exact_work.coefficient_fold_count,
+            static_ledger.coefficient_fold_count
+        );
+        assert_eq!(
+            exact_work.coset_multiplication_count,
+            static_ledger.coset_multiplication_count
+        );
+        assert_eq!(
+            exact_work.column_value_delivery_count,
+            static_ledger.column_value_delivery_count
+        );
+        assert_eq!(
+            exact_work.leaf_hash_query_count,
+            static_ledger.leaf_hash_query_count
+        );
+        assert_eq!(
+            exact_work.merkle_parent_hash_query_count,
+            static_ledger.merkle_parent_hash_query_count
+        );
+        let repeated = derive_vss_fused_bound_range_candidate_construction_plan(51)
+            .expect("the repeated radix-51 fused-bound VSS construction validates");
+        assert_eq!(
+            repeated.0.canonical_plan_hash(),
+            artifact.canonical_plan_hash()
+        );
+        assert_eq!(repeated.2, construction_plan);
+        assert!(derive_vss_fused_bound_range_candidate_construction_plan(50).is_err());
+        assert!(derive_vss_fused_bound_range_candidate_construction_plan(52).is_err());
     }
 
     #[test]

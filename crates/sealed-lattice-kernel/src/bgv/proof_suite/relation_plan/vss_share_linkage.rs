@@ -29,11 +29,42 @@ pub(crate) fn compile_vss_share_linkage_range_candidate_relation_plan(
     )
 }
 
+#[cfg(all(feature = "primitive-measurement-evidence", test))]
+pub(crate) fn compile_vss_share_linkage_fused_bound_range_candidate_relation_plan(
+    input: &CommittedMaterialRelationPlanInput,
+    check_context: &RelationPlanCheckContext,
+    range_digit_radix: u64,
+) -> Result<CompiledRelationPlan, RelationPlanError> {
+    let root_paths = vss_share_linkage_root_paths(input)?;
+    let builder = CommittedMaterialPlanBuilder::new_with_fused_bound_range_design(
+        VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+        input,
+        check_context,
+        root_paths,
+        range_digit_radix,
+    )?;
+    compile_vss_share_linkage_relation_plan_with_builder(input, check_context, builder)
+}
+
 fn compile_vss_share_linkage_relation_plan_with_range_digit_radix(
     input: &CommittedMaterialRelationPlanInput,
     check_context: &RelationPlanCheckContext,
     range_digit_radix: u64,
 ) -> Result<CompiledRelationPlan, RelationPlanError> {
+    let root_paths = vss_share_linkage_root_paths(input)?;
+    let builder = CommittedMaterialPlanBuilder::new_with_range_digit_radix(
+        VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+        input,
+        check_context,
+        root_paths,
+        range_digit_radix,
+    )?;
+    compile_vss_share_linkage_relation_plan_with_builder(input, check_context, builder)
+}
+
+fn vss_share_linkage_root_paths(
+    input: &CommittedMaterialRelationPlanInput,
+) -> Result<Vec<Vec<super::RelationSelectorPathStep>>, RelationPlanError> {
     let sharing_limb_count = input.sharing_data_modulus_indices.len();
     let threshold = usize::from(input.threshold);
     let participant_count = usize::from(input.participant_count);
@@ -69,13 +100,17 @@ fn compile_vss_share_linkage_relation_plan_with_range_digit_radix(
         }
     }
 
-    let mut builder = CommittedMaterialPlanBuilder::new_with_range_digit_radix(
-        VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
-        input,
-        check_context,
-        root_paths,
-        range_digit_radix,
-    )?;
+    Ok(root_paths)
+}
+
+fn compile_vss_share_linkage_relation_plan_with_builder(
+    input: &CommittedMaterialRelationPlanInput,
+    check_context: &RelationPlanCheckContext,
+    mut builder: CommittedMaterialPlanBuilder<'_>,
+) -> Result<CompiledRelationPlan, RelationPlanError> {
+    let sharing_limb_count = input.sharing_data_modulus_indices.len();
+    let threshold = usize::from(input.threshold);
+    let participant_count = usize::from(input.participant_count);
     let mut coefficient_messages = Vec::with_capacity(sharing_limb_count);
     let mut recipient_messages = Vec::with_capacity(sharing_limb_count);
     let mut logical_root_ordinal = 0_usize;
@@ -165,4 +200,35 @@ fn compile_vss_share_linkage_relation_plan_with_range_digit_radix(
         return Err(RelationPlanError::InvalidColumn);
     }
     builder.finish()
+}
+
+#[cfg(all(feature = "primitive-measurement-evidence", test))]
+mod tests {
+    use super::{
+        RelationPlanError, compile_vss_share_linkage_fused_bound_range_candidate_relation_plan,
+    };
+    use crate::bgv::proof_suite::relation_plan::SelectedVssSourceReplayMeasurement;
+
+    #[test]
+    fn fused_bound_range_compiler_refuses_wrong_radix_and_trace_packing() {
+        let (input, context) =
+            SelectedVssSourceReplayMeasurement::fused_bound_range_candidate_definition(51)
+                .expect("the radix-51 fused-bound definition derives");
+        assert!(matches!(
+            compile_vss_share_linkage_fused_bound_range_candidate_relation_plan(
+                &input, &context, 50,
+            ),
+            Err(RelationPlanError::InvalidConstraint)
+        ));
+        let mut packed_input = input;
+        packed_input.trace_packing_factor = 2;
+        assert!(matches!(
+            compile_vss_share_linkage_fused_bound_range_candidate_relation_plan(
+                &packed_input,
+                &context,
+                51,
+            ),
+            Err(RelationPlanError::InvalidDomain)
+        ));
+    }
 }
