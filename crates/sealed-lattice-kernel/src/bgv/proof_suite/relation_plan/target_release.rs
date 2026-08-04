@@ -5001,7 +5001,11 @@ mod tests {
         let flooding_bound =
             crate::bgv::proof_suite::selected_profile::selected_target_decryption_flooding_bound()
                 .expect("selected flooding bound");
-        assert_eq!(flooding_bound.bits(), 218);
+        assert_eq!(flooding_bound.bits(), 146);
+        assert_eq!(
+            flooding_bound.to_str_radix(10),
+            "48425557508880960588220213618157405536780288",
+        );
         let flooding_errors = [
             BigInt::from_biguint(Sign::Minus, flooding_bound.clone()),
             BigInt::zero(),

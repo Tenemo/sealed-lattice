@@ -174,7 +174,7 @@ fn selected_eight_prime_target_basis_satisfies_the_exact_factor_four_theorem_bou
         .max()
         .cloned()
         .expect("the selected evaluator has at least one target");
-    assert!(!evaluation_error_bound.is_zero());
+    assert_eq!(evaluation_error_bound, BigUint::from(2_331_605_782_u64));
 
     let flooding_bound = factor_four_required_flooding_bound(&evaluation_error_bound)
         .expect("the exact factor-four flooding bound is representable");
@@ -186,6 +186,11 @@ fn selected_eight_prime_target_basis_satisfies_the_exact_factor_four_theorem_bou
     assert_eq!(
         flooding_bound, independently_required_flooding_bound,
         "the selected C4 inequality is met at its exact non-strict minimum",
+    );
+    assert_eq!(flooding_bound.bits(), 146);
+    assert_eq!(
+        flooding_bound.to_str_radix(10),
+        "48425557508880960588220213618157405536780288",
     );
     assert_eq!(
         selected_factor_four_flooding_bound()

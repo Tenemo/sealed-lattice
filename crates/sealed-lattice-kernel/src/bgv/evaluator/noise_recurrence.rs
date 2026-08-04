@@ -935,6 +935,15 @@ mod tests {
         let option_count = usize::from(FOUNDATION_PROFILE.option_count);
         let bounds = direct_ballot_target_noise_bounds(10, 10, option_count, 1, 10)
             .expect("selected recurrence");
+        let worst = bounds
+            .iter()
+            .max_by_key(|bound| bound.maximum_error_coefficient_bound())
+            .expect("selected target bounds");
+        assert_eq!(worst.top_count, 9);
+        assert_eq!(
+            worst.maximum_error_coefficient_bound().to_str_radix(10),
+            "2331605782",
+        );
         assert_eq!(bounds.len(), option_count);
         assert!(bounds.iter().enumerate().all(|(index, bound)| {
             bound.top_count == index + 1
