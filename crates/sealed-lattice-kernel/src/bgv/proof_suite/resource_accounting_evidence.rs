@@ -1297,8 +1297,22 @@ mod tests {
                     == ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER
             })
             .expect("the same-secret accounting row exists");
-        assert_eq!(same_secret.canonical_proof_byte_length, 5_309_850);
-        assert_eq!(same_secret.nominal_proof_overage_byte_length, 66_970);
+        let aggregate_opening_byte_length = same_secret
+            .construction
+            .aggregate_opening_sections
+            .iter()
+            .map(|section| section.byte_length)
+            .sum::<u64>();
+        let non_aggregate_prefix_byte_length = same_secret
+            .canonical_proof_byte_length
+            .checked_sub(aggregate_opening_byte_length)
+            .expect("the same-secret proof contains its aggregate opening");
+        assert_eq!(same_secret.canonical_header_byte_length, 902);
+        assert_eq!(same_secret.canonical_family_body_byte_length, 5_813_652);
+        assert_eq!(aggregate_opening_byte_length, 2_942_104);
+        assert_eq!(non_aggregate_prefix_byte_length, 2_872_450);
+        assert_eq!(same_secret.canonical_proof_byte_length, 5_814_554);
+        assert_eq!(same_secret.nominal_proof_overage_byte_length, 571_674);
         assert_eq!(same_secret.automatic_acceptance_overage_byte_length, 0);
         assert_eq!(
             same_secret.external_memory.peak_stored_byte_length,
@@ -1334,14 +1348,34 @@ mod tests {
                 )
             })
             .collect::<Vec<_>>();
+        assert!(!engineering_review_rows.is_empty());
+        assert_eq!(engineering_review_rows.len(), 18);
         assert_eq!(
-            engineering_review_rows,
-            vec![(
-                ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
-                7_916_724,
-                52_404,
-            )],
+            engineering_review_rows
+                .iter()
+                .map(|(_, proof_byte_length, _)| *proof_byte_length)
+                .max(),
+            Some(48_211_810),
         );
+        assert!(engineering_review_rows.iter().all(
+            |(_, proof_byte_length, automatic_acceptance_overage_byte_length)| {
+                *proof_byte_length > record.caps.automatic_proof_acceptance_byte_length
+                    && *proof_byte_length
+                        <= record
+                            .caps
+                            .common_authenticated_stream_hard_limit_byte_length
+                    && *automatic_acceptance_overage_byte_length
+                        == proof_byte_length
+                            .checked_sub(record.caps.automatic_proof_acceptance_byte_length)
+                            .expect("the reviewed proof exceeds automatic acceptance")
+            }
+        ));
+        assert!(engineering_review_rows.iter().all(
+            |(application_statement_schema_identifier, _, _)| {
+                *application_statement_schema_identifier
+                    != ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER
+            }
+        ));
         let material = derive_selected_complete_action_material_resource_accounting()
             .expect("selected material accounting closes");
         assert_eq!(

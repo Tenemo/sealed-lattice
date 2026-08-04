@@ -91,13 +91,14 @@ Works today:
   incremental canonical verification, bounded-storage primitives, and focused
   development tests.
 - The live 64-way same-secret geometry and full-coordinate, inverse-rate-four
-  aggregate-wide mask have production-derived static plans. Static accounting
-  is not yet reconciled: the transport-section model derives `5,814,554`
-  bytes, while the selected resource record still expects `5,309,850` bytes.
-  Both are within the automatic proof-size variance band, but neither may be
-  frozen as the exact emitted size until one production ledger accounts for
-  the difference. Other proof-family resource rows inherited from the
-  superseded option-count profile are likewise provisional.
+  aggregate-wide mask have production-derived static plans. The canonical
+  transport sections and selected resource owner now independently reconcile a
+  `5,813,652`-byte family body plus a 902-byte header, for a `5,814,554`-byte
+  static proof ceiling. That is `571,674` bytes above the nominal target and
+  within the automatic variance band. The current exact-ten resource owner
+  derives all 21 selected variant rows; 18 exceed the automatic proof band but
+  remain below the absolute parser bound and require engineering review. These
+  are static ceilings, not emitted-proof or browser evidence.
 - Aggregate-wide oracle commitments now use uniform 512-bit leaf transitions
   in aligned `2^20`-row stripes. The selected construction derives a
   `402,653,184`-byte DFT-plus-leaf-state core and preserves the canonical roots
@@ -299,10 +300,10 @@ Works today:
   construction-plan proof sections through their production decoder and
   semantic-verifier owners. Its current section model derives a
   `5,813,652`-byte family body and the `2,942,104`-byte aggregate-wide terminal,
-  giving `5,814,554` bytes after the 902-byte canonical header. The independent
-  resource record still expects `5,309,850` bytes, so the discrepancy is an
-  open ledger defect rather than a frozen proof size. The catalog binds the
-  statement, protocol, suite, ceremony, action,
+  giving `5,814,554` bytes after the 902-byte canonical header. The selected
+  resource owner independently rederives the same total as a 2,872,450-byte
+  pre-aggregate prefix plus that terminal. The catalog binds the statement,
+  protocol, suite, ceremony, action,
   application slot, relation, construction, declared length, and final stream
   digest, and mutation tests refuse omitted or reordered sections, stale
   identities, incomplete binding or refusal catalogs, and altered byte
@@ -459,12 +460,12 @@ Not yet:
   remain open.
 - The static liveness model has not yet been confirmed by a completed native
   proof or release-WebAssembly browser measurement. Complete participant
-  transport accounting is also open. Production-derived sizes for 73 of the
-  103 physical proof objects in the superseded twenty-option inventory already
-  total `2,024,248,558` bytes
-  (`1.885228378698` GiB), before the ten public-key-share proofs and twenty
-  ballot proofs. That is a partial corpus lower bound, not a completed traffic
-  estimate; the two-GiB corpus and network values are soft planning targets.
+  transport accounting is also open. The current exact-ten static owner derives
+  all 21 selected variant rows and the 103-proof action arithmetic, but its
+  complete proof-corpus total has not been exported and reconciled with carrier
+  framing or per-participant traffic. The former `2,024,248,558`-byte
+  twenty-option subtotal is superseded and is not a lower bound for the current
+  profile.
 - No full-width exact proof has completed on the current implementation, and no
   release WebAssembly proof has been generated and freshly verified across the
   desktop browsers. Recent guarded native attempts ended before proof emission,
