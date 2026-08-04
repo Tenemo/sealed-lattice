@@ -20,7 +20,9 @@ pub(crate) struct VssRelationPackingCandidateGeometry {
     pub(crate) trace_packing_factor: u64,
     pub(crate) range_constraint_arity: u64,
     pub(crate) relation_trace_domain_size: u64,
+    pub(crate) material_digit_radix: u64,
     pub(crate) material_group_count: u64,
+    pub(crate) maximum_material_high_digit: u64,
     pub(crate) material_range_digit_prover_column_count: u64,
     pub(crate) material_prover_column_count: u64,
     pub(crate) quotient_group_count: u64,
@@ -191,10 +193,12 @@ pub(crate) fn derive_vss_relation_range_arity_candidate_geometry(
     let material_digit_range_digit_count =
         minimum_unsigned_digit_count(MATERIAL_DIGIT_RADIX - 1, range_constraint_arity)?;
     let mut material_group_count = 0_u64;
+    let mut maximum_material_high_digit = 0_u64;
     let mut material_range_digit_prover_column_count = 0_u64;
     let mut material_prover_column_count = 0_u64;
     for (_, modulus) in resolved_moduli.iter().copied() {
         let maximum_digits = fixed_material_digits(modulus - 1)?;
+        maximum_material_high_digit = maximum_material_high_digit.max(maximum_digits[1]);
         let high_digit_range_digit_count =
             minimum_unsigned_digit_count(maximum_digits[1], range_constraint_arity)?;
         let range_digit_columns_per_physical_half = material_digit_range_digit_count
@@ -308,7 +312,9 @@ pub(crate) fn derive_vss_relation_range_arity_candidate_geometry(
         trace_packing_factor,
         range_constraint_arity,
         relation_trace_domain_size,
+        material_digit_radix: MATERIAL_DIGIT_RADIX,
         material_group_count,
+        maximum_material_high_digit,
         material_range_digit_prover_column_count,
         material_prover_column_count,
         quotient_group_count,
@@ -322,7 +328,7 @@ pub(crate) fn derive_vss_relation_range_arity_candidate_geometry(
     })
 }
 
-#[cfg(feature = "primitive-measurement-evidence")]
+#[cfg(all(feature = "primitive-measurement-evidence", test))]
 pub(crate) fn vss_relation_trinary_prover_column_ordinals(
     variant: &RelationPlanVariant,
 ) -> Result<BTreeSet<u32>, RelationPlanError> {
@@ -353,7 +359,7 @@ pub(crate) fn vss_relation_trinary_prover_column_ordinals(
     Ok(column_ordinals)
 }
 
-#[cfg(feature = "primitive-measurement-evidence")]
+#[cfg(all(feature = "primitive-measurement-evidence", test))]
 pub(crate) fn vss_relation_range_digit_prover_column_ordinals(
     variant: &RelationPlanVariant,
     range_digit_radix: u64,
@@ -2525,6 +2531,7 @@ impl SelectedVssSourceReplayMeasurement {
         Ok((input, artifact, context))
     }
 
+    #[cfg(test)]
     pub(crate) fn validated_range_packing_candidate_with_input(
         trace_packing_factor: u64,
         opening_degree_bound_exclusive: u64,
@@ -2561,6 +2568,7 @@ impl SelectedVssSourceReplayMeasurement {
         Ok((input, artifact, context))
     }
 
+    #[cfg(test)]
     pub(crate) fn range_packing_candidate_definition(
         trace_packing_factor: u64,
         opening_degree_bound_exclusive: u64,

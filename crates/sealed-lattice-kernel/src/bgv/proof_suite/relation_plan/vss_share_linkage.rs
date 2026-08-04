@@ -16,7 +16,7 @@ pub(crate) fn compile_vss_share_linkage_relation_plan(
     compile_vss_share_linkage_relation_plan_with_range_digit_radix(input, check_context, 3)
 }
 
-#[cfg(feature = "primitive-measurement-evidence")]
+#[cfg(all(feature = "primitive-measurement-evidence", test))]
 pub(crate) fn compile_vss_share_linkage_range_candidate_relation_plan(
     input: &CommittedMaterialRelationPlanInput,
     check_context: &RelationPlanCheckContext,

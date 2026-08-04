@@ -16,13 +16,17 @@ use sha3::Shake256;
 use zeroize::Zeroizing;
 
 use super::super::relation_plan::{
-    COMMITTED_MATERIAL_TRACE_PACKING_FACTOR, RelationOpeningSourceClass,
-    derive_vss_relation_packing_candidate_geometry,
-    derive_vss_relation_range_arity_candidate_geometry,
+    COMMITTED_MATERIAL_TRACE_PACKING_FACTOR, derive_vss_relation_packing_candidate_geometry,
+};
+#[cfg(test)]
+use super::super::relation_plan::{
+    RelationOpeningSourceClass, derive_vss_relation_range_arity_candidate_geometry,
     vss_relation_range_digit_prover_column_ordinals, vss_relation_trinary_prover_column_ordinals,
 };
 #[cfg(test)]
 use super::commitment_liveness::derive_phase_commitment_work_accounting;
+#[cfg(test)]
+use super::construction_plan::RowCodeWhirTracePhasePlan;
 use super::{
     bounded_dft::{
         BoundedBaseCosetLaneDft, BoundedSelectedBaseCosetLaneDft, SelectedBaseCosetLaneDftSchedule,
@@ -38,7 +42,7 @@ use super::{
         ROW_CODE_WHIR_LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT,
         ROW_CODE_WHIR_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW, ROW_CODE_WHIR_OUTER_QUERY_COUNT,
         RowCodeWhirAggregateColumnRole, RowCodeWhirConstructionPlan,
-        RowCodeWhirConstructionPlanError, RowCodeWhirTracePhasePlan,
+        RowCodeWhirConstructionPlanError,
     },
     hiding_whir::selected_hiding_whir_config,
     opening_claim_reduction::OpeningClaimQuotientBatchGeometry,
@@ -638,6 +642,7 @@ struct VssRelationReplayCandidateLedger {
     logical_row_chunk_byte_length: u64,
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct VssRangeConstraintArityCandidateLedger {
     trace_packing_factor: u64,
@@ -653,6 +658,43 @@ struct VssRangeConstraintArityCandidateLedger {
     quotient_component_count: u64,
     quotient_decomposition_stride: u64,
     quotient_coefficient_capacity: u64,
+    base_phase_row_count: u64,
+    quotient_phase_row_count: u64,
+    complete_phase_row_count: u64,
+    lane_dft_count: u64,
+    butterfly_count: u64,
+    coefficient_fold_count: u64,
+    coset_multiplication_count: u64,
+    column_value_delivery_count: u64,
+    leaf_hash_query_count: u64,
+    salted_leaf_keccak_permutation_count: u64,
+    merkle_parent_hash_query_count: u64,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct VssFusedBoundRangeCandidateLedger {
+    range_digit_radix: u64,
+    range_digit_count_per_material_low_digit: u64,
+    material_group_count: u64,
+    maximum_material_high_digit: u64,
+    material_range_digit_prover_column_count: u64,
+    material_borrow_prover_column_count: u64,
+    quotient_prover_column_count: u64,
+    shift_selector_column_count: u64,
+    prover_column_count: u64,
+    maximum_range_digit_constraint_numerator_degree: u64,
+    maximum_high_digit_constraint_numerator_degree: u64,
+    maximum_constraint_numerator_degree: u64,
+    maximum_required_quotient_coefficient_count: u64,
+    quotient_component_count: u64,
+    quotient_decomposition_stride: u64,
+    quotient_coefficient_capacity: u64,
+    quotient_component_degree_bound_exclusive: u64,
+    physical_row_witness_variable_count: u64,
+    padded_coefficient_count: u64,
+    lane_column_count: u64,
+    coefficient_fold_count_per_lane_dft: u64,
     base_phase_row_count: u64,
     quotient_phase_row_count: u64,
     complete_phase_row_count: u64,
@@ -1503,6 +1545,7 @@ fn derive_vss_relation_replay_candidate_construction_plan(
     })
 }
 
+#[cfg(test)]
 fn trace_phase_columns_by_opening_pattern_and_chunk_count(
     phase: &RowCodeWhirTracePhasePlan,
     logical_polynomials_per_physical_row: u64,
@@ -1589,6 +1632,7 @@ fn trace_phase_columns_by_opening_pattern_and_chunk_count(
     Ok(columns_by_pattern)
 }
 
+#[cfg(test)]
 fn derive_vss_range_constraint_arity_candidate_ledger(
     range_constraint_arity: u64,
 ) -> Result<Option<VssRangeConstraintArityCandidateLedger>, String> {
@@ -1599,6 +1643,7 @@ fn derive_vss_range_constraint_arity_candidate_ledger(
     )
 }
 
+#[cfg(test)]
 fn derive_vss_range_constraint_candidate_ledger(
     trace_packing_factor: u64,
     logical_polynomials_per_physical_row: u64,
@@ -1932,6 +1977,7 @@ fn derive_vss_range_constraint_candidate_ledger(
     }))
 }
 
+#[cfg(test)]
 fn derive_vss_range_constraint_arity_candidate_grid()
 -> Result<Vec<VssRangeConstraintArityCandidateLedger>, String> {
     (3_u64..=7)
@@ -1946,6 +1992,7 @@ fn derive_vss_range_constraint_arity_candidate_grid()
         .collect()
 }
 
+#[cfg(test)]
 fn derive_vss_maximum_range_arity_candidate_grid()
 -> Result<Vec<VssRangeConstraintArityCandidateLedger>, String> {
     let mut candidates = Vec::new();
@@ -1980,6 +2027,314 @@ fn derive_vss_maximum_range_arity_candidate_grid()
     Ok(candidates)
 }
 
+#[cfg(test)]
+fn derive_vss_fused_bound_range_candidate_ledger(
+    range_digit_radix: u64,
+) -> Result<VssFusedBoundRangeCandidateLedger, String> {
+    if range_digit_radix < 2 {
+        return Err("VSS fused-bound range radix is invalid".to_owned());
+    }
+    let relation_candidate = derive_vss_relation_replay_candidate_ledger(1, 64)?
+        .ok_or_else(|| "VSS fused-bound baseline exceeds its opening bound".to_owned())?;
+    let relation_input = selected_committed_material_relation_plan_input()
+        .map_err(|_| "VSS fused-bound relation input is invalid".to_owned())?;
+    let relation_context = selected_relation_plan_check_context(
+        ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+    )
+    .ok_or_else(|| "VSS fused-bound relation context is absent".to_owned())?;
+    let geometry = derive_vss_relation_range_arity_candidate_geometry(
+        &relation_input,
+        &relation_context,
+        1,
+        range_digit_radix,
+    )
+    .map_err(|error| format!("VSS fused-bound geometry is invalid: {error:?}"))?;
+    let mut range_digit_count_per_material_low_digit = 1_u64;
+    let mut range_digit_capacity = range_digit_radix;
+    while range_digit_capacity <= geometry.material_digit_radix - 1 {
+        range_digit_count_per_material_low_digit = range_digit_count_per_material_low_digit
+            .checked_add(1)
+            .ok_or_else(|| "VSS fused-bound range digit count overflowed".to_owned())?;
+        range_digit_capacity = range_digit_capacity
+            .checked_mul(range_digit_radix)
+            .ok_or_else(|| "VSS fused-bound range digit capacity overflowed".to_owned())?;
+    }
+    let material_range_digit_prover_column_count = geometry
+        .material_group_count
+        .checked_mul(4)
+        .and_then(|count| count.checked_mul(range_digit_count_per_material_low_digit))
+        .ok_or_else(|| "VSS fused-bound material range column count overflowed".to_owned())?;
+    let material_borrow_prover_column_count = geometry
+        .material_group_count
+        .checked_mul(2)
+        .ok_or_else(|| "VSS fused-bound borrow column count overflowed".to_owned())?;
+    let quotient_prover_column_count = geometry.quotient_group_count;
+    let prover_column_count = material_range_digit_prover_column_count
+        .checked_add(material_borrow_prover_column_count)
+        .and_then(|count| count.checked_add(quotient_prover_column_count))
+        .and_then(|count| count.checked_add(geometry.shift_selector_column_count))
+        .ok_or_else(|| "VSS fused-bound prover column count overflowed".to_owned())?;
+
+    let maximum_prover_column_degree = geometry
+        .prover_column_degree_bound_exclusive
+        .checked_sub(1)
+        .ok_or_else(|| "VSS fused-bound prover degree is empty".to_owned())?;
+    let maximum_material_column_degree = relation_input
+        .material_column_degree_bound_exclusive
+        .checked_sub(1)
+        .ok_or_else(|| "VSS fused-bound material degree is empty".to_owned())?;
+    let maximum_range_digit_constraint_numerator_degree = maximum_prover_column_degree
+        .checked_mul(range_digit_radix)
+        .ok_or_else(|| "VSS fused-bound range numerator degree overflowed".to_owned())?;
+    let maximum_high_digit_constraint_numerator_degree = maximum_material_column_degree
+        .checked_mul(
+            geometry
+                .maximum_material_high_digit
+                .checked_add(1)
+                .ok_or_else(|| "VSS fused-bound high-digit cardinality overflowed".to_owned())?,
+        )
+        .ok_or_else(|| "VSS fused-bound high-digit degree overflowed".to_owned())?;
+    let signed_quotient_value_count = u64::from(relation_input.threshold)
+        .checked_mul(2)
+        .and_then(|count| count.checked_add(1))
+        .ok_or_else(|| "VSS fused-bound quotient value count overflowed".to_owned())?;
+    let signed_quotient_constraint_numerator_degree = maximum_prover_column_degree
+        .checked_mul(signed_quotient_value_count)
+        .ok_or_else(|| "VSS fused-bound quotient degree overflowed".to_owned())?;
+    let conditional_high_digit_constraint_numerator_degree = maximum_material_column_degree
+        .checked_mul(geometry.maximum_material_high_digit)
+        .and_then(|degree| degree.checked_add(maximum_prover_column_degree))
+        .ok_or_else(|| "VSS fused-bound conditional degree overflowed".to_owned())?;
+    let maximum_constraint_numerator_degree = [
+        maximum_range_digit_constraint_numerator_degree,
+        maximum_high_digit_constraint_numerator_degree,
+        signed_quotient_constraint_numerator_degree,
+        conditional_high_digit_constraint_numerator_degree,
+    ]
+    .into_iter()
+    .max()
+    .ok_or_else(|| "VSS fused-bound constraint catalog is empty".to_owned())?;
+    if maximum_constraint_numerator_degree >= relation_candidate.opening_degree_bound_exclusive {
+        return Err("VSS fused-bound maximum degree reaches the opening bound".to_owned());
+    }
+    let maximum_required_quotient_coefficient_count = maximum_constraint_numerator_degree
+        .checked_sub(geometry.relation_trace_domain_size)
+        .map_or(Ok(1), |quotient_degree| {
+            quotient_degree
+                .checked_add(1)
+                .ok_or_else(|| "VSS fused-bound quotient degree overflowed".to_owned())
+        })?;
+    let minimum_stride_without_component_rounding = geometry
+        .relation_trace_domain_size
+        .checked_add(relation_input.trace_mask_degree_bound_exclusive)
+        .ok_or_else(|| "VSS fused-bound quotient stride overflowed".to_owned())?;
+    let mut quotient_component_count = maximum_required_quotient_coefficient_count
+        .div_ceil(minimum_stride_without_component_rounding)
+        .max(2);
+    let quotient_geometry = |component_count: u64| -> Result<(u64, u64), String> {
+        let rounded_mask_degree = component_count
+            .checked_add(1)
+            .and_then(|count| count.checked_mul(relation_input.trace_mask_degree_bound_exclusive))
+            .and_then(|degree| degree.checked_add(component_count.checked_sub(1)?))
+            .and_then(|degree| degree.checked_div(component_count))
+            .ok_or_else(|| "VSS fused-bound quotient mask degree overflowed".to_owned())?;
+        let decomposition_stride = geometry
+            .relation_trace_domain_size
+            .checked_add(rounded_mask_degree)
+            .ok_or_else(|| "VSS fused-bound quotient stride overflowed".to_owned())?;
+        let coefficient_capacity = decomposition_stride
+            .checked_mul(component_count)
+            .ok_or_else(|| "VSS fused-bound quotient capacity overflowed".to_owned())?;
+        Ok((decomposition_stride, coefficient_capacity))
+    };
+    while quotient_component_count > 2
+        && quotient_geometry(quotient_component_count - 1)?.1
+            >= maximum_required_quotient_coefficient_count
+    {
+        quotient_component_count -= 1;
+    }
+    let (quotient_decomposition_stride, quotient_coefficient_capacity) =
+        quotient_geometry(quotient_component_count)?;
+    if quotient_coefficient_capacity < maximum_required_quotient_coefficient_count {
+        return Err("VSS fused-bound quotient capacity does not close".to_owned());
+    }
+    let quotient_component_degree_bound_exclusive = quotient_decomposition_stride
+        .checked_add(u64::from(
+            relation_context.phase_column_query_coordinate_count,
+        ))
+        .and_then(|degree| {
+            degree.checked_add(u64::from(relation_context.out_of_domain_point_count))
+        })
+        .ok_or_else(|| "VSS fused-bound component degree overflowed".to_owned())?;
+
+    let construction_plan =
+        derive_vss_relation_replay_opening_claim_quotient_candidate_construction_plan(
+            relation_candidate,
+        )?;
+    let logical_polynomials_per_physical_row = u64::try_from(
+        construction_plan
+            .parameters
+            .logical_polynomials_per_physical_row,
+    )
+    .map_err(|_| "VSS fused-bound row width exceeds u64".to_owned())?;
+    let material_phase_row_count = material_range_digit_prover_column_count
+        .checked_add(material_borrow_prover_column_count)
+        .map(|count| count.div_ceil(logical_polynomials_per_physical_row))
+        .ok_or_else(|| "VSS fused-bound material row count overflowed".to_owned())?;
+    let quotient_source_phase_row_count =
+        quotient_prover_column_count.div_ceil(logical_polynomials_per_physical_row);
+    let shift_selector_phase_row_count = geometry
+        .shift_selector_column_count
+        .div_ceil(logical_polynomials_per_physical_row);
+    let base_phase_row_count = material_phase_row_count
+        .checked_add(quotient_source_phase_row_count)
+        .and_then(|count| count.checked_add(shift_selector_phase_row_count))
+        .ok_or_else(|| "VSS fused-bound base row count overflowed".to_owned())?;
+    let quotient_coefficient_chunk_count = quotient_component_degree_bound_exclusive.div_ceil(
+        u64::try_from(
+            construction_plan
+                .parameters
+                .logical_polynomial_coefficient_count,
+        )
+        .map_err(|_| "VSS fused-bound coefficient count exceeds u64".to_owned())?,
+    );
+    let quotient_component_group_count =
+        quotient_component_count.div_ceil(logical_polynomials_per_physical_row);
+    let opening_batch_mask_row_count = u64::try_from(
+        construction_plan
+            .quotient_phase
+            .rows
+            .iter()
+            .filter(|row| row.source_class == RelationOpeningSourceClass::BatchMask)
+            .count(),
+    )
+    .map_err(|_| "VSS fused-bound batch-mask row count exceeds u64".to_owned())?;
+    let quotient_phase_row_count = quotient_coefficient_chunk_count
+        .checked_mul(quotient_component_group_count)
+        .and_then(|count| count.checked_mul(u64::from(relation_context.challenge_extension_degree)))
+        .and_then(|count| count.checked_add(opening_batch_mask_row_count))
+        .ok_or_else(|| "VSS fused-bound quotient row count overflowed".to_owned())?;
+    let complete_phase_row_count = base_phase_row_count
+        .checked_add(quotient_phase_row_count)
+        .ok_or_else(|| "VSS fused-bound complete row count overflowed".to_owned())?;
+    let base_geometry = RowEncodingGeometry::new_weighted_batch_with_log_inverse_rate(
+        usize::try_from(base_phase_row_count)
+            .map_err(|_| "VSS fused-bound base rows exceed usize".to_owned())?,
+        construction_plan
+            .parameters
+            .physical_row_witness_variable_count,
+        construction_plan.parameters.row_code_log_inverse_rate,
+    )?;
+    let quotient_geometry = RowEncodingGeometry::new_weighted_batch_with_log_inverse_rate(
+        usize::try_from(quotient_phase_row_count)
+            .map_err(|_| "VSS fused-bound quotient rows exceed usize".to_owned())?,
+        construction_plan
+            .parameters
+            .physical_row_witness_variable_count,
+        construction_plan.parameters.row_code_log_inverse_rate,
+    )?;
+    if base_geometry.padded_coefficient_count != quotient_geometry.padded_coefficient_count {
+        return Err("VSS fused-bound phase coefficient geometries disagree".to_owned());
+    }
+    let base_accounting = derive_phase_commitment_geometry_accounting(base_geometry)?;
+    let quotient_accounting = derive_phase_commitment_geometry_accounting(quotient_geometry)?;
+    if base_accounting.lane_column_count != quotient_accounting.lane_column_count {
+        return Err("VSS fused-bound phase lane geometries disagree".to_owned());
+    }
+    let padded_coefficient_count = u64::try_from(base_geometry.padded_coefficient_count)
+        .map_err(|_| "VSS fused-bound padded coefficient count exceeds u64".to_owned())?;
+    let coefficient_fold_count_per_lane_dft = padded_coefficient_count
+        .checked_sub(base_accounting.lane_column_count)
+        .ok_or_else(|| "VSS fused-bound lane exceeds its coefficient message".to_owned())?;
+    let complete_count = |base_count: u64, quotient_count: u64, role: &str| {
+        base_count
+            .checked_add(quotient_count)
+            .and_then(|count| count.checked_mul(ROOT_AND_OPENING_PASS_COUNT))
+            .ok_or_else(|| format!("VSS fused-bound {role} count overflowed"))
+    };
+    let leaf_hash_query_count = complete_count(
+        base_accounting.leaf_hash_query_count_per_pass,
+        quotient_accounting.leaf_hash_query_count_per_pass,
+        "leaf-hash",
+    )?;
+    let salted_leaf_keccak_permutation_count = [base_accounting, quotient_accounting]
+        .into_iter()
+        .try_fold(0_u64, |total, accounting| {
+        salted_phase_column_leaf_keccak_permutation_count(
+            usize::try_from(accounting.row_count)
+                .map_err(|_| "VSS fused-bound leaf width exceeds usize".to_owned())?,
+        )?
+        .checked_mul(accounting.encoded_column_count)
+        .and_then(|count| count.checked_mul(ROOT_AND_OPENING_PASS_COUNT))
+        .and_then(|count| total.checked_add(count))
+        .ok_or_else(|| "VSS fused-bound salted-leaf work overflowed".to_owned())
+    })?;
+
+    Ok(VssFusedBoundRangeCandidateLedger {
+        range_digit_radix,
+        range_digit_count_per_material_low_digit,
+        material_group_count: geometry.material_group_count,
+        maximum_material_high_digit: geometry.maximum_material_high_digit,
+        material_range_digit_prover_column_count,
+        material_borrow_prover_column_count,
+        quotient_prover_column_count,
+        shift_selector_column_count: geometry.shift_selector_column_count,
+        prover_column_count,
+        maximum_range_digit_constraint_numerator_degree,
+        maximum_high_digit_constraint_numerator_degree,
+        maximum_constraint_numerator_degree,
+        maximum_required_quotient_coefficient_count,
+        quotient_component_count,
+        quotient_decomposition_stride,
+        quotient_coefficient_capacity,
+        quotient_component_degree_bound_exclusive,
+        physical_row_witness_variable_count: u64::try_from(
+            construction_plan
+                .parameters
+                .physical_row_witness_variable_count,
+        )
+        .map_err(|_| "VSS fused-bound witness width exceeds u64".to_owned())?,
+        padded_coefficient_count,
+        lane_column_count: base_accounting.lane_column_count,
+        coefficient_fold_count_per_lane_dft,
+        base_phase_row_count,
+        quotient_phase_row_count,
+        complete_phase_row_count,
+        lane_dft_count: complete_count(
+            base_accounting.lane_dft_count_per_pass,
+            quotient_accounting.lane_dft_count_per_pass,
+            "lane DFT",
+        )?,
+        butterfly_count: complete_count(
+            base_accounting.butterfly_count_per_pass,
+            quotient_accounting.butterfly_count_per_pass,
+            "butterfly",
+        )?,
+        coefficient_fold_count: complete_count(
+            base_accounting.coefficient_fold_count_per_pass,
+            quotient_accounting.coefficient_fold_count_per_pass,
+            "coefficient fold",
+        )?,
+        coset_multiplication_count: complete_count(
+            base_accounting.coset_multiplication_count_per_pass,
+            quotient_accounting.coset_multiplication_count_per_pass,
+            "coset multiplication",
+        )?,
+        column_value_delivery_count: complete_count(
+            base_accounting.column_value_delivery_count_per_pass,
+            quotient_accounting.column_value_delivery_count_per_pass,
+            "value delivery",
+        )?,
+        leaf_hash_query_count,
+        salted_leaf_keccak_permutation_count,
+        merkle_parent_hash_query_count: complete_count(
+            base_accounting.merkle_parent_hash_query_count_per_pass,
+            quotient_accounting.merkle_parent_hash_query_count_per_pass,
+            "Merkle parent",
+        )?,
+    })
+}
+
 fn derive_vss_relation_replay_opening_claim_quotient_candidate_construction_plan(
     candidate: VssRelationReplayCandidateLedger,
 ) -> Result<RowCodeWhirConstructionPlan, String> {
@@ -2005,6 +2360,7 @@ fn derive_vss_relation_replay_opening_claim_quotient_candidate_construction_plan
     })
 }
 
+#[cfg(test)]
 fn derive_vss_range_packing_candidate_construction_plan(
     candidate: VssRangeConstraintArityCandidateLedger,
 ) -> Result<RowCodeWhirConstructionPlan, String> {
@@ -4858,6 +5214,118 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn vss_fused_bound_range_candidates_clear_the_static_work_boundary() {
+        let radix_41 = derive_vss_fused_bound_range_candidate_ledger(41)
+            .expect("the radix-41 fused-bound VSS comparator derives");
+        let radix_42 = derive_vss_fused_bound_range_candidate_ledger(42)
+            .expect("the radix-42 fused-bound VSS candidate derives");
+        let radix_65 = derive_vss_fused_bound_range_candidate_ledger(65)
+            .expect("the radix-65 fused-bound VSS comparator derives");
+        let radix_66 = derive_vss_fused_bound_range_candidate_ledger(66)
+            .expect("the radix-66 fused-bound VSS comparator derives");
+        assert_eq!(
+            [radix_41, radix_42, radix_65, radix_66].map(|candidate| (
+                candidate.range_digit_radix,
+                candidate.range_digit_count_per_material_low_digit,
+                candidate.prover_column_count,
+                candidate.maximum_constraint_numerator_degree,
+                candidate.maximum_required_quotient_coefficient_count,
+                candidate.quotient_component_count,
+                candidate.quotient_decomposition_stride,
+                candidate.quotient_coefficient_capacity,
+            )),
+            [
+                (41, 6, 3_075, 755_671, 739_288, 40, 18_484, 739_360),
+                (42, 5, 2_627, 774_102, 757_719, 41, 18_482, 757_762),
+                (65, 5, 2_627, 1_198_015, 1_181_632, 64, 18_464, 1_181_696),
+                (66, 5, 2_627, 1_216_446, 1_200_063, 65, 18_464, 1_200_160),
+            ]
+        );
+        assert_eq!(
+            [radix_41, radix_42, radix_65, radix_66].map(|candidate| (
+                candidate.quotient_component_degree_bound_exclusive,
+                candidate.base_phase_row_count,
+                candidate.quotient_phase_row_count,
+                candidate.complete_phase_row_count,
+                candidate.salted_leaf_keccak_permutation_count,
+            )),
+            [
+                (18_872, 50, 10, 60, 234_881_024),
+                (18_870, 43, 10, 53, 201_326_592),
+                (18_852, 43, 10, 53, 201_326_592),
+                (18_852, 43, 15, 58, 234_881_024),
+            ]
+        );
+        assert_eq!(radix_42.material_group_count, 112);
+        assert_eq!(radix_42.maximum_material_high_digit, 26);
+        assert_eq!(radix_42.material_range_digit_prover_column_count, 2_240);
+        assert_eq!(radix_42.material_borrow_prover_column_count, 224);
+        assert_eq!(radix_42.quotient_prover_column_count, 160);
+        assert_eq!(radix_42.shift_selector_column_count, 3);
+        assert_eq!(
+            radix_42.maximum_range_digit_constraint_numerator_degree,
+            774_102
+        );
+        assert_eq!(
+            radix_42.maximum_high_digit_constraint_numerator_degree,
+            497_637
+        );
+        assert_eq!(radix_42.lane_dft_count, 3_392);
+        assert_eq!(radix_42.butterfly_count, 16_894_656_512);
+        assert_eq!(radix_42.physical_row_witness_variable_count, 21);
+        assert_eq!(radix_42.padded_coefficient_count, 4_194_304);
+        assert_eq!(radix_42.lane_column_count, 524_288);
+        assert_eq!(radix_42.coefficient_fold_count_per_lane_dft, 3_670_016);
+        assert_eq!(radix_42.coefficient_fold_count, 12_448_694_272);
+        assert_eq!(
+            radix_42.coefficient_fold_count,
+            radix_42.lane_dft_count * radix_42.coefficient_fold_count_per_lane_dft
+        );
+        assert_eq!(radix_42.coset_multiplication_count, 1_778_384_896);
+        assert_eq!(radix_42.column_value_delivery_count, 1_778_384_896);
+        assert_eq!(radix_42.leaf_hash_query_count, 67_108_864);
+        assert_eq!(radix_42.merkle_parent_hash_query_count, 67_108_860);
+
+        let production_work = derive_selected_vss_base_phase_work_ledger()
+            .expect("the selected VSS base-phase work ledger derives");
+        assert!(radix_42.lane_dft_count * 10 <= production_work.lane_dft_count);
+        assert!(radix_42.butterfly_count * 10 <= production_work.butterfly_count);
+        let radix_42_counted_row_code_operations = radix_42
+            .butterfly_count
+            .checked_add(radix_42.coefficient_fold_count)
+            .and_then(|count| count.checked_add(radix_42.coset_multiplication_count))
+            .expect("the radix-42 counted row-code operation total fits");
+        let production_counted_row_code_operations = production_work
+            .butterfly_count
+            .checked_add(production_work.coset_multiplication_count)
+            .expect("the selected counted row-code operation total fits");
+        assert!(
+            radix_42_counted_row_code_operations * 10 <= production_counted_row_code_operations
+        );
+        assert!(
+            radix_42.column_value_delivery_count * 10
+                <= production_work.column_value_delivery_count
+        );
+        assert!(
+            radix_42.salted_leaf_keccak_permutation_count * 10
+                <= production_work.salted_leaf_keccak_permutation_count
+        );
+        assert!(
+            radix_41.salted_leaf_keccak_permutation_count * 10
+                > production_work.salted_leaf_keccak_permutation_count
+        );
+        assert!(
+            radix_66.salted_leaf_keccak_permutation_count * 10
+                > production_work.salted_leaf_keccak_permutation_count
+        );
+        assert!(
+            radix_42.maximum_constraint_numerator_degree
+                < radix_65.maximum_constraint_numerator_degree
+        );
+        assert!(radix_42.quotient_component_count < radix_65.quotient_component_count);
     }
 
     #[test]
