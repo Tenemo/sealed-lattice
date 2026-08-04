@@ -1842,6 +1842,19 @@ impl RowCodeWhirConstructionPlan {
         Ok(aggregate_opening_layout(&self.aggregate_column_roles)?.uses_quotient_batch())
     }
 
+    #[cfg(feature = "primitive-measurement-evidence")]
+    pub(super) fn opening_claim_quotient_batch_column_index(
+        &self,
+    ) -> Result<Option<usize>, RowCodeWhirConstructionPlanError> {
+        aggregate_opening_layout(&self.aggregate_column_roles)?
+            .quotient_batch_column_ordinal
+            .map(|column_ordinal| {
+                usize::try_from(column_ordinal)
+                    .map_err(|_| RowCodeWhirConstructionPlanError::CountOverflow)
+            })
+            .transpose()
+    }
+
     /// Physical interleaved table width consumed by the selected PCS. Logical
     /// aggregate roles occupy the leading columns and every remaining column
     /// is canonically zero. Accounting must use this width, not the number of
@@ -6717,6 +6730,7 @@ mod tests {
             12
         );
         assert_eq!(expected_prefix.len(), 84);
+        assert_eq!(identity.len(), 994_031);
         assert_eq!(&identity[..expected_prefix.len()], expected_prefix,);
     }
 

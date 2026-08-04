@@ -33,6 +33,12 @@ use super::super::aggregate_wide_pcs::{
 use super::super::construction_plan::{
     RowCodeWhirConstructionPlan, RowCodeWhirOpenedPolynomialSource, RowCodeWhirPhase,
 };
+#[cfg(feature = "primitive-measurement-evidence")]
+use super::super::opening_claim_reduction::{
+    accumulate_weighted_opening_claim_quotient_row, validate_distinct_opening_claim_points,
+};
+#[cfg(feature = "primitive-measurement-evidence")]
+use super::super::opening_schedule::challenge_from_production;
 use super::super::opening_schedule::{
     RowCodeWhirBoundOpeningClaim, RowCodeWhirOpeningSchedule,
     RowCodeWhirOpeningScheduleContinuation, RowCodeWhirPointRowWeights,
@@ -271,6 +277,14 @@ pub(in crate::bgv::proof_suite::row_code_whir) struct ExactSameSecretAggregateSo
     aggregate_table_width: usize,
     relation_context: Option<RelationPlanCheckContext>,
     point_row_weights: Option<Vec<RowCodeWhirPointRowWeights>>,
+    #[cfg(feature = "primitive-measurement-evidence")]
+    opening_claim_quotient_column_index: Option<usize>,
+    #[cfg(feature = "primitive-measurement-evidence")]
+    opening_claim_quotient_points: Vec<ChallengeField>,
+    #[cfg(feature = "primitive-measurement-evidence")]
+    opening_claim_quotient_row_weights: Vec<ChallengeField>,
+    #[cfg(feature = "primitive-measurement-evidence")]
+    opening_claim_quotient_carries: Vec<ChallengeField>,
     bound_claims: Vec<RowCodeWhirBoundOpeningClaim>,
     metadata: Option<ExactSameSecretAggregateMetadata>,
     challenger: Option<ExtensionFieldChallenger>,
@@ -338,6 +352,38 @@ impl ExactSameSecretAggregateSource {
             &mut challenger,
         )
         .map_err(|_| CommonProofProverError::InvalidInput)?;
+        #[cfg(feature = "primitive-measurement-evidence")]
+        let (
+            opening_claim_quotient_column_index,
+            opening_claim_quotient_points,
+            opening_claim_quotient_row_weights,
+            opening_claim_quotient_carries,
+        ) = {
+            let column_index = construction_plan
+                .opening_claim_quotient_batch_column_index()
+                .map_err(|_| CommonProofProverError::InvalidInput)?;
+            if column_index.is_some() {
+                let points = opening_points
+                    .iter()
+                    .copied()
+                    .map(challenge_from_production)
+                    .collect::<Vec<_>>();
+                validate_distinct_opening_claim_points(&points)
+                    .map_err(|_| CommonProofProverError::InvalidOpening)?;
+                if points.len()
+                    != construction_plan
+                        .aggregate_opening_point_count()
+                        .map_err(|_| CommonProofProverError::InvalidOpening)?
+                {
+                    return Err(CommonProofProverError::InvalidOpening);
+                }
+                let row_weights = allocate_challenge_scratch(points.len())?;
+                let carries = allocate_challenge_scratch(points.len())?;
+                (column_index, points, row_weights, carries)
+            } else {
+                (None, Vec::new(), Vec::new(), Vec::new())
+            }
+        };
         let bound_claims = derive_bound_opening_claims(
             construction_plan,
             relation_variant,
@@ -392,6 +438,14 @@ impl ExactSameSecretAggregateSource {
             aggregate_table_width,
             relation_context: Some(relation_context.clone()),
             point_row_weights: Some(point_row_weights),
+            #[cfg(feature = "primitive-measurement-evidence")]
+            opening_claim_quotient_column_index,
+            #[cfg(feature = "primitive-measurement-evidence")]
+            opening_claim_quotient_points,
+            #[cfg(feature = "primitive-measurement-evidence")]
+            opening_claim_quotient_row_weights,
+            #[cfg(feature = "primitive-measurement-evidence")]
+            opening_claim_quotient_carries,
             bound_claims,
             metadata: Some(ExactSameSecretAggregateMetadata {
                 binding_digest,
@@ -499,6 +553,13 @@ impl ExactSameSecretAggregateSource {
             self.coefficient_count,
             self.aggregate_table_width / 2,
         )?);
+        #[cfg(feature = "primitive-measurement-evidence")]
+        if self.opening_claim_quotient_column_index.is_some()
+            && self.construction_plan.aggregate_logical_column_count()
+                <= self.aggregate_table_width / 2
+        {
+            self.next_action_index = self.actions.len();
+        }
         Ok(())
     }
 
@@ -658,6 +719,31 @@ impl ExactSameSecretAggregateSource {
             high_half_source,
         )
         .map_err(|_| CommonProofProverError::InvalidColumn)?;
+        #[cfg(feature = "primitive-measurement-evidence")]
+        let accumulation_result = if self.opening_claim_quotient_column_index.is_some() {
+            self.accumulate_opening_claim_quotient_phase_row(
+                phase,
+                row_ordinal,
+                &padded_coefficients,
+            )
+        } else {
+            self.accumulate_direct_opening_phase_row(phase, row_ordinal, &padded_coefficients)
+        };
+        #[cfg(not(feature = "primitive-measurement-evidence"))]
+        let accumulation_result =
+            self.accumulate_direct_opening_phase_row(phase, row_ordinal, &padded_coefficients);
+        padded_coefficients.fill(Goldilocks::ZERO);
+        self.phase_row_witness.fill(Goldilocks::ZERO);
+        self.phase_row_witness.clear();
+        accumulation_result
+    }
+
+    fn accumulate_direct_opening_phase_row(
+        &mut self,
+        phase: RowCodeWhirPhase,
+        row_ordinal: usize,
+        padded_coefficients: &[Goldilocks],
+    ) -> Result<(), CommonProofProverError> {
         let point_row_weights = self
             .point_row_weights
             .as_ref()
@@ -673,36 +759,94 @@ impl ExactSameSecretAggregateSource {
                 .get(row_ordinal)
                 .copied()
                 .ok_or(CommonProofProverError::InvalidColumn)?;
-            if weight != ChallengeField::ZERO {
-                let first_column_index = self
-                    .current_batch_ordinal
-                    .checked_mul(self.aggregate_table_width / 2)
-                    .ok_or(CommonProofProverError::CountOverflow)?;
-                if let Some(batch_column_index) = aggregate_column_index
-                    .checked_sub(first_column_index)
-                    .filter(|index| *index < self.aggregate_table_width / 2)
+            if weight == ChallengeField::ZERO {
+                continue;
+            }
+            let first_column_index = self
+                .current_batch_ordinal
+                .checked_mul(self.aggregate_table_width / 2)
+                .ok_or(CommonProofProverError::CountOverflow)?;
+            if let Some(batch_column_index) = aggregate_column_index
+                .checked_sub(first_column_index)
+                .filter(|index| *index < self.aggregate_table_width / 2)
+            {
+                let aggregate_column = self
+                    .aggregate_columns
+                    .as_mut()
+                    .and_then(|columns| columns.get_mut(batch_column_index))
+                    .ok_or(CommonProofProverError::InvalidInput)?;
+                if aggregate_column.len() != padded_coefficients.len() {
+                    return Err(CommonProofProverError::InvalidColumn);
+                }
+                for (destination, coefficient) in aggregate_column
+                    .iter_mut()
+                    .zip(padded_coefficients.iter().copied())
                 {
-                    let aggregate_column = self
-                        .aggregate_columns
-                        .as_mut()
-                        .and_then(|columns| columns.get_mut(batch_column_index))
-                        .ok_or(CommonProofProverError::InvalidInput)?;
-                    if aggregate_column.len() != padded_coefficients.len() {
-                        return Err(CommonProofProverError::InvalidColumn);
-                    }
-                    for (destination, coefficient) in aggregate_column
-                        .iter_mut()
-                        .zip(padded_coefficients.iter().copied())
-                    {
-                        *destination += weight * ChallengeField::from(coefficient);
-                    }
+                    *destination += weight * ChallengeField::from(coefficient);
                 }
             }
         }
-        padded_coefficients.fill(Goldilocks::ZERO);
-        self.phase_row_witness.fill(Goldilocks::ZERO);
-        self.phase_row_witness.clear();
         Ok(())
+    }
+
+    #[cfg(feature = "primitive-measurement-evidence")]
+    fn accumulate_opening_claim_quotient_phase_row(
+        &mut self,
+        phase: RowCodeWhirPhase,
+        row_ordinal: usize,
+        padded_coefficients: &[Goldilocks],
+    ) -> Result<(), CommonProofProverError> {
+        let result = (|| {
+            let aggregate_column_index = self
+                .opening_claim_quotient_column_index
+                .ok_or(CommonProofProverError::InvalidInput)?;
+            let first_column_index = self
+                .current_batch_ordinal
+                .checked_mul(self.aggregate_table_width / 2)
+                .ok_or(CommonProofProverError::CountOverflow)?;
+            let Some(batch_column_index) = aggregate_column_index
+                .checked_sub(first_column_index)
+                .filter(|index| *index < self.aggregate_table_width / 2)
+            else {
+                return Ok(());
+            };
+            let point_row_weights = self
+                .point_row_weights
+                .as_ref()
+                .ok_or(CommonProofProverError::InvalidInput)?;
+            if point_row_weights.len() != self.opening_claim_quotient_row_weights.len() {
+                return Err(CommonProofProverError::InvalidOpening);
+            }
+            for (destination, point_weights) in self
+                .opening_claim_quotient_row_weights
+                .iter_mut()
+                .zip(point_row_weights)
+            {
+                *destination = point_weights
+                    .phase_rows(phase)
+                    .get(row_ordinal)
+                    .copied()
+                    .ok_or(CommonProofProverError::InvalidColumn)?;
+            }
+            let aggregate_column = self
+                .aggregate_columns
+                .as_mut()
+                .and_then(|columns| columns.get_mut(batch_column_index))
+                .ok_or(CommonProofProverError::InvalidInput)?;
+            accumulate_weighted_opening_claim_quotient_row(
+                aggregate_column,
+                padded_coefficients,
+                &self.opening_claim_quotient_points,
+                &self.opening_claim_quotient_row_weights,
+                &mut self.opening_claim_quotient_carries,
+            )
+            .map_err(|_| CommonProofProverError::InvalidOpening)
+        })();
+        self.opening_claim_quotient_row_weights
+            .fill(ChallengeField::ZERO);
+        self.opening_claim_quotient_carries
+            .fill(ChallengeField::ZERO);
+        result
     }
 
     fn consume_bound_polynomial(
@@ -809,6 +953,13 @@ impl ExactSameSecretAggregateSource {
             }
         }
         self.aggregate_columns = None;
+        #[cfg(feature = "primitive-measurement-evidence")]
+        {
+            self.opening_claim_quotient_row_weights
+                .fill(ChallengeField::ZERO);
+            self.opening_claim_quotient_carries
+                .fill(ChallengeField::ZERO);
+        }
         self.row_pad_seeds = None;
     }
 }
@@ -826,7 +977,35 @@ fn exact_aggregate_source_actions(
 ) -> Result<Vec<ExactSameSecretAggregateSourceAction>, CommonProofProverError> {
     let replay_coefficient_counts =
         aggregate_relation_replay_coefficient_position_counts(relation_variant)?;
+    let trace_phase_action_count = construction_plan
+        .base_phase
+        .iter()
+        .chain(&construction_plan.auxiliary_phase)
+        .flat_map(|phase| &phase.rows)
+        .try_fold(0_usize, |count, row| {
+            count
+                .checked_add(row.logical_polynomial_chunks.iter().flatten().count())
+                .ok_or(CommonProofProverError::CountOverflow)
+        })?;
+    let quotient_phase_action_count =
+        construction_plan
+            .quotient_phase
+            .rows
+            .iter()
+            .try_fold(0_usize, |count, row| {
+                count
+                    .checked_add(row.logical_polynomial_chunks.iter().flatten().count())
+                    .ok_or(CommonProofProverError::CountOverflow)
+            })?;
+    let expected_action_count = trace_phase_action_count
+        .checked_add(quotient_phase_action_count)
+        .ok_or(CommonProofProverError::CountOverflow)?
+        .checked_add(bound_claims.len())
+        .ok_or(CommonProofProverError::CountOverflow)?;
     let mut actions = Vec::new();
+    actions
+        .try_reserve_exact(expected_action_count)
+        .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
     for phase in [RowCodeWhirPhase::Base, RowCodeWhirPhase::Auxiliary] {
         let phase_plan = match phase {
             RowCodeWhirPhase::Base => construction_plan.base_phase.as_ref(),
@@ -1013,6 +1192,9 @@ fn exact_aggregate_source_actions(
             },
         });
     }
+    if actions.len() != expected_action_count {
+        return Err(CommonProofProverError::InvalidColumn);
+    }
     Ok(actions)
 }
 
@@ -1082,6 +1264,18 @@ fn allocate_aggregate_batch(
         columns.push(column);
     }
     Ok(columns)
+}
+
+#[cfg(feature = "primitive-measurement-evidence")]
+fn allocate_challenge_scratch(
+    element_count: usize,
+) -> Result<Vec<ChallengeField>, CommonProofProverError> {
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(element_count)
+        .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
+    values.resize(element_count, ChallengeField::ZERO);
+    Ok(values)
 }
 
 fn aggregate_action_catalog_digest(
@@ -1374,6 +1568,14 @@ mod tests {
             aggregate_table_width: 2,
             relation_context: None,
             point_row_weights: Some(Vec::new()),
+            #[cfg(feature = "primitive-measurement-evidence")]
+            opening_claim_quotient_column_index: None,
+            #[cfg(feature = "primitive-measurement-evidence")]
+            opening_claim_quotient_points: Vec::new(),
+            #[cfg(feature = "primitive-measurement-evidence")]
+            opening_claim_quotient_row_weights: Vec::new(),
+            #[cfg(feature = "primitive-measurement-evidence")]
+            opening_claim_quotient_carries: Vec::new(),
             bound_claims: Vec::new(),
             metadata: None,
             challenger: None,
@@ -1396,5 +1598,55 @@ mod tests {
             Err(CommonProofProverError::InvalidColumn)
         ));
         assert_eq!(materializer.next_action(), Some(expected_action));
+    }
+
+    #[cfg(feature = "primitive-measurement-evidence")]
+    #[test]
+    fn quotient_candidate_skips_replay_for_its_canonical_zero_second_half() {
+        let (mut construction_plan, _, actions) = selected_plan_actions();
+        construction_plan.aggregate_column_roles = vec![
+            super::super::super::construction_plan::RowCodeWhirAggregateColumnRole::OpeningClaimQuotientBatch {
+                opening_point_count: 3,
+            },
+            super::super::super::construction_plan::RowCodeWhirAggregateColumnRole::BoundReduction,
+        ];
+        let expected_action = actions[0];
+        let mut materializer = ExactSameSecretAggregateSource {
+            construction_plan,
+            actions: vec![expected_action],
+            next_action_index: 1,
+            row_pad_seeds: None,
+            phase_row_witness: Vec::new(),
+            aggregate_columns: None,
+            current_batch_ordinal: 0,
+            coefficient_count: 4,
+            aggregate_table_width: 4,
+            relation_context: None,
+            point_row_weights: Some(Vec::new()),
+            opening_claim_quotient_column_index: Some(0),
+            opening_claim_quotient_points: vec![
+                ChallengeField::ZERO,
+                ChallengeField::ONE,
+                ChallengeField::TWO,
+            ],
+            opening_claim_quotient_row_weights: vec![ChallengeField::ZERO; 3],
+            opening_claim_quotient_carries: vec![ChallengeField::ZERO; 3],
+            bound_claims: Vec::new(),
+            metadata: None,
+            challenger: None,
+        };
+
+        materializer
+            .begin_second_batch()
+            .expect("the zero second half begins without replay");
+        assert_eq!(materializer.next_action(), None);
+        let batch = materializer
+            .take_completed_batch()
+            .expect("the canonical zero second half completes immediately");
+        assert_eq!(batch.first_column_index(), 2);
+        assert_eq!(batch.columns().len(), 2);
+        assert!(batch.columns().iter().all(|column| {
+            column.len() == 4 && column.iter().all(|value| *value == ChallengeField::ZERO)
+        }));
     }
 }

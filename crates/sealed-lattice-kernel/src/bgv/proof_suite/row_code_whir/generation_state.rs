@@ -33,7 +33,9 @@ use super::exact_same_secret::{
     ExactSameSecretProofEncodingProgress, ExactSameSecretProofSinkEncoder,
     ExactSameSecretProofSinkEncodingError,
 };
-use super::opening_schedule::RowCodeWhirOpeningSchedule;
+use super::opening_schedule::{
+    RowCodeWhirBoundOpeningClaim, RowCodeWhirOpeningSchedule, RowCodeWhirPointRowWeights,
+};
 use super::relation_materialization::{
     RowCodeWhirAuxiliaryRelationMaterialization, RowCodeWhirAuxiliaryRelationMaterializationAction,
     RowCodeWhirQuotientMaterialization, RowCodeWhirQuotientMaterializationAction,
@@ -2378,6 +2380,168 @@ fn add_resident_byte_length(
     Ok(())
 }
 
+fn aggregate_source_action_count(
+    construction_plan: &RowCodeWhirConstructionPlan,
+    relation_variant: &RelationPlanVariant,
+) -> Result<(usize, usize), CommonProofProverError> {
+    let trace_phase_action_count = construction_plan
+        .base_phase
+        .iter()
+        .chain(&construction_plan.auxiliary_phase)
+        .flat_map(|phase| &phase.rows)
+        .try_fold(0_usize, |count, row| {
+            count
+                .checked_add(row.logical_polynomial_chunks.iter().flatten().count())
+                .ok_or(CommonProofProverError::CountOverflow)
+        })?;
+    let quotient_phase_action_count =
+        construction_plan
+            .quotient_phase
+            .rows
+            .iter()
+            .try_fold(0_usize, |count, row| {
+                count
+                    .checked_add(row.logical_polynomial_chunks.iter().flatten().count())
+                    .ok_or(CommonProofProverError::CountOverflow)
+            })?;
+    let bound_claim_count = relation_variant
+        .ordered_opening_claims()
+        .iter()
+        .filter(|claim| {
+            claim
+                .column_ordinal()
+                .and_then(|column_ordinal| {
+                    relation_variant
+                        .ordered_columns()
+                        .get(column_ordinal as usize)
+                })
+                .is_some_and(|column| {
+                    claim.source_class() == RelationOpeningSourceClass::TreeColumn
+                        && matches!(column.origin(), RelationColumnOrigin::BoundTree { .. })
+                })
+        })
+        .count();
+    let action_count = trace_phase_action_count
+        .checked_add(quotient_phase_action_count)
+        .and_then(|count| count.checked_add(bound_claim_count))
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    Ok((action_count, bound_claim_count))
+}
+
+fn aggregate_source_control_payload_byte_length(
+    construction_plan: &RowCodeWhirConstructionPlan,
+    relation_variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
+) -> Result<u64, CommonProofProverError> {
+    let opening_point_count = construction_plan
+        .aggregate_opening_point_count()
+        .map_err(|_| CommonProofProverError::InvalidOpening)?;
+    let parameters = construction_plan.selected_parameters();
+    let selector_count = parameters
+        .logical_polynomials_per_physical_row
+        .checked_ilog2()
+        .ok_or(CommonProofProverError::CountOverflow)? as usize;
+    let phase_row_count = construction_plan
+        .base_phase
+        .iter()
+        .chain(&construction_plan.auxiliary_phase)
+        .try_fold(
+            construction_plan.quotient_phase.rows.len(),
+            |count, phase| {
+                count
+                    .checked_add(phase.rows.len())
+                    .ok_or(CommonProofProverError::CountOverflow)
+            },
+        )?;
+    let challenge_count_per_point = selector_count
+        .checked_add(phase_row_count)
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    let (action_count, bound_claim_count) =
+        aggregate_source_action_count(construction_plan, relation_variant)?;
+
+    [
+        construction_plan
+            .resident_owned_payload_byte_length()
+            .map_err(|_| CommonProofProverError::CountOverflow)?,
+        relation_context
+            .resident_owned_payload_byte_length()
+            .map_err(|_| CommonProofProverError::CountOverflow)?,
+        resident_vector_allocation_byte_length::<ExactSameSecretAggregateSourceAction>(
+            action_count,
+        )?,
+        resident_vector_allocation_byte_length::<RowCodeWhirPointRowWeights>(opening_point_count)?,
+        resident_vector_allocation_byte_length::<ChallengeField>(
+            opening_point_count
+                .checked_mul(challenge_count_per_point)
+                .ok_or(CommonProofProverError::CountOverflow)?,
+        )?,
+        resident_vector_allocation_byte_length::<ProofChallengeExtensionElement>(
+            opening_point_count,
+        )?,
+        resident_vector_allocation_byte_length::<RowCodeWhirBoundOpeningClaim>(bound_claim_count)?,
+    ]
+    .into_iter()
+    .try_fold(0_u64, |total, byte_length| {
+        total
+            .checked_add(byte_length)
+            .ok_or(CommonProofProverError::CountOverflow)
+    })
+}
+
+fn aggregate_source_row_peak_byte_length(
+    construction_plan: &RowCodeWhirConstructionPlan,
+) -> Result<u64, CommonProofProverError> {
+    let parameters = construction_plan.selected_parameters();
+    let base_field_element_byte_length = u64::try_from(size_of::<ProofBaseFieldElement>())
+        .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let extension_element_byte_length = u64::try_from(size_of::<ProofChallengeExtensionElement>())
+        .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let physical_row_witness_value_count = 1_usize
+        .checked_shl(
+            u32::try_from(parameters.physical_row_witness_variable_count)
+                .map_err(|_| CommonProofProverError::CountOverflow)?,
+        )
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    let phase_row_witness_byte_length = u64::try_from(physical_row_witness_value_count)
+        .ok()
+        .and_then(|count| count.checked_mul(base_field_element_byte_length))
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    let padded_row_byte_length = u64::try_from(physical_row_witness_value_count)
+        .ok()
+        .and_then(|count| count.checked_mul(2))
+        .and_then(|count| count.checked_mul(base_field_element_byte_length))
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    let maximum_replay_source_range_byte_length =
+        u64::try_from(parameters.logical_polynomial_coefficient_count)
+            .ok()
+            .and_then(|count| count.checked_mul(extension_element_byte_length))
+            .ok_or(CommonProofProverError::CountOverflow)?;
+    #[cfg(feature = "primitive-measurement-evidence")]
+    let quotient_accumulator_scratch_byte_length = if construction_plan
+        .uses_opening_claim_quotient_batch()
+        .map_err(|_| CommonProofProverError::InvalidOpening)?
+    {
+        u64::try_from(
+            construction_plan
+                .aggregate_opening_point_count()
+                .map_err(|_| CommonProofProverError::InvalidOpening)?,
+        )
+        .ok()
+        .and_then(|count| count.checked_mul(3))
+        .and_then(|count| count.checked_mul(u64::try_from(size_of::<ChallengeField>()).ok()?))
+        .ok_or(CommonProofProverError::CountOverflow)?
+    } else {
+        0
+    };
+    #[cfg(not(feature = "primitive-measurement-evidence"))]
+    let quotient_accumulator_scratch_byte_length = 0_u64;
+
+    phase_row_witness_byte_length
+        .checked_add(padded_row_byte_length.max(maximum_replay_source_range_byte_length))
+        .and_then(|total| total.checked_add(quotient_accumulator_scratch_byte_length))
+        .ok_or(CommonProofProverError::CountOverflow)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn derive_generation_liveness(
     construction_plan: &RowCodeWhirConstructionPlan,
@@ -2613,22 +2777,19 @@ fn derive_generation_liveness(
             .and_then(|catalog_byte_length| byte_length.checked_add(catalog_byte_length))
         })
         .ok_or(CommonProofProverError::CountOverflow)?;
-    let physical_row_witness_value_count = 1_usize
-        .checked_shl(
-            u32::try_from(parameters.physical_row_witness_variable_count)
-                .map_err(|_| CommonProofProverError::CountOverflow)?,
-        )
-        .ok_or(CommonProofProverError::CountOverflow)?;
-    let aggregate_source_row_byte_length = u64::try_from(physical_row_witness_value_count)
-        .ok()
-        .and_then(|count| count.checked_mul(base_field_element_byte_length))
-        .and_then(|byte_length| {
-            u64::try_from(parameters.logical_polynomial_coefficient_count)
-                .ok()
-                .and_then(|count| count.checked_mul(extension_element_byte_length))
-                .and_then(|row_byte_length| byte_length.checked_add(row_byte_length))
-        })
-        .ok_or(CommonProofProverError::CountOverflow)?;
+    // Loading one replay chunk and padding the completed physical row are
+    // disjoint snapshots: the final source vector is dropped before padding.
+    // The resident witness survives both, so the row peak is the witness plus
+    // the larger successor allocation. Candidate quotient scratch is retained
+    // across the same phase and is derived by the helper when present.
+    let aggregate_source_row_byte_length =
+        aggregate_source_row_peak_byte_length(construction_plan)?
+            .checked_add(aggregate_source_control_payload_byte_length(
+                construction_plan,
+                relation_variant,
+                relation_context,
+            )?)
+            .ok_or(CommonProofProverError::CountOverflow)?;
 
     let canonical_family_body_byte_length =
         canonical_row_code_whir_family_body_byte_length_ceiling(
@@ -8305,6 +8466,44 @@ mod tests {
             MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
         )
         .expect("the complete selected VSS live set derives");
+        let aggregate_source_row_byte_length =
+            aggregate_source_row_peak_byte_length(&construction_plan)
+                .expect("the selected VSS aggregate source row peak derives");
+        let aggregate_source_control_byte_length = aggregate_source_control_payload_byte_length(
+            &construction_plan,
+            validated_variant,
+            &relation_context,
+        )
+        .expect("the selected VSS aggregate source control payload derives");
+        let aggregate_batch_column_count = construction_plan.aggregate_table_width() / 2;
+        let aggregate_batch_byte_length = (1_u64
+            << construction_plan.selected_parameters().table_variable_count)
+            .checked_mul(
+                u64::try_from(aggregate_batch_column_count)
+                    .expect("the aggregate batch column count fits u64"),
+            )
+            .and_then(|count| {
+                count.checked_mul(
+                    u64::try_from(size_of::<ProofChallengeExtensionElement>())
+                        .expect("the extension width fits u64"),
+                )
+            })
+            .and_then(|byte_length| {
+                byte_length.checked_add(
+                    u64::try_from(aggregate_batch_column_count * size_of::<Vec<ChallengeField>>())
+                        .expect("the aggregate column catalog width fits u64"),
+                )
+            })
+            .expect("the selected VSS aggregate batch byte length adds");
+        assert_eq!(aggregate_source_row_byte_length, 6_291_456);
+        assert_eq!(aggregate_source_control_byte_length, 3_362_419);
+        assert_eq!(aggregate_batch_byte_length, 335_544_704);
+        assert_eq!(
+            aggregate_batch_byte_length
+                + aggregate_source_row_byte_length
+                + aggregate_source_control_byte_length,
+            345_198_579,
+        );
         let phase_commitment = complete_liveness
             .rows()
             .iter()
@@ -8314,8 +8513,8 @@ mod tests {
             phase_commitment.wasm_runtime_baseline_byte_length(),
             33_554_432
         );
-        assert_eq!(phase_commitment.engine_control_byte_length(), 19_216_525);
-        assert_eq!(phase_commitment.source_provider_byte_length(), 30_431_176);
+        assert_eq!(phase_commitment.engine_control_byte_length(), 19_216_877);
+        assert_eq!(phase_commitment.source_provider_byte_length(), 30_431_184);
         assert_eq!(phase_commitment.replay_reader_byte_length(), 11_534_336);
         assert_eq!(phase_commitment.dft_buffer_byte_length(), 4_194_304);
         assert_eq!(
@@ -8330,7 +8529,7 @@ mod tests {
             phase_commitment.transported_private_leaf_salt_byte_length(),
             4_268_544,
         );
-        assert_eq!(phase_commitment.transcript_byte_length(), 223_344);
+        assert_eq!(phase_commitment.transcript_byte_length(), 223_432);
         assert_eq!(phase_commitment.private_material_byte_length(), 721_272);
         assert_eq!(phase_commitment.private_leaf_salt_state_byte_length(), 0);
         assert_eq!(
@@ -8362,14 +8561,14 @@ mod tests {
         .into_iter()
         .try_fold(0_u64, |total, byte_length| total.checked_add(byte_length))
         .expect("the selected VSS owned live set adds");
-        assert_eq!(allocator_owned_byte_length, 389_532_563);
+        assert_eq!(allocator_owned_byte_length, 389_533_011);
         assert_eq!(
             phase_commitment.allocator_overhead_byte_length(),
             allocator_owned_byte_length.div_ceil(8),
         );
         assert_eq!(
             phase_commitment.allocator_overhead_byte_length(),
-            48_691_571
+            48_691_627
         );
         assert_eq!(
             phase_commitment.total_byte_length(),
@@ -8377,10 +8576,10 @@ mod tests {
                 + allocator_owned_byte_length
                 + allocator_owned_byte_length.div_ceil(8),
         );
-        assert_eq!(phase_commitment.total_byte_length(), 471_778_566);
+        assert_eq!(phase_commitment.total_byte_length(), 471_779_070);
         assert_eq!(
             complete_liveness.maximum_live_set_byte_length(),
-            597_022_845
+            597_023_349
         );
 
         let base_phase = construction_plan
@@ -8411,18 +8610,18 @@ mod tests {
                 .expect("the selected VSS grouped-lane total adds")
         };
         let two_lane_total_byte_length = grouped_phase_total(2);
-        assert_eq!(two_lane_total_byte_length, 594_461_958);
+        assert_eq!(two_lane_total_byte_length, 594_462_462);
         assert_eq!(
             crate::bgv::proof_suite::prover::AUTOMATIC_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
                 .checked_sub(two_lane_total_byte_length),
-            Some(9_517_818),
+            Some(9_517_314),
         );
         assert_eq!(
             MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH.checked_sub(two_lane_total_byte_length),
-            Some(76_626_682),
+            Some(76_626_178),
         );
         let three_lane_total_byte_length = grouped_phase_total(3);
-        assert_eq!(three_lane_total_byte_length, 712_426_758);
+        assert_eq!(three_lane_total_byte_length, 712_427_262);
         assert!(three_lane_total_byte_length > MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH);
     }
 
@@ -8691,9 +8890,9 @@ mod tests {
         assert_eq!(canonical_statement.len(), 884);
         assert_eq!(relation_variant_payload_byte_length, 4_986_144);
         assert_eq!(relation_context_payload_byte_length, 736);
-        assert_eq!(construction_identity_byte_length, 959_789);
-        assert_eq!(size_of::<RowCodeWhirGenerationStateMachine>(), 19_856);
-        assert_eq!(size_of::<super::super::RowCodeWhirChallenger>(), 464);
+        assert_eq!(construction_identity_byte_length, 994_031);
+        assert_eq!(size_of::<RowCodeWhirGenerationStateMachine>(), 20_208);
+        assert_eq!(size_of::<super::super::RowCodeWhirChallenger>(), 552);
         assert_eq!(
             accounting.loading_persistent_resident_byte_length(),
             5_529_036
@@ -8795,6 +8994,45 @@ mod tests {
             quotient_builder_byte_length
                 .max(quotient_liveness.maximum_component_transition_byte_length()),
         );
+        let aggregate_source_row_byte_length =
+            aggregate_source_row_peak_byte_length(&construction_plan)
+                .expect("the aggregate source row peak derives");
+        let aggregate_source_control_byte_length = aggregate_source_control_payload_byte_length(
+            &construction_plan,
+            validated_variant,
+            &relation_context,
+        )
+        .expect("the aggregate source control payload derives");
+        let aggregate_column_element_count =
+            1_u64 << construction_plan.selected_parameters().table_variable_count;
+        let aggregate_batch_column_count = construction_plan.aggregate_table_width() / 2;
+        let aggregate_batch_byte_length = aggregate_column_element_count
+            .checked_mul(
+                u64::try_from(aggregate_batch_column_count)
+                    .expect("the aggregate batch column count fits u64"),
+            )
+            .and_then(|count| {
+                count.checked_mul(
+                    u64::try_from(size_of::<ProofChallengeExtensionElement>())
+                        .expect("the extension width fits u64"),
+                )
+            })
+            .and_then(|byte_length| {
+                byte_length.checked_add(
+                    u64::try_from(aggregate_batch_column_count * size_of::<Vec<ChallengeField>>())
+                        .expect("the aggregate column catalog width fits u64"),
+                )
+            })
+            .expect("the aggregate batch byte length adds");
+        assert_eq!(aggregate_source_row_byte_length, 50_331_648);
+        assert_eq!(aggregate_source_control_byte_length, 550_729);
+        assert_eq!(aggregate_batch_byte_length, 335_544_368);
+        assert_eq!(
+            aggregate_batch_byte_length
+                + aggregate_source_row_byte_length
+                + aggregate_source_control_byte_length,
+            386_426_745,
+        );
         let complete_liveness = derive_generation_liveness(
             &construction_plan,
             validated_variant,
@@ -8843,7 +9081,7 @@ mod tests {
                 0,
                 0,
                 0,
-                65_179_788,
+                65_180_283,
             ),
             (
                 GenerationPhaseLivenessKind::SourceReplay,
@@ -8854,7 +9092,7 @@ mod tests {
                 0,
                 0,
                 0,
-                158_740_287,
+                158_740_782,
             ),
             (
                 GenerationPhaseLivenessKind::RelationMaterialization,
@@ -8865,7 +9103,7 @@ mod tests {
                 0,
                 0,
                 1_185_104,
-                160_073_529,
+                160_074_024,
             ),
             (
                 GenerationPhaseLivenessKind::PhaseCommitment,
@@ -8876,7 +9114,7 @@ mod tests {
                 392,
                 0,
                 0,
-                504_267_459,
+                504_267_954,
             ),
             (
                 GenerationPhaseLivenessKind::QuotientPreparation,
@@ -8887,7 +9125,7 @@ mod tests {
                 0,
                 0,
                 7_280_808,
-                166_931_196,
+                166_931_691,
             ),
             (
                 GenerationPhaseLivenessKind::AggregateSource,
@@ -8897,8 +9135,8 @@ mod tests {
                 0,
                 0,
                 0,
-                353_632_304,
-                556_576_629,
+                386_426_745,
+                593_470_870,
             ),
             (
                 GenerationPhaseLivenessKind::PrivateMaterialSampling,
@@ -8909,7 +9147,7 @@ mod tests {
                 0,
                 0,
                 721_320,
-                64_000_284,
+                64_000_779,
             ),
             (
                 GenerationPhaseLivenessKind::AggregateOpeningPreparation,
@@ -8920,7 +9158,7 @@ mod tests {
                 0,
                 0,
                 167_772_160,
-                251_932_479,
+                251_932_974,
             ),
             (
                 GenerationPhaseLivenessKind::AggregateCommitment,
@@ -8931,7 +9169,7 @@ mod tests {
                 976,
                 0,
                 0,
-                516_174_792,
+                516_175_287,
             ),
             (
                 GenerationPhaseLivenessKind::BoundTreeAuthentication,
@@ -8942,7 +9180,7 @@ mod tests {
                 0,
                 0,
                 0,
-                289_681_827,
+                289_682_322,
             ),
             (
                 GenerationPhaseLivenessKind::WhirOpening,
@@ -8953,7 +9191,7 @@ mod tests {
                 976,
                 0,
                 1_376_720,
-                517_723_602,
+                517_724_097,
             ),
             (
                 GenerationPhaseLivenessKind::BaseCaseOpening,
@@ -8964,7 +9202,7 @@ mod tests {
                 976,
                 0,
                 46_794_256,
-                146_504_346,
+                146_504_841,
             ),
             (
                 GenerationPhaseLivenessKind::CanonicalEncoding,
@@ -8975,7 +9213,7 @@ mod tests {
                 0,
                 750_312,
                 0,
-                64_032_900,
+                64_033_395,
             ),
         ];
         assert_eq!(complete_liveness.rows().len(), expected_rows.len());
@@ -8996,7 +9234,7 @@ mod tests {
         {
             assert_eq!(row.phase(), phase);
             assert_eq!(row.wasm_runtime_baseline_byte_length(), 33_554_432);
-            assert_eq!(row.engine_control_byte_length(), 10_200_177);
+            assert_eq!(row.engine_control_byte_length(), 10_200_529);
             assert_eq!(
                 row.source_provider_byte_length(),
                 if phase == GenerationPhaseLivenessKind::LoadingAuthenticatedSources {
@@ -9024,7 +9262,7 @@ mod tests {
                     545_664
                 },
             );
-            assert_eq!(row.transcript_byte_length(), 207_336);
+            assert_eq!(row.transcript_byte_length(), 207_424);
             assert_eq!(row.private_material_byte_length(), 721_272);
             assert_eq!(
                 row.private_leaf_salt_state_byte_length(),
@@ -9074,7 +9312,7 @@ mod tests {
         }
         assert_eq!(
             complete_liveness.maximum_live_set_byte_length(),
-            556_576_629,
+            593_470_870,
         );
         assert_eq!(
             complete_liveness
@@ -9082,17 +9320,17 @@ mod tests {
                 .saturating_sub(
                     crate::bgv::proof_suite::prover::NOMINAL_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
                 ),
-            153_923_445,
+            190_817_686,
         );
         assert_eq!(
             crate::bgv::proof_suite::prover::AUTOMATIC_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
                 .checked_sub(complete_liveness.maximum_live_set_byte_length(),),
-            Some(47_403_147),
+            Some(10_508_906),
         );
         assert_eq!(
             MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
                 .checked_sub(complete_liveness.maximum_live_set_byte_length()),
-            Some(114_512_011),
+            Some(77_617_770),
         );
     }
 

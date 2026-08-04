@@ -14,9 +14,13 @@
 //! is needed.
 
 #[cfg(test)]
-use p3_field::{Field, PrimeCharacteristicRing};
+use p3_field::Field;
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+use p3_field::PrimeCharacteristicRing;
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+use p3_goldilocks::Goldilocks;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
 use super::ChallengeField;
 #[cfg(test)]
 use super::opening_schedule::divide_polynomial_opening;
@@ -98,7 +102,7 @@ impl OpeningClaimQuotientBatchGeometry {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
 pub(super) fn validate_distinct_opening_claim_points(
     opening_points: &[ChallengeField],
 ) -> Result<(), String> {
@@ -110,6 +114,55 @@ pub(super) fn validate_distinct_opening_claim_points(
             return Err("opening-claim quotient points are not distinct".to_owned());
         }
     }
+    Ok(())
+}
+
+/// Adds one physical row to the distinct-point quotient batch without
+/// materializing any of its point-specific aggregate columns.
+///
+/// For row polynomial `P`, point `z_i`, and row weight `w_i`, this adds
+/// `sum_i w_i * (P(X) - P(z_i)) / (X - z_i)` to the destination. Synthetic
+/// division is evaluated from high coefficient to low coefficient while one
+/// carry per opening point is reused. The final physical coefficient remains
+/// untouched and is therefore the canonical zero above the quotient degree.
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+pub(super) fn accumulate_weighted_opening_claim_quotient_row(
+    accumulated_quotient: &mut [ChallengeField],
+    source_coefficients: &[Goldilocks],
+    opening_points: &[ChallengeField],
+    row_weights: &[ChallengeField],
+    synthetic_division_carries: &mut [ChallengeField],
+) -> Result<(), String> {
+    if source_coefficients.len() < 2
+        || accumulated_quotient.len() != source_coefficients.len()
+        || opening_points.len() != row_weights.len()
+        || opening_points.len() != synthetic_division_carries.len()
+    {
+        return Err("weighted opening-claim quotient geometry is invalid".to_owned());
+    }
+    synthetic_division_carries.fill(ChallengeField::ZERO);
+    validate_distinct_opening_claim_points(opening_points)?;
+
+    let highest_coefficient_ordinal = source_coefficients.len() - 1;
+    for coefficient_ordinal in (1..=highest_coefficient_ordinal).rev() {
+        let source_coefficient = ChallengeField::from(source_coefficients[coefficient_ordinal]);
+        let mut weighted_coefficient = ChallengeField::ZERO;
+        for ((opening_point, row_weight), carry) in opening_points
+            .iter()
+            .copied()
+            .zip(row_weights.iter().copied())
+            .zip(synthetic_division_carries.iter_mut())
+        {
+            *carry = if coefficient_ordinal == highest_coefficient_ordinal {
+                source_coefficient
+            } else {
+                source_coefficient + opening_point * *carry
+            };
+            weighted_coefficient += row_weight * *carry;
+        }
+        accumulated_quotient[coefficient_ordinal - 1] += weighted_coefficient;
+    }
+    synthetic_division_carries.fill(ChallengeField::ZERO);
     Ok(())
 }
 
@@ -286,6 +339,125 @@ mod tests {
                 &[opening_point],
                 &[],
                 &[field(1)],
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn streaming_weighted_rows_equal_materialized_point_columns() {
+        let source_rows = [
+            vec![
+                Goldilocks::from_u64(3),
+                Goldilocks::from_u64(2),
+                Goldilocks::from_u64(1),
+                Goldilocks::from_u64(4),
+            ],
+            vec![
+                Goldilocks::from_u64(7),
+                Goldilocks::from_u64(5),
+                Goldilocks::from_u64(4),
+                Goldilocks::from_u64(2),
+            ],
+            vec![
+                Goldilocks::from_u64(9),
+                Goldilocks::from_u64(0),
+                Goldilocks::from_u64(6),
+                Goldilocks::from_u64(8),
+            ],
+        ];
+        let opening_points = [field(2), field(3), field(11)];
+        let weights_by_row = [
+            [field(5), field(0), field(13)],
+            [field(7), field(17), field(0)],
+            [field(0), field(19), field(23)],
+        ];
+        let mut streaming = vec![ChallengeField::ZERO; source_rows[0].len()];
+        let mut carries = vec![field(91); opening_points.len()];
+        for (source_row, row_weights) in source_rows.iter().zip(weights_by_row) {
+            accumulate_weighted_opening_claim_quotient_row(
+                &mut streaming,
+                source_row,
+                &opening_points,
+                &row_weights,
+                &mut carries,
+            )
+            .expect("the weighted row quotient accumulates");
+            assert_eq!(carries, vec![ChallengeField::ZERO; opening_points.len()]);
+        }
+
+        let mut materialized = vec![ChallengeField::ZERO; source_rows[0].len() - 1];
+        for (point_ordinal, opening_point) in opening_points.iter().copied().enumerate() {
+            let aggregate_column = (0..source_rows[0].len())
+                .map(|coefficient_ordinal| {
+                    source_rows.iter().zip(weights_by_row).fold(
+                        ChallengeField::ZERO,
+                        |coefficient, (source_row, row_weights)| {
+                            coefficient
+                                + row_weights[point_ordinal]
+                                    * ChallengeField::from(source_row[coefficient_ordinal])
+                        },
+                    )
+                })
+                .collect::<Vec<_>>();
+            let claimed_evaluation = evaluate_polynomial(&aggregate_column, opening_point);
+            accumulate_opening_claim_quotient(
+                &mut materialized,
+                &aggregate_column,
+                opening_point,
+                claimed_evaluation,
+            )
+            .expect("the materialized point column divides exactly");
+        }
+        assert_eq!(&streaming[..materialized.len()], materialized);
+        assert_eq!(streaming.last(), Some(&ChallengeField::ZERO));
+    }
+
+    #[test]
+    fn streaming_weighted_rows_refuse_ambiguous_or_mismatched_geometry() {
+        let source = [Goldilocks::from_u64(1), Goldilocks::from_u64(2)];
+        let point = field(3);
+        let mut destination = vec![ChallengeField::ZERO; source.len()];
+        let mut carries = vec![ChallengeField::ZERO; 1];
+        assert!(
+            accumulate_weighted_opening_claim_quotient_row(
+                &mut destination[..1],
+                &source,
+                &[point],
+                &[field(5)],
+                &mut carries,
+            )
+            .is_err()
+        );
+        let mut duplicate_point_carries = [field(11), field(13)];
+        assert!(
+            accumulate_weighted_opening_claim_quotient_row(
+                &mut destination,
+                &source,
+                &[point, point],
+                &[field(5), field(7)],
+                &mut duplicate_point_carries,
+            )
+            .is_err()
+        );
+        assert_eq!(duplicate_point_carries, [ChallengeField::ZERO; 2]);
+        assert!(
+            accumulate_weighted_opening_claim_quotient_row(
+                &mut destination,
+                &source,
+                &[point],
+                &[],
+                &mut carries,
+            )
+            .is_err()
+        );
+        assert!(
+            accumulate_weighted_opening_claim_quotient_row(
+                &mut destination,
+                &[Goldilocks::from_u64(1)],
+                &[point],
+                &[field(5)],
+                &mut carries,
             )
             .is_err()
         );

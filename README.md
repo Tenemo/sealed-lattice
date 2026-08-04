@@ -348,17 +348,22 @@ Works today:
 - Production-derived phase-liveness accounting covers source ownership, replay
   readers, DFTs, Merkle frontiers, proof material, transcript state, private
   material, browser-bridge copies, a WebAssembly runtime reserve, and allocator
-  overhead. The selected VSS phase-commitment row now derives `471,778,566`
+  overhead. The selected VSS phase-commitment row now derives `471,779,070`
   bytes from the complete live set, including a `33,554,432`-byte runtime
-  reserve and `48,691,571` bytes of allocator overhead. The complete selected
-  VSS maximum is `597,022,845` bytes, leaving `6,956,931` bytes below the
-  automatic ceiling and `74,065,795` bytes below the hard WebAssembly bound.
+  reserve and `48,691,627` bytes of allocator overhead. The complete selected
+  VSS maximum is `597,023,349` bytes, leaving `6,956,427` bytes below the
+  automatic ceiling and `74,065,291` bytes below the hard WebAssembly bound.
+  Aggregate-source accounting now includes the resident witness and its
+  simultaneously allocated padded physical row, rather than substituting the
+  already-released replay chunk. The selected same-secret aggregate-source
+  phase consequently derives `593,470,870` bytes, `10,508,906` below the
+  automatic ceiling and `77,617,770` below the hard bound.
   This is static accounting, not a native or browser full-proof measurement;
   the narrow automatic-ceiling margin, allocator behavior, and phase lifecycle
   remain unmeasured, so memory feasibility is not closed.
   Bound-tree authentication uses
   one in-place DFT and one evaluated stripe instead of retaining complete
-  evaluated columns; its complete static phase row is `289,681,827` bytes.
+  evaluated columns; its complete static phase row is `289,682,322` bytes.
   These are conservative production-derived live-set bounds, not native or
   browser measurements.
 - The production VSS prerequisite now has a dedicated guarded generation and
@@ -438,8 +443,14 @@ Works today:
   validator independently reconciles the source, discrepancy, domain, query,
   role, variable, and batch formulas. Ordinary selected-profile construction
   still cannot call this route, and production extraction explicitly refuses
-  the quotient tag. No materializer, verifier equation, masking theorem, proof
-  ledger, or complete live-set accounting consumes it yet, so the factor-16
+  the quotient tag. A feature-scoped materializer now streams each padded row
+  into that one quotient column with one reusable carry per opening point;
+  focused equality tests match the 24 materialized point columns exactly and
+  hostile tests refuse duplicate points and mismatched geometry. Because the
+  two live roles occupy columns zero and one, the same candidate derives the
+  second physical half as canonical zero without another authenticated-source
+  replay. No production verifier equation, masking theorem, proof ledger, or
+  complete candidate live-set accounting consumes it yet, so the factor-16
   comparator remains unselected. The fastest comparator accepted by the
   existing one-aggregate construction is instead factor 1, width 32. It has
   331 rows, 21,184 lane
