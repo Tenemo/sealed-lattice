@@ -2119,6 +2119,13 @@ enum CommittedMaterialColumnRecipe {
         digit_ordinal: usize,
         offset: u64,
     },
+    #[cfg(all(feature = "primitive-measurement-evidence", test))]
+    RadixDigit {
+        source: CommittedMaterialIntegerRecipe,
+        digit_ordinal: usize,
+        radix: u64,
+        offset: u64,
+    },
     ShiftSelector {
         row_shift: u64,
     },
@@ -2130,6 +2137,8 @@ impl CommittedMaterialColumnRecipe {
             Self::Integer(source) | Self::TernaryDigit { source, .. } => {
                 source.nested_allocation_byte_length()
             }
+            #[cfg(all(feature = "primitive-measurement-evidence", test))]
+            Self::RadixDigit { source, .. } => source.nested_allocation_byte_length(),
             Self::ShiftSelector { .. } => Ok(0),
         }
     }
@@ -2510,6 +2519,29 @@ impl<Source: CommittedMaterialTraceSource> CommittedMaterialTraceWitnessProvider
                     .ok_or(RelationPlanError::IntegerBoundOverflow)?;
                 shifted / divisor % i128::from(TERNARY_DIGIT_RADIX)
             }
+            #[cfg(all(feature = "primitive-measurement-evidence", test))]
+            CommittedMaterialColumnRecipe::RadixDigit {
+                source,
+                digit_ordinal,
+                radix,
+                offset,
+            } => {
+                if *radix < 2 {
+                    return Err(RelationPlanError::InvalidColumn);
+                }
+                let shifted = self
+                    .integer_value(source, row_ordinal)?
+                    .checked_add(i128::from(*offset))
+                    .filter(|value| *value >= 0)
+                    .ok_or(RelationPlanError::InvalidColumn)?;
+                let divisor = i128::from(*radix)
+                    .checked_pow(
+                        u32::try_from(*digit_ordinal)
+                            .map_err(|_| RelationPlanError::CountOverflow)?,
+                    )
+                    .ok_or(RelationPlanError::IntegerBoundOverflow)?;
+                shifted / divisor % i128::from(*radix)
+            }
             CommittedMaterialColumnRecipe::ShiftSelector { row_shift } => {
                 let trace_domain_size = self.input.message_trace_domain_size()?;
                 let message_row_ordinal = u64::try_from(row_ordinal)
@@ -2859,6 +2891,16 @@ pub(crate) struct SelectedVssSourceReplayMeasurement {
 }
 
 #[cfg(feature = "primitive-measurement-evidence")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VssTraceWitnessLayoutDesign {
+    Selected,
+    #[cfg(test)]
+    FusedBoundRange {
+        range_digit_radix: u64,
+    },
+}
+
+#[cfg(feature = "primitive-measurement-evidence")]
 pub(crate) struct VssRelationReplayRetainedRecipeGroup {
     pub(crate) coefficients: Vec<Zeroizing<Vec<ProofBaseFieldElement>>>,
     pub(crate) checksum: u64,
@@ -2885,6 +2927,18 @@ impl SelectedVssSourceReplayMeasurement {
             opening_degree_bound_exclusive,
         )?;
         Self::prepare_for_relation(input, context)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn prepare_fused_bound_range_candidate(
+        range_digit_radix: u64,
+    ) -> Result<Self, String> {
+        let (input, context) = Self::fused_bound_range_candidate_definition(range_digit_radix)?;
+        Self::prepare_for_relation_with_design(
+            input,
+            context,
+            VssTraceWitnessLayoutDesign::FusedBoundRange { range_digit_radix },
+        )
     }
 
     pub(crate) fn validated_relation_replay_candidate(
@@ -3217,6 +3271,18 @@ impl SelectedVssSourceReplayMeasurement {
         input: CommittedMaterialRelationPlanInput,
         context: RelationPlanCheckContext,
     ) -> Result<Self, String> {
+        Self::prepare_for_relation_with_design(
+            input,
+            context,
+            VssTraceWitnessLayoutDesign::Selected,
+        )
+    }
+
+    fn prepare_for_relation_with_design(
+        input: CommittedMaterialRelationPlanInput,
+        context: RelationPlanCheckContext,
+        layout_design: VssTraceWitnessLayoutDesign,
+    ) -> Result<Self, String> {
         let resolved_moduli = input
             .validate(&context)
             .map_err(|error| format!("selected VSS source-replay moduli are invalid: {error:?}"))?;
@@ -3338,12 +3404,20 @@ impl SelectedVssSourceReplayMeasurement {
         if ordered_sources.len() != expected_root_count {
             return Err("selected VSS source catalog is incomplete".to_owned());
         }
-        super::vss_share_linkage::compile_vss_share_linkage_relation_plan(&input, &context)
-            .map_err(|error| {
-                format!("selected VSS source-replay relation is invalid: {error:?}")
-            })?;
-        let layout = derive_vss_share_linkage_trace_witness_layout(&input, &context)
-            .map_err(|error| format!("selected VSS trace-witness layout is invalid: {error:?}"))?;
+        let layout = match layout_design {
+            VssTraceWitnessLayoutDesign::Selected => {
+                derive_vss_share_linkage_trace_witness_layout(&input, &context)
+            }
+            #[cfg(test)]
+            VssTraceWitnessLayoutDesign::FusedBoundRange { range_digit_radix } => {
+                derive_vss_fused_bound_range_trace_witness_layout(
+                    &input,
+                    &context,
+                    range_digit_radix,
+                )
+            }
+        }
+        .map_err(|error| format!("selected VSS trace-witness layout is invalid: {error:?}"))?;
         let provider = CommittedMaterialTraceWitnessProvider {
             input: CommittedMaterialTraceWitnessInput::from_relation_input(&input),
             ordered_roots: ordered_sources.into_boxed_slice(),
@@ -3755,6 +3829,37 @@ impl<'plan> CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
         Ok(())
     }
 
+    #[cfg(all(feature = "primitive-measurement-evidence", test))]
+    fn add_radix_digits(
+        &mut self,
+        source: CommittedMaterialIntegerRecipe,
+        digit_count: usize,
+        radix: u64,
+        offset: u64,
+    ) -> Result<(), RelationPlanError> {
+        if digit_count == 0 || radix < 2 {
+            return Err(RelationPlanError::InvalidColumn);
+        }
+        let mut source = Some(source);
+        for digit_ordinal in 0..digit_count {
+            let digit_source = if digit_ordinal + 1 == digit_count {
+                source.take().ok_or(RelationPlanError::InvalidColumn)?
+            } else {
+                source
+                    .as_ref()
+                    .ok_or(RelationPlanError::InvalidColumn)?
+                    .clone()
+            };
+            self.push_recipe(CommittedMaterialColumnRecipe::RadixDigit {
+                source: digit_source,
+                digit_ordinal,
+                radix,
+                offset,
+            })?;
+        }
+        Ok(())
+    }
+
     fn packed_source(
         &self,
         actual_sources: impl IntoIterator<Item = CommittedMaterialIntegerRecipe>,
@@ -3869,6 +3974,57 @@ impl<'plan> CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
         Ok(())
     }
 
+    #[cfg(all(feature = "primitive-measurement-evidence", test))]
+    fn add_fused_bound_material_root(
+        &mut self,
+        logical_root_ordinal: usize,
+        modulus_ordinal: usize,
+        modulus: u64,
+        range_digit_radix: u64,
+    ) -> Result<(), RelationPlanError> {
+        if self.trace_packing_factor != 1 || range_digit_radix != 51 {
+            return Err(RelationPlanError::InvalidDomain);
+        }
+        fixed_material_digits(modulus - 1)?;
+        self.consume_bound_root(4)?;
+        let range_digit_count = usize::try_from(minimum_unsigned_digit_count(
+            MATERIAL_DIGIT_RADIX - 1,
+            range_digit_radix,
+        )?)
+        .map_err(|_| RelationPlanError::CountOverflow)?;
+        for physical_half_ordinal in 0..2 {
+            self.add_radix_digits(
+                CommittedMaterialIntegerRecipe::BoundDigit {
+                    logical_root_ordinal,
+                    physical_half_ordinal,
+                    material_digit_ordinal: 0,
+                },
+                range_digit_count,
+                range_digit_radix,
+                0,
+            )?;
+            self.add_radix_digits(
+                CommittedMaterialIntegerRecipe::ComparatorDifference {
+                    logical_root_ordinal,
+                    physical_half_ordinal,
+                    material_digit_ordinal: 0,
+                    modulus_ordinal,
+                },
+                range_digit_count,
+                range_digit_radix,
+                0,
+            )?;
+            self.push_recipe(CommittedMaterialColumnRecipe::Integer(
+                CommittedMaterialIntegerRecipe::ComparatorBorrow {
+                    logical_root_ordinal,
+                    physical_half_ordinal,
+                    modulus_ordinal,
+                },
+            ))?;
+        }
+        Ok(())
+    }
+
     fn ensure_shift_selector(&mut self, row_shift: u64) -> Result<(), RelationPlanError> {
         if row_shift != 0
             && !self.ordered_recipes.iter().any(|(_, recipe)| {
@@ -3906,6 +4062,28 @@ impl<'plan> CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
             )?;
             self.push_recipe(CommittedMaterialColumnRecipe::Integer(source.clone()))?;
             self.add_ternary_digits(source, ternary_digit_count, offset)?;
+        }
+        Ok(())
+    }
+
+    #[cfg(all(feature = "primitive-measurement-evidence", test))]
+    fn add_direct_signed_quotients(
+        &mut self,
+        ordered_sources: impl IntoIterator<Item = CommittedMaterialIntegerRecipe>,
+        required_absolute_bound: u64,
+    ) -> Result<(), RelationPlanError> {
+        if self.trace_packing_factor != 1 || required_absolute_bound == 0 {
+            return Err(RelationPlanError::InvalidColumn);
+        }
+        let mut source_count = 0_usize;
+        for source in ordered_sources {
+            self.push_recipe(CommittedMaterialColumnRecipe::Integer(source))?;
+            source_count = source_count
+                .checked_add(1)
+                .ok_or(RelationPlanError::CountOverflow)?;
+        }
+        if source_count == 0 {
+            return Err(RelationPlanError::InvalidColumn);
         }
         Ok(())
     }
@@ -3949,6 +4127,43 @@ struct VssShareLinkageTraceWitnessLayout {
     roots_per_limb: usize,
     ordered_recipes: Box<[(u32, CommittedMaterialColumnRecipe)]>,
     relation_plan_hash: [u8; 64],
+}
+
+fn add_vss_shift_selector_recipes(
+    layout: &mut CommittedMaterialTraceWitnessLayoutBuilder<'_>,
+    input: &CommittedMaterialRelationPlanInput,
+    sharing_limb_count: usize,
+) -> Result<(), RelationPlanError> {
+    let threshold = usize::from(input.threshold);
+    let participant_count = usize::from(input.participant_count);
+    let point_stride = input.point_stride()?;
+    for _sharing_limb_ordinal in 0..sharing_limb_count {
+        for physical_half_ordinal in 0..2 {
+            for recipient_ordinal in 0..participant_count {
+                for coefficient_ordinal in 0..threshold {
+                    let exponent = u64::try_from(recipient_ordinal)
+                        .ok()
+                        .and_then(|recipient| {
+                            u64::try_from(coefficient_ordinal)
+                                .ok()
+                                .and_then(|coefficient| recipient.checked_mul(coefficient))
+                        })
+                        .and_then(|product| product.checked_mul(point_stride))
+                        .ok_or(RelationPlanError::CountOverflow)?;
+                    for branch in monomial_action_branches(
+                        input.ring_degree,
+                        exponent,
+                        physical_half_ordinal,
+                    )? {
+                        if branch.use_upper_row_selector.is_some() {
+                            layout.ensure_shift_selector(branch.rotation_magnitude)?;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn derive_vss_share_linkage_trace_witness_layout(
@@ -3998,33 +4213,67 @@ fn derive_vss_share_linkage_trace_witness_layout(
         })
     });
     layout.add_packed_signed_quotients(quotient_sources, u64::from(input.threshold))?;
-    let point_stride = input.point_stride()?;
-    for _sharing_limb_ordinal in 0..sharing_limb_count {
-        for physical_half_ordinal in 0..2 {
-            for recipient_ordinal in 0..participant_count {
-                for coefficient_ordinal in 0..threshold {
-                    let exponent = u64::try_from(recipient_ordinal)
-                        .ok()
-                        .and_then(|recipient| {
-                            u64::try_from(coefficient_ordinal)
-                                .ok()
-                                .and_then(|coefficient| recipient.checked_mul(coefficient))
-                        })
-                        .and_then(|product| product.checked_mul(point_stride))
-                        .ok_or(RelationPlanError::CountOverflow)?;
-                    for branch in monomial_action_branches(
-                        input.ring_degree,
-                        exponent,
-                        physical_half_ordinal,
-                    )? {
-                        if branch.use_upper_row_selector.is_some() {
-                            layout.ensure_shift_selector(branch.rotation_magnitude)?;
-                        }
-                    }
-                }
-            }
+    add_vss_shift_selector_recipes(&mut layout, input, sharing_limb_count)?;
+    Ok(VssShareLinkageTraceWitnessLayout {
+        resolved_moduli: resolved,
+        roots_per_limb,
+        ordered_recipes: layout.finish()?,
+        relation_plan_hash: compiled.canonical_hash()?,
+    })
+}
+
+#[cfg(all(feature = "primitive-measurement-evidence", test))]
+fn derive_vss_fused_bound_range_trace_witness_layout(
+    input: &CommittedMaterialRelationPlanInput,
+    context: &RelationPlanCheckContext,
+    range_digit_radix: u64,
+) -> Result<VssShareLinkageTraceWitnessLayout, RelationPlanError> {
+    let resolved = input.validate(context)?;
+    let compiled =
+        super::vss_share_linkage::compile_vss_share_linkage_fused_bound_range_candidate_relation_plan(
+            input,
+            context,
+            range_digit_radix,
+        )?;
+    let variant = compiled
+        .variants()
+        .first()
+        .ok_or(RelationPlanError::InvalidVariantSelector)?;
+    let sharing_limb_count = resolved.len();
+    let threshold = usize::from(input.threshold);
+    let participant_count = usize::from(input.participant_count);
+    let roots_per_limb = threshold
+        .checked_add(participant_count)
+        .ok_or(RelationPlanError::CountOverflow)?;
+    let mut layout =
+        CommittedMaterialTraceWitnessLayoutBuilder::new(variant, input.trace_packing_factor)?;
+    let mut logical_root_ordinal = 0_usize;
+    for (modulus_ordinal, (_, modulus)) in resolved.iter().copied().enumerate() {
+        for root_offset in 0..roots_per_limb {
+            layout.add_fused_bound_material_root(
+                logical_root_ordinal + root_offset,
+                modulus_ordinal,
+                modulus,
+                range_digit_radix,
+            )?;
         }
+        logical_root_ordinal = logical_root_ordinal
+            .checked_add(roots_per_limb)
+            .ok_or(RelationPlanError::CountOverflow)?;
     }
+    let quotient_sources = (0..sharing_limb_count).flat_map(|sharing_limb_ordinal| {
+        (0..2).flat_map(move |physical_half_ordinal| {
+            (0..participant_count).map(move |recipient_ordinal| {
+                CommittedMaterialIntegerRecipe::VssQuotient {
+                    sharing_limb_ordinal,
+                    recipient_ordinal,
+                    physical_half_ordinal,
+                }
+            })
+        })
+    });
+    layout.add_direct_signed_quotients(quotient_sources, u64::from(input.threshold))?;
+    add_vss_shift_selector_recipes(&mut layout, input, sharing_limb_count)?;
     Ok(VssShareLinkageTraceWitnessLayout {
         resolved_moduli: resolved,
         roots_per_limb,
@@ -4581,6 +4830,476 @@ mod tests {
             altered_radix_plan.check(&context),
             Err(RelationPlanError::InvalidBoundCertificate)
         );
+    }
+
+    #[cfg(feature = "primitive-measurement-evidence")]
+    #[test]
+    fn fused_bound_range_witness_layout_matches_every_compiled_prover_column() {
+        let mut measurement =
+            super::SelectedVssSourceReplayMeasurement::prepare_fused_bound_range_candidate(51)
+                .expect("the radix-51 fused-bound witness layout derives");
+        let (input, artifact, context) =
+            super::SelectedVssSourceReplayMeasurement::validated_fused_bound_range_candidate_with_input(51)
+                .expect("the radix-51 fused-bound artifact validates");
+        assert_eq!(
+            measurement.relation_plan_hash(),
+            artifact.canonical_plan_hash()
+        );
+        assert_eq!(measurement.production_recipe_count(), 2_627);
+        let variant = artifact
+            .compiled_plan()
+            .variants()
+            .first()
+            .expect("the radix-51 fused-bound variant exists");
+        let expected_range_values = (0_u64..51)
+            .map(num_bigint::BigInt::from)
+            .collect::<Vec<_>>();
+        let expected_quotient_values = (-4_i128..=4)
+            .map(num_bigint::BigInt::from)
+            .collect::<Vec<_>>();
+        let semantic_cells = variant
+            .ordered_semantic_cells
+            .iter()
+            .map(|cell| (cell.column_ordinal, cell))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let mut bound_low_digit_count = 0_usize;
+        let mut difference_digit_count = 0_usize;
+        let mut borrow_count = 0_usize;
+        let mut quotient_count = 0_usize;
+        let mut shift_selector_count = 0_usize;
+        let mut bound_low_digit_count_by_ordinal = [0_usize; 5];
+        let mut difference_digit_count_by_ordinal = [0_usize; 5];
+        let trace_value_count = measurement.trace_value_count();
+        let mut representative_rows = BTreeSet::from([
+            0_usize,
+            1,
+            trace_value_count / 3,
+            trace_value_count / 2,
+            trace_value_count - 2,
+            trace_value_count - 1,
+        ]);
+        for (_, recipe) in measurement.provider.ordered_recipes.iter() {
+            if let super::CommittedMaterialColumnRecipe::ShiftSelector { row_shift } = recipe {
+                let transition_row = trace_value_count
+                    .checked_sub(
+                        usize::try_from(*row_shift).expect("the shift magnitude fits usize") + 1,
+                    )
+                    .expect("the shift transition is inside the trace");
+                representative_rows.insert(transition_row);
+                representative_rows.insert((transition_row + 1) % trace_value_count);
+            }
+        }
+        for (column_ordinal, recipe) in measurement.provider.ordered_recipes.iter() {
+            let semantic_cell = semantic_cells
+                .get(column_ordinal)
+                .copied()
+                .expect("every fused-bound recipe has a semantic cell");
+            match recipe {
+                super::CommittedMaterialColumnRecipe::RadixDigit {
+                    source:
+                        super::CommittedMaterialIntegerRecipe::BoundDigit {
+                            material_digit_ordinal: 0,
+                            ..
+                        },
+                    radix: 51,
+                    offset: 0,
+                    digit_ordinal,
+                } => {
+                    bound_low_digit_count += 1;
+                    bound_low_digit_count_by_ordinal[*digit_ordinal] += 1;
+                    assert!(matches!(
+                        &semantic_cell.bound_certificate,
+                        RelationBoundCertificate::FiniteIntegerSet { ordered_values, .. }
+                            if ordered_values == &expected_range_values
+                    ));
+                }
+                super::CommittedMaterialColumnRecipe::RadixDigit {
+                    source:
+                        super::CommittedMaterialIntegerRecipe::ComparatorDifference {
+                            material_digit_ordinal: 0,
+                            ..
+                        },
+                    radix: 51,
+                    offset: 0,
+                    digit_ordinal,
+                } => {
+                    difference_digit_count += 1;
+                    difference_digit_count_by_ordinal[*digit_ordinal] += 1;
+                    assert!(matches!(
+                        &semantic_cell.bound_certificate,
+                        RelationBoundCertificate::FiniteIntegerSet { ordered_values, .. }
+                            if ordered_values == &expected_range_values
+                    ));
+                }
+                super::CommittedMaterialColumnRecipe::Integer(
+                    source @ super::CommittedMaterialIntegerRecipe::ComparatorBorrow { .. },
+                ) => {
+                    borrow_count += 1;
+                    assert!(matches!(
+                        semantic_cell.bound_certificate,
+                        RelationBoundCertificate::Binary { .. }
+                    ));
+                    for row_ordinal in representative_rows.iter().copied() {
+                        assert!(matches!(
+                            measurement.provider.integer_value(source, row_ordinal),
+                            Ok(0 | 1)
+                        ));
+                    }
+                }
+                super::CommittedMaterialColumnRecipe::Integer(
+                    source @ super::CommittedMaterialIntegerRecipe::VssQuotient { .. },
+                ) => {
+                    quotient_count += 1;
+                    assert!(matches!(
+                        &semantic_cell.bound_certificate,
+                        RelationBoundCertificate::FiniteIntegerSet { ordered_values, .. }
+                            if ordered_values == &expected_quotient_values
+                    ));
+                    for row_ordinal in representative_rows.iter().copied() {
+                        assert!(matches!(
+                            measurement.provider.integer_value(source, row_ordinal),
+                            Ok(-4..=4)
+                        ));
+                    }
+                }
+                super::CommittedMaterialColumnRecipe::ShiftSelector { .. } => {
+                    shift_selector_count += 1;
+                    assert!(matches!(
+                        semantic_cell.bound_certificate,
+                        RelationBoundCertificate::Binary { .. }
+                    ));
+                }
+                _ => panic!("the radix-51 fused-bound witness has an unexpected recipe"),
+            }
+            for row_ordinal in representative_rows.iter().copied() {
+                let observed = measurement
+                    .provider
+                    .trace_value(*column_ordinal, row_ordinal)
+                    .expect("the representative fused-bound witness value derives");
+                assert!(observed < crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS);
+                if let super::CommittedMaterialColumnRecipe::RadixDigit {
+                    source,
+                    digit_ordinal,
+                    radix,
+                    offset,
+                } = recipe
+                {
+                    let source_value = measurement
+                        .provider
+                        .integer_value(source, row_ordinal)
+                        .expect("the fused-bound radix source derives")
+                        + i128::from(*offset);
+                    let divisor = i128::from(*radix)
+                        .pow(u32::try_from(*digit_ordinal).expect("the digit ordinal fits u32"));
+                    assert_eq!(
+                        observed,
+                        u64::try_from(source_value / divisor % i128::from(*radix))
+                            .expect("the expected radix digit fits u64")
+                    );
+                }
+            }
+        }
+        assert_eq!(bound_low_digit_count, 1_120);
+        assert_eq!(difference_digit_count, 1_120);
+        assert_eq!(bound_low_digit_count_by_ordinal, [224; 5]);
+        assert_eq!(difference_digit_count_by_ordinal, [224; 5]);
+        assert_eq!(borrow_count, 224);
+        assert_eq!(quotient_count, 160);
+        assert_eq!(shift_selector_count, 3);
+
+        let roots_per_limb = usize::from(input.threshold)
+            .checked_add(usize::from(input.participant_count))
+            .expect("the VSS roots per limb fit usize");
+        for logical_root_ordinal in 0..measurement.provider.ordered_roots.len() {
+            let modulus_ordinal = logical_root_ordinal / roots_per_limb;
+            let modulus = measurement.provider.resolved_moduli[modulus_ordinal];
+            let maximum_digits =
+                super::fixed_material_digits(modulus - 1).expect("the VSS material maximum splits");
+            for physical_half_ordinal in 0..2 {
+                for row_ordinal in 0..trace_value_count {
+                    let low = measurement
+                        .provider
+                        .material_digit(logical_root_ordinal, physical_half_ordinal, 0, row_ordinal)
+                        .expect("the fused-bound low material digit derives");
+                    let high = measurement
+                        .provider
+                        .material_digit(logical_root_ordinal, physical_half_ordinal, 1, row_ordinal)
+                        .expect("the fused-bound high material digit derives");
+                    assert!(low >= 0 && low < i128::from(super::MATERIAL_DIGIT_RADIX));
+                    assert!(high >= 0 && high <= i128::from(maximum_digits[1]));
+                    assert!(
+                        high < i128::from(maximum_digits[1])
+                            || low <= i128::from(maximum_digits[0])
+                    );
+                    let borrow = measurement
+                        .provider
+                        .comparator_borrow(
+                            logical_root_ordinal,
+                            physical_half_ordinal,
+                            modulus_ordinal,
+                            row_ordinal,
+                        )
+                        .expect("the fused-bound comparator borrow derives");
+                    assert_eq!(borrow, u64::from(low > i128::from(maximum_digits[0])));
+                    let difference = measurement
+                        .provider
+                        .comparator_difference(
+                            logical_root_ordinal,
+                            physical_half_ordinal,
+                            0,
+                            modulus_ordinal,
+                            row_ordinal,
+                        )
+                        .expect("the fused-bound comparator difference derives");
+                    assert!(
+                        difference >= 0 && difference < i128::from(super::MATERIAL_DIGIT_RADIX)
+                    );
+                    assert_eq!(
+                        i128::from(maximum_digits[0]) - low
+                            + i128::from(super::MATERIAL_DIGIT_RADIX) * i128::from(borrow),
+                        difference
+                    );
+                }
+            }
+        }
+
+        for sharing_limb_ordinal in 0..measurement.provider.resolved_moduli.len() {
+            for physical_half_ordinal in 0..2 {
+                for recipient_ordinal in 0..usize::from(input.participant_count) {
+                    for row_ordinal in 0..trace_value_count {
+                        assert!(matches!(
+                            measurement.provider.vss_quotient(
+                                sharing_limb_ordinal,
+                                recipient_ordinal,
+                                physical_half_ordinal,
+                                row_ordinal,
+                            ),
+                            Ok(-4..=4)
+                        ));
+                    }
+                }
+            }
+        }
+
+        let assignments = (0..variant.ordered_non_native_moduli.len())
+            .flat_map(|modulus_ordinal| {
+                (0..context.non_native_alpha_repetition_count).map(move |repetition_ordinal| {
+                    crate::bgv::proof_suite::RelationApplicationChallengeAssignment::new(
+                        crate::bgv::proof_suite::CommonProofChallenge::Alpha {
+                            modulus_ordinal: u16::try_from(modulus_ordinal)
+                                .expect("the modulus ordinal fits u16"),
+                        },
+                        repetition_ordinal,
+                        2 + u64::from(repetition_ordinal),
+                    )
+                    .expect("the deterministic alpha assignment is valid")
+                })
+            })
+            .collect::<Vec<_>>();
+        let checked_challenges = variant
+            .checked_application_challenges(&context, &assignments)
+            .expect("the deterministic alpha catalog covers the VSS relation");
+        let evaluation_generator = crate::bgv::proof_suite::ProofBaseFieldElement::from_canonical(
+            context.evaluation_domain_generator,
+        )
+        .expect("the VSS evaluation generator is canonical");
+        let trace_generator =
+            evaluation_generator.power(variant.evaluation_domain_size / variant.trace_domain_size);
+        let mut bound_column_sources = std::collections::BTreeMap::new();
+        let mut logical_root_ordinal = 0_usize;
+        for tree in &variant.ordered_trees {
+            let RelationTreeDescriptor::BoundPublic {
+                ordered_column_ordinals,
+                ..
+            } = tree
+            else {
+                continue;
+            };
+            assert_eq!(ordered_column_ordinals.len(), 4);
+            for (physical_column_ordinal, column_ordinal) in
+                ordered_column_ordinals.iter().copied().enumerate()
+            {
+                assert!(
+                    bound_column_sources
+                        .insert(
+                            column_ordinal,
+                            (logical_root_ordinal, physical_column_ordinal),
+                        )
+                        .is_none()
+                );
+            }
+            logical_root_ordinal += 1;
+        }
+        assert_eq!(
+            logical_root_ordinal,
+            measurement.provider.ordered_roots.len()
+        );
+        let mut operative_constraint_evaluation_count = 0_usize;
+        for constraint_ordinal in 0..variant.constraint_count() {
+            for row_ordinal in representative_rows.iter().copied() {
+                let evaluation_point =
+                    crate::bgv::proof_suite::ProofChallengeExtensionElement::from_base(
+                        trace_generator
+                            .power(u64::try_from(row_ordinal).expect("the trace row fits u64")),
+                    );
+                let evaluation = variant
+                    .evaluate_constraint_programs_at_point(
+                        &context,
+                        constraint_ordinal,
+                        evaluation_point,
+                        &checked_challenges,
+                        &mut |column_ordinal, rotation_is_negative, rotation_magnitude| {
+                            let rotation = usize::try_from(rotation_magnitude)
+                                .map_err(|_| RelationPlanError::CountOverflow)?;
+                            let rotated_row = if rotation_is_negative {
+                                row_ordinal
+                                    .checked_add(trace_value_count)
+                                    .and_then(|value| value.checked_sub(rotation))
+                                    .ok_or(RelationPlanError::CountOverflow)?
+                                    % trace_value_count
+                            } else {
+                                row_ordinal
+                                    .checked_add(rotation)
+                                    .ok_or(RelationPlanError::CountOverflow)?
+                                    % trace_value_count
+                            };
+                            let column = variant
+                                .ordered_columns
+                                .get(
+                                    usize::try_from(column_ordinal)
+                                        .map_err(|_| RelationPlanError::CountOverflow)?,
+                                )
+                                .ok_or(RelationPlanError::InvalidColumn)?;
+                            let value = match column.origin {
+                                RelationColumnOrigin::Prover => measurement
+                                    .provider
+                                    .trace_value(column_ordinal, rotated_row)?,
+                                RelationColumnOrigin::BoundTree { .. } => {
+                                    let (logical_root_ordinal, physical_column_ordinal) =
+                                        bound_column_sources
+                                            .get(&column_ordinal)
+                                            .copied()
+                                            .ok_or(RelationPlanError::InvalidColumn)?;
+                                    measurement
+                                        .provider
+                                        .material_digit(
+                                            logical_root_ordinal,
+                                            physical_column_ordinal % 2,
+                                            physical_column_ordinal / 2,
+                                            rotated_row,
+                                        )
+                                        .and_then(|value| {
+                                            u64::try_from(value)
+                                                .map_err(|_| RelationPlanError::InvalidColumn)
+                                        })?
+                                }
+                                _ => return Err(RelationPlanError::InvalidColumn),
+                            };
+                            crate::bgv::proof_suite::ProofBaseFieldElement::from_canonical(value)
+                                .map(crate::bgv::proof_suite::ProofChallengeExtensionElement::from_base)
+                                .map_err(|_| RelationPlanError::InvalidColumn)
+                        },
+                    )
+                    .expect("the fused-bound constraint evaluates on a trace point");
+                if evaluation.zeroifier.is_zero() {
+                    operative_constraint_evaluation_count += 1;
+                    assert!(
+                        evaluation.numerator.is_zero(),
+                        "constraint {constraint_ordinal} fails on trace row {row_ordinal}",
+                    );
+                }
+            }
+        }
+        assert!(operative_constraint_evaluation_count > variant.constraint_count());
+
+        let (tampered_column_ordinal, tampered_source) = measurement
+            .provider
+            .ordered_recipes
+            .iter_mut()
+            .find_map(|(column_ordinal, recipe)| match recipe {
+                super::CommittedMaterialColumnRecipe::RadixDigit {
+                    source:
+                        source @ super::CommittedMaterialIntegerRecipe::BoundDigit {
+                            material_digit_ordinal: 0,
+                            ..
+                        },
+                    digit_ordinal: 0,
+                    radix,
+                    offset: 0,
+                } if *radix == 51 => {
+                    *radix = 50;
+                    Some((*column_ordinal, source.clone()))
+                }
+                _ => None,
+            })
+            .expect("one bound-low radix recipe can be tampered");
+        let (recomposition_constraint_ordinal, recomposition_target_column_ordinal) = variant
+            .ordered_semantic_cells
+            .iter()
+            .find_map(|cell| match &cell.bound_certificate {
+                RelationBoundCertificate::UnsignedRadixRecomposition {
+                    constraint_ordinal,
+                    ordered_digit_column_ordinals,
+                    ..
+                } if ordered_digit_column_ordinals.contains(&tampered_column_ordinal) => {
+                    Some((*constraint_ordinal, cell.column_ordinal))
+                }
+                _ => None,
+            })
+            .expect("the tampered radix digit has a bound recomposition");
+        let tampered_row_ordinal = (0..trace_value_count)
+            .find(|row_ordinal| {
+                measurement
+                    .provider
+                    .integer_value(&tampered_source, *row_ordinal)
+                    .is_ok_and(|value| value % 50 != value % 51)
+            })
+            .expect("the selected source distinguishes radix 50 from radix 51");
+        let tampered_evaluation = variant
+            .evaluate_constraint_programs_at_point(
+                &context,
+                usize::try_from(recomposition_constraint_ordinal)
+                    .expect("the recomposition constraint ordinal fits usize"),
+                crate::bgv::proof_suite::ProofChallengeExtensionElement::from_base(
+                    trace_generator.power(
+                        u64::try_from(tampered_row_ordinal)
+                            .expect("the tampered row ordinal fits u64"),
+                    ),
+                ),
+                &checked_challenges,
+                &mut |column_ordinal, rotation_is_negative, rotation_magnitude| {
+                    if rotation_is_negative || rotation_magnitude != 0 {
+                        return Err(RelationPlanError::InvalidColumn);
+                    }
+                    let value = if column_ordinal == recomposition_target_column_ordinal {
+                        let (logical_root_ordinal, physical_column_ordinal) = bound_column_sources
+                            .get(&column_ordinal)
+                            .copied()
+                            .ok_or(RelationPlanError::InvalidColumn)?;
+                        measurement
+                            .provider
+                            .material_digit(
+                                logical_root_ordinal,
+                                physical_column_ordinal % 2,
+                                physical_column_ordinal / 2,
+                                tampered_row_ordinal,
+                            )
+                            .and_then(|value| {
+                                u64::try_from(value).map_err(|_| RelationPlanError::InvalidColumn)
+                            })?
+                    } else {
+                        measurement
+                            .provider
+                            .trace_value(column_ordinal, tampered_row_ordinal)?
+                    };
+                    crate::bgv::proof_suite::ProofBaseFieldElement::from_canonical(value)
+                        .map(crate::bgv::proof_suite::ProofChallengeExtensionElement::from_base)
+                        .map_err(|_| RelationPlanError::InvalidColumn)
+                },
+            )
+            .expect("the tampered recomposition remains structurally evaluable");
+        assert!(tampered_evaluation.zeroifier.is_zero());
+        assert!(!tampered_evaluation.numerator.is_zero());
     }
 
     fn dense_negacyclic_monomial_action(source: &[u64], exponent: u64, modulus: u64) -> Vec<u64> {

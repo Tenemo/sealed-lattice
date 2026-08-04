@@ -553,10 +553,13 @@ Works today:
   remain. Radix 50 needs 74 quotient components and radix 66 needs 112, so each
   adds another quotient-row group and misses the salted-leaf boundary. The
   radix-51 result is still only a feature-scoped implementation candidate. Its
-  canonical checked compiler and distinct repeatable construction identity now
-  exist, but its witness correspondence, checked interpreter parity, complete
-  liveness, theorem, proof bytes, and native and browser measurements do not,
-  so no replay redesign is selected.
+  canonical checked compiler, distinct repeatable construction identity, and
+  one-to-one 2,627-column witness layout now exist. Focused correspondence
+  checks cover every selected source row and direct VSS quotient, every radix
+  decomposition and borrow identity, and every compiled constraint at
+  boundary-sensitive trace points through the checked interpreter. Complete
+  phase liveness, theorem integration, proof bytes, and native and browser
+  measurements do not yet exist, so no replay redesign is selected.
   The fastest comparator accepted by the existing one-aggregate construction
   is instead factor 1, width 32. It has 331 rows, 21,184 lane DFTs,
   `105,511,911,424` butterflies, `11,106,516,992` value deliveries, and
