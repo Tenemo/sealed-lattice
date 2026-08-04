@@ -39,6 +39,8 @@ mod relinearization_source_material;
 mod relinearization_verification_runtime;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod resource_accounting_evidence;
+#[cfg(test)]
+mod ring_native_candidate;
 mod row_code_whir;
 mod runtime;
 mod runtime_ffi;

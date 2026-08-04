@@ -47,18 +47,14 @@ ordered `topOptionCount` variants, and focused structural tests cover every
 configurable count without generating cryptographic evidence for the other
 counts.
 The current version-five mapped-soundness vector contains the exact-ten
-construction identities, twelve family rows, and conservative 103-physical-
-proof, 159-logical-instance arithmetic. Its independently derived fixed-output
-graph certificate covers coherent seed-and-block access, exact predecessor
-support, database recording and extraction, and the conservative action union
-under one modeled 512-bit ideal QRO. It is not yet accepted as emitted-proof
-soundness authority: the evidence builder and imported collective-setup record
-keep the fixed-output transform and proof composition unresolved until one
-freshly transported canonical proof instantiates the certified construction
-and graph identities.
-Other checked construction records, resource ledgers, checkpoints, and runtime
-evidence still describe the superseded twenty-option candidate and are not
-eligible for suite freeze.
+row-code construction identities, twelve family rows, and conservative
+103-physical-proof, 159-logical-instance arithmetic. Its independently derived
+fixed-output graph certificate is conditional evidence for that construction,
+not accepted emitted-proof authority. The row-code prover is now also rejected
+as the mobile implementation direction by the measured results below, so its
+theorem records cannot select a suite even if their remaining imports close.
+Other records that still describe the superseded twenty-option candidate are
+likewise ineligible for suite freeze.
 
 Every required participant operation is intended to run in the participant's
 own mobile browser. Transcript and mailbox services only relay untrusted bytes;
@@ -69,11 +65,80 @@ they are not trusted to prove, verify, tally, finalize, or decrypt.
 The kernel's selected source profile and deterministic compilers now target
 `n = 10`, `optionCount = 10`. The suite remains unavailable until its
 parameters, proof construction, theorem records, vectors, resource ledgers,
-and runtime evidence are regenerated and frozen together. All exact geometry,
-proof-count, proof-size, transcript, soundness, and runtime figures below were
-generated from the superseded twenty-option candidate unless stated otherwise;
-they remain useful diagnostics but are not evidence for the selected
-ten-option bytes.
+and runtime evidence are regenerated and frozen together. Historical figures
+below retain their stated scope; only figures explicitly labeled exact-ten and
+bound to one recorded build describe the current target.
+
+### Current proof-backend decision
+
+The streaming row-code/WHIR prover remains implemented as the current proof
+body, but it is no longer the selected mobile-feasibility direction. Its best
+feature-scoped exact-ten VSS candidate has a `665,012,106`-byte modeled live
+set, only `6,076,534` bytes below the hard WebAssembly bound, plus
+`885,618,680` bytes of authenticated scratch. Corrected replay accounting gives
+`5,670,455,288` bytes written, `73,344,195,928` requested bytes read, and
+`2,866,177` authenticated transactions. Browser storage opens and
+authenticates complete encrypted records for range reads, so requested-byte
+accounting understates the physical work of the `2,787,686` quotient reads.
+
+One reproducible release-WebAssembly build measured every owner used by the
+candidate's base and quotient commitment projection. Those owners alone
+project to `452.200` seconds in desktop Chromium and `3,900.567` seconds in
+desktop Firefox, before sumcheck, WHIR, proof encoding, storage, allocator,
+bridge, checkpoint, and verification work. The same build measured a
+one-mebibyte authenticated browser-storage round trip at `302` milliseconds in
+Chromium and `2,261` milliseconds in Firefox. These results reject further
+whole-proof reruns and storage tuning of the row-code prover as a credible
+mobile path; they do not invalidate already verified proof bytes or establish
+phone performance.
+
+The replacement implementation candidate is a direct-RNS ring PIOP for the BGV
+relations compiled with an evaluation-hiding lattice polynomial commitment.
+Every 27- to 39-bit physical RNS limb remains an exact centered integer
+equation with a bounded reduction quotient; the candidate neither reconstructs
+the 805-bit extended product inside one relation nor modulus-switches accepted
+BGV objects. The earlier 255-bit Jindo example field is rejected: HLS's
+`O(degree * N / p)` row-check term, the `t^2` loss in BGTZ's QROM transform,
+the complete `2^80 - 1` query budget, and the 60-packet union consume its
+headroom before relation degree or transform constants are charged. The
+replacement parameter candidate is the existing Jindo-friendly 440-bit prime
+`181765148^16 + 1`. It supports the degree-`32,768` NTT and leaves a 192-bit
+capacity for the still-to-be-derived weighted algebraic numerator under a
+conservative `t = 2^81` reservation. This is parameter headroom, not a QROM
+proof: the production compiler and an explicit-constant transform must still
+derive every interval, special-soundness term, PCS segment, verifier query,
+and complete-ceremony loss before the field can be selected.
+
+The test-only candidate correspondence maps every current family exactly once
+and preserves all 150 secret-bearing logical relations. The setup dependency
+graph permits three outer proof packets per participant: dealer VSS; one
+post-VSS packet batching aggregate-share, same-secret, public-key, round-one,
+and Galois relations; and one round-two packet after the round-one aggregate
+freezes. Including the 20 ballot-attempt slots and ten target-share slots gives
+a 60-packet outer schedule, compared with the incumbent inventory of 103
+physical proof applications. The number of internal PCS lifecycle segments is
+unresolved until the exact oracle inventory is compiled, and no logical
+relation is removed by batching. At 234 committed polynomials, one
+uncompressed 440-bit field array would be `858,783,744` bytes and already
+exceed the WebAssembly hard-memory bound. The reference prover's resident
+opening lifecycle is therefore not a browser implementation candidate. The
+intended adapter emits commitments in a first pass, discards per-polynomial
+openings, and deterministically recomputes and streams them into one batched
+opening after challenge derivation. Independent proof segmentation is a
+fallback only if that two-pass lifecycle cannot be bounded.
+
+That candidate is not yet implemented or selected. The three public-only
+aggregate families may disappear only if canonical homomorphic source
+commitments and a streaming commitment to the aggregate bytes prove the same
+binding; otherwise their relations remain. The first required executable kill
+gate is the clean-room 440-bit field and degree-`32,768` NTT in release
+WebAssembly, followed by one public-key relation across its actual RNS limbs
+with the recomputable two-pass opening lifecycle, canonical statement binding,
+centered-lift and quotient uniqueness, exact norms, proof generation and
+verification, and one-build Chromium and Firefox resource evidence. Published
+native results and the external Go reference are research and differential-test
+inputs, not browser evidence, licensed reusable code, a project transcript, or
+a QROM theorem.
 
 Works today:
 
@@ -89,7 +154,9 @@ Works today:
   and explicit-point WHIR construction. The old operative FRI body has been
   removed, and the successor has production-owned masked proof assembly,
   incremental canonical verification, bounded-storage primitives, and focused
-  development tests.
+  development tests. This describes the live code path, not a selected mobile
+  backend; the measurements above reject its proving schedule pending
+  replacement by the ring-native candidate.
 - The live 64-way same-secret geometry and full-coordinate, inverse-rate-four
   aggregate-wide mask have production-derived static plans. The canonical
   transport sections and selected resource owner now independently reconcile a
@@ -389,7 +456,7 @@ Works today:
   remains available for current decoder-and-verifier resume validation, but
   the focused guarded VSS prerequisite and any complete proof run have not been
   resumed.
-  The current liveness plan materializes this geometry twice. The two passes
+  The retired liveness plan materialized this geometry twice. The two passes
   therefore require `72,192` lane DFTs, `359,569,293,312` butterflies, and
   `37,849,399,296` value deliveries, or about 282 GiB of eight-byte value
   traffic before allocator and replay effects. Each salted 1,128-value phase
@@ -402,19 +469,20 @@ Works today:
   `67.8726` seconds in desktop Chromium, and `360.784` seconds in desktop
   Firefox; both browsers ended at `58,720,256` bytes of WebAssembly linear
   memory and matched the native checksum. Projecting the measured owners places
-  the current two-pass schedule at about 1.72 hours natively, 7.38 hours in
+  that two-pass schedule at about 1.72 hours natively, 7.38 hours in
   Chromium, and 38.85 hours in Firefox. A modeled level-two checkpoint candidate
   uses `268,576,000` bytes of scratch and projects about 1.06, 4.58, and 23.91
   hours respectively. It is not an implemented authenticated production
   checkpoint and makes no root, transcript, proof-byte, or verifier-equivalence
   claim. The displayed owner total excludes the separately recorded checkpoint
-  storage, codec, and boundary-copy time. The latest projection also combines
+  storage, codec, and boundary-copy time. That historical projection combines
   base and supplemental cases measured from two different WebAssembly binaries;
-  the current evidence validator refuses that stitched catalog and requires one
+  the evidence validator refuses that stitched catalog and requires one
   complete native catalog plus complete Chromium and Firefox catalogs from one
-  reproducible WebAssembly binary. No such replacement browser catalog exists
-  yet. The feature-scoped selected-output DFT is measured but not consumed by
-  production generation.
+  reproducible WebAssembly binary. The later radix-51 candidate catalog below
+  satisfies that measurement-shape rule, but rejects rather than rescues the
+  row-code direction. The feature-scoped selected-output DFT is measured but
+  not consumed by production generation.
   A production-derived relation/replay model now reproduces the current
   factor-four, width-eight plan and derives the complete verifier rotation set
   for every power-of-two packing and row-width comparator. The raw minimum-row
@@ -563,23 +631,28 @@ Works today:
   above the automatic ceiling and leaves `6,076,534` bytes below the hard
   WebAssembly bound, so it requires engineering review. The authenticated
   scratch plan peaks at `885,618,680` bytes, writes `5,670,455,288` bytes, reads
-  `67,746,897,240` bytes, performs 133,112 transactions, and leaves
+  `73,344,195,928` requested bytes, performs `2,866,177` transactions, and leaves
   `188,123,144` bytes below the hard scratch bound. Focused segmented-oracle
   checks preserve the configured MMCS root and authentication paths, but exact
-  whole-proof byte parity, theorem integration, native and browser measurement,
-  production integration, and a suite identity do not yet exist. No replay
-  redesign is selected. Focused release-native measurements now execute the
+  whole-proof byte parity, theorem integration, production integration, and a
+  suite identity do not exist. Focused release-native measurements execute the
   production-derived feature candidate from one release binary. One retained
   64-column source group took `100,787,000` nanoseconds with a
   `39,185,944`-byte modeled primitive live set, and one selected row-lane stripe
   took `79,148,600` nanoseconds with a `72,609,648`-byte modeled primitive live
   set. The successful cached guarded run completed with child exit zero, a
   `344,961,024`-byte job-object peak, a `77,246,464`-byte sampled process-tree
-  resident-set peak, and no memory-limit violation. These are focused owner
-  measurements, not a complete-runtime projection, whole-proof live-set
-  measurement, production integration result, or proof result. Matching
-  release-WebAssembly measurements from one reproducible binary in Chromium
-  and Firefox remain absent.
+  resident-set peak, and no memory-limit violation. A later one-build
+  release-WebAssembly catalog measured every owner used by the base-and-
+  quotient commitment projection. It gives `452,199,581,738` nanoseconds in
+  Chromium and `3,900,566,682,466` nanoseconds in Firefox, with a maximum
+  observed WebAssembly memory length of `279,314,432` bytes. Those 7.54- and
+  65.01-minute owner projections exclude sumcheck, WHIR, proof encoding,
+  authenticated storage, allocator, bridge, checkpoint, and verification work.
+  Together with the corrected replay ledger, they operationally reject this
+  candidate and end further full-width row-code proving runs. It remains
+  implemented only until a successor proves and verifies the same production
+  relations.
   The fastest comparator accepted by the existing one-aggregate construction
   is instead factor 1, width 32. It has 331 rows, 21,184 lane DFTs,
   `105,511,911,424` butterflies, `11,106,516,992` value deliveries, and
@@ -602,13 +675,20 @@ Works today:
     completed without a memory violation; the second guard's
     `5,225,570,304`-byte process-tree peak is cold compilation, not phase memory.
     These measurements exclude complete hashing, salts, authenticated storage,
-    codec, allocator, browser-boundary, proof, and lifecycle costs. No comparator
-    has a same-build Chromium and Firefox result, proof-size and transcript-parity
-    result, production-proof integration, or suite status. Relation, aggregate,
-    and replay redesign remains required before another full-width run.
+    codec, allocator, browser-boundary, proof, and lifecycle costs. This
+    factor-16 comparator has no same-build browser, proof-parity, integration,
+    or suite result. It is retained only as historical lower-bound evidence;
+    the backend pivot prohibits another full-width row-code run.
 
 Not yet:
 
+- The direct-RNS ring candidate has no production prover, verifier, canonical
+  encoding, complete per-constraint interval theorem, compiled oracle ledger,
+  MLWE/MSIS estimate, extraction or hiding proof, Fiat-Shamir transform,
+  emitted bytes, or browser result. The
+  row-code construction's masking, extractor, transcript, and QROM records do
+  not transfer to it. The candidate cannot select or activate a suite until
+  these obligations close for the emitted replacement bytes.
 - The exact-ten source and schema conversion now binds the selected foundation
   profile, manifests, actions, suite records, 45 unordered pairs, and ten
   `topCount` evaluator streams while retaining deterministic structural
