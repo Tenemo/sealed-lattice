@@ -191,6 +191,23 @@ impl SameSecretAuthenticatedSourceManifest {
         relation_context: &RelationPlanCheckContext,
     ) -> Result<Self, SameSecretAuthenticatedSourceManifestError> {
         validate_selected_owners(construction_plan, relation_variant, relation_context)?;
+        Self::derive_after_owner_validation(construction_plan, relation_variant)
+    }
+
+    #[cfg(all(test, feature = "primitive-measurement-evidence"))]
+    pub(in crate::bgv::proof_suite) fn derive_for_primitive_measurement_candidate(
+        construction_plan: &RowCodeWhirConstructionPlan,
+        relation_variant: &RelationPlanVariant,
+        relation_context: &RelationPlanCheckContext,
+    ) -> Result<Self, SameSecretAuthenticatedSourceManifestError> {
+        validate_relation_owners(construction_plan, relation_variant, relation_context)?;
+        Self::derive_after_owner_validation(construction_plan, relation_variant)
+    }
+
+    fn derive_after_owner_validation(
+        construction_plan: &RowCodeWhirConstructionPlan,
+        relation_variant: &RelationPlanVariant,
+    ) -> Result<Self, SameSecretAuthenticatedSourceManifestError> {
         let construction_identity = construction_plan.canonical_identity_hash()?;
         let relation_plan_variant_hash = relation_variant.canonical_hash()?;
         let authenticated_sources =
@@ -223,6 +240,28 @@ impl SameSecretAuthenticatedSourceManifest {
         relation_context: &RelationPlanCheckContext,
     ) -> Result<(), SameSecretAuthenticatedSourceManifestError> {
         let derived = Self::derive(construction_plan, relation_variant, relation_context)?;
+        self.validate_derived(&derived)
+    }
+
+    #[cfg(all(test, feature = "primitive-measurement-evidence"))]
+    pub(in crate::bgv::proof_suite) fn validate_against_primitive_measurement_candidate(
+        &self,
+        construction_plan: &RowCodeWhirConstructionPlan,
+        relation_variant: &RelationPlanVariant,
+        relation_context: &RelationPlanCheckContext,
+    ) -> Result<(), SameSecretAuthenticatedSourceManifestError> {
+        let derived = Self::derive_for_primitive_measurement_candidate(
+            construction_plan,
+            relation_variant,
+            relation_context,
+        )?;
+        self.validate_derived(&derived)
+    }
+
+    fn validate_derived(
+        &self,
+        derived: &Self,
+    ) -> Result<(), SameSecretAuthenticatedSourceManifestError> {
         if self.construction_identity != derived.construction_identity
             || self.relation_plan_variant_hash != derived.relation_plan_variant_hash
         {
@@ -498,6 +537,22 @@ fn validate_selected_owners(
         .ok_or(SameSecretAuthenticatedSourceManifestError::WrongSelectedContext)?;
     if relation_context != &selected_context {
         return Err(SameSecretAuthenticatedSourceManifestError::WrongSelectedContext);
+    }
+    validate_relation_owners(construction_plan, relation_variant, relation_context)
+}
+
+fn validate_relation_owners(
+    construction_plan: &RowCodeWhirConstructionPlan,
+    relation_variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
+) -> Result<(), SameSecretAuthenticatedSourceManifestError> {
+    construction_plan.quotient_computation_evaluation_domain(relation_context)?;
+    if construction_plan
+        .selected_parameters()
+        .maximum_fiat_shamir_candidate_draws_per_output
+        != relation_context.maximum_fiat_shamir_candidate_draws_per_output
+    {
+        return Err(SameSecretAuthenticatedSourceManifestError::RelationVariantMismatch);
     }
     let relation_variant_hash = relation_variant.canonical_hash()?;
     if construction_plan.relation_plan_variant_hash() != relation_variant_hash

@@ -2312,6 +2312,24 @@ impl SelectedVssSourceReplayMeasurement {
         ),
         String,
     > {
+        let (_, artifact, context) = Self::validated_relation_replay_candidate_with_input(
+            trace_packing_factor,
+            opening_degree_bound_exclusive,
+        )?;
+        Ok((artifact, context))
+    }
+
+    pub(crate) fn validated_relation_replay_candidate_with_input(
+        trace_packing_factor: u64,
+        opening_degree_bound_exclusive: u64,
+    ) -> Result<
+        (
+            CommittedMaterialRelationPlanInput,
+            crate::bgv::proof_suite::ValidatedRelationPlanArtifact,
+            RelationPlanCheckContext,
+        ),
+        String,
+    > {
         let (input, context) = Self::relation_replay_candidate_definition(
             trace_packing_factor,
             opening_degree_bound_exclusive,
@@ -2328,7 +2346,7 @@ impl SelectedVssSourceReplayMeasurement {
         .map_err(|error| {
             format!("VSS relation-replay candidate artifact is invalid: {error:?}")
         })?;
-        Ok((artifact, context))
+        Ok((input, artifact, context))
     }
 
     fn relation_replay_candidate_definition(

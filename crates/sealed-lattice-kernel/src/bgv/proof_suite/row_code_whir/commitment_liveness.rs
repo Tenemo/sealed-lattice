@@ -1348,7 +1348,7 @@ pub(super) fn derive_phase_commitment_geometry_accounting(
     })
 }
 
-fn derive_phase_commitment_work_accounting(
+pub(super) fn derive_phase_commitment_work_accounting(
     construction_plan: &RowCodeWhirConstructionPlan,
 ) -> Result<PhaseCommitmentWorkAccounting, String> {
     let geometries = construction_plan

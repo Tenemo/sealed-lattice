@@ -46,6 +46,8 @@ use super::{
         padded_base_row_coefficients,
     },
 };
+#[cfg(test)]
+use crate::bgv::proof_suite::{CommittedMaterialRelationPlanInput, RelationPlanCheckContext};
 use crate::bgv::proof_suite::{
     PROOF_BASE_FIELD_MODULUS, PROOF_EVALUATION_COSET_OFFSET, ProofBaseFieldElement,
     ProofEvaluationDomain, ProofProfileError, RelationTreeDescriptor,
@@ -929,6 +931,45 @@ fn derive_vss_relation_replay_opening_claim_quotient_candidate_construction_plan
     .map_err(|error| {
         format!("VSS opening-claim quotient candidate construction does not derive: {error:?}")
     })
+}
+
+#[cfg(test)]
+pub(super) fn derive_bounded_vss_opening_claim_quotient_candidate() -> Result<
+    (
+        CommittedMaterialRelationPlanInput,
+        ValidatedRelationPlanArtifact,
+        RelationPlanCheckContext,
+        RowCodeWhirConstructionPlan,
+    ),
+    String,
+> {
+    let candidate = derive_vss_relation_replay_candidate_ledger(
+        VSS_RELATION_REPLAY_CANDIDATE_TRACE_PACKING_FACTOR,
+        VSS_RELATION_REPLAY_CANDIDATE_RETAINED_GROUP_WIDTH as u64,
+    )?
+    .ok_or_else(|| "bounded VSS quotient candidate exceeds its opening bound".to_owned())?;
+    let (input, artifact, context) =
+        SelectedVssSourceReplayMeasurement::validated_relation_replay_candidate_with_input(
+            candidate.trace_packing_factor,
+            candidate.opening_degree_bound_exclusive,
+        )?;
+    let variant = artifact
+        .compiled_plan()
+        .variants()
+        .first()
+        .ok_or_else(|| "bounded VSS quotient candidate variant is absent".to_owned())?;
+    let construction_plan =
+        RowCodeWhirConstructionPlan::for_primitive_measurement_opening_claim_quotient_candidate_variant(
+            &artifact,
+            &context,
+            variant.schedule_position(),
+            variant.top_count(),
+            vss_relation_replay_candidate_bound_root_source_trace_domain_size,
+        )
+        .map_err(|error| {
+            format!("bounded VSS quotient candidate construction does not derive: {error:?}")
+        })?;
+    Ok((input, artifact, context, construction_plan))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -7911,9 +7911,13 @@ fn aggregate_commitment_digest_bytes(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "primitive-measurement-evidence")]
+    use super::super::commitment_liveness::derive_phase_commitment_work_accounting;
     use super::super::commitment_liveness::{
         GenerationPhaseLivenessKind, derive_phase_commitment_geometry_accounting,
     };
+    #[cfg(feature = "primitive-measurement-evidence")]
+    use super::super::primitive_measurements::derive_bounded_vss_opening_claim_quotient_candidate;
     use super::*;
     use crate::{
         bgv::proof_suite::{
@@ -8623,6 +8627,468 @@ mod tests {
         let three_lane_total_byte_length = grouped_phase_total(3);
         assert_eq!(three_lane_total_byte_length, 712_427_262);
         assert!(three_lane_total_byte_length > MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH);
+    }
+
+    #[cfg(feature = "primitive-measurement-evidence")]
+    #[test]
+    fn bounded_vss_quotient_candidate_complete_generation_liveness_derives() {
+        let (relation_input, artifact, relation_context, construction_plan) =
+            derive_bounded_vss_opening_claim_quotient_candidate()
+                .expect("the bounded VSS quotient candidate derives");
+        let relation_variant = artifact
+            .compiled_plan()
+            .variants()
+            .first()
+            .expect("the bounded VSS quotient candidate has one variant");
+        assert!(
+            construction_plan
+                .uses_opening_claim_quotient_batch()
+                .expect("the bounded VSS quotient layout derives")
+        );
+        let source_provider = selected_vss_source_provider_memory_accounting(
+            &relation_input,
+            &relation_context,
+            artifact.compiled_plan(),
+        )
+        .expect("the bounded VSS quotient source-provider accounting derives");
+        let schema_identifier =
+            ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER;
+        let canonical_statement = canonical_selected_application_statement_for_ceiling(
+            schema_identifier,
+            SelectedApplicationStatementContext::new(
+                FOUNDATION_PROFILE.protocol_version,
+                [0_u8; Hash512::BYTE_LENGTH],
+                relation_variant.schedule_position(),
+                relation_variant.top_count(),
+            ),
+        )
+        .expect("the bounded VSS quotient statement encodes");
+        let relation_trees = selected_relation_tree_inputs(relation_variant)
+            .expect("the bounded VSS quotient relation trees derive");
+        let bound_tree_entries = build_relation_bound_public_tree_catalog_entries(&relation_trees)
+            .expect("the bounded VSS quotient bound-tree entries derive");
+        let canonical_header_bytes = canonical_proof_object_header_bytes(&canonical_statement)
+            .expect("the bounded VSS quotient proof header derives");
+        let relation_plan_hash = artifact
+            .compiled_plan()
+            .canonical_hash()
+            .expect("the bounded VSS quotient relation plan hashes");
+        let relation_plan_variant_hash = relation_variant
+            .canonical_hash()
+            .expect("the bounded VSS quotient relation variant hashes");
+        let source_request_context = CommonProofSourcePolynomialRequestContext::new(
+            FOUNDATION_PROFILE.protocol_version,
+            [0x31; HASH_BYTE_LENGTH],
+            schema_identifier,
+            [0x32; HASH_BYTE_LENGTH],
+            relation_plan_hash,
+            relation_plan_variant_hash,
+            relation_variant.schedule_position(),
+            relation_variant.top_count(),
+        );
+        let source_cursor =
+            CommonProofPreChallengeSourceCursor::new(relation_variant, source_request_context)
+                .expect("the bounded VSS quotient source cursor derives");
+        let reversed_column_bindings = source_cursor.reversed_column_bindings().to_vec();
+        assert_eq!(
+            SameSecretAuthenticatedSourceManifest::derive(
+                &construction_plan,
+                relation_variant,
+                &relation_context,
+            ),
+            Err(SameSecretAuthenticatedSourceManifestError::WrongSelectedContext),
+            "the candidate context remains refused by the selected manifest route",
+        );
+        let mut wrong_candidate_context = relation_context.clone();
+        wrong_candidate_context.maximum_fiat_shamir_candidate_draws_per_output =
+            wrong_candidate_context
+                .maximum_fiat_shamir_candidate_draws_per_output
+                .checked_add(1)
+                .expect("the hostile candidate-draw count fits u32");
+        assert_eq!(
+            SameSecretAuthenticatedSourceManifest::derive_for_primitive_measurement_candidate(
+                &construction_plan,
+                relation_variant,
+                &wrong_candidate_context,
+            ),
+            Err(SameSecretAuthenticatedSourceManifestError::RelationVariantMismatch),
+            "the candidate-only manifest route remains bound to its exact checked context",
+        );
+        let source_manifest =
+            SameSecretAuthenticatedSourceManifest::derive_for_primitive_measurement_candidate(
+                &construction_plan,
+                relation_variant,
+                &relation_context,
+            )
+            .expect("the bounded VSS quotient candidate source manifest derives");
+        source_manifest
+            .validate_against_primitive_measurement_candidate(
+                &construction_plan,
+                relation_variant,
+                &relation_context,
+            )
+            .expect("the bounded VSS quotient candidate source manifest validates");
+        assert_eq!(
+            source_manifest.construction_identity(),
+            construction_plan
+                .canonical_identity_hash()
+                .expect("the bounded VSS quotient construction identity hashes"),
+        );
+        assert_eq!(
+            source_manifest
+                .authenticated_source_polynomial_count()
+                .expect("the bounded VSS quotient source count derives"),
+            u64::try_from(construction_plan.requested_source_column_ordinals.len())
+                .expect("the bounded VSS quotient source count fits u64"),
+        );
+        let storage_plan = RowCodeWhirGenerationStoragePlan::new(
+            &construction_plan,
+            relation_variant,
+            &relation_context,
+            &reversed_column_bindings,
+        )
+        .expect("the bounded VSS quotient storage plan derives");
+        let external_memory_requirement =
+            CommonProofExternalMemoryRequirement::from_external_memory_plan(
+                &storage_plan.external_memory_plan,
+            )
+            .expect("the bounded VSS quotient external-memory requirement derives");
+        let external_memory_read_traffic = storage_plan.external_memory_read_traffic;
+        let external_memory_transaction_traffic = storage_plan.external_memory_transaction_traffic;
+        assert_eq!(external_memory_requirement.step_count(), 4_864);
+        assert_eq!(
+            external_memory_requirement.maximum_chunk_byte_length(),
+            1_048_576,
+        );
+        assert_eq!(
+            external_memory_requirement.maximum_transaction_payload_byte_length(),
+            1_048_576,
+        );
+        assert_eq!(
+            external_memory_requirement.distinct_physical_object_count(),
+            29
+        );
+        assert_eq!(external_memory_requirement.object_lifecycle_count(), 3_444);
+        assert_eq!(
+            external_memory_requirement.peak_stored_byte_length(),
+            870_692_320
+        );
+        assert_eq!(
+            external_memory_requirement.total_written_byte_length(),
+            15_281_718_752
+        );
+        assert_eq!(
+            external_memory_requirement.total_read_byte_length(),
+            134_439_906_080
+        );
+        assert_eq!(external_memory_requirement.transaction_count(), 159_551);
+        assert_eq!(
+            external_memory_requirement.local_record_seal_invocation_count(),
+            21_473
+        );
+        assert_eq!(
+            external_memory_requirement.local_record_sealed_plaintext_byte_length(),
+            15_281_749_748,
+        );
+        assert_eq!(
+            external_memory_read_traffic,
+            RowCodeWhirExternalMemoryReadTraffic {
+                opened_polynomial_replay_byte_length: 122_337_844_000,
+                quotient_transform_byte_length: 0,
+                aggregate_source_byte_length: 12_102_062_080,
+            },
+        );
+        assert_eq!(
+            external_memory_read_traffic.total_byte_length(),
+            Some(external_memory_requirement.total_read_byte_length()),
+        );
+        assert_eq!(
+            external_memory_transaction_traffic,
+            RowCodeWhirExternalMemoryTransactionTraffic {
+                initialization_count: 1,
+                opened_polynomial_replay_count: 124_640,
+                quotient_transform_count: 20_598,
+                pre_retained_deletion_count: 1_422,
+                aggregate_source_count: 12_890,
+            },
+        );
+        assert_eq!(
+            external_memory_transaction_traffic.total_count(),
+            Some(external_memory_requirement.transaction_count()),
+        );
+        assert_eq!(
+            external_memory_requirement
+                .peak_stored_byte_length()
+                .saturating_sub(NOMINAL_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH),
+            602_256_864,
+        );
+        assert_eq!(
+            external_memory_requirement
+                .peak_stored_byte_length()
+                .saturating_sub(AUTOMATIC_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH),
+            468_039_136,
+        );
+        assert_eq!(
+            MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH
+                .checked_sub(external_memory_requirement.peak_stored_byte_length()),
+            Some(203_049_504),
+        );
+        assert!(
+            external_memory_requirement.peak_stored_byte_length()
+                <= MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
+        );
+        assert!(!external_memory_requirement.exceeds_active_root_seal_custody_budget());
+        let complete_liveness = derive_generation_liveness(
+            &construction_plan,
+            relation_variant,
+            &relation_context,
+            &relation_trees,
+            &bound_tree_entries,
+            &canonical_header_bytes,
+            &source_cursor,
+            &source_manifest,
+            &reversed_column_bindings,
+            &storage_plan,
+            source_provider,
+            MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
+        )
+        .expect("the bounded VSS quotient complete live set derives");
+        let aggregate_source_row_byte_length =
+            aggregate_source_row_peak_byte_length(&construction_plan)
+                .expect("the bounded VSS quotient aggregate row peak derives");
+        let aggregate_source_control_byte_length = aggregate_source_control_payload_byte_length(
+            &construction_plan,
+            relation_variant,
+            &relation_context,
+        )
+        .expect("the bounded VSS quotient aggregate control payload derives");
+        let aggregate_batch_column_count = construction_plan.aggregate_table_width() / 2;
+        let aggregate_batch_byte_length = (1_u64
+            << construction_plan.selected_parameters().table_variable_count)
+            .checked_mul(
+                u64::try_from(aggregate_batch_column_count)
+                    .expect("the bounded VSS quotient batch width fits u64"),
+            )
+            .and_then(|count| {
+                count.checked_mul(
+                    u64::try_from(size_of::<ProofChallengeExtensionElement>())
+                        .expect("the extension width fits u64"),
+                )
+            })
+            .and_then(|byte_length| {
+                byte_length.checked_add(
+                    u64::try_from(aggregate_batch_column_count * size_of::<Vec<ChallengeField>>())
+                        .expect("the bounded VSS quotient column catalog fits u64"),
+                )
+            })
+            .expect("the bounded VSS quotient aggregate batch byte length adds");
+        let aggregate_source = complete_liveness
+            .rows()
+            .iter()
+            .find(|row| row.phase() == GenerationPhaseLivenessKind::AggregateSource)
+            .expect("the bounded VSS quotient aggregate-source row exists");
+        assert_eq!(
+            aggregate_source.specialized_workspace_byte_length(),
+            aggregate_batch_byte_length
+                + aggregate_source_row_byte_length
+                + aggregate_source_control_byte_length,
+        );
+        assert_eq!(aggregate_batch_byte_length, 335_544_368);
+        assert_eq!(aggregate_source_row_byte_length, 50_334_528);
+        assert_eq!(aggregate_source_control_byte_length, 1_393_198);
+        assert_eq!(
+            aggregate_source.specialized_workspace_byte_length(),
+            387_272_094,
+        );
+        let expected_phase_totals = [
+            (
+                GenerationPhaseLivenessKind::LoadingAuthenticatedSources,
+                86_488_945,
+            ),
+            (GenerationPhaseLivenessKind::SourceReplay, 225_699_399),
+            (
+                GenerationPhaseLivenessKind::RelationMaterialization,
+                225_699_399,
+            ),
+            (GenerationPhaseLivenessKind::PhaseCommitment, 571_585_320),
+            (
+                GenerationPhaseLivenessKind::QuotientPreparation,
+                269_522_622,
+            ),
+            (GenerationPhaseLivenessKind::AggregateSource, 661_380_505),
+            (
+                GenerationPhaseLivenessKind::PrivateMaterialSampling,
+                130_959_396,
+            ),
+            (
+                GenerationPhaseLivenessKind::AggregateOpeningPreparation,
+                318_891_591,
+            ),
+            (
+                GenerationPhaseLivenessKind::AggregateCommitment,
+                583_133_904,
+            ),
+            (
+                GenerationPhaseLivenessKind::BoundTreeAuthentication,
+                356_640_939,
+            ),
+            (GenerationPhaseLivenessKind::WhirOpening, 584_682_714),
+            (GenerationPhaseLivenessKind::BaseCaseOpening, 213_463_458),
+            (GenerationPhaseLivenessKind::CanonicalEncoding, 136_750_842),
+        ];
+        assert_eq!(complete_liveness.rows().len(), expected_phase_totals.len());
+        for (row, (expected_phase, expected_total_byte_length)) in
+            complete_liveness.rows().iter().zip(expected_phase_totals)
+        {
+            assert_eq!(row.phase(), expected_phase);
+            assert_eq!(row.total_byte_length(), expected_total_byte_length);
+        }
+        assert_eq!(aggregate_source.engine_control_byte_length(), 11_814_296);
+        assert_eq!(aggregate_source.source_provider_byte_length(), 30_107_184);
+        assert_eq!(aggregate_source.replay_reader_byte_length(), 84_934_656);
+        assert_eq!(
+            aggregate_source.proof_encoder_non_salt_byte_length(),
+            36_636_578
+        );
+        assert_eq!(
+            aggregate_source.transported_private_leaf_salt_byte_length(),
+            4_268_544
+        );
+        assert_eq!(aggregate_source.transcript_byte_length(), 215_488);
+        assert_eq!(aggregate_source.private_material_byte_length(), 721_272);
+        assert_eq!(aggregate_source.bridge_copy_byte_length(), 2_097_508);
+        assert_eq!(
+            aggregate_source.allocator_overhead_byte_length(),
+            69_758_453
+        );
+        let phase_commitment_work = complete_liveness.phase_commitment_work();
+        assert_eq!(phase_commitment_work.geometry_count, 2);
+        assert_eq!(phase_commitment_work.materialization_pass_count, 2);
+        assert_eq!(phase_commitment_work.lane_dft_count, 11_840);
+        assert_eq!(phase_commitment_work.butterfly_count, 58_971_914_240);
+        assert_eq!(phase_commitment_work.coefficient_fold_count, 43_452_989_440);
+        assert_eq!(
+            phase_commitment_work.coset_multiplication_count,
+            6_207_569_920
+        );
+        assert_eq!(
+            phase_commitment_work.column_value_delivery_count,
+            6_207_569_920
+        );
+        assert_eq!(phase_commitment_work.leaf_hash_query_count, 67_108_864);
+        assert_eq!(
+            phase_commitment_work.merkle_parent_hash_query_count,
+            67_108_860
+        );
+        assert_eq!(
+            phase_commitment_work.private_leaf_salt_derivation_count,
+            67_108_864
+        );
+        let selected_relation_context = selected_relation_plan_check_context(schema_identifier)
+            .expect("the selected VSS relation context exists");
+        let selected_relation_input = selected_committed_material_relation_plan_input()
+            .expect("the selected VSS relation input derives");
+        let selected_compiled_plan = compile_vss_share_linkage_relation_plan(
+            &selected_relation_input,
+            &selected_relation_context,
+        )
+        .expect("the selected VSS relation compiles");
+        let selected_artifact = ValidatedRelationPlanArtifact::from_owned_compiled_plan(
+            selected_compiled_plan,
+            &selected_relation_context,
+        )
+        .expect("the selected VSS relation validates");
+        let selected_variant = selected_artifact
+            .compiled_plan()
+            .variants()
+            .first()
+            .expect("the selected VSS relation has one variant");
+        let selected_construction_plan = RowCodeWhirConstructionPlan::for_selected_variant(
+            &selected_artifact,
+            selected_variant.schedule_position(),
+            selected_variant.top_count(),
+        )
+        .expect("the selected VSS construction derives");
+        let selected_phase_commitment_work =
+            derive_phase_commitment_work_accounting(&selected_construction_plan)
+                .expect("the selected VSS phase-work ledger derives");
+        assert_eq!(selected_phase_commitment_work.geometry_count, 2);
+        assert_eq!(selected_phase_commitment_work.materialization_pass_count, 2);
+        assert_eq!(selected_phase_commitment_work.lane_dft_count, 73_472);
+        assert_eq!(
+            selected_phase_commitment_work.butterfly_count,
+            365_944_635_392
+        );
+        assert_eq!(selected_phase_commitment_work.coefficient_fold_count, 0);
+        assert_eq!(
+            selected_phase_commitment_work.coset_multiplication_count,
+            38_520_487_936
+        );
+        assert_eq!(
+            selected_phase_commitment_work.column_value_delivery_count,
+            38_520_487_936
+        );
+        assert_eq!(
+            selected_phase_commitment_work.leaf_hash_query_count,
+            67_108_864
+        );
+        assert_eq!(
+            selected_phase_commitment_work.merkle_parent_hash_query_count,
+            67_108_860
+        );
+        assert_eq!(
+            selected_phase_commitment_work.private_leaf_salt_derivation_count,
+            67_108_864,
+        );
+        assert!(
+            phase_commitment_work.lane_dft_count * 10
+                > selected_phase_commitment_work.lane_dft_count,
+            "the bounded candidate does not provide a tenfold complete lane-DFT reduction",
+        );
+        assert!(
+            phase_commitment_work.butterfly_count * 10
+                > selected_phase_commitment_work.butterfly_count,
+            "the bounded candidate does not provide a tenfold complete butterfly reduction",
+        );
+        assert!(
+            phase_commitment_work.column_value_delivery_count * 10
+                > selected_phase_commitment_work.column_value_delivery_count,
+            "the bounded candidate does not provide a tenfold complete value-delivery reduction",
+        );
+        assert_eq!(
+            phase_commitment_work.leaf_hash_query_count,
+            selected_phase_commitment_work.leaf_hash_query_count,
+            "the bounded candidate does not reduce complete phase-leaf hashing",
+        );
+        assert_eq!(
+            complete_liveness.maximum_live_set_byte_length(),
+            661_380_505
+        );
+        assert_eq!(
+            complete_liveness
+                .maximum_live_set_byte_length()
+                .saturating_sub(
+                    crate::bgv::proof_suite::prover::NOMINAL_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
+                ),
+            258_727_321,
+        );
+        assert_eq!(
+            complete_liveness
+                .maximum_live_set_byte_length()
+                .saturating_sub(
+                crate::bgv::proof_suite::prover::AUTOMATIC_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
+            ),
+            57_400_729,
+        );
+        assert_eq!(
+            MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
+                .checked_sub(complete_liveness.maximum_live_set_byte_length()),
+            Some(9_708_135),
+        );
+        assert!(
+            complete_liveness.maximum_live_set_byte_length()
+                <= MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
+        );
     }
 
     #[test]

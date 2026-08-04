@@ -449,12 +449,22 @@ Works today:
   hostile tests refuse duplicate points and mismatched geometry. Because the
   two live roles occupy columns zero and one, the same candidate derives the
   second physical half as canonical zero without another authenticated-source
-  replay. No production verifier equation, masking theorem, proof ledger, or
-  complete candidate live-set accounting consumes it yet, so the factor-16
-  comparator remains unselected. The fastest comparator accepted by the
-  existing one-aggregate construction is instead factor 1, width 32. It has
-  331 rows, 21,184 lane
-  DFTs, `105,511,911,424` butterflies, `11,106,516,992` value deliveries, and
+  replay. A feature-scoped owner now composes the exact candidate artifact,
+  source catalog, storage plan, proof encoder, transcript, and construction
+  plan into all 13 phase-liveness rows while proving that the ordinary selected
+  manifest route still refuses the candidate context. Its `661,380,505`-byte
+  aggregate-source peak is `57,400,729` bytes above the automatic WebAssembly
+  ceiling and only `9,708,135` below the hard bound. Authenticated scratch peaks
+  at `870,692,320` bytes, reads `134,439,906,080` bytes, and writes
+  `15,281,718,752` bytes. Against the exact selected VSS ledger, complete lane
+  DFTs and value deliveries fall only about 6.2-fold, all `67,108,864`
+  phase-leaf hashes remain, and `43,452,989,440` coefficient folds are added.
+  This fails the required order-of-magnitude work reduction, so the candidate
+  remains unselected. No production verifier equation, masking theorem, proof
+  ledger, native measurement, or WebAssembly measurement consumes it. The
+  fastest comparator accepted by the existing one-aggregate construction is
+  instead factor 1, width 32. It has 331 rows, 21,184 lane DFTs,
+  `105,511,911,424` butterflies, `11,106,516,992` value deliveries, and
   `704,643,072` salted-leaf Keccak-f permutations. Its six aggregate roles fit
   eight columns, and its base commitment algorithm accounts for `289,406,976`
   live bytes before shared runtime, source, encoder, allocator, and bridge
