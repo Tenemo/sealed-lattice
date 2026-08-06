@@ -1408,12 +1408,12 @@ mod tests {
             .expect("compact public-key static packing ledger");
         let expected_response_counts = [82, 80, 78, 76];
         let expected_maximum_lengths = [262_144, 524_288, 1_048_576, 2_097_152];
-        let expected_proof_oracle_query_counts = [73_601, 73_133, 72_435, 71_865];
+        let expected_proof_oracle_query_counts = [74_517, 73_983, 72_775, 72_559];
         let expected_maximum_opening_byte_lengths =
-            [25_067_264, 24_173_592, 23_710_480, 23_569_544];
+            [25_509_792, 24_576_472, 23_858_784, 23_898_984];
         let expected_committed_leaf_counts = [639_270, 1_065_250, 1_917_214, 3_621_146];
         let expected_commitment_parent_hash_counts = [639_188, 1_065_170, 1_917_136, 3_621_070];
-        let expected_maximum_opening_parent_hash_counts = [159_730, 163_404, 166_730, 170_248];
+        let expected_maximum_opening_parent_hash_counts = [161_420, 164_975, 167_499, 171_483];
 
         for (factor_ordinal, factor) in catalog.factor_catalogs.iter().enumerate() {
             let expected_response_count = expected_response_counts[factor_ordinal];

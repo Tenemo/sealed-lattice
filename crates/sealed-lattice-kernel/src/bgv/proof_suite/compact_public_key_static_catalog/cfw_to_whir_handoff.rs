@@ -162,6 +162,22 @@ impl CfwToWhirHandoffCatalog {
         self.retained_combined_relation_payload_byte_length
     }
 
+    pub(super) const fn combined_relation_extension_element_count(&self) -> u64 {
+        self.combined_relation_extension_element_count
+    }
+
+    pub(super) const fn combined_relation_claim_count(&self) -> u64 {
+        self.combined_relation_claim_count
+    }
+
+    pub(super) const fn source_covector_extension_element_count(&self) -> u64 {
+        self.source_covector_extension_element_count
+    }
+
+    pub(super) const fn preceding_opening_claim_count(&self) -> u64 {
+        self.preceding_opening_claim_count
+    }
+
     pub(super) const fn transition_payload_byte_length(&self) -> u64 {
         self.transition_payload_byte_length
     }

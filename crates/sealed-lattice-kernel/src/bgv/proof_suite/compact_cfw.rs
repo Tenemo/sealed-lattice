@@ -40,6 +40,13 @@ pub(crate) const COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH: usize = 8;
 pub(crate) const COMPACT_CFW_MATRIX_COUNT: usize = 3;
 pub(crate) const COMPACT_CFW_INNER_ENDPOINT_CLAIM_COUNT: usize = 2;
 pub(crate) const COMPACT_CFW_INNER_MASK_APPLICATION_MULTIPLIER: u64 = 2;
+pub(crate) const COMPACT_CFW_ZERO_EVADER_EXPONENTS: [u32; COMPACT_CFW_MATRIX_COUNT] = [0, 1, 2];
+
+pub(crate) fn compact_cfw_zero_evader_weights(
+    challenge: CompactChallengeField,
+) -> [CompactChallengeField; COMPACT_CFW_MATRIX_COUNT] {
+    [CompactChallengeField::ONE, challenge, challenge * challenge]
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CompactCfwMatrixRole {
@@ -1283,11 +1290,7 @@ pub(crate) fn verify_compact_cfw_transcript(
         return Err(CompactCfwError::FinalConsistency);
     }
 
-    let joint_inner_mask_weights = [
-        CompactChallengeField::ONE,
-        joint_constraint_challenge,
-        joint_constraint_challenge * joint_constraint_challenge,
-    ];
+    let joint_inner_mask_weights = compact_cfw_zero_evader_weights(joint_constraint_challenge);
     let mut joint_target = CompactChallengeField::ZERO;
     for matrix_role in CompactCfwMatrixRole::ALL {
         let public_contribution =

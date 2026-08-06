@@ -247,8 +247,8 @@ eight are 82, 80, 78, and 76. A WHIR round samples its distinct queries and comb
 coefficient in one atomic verifier move, matching the vendored transcript.
 
 The current WHIR source-query vectors for those factors are respectively
-`[394, 394, 322, 274]`, `[394, 394, 394, 280]`,
-`[394, 394, 394, 293]`, and `[394, 394, 394, 322]`. Both epochs use 399 mask
+`[396, 432, 400, 348]`, `[395, 412, 481, 351]`,
+`[395, 403, 373, 357]`, and `[395, 398, 489, 371]`. Both epochs use 399 mask
 queries. The exact interactive catalogs contain 106, 104, 102, and 100 failure
 events; every event maps to one verifier move, the largest grouped move failure
 is at most `2^-266`, and each complete interactive union is at most `2^-256`.
@@ -256,8 +256,27 @@ The main relation-batching move covers 164 claims: one global CFW claim, two
 claims for each of 69 inner masks, one for each of 23 outer masks, and two
 explicit cross-epoch openings. Its exact batching error is therefore
 `163 / |F|`; the pre-challenge epoch has one claim and zero batching error.
-These are exact rational checks for the generated interactive catalog, not yet
-the emitted-byte CDHZ, Merkle, composition, or QROM theorem.
+These are exact rational checks for the generated interactive catalog. They are
+not used as a substitute for the relaxed extraction theorem.
+
+The factor-one chronology now has a checked prefix knowledge state and a
+deterministic extractor transition for all 82 verifier moves. The catalog
+instantiates the exact CFW input, intermediate, and output relations; the
+`9 / |F|` initial check; 22 ordinary `8 / |F|` sumcheck rows; the final
+`8 / (|F| - 2)` row; the joint `2 / |F|` zero-evader row; and every odd-
+characteristic, mask-length, list-size-one, and sequential-composition
+hypothesis used from CFW Theorem 11.3. Each Reed-Solomon code uses its full
+message-plus-hiding dimension, the strict integer radius
+`floor((N - K - 1) / 2)`, canonical Berlekamp-Welch correction, and an explicit
+field-operation ceiling. The same owner checks 37 WHIR binary-fold MCA and
+masked-sumcheck transitions, 15 exact adjacent relation boundaries, every
+challenge space, and every commitment-before-challenge barrier. Coordinated
+relation mutations that leave the two boundary copies equal are refused by
+independent reconstruction. The exact maximum per-move extraction error is
+carried into the conditional CDHZ arithmetic and remains at most `2^-266`.
+This closes the static relaxed extraction premise; it does not close
+construction-level masking, emitted-byte correspondence, complete CDHZ/Merkle
+composition, or QROM soundness.
 
 The focused CDHZ owner now derives one complete, power-of-two-padded Merkle
 vector for every logical IOR response. The verifier derives distinct one-based
@@ -265,24 +284,25 @@ commitment-oracle identifiers; each response carries one independent 64-byte
 Fiat-Shamir round salt separately from its 128-byte secret-leaf salts. The
 canonical transcript streams the complete public-input bytes plus every
 identifier, response root, and round salt through the current response before
-deriving its fixed verifier message. The proof-query counts are `73,601`,
-`73,133`, `72,435`, and `71,865`; maximum proof-oracle lengths are `2^18`,
+deriving its fixed verifier message. The proof-query counts are `74,517`,
+`73,983`, `72,775`, and `72,559`; maximum proof-oracle lengths are `2^18`,
 `2^19`, `2^20`, and `2^21`; and the abstract logical-round-plus-Merkle query
-counts are `233,413`, `236,617`, `239,243`, and `242,189`.
+counts are `236,019`, `239,038`, `240,352`, and `244,118`.
 
 The exact conditional Theorem 6.10 arithmetic still uses `2^80 - 1`
 adversarial queries, work bound equal to that query bound, and the current
 uniform fixed-bit verifier messages. After the Theorem 11.3 factor of four,
 the recorded positive terms are at most `2^-96` for every packing. This is not
-an emitted-proof theorem: the source still lacks the relaxed round-by-round
-knowledge extractor, and the concrete prefix-digest plus fixed seed/block
-SHAKE256 graph still lacks its complete CDHZ composition and QROM
-correspondence. The canonical proof encoder can now append one logical response
-at a time in verifier-owned order and release that response before accepting the
-next. It produces the same bytes as the batch encoder, refuses incomplete or
-extra response sequences and globally duplicated leaf salts, and gives exact
-target-independent owned-heap payloads of `35,994,730`, `35,077,922`,
-`34,565,410`, and `34,389,666` bytes. Those totals include the proof vector,
+an emitted-proof theorem: the checked extractor now supplies its exact maximum
+per-move error, but construction-level masking and the concrete prefix-digest
+plus fixed seed/block SHAKE256 graph still lack complete emitted-byte CDHZ,
+Merkle, and QROM correspondence. The canonical proof encoder can now append one
+logical response at a time in verifier-owned order and release that response
+before accepting the next. It produces the same bytes as the batch encoder,
+refuses incomplete or extra response sequences and globally duplicated leaf
+salts, and gives exact
+target-independent owned-heap payloads of `36,545,314`, `35,581,158`,
+`34,755,558`, and `34,800,566` bytes. Those totals include the proof vector,
 the global salt registry, and the maximum transient sorted frontier dictionary.
 The hostile decoder uses the same bounded salt and frontier accounting. A
 canonical response-Merkle core now derives each commitment-oracle identifier
@@ -472,20 +492,20 @@ maximum wire and static resource vectors:
 
 | Packing factor | Proof bytes | Public-input bytes | Transport bytes | Provisional WASM payload peak bytes | Scratch bytes | Base-coordinate butterflies |
 | -------------: | ----------: | -----------------: | --------------: | ----------------------------------: | ------------: | --------------------------: |
-|              1 |  25,412,778 |         15,991,062 |      41,403,840 |                         383,173,896 |   640,811,508 |                 913,355,264 |
-|              2 |  24,535,650 |         15,991,062 |      40,526,712 |                         415,776,128 |   693,240,308 |                 969,097,728 |
-|              4 |  24,088,610 |         15,991,062 |      40,079,672 |                         482,330,704 |   798,097,908 |               1,036,964,352 |
-|              8 |  23,964,002 |         15,991,062 |      39,955,064 |                         616,334,496 | 1,078,341,144 |               1,129,570,816 |
+|              1 |  25,858,402 |         15,991,062 |      41,849,464 |                         383,745,984 |   640,811,508 |                 915,861,504 |
+|              2 |  24,941,414 |         15,991,062 |      40,932,476 |                         416,299,188 |   693,240,308 |                 971,603,968 |
+|              4 |  24,238,630 |         15,991,062 |      40,229,692 |                         482,526,788 |   798,097,908 |               1,040,617,472 |
+|              8 |  24,295,606 |         15,991,062 |      40,286,668 |                         616,762,084 | 1,079,100,336 |               1,131,094,016 |
 
 The WHIR-internal commitment peaks remain `75,497,456`, `109,051,888`,
 `176,160,752`, and `310,378,480` bytes. The complete committed-leaf counts,
-including every logical outer response tree, are `1,012,006`, `1,716,514`,
-`3,127,582`, and `5,949,722`. The corresponding complete commitment-leaf,
+including every logical outer response tree, are `1,020,198`, `1,724,706`,
+`3,137,822`, and `5,955,866`. The corresponding complete commitment-leaf,
 commitment-parent, and verifier-opened leaf-plus-parent hash-query triples are
-`(27,440,422, 1,011,882, 481,105)`,
-`(28,677,410, 1,716,392, 447,735)`,
-`(31,196,446, 3,127,462, 430,401)`, and
-`(36,242,714, 5,949,604, 423,515)`. Every proper-subset response component now
+`(27,541,798, 1,020,074, 491,387)`,
+`(28,778,786, 1,724,584, 457,018)`,
+`(31,334,686, 3,137,702, 433,818)`, and
+`(36,307,226, 5,955,748, 431,094)`. Every proper-subset response component now
 names the exact later verifier move and distinct-query group that selects it.
 The production registry covers every query group, permits the intended shared
 groups, refuses premature or unused sources, and follows WHIR's active-source
@@ -506,10 +526,10 @@ Its total write and read traffic are each
 MiB digest chunks and 534, 628, 826, or 1,232 external-memory transactions.
 Trees are deleted after 65, 63, 61, or 59 distinct verifier moves, with at most
 ten deletions after one move. The exact maximum writer heaps are `1,050,944`, `1,051,072`,
-`1,051,200`, and `1,051,328` bytes; the maximum scanner heaps are `1,451,280`,
-`1,476,560`, `1,506,400`, and `1,533,680` bytes. The current response value,
-salt, frontier, and explicit query-schedule inputs dominate both at `9,502,544`,
-`9,467,152`, `9,425,376`, and `9,387,184` bytes and are included in the
+`1,051,200`, and `1,051,328` bytes; the maximum scanner heaps are `1,435,920`,
+`1,462,400`, `1,502,160`, and `1,521,760` bytes. The current response value,
+salt, frontier, and explicit query-schedule inputs dominate both at `9,524,048`,
+`9,486,976`, `9,431,312`, and `9,403,872` bytes and are included in the
 provisional WASM peaks above. A browser-compatible transaction driver writes,
 seals, scans, and deletes the canonical postorder object and advances only
 after exact committed-transaction replay; focused small-tree owners cover both
@@ -591,8 +611,8 @@ selection rather than hidden transcript overhead.
 All four current canonical-payload vectors are below the 671,088,640-byte WASM
 hard bound and the 268,435,456-byte proof-allocation bound. Factors one, two,
 and four are also below the 1,073,741,824-byte scratch bound. Factor eight has
-`54,754,144` bytes of provisional WASM margin but exceeds the scratch bound by
-`4,599,320` bytes under the complete retained-tree lifecycle, so it is not an
+`54,326,556` bytes of provisional WASM margin but exceeds the scratch bound by
+`5,358,512` bytes under the complete retained-tree lifecycle, so it is not an
 eligible static default. Factor four remains under every byte bound, but these
 vectors still cannot select it: the compact loader and materializer
 are connected only to the standalone production-derived development authority,
@@ -664,14 +684,16 @@ derived task, poll, work, host-control, and full-replay ledgers plus a small
 dense-matrix correspondence owner. The canonical postorder response-tree writer
 and frontier scanner now have independent byte-order correspondence, hostile
 framing coverage, production constructor coverage, and exact per-factor heap
-ledgers.
+ledgers. The factor-one relaxed theorem owner now independently reconstructs
+all 82 knowledge transitions, 15 exact relation boundaries, full-dimension
+code shapes, strict correction radii, list-size bounds, CFW errors, WHIR MCA
+terms, challenge dependencies, and its explicit extraction-work ceiling.
 The static gate remains closed because current generation does not select the
 compact profile or exercise it through a retained live authority, because row-
 source preparation has no authenticated cache recovery, and because the
 selected-size CFW execution, live CFW-to-transpose driving, selected-size
 transpose execution, WHIR invocation, emitted-proof and verifier integration,
-relaxed round-by-round
-extractor, exact remaining
+construction-level masking and leakage correspondence, exact remaining
 CDHZ/Merkle/composition/QROM arithmetic, and independently measured lifecycle
 resources for the fixed bytes remain incomplete. The canonical proof and
 public-input codecs,
@@ -680,16 +702,16 @@ challenge decoder, complete static query censuses, and literal transcript-prefix
 work ledger now exist.
 
 The next task is to close those owners one at a time with focused tests, not to
-run a prover or a complete test graph. In particular, the numerical interactive
-failure rows must be connected to an exact prefix-wise relaxed round-by-round
-knowledge-state function and deterministic extractor before the conditional
-CDHZ substitution can authorize generation. The canonical logical transcript
-must then be mapped section by section to emitted bytes and every verifier
-consumer. Factors one, two, and four remain eligible engineering comparators
+run a prover or a complete test graph. Construction-level masking must first
+reconcile every production coefficient-to-view map and the conditional entropy
+after preceding disclosures. The canonical logical transcript must then be
+mapped section by section to emitted bytes and every verifier consumer before
+the remaining CDHZ and QROM composition can authorize generation. Factors one,
+two, and four remain eligible engineering comparators
 for the same standalone relation and security target. Factor eight is retained
 only as a statically refused comparator under the current retained-tree
 lifecycle; the unimplemented 18-response recomputation alternative is not the
-next work item. No factor is selected. After the theorem, emitted-byte, live
+next work item. No factor is selected. After masking, emitted-byte, live
 transcript, and authenticated-restart gates pass, factor one is the first
 selected-size execution target because it minimizes projected prover memory,
 scratch, retained response-tree bytes, and butterfly work. Factors two and four
@@ -1251,11 +1273,13 @@ Not yet:
   live-authority execution for its now-derived compact source profile,
   production CFW assignment consumer, bounded external-storage execution,
   connected CFW-to-WHIR
-  invocation, joint two-epoch RBR theorem, canonical emitted-proof verifier,
+  invocation, construction-level masking and leakage correspondence, canonical
+  emitted-proof verifier,
   complete concrete QROM composition, emitted proof bytes, or complete-proof
   browser result. Its public-key development slice now has the
   complete structured relation, mask and code-switch catalogs, exact compact
-  CFW algebra and claim batching, a bounded static CFW lifecycle, one canonical
+  CFW algebra and claim batching, the factor-one relaxed extraction theorem, a
+  bounded static CFW lifecycle, one canonical
   Merkle response per logical round, canonical proof and public-input codecs,
   fixed verifier-message decoding, and exact static transcript workload. Those
   owners do not establish an accepted proof path. The BGV
@@ -1278,8 +1302,9 @@ Not yet:
 - The fixed-output sampler's classical distributions, chronology, rejection and
   exhaustion accounting, deployed-call partition, coherent-access graph, exact
   predecessor support, and extraction mapping remain useful structural records
-  for the incumbent. They do not supply the missing round-by-round premise or
-  overcome the exact state-restoration loss. Concrete SHAKE256 remains a
+  for the incumbent. They do not supply the successor's missing construction-
+  level masking or emitted-byte correspondence and do not overcome the exact
+  state-restoration loss. Concrete SHAKE256 remains a
   separate assumption for any successor.
 - The generic construction certificate does not establish family simulation,
   malicious-verifier zero knowledge, or quantum-random-oracle zero knowledge.

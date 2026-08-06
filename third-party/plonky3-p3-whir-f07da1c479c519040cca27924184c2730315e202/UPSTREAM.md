@@ -68,6 +68,16 @@ randomness, and covector dimensions with typed errors. The ordinary
 point-opening adapter remains unchanged and drives the same internal reduction
 with no external groups.
 
+The hiding configuration also derives unique-decoding source queries from the
+physical Reed-Solomon dimension `message length + hiding randomness length`.
+Each source query count is the least fixed point whose exact strict integer
+decoding-radius failure reaches the configured security level. The exported
+source-code shape records the complete dimension, minimum distance, strict
+radius, minimum agreement, and resulting query security so sealed-lattice can
+independently reconcile every committed source oracle. Mask query derivation
+remains the upstream rate-based conservative bound and is checked separately
+against the complete grouped final verifier move.
+
 The obsolete complete-proof commitment reader and unused round proof-of-work
 getter were removed. Neither the plain prover, resumable verifier, complete
 verifier adapter, hiding implementation, nor tests consumed them. The
@@ -86,6 +96,7 @@ The changes are confined to:
 - `src/pcs/zk/base_case/mod.rs`
 - `src/pcs/zk/base_case/prover.rs`
 - `src/pcs/zk/constraint/source.rs`
+- `src/pcs/zk/config.rs`
 - `src/pcs/zk/mask.rs`
 - `src/pcs/zk/mod.rs`
 - `src/pcs/zk/prover/data.rs`

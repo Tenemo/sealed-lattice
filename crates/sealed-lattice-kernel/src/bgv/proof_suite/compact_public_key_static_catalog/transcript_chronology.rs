@@ -185,6 +185,28 @@ pub(super) struct VerifierMove {
     pub(super) challenge_space: ExactChallengeSpace,
 }
 
+impl VerifierMove {
+    pub(super) const fn ordinal(&self) -> u32 {
+        self.ordinal
+    }
+
+    pub(super) fn roles(&self) -> &[VerifierMoveRole] {
+        &self.roles
+    }
+
+    pub(super) fn challenge_space(&self) -> &ExactChallengeSpace {
+        &self.challenge_space
+    }
+
+    pub(super) const fn preceding_prover_response_ordinal(&self) -> u32 {
+        self.preceding_prover_response_ordinal
+    }
+
+    pub(super) const fn preceding_commitment_count(&self) -> u64 {
+        self.preceding_commitment_count
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct PackingTranscriptChronology {
     pub(super) verifier_moves: Vec<VerifierMove>,
@@ -210,6 +232,10 @@ impl PackingTranscriptChronology {
     pub(super) fn logical_verifier_move_count(&self) -> Result<u64, CompactStaticCatalogError> {
         u64::try_from(self.verifier_moves.len())
             .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)
+    }
+
+    pub(super) fn verifier_moves(&self) -> &[VerifierMove] {
+        &self.verifier_moves
     }
 
     fn check(
@@ -601,7 +627,7 @@ mod tests {
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
         let expected_round_counts = [82, 80, 78, 76];
-        let expected_candidate_slot_counts = [1_171_456, 1_191_424, 1_194_752, 1_202_176];
+        let expected_candidate_slot_counts = [1_220_608, 1_236_736, 1_208_320, 1_240_320];
         for ((factor, expected_round_count), expected_candidate_slot_count) in catalog
             .factor_catalogs
             .iter()

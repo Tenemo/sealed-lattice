@@ -10,7 +10,7 @@ use p3_util::log2_ceil_usize;
 use thiserror::Error;
 
 use super::mask::{MaskCodeShape, MaskGroupShape};
-use crate::parameters::{ProtocolParameters, WhirConfig, WhirConfigError};
+use crate::parameters::{ProtocolParameters, SecurityAssumption, WhirConfig, WhirConfigError};
 
 /// Reasons ZK parameters cannot extend a WHIR configuration.
 #[derive(Debug, Error)]
@@ -46,6 +46,76 @@ pub enum ZkConfigError {
         log_domain_size: usize,
         two_adicity: usize,
     },
+
+    /// A source oracle cannot reach the requested unique-decoding query
+    /// security once its hiding coefficients are included in the RS degree.
+    #[error(
+        "source oracle {oracle}: no query count reaches {security_level}-bit unique-decoding security with message length {message_len} and domain size {domain_size}"
+    )]
+    SourceUniqueDecodingQueriesInfeasible {
+        oracle: usize,
+        security_level: usize,
+        message_len: usize,
+        domain_size: usize,
+    },
+}
+
+/// The exact Reed-Solomon code committed by one hiding WHIR source oracle.
+///
+/// Its dimension is `message_len + randomness_len`; the hiding coefficients
+/// are not zero padding and therefore participate in distance and query
+/// calculations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SourceCodeShape {
+    /// Multilinear message coefficients remaining after the current fold.
+    pub message_len: usize,
+    /// Per-limb hiding coefficients, equal to the oracle's query budget.
+    pub randomness_len: usize,
+    /// Number of evaluation points in the committed source codeword.
+    pub domain_size: usize,
+}
+
+impl SourceCodeShape {
+    /// Full RS dimension, including the hiding coefficients.
+    #[must_use]
+    pub const fn dimension(self) -> usize {
+        self.message_len + self.randomness_len
+    }
+
+    /// Numerator of the relative minimum distance over `domain_size`.
+    #[must_use]
+    pub const fn minimum_distance_numerator(self) -> usize {
+        self.domain_size - self.dimension() + 1
+    }
+
+    /// Numerator of the selected unique-decoding radius over `domain_size`.
+    ///
+    /// The integer radius is strictly below `(N - K) / (2N)`, as required by
+    /// the proved mutual-correlated-agreement regime.
+    #[must_use]
+    pub const fn unique_decoding_radius_numerator(self) -> usize {
+        (self.domain_size - self.dimension() - 1) / 2
+    }
+
+    /// Denominator of the selected integer unique-decoding radius.
+    #[must_use]
+    pub const fn unique_decoding_radius_denominator(self) -> usize {
+        self.domain_size
+    }
+
+    /// Minimum number of positions that can agree with the uniquely decoded
+    /// codeword at the selected integer radius.
+    #[must_use]
+    pub const fn minimum_agreement_count(self) -> usize {
+        self.domain_size - self.unique_decoding_radius_numerator()
+    }
+
+    /// Query-failure security in bits for this exact code shape.
+    #[must_use]
+    pub fn query_security_bits(self) -> f64 {
+        -(self.randomness_len as f64)
+            * libm::log2(self.minimum_agreement_count() as f64 / self.domain_size as f64)
+    }
 }
 
 /// User-facing ZK extension of [`ProtocolParameters`].
@@ -83,6 +153,10 @@ where
     /// Budget rule: at least the spot checks ever opened against the oracle.
     /// Every opening is then simulatable.
     pub oracle_randomness: Vec<usize>,
+    /// Full source-code shapes in commitment order.
+    ///
+    /// Every shape includes its hiding coefficients in the RS dimension.
+    pub source_code_shapes: Vec<SourceCodeShape>,
     /// Mask code for the HVZK sumcheck rounds.
     pub sumcheck_mask: MaskCodeShape,
     /// Mask code per code-switching round.
@@ -134,17 +208,76 @@ where
         let security_level = params.security_level;
         let soundness_type = params.soundness_type;
 
-        let inner = WhirConfig::<EF, F, Challenger>::new(num_variables, params)?;
+        let mut inner = WhirConfig::<EF, F, Challenger>::new(num_variables, params)?;
         let n_rounds = inner.n_rounds();
 
-        // Derive the mask spot-check count t_zk.
+        // The plain WHIR configuration derives query counts from the message
+        // rate. A hiding source oracle instead commits
         //
-        //     each mask spot-check branch is (1 - delta_zk)^{t_zk}
-        //     union over the 2*n_rounds + 2 mask oracles -> + log2 of that
-        //     no PoW on mask spot checks -> target the full security level
-        //     t_zk is also the mask randomness length -> t_zk-query private
-        let union = log2_ceil_usize(2 * n_rounds + 2);
-        let mask_queries = soundness_type.queries(security_level + union, zk.mask_log_inv_rate);
+        //     message || query-private randomness || zero padding,
+        //
+        // so its RS dimension is `message + queries`. In unique-decoding
+        // mode the query count is therefore a fixed point: it is both part of
+        // the distance and the number of spot checks. Derive that count from
+        // every physical source domain before allocating oracle randomness.
+        let source_message_and_domain = source_message_and_domain_shapes(&inner);
+        if matches!(soundness_type, SecurityAssumption::UniqueDecoding) {
+            let protocol_security_level = security_level.saturating_sub(inner.params.pow_bits);
+            let mut source_query_counts = Vec::with_capacity(source_message_and_domain.len());
+            for (oracle, &(message_len, domain_size)) in
+                source_message_and_domain.iter().enumerate()
+            {
+                let query_count = unique_decoding_source_query_count(
+                    message_len,
+                    domain_size,
+                    protocol_security_level,
+                )
+                .ok_or(ZkConfigError::SourceUniqueDecodingQueriesInfeasible {
+                    oracle,
+                    security_level: protocol_security_level,
+                    message_len,
+                    domain_size,
+                })?;
+                source_query_counts.push(query_count);
+            }
+
+            for (round, &query_count) in source_query_counts.iter().take(n_rounds).enumerate() {
+                inner.round_parameters[round].num_queries = query_count;
+            }
+            inner.final_queries = source_query_counts[n_rounds];
+
+            // Recompute the query-phase grinding gaps from the full source
+            // dimensions. The combination branch remains the plain WHIR
+            // expression; under unique decoding its list size is one.
+            let field_size_bits = EF::bits();
+            for round in 0..n_rounds {
+                let (message_len, domain_size) = source_message_and_domain[round];
+                let shape = SourceCodeShape {
+                    message_len,
+                    randomness_len: source_query_counts[round],
+                    domain_size,
+                };
+                let round_config = &mut inner.round_parameters[round];
+                let combination_security = soundness_type.queries_combination_error(
+                    field_size_bits,
+                    round_config.num_variables,
+                    round_config.log_inv_rate,
+                    round_config.ood_samples,
+                    round_config.num_queries,
+                );
+                round_config.pow_bits = ceil_nonnegative_gap(
+                    security_level as f64 - shape.query_security_bits().min(combination_security),
+                );
+            }
+            let (message_len, domain_size) = source_message_and_domain[n_rounds];
+            let final_shape = SourceCodeShape {
+                message_len,
+                randomness_len: source_query_counts[n_rounds],
+                domain_size,
+            };
+            inner.final_pow_bits =
+                ceil_nonnegative_gap(security_level as f64 - final_shape.query_security_bits());
+        }
 
         // Per-oracle ZK budget.
         //
@@ -161,6 +294,24 @@ where
                 }
             })
             .collect();
+        let source_code_shapes = source_message_and_domain
+            .iter()
+            .copied()
+            .zip(oracle_randomness.iter().copied())
+            .map(
+                |((message_len, domain_size), randomness_len)| SourceCodeShape {
+                    message_len,
+                    randomness_len,
+                    domain_size,
+                },
+            )
+            .collect::<Vec<_>>();
+
+        // Derive the mask spot-check count t_zk. The independently interpreted
+        // static catalog checks this conservative nominal-rate count against
+        // every full mask-code dimension and the complete grouped move.
+        let union = log2_ceil_usize(2 * n_rounds + 2);
+        let mask_queries = soundness_type.queries(security_level + union, zk.mask_log_inv_rate);
 
         // Randomness rows must fit inside each oracle's rate slack:
         //
@@ -190,21 +341,13 @@ where
             }
         }
 
-        // Message length of each mask code: the sumcheck mask, then one
-        // code-switch mask per round committing (Fold(r_j, gamma) || pad).
-        //
-        //     Fold(r_j, gamma)  ->  the previous oracle's per-limb randomness
-        //     pad               ->  one coordinate per out-of-domain answer
-        //
-        // The pad covers every private OOD answer by construction.
-        let mask_message_lens = once(zk.ell_zk).chain(
-            (0..n_rounds).map(|j| oracle_randomness[j] + inner.round_parameters[j].ood_samples),
-        );
-
         // Reject mask domains the extension field cannot host.
         //
         // The check is in log space, before the shift in `MaskCodeShape::new`,
         // so an oversized rate yields the typed error instead of overflowing.
+        let mask_message_lens = once(zk.ell_zk).chain(
+            (0..n_rounds).map(|j| oracle_randomness[j] + inner.round_parameters[j].ood_samples),
+        );
         for message_len in mask_message_lens {
             let log_domain_size =
                 log2_ceil_usize(message_len + mask_queries) + zk.mask_log_inv_rate;
@@ -231,6 +374,7 @@ where
             inner,
             zk,
             oracle_randomness,
+            source_code_shapes,
             sumcheck_mask,
             switch_masks,
             mask_queries,
@@ -259,6 +403,53 @@ where
         }
         groups
     }
+}
+
+fn source_message_and_domain_shapes<EF, F, Challenger>(
+    inner: &WhirConfig<EF, F, Challenger>,
+) -> Vec<(usize, usize)>
+where
+    F: TwoAdicField,
+    EF: ExtensionField<F> + TwoAdicField,
+    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+{
+    let mut shapes = inner
+        .round_parameters
+        .iter()
+        .map(|round| {
+            (
+                1 << round.num_variables,
+                round.domain_size >> round.folding_factor,
+            )
+        })
+        .collect::<Vec<_>>();
+    let final_round = inner.final_round_config();
+    shapes.push((
+        1 << final_round.num_variables,
+        final_round.domain_size >> final_round.folding_factor,
+    ));
+    shapes
+}
+
+fn unique_decoding_source_query_count(
+    message_len: usize,
+    domain_size: usize,
+    protocol_security_level: usize,
+) -> Option<usize> {
+    let slack = domain_size.checked_sub(message_len)?;
+    (1..slack).find(|&query_count| {
+        SourceCodeShape {
+            message_len,
+            randomness_len: query_count,
+            domain_size,
+        }
+        .query_security_bits()
+            >= protocol_security_level as f64
+    })
+}
+
+fn ceil_nonnegative_gap(gap: f64) -> usize {
+    libm::ceil(0_f64.max(gap)) as usize
 }
 
 #[cfg(test)]

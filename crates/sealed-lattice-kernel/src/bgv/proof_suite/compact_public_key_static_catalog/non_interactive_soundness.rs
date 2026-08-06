@@ -2,21 +2,22 @@
 //!
 //! This owner applies the arithmetic of CDHZ Theorems 6.10, 8.3, and 11.3
 //! only where the current source supplies every argument. In particular, the
-//! state-restoration row below is a conditional diagnostic substitution: the
-//! current interactive failure ceiling has not yet been proved to be the
-//! relaxed round-by-round knowledge-soundness error required by Theorem 6.10.
+//! state-restoration row below consumes the maximum error from the checked
+//! relaxed round-by-round extractor theorem rather than the numerical event
+//! union directly.
 //! The fixed-bit layout, bounded-rejection decoder, and complete SHAKE256
 //! schedule are production-owned and independently reconciled. Typed refusals
-//! keep the missing extractor and emitted-proof correspondence, or any
-//! producer assertion, from authorizing proof generation.
+//! keep the missing construction-level masking and emitted-proof
+//! correspondences, or any producer assertion, from authorizing proof
+//! generation.
 
 use num_bigint::BigUint;
 use num_traits::One;
 
 use super::CompactStaticCatalogError;
 use super::lifecycle::ExactProbability;
+use super::relaxed_round_by_round::RelaxedRoundByRoundCatalog;
 use super::response_commitment::PackingResponseCommitmentCatalog;
-use super::soundness::PackingInteractiveSoundness;
 use super::transcript_binding::PackingTranscriptBindingLedger;
 use super::transcript_chronology::PackingTranscriptChronology;
 use super::uniform_verifier_randomness::PackingUniformVerifierRandomness;
@@ -32,7 +33,7 @@ const MERKLE_RANDOM_ORACLE_OUTPUT_BIT_LENGTH: u64 = 512;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum NonInteractiveCompletionRefusal {
-    MissingRelaxedRoundByRoundKnowledgeExtractor,
+    MissingConstructionMaskingCorrespondence,
     MissingEmittedProofCorrespondence,
 }
 
@@ -86,7 +87,7 @@ impl ConditionalCdhzMerkleArithmetic {
         uniform_verifier_randomness: &PackingUniformVerifierRandomness,
         response_commitments: &PackingResponseCommitmentCatalog,
         transcript_binding: &PackingTranscriptBindingLedger,
-        interactive_soundness: &PackingInteractiveSoundness,
+        relaxed_round_by_round: &RelaxedRoundByRoundCatalog,
     ) -> Result<Self, CompactStaticCatalogError> {
         let adversarial_query_bound = BigUint::from(DECLARED_ADVERSARIAL_QUERY_BUDGET);
         let logical_round_count = chronology.logical_verifier_move_count()?;
@@ -125,8 +126,8 @@ impl ConditionalCdhzMerkleArithmetic {
         let state_restoration_common_factor =
             BigUint::from(CDHZ_COMPOSITION_STATE_MULTIPLIER * CDHZ_STATE_RESTORATION_MULTIPLIER)
                 * (&adversarial_query_bound + &logical_round_count_big + BigUint::one());
-        let fiat_shamir_work_coefficient = interactive_soundness
-            .maximum_verifier_move_failure()
+        let fiat_shamir_work_coefficient = relaxed_round_by_round
+            .maximum_per_move_extraction_error()
             .scale(&state_restoration_common_factor)?;
 
         let vector_commitment_work_numerator =
@@ -153,8 +154,8 @@ impl ConditionalCdhzMerkleArithmetic {
             };
         let maximum_work_term = maximum_work_coefficient.scale(&adversarial_query_bound)?;
 
-        let fixed_round_by_round_state_term = interactive_soundness
-            .maximum_verifier_move_failure()
+        let fixed_round_by_round_state_term = relaxed_round_by_round
+            .maximum_per_move_extraction_error()
             .scale(&(state_restoration_common_factor * &logical_round_count_big))?;
         let fixed_verifier_randomness_state_term = ExactProbability::new(
             BigUint::from(CDHZ_COMPOSITION_STATE_MULTIPLIER)
@@ -223,7 +224,7 @@ impl ConditionalCdhzStateRestorationArithmetic {
     fn derive(
         chronology: &PackingTranscriptChronology,
         uniform_verifier_randomness: &PackingUniformVerifierRandomness,
-        interactive_soundness: &PackingInteractiveSoundness,
+        relaxed_round_by_round: &RelaxedRoundByRoundCatalog,
     ) -> Result<Self, CompactStaticCatalogError> {
         let adversarial_query_bound = BigUint::from(DECLARED_ADVERSARIAL_QUERY_BUDGET);
         let logical_round_count = chronology.logical_verifier_move_count()?;
@@ -236,8 +237,8 @@ impl ConditionalCdhzStateRestorationArithmetic {
         let round_by_round_multiplier = BigUint::from(CDHZ_STATE_RESTORATION_MULTIPLIER)
             * &query_plus_round_and_one
             * work_plus_round;
-        let candidate_relaxed_round_by_round_error = interactive_soundness
-            .maximum_verifier_move_failure()
+        let candidate_relaxed_round_by_round_error = relaxed_round_by_round
+            .maximum_per_move_extraction_error()
             .clone();
         let round_by_round_term =
             candidate_relaxed_round_by_round_error.scale(&round_by_round_multiplier)?;
@@ -283,19 +284,19 @@ impl PackingNonInteractiveSoundness {
         uniform_verifier_randomness: &PackingUniformVerifierRandomness,
         response_commitments: &PackingResponseCommitmentCatalog,
         transcript_binding: &PackingTranscriptBindingLedger,
-        interactive_soundness: &PackingInteractiveSoundness,
+        relaxed_round_by_round: &RelaxedRoundByRoundCatalog,
     ) -> Result<Self, CompactStaticCatalogError> {
         let conditional_state_restoration = ConditionalCdhzStateRestorationArithmetic::derive(
             chronology,
             uniform_verifier_randomness,
-            interactive_soundness,
+            relaxed_round_by_round,
         )?;
         let conditional_cdhz_merkle = ConditionalCdhzMerkleArithmetic::derive(
             chronology,
             uniform_verifier_randomness,
             response_commitments,
             transcript_binding,
-            interactive_soundness,
+            relaxed_round_by_round,
         )?;
         if response_commitments.bcs_response_root_count()
             != chronology.logical_verifier_move_count()?
@@ -311,7 +312,7 @@ impl PackingNonInteractiveSoundness {
             proof_oracle_query_count: response_commitments.proof_oracle_query_count(),
             maximum_proof_oracle_length: response_commitments.maximum_proof_oracle_length(),
             completion_refusals: vec![
-                NonInteractiveCompletionRefusal::MissingRelaxedRoundByRoundKnowledgeExtractor,
+                NonInteractiveCompletionRefusal::MissingConstructionMaskingCorrespondence,
                 NonInteractiveCompletionRefusal::MissingEmittedProofCorrespondence,
             ],
         };
@@ -320,7 +321,7 @@ impl PackingNonInteractiveSoundness {
             uniform_verifier_randomness,
             response_commitments,
             transcript_binding,
-            interactive_soundness,
+            relaxed_round_by_round,
         )?;
         Ok(ledger)
     }
@@ -331,26 +332,26 @@ impl PackingNonInteractiveSoundness {
         uniform_verifier_randomness: &PackingUniformVerifierRandomness,
         response_commitments: &PackingResponseCommitmentCatalog,
         transcript_binding: &PackingTranscriptBindingLedger,
-        interactive_soundness: &PackingInteractiveSoundness,
+        relaxed_round_by_round: &RelaxedRoundByRoundCatalog,
     ) -> Result<(), CompactStaticCatalogError> {
         let expected_state = ConditionalCdhzStateRestorationArithmetic::derive(
             chronology,
             uniform_verifier_randomness,
-            interactive_soundness,
+            relaxed_round_by_round,
         )?;
         let expected_cdhz_merkle = ConditionalCdhzMerkleArithmetic::derive(
             chronology,
             uniform_verifier_randomness,
             response_commitments,
             transcript_binding,
-            interactive_soundness,
+            relaxed_round_by_round,
         )?;
         let expected = Self::derive_without_check(
             chronology,
             uniform_verifier_randomness,
             response_commitments,
             transcript_binding,
-            interactive_soundness,
+            relaxed_round_by_round,
         )?;
         if self != &expected
             || self.conditional_state_restoration != expected_state
@@ -383,19 +384,19 @@ impl PackingNonInteractiveSoundness {
         uniform_verifier_randomness: &PackingUniformVerifierRandomness,
         response_commitments: &PackingResponseCommitmentCatalog,
         transcript_binding: &PackingTranscriptBindingLedger,
-        interactive_soundness: &PackingInteractiveSoundness,
+        relaxed_round_by_round: &RelaxedRoundByRoundCatalog,
     ) -> Result<Self, CompactStaticCatalogError> {
         let conditional_state_restoration = ConditionalCdhzStateRestorationArithmetic::derive(
             chronology,
             uniform_verifier_randomness,
-            interactive_soundness,
+            relaxed_round_by_round,
         )?;
         let conditional_cdhz_merkle = ConditionalCdhzMerkleArithmetic::derive(
             chronology,
             uniform_verifier_randomness,
             response_commitments,
             transcript_binding,
-            interactive_soundness,
+            relaxed_round_by_round,
         )?;
         Ok(Self {
             conditional_state_restoration,
@@ -405,7 +406,7 @@ impl PackingNonInteractiveSoundness {
             proof_oracle_query_count: response_commitments.proof_oracle_query_count(),
             maximum_proof_oracle_length: response_commitments.maximum_proof_oracle_length(),
             completion_refusals: vec![
-                NonInteractiveCompletionRefusal::MissingRelaxedRoundByRoundKnowledgeExtractor,
+                NonInteractiveCompletionRefusal::MissingConstructionMaskingCorrespondence,
                 NonInteractiveCompletionRefusal::MissingEmittedProofCorrespondence,
             ],
         })
@@ -457,11 +458,11 @@ mod tests {
             .expect("compact public-key static packing ledger");
         let expected_logical_round_counts = [82, 80, 78, 76];
         let expected_maximum_proof_oracle_lengths = [262_144, 524_288, 1_048_576, 2_097_152];
-        let expected_proof_oracle_query_counts = [73_601, 73_133, 72_435, 71_865];
+        let expected_proof_oracle_query_counts = [74_517, 73_983, 72_775, 72_559];
         let expected_maximum_verifier_merkle_hash_query_counts =
-            [233_331, 236_537, 239_165, 242_113];
+            [235_937, 238_958, 240_274, 244_042];
         let expected_abstract_bcs_verifier_oracle_query_counts =
-            [233_413, 236_617, 239_243, 242_189];
+            [236_019, 239_038, 240_352, 244_118];
         let expected_maximum_leaf_value_byte_lengths = [5_120, 2_760, 2_760, 2_760];
 
         for (factor_ordinal, factor) in catalog.factor_catalogs.iter().enumerate() {
@@ -592,7 +593,7 @@ mod tests {
                 &factor.uniform_verifier_randomness,
                 &factor.response_commitments,
                 &factor.transcript_binding,
-                &factor.interactive_soundness,
+                &factor.relaxed_round_by_round,
             ),
             Err(CompactStaticCatalogError::InvalidGeometry)
         );

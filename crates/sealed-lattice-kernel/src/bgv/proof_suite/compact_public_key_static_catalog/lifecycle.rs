@@ -301,7 +301,7 @@ mod tests {
     fn every_factor_has_twenty_four_fixed_output_query_groups() {
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
-        let expected_candidate_slot_counts = [1_171_456, 1_191_424, 1_194_752, 1_202_176];
+        let expected_candidate_slot_counts = [1_220_608, 1_236_736, 1_208_320, 1_240_320];
         for (factor, expected_candidate_slot_count) in catalog
             .factor_catalogs
             .iter()

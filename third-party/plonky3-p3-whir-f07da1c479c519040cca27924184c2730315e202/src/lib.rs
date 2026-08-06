@@ -30,6 +30,6 @@ pub use pcs::zk::{
     HidingWhirExtensionProverData, HidingWhirPcs, HidingWhirProver, HidingWhirProverData,
     HidingWhirRelationInputError, HidingWhirVerifier, MaskCodeShape, MaskGroupShape,
     MaskGroupWitness, MaskOpeningPair, MaskProverData, PrecommittedMaskProverGroup,
-    PrecommittedMaskVerifierGroup, PreparedBaseCaseZkProof, ZkConfigError, ZkParameters,
-    ZkRoundProof, ZkVerifierError, ZkWhirConfig, ZkWhirProof, switch_mask_covector,
+    PrecommittedMaskVerifierGroup, PreparedBaseCaseZkProof, SourceCodeShape, ZkConfigError,
+    ZkParameters, ZkRoundProof, ZkVerifierError, ZkWhirConfig, ZkWhirProof, switch_mask_covector,
 };

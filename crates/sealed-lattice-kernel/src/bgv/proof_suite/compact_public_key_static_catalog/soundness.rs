@@ -1,11 +1,13 @@
 //! Exact interactive soundness ledger for the compact public-key slice.
 //!
-//! The rows below instantiate the unique-decoding round-by-round bounds of the
-//! CFW R1CS reduction, masked sumcheck, code switching, and masked base case.
+//! The rows below are the exact numerical failure magnitudes for the CFW R1CS
+//! reduction, masked sumcheck, code switching, and masked base case.
 //! Every magnitude is a reduced exact rational. Query errors use integer
 //! powers, and every algebraic row is tied to production-derived relation or
-//! WHIR geometry. This is an interactive ledger only; hash compilation and its
-//! post-quantum composition remain separate gate owners.
+//! WHIR geometry. This event vector is not a round-by-round theorem: the
+//! separate relaxed-state owner must supply the prefix state, deterministic
+//! extractor, correction bounds, and exact sequential relations before these
+//! magnitudes can enter hash compilation.
 
 use num_bigint::BigUint;
 use num_traits::{CheckedSub, One};
@@ -17,9 +19,8 @@ use super::transcript_chronology::{
 };
 use super::{
     CROSS_EPOCH_POINT_COORDINATE_COUNT, CompactStaticCatalogError, GOLDILOCKS_BASE_FIELD_MODULUS,
-    INTERACTIVE_VERIFIER_MOVE_SECURITY_LEVEL, MAIN_CODE_LOG_INVERSE_RATE,
-    MASK_CODE_LOG_INVERSE_RATE, QUINTIC_EXTENSION_DEGREE, SUMCHECK_MASK_MESSAGE_LENGTH,
-    WHIR_FOLD_BATCH_COUNT, WHIR_ROUND_COUNT, WhirStaticLedger,
+    INTERACTIVE_VERIFIER_MOVE_SECURITY_LEVEL, MAIN_CODE_LOG_INVERSE_RATE, QUINTIC_EXTENSION_DEGREE,
+    SUMCHECK_MASK_MESSAGE_LENGTH, WHIR_FOLD_BATCH_COUNT, WHIR_ROUND_COUNT, WhirStaticLedger,
 };
 use crate::bgv::proof_suite::relation_plan::CompactPublicKeyRelationCatalog;
 
@@ -48,7 +49,8 @@ enum InteractiveFailureEvent {
     WhirSourceQuery {
         epoch: TranscriptEpoch,
         batch_ordinal: u8,
-        log_inverse_rate: u32,
+        message_length: u64,
+        domain_size: u64,
         query_count: u64,
     },
     WhirRoundCombination {
@@ -193,10 +195,12 @@ impl WhirInteractiveSoundness {
                     epoch,
                     batch_ordinal: u8::try_from(batch_ordinal)
                         .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
-                    log_inverse_rate: source_rates[batch_ordinal],
+                    message_length: whir.source_message_lengths[batch_ordinal],
+                    domain_size: whir.oracle_heights[batch_ordinal],
                     query_count,
                 },
-                source_rates[batch_ordinal],
+                whir.source_message_lengths[batch_ordinal],
+                whir.oracle_heights[batch_ordinal],
                 query_count,
             )?);
             if batch_ordinal < WHIR_ROUND_COUNT {
@@ -239,7 +243,7 @@ impl WhirInteractiveSoundness {
             extension_field_order.clone(),
         )?);
 
-        for (group_ordinal, _) in mask_groups.iter().enumerate() {
+        for (group_ordinal, group) in mask_groups.iter().enumerate() {
             rows.push(query_failure_row(
                 InteractiveFailureEvent::WhirMaskQuery {
                     epoch,
@@ -247,7 +251,8 @@ impl WhirInteractiveSoundness {
                         .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
                     query_count: whir.mask_query_count,
                 },
-                MASK_CODE_LOG_INVERSE_RATE,
+                group.message_length,
+                group.domain_size,
                 whir.mask_query_count,
             )?);
         }
@@ -291,11 +296,25 @@ impl WhirInteractiveSoundness {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct ExactVerifierMoveFailure {
+pub(super) struct ExactVerifierMoveFailure {
     ordinal: u32,
     roles: Vec<VerifierMoveRole>,
     contributing_event_count: u64,
     probability: ExactProbability,
+}
+
+impl ExactVerifierMoveFailure {
+    pub(super) const fn ordinal(&self) -> u32 {
+        self.ordinal
+    }
+
+    pub(super) fn roles(&self) -> &[VerifierMoveRole] {
+        &self.roles
+    }
+
+    pub(super) fn probability(&self) -> &ExactProbability {
+        &self.probability
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -355,6 +374,10 @@ impl PackingInteractiveSoundness {
 
     pub(super) fn maximum_verifier_move_failure(&self) -> &ExactProbability {
         &self.maximum_verifier_move_failure
+    }
+
+    pub(super) fn verifier_move_failures(&self) -> &[ExactVerifierMoveFailure] {
+        &self.verifier_move_failures
     }
 
     fn check(
@@ -611,32 +634,53 @@ fn outer_failure_rows(
 
 fn query_failure_row(
     event: InteractiveFailureEvent,
-    log_inverse_rate: u32,
+    message_length: u64,
+    domain_size: u64,
     query_count: u64,
 ) -> Result<ExactInteractiveFailureRow, CompactStaticCatalogError> {
-    let numerator = BigUint::from(
-        (1_u64 << log_inverse_rate)
-            .checked_add(1)
-            .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?,
-    )
-    .pow(u32::try_from(query_count).map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?);
-    let denominator = BigUint::from(1_u64 << (log_inverse_rate + 1)).pow(
-        u32::try_from(query_count).map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
-    );
+    let dimension = message_length
+        .checked_add(query_count)
+        .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+    if query_count == 0 || dimension >= domain_size {
+        return Err(CompactStaticCatalogError::InvalidGeometry);
+    }
+    let exponent =
+        u32::try_from(query_count).map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?;
+    let selected_decoding_error_count = domain_size
+        .checked_sub(dimension)
+        .and_then(|slack| slack.checked_sub(1))
+        .ok_or(CompactStaticCatalogError::InvalidGeometry)?
+        / 2;
+    let minimum_agreement_count = domain_size
+        .checked_sub(selected_decoding_error_count)
+        .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
+    let numerator = BigUint::from(minimum_agreement_count).pow(exponent);
+    let denominator = BigUint::from(domain_size).pow(exponent);
     ExactInteractiveFailureRow::new(event, numerator, denominator)
 }
 
 fn query_failure_probability(
-    log_inverse_rate: u32,
+    message_length: u64,
+    domain_size: u64,
     query_count: u64,
 ) -> Result<ExactProbability, CompactStaticCatalogError> {
+    let dimension = message_length
+        .checked_add(query_count)
+        .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+    if query_count == 0 || dimension >= domain_size {
+        return Err(CompactStaticCatalogError::InvalidGeometry);
+    }
+    let selected_decoding_error_count = domain_size
+        .checked_sub(dimension)
+        .and_then(|slack| slack.checked_sub(1))
+        .ok_or(CompactStaticCatalogError::InvalidGeometry)?
+        / 2;
+    let minimum_agreement_count = domain_size
+        .checked_sub(selected_decoding_error_count)
+        .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
     let one_query = ExactProbability::new(
-        BigUint::from(
-            (1_u64 << log_inverse_rate)
-                .checked_add(1)
-                .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?,
-        ),
-        BigUint::from(1_u64 << (log_inverse_rate + 1)),
+        BigUint::from(minimum_agreement_count),
+        BigUint::from(domain_size),
     )?;
     one_query.power(
         u32::try_from(query_count).map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
@@ -842,17 +886,19 @@ mod tests {
             let main = &factor.main_whir;
             assert_eq!(main.mask_query_union_branch_count, 10);
             assert_eq!(main.mask_query_count, 399);
-            let branch_probability =
-                query_failure_probability(MASK_CODE_LOG_INVERSE_RATE, main.mask_query_count)
-                    .expect("exact mask query probability");
-            assert!(
-                branch_probability
-                    .scale(&BigUint::from(main.mask_query_union_branch_count))
-                    .expect("exact union ceiling")
-                    .is_at_most_inverse_power_of_two(
-                        INTERACTIVE_VERIFIER_MOVE_SECURITY_LEVEL as usize,
-                    )
-            );
+            let mask_union_probability = main
+                .mask_groups_in_commitment_order()
+                .try_fold(ExactProbability::zero(), |sum, group| {
+                    sum.add(&query_failure_probability(
+                        group.message_length,
+                        group.domain_size,
+                        main.mask_query_count,
+                    )?)
+                })
+                .expect("exact mask query union probability");
+            assert!(mask_union_probability.is_at_most_inverse_power_of_two(
+                INTERACTIVE_VERIFIER_MOVE_SECURITY_LEVEL as usize,
+            ));
         }
     }
 }

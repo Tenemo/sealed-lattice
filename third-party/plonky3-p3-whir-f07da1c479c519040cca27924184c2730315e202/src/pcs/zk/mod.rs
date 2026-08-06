@@ -79,7 +79,7 @@ pub use base_case::{
 };
 pub use code_switch::{CodeSwitchError, switch_mask_covector};
 pub use committer::FoldedRsCode;
-pub use config::{ZkConfigError, ZkParameters, ZkWhirConfig};
+pub use config::{SourceCodeShape, ZkConfigError, ZkParameters, ZkWhirConfig};
 pub use mask::{MaskCodeShape, MaskGroupShape};
 pub use proof::{BaseCaseZkProof, BlindedMask, MaskOpeningPair, ZkRoundProof, ZkWhirProof};
 pub use prover::{HidingWhirExtensionProverData, HidingWhirProver, HidingWhirProverData};

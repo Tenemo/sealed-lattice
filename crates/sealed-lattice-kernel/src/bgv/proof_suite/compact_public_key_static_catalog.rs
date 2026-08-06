@@ -41,6 +41,7 @@ mod cfw_to_whir_handoff;
 mod external_mask_integration;
 mod lifecycle;
 mod non_interactive_soundness;
+mod relaxed_round_by_round;
 mod resource_overlap;
 mod response_commitment;
 mod response_commitment_lifecycle;
@@ -193,6 +194,7 @@ struct WhirStaticLedger {
     mask_query_count: u64,
     oracle_widths: [u64; WHIR_FOLD_BATCH_COUNT],
     oracle_heights: [u64; WHIR_FOLD_BATCH_COUNT],
+    source_message_lengths: [u64; WHIR_FOLD_BATCH_COUNT],
     internal_mask_groups: Vec<MaskGroupStaticLedger>,
     external_mask_groups: Vec<MaskGroupStaticLedger>,
     external_generalized_relation_claim_count: u64,
@@ -290,8 +292,37 @@ impl WhirStaticLedger {
         let mask_query_union_branch_count = mask_group_count
             .checked_add(1)
             .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
-        let query_counts =
-            rates.map(|rate| u64::from(exact_query_count(WHIR_PROTOCOL_SECURITY_LEVEL, rate)));
+        let mut remaining_variables = polynomial_variable_count;
+        let mut oracle_widths = [0_u64; WHIR_FOLD_BATCH_COUNT];
+        let mut oracle_heights = [0_u64; WHIR_FOLD_BATCH_COUNT];
+        let mut source_message_lengths = [0_u64; WHIR_FOLD_BATCH_COUNT];
+        let mut query_counts = [0_u64; WHIR_FOLD_BATCH_COUNT];
+        for (batch_ordinal, folding_factor) in folding_schedule.iter().copied().enumerate() {
+            remaining_variables = remaining_variables
+                .checked_sub(folding_factor)
+                .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
+            oracle_widths[batch_ordinal] = 1_u64
+                .checked_shl(folding_factor)
+                .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+            let message_rows = 1_u64
+                .checked_shl(remaining_variables)
+                .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+            source_message_lengths[batch_ordinal] = message_rows;
+            oracle_heights[batch_ordinal] = message_rows
+                .checked_shl(rates[batch_ordinal])
+                .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+            query_counts[batch_ordinal] = exact_full_dimension_unique_decoding_query_count(
+                WHIR_PROTOCOL_SECURITY_LEVEL,
+                message_rows,
+                oracle_heights[batch_ordinal],
+            )?;
+            let randomness_slack = oracle_heights[batch_ordinal]
+                .checked_sub(message_rows)
+                .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
+            if query_counts[batch_ordinal] > randomness_slack {
+                return Err(CompactStaticCatalogError::InvalidGeometry);
+            }
+        }
         let vendored_mask_query_security_level = WHIR_PROTOCOL_SECURITY_LEVEL
             .checked_add(ceil_log2(
                 internal_mask_group_count
@@ -303,37 +334,35 @@ impl WhirStaticLedger {
             vendored_mask_query_security_level,
             MASK_CODE_LOG_INVERSE_RATE,
         ));
+        let mut mask_message_lengths = Vec::with_capacity(
+            usize::try_from(mask_group_count)
+                .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+        );
+        mask_message_lengths.push(SUMCHECK_MASK_MESSAGE_LENGTH);
+        for round_ordinal in 0..WHIR_ROUND_COUNT {
+            mask_message_lengths.push(query_counts[round_ordinal]);
+            mask_message_lengths.push(SUMCHECK_MASK_MESSAGE_LENGTH);
+        }
+        mask_message_lengths.extend(
+            external_mask_group_specifications
+                .iter()
+                .map(|specification| specification.message_length),
+        );
+        if mask_message_lengths.len()
+            != usize::try_from(mask_group_count)
+                .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?
+        {
+            return Err(CompactStaticCatalogError::InvalidGeometry);
+        }
         let minimum_complete_mask_query_count = exact_mask_query_count_for_final_verifier_move(
-            rates[WHIR_ROUND_COUNT],
+            source_message_lengths[WHIR_ROUND_COUNT],
+            oracle_heights[WHIR_ROUND_COUNT],
             query_counts[WHIR_ROUND_COUNT],
-            mask_group_count,
+            &mask_message_lengths,
+            vendored_mask_query_count,
             INTERACTIVE_VERIFIER_MOVE_SECURITY_LEVEL,
         )?;
-        let mask_query_count = vendored_mask_query_count.max(minimum_complete_mask_query_count);
-
-        let mut remaining_variables = polynomial_variable_count;
-        let mut oracle_widths = [0_u64; WHIR_FOLD_BATCH_COUNT];
-        let mut oracle_heights = [0_u64; WHIR_FOLD_BATCH_COUNT];
-        for (batch_ordinal, folding_factor) in folding_schedule.iter().copied().enumerate() {
-            remaining_variables = remaining_variables
-                .checked_sub(folding_factor)
-                .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
-            oracle_widths[batch_ordinal] = 1_u64
-                .checked_shl(folding_factor)
-                .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
-            let message_rows = 1_u64
-                .checked_shl(remaining_variables)
-                .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
-            oracle_heights[batch_ordinal] = message_rows
-                .checked_shl(rates[batch_ordinal])
-                .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
-            let randomness_slack = oracle_heights[batch_ordinal]
-                .checked_sub(message_rows)
-                .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
-            if query_counts[batch_ordinal] > randomness_slack {
-                return Err(CompactStaticCatalogError::InvalidGeometry);
-            }
-        }
+        let mask_query_count = minimum_complete_mask_query_count;
 
         let mut internal_mask_groups = Vec::with_capacity(7);
         internal_mask_groups.push(MaskGroupStaticLedger::derive(
@@ -765,6 +794,7 @@ impl WhirStaticLedger {
             mask_query_count,
             oracle_widths,
             oracle_heights,
+            source_message_lengths,
             internal_mask_groups,
             external_mask_groups,
             external_generalized_relation_claim_count,
@@ -946,6 +976,29 @@ impl WhirStaticLedger {
             .chain(core::iter::once(u64::try_from(configuration.final_queries)))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?;
+        let source_code_shapes = configuration
+            .source_code_shapes
+            .iter()
+            .map(|shape| {
+                Ok((
+                    u64::try_from(shape.message_len)
+                        .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+                    u64::try_from(shape.randomness_len)
+                        .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+                    u64::try_from(shape.domain_size)
+                        .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+                ))
+            })
+            .collect::<Result<Vec<_>, CompactStaticCatalogError>>()?;
+        let expected_source_code_shapes = self
+            .source_message_lengths
+            .into_iter()
+            .zip(self.query_counts)
+            .zip(self.oracle_heights)
+            .map(|((message_length, randomness_length), domain_size)| {
+                (message_length, randomness_length, domain_size)
+            })
+            .collect::<Vec<_>>();
         let oracle_widths = (0..WHIR_FOLD_BATCH_COUNT)
             .map(|ordinal| {
                 1_u64
@@ -1029,6 +1082,7 @@ impl WhirStaticLedger {
             })
             || !configuration.check_pow_bits()
             || query_counts.as_slice() != self.query_counts
+            || source_code_shapes != expected_source_code_shapes
             || oracle_widths.as_slice() != self.oracle_widths
             || oracle_heights.as_slice() != self.oracle_heights
             || !internal_mask_groups_match
@@ -1052,6 +1106,7 @@ struct PackingStaticCatalog {
         response_commitment_lifecycle::PackingResponseCommitmentLifecycle,
     query_sampling_lifecycle: lifecycle::PackingQuerySamplingLifecycle,
     interactive_soundness: soundness::PackingInteractiveSoundness,
+    relaxed_round_by_round: relaxed_round_by_round::RelaxedRoundByRoundCatalog,
     non_interactive_soundness: non_interactive_soundness::PackingNonInteractiveSoundness,
     proof_wire_geometry: CompactProofWireGeometry,
     proof_assembler_heap_geometry: CompactProofWireAssemblerHeapGeometry,
@@ -1117,8 +1172,13 @@ impl PackingStaticCatalog {
         let pre_challenge_first_folding_factor = pre_challenge_component_count.ilog2();
         let round_log_inverse_rates = [
             2,
-            if packing_factor == 1 { 3 } else { 2 },
-            6_u32
+            match packing_factor {
+                1 => 4,
+                2 | 4 => 3,
+                8 => 2,
+                _ => return Err(CompactStaticCatalogError::InvalidGeometry),
+            },
+            8_u32
                 .checked_sub(packing_logarithm)
                 .ok_or(CompactStaticCatalogError::InvalidGeometry)?,
         ];
@@ -1155,8 +1215,8 @@ impl PackingStaticCatalog {
         )?;
         if pre_challenge_whir.mask_query_union_branch_count != 8
             || main_whir.mask_query_union_branch_count != 10
-            || pre_challenge_whir.mask_query_count != 399
-            || main_whir.mask_query_count != 399
+            || pre_challenge_whir.mask_query_count == 0
+            || main_whir.mask_query_count == 0
         {
             return Err(CompactStaticCatalogError::InvalidGeometry);
         }
@@ -1199,6 +1259,15 @@ impl PackingStaticCatalog {
             &main_whir,
             &transcript_chronology,
             cfw_reduction,
+        )?;
+        let relaxed_round_by_round = relaxed_round_by_round::RelaxedRoundByRoundCatalog::derive(
+            relation,
+            cfw_reduction,
+            cfw_to_whir_handoff,
+            &pre_challenge_whir,
+            &main_whir,
+            &transcript_chronology,
+            &interactive_soundness,
         )?;
         if transcript_chronology.distinct_query_group_count
             != query_sampling_lifecycle.query_group_count
@@ -1250,7 +1319,7 @@ impl PackingStaticCatalog {
                 &uniform_verifier_randomness,
                 &response_commitments,
                 &transcript_binding,
-                &interactive_soundness,
+                &relaxed_round_by_round,
             )?;
         let maximum_proof_byte_length =
             u64::try_from(proof_wire_geometry.maximum_canonical_byte_length())
@@ -1416,6 +1485,7 @@ impl PackingStaticCatalog {
             response_commitment_lifecycle,
             query_sampling_lifecycle,
             interactive_soundness,
+            relaxed_round_by_round,
             non_interactive_soundness,
             proof_wire_geometry,
             proof_assembler_heap_geometry,
@@ -1631,40 +1701,139 @@ fn exact_query_count(security_level: u32, log_inverse_rate: u32) -> u32 {
     unreachable!("the fixed redundant code reaches the finite security target")
 }
 
-fn exact_mask_query_count_for_final_verifier_move(
-    source_log_inverse_rate: u32,
-    source_query_count: u64,
-    mask_group_count: u64,
-    verifier_move_security_level: u32,
+fn exact_full_dimension_unique_decoding_query_count(
+    security_level: u32,
+    message_length: u64,
+    domain_size: u64,
 ) -> Result<u64, CompactStaticCatalogError> {
-    if source_query_count == 0 || mask_group_count == 0 {
+    if message_length == 0
+        || domain_size <= message_length
+        || domain_size % message_length != 0
+        || !(domain_size / message_length).is_power_of_two()
+    {
         return Err(CompactStaticCatalogError::InvalidGeometry);
     }
-    let source_exponent = u32::try_from(source_query_count)
-        .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?;
-    let source_failure_numerator =
-        BigUint::from((1_u64 << source_log_inverse_rate) + 1).pow(source_exponent);
-    let source_failure_denominator =
-        BigUint::from(1_u64 << (source_log_inverse_rate + 1)).pow(source_exponent);
-    let mask_failure_numerator = BigUint::from((1_u64 << MASK_CODE_LOG_INVERSE_RATE) + 1);
-    let mask_failure_denominator = BigUint::from(1_u64 << (MASK_CODE_LOG_INVERSE_RATE + 1));
-    let target_multiplier = BigUint::one() << verifier_move_security_level;
-    let mut mask_failure_numerator_power = BigUint::one();
-    let mut mask_failure_denominator_power = BigUint::one();
-
-    for mask_query_count in 1..=u32::MAX {
-        mask_failure_numerator_power *= &mask_failure_numerator;
-        mask_failure_denominator_power *= &mask_failure_denominator;
-        let common_denominator = &source_failure_denominator * &mask_failure_denominator_power;
-        let combined_numerator = &source_failure_numerator * &mask_failure_denominator_power
-            + BigUint::from(mask_group_count)
-                * &mask_failure_numerator_power
-                * &source_failure_denominator;
-        if combined_numerator * &target_multiplier <= common_denominator {
-            return Ok(u64::from(mask_query_count));
+    let log_inverse_rate = (domain_size / message_length).ilog2();
+    let mut query_count = u64::from(exact_query_count(security_level, log_inverse_rate));
+    loop {
+        let dimension = message_length
+            .checked_add(query_count)
+            .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+        if dimension >= domain_size {
+            return Err(CompactStaticCatalogError::InvalidGeometry);
         }
+        if exact_full_dimension_query_failure_is_at_most_target(
+            security_level,
+            message_length,
+            domain_size,
+            query_count,
+        )? {
+            return Ok(query_count);
+        }
+        query_count = query_count
+            .checked_add(1)
+            .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
     }
-    Err(CompactStaticCatalogError::ArithmeticOverflow)
+}
+
+fn exact_full_dimension_query_failure_is_at_most_target(
+    security_level: u32,
+    message_length: u64,
+    domain_size: u64,
+    query_count: u64,
+) -> Result<bool, CompactStaticCatalogError> {
+    let dimension = message_length
+        .checked_add(query_count)
+        .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+    if query_count == 0 || dimension >= domain_size {
+        return Err(CompactStaticCatalogError::InvalidGeometry);
+    }
+    let exponent =
+        u32::try_from(query_count).map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?;
+    let selected_decoding_error_count = domain_size
+        .checked_sub(dimension)
+        .and_then(|slack| slack.checked_sub(1))
+        .ok_or(CompactStaticCatalogError::InvalidGeometry)?
+        / 2;
+    let minimum_agreement_count = domain_size
+        .checked_sub(selected_decoding_error_count)
+        .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
+    Ok(
+        BigUint::from(minimum_agreement_count).pow(exponent) * (BigUint::one() << security_level)
+            <= BigUint::from(domain_size).pow(exponent),
+    )
+}
+
+fn exact_mask_query_count_for_final_verifier_move(
+    source_message_length: u64,
+    source_domain_size: u64,
+    source_query_count: u64,
+    mask_message_lengths: &[u64],
+    minimum_mask_query_count: u64,
+    verifier_move_security_level: u32,
+) -> Result<u64, CompactStaticCatalogError> {
+    if source_query_count == 0 || mask_message_lengths.is_empty() || minimum_mask_query_count == 0 {
+        return Err(CompactStaticCatalogError::InvalidGeometry);
+    }
+    let source_failure = exact_full_dimension_query_failure_probability(
+        source_message_length,
+        source_domain_size,
+        source_query_count,
+    )?;
+    let mut candidate_mask_query_count = minimum_mask_query_count;
+    loop {
+        let mut grouped_move_failure = source_failure.clone();
+        for message_length in mask_message_lengths {
+            let populated_message_length = message_length
+                .checked_add(candidate_mask_query_count)
+                .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+            let domain_size = populated_message_length
+                .checked_next_power_of_two()
+                .and_then(|value| value.checked_shl(MASK_CODE_LOG_INVERSE_RATE))
+                .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+            grouped_move_failure =
+                grouped_move_failure.add(&exact_full_dimension_query_failure_probability(
+                    *message_length,
+                    domain_size,
+                    candidate_mask_query_count,
+                )?)?;
+        }
+        if grouped_move_failure
+            .is_at_most_inverse_power_of_two(verifier_move_security_level as usize)
+        {
+            return Ok(candidate_mask_query_count);
+        }
+        candidate_mask_query_count = candidate_mask_query_count
+            .checked_add(1)
+            .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+    }
+}
+
+fn exact_full_dimension_query_failure_probability(
+    message_length: u64,
+    domain_size: u64,
+    query_count: u64,
+) -> Result<lifecycle::ExactProbability, CompactStaticCatalogError> {
+    let dimension = message_length
+        .checked_add(query_count)
+        .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+    if query_count == 0 || dimension >= domain_size {
+        return Err(CompactStaticCatalogError::InvalidGeometry);
+    }
+    let selected_decoding_error_count = domain_size
+        .checked_sub(dimension)
+        .and_then(|slack| slack.checked_sub(1))
+        .ok_or(CompactStaticCatalogError::InvalidGeometry)?
+        / 2;
+    let minimum_agreement_count = domain_size
+        .checked_sub(selected_decoding_error_count)
+        .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
+    let exponent =
+        u32::try_from(query_count).map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?;
+    lifecycle::ExactProbability::new(
+        BigUint::from(minimum_agreement_count).pow(exponent),
+        BigUint::from(domain_size).pow(exponent),
+    )
 }
 
 fn ceil_log2(value: u64) -> Result<u32, CompactStaticCatalogError> {
@@ -1953,44 +2122,44 @@ mod tests {
             pre_challenge_snapshots,
             vec![
                 WhirPrivateRandomnessSnapshot {
-                    source_oracle_encoding: 41_056,
+                    source_oracle_encoding: 44_224,
                     carried_mask_messages: 54,
                     carried_mask_encoding: 8_379,
-                    fresh_mirror_messages: 1_164,
+                    fresh_mirror_messages: 1_282,
                     fresh_mirror_encoding: 8_379,
                     fresh_source_message: 8,
-                    fresh_source_encoding: 274,
-                    total: 59_314,
+                    fresh_source_encoding: 348,
+                    total: 62_674,
                 },
                 WhirPrivateRandomnessSnapshot {
-                    source_oracle_encoding: 29_696,
+                    source_oracle_encoding: 32_544,
                     carried_mask_messages: 51,
                     carried_mask_encoding: 7_980,
-                    fresh_mirror_messages: 1_233,
+                    fresh_mirror_messages: 1_339,
                     fresh_mirror_encoding: 7_980,
                     fresh_source_message: 16,
-                    fresh_source_encoding: 280,
-                    total: 47_236,
+                    fresh_source_encoding: 351,
+                    total: 50_261,
                 },
                 WhirPrivateRandomnessSnapshot {
-                    source_oracle_encoding: 23_600,
+                    source_oracle_encoding: 24_448,
                     carried_mask_messages: 48,
                     carried_mask_encoding: 7_581,
-                    fresh_mirror_messages: 1_230,
+                    fresh_mirror_messages: 1_219,
                     fresh_mirror_encoding: 7_581,
                     fresh_source_message: 32,
-                    fresh_source_encoding: 293,
-                    total: 40_365,
+                    fresh_source_encoding: 357,
+                    total: 41_266,
                 },
                 WhirPrivateRandomnessSnapshot {
-                    source_oracle_encoding: 20_912,
+                    source_oracle_encoding: 23_288,
                     carried_mask_messages: 45,
                     carried_mask_encoding: 7_182,
-                    fresh_mirror_messages: 1_227,
+                    fresh_mirror_messages: 1_327,
                     fresh_mirror_encoding: 7_182,
                     fresh_source_message: 64,
-                    fresh_source_encoding: 322,
-                    total: 36_934,
+                    fresh_source_encoding: 371,
+                    total: 39_459,
                 },
             ]
         );
@@ -1998,44 +2167,44 @@ mod tests {
             main_snapshots,
             vec![
                 WhirPrivateRandomnessSnapshot {
-                    source_oracle_encoding: 66_272,
+                    source_oracle_encoding: 69_568,
                     carried_mask_messages: 379,
                     carried_mask_encoding: 45_486,
-                    fresh_mirror_messages: 1_627,
+                    fresh_mirror_messages: 1_745,
                     fresh_mirror_encoding: 45_486,
                     fresh_source_message: 8,
-                    fresh_source_encoding: 274,
-                    total: 159_532,
+                    fresh_source_encoding: 348,
+                    total: 163_020,
                 },
                 WhirPrivateRandomnessSnapshot {
-                    source_oracle_encoding: 42_304,
+                    source_oracle_encoding: 45_184,
                     carried_mask_messages: 376,
                     carried_mask_encoding: 45_087,
-                    fresh_mirror_messages: 1_696,
+                    fresh_mirror_messages: 1_802,
                     fresh_mirror_encoding: 45_087,
                     fresh_source_message: 16,
-                    fresh_source_encoding: 280,
-                    total: 134_846,
+                    fresh_source_encoding: 351,
+                    total: 137_903,
                 },
                 WhirPrivateRandomnessSnapshot {
-                    source_oracle_encoding: 29_904,
+                    source_oracle_encoding: 30_768,
                     carried_mask_messages: 373,
                     carried_mask_encoding: 44_688,
-                    fresh_mirror_messages: 1_693,
+                    fresh_mirror_messages: 1_682,
                     fresh_mirror_encoding: 44_688,
                     fresh_source_message: 32,
-                    fresh_source_encoding: 293,
-                    total: 121_671,
+                    fresh_source_encoding: 357,
+                    total: 122_588,
                 },
                 WhirPrivateRandomnessSnapshot {
-                    source_oracle_encoding: 24_064,
+                    source_oracle_encoding: 26_448,
                     carried_mask_messages: 370,
                     carried_mask_encoding: 44_289,
-                    fresh_mirror_messages: 1_690,
+                    fresh_mirror_messages: 1_790,
                     fresh_mirror_encoding: 44_289,
                     fresh_source_message: 64,
-                    fresh_source_encoding: 322,
-                    total: 115_088,
+                    fresh_source_encoding: 371,
+                    total: 117_621,
                 },
             ]
         );
@@ -2070,84 +2239,84 @@ mod tests {
             vec![
                 PackingResourceCeilingSnapshot {
                     packing_factor: 1,
-                    pre_challenge_proof_byte_length: 4_190_180,
-                    main_proof_byte_length: 10_914_860,
-                    maximum_proof_byte_length: 25_412_778,
+                    pre_challenge_proof_byte_length: 4_470_900,
+                    main_proof_byte_length: 11_204_796,
+                    maximum_proof_byte_length: 25_858_402,
                     public_input_byte_length: 15_991_062,
-                    transport_byte_length: 41_403_840,
+                    transport_byte_length: 41_849_464,
                     transport_chunk_count: 40,
                     commitment_peak_byte_length: 75_497_456,
                     cfw_to_whir_retained_payload_byte_length: 167_790_600,
-                    wasm_peak_byte_length: 383_173_896,
+                    wasm_peak_byte_length: 383_745_984,
                     scratch_byte_length: 640_811_508,
-                    base_coordinate_butterfly_count: 913_355_264,
-                    committed_leaf_count: 1_012_006,
-                    commitment_leaf_hash_query_count: 27_440_422,
-                    commitment_parent_hash_query_count: 1_011_882,
-                    verifier_opened_leaf_hash_query_count: 481_105,
+                    base_coordinate_butterfly_count: 915_861_504,
+                    committed_leaf_count: 1_020_198,
+                    commitment_leaf_hash_query_count: 27_541_798,
+                    commitment_parent_hash_query_count: 1_020_074,
+                    verifier_opened_leaf_hash_query_count: 491_387,
                     maximum_uninterrupted_butterfly_count: 44_564_480,
                     maximum_uninterrupted_leaf_hash_count: 131_072,
                     deterministic_checkpoint_count: 2_677,
                 },
                 PackingResourceCeilingSnapshot {
                     packing_factor: 2,
-                    pre_challenge_proof_byte_length: 4_155_252,
-                    main_proof_byte_length: 9_972_156,
-                    maximum_proof_byte_length: 24_535_650,
+                    pre_challenge_proof_byte_length: 4_426_484,
+                    main_proof_byte_length: 10_245_692,
+                    maximum_proof_byte_length: 24_941_414,
                     public_input_byte_length: 15_991_062,
-                    transport_byte_length: 40_526_712,
-                    transport_chunk_count: 39,
+                    transport_byte_length: 40_932_476,
+                    transport_chunk_count: 40,
                     commitment_peak_byte_length: 109_051_888,
                     cfw_to_whir_retained_payload_byte_length: 167_790_600,
-                    wasm_peak_byte_length: 415_776_128,
+                    wasm_peak_byte_length: 416_299_188,
                     scratch_byte_length: 693_240_308,
-                    base_coordinate_butterfly_count: 969_097_728,
-                    committed_leaf_count: 1_716_514,
-                    commitment_leaf_hash_query_count: 28_677_410,
-                    commitment_parent_hash_query_count: 1_716_392,
-                    verifier_opened_leaf_hash_query_count: 447_735,
+                    base_coordinate_butterfly_count: 971_603_968,
+                    committed_leaf_count: 1_724_706,
+                    commitment_leaf_hash_query_count: 28_778_786,
+                    commitment_parent_hash_query_count: 1_724_584,
+                    verifier_opened_leaf_hash_query_count: 457_018,
                     maximum_uninterrupted_butterfly_count: 47_185_920,
                     maximum_uninterrupted_leaf_hash_count: 262_144,
                     deterministic_checkpoint_count: 2_677,
                 },
                 PackingResourceCeilingSnapshot {
                     packing_factor: 4,
-                    pre_challenge_proof_byte_length: 4_144_052,
-                    main_proof_byte_length: 9_507_068,
-                    maximum_proof_byte_length: 24_088_610,
+                    pre_challenge_proof_byte_length: 4_306_300,
+                    main_proof_byte_length: 9_670_468,
+                    maximum_proof_byte_length: 24_238_630,
                     public_input_byte_length: 15_991_062,
-                    transport_byte_length: 40_079_672,
+                    transport_byte_length: 40_229_692,
                     transport_chunk_count: 39,
                     commitment_peak_byte_length: 176_160_752,
                     cfw_to_whir_retained_payload_byte_length: 167_790_600,
-                    wasm_peak_byte_length: 482_330_704,
+                    wasm_peak_byte_length: 482_526_788,
                     scratch_byte_length: 798_097_908,
-                    base_coordinate_butterfly_count: 1_036_964_352,
-                    committed_leaf_count: 3_127_582,
-                    commitment_leaf_hash_query_count: 31_196_446,
-                    commitment_parent_hash_query_count: 3_127_462,
-                    verifier_opened_leaf_hash_query_count: 430_401,
+                    base_coordinate_butterfly_count: 1_040_617_472,
+                    committed_leaf_count: 3_137_822,
+                    commitment_leaf_hash_query_count: 31_334_686,
+                    commitment_parent_hash_query_count: 3_137_702,
+                    verifier_opened_leaf_hash_query_count: 433_818,
                     maximum_uninterrupted_butterfly_count: 49_807_360,
                     maximum_uninterrupted_leaf_hash_count: 524_288,
                     deterministic_checkpoint_count: 2_677,
                 },
                 PackingResourceCeilingSnapshot {
                     packing_factor: 8,
-                    pre_challenge_proof_byte_length: 4_172_276,
-                    main_proof_byte_length: 9_308_348,
-                    maximum_proof_byte_length: 23_964_002,
+                    pre_challenge_proof_byte_length: 4_403_364,
+                    main_proof_byte_length: 9_540_012,
+                    maximum_proof_byte_length: 24_295_606,
                     public_input_byte_length: 15_991_062,
-                    transport_byte_length: 39_955_064,
+                    transport_byte_length: 40_286_668,
                     transport_chunk_count: 39,
                     commitment_peak_byte_length: 310_378_480,
                     cfw_to_whir_retained_payload_byte_length: 167_790_600,
-                    wasm_peak_byte_length: 616_334_496,
-                    scratch_byte_length: 1_078_341_144,
-                    base_coordinate_butterfly_count: 1_129_570_816,
-                    committed_leaf_count: 5_949_722,
-                    commitment_leaf_hash_query_count: 36_242_714,
-                    commitment_parent_hash_query_count: 5_949_604,
-                    verifier_opened_leaf_hash_query_count: 423_515,
+                    wasm_peak_byte_length: 616_762_084,
+                    scratch_byte_length: 1_079_100_336,
+                    base_coordinate_butterfly_count: 1_131_094_016,
+                    committed_leaf_count: 5_955_866,
+                    commitment_leaf_hash_query_count: 36_307_226,
+                    commitment_parent_hash_query_count: 5_955_748,
+                    verifier_opened_leaf_hash_query_count: 431_094,
                     maximum_uninterrupted_butterfly_count: 52_428_800,
                     maximum_uninterrupted_leaf_hash_count: 1_048_576,
                     deterministic_checkpoint_count: 2_677,
@@ -2198,10 +2367,10 @@ mod tests {
         assert_eq!(
             heap_snapshots,
             vec![
-                (1, 25_412_778, 9_420_928, 1_161_024, 35_994_730),
-                (2, 24_535_650, 9_361_024, 1_181_248, 35_077_922),
-                (4, 24_088_610, 9_271_680, 1_205_120, 34_565_410),
-                (8, 23_964_002, 9_198_720, 1_226_944, 34_389_666),
+                (1, 25_858_402, 9_538_176, 1_148_736, 36_545_314),
+                (2, 24_941_414, 9_469_824, 1_169_920, 35_581_158),
+                (4, 24_238_630, 9_315_200, 1_201_728, 34_755_558),
+                (8, 24_295_606, 9_287_552, 1_217_408, 34_800_566),
             ]
         );
     }
@@ -2238,16 +2407,16 @@ mod tests {
             heap_snapshots,
             vec![
                 (
-                    1, 1_050_944, 1_451_280, 368, 64, 379_160, 9_502_544, 9_502_544
+                    1, 1_050_944, 1_435_920, 368, 64, 380_696, 9_524_048, 9_524_048
                 ),
                 (
-                    2, 1_051_072, 1_476_560, 368, 64, 376_632, 9_467_152, 9_467_152
+                    2, 1_051_072, 1_462_400, 368, 64, 378_048, 9_486_976, 9_486_976
                 ),
                 (
-                    4, 1_051_200, 1_506_400, 368, 64, 373_648, 9_425_376, 9_425_376
+                    4, 1_051_200, 1_502_160, 368, 64, 374_072, 9_431_312, 9_431_312
                 ),
                 (
-                    8, 1_051_328, 1_533_680, 368, 64, 370_920, 9_387_184, 9_387_184
+                    8, 1_051_328, 1_521_760, 368, 64, 372_112, 9_403_872, 9_403_872
                 ),
             ]
         );
@@ -2269,12 +2438,28 @@ mod tests {
 
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
-        let expected_round_rates = [[2, 3, 6], [2, 2, 5], [2, 2, 4], [2, 2, 3]];
-        for (factor, expected_rates) in catalog.factor_catalogs.iter().zip(expected_round_rates) {
+        let expected_round_rates = [[2, 4, 8], [2, 3, 7], [2, 3, 6], [2, 2, 5]];
+        let expected_full_dimension_query_counts = [
+            [396, 432, 400, 348],
+            [395, 412, 481, 351],
+            [395, 403, 373, 357],
+            [395, 398, 489, 371],
+        ];
+        for ((factor, expected_rates), expected_query_counts) in catalog
+            .factor_catalogs
+            .iter()
+            .zip(expected_round_rates)
+            .zip(expected_full_dimension_query_counts)
+        {
             assert_eq!(factor.main_whir.round_log_inverse_rates, expected_rates);
             assert_eq!(
                 factor.pre_challenge_whir.round_log_inverse_rates,
                 expected_rates
+            );
+            assert_eq!(factor.main_whir.query_counts, expected_query_counts);
+            assert_eq!(
+                factor.pre_challenge_whir.query_counts,
+                expected_query_counts
             );
             assert_eq!(factor.pre_challenge_whir.mask_query_count, 399);
             assert_eq!(factor.main_whir.mask_query_count, 399);
