@@ -147,6 +147,112 @@ pub(crate) struct CompactWitnessSegment {
     element_count: u64,
 }
 
+/// Exact coefficient layout used to bind the pre-challenge lookup message to
+/// its copy at the front of the complete R1CS witness.
+///
+/// The pre-challenge message contains the modular quotients followed by the
+/// lookup multiplicities and canonical zero padding. The complete witness
+/// begins with those same two segments, but its later witness segments are not
+/// part of the copy relation. Consequently the main-epoch linear functional
+/// has the pre-challenge multilinear weights on the copied prefix and zero on
+/// every later main-witness coefficient.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CompactCrossEpochCopyGeometry {
+    copied_ring_vector_count: u64,
+    copied_element_count: u64,
+    pre_challenge_message_element_count: u64,
+    main_message_element_count: u64,
+    point_coordinate_count: u32,
+}
+
+impl CompactCrossEpochCopyGeometry {
+    fn derive(catalog: &CompactPublicKeyRelationCatalog) -> Result<Self, RelationPlanError> {
+        let [
+            quotient_segment,
+            multiplicity_segment,
+            remaining_segments @ ..,
+        ] = catalog.ordered_witness_segments.as_slice()
+        else {
+            return Err(RelationPlanError::InvalidConstraint);
+        };
+        let expected_first_remaining_element = quotient_segment
+            .element_count
+            .checked_add(multiplicity_segment.element_count)
+            .ok_or(RelationPlanError::CountOverflow)?;
+        if quotient_segment.kind != CompactWitnessSegmentKind::ModularQuotients
+            || quotient_segment.first_element != 0
+            || quotient_segment.ring_vector_count != catalog.quotient_vector_count()
+            || multiplicity_segment.kind != CompactWitnessSegmentKind::LookupMultiplicities
+            || multiplicity_segment.first_element != quotient_segment.element_count
+            || multiplicity_segment.ring_vector_count
+                != catalog.quotient_lookup_table_ring_vector_count
+            || remaining_segments
+                .first()
+                .is_none_or(|segment| segment.first_element != expected_first_remaining_element)
+        {
+            return Err(RelationPlanError::InvalidConstraint);
+        }
+
+        let copied_ring_vector_count = quotient_segment
+            .ring_vector_count
+            .checked_add(multiplicity_segment.ring_vector_count)
+            .ok_or(RelationPlanError::CountOverflow)?;
+        let copied_element_count = copied_ring_vector_count
+            .checked_mul(catalog.ring_degree)
+            .ok_or(RelationPlanError::CountOverflow)?;
+        if copied_element_count
+            != quotient_segment
+                .element_count
+                .checked_add(multiplicity_segment.element_count)
+                .ok_or(RelationPlanError::CountOverflow)?
+        {
+            return Err(RelationPlanError::InvalidConstraint);
+        }
+        let pre_challenge_message_element_count = copied_element_count
+            .checked_next_power_of_two()
+            .ok_or(RelationPlanError::CountOverflow)?;
+        let main_message_element_count = catalog.padded_witness_element_count;
+        let expected_main_message_element_count = pre_challenge_message_element_count
+            .checked_mul(2)
+            .ok_or(RelationPlanError::CountOverflow)?;
+        if copied_element_count == 0
+            || pre_challenge_message_element_count >= main_message_element_count
+            || main_message_element_count != expected_main_message_element_count
+        {
+            return Err(RelationPlanError::InvalidConstraint);
+        }
+        let point_coordinate_count = pre_challenge_message_element_count.ilog2();
+
+        Ok(Self {
+            copied_ring_vector_count,
+            copied_element_count,
+            pre_challenge_message_element_count,
+            main_message_element_count,
+            point_coordinate_count,
+        })
+    }
+
+    pub(crate) const fn copied_ring_vector_count(self) -> u64 {
+        self.copied_ring_vector_count
+    }
+
+    pub(crate) const fn copied_element_count(self) -> u64 {
+        self.copied_element_count
+    }
+
+    pub(crate) const fn pre_challenge_message_element_count(self) -> u64 {
+        self.pre_challenge_message_element_count
+    }
+
+    pub(crate) const fn main_message_element_count(self) -> u64 {
+        self.main_message_element_count
+    }
+
+    pub(crate) const fn point_coordinate_count(self) -> u32 {
+        self.point_coordinate_count
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CompactR1csConstraintKind {
     ExactIntegerLift,
@@ -291,6 +397,12 @@ impl CompactPublicKeyRelationCatalog {
         self.lookup_soundness_numerator
     }
 
+    pub(crate) fn cross_epoch_copy_geometry(
+        &self,
+    ) -> Result<CompactCrossEpochCopyGeometry, RelationPlanError> {
+        CompactCrossEpochCopyGeometry::derive(self)
+    }
+
     pub(crate) fn resident_owned_byte_length(&self) -> Result<u64, RelationPlanError> {
         let inline_byte_length = u64::try_from(core::mem::size_of::<Self>())
             .map_err(|_| RelationPlanError::CountOverflow)?;
@@ -378,6 +490,7 @@ impl CompactPublicKeyRelationCatalog {
         check_private_vectors_are_prover_owned(variant, &self.ordered_private_small_vectors)?;
         CompactAuthenticatedAssignmentCatalog::derive(self, variant)?;
         structured_r1cs::CompactStructuredR1csCatalog::derive(self)?.check(self)?;
+        self.cross_epoch_copy_geometry()?;
         if self.padded_public_input_element_count != self.padded_witness_element_count
             || self.padded_constraint_count != 2 * self.padded_witness_element_count
             || self.operative_constraint_count >= self.padded_constraint_count
@@ -1295,6 +1408,17 @@ mod tests {
             Ok(662_283_957_175_299)
         );
         assert_eq!(catalog.quotient_lookup_table_value_count, 131_072);
+        let cross_epoch_copy = catalog
+            .cross_epoch_copy_geometry()
+            .expect("selected cross-epoch copy geometry");
+        assert_eq!(cross_epoch_copy.copied_ring_vector_count(), 33);
+        assert_eq!(cross_epoch_copy.copied_element_count(), 1_081_344);
+        assert_eq!(
+            cross_epoch_copy.pre_challenge_message_element_count(),
+            2_097_152
+        );
+        assert_eq!(cross_epoch_copy.main_message_element_count(), 4_194_304);
+        assert_eq!(cross_epoch_copy.point_coordinate_count(), 21);
     }
 
     #[test]

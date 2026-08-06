@@ -4,8 +4,9 @@
 //!     masked sumcheck batches -> code-switching rounds -> masked base case
 //! ```
 //!
-//! Local modification: an extension-field source and caller-precommitted masks
-//! can enter through an outer committed relation. See `../../../../UPSTREAM.md`.
+//! Local modification: a base- or extension-field source and
+//! caller-precommitted extension-field masks can enter through an outer
+//! committed relation. See `../../../../UPSTREAM.md`.
 
 mod data;
 mod masks;
@@ -218,6 +219,52 @@ where
             rng,
         )
         .expect("opening claims construct a valid committed relation")
+    }
+
+    /// Reduces a caller-owned extension-field relation whose committed source
+    /// message and initial encoding are in the base field.
+    ///
+    /// Every precommitted mask root and the base-field source root must already
+    /// have been observed by `challenger` in outer-protocol order. This is the
+    /// heterogeneous-source counterpart of [`Self::prove_extension_relation`].
+    pub fn prove_base_source_relation<R, BuildRelation>(
+        &self,
+        prover_data: HidingWhirProverData<F, EF, MT>,
+        revealed_values: Vec<EF>,
+        build_relation: BuildRelation,
+        challenger: &mut Challenger,
+        rng: &mut R,
+    ) -> Result<ZkWhirProof<F, EF, MT>, HidingWhirRelationInputError>
+    where
+        R: Rng,
+        BuildRelation:
+            FnOnce(
+                EF,
+            )
+                -> Result<CombinedRelationProverInput<F, EF, MT>, HidingWhirRelationInputError>,
+    {
+        let batching_challenge: EF = challenger.sample_algebra_element();
+        let relation = build_relation(batching_challenge)?;
+        let HidingWhirProverData {
+            message,
+            randomness,
+            merkle,
+            ..
+        } = prover_data;
+        let extension_message = message
+            .as_slice()
+            .par_iter()
+            .map(|&value| value.into())
+            .collect::<Vec<EF>>();
+        self.prove_combined_relation_inner(
+            Poly::new(extension_message),
+            InitialEncodingRandomness::Base(randomness),
+            ZkRoundData::Base(merkle),
+            revealed_values,
+            relation,
+            challenger,
+            rng,
+        )
     }
 
     /// Reduces an outer extension-field committed relation.

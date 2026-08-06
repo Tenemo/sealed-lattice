@@ -206,6 +206,18 @@ fn commit_mask_group(
     commitment_scheme: &TestExtensionCommitmentScheme,
     challenger: &mut TestChallenger,
 ) -> CommittedMaskGroup {
+    let committed_group =
+        build_committed_mask_group(shape, messages, randomness, commitment_scheme);
+    challenger.observe(committed_group.commitment.clone());
+    committed_group
+}
+
+fn build_committed_mask_group(
+    shape: MaskGroupShape,
+    messages: Vec<Vec<ChallengeField>>,
+    randomness: Vec<Vec<ChallengeField>>,
+    commitment_scheme: &TestExtensionCommitmentScheme,
+) -> CommittedMaskGroup {
     assert_eq!(messages.len(), shape.width);
     assert_eq!(randomness.len(), shape.width);
     let codewords = messages
@@ -218,7 +230,6 @@ fn commit_mask_group(
         })
         .collect::<Vec<_>>();
     let (commitment, data) = commitment_scheme.commit_matrix(stack_codewords(&codewords));
-    challenger.observe(commitment.clone());
     CommittedMaskGroup {
         shape,
         messages,
@@ -708,4 +719,211 @@ fn extension_relation_prover_refuses_malformed_caller_owned_dimensions() {
             covector_count: 2,
         })
     ));
+}
+
+#[test]
+fn base_and_extension_relations_reuse_one_two_mask_commitment_without_revealing_the_copy_value() {
+    let configuration = test_configuration();
+    let commitment_scheme = test_commitment_scheme();
+    let extension_commitment_scheme = TestExtensionCommitmentScheme::new(commitment_scheme.clone());
+    let discrete_fourier_transform = Radix2DFTSmallBatch::<Goldilocks>::default();
+    let prover = HidingWhirProver::new(
+        &configuration,
+        &discrete_fourier_transform,
+        &commitment_scheme,
+    );
+    let verifier = HidingWhirVerifier::new(&configuration, &commitment_scheme);
+    let mut prover_challenger = test_challenger();
+    let mut random_source = SmallRng::seed_from_u64(0xC0_55_E0_21);
+
+    let base_source_values = (0..1 << TEST_VARIABLE_COUNT)
+        .map(|value_ordinal| {
+            Goldilocks::from_u64(
+                7_001_u64
+                    .wrapping_add(value_ordinal as u64 * 43)
+                    .wrapping_mul(59),
+            )
+        })
+        .collect::<Vec<_>>();
+    let pre_challenge_source = Poly::new(base_source_values.clone());
+    let main_source = Poly::new(
+        base_source_values
+            .iter()
+            .copied()
+            .map(ChallengeField::from)
+            .collect::<Vec<_>>(),
+    );
+    let source_covector = extension_vector(1 << TEST_VARIABLE_COUNT, 9_001);
+    let copied_source_value = main_source
+        .as_slice()
+        .iter()
+        .copied()
+        .zip(source_covector.iter().copied())
+        .map(|(source_value, coefficient)| source_value * coefficient)
+        .sum::<ChallengeField>();
+
+    let (pre_challenge_source_commitment, pre_challenge_source_data) = prover.commit(
+        pre_challenge_source,
+        &mut prover_challenger,
+        &mut random_source,
+    );
+    let (main_source_commitment, main_source_data) =
+        prover.commit_extension(main_source, &mut prover_challenger, &mut random_source);
+
+    let pre_challenge_mask = extension_value(9_401);
+    let main_mask = extension_value(9_701);
+    let shared_mask_shape = MaskGroupShape {
+        shape: MaskCodeShape::new(
+            1,
+            configuration.mask_queries * 2,
+            TEST_MASK_LOG_INVERSE_RATE,
+        ),
+        width: 2,
+    };
+    let shared_mask_messages = vec![vec![pre_challenge_mask], vec![main_mask]];
+    let shared_mask_randomness = vec![
+        extension_vector(shared_mask_shape.shape.randomness_len, 10_001),
+        extension_vector(shared_mask_shape.shape.randomness_len, 10_301),
+    ];
+    let shared_mask_group_for_pre_challenge = commit_mask_group(
+        shared_mask_shape,
+        shared_mask_messages.clone(),
+        shared_mask_randomness.clone(),
+        &extension_commitment_scheme,
+        &mut prover_challenger,
+    );
+    let shared_mask_group_for_main = build_committed_mask_group(
+        shared_mask_shape,
+        shared_mask_messages,
+        shared_mask_randomness,
+        &extension_commitment_scheme,
+    );
+    assert_eq!(
+        shared_mask_group_for_pre_challenge.commitment, shared_mask_group_for_main.commitment,
+        "deterministic replay must reconstruct the one shared mask root",
+    );
+
+    let masked_pre_challenge_value = copied_source_value + pre_challenge_mask;
+    let masked_main_value = copied_source_value + main_mask;
+    let mask_difference = pre_challenge_mask - main_mask;
+    assert_eq!(
+        masked_pre_challenge_value - masked_main_value - mask_difference,
+        ChallengeField::ZERO,
+    );
+    for value in [
+        masked_pre_challenge_value,
+        masked_main_value,
+        mask_difference,
+    ] {
+        prover_challenger.observe_algebra_element(value);
+    }
+
+    let pre_challenge_covector_for_prover = source_covector.clone();
+    let pre_challenge_proof = prover
+        .prove_base_source_relation(
+            pre_challenge_source_data,
+            vec![masked_pre_challenge_value],
+            move |_| {
+                Ok(CombinedRelationProverInput {
+                    source_covector: Poly::new(pre_challenge_covector_for_prover),
+                    target: masked_pre_challenge_value,
+                    precommitted_mask_groups: vec![PrecommittedMaskProverGroup {
+                        shape: shared_mask_group_for_pre_challenge.shape,
+                        messages: shared_mask_group_for_pre_challenge.messages,
+                        randomness: shared_mask_group_for_pre_challenge.randomness,
+                        covectors: vec![vec![ChallengeField::ONE], vec![ChallengeField::ZERO]],
+                        data: shared_mask_group_for_pre_challenge.data,
+                    }],
+                })
+            },
+            &mut prover_challenger,
+            &mut random_source,
+        )
+        .expect("the base-source masked relation is well formed");
+
+    let main_covector_for_prover = source_covector.clone();
+    let main_proof = prover
+        .prove_extension_relation(
+            main_source_data,
+            vec![masked_main_value, mask_difference],
+            move |batching_challenge| {
+                Ok(CombinedRelationProverInput {
+                    source_covector: Poly::new(main_covector_for_prover),
+                    target: masked_main_value + batching_challenge * mask_difference,
+                    precommitted_mask_groups: vec![PrecommittedMaskProverGroup {
+                        shape: shared_mask_group_for_main.shape,
+                        messages: shared_mask_group_for_main.messages,
+                        randomness: shared_mask_group_for_main.randomness,
+                        covectors: vec![
+                            vec![batching_challenge],
+                            vec![ChallengeField::ONE - batching_challenge],
+                        ],
+                        data: shared_mask_group_for_main.data,
+                    }],
+                })
+            },
+            &mut prover_challenger,
+            &mut random_source,
+        )
+        .expect("the extension-source masked relation is well formed");
+
+    assert_eq!(pre_challenge_proof.evals, vec![masked_pre_challenge_value]);
+    assert_eq!(main_proof.evals, vec![masked_main_value, mask_difference]);
+
+    let mut verifier_challenger = test_challenger();
+    verifier_challenger.observe(pre_challenge_source_commitment.clone());
+    verifier_challenger.observe(main_source_commitment.clone());
+    verifier_challenger.observe(shared_mask_group_for_main.commitment.clone());
+    for value in [
+        masked_pre_challenge_value,
+        masked_main_value,
+        mask_difference,
+    ] {
+        verifier_challenger.observe_algebra_element(value);
+    }
+
+    let pre_challenge_covector_for_verifier = source_covector.clone();
+    verifier
+        .verify_base_source_relation(
+            &pre_challenge_proof,
+            &pre_challenge_source_commitment,
+            1,
+            |_, disclosed_values| {
+                Ok(CombinedRelationVerifierInput {
+                    source_covector: Poly::new(pre_challenge_covector_for_verifier),
+                    target: disclosed_values[0],
+                    precommitted_mask_groups: vec![PrecommittedMaskVerifierGroup {
+                        shape: shared_mask_shape,
+                        covectors: vec![vec![ChallengeField::ONE], vec![ChallengeField::ZERO]],
+                        commitment: shared_mask_group_for_main.commitment.clone(),
+                    }],
+                })
+            },
+            &mut verifier_challenger,
+        )
+        .expect("the independently reconstructed base-source relation must verify");
+
+    let main_covector_for_verifier = source_covector;
+    verifier
+        .verify_extension_relation(
+            &main_proof,
+            &main_source_commitment,
+            2,
+            |batching_challenge, disclosed_values| {
+                Ok(CombinedRelationVerifierInput {
+                    source_covector: Poly::new(main_covector_for_verifier),
+                    target: disclosed_values[0] + batching_challenge * disclosed_values[1],
+                    precommitted_mask_groups: vec![PrecommittedMaskVerifierGroup {
+                        shape: shared_mask_shape,
+                        covectors: vec![
+                            vec![batching_challenge],
+                            vec![ChallengeField::ONE - batching_challenge],
+                        ],
+                        commitment: shared_mask_group_for_main.commitment,
+                    }],
+                })
+            },
+            &mut verifier_challenger,
+        )
+        .expect("the independently reconstructed extension relation must verify");
 }

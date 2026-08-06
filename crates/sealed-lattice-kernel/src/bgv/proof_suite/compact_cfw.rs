@@ -876,6 +876,48 @@ impl CompactCfwMultilinearOpeningClaim {
     }
 }
 
+/// Main-epoch claims for the masked cross-epoch copy relation.
+///
+/// Let `z_pre` and `z_main` be the two independent one-element messages in the
+/// shared cross-epoch mask group. The caller discloses
+///
+/// ```text
+/// masked_pre_challenge_evaluation = <pre_copy_covector, source> + z_pre
+/// masked_main_evaluation = <main_copy_covector, witness> + z_main
+/// mask_difference = z_pre - z_main.
+/// ```
+///
+/// The pre-challenge WHIR relation separately proves its masked evaluation
+/// with `z_pre`. Comparing the three disclosed values therefore reveals only
+/// the required copied-message equality. The mask group is committed before
+/// `point` is sampled.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CompactCfwMaskedCrossEpochClaims {
+    point: Vec<CompactChallengeField>,
+    copied_main_source_element_count: usize,
+    masked_pre_challenge_evaluation: CompactChallengeField,
+    masked_main_evaluation: CompactChallengeField,
+    mask_difference: CompactChallengeField,
+}
+
+impl CompactCfwMaskedCrossEpochClaims {
+    pub(crate) fn new(
+        point: Vec<CompactChallengeField>,
+        copied_main_source_element_count: usize,
+        masked_pre_challenge_evaluation: CompactChallengeField,
+        masked_main_evaluation: CompactChallengeField,
+        mask_difference: CompactChallengeField,
+    ) -> Self {
+        Self {
+            point,
+            copied_main_source_element_count,
+            masked_pre_challenge_evaluation,
+            masked_main_evaluation,
+            mask_difference,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CompactCfwClaimBatch {
     geometry: CompactCfwGeometry,
@@ -894,6 +936,7 @@ pub(crate) struct CompactCfwClaimCombinationContinuation {
     claim_batch: CompactCfwClaimBatch,
     payload_geometry: CompactCfwToWhirPayloadGeometry,
     preceding_target: CompactChallengeField,
+    preceding_mask_covectors: Vec<Vec<CompactChallengeField>>,
     batching_challenge: CompactChallengeField,
     joint_batching_coefficient: CompactChallengeField,
     preceding_opening_claim_count: usize,
@@ -905,6 +948,7 @@ pub(crate) struct CompactCfwToWhirPayloadGeometry {
     preceding_opening_claim_extension_element_count: usize,
     cfw_claim_batch_extension_element_count: usize,
     source_covector_extension_element_count: usize,
+    preceding_mask_covector_extension_element_count: usize,
     inner_mask_covector_extension_element_count: usize,
     outer_mask_covector_extension_element_count: usize,
     combined_relation_extension_element_count: usize,
@@ -915,6 +959,18 @@ impl CompactCfwToWhirPayloadGeometry {
     pub(crate) fn derive(
         geometry: CompactCfwGeometry,
         preceding_opening_claim_count: usize,
+    ) -> Result<Self, CompactCfwError> {
+        Self::derive_with_preceding_mask_covector_element_count(
+            geometry,
+            preceding_opening_claim_count,
+            0,
+        )
+    }
+
+    pub(crate) fn derive_with_preceding_mask_covector_element_count(
+        geometry: CompactCfwGeometry,
+        preceding_opening_claim_count: usize,
+        preceding_mask_covector_extension_element_count: usize,
     ) -> Result<Self, CompactCfwError> {
         let source_variable_count = usize::try_from(geometry.witness_length().ilog2())
             .map_err(|_| CompactCfwError::CountOverflow)?;
@@ -941,6 +997,7 @@ impl CompactCfwToWhirPayloadGeometry {
             .ok_or(CompactCfwError::CountOverflow)?;
         let combined_relation_extension_element_count = source_covector_extension_element_count
             .checked_add(1)
+            .and_then(|count| count.checked_add(preceding_mask_covector_extension_element_count))
             .and_then(|count| count.checked_add(inner_mask_covector_extension_element_count))
             .and_then(|count| count.checked_add(outer_mask_covector_extension_element_count))
             .ok_or(CompactCfwError::CountOverflow)?;
@@ -954,6 +1011,7 @@ impl CompactCfwToWhirPayloadGeometry {
             preceding_opening_claim_extension_element_count,
             cfw_claim_batch_extension_element_count,
             source_covector_extension_element_count,
+            preceding_mask_covector_extension_element_count,
             inner_mask_covector_extension_element_count,
             outer_mask_covector_extension_element_count,
             combined_relation_extension_element_count,
@@ -975,6 +1033,10 @@ impl CompactCfwToWhirPayloadGeometry {
 
     pub(crate) const fn source_covector_extension_element_count(self) -> usize {
         self.source_covector_extension_element_count
+    }
+
+    pub(crate) const fn preceding_mask_covector_extension_element_count(self) -> usize {
+        self.preceding_mask_covector_extension_element_count
     }
 
     pub(crate) const fn inner_mask_covector_extension_element_count(self) -> usize {
@@ -1069,9 +1131,97 @@ impl CompactCfwClaimBatch {
                 claim_batch: self,
                 payload_geometry,
                 preceding_target,
+                preceding_mask_covectors: Vec::new(),
                 batching_challenge,
                 joint_batching_coefficient: batching_coefficient,
                 preceding_opening_claim_count: preceding_opening_claims.len(),
+            },
+            source_covector,
+        })
+    }
+
+    pub(crate) fn begin_combining_with_masked_cross_epoch_claims(
+        self,
+        claims: CompactCfwMaskedCrossEpochClaims,
+        batching_challenge: CompactChallengeField,
+    ) -> Result<CompactCfwMatrixClaimCombination, CompactCfwError> {
+        const CROSS_EPOCH_CLAIM_COUNT: usize = 2;
+        const CROSS_EPOCH_MASK_COVECTOR_ELEMENT_COUNT: usize = 2;
+
+        if self.sumcheck_point.len() != self.geometry.sumcheck_round_count()
+            || self.outer_evaluations.len() != self.geometry.outer_mask_count()
+            || self.sumcheck_point.capacity() != self.sumcheck_point.len()
+            || self.outer_evaluations.capacity() != self.outer_evaluations.len()
+        {
+            return Err(CompactCfwError::InvalidClaimInput);
+        }
+        let payload_geometry =
+            CompactCfwToWhirPayloadGeometry::derive_with_preceding_mask_covector_element_count(
+                self.geometry,
+                CROSS_EPOCH_CLAIM_COUNT,
+                CROSS_EPOCH_MASK_COVECTOR_ELEMENT_COUNT,
+            )?;
+        let expected_cross_epoch_point_coordinate_count = payload_geometry
+            .source_variable_count()
+            .checked_sub(1)
+            .ok_or(CompactCfwError::InvalidClaimInput)?;
+        let pre_challenge_message_element_count = 1_usize
+            .checked_shl(
+                u32::try_from(expected_cross_epoch_point_coordinate_count)
+                    .map_err(|_| CompactCfwError::CountOverflow)?,
+            )
+            .ok_or(CompactCfwError::CountOverflow)?;
+        if claims.point.len() != expected_cross_epoch_point_coordinate_count
+            || claims.copied_main_source_element_count == 0
+            || claims.copied_main_source_element_count > pre_challenge_message_element_count
+            || claims.masked_pre_challenge_evaluation
+                - claims.masked_main_evaluation
+                - claims.mask_difference
+                != CompactChallengeField::ZERO
+            || self.geometry.witness_length()
+                != pre_challenge_message_element_count
+                    .checked_mul(2)
+                    .ok_or(CompactCfwError::CountOverflow)?
+        {
+            return Err(CompactCfwError::InvalidClaimInput);
+        }
+
+        let mut source_covector = Vec::new();
+        source_covector
+            .try_reserve_exact(payload_geometry.source_covector_extension_element_count())
+            .map_err(|_| CompactCfwError::AllocationLimitExceeded)?;
+        source_covector.resize(
+            payload_geometry.source_covector_extension_element_count(),
+            CompactChallengeField::ZERO,
+        );
+        if source_covector.capacity() != payload_geometry.source_covector_extension_element_count()
+        {
+            return Err(CompactCfwError::AllocationLimitExceeded);
+        }
+        accumulate_scaled_multilinear_prefix_covector(
+            &mut source_covector,
+            &claims.point,
+            claims.copied_main_source_element_count,
+            CompactChallengeField::ONE,
+        )?;
+
+        let preceding_target =
+            claims.masked_main_evaluation + batching_challenge * claims.mask_difference;
+        let preceding_mask_covectors = vec![
+            vec![batching_challenge],
+            vec![CompactChallengeField::ONE - batching_challenge],
+        ];
+        let joint_batching_coefficient = batching_challenge * batching_challenge;
+
+        Ok(CompactCfwMatrixClaimCombination {
+            continuation: CompactCfwClaimCombinationContinuation {
+                claim_batch: self,
+                payload_geometry,
+                preceding_target,
+                preceding_mask_covectors,
+                batching_challenge,
+                joint_batching_coefficient,
+                preceding_opening_claim_count: CROSS_EPOCH_CLAIM_COUNT,
             },
             source_covector,
         })
@@ -1175,6 +1325,7 @@ impl CompactCfwClaimCombinationContinuation {
         let combined_relation = CompactCfwCombinedRelation {
             source_covector,
             target,
+            preceding_mask_covectors: self.preceding_mask_covectors,
             inner_mask_covectors,
             outer_mask_covectors,
             claim_count,
@@ -1194,6 +1345,7 @@ impl CompactCfwClaimCombinationContinuation {
 pub(crate) struct CompactCfwCombinedRelation {
     source_covector: Vec<CompactChallengeField>,
     target: CompactChallengeField,
+    preceding_mask_covectors: Vec<Vec<CompactChallengeField>>,
     inner_mask_covectors: Vec<Vec<CompactChallengeField>>,
     outer_mask_covectors: Vec<Vec<CompactChallengeField>>,
     claim_count: usize,
@@ -1204,6 +1356,11 @@ impl CompactCfwCombinedRelation {
         self.source_covector
             .len()
             .checked_add(1)
+            .and_then(|count| {
+                self.preceding_mask_covectors
+                    .iter()
+                    .try_fold(count, |total, covector| total.checked_add(covector.len()))
+            })
             .and_then(|count| {
                 self.inner_mask_covectors
                     .iter()
@@ -1224,11 +1381,13 @@ impl CompactCfwCombinedRelation {
         CompactChallengeField,
         Vec<Vec<CompactChallengeField>>,
         Vec<Vec<CompactChallengeField>>,
+        Vec<Vec<CompactChallengeField>>,
         usize,
     ) {
         (
             self.source_covector,
             self.target,
+            self.preceding_mask_covectors,
             self.inner_mask_covectors,
             self.outer_mask_covectors,
             self.claim_count,
@@ -1525,6 +1684,62 @@ fn accumulate_scaled_multilinear_equality_covector(
     }
 
     accumulate_subtree(destination, point, 0, 0, CompactChallengeField::ONE, scale)
+}
+
+fn accumulate_scaled_multilinear_prefix_covector(
+    destination: &mut [CompactChallengeField],
+    point: &[CompactChallengeField],
+    copied_element_count: usize,
+    scale: CompactChallengeField,
+) -> Result<(), CompactCfwError> {
+    let point_domain_length = 1_usize
+        .checked_shl(u32::try_from(point.len()).map_err(|_| CompactCfwError::CountOverflow)?)
+        .ok_or(CompactCfwError::CountOverflow)?;
+    if copied_element_count == 0
+        || copied_element_count > point_domain_length
+        || destination.len() < point_domain_length
+    {
+        return Err(CompactCfwError::InvalidClaimInput);
+    }
+
+    fn accumulate_prefix_subtree(
+        destination: &mut [CompactChallengeField],
+        point: &[CompactChallengeField],
+        coordinate_ordinal: usize,
+        first_leaf_ordinal: usize,
+        copied_element_count: usize,
+        accumulated_weight: CompactChallengeField,
+    ) {
+        if first_leaf_ordinal >= copied_element_count {
+            return;
+        }
+        if coordinate_ordinal == point.len() {
+            destination[first_leaf_ordinal] += accumulated_weight;
+            return;
+        }
+        let remaining_coordinate_count = point.len() - coordinate_ordinal - 1;
+        let right_first_leaf_ordinal = first_leaf_ordinal + (1 << remaining_coordinate_count);
+        let coordinate = point[coordinate_ordinal];
+        accumulate_prefix_subtree(
+            destination,
+            point,
+            coordinate_ordinal + 1,
+            first_leaf_ordinal,
+            copied_element_count,
+            accumulated_weight * (CompactChallengeField::ONE - coordinate),
+        );
+        accumulate_prefix_subtree(
+            destination,
+            point,
+            coordinate_ordinal + 1,
+            right_first_leaf_ordinal,
+            copied_element_count,
+            accumulated_weight * coordinate,
+        );
+    }
+
+    accumulate_prefix_subtree(destination, point, 0, 0, copied_element_count, scale);
+    Ok(())
 }
 
 fn field_from_usize(value: usize) -> Result<CompactChallengeField, CompactCfwError> {
@@ -2133,8 +2348,15 @@ mod tests {
             .finish_after_matrix_accumulation(source_covector)
             .expect("continued canonical CFW claim batch");
         assert_eq!(combined, synchronously_combined);
-        let (source_covector, target, inner_mask_covectors, outer_mask_covectors, claim_count) =
-            combined.into_parts();
+        let (
+            source_covector,
+            target,
+            preceding_mask_covectors,
+            inner_mask_covectors,
+            outer_mask_covectors,
+            claim_count,
+        ) = combined.into_parts();
+        assert!(preceding_mask_covectors.is_empty());
         let evaluated_relation = source_covector
             .iter()
             .zip(&witness)
@@ -2168,6 +2390,169 @@ mod tests {
             claim_count,
             1 + geometry.generalized_committed_relation_claim_count(),
         );
+    }
+
+    #[test]
+    fn masked_cross_epoch_claims_reveal_only_the_copy_relation() {
+        let matrices = DiagonalBooleanR1cs {
+            witness_length: 1 << 5,
+        };
+        let geometry = CompactCfwGeometry::derive(matrices.witness_length())
+            .expect("valid compact CFW geometry");
+        let masked_payload_geometry =
+            CompactCfwToWhirPayloadGeometry::derive_with_preceding_mask_covector_element_count(
+                geometry, 2, 2,
+            )
+            .expect("masked cross-epoch payload geometry");
+        assert_eq!(
+            masked_payload_geometry.preceding_mask_covector_extension_element_count(),
+            2
+        );
+        let public_input = (0..matrices.witness_length())
+            .map(|ordinal| CompactChallengeField::from_u64((ordinal & 1) as u64))
+            .collect::<Vec<_>>();
+        let witness = (0..matrices.witness_length())
+            .map(|ordinal| CompactChallengeField::from_u64(((ordinal >> 2) & 1) as u64))
+            .collect::<Vec<_>>();
+        let mut next_seed = 40_000_u64;
+        let mask_material = CompactCfwMaskMaterial::sample(geometry, || {
+            let value = extension_value(next_seed);
+            next_seed += 37;
+            value
+        })
+        .expect("complete compact CFW masks");
+        let (transcript, equality_point, sumcheck_point, mask_material) =
+            run_complete_transcript(&matrices, &public_input, &witness, mask_material)
+                .expect("complete compact CFW transcript");
+        let claims = verify_compact_cfw_transcript(
+            &matrices,
+            &public_input,
+            &transcript,
+            extension_value(701),
+            &equality_point,
+            &sumcheck_point,
+            extension_value(909),
+        )
+        .expect("independent compact CFW replay");
+
+        let cross_epoch_point = (0..4)
+            .map(|ordinal| extension_value(50_000 + ordinal))
+            .collect::<Vec<_>>();
+        let copied_element_count = 11;
+        let point_covector = Poly::new_from_point(&cross_epoch_point, CompactChallengeField::ONE);
+        let copied_evaluation = witness[..copied_element_count]
+            .iter()
+            .zip(&point_covector.as_slice()[..copied_element_count])
+            .map(|(&value, &coefficient)| value * coefficient)
+            .sum::<CompactChallengeField>();
+        let pre_challenge_mask = extension_value(51_001);
+        let main_mask = extension_value(51_101);
+        let masked_pre_challenge_evaluation = copied_evaluation + pre_challenge_mask;
+        let masked_main_evaluation = copied_evaluation + main_mask;
+        let mask_difference = pre_challenge_mask - main_mask;
+        assert_eq!(
+            masked_pre_challenge_evaluation - masked_main_evaluation - mask_difference,
+            CompactChallengeField::ZERO
+        );
+
+        let batching_challenge = extension_value(51_301);
+        assert!(matches!(
+            claims
+                .clone()
+                .begin_combining_with_masked_cross_epoch_claims(
+                    CompactCfwMaskedCrossEpochClaims::new(
+                        cross_epoch_point.clone(),
+                        copied_element_count,
+                        masked_pre_challenge_evaluation + CompactChallengeField::ONE,
+                        masked_main_evaluation,
+                        mask_difference,
+                    ),
+                    batching_challenge,
+                ),
+            Err(CompactCfwError::InvalidClaimInput)
+        ));
+        let combination = claims
+            .begin_combining_with_masked_cross_epoch_claims(
+                CompactCfwMaskedCrossEpochClaims::new(
+                    cross_epoch_point,
+                    copied_element_count,
+                    masked_pre_challenge_evaluation,
+                    masked_main_evaluation,
+                    mask_difference,
+                ),
+                batching_challenge,
+            )
+            .expect("masked cross-epoch CFW combination");
+        let (continuation, mut source_covector) = combination.into_parts();
+        matrices
+            .accumulate_weighted_witness_covector_at_row_point(
+                continuation.row_point(),
+                continuation.matrix_role_weights(),
+                &mut source_covector,
+            )
+            .expect("independent matrix accumulation");
+        let combined = continuation
+            .finish_after_matrix_accumulation(source_covector)
+            .expect("complete masked cross-epoch relation");
+        let (
+            source_covector,
+            target,
+            cross_epoch_mask_covectors,
+            inner_mask_covectors,
+            outer_mask_covectors,
+            claim_count,
+        ) = combined.into_parts();
+        assert_eq!(
+            cross_epoch_mask_covectors,
+            vec![
+                vec![batching_challenge],
+                vec![CompactChallengeField::ONE - batching_challenge],
+            ]
+        );
+        assert_eq!(
+            claim_count,
+            2 + geometry.generalized_committed_relation_claim_count()
+        );
+
+        let source_term = source_covector
+            .iter()
+            .zip(&witness)
+            .map(|(&coefficient, &value)| coefficient * value)
+            .sum::<CompactChallengeField>();
+        let remaining_terms = cross_epoch_mask_covectors[0][0] * pre_challenge_mask
+            + cross_epoch_mask_covectors[1][0] * main_mask
+            + inner_mask_covectors
+                .iter()
+                .zip(mask_material.inner_masks())
+                .map(|(covector, message)| {
+                    covector
+                        .iter()
+                        .zip(message)
+                        .map(|(&coefficient, &value)| coefficient * value)
+                        .sum::<CompactChallengeField>()
+                })
+                .sum::<CompactChallengeField>()
+            + outer_mask_covectors
+                .iter()
+                .zip(mask_material.outer_masks())
+                .map(|(covector, message)| {
+                    covector
+                        .iter()
+                        .zip(message)
+                        .map(|(&coefficient, &value)| coefficient * value)
+                        .sum::<CompactChallengeField>()
+                })
+                .sum::<CompactChallengeField>();
+        assert_eq!(source_term + remaining_terms, target);
+
+        let mut substituted_witness = witness.clone();
+        substituted_witness[copied_element_count - 1] += CompactChallengeField::ONE;
+        let substituted_source_term = source_covector
+            .iter()
+            .zip(substituted_witness)
+            .map(|(&coefficient, value)| coefficient * value)
+            .sum::<CompactChallengeField>();
+        assert_ne!(substituted_source_term + remaining_terms, target);
     }
 
     #[test]

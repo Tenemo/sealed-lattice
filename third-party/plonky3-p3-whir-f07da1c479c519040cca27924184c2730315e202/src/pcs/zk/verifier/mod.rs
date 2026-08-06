@@ -6,9 +6,9 @@
 //!
 //! The carried claim is tracked symbolically throughout.
 //!
-//! Local modification: an outer extension-field relation can supply its source
-//! and precommitted masks without replaying their roots. See
-//! `../../../../UPSTREAM.md`.
+//! Local modification: an outer extension-field relation can use a base- or
+//! extension-field source and precommitted extension-field masks without
+//! replaying their roots. See `../../../../UPSTREAM.md`.
 
 mod masks;
 
@@ -189,6 +189,54 @@ where
             ActiveOracle::Base(commitment.clone()),
             source,
             target,
+            masks,
+            challenger,
+        )
+    }
+
+    /// Verifies a caller-owned extension-field relation whose committed source
+    /// oracle was encoded over the base field.
+    ///
+    /// The caller must observe the precommitted mask roots and base-field
+    /// source root in their outer-protocol order before invoking this method.
+    #[allow(clippy::too_many_arguments)]
+    pub fn verify_base_source_relation<BuildRelation>(
+        &self,
+        proof: &ZkWhirProof<F, EF, MT>,
+        commitment: &MT::Commitment,
+        expected_revealed_value_count: usize,
+        build_relation: BuildRelation,
+        challenger: &mut Challenger,
+    ) -> Result<(), ZkVerifierError>
+    where
+        BuildRelation: FnOnce(
+            EF,
+            &[EF],
+        ) -> Result<
+            CombinedRelationVerifierInput<EF, MT::Commitment>,
+            HidingWhirRelationInputError,
+        >,
+    {
+        self.check_proof_structure(proof)?;
+        if proof.evals.len() != expected_revealed_value_count {
+            return Err(ZkVerifierError::EvalCountMismatch {
+                expected: expected_revealed_value_count,
+                actual: proof.evals.len(),
+            });
+        }
+
+        let batching_challenge: EF = challenger.sample_algebra_element();
+        let relation = build_relation(batching_challenge, &proof.evals)?;
+        validate_source_covector(&relation.source_covector, 1 << self.config.num_variables)?;
+        let mut source = SourceClaim::new();
+        source.push_dense(relation.source_covector);
+        let masks = VerifierMasks::from_precommitted(relation.precommitted_mask_groups)?;
+
+        self.verify_combined_relation_inner(
+            proof,
+            ActiveOracle::Base(commitment.clone()),
+            source,
+            relation.target,
             masks,
             challenger,
         )

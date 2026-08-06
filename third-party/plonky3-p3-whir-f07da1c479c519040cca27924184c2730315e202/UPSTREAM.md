@@ -59,14 +59,17 @@ sealed-lattice's domain-separated private-coin source.
 
 The compact constrained-code path additionally needs an outer relation
 handoff that upstream hiding WHIR does not expose. The local prover can commit
-an extension-field source oracle and accept mask groups that an outer protocol
-already committed before its relation-batching challenge. The matching
-verifier carries the same commitments and dense linear covectors through every
-masked sumcheck and into the base case without observing the earlier roots a
-second time. Both sides validate caller-owned source, group, message,
-randomness, and covector dimensions with typed errors. The ordinary
-point-opening adapter remains unchanged and drives the same internal reduction
-with no external groups.
+a base- or extension-field source oracle and accept extension-field mask groups
+that an outer protocol already committed before its relation-batching
+challenge. A base-field source is lifted coefficient by coefficient only after
+its base-field encoding and root are fixed; it then enters the same
+extension-linear relation as an extension-field source. The matching verifier
+carries the same commitments and dense linear covectors through every masked
+sumcheck and into the base case without observing the earlier roots a second
+time. Both sides validate caller-owned source, group, message, randomness, and
+covector dimensions with typed errors. The ordinary point-opening adapter
+remains unchanged and drives the same internal reduction with no external
+groups.
 
 The hiding configuration also derives unique-decoding source queries from the
 physical Reed-Solomon dimension `message length + hiding randomness length`.
