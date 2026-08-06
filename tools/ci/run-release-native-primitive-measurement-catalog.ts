@@ -1,17 +1,18 @@
-import { readFile, mkdir, writeFile } from 'node:fs/promises';
-import path from 'node:path';
+import { readFile, mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 
-import { runWithLocalRunLog } from './local-run-log.js';
+import { runWithLocalRunLog } from "./local-run-log.js";
 import {
     parseReleaseNativePrimitiveMeasurementOutput,
+    primitiveMeasurementCaseCatalog,
     validateReleaseNativePrimitiveMeasurementEvidence,
     type PrimitiveMeasurementRecord,
-} from './primitive-measurement-evidence.js';
+} from "./primitive-measurement-evidence.js";
 
 type JsonObject = Record<string, unknown>;
 
 const isJsonObject = (value: unknown): value is JsonObject =>
-    typeof value === 'object' && value !== null && !Array.isArray(value);
+    typeof value === "object" && value !== null && !Array.isArray(value);
 
 const readCompletedFocusedRun = async (
     runDirectoryArgument: string,
@@ -20,15 +21,15 @@ const readCompletedFocusedRun = async (
 > => {
     const runDirectoryPath = path.resolve(process.cwd(), runDirectoryArgument);
     const summary = JSON.parse(
-        await readFile(path.join(runDirectoryPath, 'summary.json'), 'utf8'),
+        await readFile(path.join(runDirectoryPath, "summary.json"), "utf8"),
     ) as unknown;
     if (
         !isJsonObject(summary) ||
         summary.exitCode !== 0 ||
         summary.diagnosticFailureCount !== 0 ||
-        summary.resultClassification !== 'completed' ||
-        summary.scriptName !== 'test:rust:kernel:measurements' ||
-        typeof summary.runDirectoryPath !== 'string' ||
+        summary.resultClassification !== "completed" ||
+        summary.scriptName !== "test:rust:kernel:measurements" ||
+        typeof summary.runDirectoryPath !== "string" ||
         path.resolve(summary.runDirectoryPath).toLocaleLowerCase() !==
             runDirectoryPath.toLocaleLowerCase()
     ) {
@@ -37,18 +38,18 @@ const readCompletedFocusedRun = async (
         );
     }
     const outputEvidence = parseReleaseNativePrimitiveMeasurementOutput(
-        await readFile(path.join(runDirectoryPath, 'output.log'), 'utf8'),
+        await readFile(path.join(runDirectoryPath, "output.log"), "utf8"),
         false,
     );
     const attachmentPath = path.join(
         runDirectoryPath,
-        'attachments',
-        'primitive-measurements',
-        'release-native-focused-primitive-measurement.json',
+        "attachments",
+        "primitive-measurements",
+        "release-native-focused-primitive-measurement.json",
     );
     const attachmentEvidence =
         validateReleaseNativePrimitiveMeasurementEvidence(
-            JSON.parse(await readFile(attachmentPath, 'utf8')) as unknown,
+            JSON.parse(await readFile(attachmentPath, "utf8")) as unknown,
             false,
         );
     if (JSON.stringify(outputEvidence) !== JSON.stringify(attachmentEvidence)) {
@@ -66,18 +67,21 @@ export const runReleaseNativePrimitiveMeasurementCatalog =
     async (): Promise<void> => {
         const commandArguments = process.argv
             .slice(2)
-            .filter((argument) => argument !== '--');
+            .filter((argument) => argument !== "--");
         await runWithLocalRunLog(
             {
                 commandLineArguments: commandArguments,
-                lanes: ['Release-native primitive measurement catalog'],
+                lanes: ["Release-native primitive measurement catalog"],
                 scriptName:
-                    'test:evidence:release-native-primitive-measurements',
+                    "test:evidence:release-native-primitive-measurements",
             },
             async (runLog) => {
-                if (commandArguments.length !== 10) {
+                if (
+                    commandArguments.length !==
+                    primitiveMeasurementCaseCatalog.length
+                ) {
                     throw new Error(
-                        'Release-native primitive measurement catalog assembly requires ten focused run directories in case order.',
+                        `Release-native primitive measurement catalog assembly requires ${String(primitiveMeasurementCaseCatalog.length)} focused run directories in case order.`,
                     );
                 }
                 const sourceRuns = await Promise.all(
@@ -95,18 +99,18 @@ export const runReleaseNativePrimitiveMeasurementCatalog =
                     );
                 const attachmentDirectoryPath = path.join(
                     runLog.runDirectoryPath,
-                    'attachments',
-                    'primitive-measurements',
+                    "attachments",
+                    "primitive-measurements",
                 );
                 await mkdir(attachmentDirectoryPath, { recursive: true });
                 const attachmentFilePath = path.join(
                     attachmentDirectoryPath,
-                    'release-native-primitive-measurements.json',
+                    "release-native-primitive-measurements.json",
                 );
                 await writeFile(
                     attachmentFilePath,
                     `${JSON.stringify(evidence, undefined, 2)}\n`,
-                    'utf8',
+                    "utf8",
                 );
                 runLog.writeEvent({
                     details: {
@@ -116,7 +120,7 @@ export const runReleaseNativePrimitiveMeasurementCatalog =
                         ),
                     },
                     eventType:
-                        'release-native-primitive-measurement-catalog-written',
+                        "release-native-primitive-measurement-catalog-written",
                 });
                 runLog.writeCombinedOutput(
                     `Release-native primitive measurement catalog completed; evidence: ${attachmentFilePath}\n`,

@@ -1,5 +1,8 @@
 use std::rc::Rc;
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+use std::time::Instant;
+
 use zeroize::Zeroizing;
 
 use crate::{
@@ -34,6 +37,12 @@ use crate::{
     transcript_core::encode_hex,
 };
 
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+use super::generation_authority::{
+    SetupGenerationCompactPublicKeyDevelopmentAuthority,
+    SetupGenerationCompactPublicKeyDevelopmentAuthorityInput,
+    retain_setup_generation_compact_public_key_development_authority,
+};
 use super::{
     VerifiedPublicRandomness,
     generation_authority::{
@@ -109,9 +118,23 @@ pub(crate) struct ExactSameSecretEvidenceAuthority {
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
-pub(crate) fn populate_exact_same_secret_evidence_authority(
+pub(crate) struct CompactPublicKeyDevelopmentEvidenceAuthority {
+    pub(crate) action_private_randomness: Rc<ActionPrivateRandomness>,
+    pub(crate) authority: Rc<SetupGenerationCompactPublicKeyDevelopmentAuthority>,
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+struct ExactSetupGenerationEvidenceInputs {
+    selected_suite: SelectedSuiteCapability,
+    verified_public_randomness: VerifiedPublicRandomness,
+    action_private_randomness: Rc<ActionPrivateRandomness>,
+    verified_reservation_binding: VerifiedStateReservationRuntimeBinding,
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+fn exact_setup_generation_evidence_inputs(
     evidence_revision: u8,
-) -> Result<ExactSameSecretEvidenceAuthority, RefusalReason> {
+) -> Result<ExactSetupGenerationEvidenceInputs, RefusalReason> {
     let selected_suite = selected_suite_capability_for_tests();
     let suite_identifier = Hash512::from_bytes(selected_suite.suite_identifier());
     let manifest_hash = Hash512::from_bytes([0x21; Hash512::BYTE_LENGTH]);
@@ -176,6 +199,24 @@ pub(crate) fn populate_exact_same_secret_evidence_authority(
             local_participant_identity,
         ),
     };
+    Ok(ExactSetupGenerationEvidenceInputs {
+        selected_suite,
+        verified_public_randomness,
+        action_private_randomness,
+        verified_reservation_binding,
+    })
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) fn populate_exact_same_secret_evidence_authority(
+    evidence_revision: u8,
+) -> Result<ExactSameSecretEvidenceAuthority, RefusalReason> {
+    let ExactSetupGenerationEvidenceInputs {
+        selected_suite,
+        verified_public_randomness,
+        action_private_randomness,
+        verified_reservation_binding,
+    } = exact_setup_generation_evidence_inputs(evidence_revision)?;
     let authority_handle = populate_browser_owned_setup_generation_authority(
         &selected_suite,
         &verified_public_randomness,
@@ -187,6 +228,128 @@ pub(crate) fn populate_exact_same_secret_evidence_authority(
         authority_handle,
         verified_public_randomness,
     })
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) fn populate_compact_public_key_development_evidence_authority(
+    evidence_revision: u8,
+) -> Result<CompactPublicKeyDevelopmentEvidenceAuthority, RefusalReason> {
+    let ExactSetupGenerationEvidenceInputs {
+        selected_suite,
+        verified_public_randomness,
+        action_private_randomness,
+        verified_reservation_binding,
+    } = exact_setup_generation_evidence_inputs(evidence_revision)?;
+    let authority = populate_compact_public_key_development_authority(
+        &selected_suite,
+        &verified_public_randomness,
+        Rc::clone(&action_private_randomness),
+        verified_reservation_binding,
+    )?;
+    Ok(CompactPublicKeyDevelopmentEvidenceAuthority {
+        action_private_randomness,
+        authority,
+    })
+}
+
+/// Constructs only the production-derived witness material needed by the
+/// standalone compact public-key development slice. The returned authority is
+/// nonserializable and intentionally cannot drive VSS, relinearization,
+/// Galois, or ceremony setup output.
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+pub(in crate::bgv) fn populate_compact_public_key_development_authority(
+    selected_suite: &SelectedSuiteCapability,
+    verified_public_randomness: &VerifiedPublicRandomness,
+    action_private_randomness: Rc<ActionPrivateRandomness>,
+    verified_reservation_binding: VerifiedStateReservationRuntimeBinding,
+) -> Result<Rc<SetupGenerationCompactPublicKeyDevelopmentAuthority>, RefusalReason> {
+    let bindings = validate_setup_generation_bindings(
+        selected_suite,
+        verified_public_randomness,
+        &action_private_randomness,
+        verified_reservation_binding,
+    )?;
+    let relation_input = selected_public_key_share_relation_plan_input()
+        .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+    let ring_degree = usize::try_from(relation_input.ring_degree)
+        .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+    let evaluation_domain_size = usize::try_from(relation_input.evaluation_domain_size)
+        .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+    if u64::from(selected_suite.polynomial_degree()) != relation_input.ring_degree {
+        return Err(RefusalReason::UnsupportedVersionOrSuite);
+    }
+
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    let phase_started_at = Instant::now();
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    println!("compact public-key development phase: sample common secret");
+    let common_secret_coefficients = sample_common_secret_coefficients(
+        selected_suite,
+        &action_private_randomness,
+        bindings.source_setup_intent_object_hash,
+        bindings.setup_attempt_identifier,
+        ring_degree,
+    )?;
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    println!(
+        "compact public-key development phase complete: sample common secret elapsed_milliseconds={}",
+        phase_started_at.elapsed().as_millis()
+    );
+
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    let phase_started_at = Instant::now();
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    println!("compact public-key development phase: construct anchor openings");
+    let (_, anchor_openings) = construct_anchor_openings(
+        selected_suite,
+        &action_private_randomness,
+        &bindings,
+        &common_secret_coefficients,
+        evaluation_domain_size,
+    )?;
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    println!(
+        "compact public-key development phase complete: construct anchor openings elapsed_milliseconds={}",
+        phase_started_at.elapsed().as_millis()
+    );
+
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    let phase_started_at = Instant::now();
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    println!("compact public-key development phase: construct public-key share");
+    let public_key_share = construct_public_key_share(
+        selected_suite,
+        &action_private_randomness,
+        &bindings,
+        &common_secret_coefficients,
+        evaluation_domain_size,
+    )?;
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    println!(
+        "compact public-key development phase complete: construct public-key share elapsed_milliseconds={}",
+        phase_started_at.elapsed().as_millis()
+    );
+
+    retain_setup_generation_compact_public_key_development_authority(
+        SetupGenerationCompactPublicKeyDevelopmentAuthorityInput {
+            suite_identifier: bindings.suite_identifier,
+            manifest_hash: bindings.manifest_hash,
+            ceremony_context_hash: bindings.ceremony_context_hash,
+            action_context_hash: bindings.action_context_hash,
+            roster_hash: bindings.roster_hash,
+            setup_proof_context_hash: bindings.setup_proof_context_hash,
+            source_setup_intent_object_hash: bindings.source_setup_intent_object_hash,
+            participant_identity: bindings.participant_identity,
+            roster_position: bindings.roster_position,
+            setup_attempt_identifier: *bindings.setup_attempt_identifier.as_bytes(),
+            action_randomness_authorization_hash: bindings.action_randomness_authorization_hash,
+            action_private_randomness,
+            public_setup_seed: bindings.public_setup_seed,
+            anchor_openings,
+            common_secret_coefficients,
+            public_key_share,
+        },
+    )
 }
 
 /// Constructs the complete browser-owned setup-generation authority from

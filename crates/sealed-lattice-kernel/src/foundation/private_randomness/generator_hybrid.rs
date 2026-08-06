@@ -20,13 +20,7 @@ use super::{
     ACTION_RANDOMNESS_KEY_MATERIAL_BYTE_LENGTH, ACTION_RANDOMNESS_ROOT_BYTE_LENGTH,
     PRIVATE_RANDOMNESS_BLOCK_BYTE_LENGTH, PRIVATE_RANDOMNESS_STREAM_KEY_BYTE_LENGTH,
 };
-use crate::foundation::Hash512;
-
-/// Bits an adversary may query in the declared classical model.
-///
-/// The proof specification charges the same `2^80 - 1` budget to every family,
-/// so the hop ledger quotes it rather than choosing its own.
-pub(crate) const DECLARED_ADVERSARIAL_QUERY_BUDGET: u128 = (1_u128 << 80) - 1;
+use crate::foundation::{DECLARED_ADVERSARIAL_QUERY_BUDGET, Hash512};
 
 /// What one replacement hop costs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

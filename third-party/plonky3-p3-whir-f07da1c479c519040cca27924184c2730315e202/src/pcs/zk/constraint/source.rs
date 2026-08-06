@@ -1,4 +1,7 @@
 //! Symbolic source-side claim tracking.
+//!
+//! Local modification: dense caller-owned covectors support the outer
+//! committed-relation handoff. See `../../../../UPSTREAM.md`.
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -39,6 +42,11 @@ pub enum SourceTerm<EF> {
         /// Each fold needs `var^{2^{m-k}}`; the index it reads only ever
         /// decreases, so squares built for one fold serve every later one.
         squares: Vec<EF>,
+    },
+    /// Caller-owned dense covector for a general committed linear relation.
+    Dense {
+        /// Current covector table, folded in place with the source oracle.
+        covector: Poly<EF>,
     },
 }
 
@@ -87,6 +95,14 @@ impl<EF: Field> SourceClaim<EF> {
         });
     }
 
+    /// Records one arbitrary dense source covector.
+    pub fn push_dense(&mut self, covector: Poly<EF>) {
+        self.constraints.push(SourceConstraint {
+            term: SourceTerm::Dense { covector },
+            coeff: EF::ONE,
+        });
+    }
+
     /// Folds every constraint by a prefix of sumcheck challenges.
     ///
     /// # Math
@@ -132,6 +148,11 @@ impl<EF: Field> SourceClaim<EF> {
                     constraint.coeff *= Point::eval_select(squares[seed_index], gamma.as_slice());
                     *num_variables -= k;
                 }
+                SourceTerm::Dense { covector } => {
+                    for &coordinate in gamma {
+                        covector.fix_prefix_var_mut(coordinate);
+                    }
+                }
             }
         }
     }
@@ -164,6 +185,12 @@ impl<EF: Field> SourceClaim<EF> {
                     for dst in dense.iter_mut() {
                         *dst += power;
                         power *= *var;
+                    }
+                }
+                SourceTerm::Dense { covector } => {
+                    assert_eq!(covector.num_variables(), num_variables);
+                    for (destination, &value) in dense.iter_mut().zip(covector.as_slice()) {
+                        *destination += constraint.coeff * value;
                     }
                 }
             }

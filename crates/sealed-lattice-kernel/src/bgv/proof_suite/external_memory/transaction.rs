@@ -25,6 +25,7 @@ const EXTERNAL_MEMORY_DELETE_OPERATION_CODE: u16 = 5;
 pub(crate) const EXTERNAL_MEMORY_SINGLE_OPERATION_VECTOR_CAPACITY_CEILING: usize = 4;
 pub(crate) const EXTERNAL_MEMORY_SINGLE_APPEND_RECYCLER_CAPACITY_CEILING: usize = 4;
 pub(crate) const EXTERNAL_MEMORY_SINGLE_READ_RESULT_VECTOR_CAPACITY_CEILING: usize = 1;
+pub(crate) const EXTERNAL_MEMORY_SINGLE_APPEND_REPLAY_LENGTH_CAPACITY_CEILING: usize = 4;
 
 type RecycledTransactionStorage = (
     Vec<ProofExternalMemoryTransactionOperation>,
@@ -73,6 +74,12 @@ impl ProofExternalMemoryTransactionRequest {
         self.append_replay_byte_lengths
             .try_reserve_exact(self.operations.len())
             .map_err(|_| ProofExternalMemoryTransactionAdapterError::AllocationLimitExceeded)?;
+        if self.maximum_operation_count == 1
+            && self.append_replay_byte_lengths.capacity()
+                > EXTERNAL_MEMORY_SINGLE_APPEND_REPLAY_LENGTH_CAPACITY_CEILING
+        {
+            return Err(ProofExternalMemoryTransactionAdapterError::AllocationLimitExceeded);
+        }
         for operation in &self.operations {
             let byte_length = match operation {
                 ProofExternalMemoryTransactionOperation::Append { bytes, .. } => {

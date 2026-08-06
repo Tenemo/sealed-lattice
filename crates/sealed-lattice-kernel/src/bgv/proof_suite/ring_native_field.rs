@@ -1,10 +1,10 @@
-//! Candidate prime-field arithmetic for the ring-native proof investigation.
+//! Comparative prime-field arithmetic from the retired lattice-PCS investigation.
 //!
 //! This module is compiled only for tests and the opt-in primitive-measurement
 //! artifact. It does not select a proof suite or enter an accepted verifier
 //! path. The arithmetic is a clean-room seven-limb Montgomery implementation
-//! for the provisional 440-bit proof field recorded by the candidate theorem
-//! evidence.
+//! for the former 440-bit proof-field candidate. It remains only so the measured
+//! cost of that rejected direction stays reproducible.
 
 use core::{cmp::Ordering, mem::size_of};
 

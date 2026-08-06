@@ -25,8 +25,9 @@ use crate::{
         },
         key_switch_topology::{
             KEY_SWITCH_DATA_PRIMES_PER_BLOCK, key_switch_special_basis_modulus_product,
+            validate_key_switch_special_basis_dominates_data_blocks,
         },
-        parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
+        parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, SPECIAL_PRIMES},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     foundation::{
@@ -39,6 +40,49 @@ const CENTERED_PLAINTEXT_BOUND: u64 = PLAINTEXT_MODULUS / 2;
 const FRESH_ERROR_COEFFICIENT_BOUND: u64 = 2;
 const FRESH_RANDOMIZER_COEFFICIENT_BOUND: u64 = 1;
 const CANONICAL_PLAINTEXT_LIFT_OFFSET_BOUND: u64 = 1;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct KeySwitchNoiseParameters {
+    data_primes_per_block: usize,
+    special_basis_modulus_product: BigUint,
+}
+
+fn key_switch_noise_parameters(
+    data_primes_per_block: usize,
+    special_moduli: &[u64],
+) -> CanonicalResult<KeySwitchNoiseParameters> {
+    validate_key_switch_special_basis_dominates_data_blocks(
+        &DATA_PRIMES,
+        special_moduli,
+        data_primes_per_block,
+    )?;
+    if special_moduli
+        .iter()
+        .any(|modulus| modulus % PLAINTEXT_MODULUS != 1)
+    {
+        return Err(invalid_recurrence(
+            "every key-switch special modulus must be one modulo the plaintext modulus",
+        ));
+    }
+    Ok(KeySwitchNoiseParameters {
+        data_primes_per_block,
+        special_basis_modulus_product: special_moduli
+            .iter()
+            .map(|modulus| BigUint::from(*modulus))
+            .product(),
+    })
+}
+
+fn selected_key_switch_noise_parameters() -> CanonicalResult<KeySwitchNoiseParameters> {
+    let parameters =
+        key_switch_noise_parameters(KEY_SWITCH_DATA_PRIMES_PER_BLOCK, &SPECIAL_PRIMES)?;
+    if parameters.special_basis_modulus_product != key_switch_special_basis_modulus_product() {
+        return Err(invalid_recurrence(
+            "selected key-switch special-basis product drifted",
+        ));
+    }
+    Ok(parameters)
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SymbolicCiphertextBound {
@@ -155,6 +199,31 @@ pub(crate) struct DirectBallotTargetReleaseNoiseInput<'a> {
 pub(crate) fn direct_ballot_target_release_noise_trace(
     input: DirectBallotTargetReleaseNoiseInput<'_>,
 ) -> CanonicalResult<Vec<TargetReleaseNoiseStageBound>> {
+    let key_switch_noise_parameters = selected_key_switch_noise_parameters()?;
+    direct_ballot_target_release_noise_trace_with_key_switch_parameters(
+        input,
+        &key_switch_noise_parameters,
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn direct_ballot_target_release_noise_trace_for_key_switch_topology(
+    input: DirectBallotTargetReleaseNoiseInput<'_>,
+    data_primes_per_block: usize,
+    special_moduli: &[u64],
+) -> CanonicalResult<Vec<TargetReleaseNoiseStageBound>> {
+    let key_switch_noise_parameters =
+        key_switch_noise_parameters(data_primes_per_block, special_moduli)?;
+    direct_ballot_target_release_noise_trace_with_key_switch_parameters(
+        input,
+        &key_switch_noise_parameters,
+    )
+}
+
+fn direct_ballot_target_release_noise_trace_with_key_switch_parameters(
+    input: DirectBallotTargetReleaseNoiseInput<'_>,
+    key_switch_noise_parameters: &KeySwitchNoiseParameters,
+) -> CanonicalResult<Vec<TargetReleaseNoiseStageBound>> {
     let DirectBallotTargetReleaseNoiseInput {
         participant_count,
         ballot_count,
@@ -175,13 +244,15 @@ pub(crate) fn direct_ballot_target_release_noise_trace(
             "target release recurrence requires positive selected parameters",
         ));
     }
-    let target_bounds = direct_ballot_target_noise_bounds(
+    let target_bounds = derive_direct_ballot_noise_bounds(
         participant_count,
         ballot_count,
         option_count,
         minimum_score,
         maximum_score,
-    )?;
+        key_switch_noise_parameters,
+    )?
+    .target_bounds;
     let evaluation_error_bound = target_bounds
         .iter()
         .map(DirectBallotTargetNoiseBound::maximum_error_coefficient_bound)
@@ -336,9 +407,18 @@ impl SymbolicState {
         )
     }
 
-    fn rotate(&self, participant_count: u64) -> CanonicalResult<Self> {
+    fn rotate(
+        &self,
+        participant_count: u64,
+        key_switch_noise_parameters: &KeySwitchNoiseParameters,
+    ) -> CanonicalResult<Self> {
         let error_bound = &self.error_bound
-            + hybrid_key_switch_error_bound(self.level, participant_count, false)?;
+            + hybrid_key_switch_error_bound(
+                self.level,
+                participant_count,
+                false,
+                key_switch_noise_parameters,
+            )?;
         Ok(self.derived(self.level, self.message_bound.clone(), error_bound, None))
     }
 
@@ -346,6 +426,7 @@ impl SymbolicState {
         &self,
         other: &Self,
         participant_count: u64,
+        key_switch_noise_parameters: &KeySwitchNoiseParameters,
     ) -> CanonicalResult<Self> {
         require_same_level(self, other, "fixed-subring multiplication")?;
         let centered_bound = BigUint::from(CENTERED_PLAINTEXT_BOUND);
@@ -357,7 +438,12 @@ impl SymbolicState {
                 * &self.error_bound
                 * &other.error_bound
             + centered_reduction_carry_bound(&unreduced_message_bound)
-            + hybrid_key_switch_error_bound(self.level, participant_count, true)?;
+            + hybrid_key_switch_error_bound(
+                self.level,
+                participant_count,
+                true,
+                key_switch_noise_parameters,
+            )?;
         Ok(self.derived(
             self.level,
             canonical_message_bound(unreduced_message_bound),
@@ -372,6 +458,7 @@ impl SymbolicState {
         left_width: usize,
         right_width: usize,
         participant_count: u64,
+        key_switch_noise_parameters: &KeySwitchNoiseParameters,
     ) -> CanonicalResult<Self> {
         require_same_level(self, other, "pair-character multiplication")?;
         let centered_bound = BigUint::from(CENTERED_PLAINTEXT_BOUND);
@@ -387,7 +474,12 @@ impl SymbolicState {
                 * &self.error_bound
                 * &other.error_bound
             + centered_reduction_carry_bound(&unreduced_message_bound)
-            + hybrid_key_switch_error_bound(self.level, participant_count, true)?;
+            + hybrid_key_switch_error_bound(
+                self.level,
+                participant_count,
+                true,
+                key_switch_noise_parameters,
+            )?;
         Ok(self.derived(
             self.level,
             canonical_message_bound(unreduced_message_bound),
@@ -451,12 +543,37 @@ pub(crate) fn direct_ballot_target_noise_bounds(
     minimum_score: u64,
     maximum_score: u64,
 ) -> CanonicalResult<Vec<DirectBallotTargetNoiseBound>> {
+    let key_switch_noise_parameters = selected_key_switch_noise_parameters()?;
     Ok(derive_direct_ballot_noise_bounds(
         participant_count,
         ballot_count,
         option_count,
         minimum_score,
         maximum_score,
+        &key_switch_noise_parameters,
+    )?
+    .target_bounds)
+}
+
+#[cfg(test)]
+pub(crate) fn direct_ballot_target_noise_bounds_for_key_switch_topology(
+    participant_count: u64,
+    ballot_count: usize,
+    option_count: usize,
+    minimum_score: u64,
+    maximum_score: u64,
+    data_primes_per_block: usize,
+    special_moduli: &[u64],
+) -> CanonicalResult<Vec<DirectBallotTargetNoiseBound>> {
+    let key_switch_noise_parameters =
+        key_switch_noise_parameters(data_primes_per_block, special_moduli)?;
+    Ok(derive_direct_ballot_noise_bounds(
+        participant_count,
+        ballot_count,
+        option_count,
+        minimum_score,
+        maximum_score,
+        &key_switch_noise_parameters,
     )?
     .target_bounds)
 }
@@ -469,12 +586,14 @@ pub(crate) fn direct_ballot_evaluator_noise_traces(
     minimum_score: u64,
     maximum_score: u64,
 ) -> CanonicalResult<Vec<SelectedEvaluatorStreamNoiseTrace>> {
+    let key_switch_noise_parameters = selected_key_switch_noise_parameters()?;
     Ok(derive_direct_ballot_noise_bounds(
         participant_count,
         ballot_count,
         option_count,
         minimum_score,
         maximum_score,
+        &key_switch_noise_parameters,
     )?
     .stream_traces)
 }
@@ -491,6 +610,7 @@ fn derive_direct_ballot_noise_bounds(
     option_count: usize,
     minimum_score: u64,
     maximum_score: u64,
+    key_switch_noise_parameters: &KeySwitchNoiseParameters,
 ) -> CanonicalResult<DerivedDirectBallotNoiseBounds> {
     if participant_count != u64::from(FOUNDATION_PROFILE.participant_count)
         || ballot_count == 0
@@ -510,8 +630,11 @@ fn derive_direct_ballot_noise_bounds(
         ));
     }
 
-    let first_aggregate_character_bound =
-        selected_pair_character_product_bound(participant_count, ballot_count)?;
+    let first_aggregate_character_bound = selected_pair_character_product_bound(
+        participant_count,
+        ballot_count,
+        key_switch_noise_parameters,
+    )?;
     let second_aggregate_character_bound = first_aggregate_character_bound.clone();
     let aggregate_character_bounds = [
         first_aggregate_character_bound,
@@ -541,6 +664,7 @@ fn derive_direct_ballot_noise_bounds(
             &constants_by_hash,
             &aggregate_character_bounds,
             participant_count,
+            key_switch_noise_parameters,
         )?;
         target_bounds.push(DirectBallotTargetNoiseBound {
             top_count: usize::from(stream.top_count()),
@@ -576,6 +700,7 @@ fn derive_direct_ballot_noise_bounds(
 fn selected_pair_character_product_bound(
     participant_count: u64,
     ballot_count: usize,
+    key_switch_noise_parameters: &KeySwitchNoiseParameters,
 ) -> CanonicalResult<SymbolicState> {
     let fresh_error = BigUint::from(2_u8)
         * BigUint::from(POLYNOMIAL_DEGREE)
@@ -651,6 +776,7 @@ fn selected_pair_character_product_bound(
                 left_node.message_width,
                 right_node.message_width,
                 participant_count,
+                key_switch_noise_parameters,
             )?
             .modulus_switch_to(output_node.level, participant_count)?;
         states[merge.output_node_ordinal] = Some(product);
@@ -680,6 +806,7 @@ fn evaluate_selected_stream(
     constants_by_hash: &BTreeMap<[u8; Hash512::BYTE_LENGTH], &[u32]>,
     aggregate_character_bounds: &[SymbolicState; 2],
     participant_count: u64,
+    key_switch_noise_parameters: &KeySwitchNoiseParameters,
 ) -> CanonicalResult<EvaluatedSelectedStream> {
     let mut registers = aggregate_character_bounds
         .iter()
@@ -713,13 +840,23 @@ fn evaluate_selected_stream(
             ),
             EvaluatorOpcode::CiphertextMultiplyRelinearizeAndDrop => Some(
                 inputs[0]
-                    .fixed_subring_multiply(inputs[1], participant_count)?
+                    .fixed_subring_multiply(
+                        inputs[1],
+                        participant_count,
+                        key_switch_noise_parameters,
+                    )?
                     .modulus_switch_to(inputs[0].level - 1, participant_count)?,
             ),
             EvaluatorOpcode::CiphertextMultiplyAndRelinearize => {
-                Some(inputs[0].fixed_subring_multiply(inputs[1], participant_count)?)
+                Some(inputs[0].fixed_subring_multiply(
+                    inputs[1],
+                    participant_count,
+                    key_switch_noise_parameters,
+                )?)
             }
-            EvaluatorOpcode::GaloisRotate => Some(inputs[0].rotate(participant_count)?),
+            EvaluatorOpcode::GaloisRotate => {
+                Some(inputs[0].rotate(participant_count, key_switch_noise_parameters)?)
+            }
             EvaluatorOpcode::DropRegister => {
                 let register = usize::try_from(instruction.input_registers()[0]).map_err(|_| {
                     invalid_recurrence("symbolic drop register does not fit the host index")
@@ -818,15 +955,17 @@ fn hybrid_key_switch_error_bound(
     level: usize,
     participant_count: u64,
     relinearization: bool,
+    key_switch_noise_parameters: &KeySwitchNoiseParameters,
 ) -> CanonicalResult<BigUint> {
     if level >= DATA_PRIMES.len() {
         return Err(invalid_recurrence(
             "symbolic key-switch level is outside the selected data basis",
         ));
     }
-    let active_block_count = (level + 1).div_ceil(KEY_SWITCH_DATA_PRIMES_PER_BLOCK);
+    let active_block_count =
+        (level + 1).div_ceil(key_switch_noise_parameters.data_primes_per_block);
     let maximum_block_modulus = DATA_PRIMES[..=level]
-        .chunks(KEY_SWITCH_DATA_PRIMES_PER_BLOCK)
+        .chunks(key_switch_noise_parameters.data_primes_per_block)
         .map(|block| {
             block
                 .iter()
@@ -851,7 +990,7 @@ fn hybrid_key_switch_error_bound(
         * evaluation_key_error;
     let decomposed_error = divide_with_ceiling(
         &decomposed_numerator,
-        &(BigUint::from(2_u8) * key_switch_special_basis_modulus_product()),
+        &(BigUint::from(2_u8) * &key_switch_noise_parameters.special_basis_modulus_product),
     );
     Ok(decomposed_error
         + BigUint::one()
@@ -966,11 +1105,17 @@ mod tests {
 
     #[test]
     fn selected_recurrence_is_monotone_and_positive_for_every_accepted_ballot_count() {
+        let key_switch_noise_parameters =
+            selected_key_switch_noise_parameters().expect("selected key-switch noise parameters");
         let mut previous_product_error = None;
         let mut previous_target_bounds: Option<Vec<DirectBallotTargetNoiseBound>> = None;
         for ballot_count in 1..=10 {
-            let product = selected_pair_character_product_bound(10, ballot_count)
-                .expect("selected pair-character recurrence");
+            let product = selected_pair_character_product_bound(
+                10,
+                ballot_count,
+                &key_switch_noise_parameters,
+            )
+            .expect("selected pair-character recurrence");
             assert_eq!(product.level, CHARACTER_OUTPUT_LEVEL);
             assert!(product.minimum_margin.is_positive());
             if let Some(previous_error) = previous_product_error.as_ref() {

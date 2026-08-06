@@ -159,7 +159,6 @@ pub(crate) enum RelationEmbeddingKind {
     None = 0,
     Identity = 1,
     LeastNonnegative = 2,
-    Centered = 3,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -233,12 +232,9 @@ impl RelationValueLayout {
         ) {
             (RelationElementKind::Hash512, None, RelationEmbeddingKind::None, true)
             | (RelationElementKind::BaseField, None, RelationEmbeddingKind::Identity, _)
-            | (
-                RelationElementKind::Residue,
-                Some(_),
-                RelationEmbeddingKind::LeastNonnegative | RelationEmbeddingKind::Centered,
-                _,
-            ) => Ok(()),
+            | (RelationElementKind::Residue, Some(_), RelationEmbeddingKind::LeastNonnegative, _) => {
+                Ok(())
+            }
             _ => Err(RelationPlanError::InvalidSource),
         }
     }

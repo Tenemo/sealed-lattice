@@ -64,6 +64,62 @@ pub(crate) const MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_BOUNDARY_TRANSFER_LIVE_BYT
     }
 };
 
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ProofExternalMemoryBoundaryGeometry {
+    append_request_byte_length: u64,
+    empty_response_byte_length: u64,
+    read_request_byte_length: u64,
+    read_response_byte_length: u64,
+}
+
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+impl ProofExternalMemoryBoundaryGeometry {
+    pub(crate) fn derive(
+        maximum_payload_byte_length: u64,
+    ) -> Result<Self, ProofExternalMemoryError> {
+        if maximum_payload_byte_length == 0
+            || maximum_payload_byte_length
+                > u64::from(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH)
+        {
+            return Err(ProofExternalMemoryError::ResourceLimitExceeded);
+        }
+        let append_request_byte_length = (EXTERNAL_MEMORY_REQUEST_HEADER_BYTE_LENGTH as u64)
+            .checked_add(EXTERNAL_MEMORY_OPERATION_HEADER_BYTE_LENGTH as u64)
+            .and_then(|length| length.checked_add(maximum_payload_byte_length))
+            .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
+        let read_request_byte_length = (EXTERNAL_MEMORY_REQUEST_HEADER_BYTE_LENGTH as u64)
+            .checked_add(EXTERNAL_MEMORY_OPERATION_HEADER_BYTE_LENGTH as u64)
+            .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
+        let read_response_byte_length = (EXTERNAL_MEMORY_RESPONSE_HEADER_BYTE_LENGTH as u64)
+            .checked_add(EXTERNAL_MEMORY_READ_RESULT_HEADER_BYTE_LENGTH as u64)
+            .and_then(|length| length.checked_add(maximum_payload_byte_length))
+            .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
+        Ok(Self {
+            append_request_byte_length,
+            empty_response_byte_length: COMMON_PROOF_EXTERNAL_MEMORY_EMPTY_RESPONSE_BYTE_LENGTH,
+            read_request_byte_length,
+            read_response_byte_length,
+        })
+    }
+
+    pub(crate) const fn append_request_byte_length(self) -> u64 {
+        self.append_request_byte_length
+    }
+
+    pub(crate) const fn empty_response_byte_length(self) -> u64 {
+        self.empty_response_byte_length
+    }
+
+    pub(crate) const fn read_request_byte_length(self) -> u64 {
+        self.read_request_byte_length
+    }
+
+    pub(crate) const fn read_response_byte_length(self) -> u64 {
+        self.read_response_byte_length
+    }
+}
+
 /// Browser scratch planning targets and the absolute safety bound. Values
 /// above the automatic target require an engineering review but remain valid
 /// when the exact plan stays within the hard bound.
@@ -85,17 +141,23 @@ pub(crate) use executor::{
     ProofExternalMemoryError, ProofExternalMemoryExecutor, ProofExternalMemoryExecutorError,
     ProofExternalMemoryUsage,
 };
-#[cfg(test)]
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
 pub(crate) use plan::ProofExternalMemoryTransactionOperation;
 pub(crate) use plan::{
     ProofExternalMemory, ProofExternalMemoryObject, ProofExternalMemoryObjectPlan,
     ProofExternalMemoryPlan, ProofExternalMemoryProtection,
     ProofExternalMemorySecretSealCustodyRequirement,
 };
-pub(crate) use transaction::EXTERNAL_MEMORY_SINGLE_APPEND_RECYCLER_CAPACITY_CEILING;
 pub(crate) use transaction::{
+    EXTERNAL_MEMORY_SINGLE_APPEND_RECYCLER_CAPACITY_CEILING,
     ProofExternalMemoryTransactionAdapterError, ProofExternalMemoryTransactionRecorder,
     ProofExternalMemoryTransactionReplay, ProofExternalMemoryTransactionRequest,
+};
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+pub(crate) use transaction::{
+    EXTERNAL_MEMORY_SINGLE_APPEND_REPLAY_LENGTH_CAPACITY_CEILING,
+    EXTERNAL_MEMORY_SINGLE_OPERATION_VECTOR_CAPACITY_CEILING,
+    EXTERNAL_MEMORY_SINGLE_READ_RESULT_VECTOR_CAPACITY_CEILING,
 };
 
 #[cfg(test)]

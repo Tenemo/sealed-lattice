@@ -22,23 +22,29 @@ accepted QROM theorem evidence.
 It is also not a concrete-standard-model SHAKE256 proof or an emitted-proof
 acceptance result. The row-code prover is now operationally rejected as the
 mobile backend, so this construction-specific vector cannot select a suite even
-if its remaining imports close. A direct-RNS ring replacement must generate its
-own exact limb-and-quotient relation, transcript, extraction, hiding, and
-classical/QROM vectors. Its 255-bit example field is already rejected by the
-combined ring-size and quantum-query loss; the provisional 440-bit field is
-only a capacity reservation until those replacement vectors derive explicit
-constants. Other
-checked vectors that still bind the superseded twenty-option profile remain
-ineligible for suite selection until regenerated.
+if its remaining imports close. The compact ring-vector replacement prefers
+one extension-linear execution over the quintic Goldilocks field and a bound
+two-epoch lookup transcript. It must generate its own exact limb-and-quotient
+relation, cross-epoch explicit-point openings, CFW/WHIR mask and code-switch
+catalog, extraction, hiding, and classical/QROM vectors. The existing checked
+public-key inventory, static candidate ledgers, and primitive measurements are
+not deterministic suite vectors.
 
-The collective-setup security record is regenerated from the exact-ten Rust
-production-authority constructor before TypeScript binds source and imported
-artifact digests. Its refresh path cannot reuse or edit the authority stored in
-the prior vector. The record now imports unresolved QROM transform and
-composition statuses and also refuses overall closure for masking, setup-family
-simulation, and terminal collective composition. It cannot serve as complete
-security evidence, mint a setup capability, or select a suite.
-Its common-proof imports are row-code-specific and do not transfer to the
-direct-RNS ring candidate.
+`selected-lattice-security-estimator-evidence.json` still binds the superseded
+twenty-option topology with data-block width three and three special primes. Its
+138.31/123.13-bit scalar-LWE diagnostics are historical and do not describe the
+active block-ten, six-special-prime candidate. This vector and every other
+checked vector that still binds superseded geometry remain ineligible for suite
+selection until regenerated from the final selected production bytes.
+
+The collective-setup security generator derives a fresh exact-ten Rust
+production authority before TypeScript binds source and imported artifact
+digests; it cannot reuse or edit the authority stored in the prior vector. The
+checked record remains blocked and is now source-stale against the compact-pivot
+worktree. It imports the rejected row-code common proof plus unresolved QROM,
+masking, setup-family simulation, and terminal-composition obligations. Do not
+refresh it piecemeal. It must be regenerated from the final successor authority
+and cannot serve as complete security evidence, mint a setup capability, or
+select a suite.
 
 When the producing code changes a vector's output on purpose, update the expected values in the JSON; the consuming test verifies them, and git tracks the change.

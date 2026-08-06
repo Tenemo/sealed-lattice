@@ -1,4 +1,11 @@
 use super::super::external_memory::EXTERNAL_MEMORY_SINGLE_APPEND_RECYCLER_CAPACITY_CEILING;
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+use super::super::external_memory::{
+    EXTERNAL_MEMORY_SINGLE_APPEND_REPLAY_LENGTH_CAPACITY_CEILING,
+    EXTERNAL_MEMORY_SINGLE_OPERATION_VECTOR_CAPACITY_CEILING,
+    EXTERNAL_MEMORY_SINGLE_READ_RESULT_VECTOR_CAPACITY_CEILING,
+    ProofExternalMemoryBoundaryGeometry, ProofExternalMemoryTransactionOperation,
+};
 use super::{
     CanonicalStreamDomain, CanonicalStreamWriter, CommonProofByteSink, CommonProofRuntimeError,
     CommonProofRuntimeLimits, HASH_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
@@ -29,6 +36,179 @@ enum CommonProofStorageTransactionPass {
     },
     Replaying(Box<ProofExternalMemoryTransactionReplay>),
     Cancelled,
+}
+
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CommonProofStorageTransactionMemoryGeometry {
+    runtime_inline_byte_length: u64,
+    maximum_operation_vector_heap_byte_length: u64,
+    maximum_append_replay_length_heap_byte_length: u64,
+    maximum_read_result_vector_heap_byte_length: u64,
+    replay_box_byte_length: u64,
+    maximum_payload_byte_length: u64,
+    append_request_byte_length: u64,
+    empty_response_byte_length: u64,
+    read_request_byte_length: u64,
+    read_response_byte_length: u64,
+    append_request_export_live_byte_length: u64,
+    read_response_supply_live_byte_length: u64,
+    read_replay_live_byte_length: u64,
+    maximum_live_byte_length: u64,
+}
+
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+impl CommonProofStorageTransactionMemoryGeometry {
+    pub(crate) fn derive(
+        maximum_payload_byte_length: u64,
+    ) -> Result<Self, CommonProofRuntimeError> {
+        let boundary = ProofExternalMemoryBoundaryGeometry::derive(maximum_payload_byte_length)
+            .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?;
+        let runtime_inline_byte_length =
+            type_byte_length::<CommonProofStorageTransactionRuntime>()?;
+        let maximum_operation_vector_heap_byte_length = checked_storage_memory_product(&[
+            u64::try_from(EXTERNAL_MEMORY_SINGLE_OPERATION_VECTOR_CAPACITY_CEILING)
+                .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?,
+            type_byte_length::<ProofExternalMemoryTransactionOperation>()?,
+        ])?;
+        let maximum_append_replay_length_heap_byte_length = checked_storage_memory_product(&[
+            u64::try_from(EXTERNAL_MEMORY_SINGLE_APPEND_REPLAY_LENGTH_CAPACITY_CEILING)
+                .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?,
+            type_byte_length::<Option<u64>>()?,
+        ])?;
+        let maximum_read_result_vector_heap_byte_length = checked_storage_memory_product(&[
+            u64::try_from(EXTERNAL_MEMORY_SINGLE_READ_RESULT_VECTOR_CAPACITY_CEILING)
+                .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?,
+            type_byte_length::<Zeroizing<Vec<u8>>>()?,
+        ])?;
+        let replay_box_byte_length = type_byte_length::<ProofExternalMemoryTransactionReplay>()?;
+        let append_request_byte_length = boundary.append_request_byte_length();
+        let empty_response_byte_length = boundary.empty_response_byte_length();
+        let read_request_byte_length = boundary.read_request_byte_length();
+        let read_response_byte_length = boundary.read_response_byte_length();
+        let common_request_state = [
+            runtime_inline_byte_length,
+            maximum_operation_vector_heap_byte_length,
+            maximum_append_replay_length_heap_byte_length,
+        ]
+        .into_iter()
+        .try_fold(0_u64, checked_storage_memory_add)?;
+        let append_request_export_live_byte_length = [
+            common_request_state,
+            maximum_payload_byte_length,
+            append_request_byte_length,
+        ]
+        .into_iter()
+        .try_fold(0_u64, checked_storage_memory_add)?;
+        let common_read_replay_state = [
+            common_request_state,
+            replay_box_byte_length,
+            maximum_read_result_vector_heap_byte_length,
+            maximum_payload_byte_length,
+        ]
+        .into_iter()
+        .try_fold(0_u64, checked_storage_memory_add)?;
+        let read_response_supply_live_byte_length =
+            checked_storage_memory_add(common_read_replay_state, read_response_byte_length)?;
+        let read_replay_live_byte_length =
+            checked_storage_memory_add(common_read_replay_state, maximum_payload_byte_length)?;
+        let maximum_live_byte_length = append_request_export_live_byte_length
+            .max(read_response_supply_live_byte_length)
+            .max(read_replay_live_byte_length);
+        Ok(Self {
+            runtime_inline_byte_length,
+            maximum_operation_vector_heap_byte_length,
+            maximum_append_replay_length_heap_byte_length,
+            maximum_read_result_vector_heap_byte_length,
+            replay_box_byte_length,
+            maximum_payload_byte_length,
+            append_request_byte_length,
+            empty_response_byte_length,
+            read_request_byte_length,
+            read_response_byte_length,
+            append_request_export_live_byte_length,
+            read_response_supply_live_byte_length,
+            read_replay_live_byte_length,
+            maximum_live_byte_length,
+        })
+    }
+
+    pub(crate) const fn runtime_inline_byte_length(self) -> u64 {
+        self.runtime_inline_byte_length
+    }
+
+    pub(crate) const fn maximum_operation_vector_heap_byte_length(self) -> u64 {
+        self.maximum_operation_vector_heap_byte_length
+    }
+
+    pub(crate) const fn maximum_append_replay_length_heap_byte_length(self) -> u64 {
+        self.maximum_append_replay_length_heap_byte_length
+    }
+
+    pub(crate) const fn maximum_read_result_vector_heap_byte_length(self) -> u64 {
+        self.maximum_read_result_vector_heap_byte_length
+    }
+
+    pub(crate) const fn replay_box_byte_length(self) -> u64 {
+        self.replay_box_byte_length
+    }
+
+    pub(crate) const fn maximum_payload_byte_length(self) -> u64 {
+        self.maximum_payload_byte_length
+    }
+
+    pub(crate) const fn append_request_byte_length(self) -> u64 {
+        self.append_request_byte_length
+    }
+
+    pub(crate) const fn empty_response_byte_length(self) -> u64 {
+        self.empty_response_byte_length
+    }
+
+    pub(crate) const fn read_request_byte_length(self) -> u64 {
+        self.read_request_byte_length
+    }
+
+    pub(crate) const fn read_response_byte_length(self) -> u64 {
+        self.read_response_byte_length
+    }
+
+    pub(crate) const fn append_request_export_live_byte_length(self) -> u64 {
+        self.append_request_export_live_byte_length
+    }
+
+    pub(crate) const fn read_response_supply_live_byte_length(self) -> u64 {
+        self.read_response_supply_live_byte_length
+    }
+
+    pub(crate) const fn read_replay_live_byte_length(self) -> u64 {
+        self.read_replay_live_byte_length
+    }
+
+    pub(crate) const fn maximum_live_byte_length(self) -> u64 {
+        self.maximum_live_byte_length
+    }
+}
+
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+fn type_byte_length<Value>() -> Result<u64, CommonProofRuntimeError> {
+    u64::try_from(core::mem::size_of::<Value>())
+        .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)
+}
+
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+fn checked_storage_memory_add(left: u64, right: u64) -> Result<u64, CommonProofRuntimeError> {
+    left.checked_add(right)
+        .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)
+}
+
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+fn checked_storage_memory_product(factors: &[u64]) -> Result<u64, CommonProofRuntimeError> {
+    factors.iter().copied().try_fold(1_u64, |product, factor| {
+        product
+            .checked_mul(factor)
+            .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)
+    })
 }
 
 #[cfg(test)]

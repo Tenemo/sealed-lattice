@@ -74,7 +74,7 @@ pub(crate) const KLLPS_PAIRED_TARGET_ROLE_COUNT: usize = 2;
 const KLLPS_SPACED_POINT_COUNT: usize = 16;
 pub(crate) const KLLPS_SUBRING_DEGREE: usize = KLLPS_SPACED_POINT_COUNT / 2;
 pub(crate) const KLLPS_POINT_STRIDE: usize = (2 * POLYNOMIAL_DEGREE) / KLLPS_SPACED_POINT_COUNT;
-const MAXIMUM_AUTHORIZED_COEFFICIENT_NORM: u64 = 44;
+pub(crate) const MAXIMUM_AUTHORIZED_COEFFICIENT_NORM: u64 = 44;
 const MAXIMUM_UNAUTHORIZED_COEFFICIENT_NORM: u64 = 8;
 const TARGET_FLOODING_CONTEXT_HASH_DOMAIN: &str =
     "sealed-lattice/target-release/flooding-context/v1";

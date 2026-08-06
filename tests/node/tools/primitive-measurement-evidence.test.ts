@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from "vitest";
 
-import { deriveDesktopBrowserAuthenticatedStorageConfiguration } from '#tools/ci/desktop-browser-primitive-measurement-page';
+import { deriveDesktopBrowserAuthenticatedStorageConfiguration } from "#tools/ci/desktop-browser-primitive-measurement-page";
 import {
     desktopBrowserBoundaryCopyIterationCount,
     parseReleaseNativePrimitiveMeasurementOutput,
@@ -17,28 +17,28 @@ import {
     validateReleaseNativePrimitiveMeasurementEvidence,
     vssFusedRadix51ProjectionOwnerCaseIdentifiers,
     type PrimitiveMeasurementRecord,
-} from '#tools/ci/primitive-measurement-evidence';
-import { parseDesktopBrowserPrimitiveMeasurementArguments } from '#tools/ci/run-desktop-browser-primitive-measurements';
+} from "#tools/ci/primitive-measurement-evidence";
+import { parseDesktopBrowserPrimitiveMeasurementArguments } from "#tools/ci/run-desktop-browser-primitive-measurements";
 import {
     deriveVssBaseMaterializationProjection,
     deriveVssFusedRadix51OwnerProjection,
-} from '#tools/ci/vss-base-materialization-projection';
+} from "#tools/ci/vss-base-materialization-projection";
 
 const recordFor = (
     caseIdentifier: number,
-    executionTarget: PrimitiveMeasurementRecord['executionTarget'] = 'wasm32-unknown-unknown',
+    executionTarget: PrimitiveMeasurementRecord["executionTarget"] = "wasm32-unknown-unknown",
 ): Record<string, unknown> => {
     const catalogEntry = primitiveMeasurementCaseCatalog.find(
         (candidate) => candidate.caseIdentifier === caseIdentifier,
     );
     if (catalogEntry === undefined) {
-        throw new Error('Test primitive-measurement case is absent.');
+        throw new Error("Test primitive-measurement case is absent.");
     }
     const dimensions: Array<{ name: string; value: number }> = Object.entries(
         catalogEntry.requiredDimensions,
     ).map(([name, value]) => ({ name, value }));
     if (caseIdentifier === 1) {
-        dimensions.push({ name: 'pollCount', value: 41 });
+        dimensions.push({ name: "pollCount", value: 41 });
     }
     if (caseIdentifier === 5) {
         const materializationPassCount = 2;
@@ -51,138 +51,138 @@ const recordFor = (
         const fullDomainSize = 16_777_216;
         const leafHashQueryCount = fullDomainSize * materializationPassCount;
         dimensions.push(
-            { name: 'columnOrdinal', value: 17 },
-            { name: 'nonzeroSourceCoefficientCount', value: 1_024 },
-            { name: 'retainedInputByteLength', value: 2_097_152 },
+            { name: "columnOrdinal", value: 17 },
+            { name: "nonzeroSourceCoefficientCount", value: 1_024 },
+            { name: "retainedInputByteLength", value: 2_097_152 },
             {
-                name: 'basePhaseSourceReplayCount',
+                name: "basePhaseSourceReplayCount",
                 value: sourceReplayCount,
             },
             {
-                name: 'basePhaseProverSourceReplayCount',
+                name: "basePhaseProverSourceReplayCount",
                 value: sourceReplayCount,
             },
-            { name: 'basePhaseLaneDftCount', value: laneDftCount },
+            { name: "basePhaseLaneDftCount", value: laneDftCount },
             {
-                name: 'basePhaseButterflyCount',
+                name: "basePhaseButterflyCount",
                 value: laneDftCount * 4_980_736,
             },
             {
-                name: 'basePhaseCosetMultiplicationCount',
+                name: "basePhaseCosetMultiplicationCount",
                 value: laneDftCount * 524_288,
             },
             {
-                name: 'basePhaseColumnValueDeliveryCount',
+                name: "basePhaseColumnValueDeliveryCount",
                 value: rowCount * fullDomainSize * materializationPassCount,
             },
             {
-                name: 'basePhaseTransportedValueByteLength',
+                name: "basePhaseTransportedValueByteLength",
                 value: rowCount * fullDomainSize * materializationPassCount * 8,
             },
             {
-                name: 'basePhaseLeafHashQueryCount',
+                name: "basePhaseLeafHashQueryCount",
                 value: leafHashQueryCount,
             },
             {
-                name: 'basePhaseSaltedLeafKeccakPermutationCount',
+                name: "basePhaseSaltedLeafKeccakPermutationCount",
                 value: leafHashQueryCount * 68,
             },
             {
-                name: 'basePhaseMerkleParentHashQueryCount',
+                name: "basePhaseMerkleParentHashQueryCount",
                 value: (fullDomainSize - 1) * materializationPassCount,
             },
             {
-                name: 'basePhasePrivateLeafSaltDerivationCount',
+                name: "basePhasePrivateLeafSaltDerivationCount",
                 value: leafHashQueryCount,
             },
             {
-                name: 'modeledCandidateQuotientConstructionIdentityByteLength',
+                name: "modeledCandidateQuotientConstructionIdentityByteLength",
                 value: 749_188,
             },
             {
-                name: 'modeledCandidateQuotientPhaseOrderCount',
+                name: "modeledCandidateQuotientPhaseOrderCount",
                 value: 2,
             },
             {
-                name: 'modeledCandidateQuotientTranscriptOperationCount',
+                name: "modeledCandidateQuotientTranscriptOperationCount",
                 value: 2_625,
             },
             {
-                name: 'modeledCandidateQuotientOpeningBatchCount',
+                name: "modeledCandidateQuotientOpeningBatchCount",
                 value: 923,
             },
             {
-                name: 'modeledCandidateQuotientProofSectionCount',
+                name: "modeledCandidateQuotientProofSectionCount",
                 value: 121,
             },
             {
-                name: 'modeledCandidateQuotientCheckpointCount',
+                name: "modeledCandidateQuotientCheckpointCount",
                 value: 11,
             },
             {
-                name: 'modeledCandidateQuotientMaximumTranscriptHashQueryCount',
+                name: "modeledCandidateQuotientMaximumTranscriptHashQueryCount",
                 value: 329_471,
             },
             {
-                name: 'modeledCandidateQuotientLogicalVerifierMessageCount',
+                name: "modeledCandidateQuotientLogicalVerifierMessageCount",
                 value: 2_158,
             },
         );
     }
     if (caseIdentifier === 7) {
         dimensions.push(
-            { name: 'pollCount', value: 1_024 },
-            { name: 'lowerScheduleHeapByteLength', value: 100_000 },
-            { name: 'higherScheduleHeapByteLength', value: 110_000 },
+            { name: "pollCount", value: 1_024 },
+            { name: "lowerScheduleHeapByteLength", value: 100_000 },
+            { name: "higherScheduleHeapByteLength", value: 110_000 },
         );
     }
     if (caseIdentifier === 8) {
-        dimensions.push({ name: 'retainedInputByteLength', value: 2_097_152 });
+        dimensions.push({ name: "retainedInputByteLength", value: 2_097_152 });
     }
     if (caseIdentifier === 9 || caseIdentifier === 11) {
         dimensions.push(
-            { name: 'retainedInputByteLength', value: 2_097_152 },
+            { name: "retainedInputByteLength", value: 2_097_152 },
             {
-                name: 'retainedGroupHeaderByteLength',
-                value: executionTarget === 'release-native' ? 1_536 : 768,
+                name: "retainedGroupHeaderByteLength",
+                value: executionTarget === "release-native" ? 1_536 : 768,
             },
         );
     }
     if (caseIdentifier === 10 || caseIdentifier === 12) {
         const retainedInputByteLength = 2_097_152;
         const retainedGroupHeaderByteLength =
-            executionTarget === 'release-native' ? 1_536 : 768;
+            executionTarget === "release-native" ? 1_536 : 768;
         const retainedGroupContainerByteLength =
-            executionTarget === 'release-native' ? 32 : 24;
+            executionTarget === "release-native" ? 32 : 24;
         const ownedFixedStateByteLength =
-            executionTarget === 'release-native' ? 256 : 192;
+            executionTarget === "release-native" ? 256 : 192;
         const retainedCoefficientPayloadByteLength = dimensions.find(
             (dimension) =>
-                dimension.name === 'retainedCoefficientPayloadByteLength',
+                dimension.name === "retainedCoefficientPayloadByteLength",
         )!.value;
         const replayBufferByteLength = dimensions.find(
-            (dimension) => dimension.name === 'replayBufferByteLength',
+            (dimension) => dimension.name === "replayBufferByteLength",
         )!.value;
         const rowWorkingBufferByteLength = dimensions.find(
-            (dimension) => dimension.name === 'rowWorkingBufferByteLength',
+            (dimension) => dimension.name === "rowWorkingBufferByteLength",
         )!.value;
         dimensions.push(
-            { name: 'pollCount', value: 10_000 },
-            { name: 'retainedInputByteLength', value: retainedInputByteLength },
+            { name: "pollCount", value: 10_000 },
+            { name: "retainedInputByteLength", value: retainedInputByteLength },
             {
-                name: 'retainedGroupHeaderByteLength',
+                name: "retainedGroupHeaderByteLength",
                 value: retainedGroupHeaderByteLength,
             },
             {
-                name: 'retainedGroupContainerByteLength',
+                name: "retainedGroupContainerByteLength",
                 value: retainedGroupContainerByteLength,
             },
             {
-                name: 'ownedFixedStateByteLength',
+                name: "ownedFixedStateByteLength",
                 value: ownedFixedStateByteLength,
             },
             {
-                name: 'materializationPeakLiveByteLength',
+                name: "materializationPeakLiveByteLength",
                 value:
                     retainedInputByteLength +
                     retainedCoefficientPayloadByteLength +
@@ -191,7 +191,7 @@ const recordFor = (
                     retainedGroupContainerByteLength,
             },
             {
-                name: 'stripePeakLiveByteLength',
+                name: "stripePeakLiveByteLength",
                 value:
                     retainedInputByteLength +
                     retainedCoefficientPayloadByteLength +
@@ -202,28 +202,28 @@ const recordFor = (
         );
     }
     const retainedInputByteLength = dimensions.find(
-        (dimension) => dimension.name === 'retainedInputByteLength',
+        (dimension) => dimension.name === "retainedInputByteLength",
     )?.value;
     const traceValueCount = dimensions.find(
-        (dimension) => dimension.name === 'traceValueCount',
+        (dimension) => dimension.name === "traceValueCount",
     )?.value;
     const retainedCoefficientPayloadByteLength = dimensions.find(
         (dimension) =>
-            dimension.name === 'retainedCoefficientPayloadByteLength',
+            dimension.name === "retainedCoefficientPayloadByteLength",
     )?.value;
     const retainedGroupHeaderByteLength = dimensions.find(
-        (dimension) => dimension.name === 'retainedGroupHeaderByteLength',
+        (dimension) => dimension.name === "retainedGroupHeaderByteLength",
     )?.value;
     const materializationPeakLiveByteLength = dimensions.find(
-        (dimension) => dimension.name === 'materializationPeakLiveByteLength',
+        (dimension) => dimension.name === "materializationPeakLiveByteLength",
     )?.value;
     const stripePeakLiveByteLength = dimensions.find(
-        (dimension) => dimension.name === 'stripePeakLiveByteLength',
+        (dimension) => dimension.name === "stripePeakLiveByteLength",
     )?.value;
     return {
         caseIdentifier,
         caseName: catalogEntry.caseName,
-        checksumHex: '0123456789abcdef',
+        checksumHex: "0123456789abcdef",
         dimensions,
         elapsedNanoseconds: 123_456,
         executionTarget,
@@ -236,7 +236,7 @@ const recordFor = (
                     retainedCoefficientPayloadByteLength! +
                     dimensions.find(
                         (dimension) =>
-                            dimension.name === 'replayBufferByteLength',
+                            dimension.name === "replayBufferByteLength",
                     )!.value +
                     retainedGroupHeaderByteLength!
                   : caseIdentifier === 10 || caseIdentifier === 12
@@ -247,28 +247,109 @@ const recordFor = (
                     : caseIdentifier === 13
                       ? (dimensions.find(
                             (dimension) =>
-                                dimension.name === 'planFieldElementCount',
+                                dimension.name === "planFieldElementCount",
                         )!.value +
                             dimensions.find(
                                 (dimension) =>
                                     dimension.name ===
-                                    'retainedFieldElementCount',
+                                    "retainedFieldElementCount",
                             )!.value) *
                         dimensions.find(
                             (dimension) =>
-                                dimension.name === 'fieldElementByteLength',
+                                dimension.name === "fieldElementByteLength",
                         )!.value
-                      : 4_194_304,
+                      : caseIdentifier === 14
+                        ? dimensions.find(
+                              (dimension) =>
+                                  dimension.name === "inverseChunkElementCount",
+                          )!.value *
+                          dimensions.find(
+                              (dimension) =>
+                                  dimension.name ===
+                                  "extensionElementByteLength",
+                          )!.value *
+                          2
+                        : caseIdentifier === 15
+                          ? (dimensions.find(
+                                (dimension) =>
+                                    dimension.name === "encodedElementCount",
+                            )!.value +
+                                dimensions.find(
+                                    (dimension) =>
+                                        dimension.name ===
+                                        "twiddleFieldElementCount",
+                                )!.value) *
+                            8
+                          : caseIdentifier === 16
+                            ? 1_568
+                            : caseIdentifier === 17
+                              ? dimensions.find(
+                                    (dimension) =>
+                                        dimension.name ===
+                                        "batchMatrixByteLength",
+                                )!.value +
+                                dimensions.find(
+                                    (dimension) =>
+                                        dimension.name ===
+                                        "replayColumnByteLength",
+                                )!.value +
+                                dimensions.find(
+                                    (dimension) =>
+                                        dimension.name ===
+                                        "hashStateByteLength",
+                                )!.value +
+                                dimensions.find(
+                                    (dimension) =>
+                                        dimension.name === "twiddleByteLength",
+                                )!.value
+                              : caseIdentifier === 18
+                                ? dimensions.find(
+                                      (dimension) =>
+                                          dimension.name ===
+                                          "retainedInputByteLength",
+                                  )!.value +
+                                  dimensions.find(
+                                      (dimension) =>
+                                          dimension.name ===
+                                          "maximumReconstructionRetainedByteLength",
+                                  )!.value +
+                                  dimensions.find(
+                                      (dimension) =>
+                                          dimension.name ===
+                                          "outputResidueByteLength",
+                                  )!.value
+                                : caseIdentifier === 19 || caseIdentifier === 20
+                                  ? dimensions.find(
+                                        (dimension) =>
+                                            dimension.name ===
+                                            "batchMatrixByteLength",
+                                    )!.value +
+                                    dimensions.find(
+                                        (dimension) =>
+                                            dimension.name ===
+                                            "replayBaseCoordinateByteLength",
+                                    )!.value +
+                                    dimensions.find(
+                                        (dimension) =>
+                                            dimension.name ===
+                                            "hashStateByteLength",
+                                    )!.value +
+                                    dimensions.find(
+                                        (dimension) =>
+                                            dimension.name ===
+                                            "twiddleByteLength",
+                                    )!.value
+                                  : 4_194_304,
         schemaVersion: 2,
     };
 };
 
-describe('Primitive measurement evidence', () => {
-    it('accepts one exact ordered record for every production primitive owner', () => {
+describe("Primitive measurement evidence", () => {
+    it("accepts one exact ordered record for every production primitive owner", () => {
         const records = primitiveMeasurementCaseCatalog.map((entry) =>
             validatePrimitiveMeasurementRecord(
                 recordFor(entry.caseIdentifier),
-                'wasm32-unknown-unknown',
+                "wasm32-unknown-unknown",
             ),
         );
 
@@ -280,17 +361,17 @@ describe('Primitive measurement evidence', () => {
         );
     });
 
-    it('refuses stale geometry, identity, target, and canonical framing', () => {
+    it("refuses stale geometry, identity, target, and canonical framing", () => {
         const wrongGeometry = recordFor(1);
         const dimensions = wrongGeometry.dimensions as Array<{
             name: string;
             value: number;
         }>;
         const butterflyCount = dimensions.find(
-            (dimension) => dimension.name === 'butterflyCount',
+            (dimension) => dimension.name === "butterflyCount",
         );
         if (butterflyCount === undefined) {
-            throw new Error('Test butterfly dimension is absent.');
+            throw new Error("Test butterfly dimension is absent.");
         }
         butterflyCount.value -= 1;
         expect(() => validatePrimitiveMeasurementRecord(wrongGeometry)).toThrow(
@@ -298,15 +379,15 @@ describe('Primitive measurement evidence', () => {
         );
 
         const wrongIdentity = recordFor(2);
-        wrongIdentity.caseName = 'salted-phase-column-leaves';
+        wrongIdentity.caseName = "salted-phase-column-leaves";
         expect(() => validatePrimitiveMeasurementRecord(wrongIdentity)).toThrow(
             /identity/u,
         );
 
         expect(() =>
             validatePrimitiveMeasurementRecord(
-                recordFor(3, 'release-native'),
-                'wasm32-unknown-unknown',
+                recordFor(3, "release-native"),
+                "wasm32-unknown-unknown",
             ),
         ).toThrow(/target/u);
 
@@ -316,9 +397,9 @@ describe('Primitive measurement evidence', () => {
                 name: string;
                 value: number;
             }>
-        ).find((dimension) => dimension.name === 'canonicalEnvelopeByteLength');
+        ).find((dimension) => dimension.name === "canonicalEnvelopeByteLength");
         if (envelopeDimension === undefined) {
-            throw new Error('Test envelope dimension is absent.');
+            throw new Error("Test envelope dimension is absent.");
         }
         envelopeDimension.value += 1;
         expect(() =>
@@ -326,19 +407,19 @@ describe('Primitive measurement evidence', () => {
         ).toThrow(/production geometry/u);
 
         for (const [dimensionName, wrongValue] of [
-            ['basePhaseOpeningQueryCount', 393],
-            ['aggregateWidePadQueryCount', 387],
-            ['modeledCandidateRowCount', 107],
-            ['modeledCandidateTracePackingFactor', 8],
-            ['modeledCandidateOpeningPointCount', 23],
-            ['modeledCandidateAggregateColumnRoleCount', 24],
-            ['modeledCandidateQuotientSourceDegreeBoundExclusive', 4_194_303],
-            ['modeledCandidateQuotientQueryCount', 393],
-            ['modeledCandidateQuotientAgreementCeiling', 4_194_325],
-            ['modeledCandidateQuotientBoundOpeningBatchCount', 535],
-            ['singleAggregateCandidateRowCount', 330],
+            ["basePhaseOpeningQueryCount", 393],
+            ["aggregateWidePadQueryCount", 387],
+            ["modeledCandidateRowCount", 107],
+            ["modeledCandidateTracePackingFactor", 8],
+            ["modeledCandidateOpeningPointCount", 23],
+            ["modeledCandidateAggregateColumnRoleCount", 24],
+            ["modeledCandidateQuotientSourceDegreeBoundExclusive", 4_194_303],
+            ["modeledCandidateQuotientQueryCount", 393],
+            ["modeledCandidateQuotientAgreementCeiling", 4_194_325],
+            ["modeledCandidateQuotientBoundOpeningBatchCount", 535],
+            ["singleAggregateCandidateRowCount", 330],
             [
-                'singleAggregateCandidateBasePhaseAlgorithmLiveSetByteLength',
+                "singleAggregateCandidateBasePhaseAlgorithmLiveSetByteLength",
                 289_406_975,
             ],
         ] as const) {
@@ -359,11 +440,11 @@ describe('Primitive measurement evidence', () => {
         }
 
         for (const [caseIdentifier, dimensionName, wrongValue] of [
-            [11, 'rangeDigitRadix', 50],
-            [11, 'completeSourceMaterializationCount', 5_253],
-            [12, 'completePhaseRowCount', 51],
-            [12, 'completeLaneDftCount', 3_327],
-            [12, 'completeSaltedLeafKeccakPermutationCount', 201_326_591],
+            [11, "rangeDigitRadix", 50],
+            [11, "completeSourceMaterializationCount", 5_253],
+            [12, "completePhaseRowCount", 51],
+            [12, "completeLaneDftCount", 3_327],
+            [12, "completeSaltedLeafKeccakPermutationCount", 201_326_591],
         ] as const) {
             const staleFusedCandidate = recordFor(caseIdentifier);
             const staleDimension = (
@@ -382,9 +463,9 @@ describe('Primitive measurement evidence', () => {
         }
 
         for (const [dimensionName, wrongValue] of [
-            ['modeledCandidateQuotientOpeningBatchCount', 922],
-            ['modeledCandidateQuotientConstructionIdentityByteLength', 0],
-            ['modeledCandidateQuotientMaximumTranscriptHashQueryCount', 2_158],
+            ["modeledCandidateQuotientOpeningBatchCount", 922],
+            ["modeledCandidateQuotientConstructionIdentityByteLength", 0],
+            ["modeledCandidateQuotientMaximumTranscriptHashQueryCount", 2_158],
         ] as const) {
             const inconsistentQuotientConstruction = recordFor(5);
             const staleDimension = (
@@ -405,7 +486,7 @@ describe('Primitive measurement evidence', () => {
         }
     });
 
-    it('refuses duplicate dimensions, unknown fields, and catalog reordering', () => {
+    it("refuses duplicate dimensions, unknown fields, and catalog reordering", () => {
         const duplicateDimension = recordFor(4);
         const dimensions = duplicateDimension.dimensions as Array<{
             name: string;
@@ -437,18 +518,18 @@ describe('Primitive measurement evidence', () => {
         ).toThrow(/incomplete/u);
     });
 
-    it('extracts one canonical native catalog and refuses missing, duplicate, or stale output', () => {
+    it("extracts one canonical native catalog and refuses missing, duplicate, or stale output", () => {
         const serializedRecords = primitiveMeasurementCaseCatalog
             .map((entry) =>
                 JSON.stringify(
-                    recordFor(entry.caseIdentifier, 'release-native'),
+                    recordFor(entry.caseIdentifier, "release-native"),
                 ),
             )
             .map(
                 (record, recordIndex) =>
                     `test primitive_${recordIndex} ... primitive measurement: ${record}`,
             )
-            .join('\n');
+            .join("\n");
 
         expect(
             parseReleaseNativePrimitiveMeasurementOutput(
@@ -461,19 +542,19 @@ describe('Primitive measurement evidence', () => {
             ),
         );
         expect(() =>
-            parseReleaseNativePrimitiveMeasurementOutput('no record', true),
+            parseReleaseNativePrimitiveMeasurementOutput("no record", true),
         ).toThrow(/no measurement record/u);
         expect(() =>
             parseReleaseNativePrimitiveMeasurementOutput(
-                `${serializedRecords}\n${serializedRecords.split('\n')[0]}`,
+                `${serializedRecords}\n${serializedRecords.split("\n")[0]}`,
                 true,
             ),
         ).toThrow(/duplicates/u);
 
-        const staleRecord = recordFor(5, 'release-native');
+        const staleRecord = recordFor(5, "release-native");
         (staleRecord.dimensions as Array<{ name: string; value: number }>).find(
             (dimension) =>
-                dimension.name === 'basePhaseLogicalChunkCountPerLane',
+                dimension.name === "basePhaseLogicalChunkCountPerLane",
         )!.value += 1;
         expect(() =>
             parseReleaseNativePrimitiveMeasurementOutput(
@@ -485,10 +566,10 @@ describe('Primitive measurement evidence', () => {
             .map(
                 (caseIdentifier) =>
                     `primitive measurement: ${JSON.stringify(
-                        recordFor(caseIdentifier, 'release-native'),
+                        recordFor(caseIdentifier, "release-native"),
                     )}`,
             )
-            .join('\n');
+            .join("\n");
         expect(
             parseReleaseNativePrimitiveMeasurementOutput(
                 reversedFocusedOutput,
@@ -520,7 +601,7 @@ describe('Primitive measurement evidence', () => {
 
         const exactEvidence = {
             primitiveCases: primitiveMeasurementCaseCatalog.map((entry) =>
-                recordFor(entry.caseIdentifier, 'release-native'),
+                recordFor(entry.caseIdentifier, "release-native"),
             ),
             schemaVersion: 1,
         };
@@ -559,7 +640,7 @@ describe('Primitive measurement evidence', () => {
         ).toThrow(/incomplete/u);
     });
 
-    it('binds browser memory, boundary copies, and authenticated storage to the codec extent', () => {
+    it("binds browser memory, boundary copies, and authenticated storage to the codec extent", () => {
         const primitiveCases = primitiveMeasurementCaseCatalog.map((entry) => ({
             record: recordFor(entry.caseIdentifier),
             wallElapsedMilliseconds: 1.25,
@@ -589,15 +670,15 @@ describe('Primitive measurement evidence', () => {
         const evidence = {
             boundaryCopies: {
                 byteLengthPerCopy: recordByteLength,
-                checksumHex: '1234abcd',
+                checksumHex: "1234abcd",
                 copyFromWasmElapsedMilliseconds: 1,
                 copyIntoWasmElapsedMilliseconds: 1,
                 iterationCount: desktopBrowserBoundaryCopyIterationCount,
                 wasmMemoryByteLengthAfter: 4_194_304,
                 wasmMemoryByteLengthBefore: 1_048_576,
             },
-            browserEngine: 'chromium',
-            browserUserAgent: 'test browser',
+            browserEngine: "chromium",
+            browserUserAgent: "test browser",
             primitiveCases,
             schemaVersion: 1,
             storage: {
@@ -616,7 +697,7 @@ describe('Primitive measurement evidence', () => {
         expect(
             validateDesktopBrowserPrimitiveMeasurementEvidence(
                 evidence,
-                'chromium',
+                "chromium",
             ).storage.recordByteLength,
         ).toBe(recordByteLength);
 
@@ -649,8 +730,8 @@ describe('Primitive measurement evidence', () => {
         const nativeEvidence = {
             primitiveCases: primitiveMeasurementCaseCatalog.map((entry) =>
                 validatePrimitiveMeasurementRecord(
-                    recordFor(entry.caseIdentifier, 'release-native'),
-                    'release-native',
+                    recordFor(entry.caseIdentifier, "release-native"),
+                    "release-native",
                 ),
             ),
             schemaVersion: 1 as const,
@@ -658,17 +739,17 @@ describe('Primitive measurement evidence', () => {
         const chromiumEvidence =
             validateDesktopBrowserPrimitiveMeasurementEvidence(
                 evidence,
-                'chromium',
+                "chromium",
             );
         const firefoxEvidence =
             validateDesktopBrowserPrimitiveMeasurementEvidence(
-                { ...structuredClone(evidence), browserEngine: 'firefox' },
-                'firefox',
+                { ...structuredClone(evidence), browserEngine: "firefox" },
+                "firefox",
             );
         const measurementWasm = {
             byteLength: 1_000_000,
-            normalizedSha256Hex: 'a'.repeat(64),
-            rawSha256Hex: 'b'.repeat(64),
+            normalizedSha256Hex: "a".repeat(64),
+            rawSha256Hex: "b".repeat(64),
         };
         const singleBuildBundle =
             validateDesktopBrowserPrimitiveMeasurementBundle({
@@ -676,7 +757,7 @@ describe('Primitive measurement evidence', () => {
                     evidence,
                     {
                         ...structuredClone(evidence),
-                        browserEngine: 'firefox',
+                        browserEngine: "firefox",
                     },
                 ],
                 measurementWasm,
@@ -707,7 +788,7 @@ describe('Primitive measurement evidence', () => {
         const firstCase = reorderedBrowserEvidence.primitiveCases[0];
         const secondCase = reorderedBrowserEvidence.primitiveCases[1];
         if (firstCase === undefined || secondCase === undefined) {
-            throw new Error('Test browser cases are absent.');
+            throw new Error("Test browser cases are absent.");
         }
         [
             reorderedBrowserEvidence.primitiveCases[0],
@@ -823,24 +904,24 @@ describe('Primitive measurement evidence', () => {
         ).toBe(297_297);
 
         const targetSizedFirefoxEvidence = structuredClone(evidence);
-        targetSizedFirefoxEvidence.browserEngine = 'firefox';
+        targetSizedFirefoxEvidence.browserEngine = "firefox";
         const targetSizedVssRecord = targetSizedFirefoxEvidence
             .primitiveCases[4].record as {
             dimensions: Array<{ name: string; value: number }>;
             modeledPeakLiveByteLength: number;
         };
         const targetSizedRetainedInput = targetSizedVssRecord.dimensions.find(
-            (dimension) => dimension.name === 'retainedInputByteLength',
+            (dimension) => dimension.name === "retainedInputByteLength",
         );
         const targetSizedTraceValueCount = targetSizedVssRecord.dimensions.find(
-            (dimension) => dimension.name === 'traceValueCount',
+            (dimension) => dimension.name === "traceValueCount",
         );
         if (
             targetSizedRetainedInput === undefined ||
             targetSizedTraceValueCount === undefined
         ) {
             throw new Error(
-                'Test target-sized VSS memory dimensions are absent.',
+                "Test target-sized VSS memory dimensions are absent.",
             );
         }
         targetSizedRetainedInput.value -= 240_976;
@@ -853,7 +934,7 @@ describe('Primitive measurement evidence', () => {
                     chromiumEvidence,
                     validateDesktopBrowserPrimitiveMeasurementEvidence(
                         targetSizedFirefoxEvidence,
-                        'firefox',
+                        "firefox",
                     ),
                 ],
                 nativeEvidence,
@@ -861,16 +942,16 @@ describe('Primitive measurement evidence', () => {
         ).not.toThrow();
 
         const wrongBrowserChecksum = structuredClone(evidence);
-        wrongBrowserChecksum.browserEngine = 'firefox';
+        wrongBrowserChecksum.browserEngine = "firefox";
         wrongBrowserChecksum.primitiveCases[4].record.checksumHex =
-            'fedcba9876543210';
+            "fedcba9876543210";
         expect(() =>
             deriveVssBaseMaterializationProjection({
                 browserEvidence: [
                     chromiumEvidence,
                     validateDesktopBrowserPrimitiveMeasurementEvidence(
                         wrongBrowserChecksum,
-                        'firefox',
+                        "firefox",
                     ),
                 ],
                 nativeEvidence,
@@ -878,173 +959,249 @@ describe('Primitive measurement evidence', () => {
         ).toThrow(/differs across native and WASM/u);
     });
 
-    it('selects one focused browser engine or the complete two-engine lane', () => {
+    it("selects one focused browser engine or the complete two-engine lane", () => {
         expect(
             parseDesktopBrowserPrimitiveMeasurementArguments([]).browserEngines,
-        ).toEqual(['chromium', 'firefox']);
+        ).toEqual(["chromium", "firefox"]);
         expect(
-            parseDesktopBrowserPrimitiveMeasurementArguments(['--', 'firefox'])
+            parseDesktopBrowserPrimitiveMeasurementArguments(["--", "firefox"])
                 .browserEngines,
-        ).toEqual(['firefox']);
+        ).toEqual(["firefox"]);
         expect(
             parseDesktopBrowserPrimitiveMeasurementArguments([
-                'chromium',
-                'authenticated-storage',
+                "chromium",
+                "authenticated-storage",
             ]),
         ).toEqual({
-            browserEngines: ['chromium'],
-            measurementComponent: 'authenticated-storage',
+            browserEngines: ["chromium"],
+            measurementComponent: "authenticated-storage",
         });
         expect(
             parseDesktopBrowserPrimitiveMeasurementArguments([
-                'firefox',
-                'boundary-copies',
+                "firefox",
+                "boundary-copies",
             ]),
         ).toEqual({
-            browserEngines: ['firefox'],
-            measurementComponent: 'boundary-copies',
+            browserEngines: ["firefox"],
+            measurementComponent: "boundary-copies",
         });
         expect(
             parseDesktopBrowserPrimitiveMeasurementArguments([
-                'firefox',
-                'reuse-wasm',
+                "firefox",
+                "reuse-wasm",
             ]),
         ).toEqual({
-            browserEngines: ['firefox'],
+            browserEngines: ["firefox"],
             reuseMeasurementWasm: true,
         });
         expect(
             parseDesktopBrowserPrimitiveMeasurementArguments([
-                'chromium',
-                'case-5',
-                'reuse-wasm',
+                "chromium",
+                "case-5",
+                "reuse-wasm",
             ]),
         ).toEqual({
-            browserEngines: ['chromium'],
+            browserEngines: ["chromium"],
             focusedCaseIdentifiers: [5],
             reuseMeasurementWasm: true,
         });
         expect(
             parseDesktopBrowserPrimitiveMeasurementArguments([
-                'chromium',
-                'case-6',
+                "chromium",
+                "case-6",
             ]),
         ).toEqual({
-            browserEngines: ['chromium'],
+            browserEngines: ["chromium"],
             focusedCaseIdentifiers: [6],
         });
         expect(
             parseDesktopBrowserPrimitiveMeasurementArguments([
-                'chromium',
-                'case-8',
+                "chromium",
+                "case-8",
             ]),
         ).toEqual({
-            browserEngines: ['chromium'],
+            browserEngines: ["chromium"],
             focusedCaseIdentifiers: [8],
         });
         expect(
             parseDesktopBrowserPrimitiveMeasurementArguments([
-                'firefox',
-                'case-8',
-                'reuse-wasm',
+                "firefox",
+                "case-8",
+                "reuse-wasm",
             ]),
         ).toEqual({
-            browserEngines: ['firefox'],
+            browserEngines: ["firefox"],
             focusedCaseIdentifiers: [8],
             reuseMeasurementWasm: true,
         });
         expect(
             parseDesktopBrowserPrimitiveMeasurementArguments([
-                'chromium',
-                'case-9',
+                "chromium",
+                "case-9",
             ]),
         ).toEqual({
-            browserEngines: ['chromium'],
+            browserEngines: ["chromium"],
             focusedCaseIdentifiers: [9],
         });
         expect(
             parseDesktopBrowserPrimitiveMeasurementArguments([
-                'firefox',
-                'case-10',
-                'reuse-wasm',
+                "firefox",
+                "case-10",
+                "reuse-wasm",
             ]),
         ).toEqual({
-            browserEngines: ['firefox'],
+            browserEngines: ["firefox"],
             focusedCaseIdentifiers: [10],
             reuseMeasurementWasm: true,
         });
         expect(
             parseDesktopBrowserPrimitiveMeasurementArguments([
-                'chromium',
-                'case-11',
+                "chromium",
+                "case-11",
             ]),
         ).toEqual({
-            browserEngines: ['chromium'],
+            browserEngines: ["chromium"],
             focusedCaseIdentifiers: [11],
         });
         expect(
             parseDesktopBrowserPrimitiveMeasurementArguments([
-                'firefox',
-                'case-12',
-                'reuse-wasm',
+                "firefox",
+                "case-12",
+                "reuse-wasm",
             ]),
         ).toEqual({
-            browserEngines: ['firefox'],
+            browserEngines: ["firefox"],
             focusedCaseIdentifiers: [12],
             reuseMeasurementWasm: true,
         });
         expect(
             parseDesktopBrowserPrimitiveMeasurementArguments([
-                'chromium',
-                'case-13',
+                "chromium",
+                "case-13",
             ]),
         ).toEqual({
-            browserEngines: ['chromium'],
+            browserEngines: ["chromium"],
             focusedCaseIdentifiers: [13],
         });
         expect(
             parseDesktopBrowserPrimitiveMeasurementArguments([
-                'chromium',
-                'fused-radix-51-projection-owners',
+                "firefox",
+                "case-14",
             ]),
         ).toEqual({
-            browserEngines: ['chromium'],
+            browserEngines: ["firefox"],
+            focusedCaseIdentifiers: [14],
+        });
+        expect(
+            parseDesktopBrowserPrimitiveMeasurementArguments([
+                "chromium",
+                "case-15",
+            ]),
+        ).toEqual({
+            browserEngines: ["chromium"],
+            focusedCaseIdentifiers: [15],
+        });
+        expect(
+            parseDesktopBrowserPrimitiveMeasurementArguments([
+                "firefox",
+                "case-16",
+            ]),
+        ).toEqual({
+            browserEngines: ["firefox"],
+            focusedCaseIdentifiers: [16],
+        });
+        expect(
+            parseDesktopBrowserPrimitiveMeasurementArguments([
+                "chromium",
+                "case-17",
+            ]),
+        ).toEqual({
+            browserEngines: ["chromium"],
+            focusedCaseIdentifiers: [17],
+        });
+        expect(
+            parseDesktopBrowserPrimitiveMeasurementArguments([
+                "firefox",
+                "case-18",
+            ]),
+        ).toEqual({
+            browserEngines: ["firefox"],
+            focusedCaseIdentifiers: [18],
+        });
+        expect(
+            parseDesktopBrowserPrimitiveMeasurementArguments([
+                "chromium",
+                "case-19",
+            ]),
+        ).toEqual({
+            browserEngines: ["chromium"],
+            focusedCaseIdentifiers: [19],
+        });
+        expect(
+            parseDesktopBrowserPrimitiveMeasurementArguments([
+                "firefox",
+                "case-20",
+                "reuse-wasm",
+            ]),
+        ).toEqual({
+            browserEngines: ["firefox"],
+            focusedCaseIdentifiers: [20],
+            reuseMeasurementWasm: true,
+        });
+        expect(
+            parseDesktopBrowserPrimitiveMeasurementArguments([
+                "chromium",
+                "compact-lookup-projection-owners",
+                "reuse-wasm",
+            ]),
+        ).toEqual({
+            browserEngines: ["chromium"],
+            focusedCaseIdentifiers: [14, 17],
+            reuseMeasurementWasm: true,
+        });
+        expect(
+            parseDesktopBrowserPrimitiveMeasurementArguments([
+                "chromium",
+                "fused-radix-51-projection-owners",
+            ]),
+        ).toEqual({
+            browserEngines: ["chromium"],
             focusedCaseIdentifiers: [1, 2, 3, 4, 5, 8, 11, 12],
         });
         expect(() =>
-            parseDesktopBrowserPrimitiveMeasurementArguments(['webkit']),
+            parseDesktopBrowserPrimitiveMeasurementArguments(["webkit"]),
         ).toThrow(/chromium or firefox/u);
         expect(() =>
             parseDesktopBrowserPrimitiveMeasurementArguments([
-                'chromium',
-                'firefox',
+                "chromium",
+                "firefox",
             ]),
         ).toThrow(/accepts chromium or firefox/u);
         expect(() =>
             parseDesktopBrowserPrimitiveMeasurementArguments([
-                'chromium',
-                'unknown-component',
+                "chromium",
+                "unknown-component",
             ]),
         ).toThrow(/authenticated-storage/u);
         expect(() =>
             parseDesktopBrowserPrimitiveMeasurementArguments([
-                'chromium',
-                'case-7',
+                "chromium",
+                "case-7",
             ]),
         ).toThrow(/authenticated-storage/u);
         expect(() =>
             parseDesktopBrowserPrimitiveMeasurementArguments([
-                'chromium',
-                'case-8',
-                'boundary-copies',
+                "chromium",
+                "case-8",
+                "boundary-copies",
             ]),
         ).toThrow(/optional reuse-wasm/u);
     });
 
-    it('binds focused browser evidence to one exact catalog case and WASM identity', () => {
+    it("binds focused browser evidence to one exact catalog case and WASM identity", () => {
         const focusedEvidence = {
-            browserEngine: 'chromium',
-            browserUserAgent: 'focused browser',
+            browserEngine: "chromium",
+            browserUserAgent: "focused browser",
             primitiveCase: {
                 record: recordFor(8),
                 wallElapsedMilliseconds: 10,
@@ -1056,7 +1213,7 @@ describe('Primitive measurement evidence', () => {
         expect(
             validateDesktopBrowserFocusedPrimitiveMeasurementEvidence(
                 focusedEvidence,
-                'chromium',
+                "chromium",
                 8,
             ).primitiveCase.record.caseIdentifier,
         ).toBe(8);
@@ -1066,8 +1223,8 @@ describe('Primitive measurement evidence', () => {
                     focusedPrimitiveEvidence: [focusedEvidence],
                     measurementWasm: {
                         byteLength: 1_000_000,
-                        normalizedSha256Hex: 'a'.repeat(64),
-                        rawSha256Hex: 'b'.repeat(64),
+                        normalizedSha256Hex: "a".repeat(64),
+                        rawSha256Hex: "b".repeat(64),
                     },
                     schemaVersion: 1,
                 },
@@ -1090,8 +1247,8 @@ describe('Primitive measurement evidence', () => {
                     focusedPrimitiveEvidence: projectionOwnerEvidence,
                     measurementWasm: {
                         byteLength: 1_000_000,
-                        normalizedSha256Hex: 'a'.repeat(64),
-                        rawSha256Hex: 'b'.repeat(64),
+                        normalizedSha256Hex: "a".repeat(64),
+                        rawSha256Hex: "b".repeat(64),
                     },
                     schemaVersion: 1,
                 },
@@ -1109,8 +1266,8 @@ describe('Primitive measurement evidence', () => {
                     ),
                     measurementWasm: {
                         byteLength: 1_000_000,
-                        normalizedSha256Hex: 'a'.repeat(64),
-                        rawSha256Hex: 'b'.repeat(64),
+                        normalizedSha256Hex: "a".repeat(64),
+                        rawSha256Hex: "b".repeat(64),
                     },
                     schemaVersion: 1,
                 },
@@ -1123,8 +1280,8 @@ describe('Primitive measurement evidence', () => {
                     focusedPrimitiveEvidence: projectionOwnerEvidence,
                     measurementWasm: {
                         byteLength: 1_000_000,
-                        normalizedSha256Hex: 'a'.repeat(64),
-                        rawSha256Hex: 'b'.repeat(64),
+                        normalizedSha256Hex: "a".repeat(64),
+                        rawSha256Hex: "b".repeat(64),
                     },
                     schemaVersion: 1,
                 },
@@ -1135,14 +1292,14 @@ describe('Primitive measurement evidence', () => {
         expect(() =>
             validateDesktopBrowserFocusedPrimitiveMeasurementEvidence(
                 focusedEvidence,
-                'firefox',
+                "firefox",
                 8,
             ),
         ).toThrow(/engine or user agent/u);
         expect(() =>
             validateDesktopBrowserFocusedPrimitiveMeasurementEvidence(
                 focusedEvidence,
-                'chromium',
+                "chromium",
                 7,
             ),
         ).toThrow(/instead of case 7/u);
@@ -1152,7 +1309,7 @@ describe('Primitive measurement evidence', () => {
         expect(() =>
             validateDesktopBrowserFocusedPrimitiveMeasurementEvidence(
                 shrinkingMemory,
-                'chromium',
+                "chromium",
                 8,
             ),
         ).toThrow(/memory shrank/u);
@@ -1164,27 +1321,27 @@ describe('Primitive measurement evidence', () => {
         expect(() =>
             validateDesktopBrowserFocusedPrimitiveMeasurementEvidence(
                 unknownField,
-                'chromium',
+                "chromium",
                 8,
             ),
         ).toThrow(/noncanonical fields/u);
     });
 
-    it('derives the fused radix-51 comparison only from exact native and browser owner sets', () => {
+    it("derives the fused radix-51 comparison only from exact native and browser owner sets", () => {
         const nativeEvidence =
             validateReleaseNativePrimitiveMeasurementEvidence(
                 {
                     primitiveCases:
                         vssFusedRadix51ProjectionOwnerCaseIdentifiers.map(
                             (caseIdentifier) =>
-                                recordFor(caseIdentifier, 'release-native'),
+                                recordFor(caseIdentifier, "release-native"),
                         ),
                     schemaVersion: 1,
                 },
                 false,
                 vssFusedRadix51ProjectionOwnerCaseIdentifiers,
             );
-        const browserEvidence = (['chromium', 'firefox'] as const).flatMap(
+        const browserEvidence = (["chromium", "firefox"] as const).flatMap(
             (browserEngine) =>
                 vssFusedRadix51ProjectionOwnerCaseIdentifiers.map(
                     (caseIdentifier) =>
@@ -1252,7 +1409,7 @@ describe('Primitive measurement evidence', () => {
                               ...evidence.primitiveCase,
                               record: {
                                   ...evidence.primitiveCase.record,
-                                  checksumHex: '0'.repeat(16),
+                                  checksumHex: "0".repeat(16),
                               },
                           },
                       }
@@ -1266,7 +1423,7 @@ describe('Primitive measurement evidence', () => {
         ).toThrow(/differs across native and WASM/u);
     });
 
-    it('makes cleanup batches admissible under the authenticated storage transaction limits', () => {
+    it("makes cleanup batches admissible under the authenticated storage transaction limits", () => {
         const configuration =
             deriveDesktopBrowserAuthenticatedStorageConfiguration(
                 selectedAuthenticatedScratchRecordByteLength,

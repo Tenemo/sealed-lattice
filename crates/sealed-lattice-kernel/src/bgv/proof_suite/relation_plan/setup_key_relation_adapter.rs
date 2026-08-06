@@ -3,9 +3,18 @@ use std::{
     mem::size_of,
 };
 
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+use std::rc::Rc;
+
 use num_traits::ToPrimitive;
 use zeroize::Zeroizing;
 
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+use crate::bgv::setup::{
+    SetupGenerationCompactPublicKeyDevelopmentAuthority,
+    setup_generation_compact_public_key_development_retained_payload_byte_length,
+    with_setup_generation_compact_public_key_development_relation_reentry,
+};
 use crate::{
     bgv::{
         parameters::PLAINTEXT_MODULUS,
@@ -39,15 +48,16 @@ use super::{
     RelationPlanVariant, RelationTreeDescriptor, RelationVerifierSource, SameSecretSourceLayout,
     SuiteModulusReference,
     galois_key_share_adapter::{
-        anchor_full_row, canonical_comparator_column_rows, centered_residue,
-        exact_modular_quotient, exact_negacyclic_product_radix, exact_negacyclic_product_small,
-        half_position, resolve_integer_lift_coefficient, signed_integer_to_base_field,
-        split_rows_match, split_signed_i8_polynomial, split_signed_polynomial,
+        anchor_full_row, canonical_comparator_column_rows, exact_modular_quotient,
+        exact_negacyclic_product_radix, exact_negacyclic_product_small, half_position,
+        resolve_integer_lift_coefficient, signed_integer_to_base_field, split_rows_match,
+        split_signed_i8_polynomial, split_signed_polynomial,
     },
     key_relation::{
         EXACT_INTEGER_LIFT_RADIX, ExactRadixDigitColumnCatalog, MATERIAL_DIGIT_RADIX,
         SplitIntegerVector, TRIT_RADIX, UpperBoundComparatorWitnessLayout,
     },
+    public_key_share::compact_public_key_assignment_source_column_ordinals,
 };
 
 const SAME_SECRET_SOURCE_REPLAY_IDENTITY_DOMAIN: &str =
@@ -58,6 +68,42 @@ const PUBLIC_KEY_SHARE_SOURCE_REPLAY_IDENTITY_DOMAIN: &str =
 enum SetupKeyRelationSourceLayout {
     SameSecret(SameSecretSourceLayout),
     PublicKeyShare(PublicKeyShareSourceLayout),
+}
+
+enum SetupKeyRelationAuthorityAccess {
+    RetainedRegistry(u32),
+    #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+    CompactPublicKeyDevelopment(Rc<SetupGenerationCompactPublicKeyDevelopmentAuthority>),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SetupKeyRelationSourceRequestProfile {
+    CompleteRelation,
+    CompactPublicKeyAssignment,
+}
+
+fn classify_setup_key_relation_source_request_profile(
+    public_key_source_layout: Option<&PublicKeyShareSourceLayout>,
+    relation_plan_variant: &RelationPlanVariant,
+    requested_column_ordinals: &[u32],
+) -> Result<SetupKeyRelationSourceRequestProfile, CommonProofProverError> {
+    let complete_requested_column_ordinals =
+        requested_pre_challenge_source_column_ordinals(relation_plan_variant)?;
+    if requested_column_ordinals == complete_requested_column_ordinals {
+        return Ok(SetupKeyRelationSourceRequestProfile::CompleteRelation);
+    }
+    let Some(public_key_source_layout) = public_key_source_layout else {
+        return Err(CommonProofProverError::InvalidColumn);
+    };
+    let compact_requested_column_ordinals = compact_public_key_assignment_source_column_ordinals(
+        relation_plan_variant,
+        public_key_source_layout,
+    )?;
+    if requested_column_ordinals == compact_requested_column_ordinals {
+        Ok(SetupKeyRelationSourceRequestProfile::CompactPublicKeyAssignment)
+    } else {
+        Err(CommonProofProverError::InvalidColumn)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -231,6 +277,9 @@ fn public_key_share_source_layout_heap_byte_length(
         setup_provider_payload_for_count::<super::key_relation::SplitIntegerVector>(
             source_layout.public_key_share_limbs.len(),
         )?,
+        setup_provider_payload_for_count::<super::key_relation::SplitIntegerVector>(
+            source_layout.public_key_common_reference_limbs.len(),
+        )?,
         setup_provider_payload_for_count::<super::public_key_share::PublicKeyShareLimbSourceLayout>(
             source_layout.ordered_limbs.len(),
         )?,
@@ -384,6 +433,7 @@ fn setup_key_relation_recursive_column_closures(
     relation_plan_variant: &RelationPlanVariant,
     exact_radix_digits_by_column: &ExactRadixDigitColumnCatalog,
     additional_dependencies: &[(u32, u32)],
+    requested_column_ordinals: &[u32],
 ) -> Result<Vec<BTreeSet<u32>>, CommonProofProverError> {
     let mut dependencies =
         setup_key_relation_column_dependencies(relation_plan_variant, exact_radix_digits_by_column);
@@ -394,8 +444,9 @@ fn setup_key_relation_recursive_column_closures(
             *source_column_ordinal,
         );
     }
-    requested_pre_challenge_source_column_ordinals(relation_plan_variant)?
-        .into_iter()
+    requested_column_ordinals
+        .iter()
+        .copied()
         .map(|requested_column| {
             let mut pending = vec![requested_column];
             let mut visited = BTreeSet::new();
@@ -442,8 +493,45 @@ pub(super) fn setup_key_relation_derivation_transient_byte_length_with_dependenc
     ring_degree: u64,
     additional_dependencies: &[(u32, u32)],
 ) -> Result<u64, CommonProofProverError> {
+    let requested_column_ordinals =
+        requested_pre_challenge_source_column_ordinals(relation_plan_variant)?;
+    setup_key_relation_derivation_transient_byte_length_for_requested_columns(
+        relation_plan_variant,
+        exact_radix_digits_by_column,
+        public_key_quotient_columns,
+        anchor_quotient_columns,
+        ring_degree,
+        additional_dependencies,
+        &requested_column_ordinals,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn setup_key_relation_derivation_transient_byte_length_for_requested_columns(
+    relation_plan_variant: &RelationPlanVariant,
+    exact_radix_digits_by_column: &ExactRadixDigitColumnCatalog,
+    public_key_quotient_columns: &BTreeSet<u32>,
+    anchor_quotient_columns: &BTreeSet<u32>,
+    ring_degree: u64,
+    additional_dependencies: &[(u32, u32)],
+    requested_column_ordinals: &[u32],
+) -> Result<u64, CommonProofProverError> {
     let trace_domain_size = relation_plan_variant.trace_domain_size();
+    let complete_requested_column_ordinals =
+        requested_pre_challenge_source_column_ordinals(relation_plan_variant)?;
     if trace_domain_size.checked_mul(2) != Some(ring_degree) {
+        return Err(CommonProofProverError::InvalidColumn);
+    }
+    if requested_column_ordinals.is_empty()
+        || requested_column_ordinals
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+        || requested_column_ordinals.iter().any(|column_ordinal| {
+            complete_requested_column_ordinals
+                .binary_search(column_ordinal)
+                .is_err()
+        })
+    {
         return Err(CommonProofProverError::InvalidColumn);
     }
     let i128_byte_length =
@@ -510,6 +598,7 @@ pub(super) fn setup_key_relation_derivation_transient_byte_length_with_dependenc
         relation_plan_variant,
         exact_radix_digits_by_column,
         additional_dependencies,
+        requested_column_ordinals,
     )?;
     let mut maximum_cache_and_derivation_byte_length = 0_u64;
     for closure in &recursive_column_closures {
@@ -568,6 +657,7 @@ pub(super) fn setup_key_relation_derivation_transient_byte_length_with_dependenc
 struct SetupKeyRelationSourceProviderMemoryAccountingInput<'input> {
     relation_plan_variant: &'input RelationPlanVariant,
     relation_context: &'input RelationPlanCheckContext,
+    requested_column_ordinals: &'input [u32],
     ring_degree: u64,
     canonical_application_statement_byte_length: usize,
     source_layout_heap_byte_length: u64,
@@ -583,6 +673,7 @@ fn finish_setup_key_relation_source_provider_memory_accounting(
     let SetupKeyRelationSourceProviderMemoryAccountingInput {
         relation_plan_variant,
         relation_context,
+        requested_column_ordinals,
         ring_degree,
         canonical_application_statement_byte_length,
         source_layout_heap_byte_length,
@@ -591,13 +682,24 @@ fn finish_setup_key_relation_source_provider_memory_accounting(
         anchor_quotient_columns,
         additional_dependencies,
     } = input;
+    let complete_requested_column_ordinals =
+        requested_pre_challenge_source_column_ordinals(relation_plan_variant)?;
+    let requested_column_count = requested_column_ordinals.len();
     if canonical_application_statement_byte_length == 0
+        || requested_column_count == 0
+        || requested_column_count > relation_plan_variant.ordered_columns().len()
+        || requested_column_ordinals
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+        || requested_column_ordinals.iter().any(|column_ordinal| {
+            complete_requested_column_ordinals
+                .binary_search(column_ordinal)
+                .is_err()
+        })
         || relation_plan_variant.trace_domain_size().checked_mul(2) != Some(ring_degree)
     {
         return Err(CommonProofProverError::InvalidColumn);
     }
-    let requested_column_count =
-        requested_pre_challenge_source_column_ordinals(relation_plan_variant)?.len();
     let bound_material_tree_count = relation_plan_variant
         .ordered_trees()
         .iter()
@@ -633,13 +735,14 @@ fn finish_setup_key_relation_source_provider_memory_accounting(
         u64::try_from(size_of::<i128>()).map_err(|_| CommonProofProverError::CountOverflow)?,
     )?;
     let additional_loading_transient_byte_length =
-        setup_key_relation_derivation_transient_byte_length_with_dependencies(
+        setup_key_relation_derivation_transient_byte_length_for_requested_columns(
             relation_plan_variant,
             exact_radix_digits_by_column,
             &public_key_quotient_columns,
             &anchor_quotient_columns,
             ring_degree,
             &additional_dependencies,
+            requested_column_ordinals,
         )?;
     let maximum_returned_source_polynomial_byte_length = checked_setup_provider_multiply(
         relation_plan_variant.trace_domain_size(),
@@ -661,6 +764,8 @@ pub(crate) fn same_secret_source_provider_memory_accounting(
     source_layout: &SameSecretSourceLayout,
     canonical_application_statement_byte_length: usize,
 ) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
+    let requested_column_ordinals =
+        requested_pre_challenge_source_column_ordinals(relation_plan_variant)?;
     let anchor_quotient_columns = source_layout
         .ordered_anchors
         .iter()
@@ -670,6 +775,7 @@ pub(crate) fn same_secret_source_provider_memory_accounting(
         SetupKeyRelationSourceProviderMemoryAccountingInput {
             relation_plan_variant,
             relation_context,
+            requested_column_ordinals: &requested_column_ordinals,
             ring_degree,
             canonical_application_statement_byte_length,
             source_layout_heap_byte_length: same_secret_source_layout_heap_byte_length(
@@ -690,6 +796,46 @@ pub(crate) fn public_key_share_source_provider_memory_accounting(
     source_layout: &PublicKeyShareSourceLayout,
     canonical_application_statement_byte_length: usize,
 ) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
+    let requested_column_ordinals =
+        requested_pre_challenge_source_column_ordinals(relation_plan_variant)?;
+    public_key_share_source_provider_memory_accounting_for_requested_columns(
+        relation_plan_variant,
+        relation_context,
+        ring_degree,
+        source_layout,
+        canonical_application_statement_byte_length,
+        &requested_column_ordinals,
+    )
+}
+
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+pub(crate) fn compact_public_key_assignment_source_provider_memory_accounting(
+    relation_plan_variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
+    ring_degree: u64,
+    source_layout: &PublicKeyShareSourceLayout,
+    canonical_application_statement_byte_length: usize,
+) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
+    let requested_column_ordinals =
+        compact_public_key_assignment_source_column_ordinals(relation_plan_variant, source_layout)?;
+    public_key_share_source_provider_memory_accounting_for_requested_columns(
+        relation_plan_variant,
+        relation_context,
+        ring_degree,
+        source_layout,
+        canonical_application_statement_byte_length,
+        &requested_column_ordinals,
+    )
+}
+
+fn public_key_share_source_provider_memory_accounting_for_requested_columns(
+    relation_plan_variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
+    ring_degree: u64,
+    source_layout: &PublicKeyShareSourceLayout,
+    canonical_application_statement_byte_length: usize,
+    requested_column_ordinals: &[u32],
+) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
     let public_key_quotient_columns = source_layout
         .ordered_limbs
         .iter()
@@ -704,6 +850,7 @@ pub(crate) fn public_key_share_source_provider_memory_accounting(
         SetupKeyRelationSourceProviderMemoryAccountingInput {
             relation_plan_variant,
             relation_context,
+            requested_column_ordinals,
             ring_degree,
             canonical_application_statement_byte_length,
             source_layout_heap_byte_length: public_key_share_source_layout_heap_byte_length(
@@ -725,7 +872,13 @@ fn add_setup_authority_memory_accounting(
         &SetupGenerationAuthorityHandle::from_identifier(authority_identifier),
     )
     .map_err(|_| CommonProofProverError::InvalidInput)?;
-    let authority_byte_length = authority.active_payload_byte_length();
+    add_setup_authority_payload_memory_accounting(provider, authority.active_payload_byte_length())
+}
+
+fn add_setup_authority_payload_memory_accounting(
+    provider: CommonProofSourceProviderMemoryAccounting,
+    authority_byte_length: u64,
+) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
     Ok(CommonProofSourceProviderMemoryAccounting::new(
         checked_setup_provider_add(
             provider.loading_persistent_resident_byte_length(),
@@ -745,7 +898,7 @@ fn add_setup_authority_memory_accounting(
 /// relation layout only; every secret or authenticated material read reenters
 /// the browser-owned setup authority.
 pub(crate) struct SetupKeyRelationSourcePolynomialAdapter {
-    authority_identifier: u32,
+    authority_access: SetupKeyRelationAuthorityAccess,
     family: SetupKeyRelationProofFamily,
     prepared_attempt: PreparedActionProofAttemptSource,
     canonical_application_statement_bytes: Vec<u8>,
@@ -761,6 +914,7 @@ pub(crate) struct SetupKeyRelationSourcePolynomialAdapter {
     relation_context: RelationPlanCheckContext,
     ring_degree: usize,
     source_layout: SetupKeyRelationSourceLayout,
+    request_profile: SetupKeyRelationSourceRequestProfile,
     requested_column_ordinals: Box<[u32]>,
     bound_material_tree_sources: Box<[BoundMaterialTreeSource]>,
     next_source_index: usize,
@@ -813,6 +967,9 @@ impl SetupKeyRelationSourcePolynomialAdapter {
         ring_degree: usize,
         source_layout: SameSecretSourceLayout,
     ) -> Result<Self, CommonProofProverError> {
+        let requested_column_ordinals =
+            requested_pre_challenge_source_column_ordinals(&relation_plan_variant)?
+                .into_boxed_slice();
         Self::new(
             source,
             relation_plan,
@@ -820,6 +977,7 @@ impl SetupKeyRelationSourcePolynomialAdapter {
             relation_context,
             ring_degree,
             SetupKeyRelationSourceLayout::SameSecret(source_layout),
+            requested_column_ordinals,
         )
     }
 
@@ -832,6 +990,56 @@ impl SetupKeyRelationSourcePolynomialAdapter {
         ring_degree: usize,
         source_layout: PublicKeyShareSourceLayout,
     ) -> Result<Self, CommonProofProverError> {
+        let requested_column_ordinals =
+            requested_pre_challenge_source_column_ordinals(&relation_plan_variant)?
+                .into_boxed_slice();
+        Self::new_public_key_share_for_requested_columns(
+            source,
+            relation_plan,
+            relation_plan_variant,
+            relation_context,
+            ring_degree,
+            source_layout,
+            requested_column_ordinals,
+        )
+    }
+
+    #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_compact_public_key_assignment(
+        source: &SetupGenerationKeyRelationSource<'_, '_>,
+        relation_plan: &CommonProofRelationPlanCapability,
+        relation_plan_variant: RelationPlanVariant,
+        relation_context: RelationPlanCheckContext,
+        ring_degree: usize,
+        source_layout: PublicKeyShareSourceLayout,
+    ) -> Result<Self, CommonProofProverError> {
+        let requested_column_ordinals = compact_public_key_assignment_source_column_ordinals(
+            &relation_plan_variant,
+            &source_layout,
+        )?
+        .into_boxed_slice();
+        Self::new_public_key_share_for_requested_columns(
+            source,
+            relation_plan,
+            relation_plan_variant,
+            relation_context,
+            ring_degree,
+            source_layout,
+            requested_column_ordinals,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_public_key_share_for_requested_columns(
+        source: &SetupGenerationKeyRelationSource<'_, '_>,
+        relation_plan: &CommonProofRelationPlanCapability,
+        relation_plan_variant: RelationPlanVariant,
+        relation_context: RelationPlanCheckContext,
+        ring_degree: usize,
+        source_layout: PublicKeyShareSourceLayout,
+        requested_column_ordinals: Box<[u32]>,
+    ) -> Result<Self, CommonProofProverError> {
         Self::new(
             source,
             relation_plan,
@@ -839,6 +1047,7 @@ impl SetupKeyRelationSourcePolynomialAdapter {
             relation_context,
             ring_degree,
             SetupKeyRelationSourceLayout::PublicKeyShare(source_layout),
+            requested_column_ordinals,
         )
     }
 
@@ -850,6 +1059,7 @@ impl SetupKeyRelationSourcePolynomialAdapter {
         relation_context: RelationPlanCheckContext,
         ring_degree: usize,
         source_layout: SetupKeyRelationSourceLayout,
+        requested_column_ordinals: Box<[u32]>,
     ) -> Result<Self, CommonProofProverError> {
         if relation_plan_variant.schedule_position().is_some()
             || relation_plan_variant.top_count().is_some()
@@ -880,9 +1090,14 @@ impl SetupKeyRelationSourcePolynomialAdapter {
             None,
             None,
         );
-        let requested_column_ordinals =
-            requested_pre_challenge_source_column_ordinals(&relation_plan_variant)?
-                .into_boxed_slice();
+        let request_profile = classify_setup_key_relation_source_request_profile(
+            match &source_layout {
+                SetupKeyRelationSourceLayout::SameSecret(_) => None,
+                SetupKeyRelationSourceLayout::PublicKeyShare(source_layout) => Some(source_layout),
+            },
+            &relation_plan_variant,
+            &requested_column_ordinals,
+        )?;
         let bound_material_tree_sources = match &source_layout {
             SetupKeyRelationSourceLayout::SameSecret(layout) => relation_plan_variant
                 .ordered_trees()
@@ -914,8 +1129,18 @@ impl SetupKeyRelationSourcePolynomialAdapter {
                 .into_boxed_slice(),
             SetupKeyRelationSourceLayout::PublicKeyShare(_) => Box::new([]),
         };
+        #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+        let authority_access = source
+            .compact_public_key_development_authority()
+            .map(SetupKeyRelationAuthorityAccess::CompactPublicKeyDevelopment)
+            .unwrap_or_else(|| {
+                SetupKeyRelationAuthorityAccess::RetainedRegistry(source.authority_identifier())
+            });
+        #[cfg(not(any(test, feature = "primitive-measurement-evidence")))]
+        let authority_access =
+            SetupKeyRelationAuthorityAccess::RetainedRegistry(source.authority_identifier());
         Ok(Self {
-            authority_identifier: source.authority_identifier(),
+            authority_access,
             family: source.family(),
             prepared_attempt: *source.prepared_attempt(),
             canonical_application_statement_bytes: source
@@ -933,6 +1158,7 @@ impl SetupKeyRelationSourcePolynomialAdapter {
             relation_context,
             ring_degree,
             source_layout,
+            request_profile,
             requested_column_ordinals,
             bound_material_tree_sources,
             next_source_index: 0,
@@ -954,6 +1180,52 @@ impl SetupKeyRelationSourcePolynomialAdapter {
             self.participant_identity,
             self.roster_position,
         )
+    }
+
+    #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+    pub(crate) fn compact_public_key_assignment_request_context(
+        &self,
+    ) -> Result<CommonProofSourcePolynomialRequestContext, CommonProofProverError> {
+        if self.family != SetupKeyRelationProofFamily::PublicKeyShare
+            || self.request_profile
+                != SetupKeyRelationSourceRequestProfile::CompactPublicKeyAssignment
+        {
+            return Err(CommonProofProverError::InvalidInput);
+        }
+        Ok(self.request_context)
+    }
+
+    #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+    pub(crate) fn finish_compact_public_key_assignment_sources(
+        self,
+    ) -> Result<(), CommonProofProverError> {
+        let independently_expected_column_ordinals =
+            self.independently_expected_requested_column_ordinals()?;
+        let authority_is_exclusively_owned = match &self.authority_access {
+            SetupKeyRelationAuthorityAccess::CompactPublicKeyDevelopment(authority) => {
+                Rc::strong_count(authority) == 1
+            }
+            SetupKeyRelationAuthorityAccess::RetainedRegistry(_) => false,
+        };
+        if self.family != SetupKeyRelationProofFamily::PublicKeyShare
+            || self.request_profile
+                != SetupKeyRelationSourceRequestProfile::CompactPublicKeyAssignment
+            || self.requested_column_ordinals.as_ref()
+                != independently_expected_column_ordinals.as_slice()
+            || self.next_source_index != self.requested_column_ordinals.len()
+            || !self.source_polynomials_finished
+            || self.cached_quotient.is_some()
+            || !self.bound_material_tree_sources.is_empty()
+            || self.next_leaf_salt_source_ordinal != 0
+            || self.next_leaf_salt_index != 0
+            || self.leaf_salts_finished
+            || !authority_is_exclusively_owned
+        {
+            return Err(CommonProofProverError::InvalidInput);
+        }
+        // Consuming `self` now drops the sole retained standalone authority.
+        // Later assignment, row-source, and proof phases cannot reenter it.
+        Ok(())
     }
 
     fn replay_identity(
@@ -982,12 +1254,32 @@ impl SetupKeyRelationSourcePolynomialAdapter {
         ))
     }
 
+    fn independently_expected_requested_column_ordinals(
+        &self,
+    ) -> Result<Vec<u32>, CommonProofProverError> {
+        match (&self.source_layout, self.request_profile) {
+            (_, SetupKeyRelationSourceRequestProfile::CompleteRelation) => {
+                requested_pre_challenge_source_column_ordinals(&self.relation_plan_variant)
+            }
+            (
+                SetupKeyRelationSourceLayout::PublicKeyShare(source_layout),
+                SetupKeyRelationSourceRequestProfile::CompactPublicKeyAssignment,
+            ) => compact_public_key_assignment_source_column_ordinals(
+                &self.relation_plan_variant,
+                source_layout,
+            )
+            .map_err(CommonProofProverError::Relation),
+            (
+                SetupKeyRelationSourceLayout::SameSecret(_),
+                SetupKeyRelationSourceRequestProfile::CompactPublicKeyAssignment,
+            ) => Err(CommonProofProverError::InvalidInput),
+        }
+    }
+
     fn derive_source_polynomial(
         &mut self,
         column_ordinal: u32,
     ) -> Result<CommonProofSourcePolynomial, CommonProofProverError> {
-        let authority_handle =
-            SetupGenerationAuthorityHandle::from_identifier(self.authority_identifier);
         let application = SetupGenerationKeyRelationApplication::from_runtime_binding(
             self.family,
             self.prepared_attempt,
@@ -1002,121 +1294,135 @@ impl SetupKeyRelationSourcePolynomialAdapter {
         let ring_degree = self.ring_degree;
         let source_layout = &self.source_layout;
         let cached_quotient = &mut self.cached_quotient;
-        let polynomial = with_setup_generation_key_relation::<_, RefusalReason>(
-            &authority_handle,
-            &application,
-            |source| {
-                if let SetupKeyRelationSourceLayout::SameSecret(layout) = source_layout
-                    && let Some((material_ordinal, physical_column_ordinal)) =
-                        bound_material_column(layout, column_ordinal)
-                {
-                    let coefficients = source
-                        .degree_zero_material(material_ordinal)?
-                        .owned_authenticated_source()
-                        .regenerate_masked_coefficients(physical_column_ordinal)
-                        .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
-                    return Ok(
-                        CommonProofSourcePolynomial::from_protected_base_coefficients(coefficients),
-                    );
-                }
-                if let SetupKeyRelationSourceLayout::PublicKeyShare(layout) = source_layout
-                    && let Some((limb_ordinal, half_ordinal)) =
-                        public_key_bound_half(layout, column_ordinal)
-                {
-                    let coefficients = source
-                        .public_key_share()?
-                        .ordered_limb_coefficients()
-                        .get(limb_ordinal)
-                        .ok_or(RefusalReason::WrongTypeOrLength)?;
-                    if coefficients.len() != ring_degree || coefficients.len() % 2 != 0 {
-                        return Err(RefusalReason::WrongTypeOrLength);
-                    }
-                    let half_size = coefficients.len() / 2;
-                    let start = half_ordinal
-                        .checked_mul(half_size)
-                        .ok_or(RefusalReason::OutsideSupportedProfile)?;
-                    let end = start
-                        .checked_add(half_size)
-                        .ok_or(RefusalReason::OutsideSupportedProfile)?;
-                    let half = coefficients
-                        .get(start..end)
-                        .ok_or(RefusalReason::WrongTypeOrLength)?;
-                    let mut field_values = half
-                        .iter()
-                        .copied()
-                        .map(ProofBaseFieldElement::from_canonical)
-                        .collect::<Result<Vec<_>, _>>()
-                        .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
-                    ProofEvaluationDomain::new_subgroup(half_size)
-                        .map_err(|_| RefusalReason::InvalidArithmeticRelation)?
-                        .interpolate_base_polynomial_in_place(&mut field_values)
-                        .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
-                    return Ok(
-                        CommonProofSourcePolynomial::from_protected_base_coefficients(
-                            Zeroizing::new(field_values),
-                        ),
-                    );
-                }
-                let signed_rows = match source_layout {
-                    SetupKeyRelationSourceLayout::SameSecret(layout) => {
-                        let mut derivation = SameSecretColumnDerivation {
-                            source: &source,
-                            relation_plan_variant,
-                            relation_context,
-                            ring_degree,
-                            source_layout: layout,
-                            cached_rows: ExactKeyRelationDerivedRowCache::new(
-                                relation_plan_variant.ordered_columns().len(),
-                            ),
-                            active_columns: ExactKeyRelationActiveColumnSet::new(
-                                relation_plan_variant.ordered_columns().len(),
-                            ),
-                            cached_quotient,
-                        };
-                        derivation.derive_rows(column_ordinal)?
-                    }
-                    SetupKeyRelationSourceLayout::PublicKeyShare(layout) => {
-                        let mut derivation = PublicKeyShareColumnDerivation {
-                            source: &source,
-                            relation_plan_variant,
-                            relation_context,
-                            ring_degree,
-                            source_layout: layout,
-                            cached_rows: ExactKeyRelationDerivedRowCache::new(
-                                relation_plan_variant.ordered_columns().len(),
-                            ),
-                            active_columns: ExactKeyRelationActiveColumnSet::new(
-                                relation_plan_variant.ordered_columns().len(),
-                            ),
-                            cached_quotient,
-                        };
-                        derivation.derive_rows(column_ordinal)?
-                    }
-                };
-                let mut field_values = Zeroizing::new(
-                    signed_rows
-                        .iter()
-                        .copied()
-                        .map(signed_integer_to_base_field)
-                        .collect::<Result<Vec<_>, _>>()?,
+        let derive_polynomial = |source: SetupGenerationKeyRelationSource<'_, '_>| {
+            if let SetupKeyRelationSourceLayout::SameSecret(layout) = source_layout
+                && let Some((material_ordinal, physical_column_ordinal)) =
+                    bound_material_column(layout, column_ordinal)
+            {
+                let coefficients = source
+                    .degree_zero_material(material_ordinal)?
+                    .owned_authenticated_source()
+                    .regenerate_masked_coefficients(physical_column_ordinal)
+                    .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
+                return Ok(
+                    CommonProofSourcePolynomial::from_protected_base_coefficients(coefficients),
                 );
-                relation_plan_variant
-                    .ordered_columns()
-                    .get(
-                        usize::try_from(column_ordinal)
-                            .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
-                    )
+            }
+            if let SetupKeyRelationSourceLayout::PublicKeyShare(layout) = source_layout
+                && let Some((limb_ordinal, half_ordinal)) =
+                    public_key_bound_half(layout, column_ordinal)
+            {
+                let coefficients = source
+                    .public_key_share()?
+                    .ordered_limb_coefficients()
+                    .get(limb_ordinal)
                     .ok_or(RefusalReason::WrongTypeOrLength)?;
-                ProofEvaluationDomain::new_subgroup(
-                    usize::try_from(relation_plan_variant.trace_domain_size())
+                if coefficients.len() != ring_degree || coefficients.len() % 2 != 0 {
+                    return Err(RefusalReason::WrongTypeOrLength);
+                }
+                let half_size = coefficients.len() / 2;
+                let start = half_ordinal
+                    .checked_mul(half_size)
+                    .ok_or(RefusalReason::OutsideSupportedProfile)?;
+                let end = start
+                    .checked_add(half_size)
+                    .ok_or(RefusalReason::OutsideSupportedProfile)?;
+                let half = coefficients
+                    .get(start..end)
+                    .ok_or(RefusalReason::WrongTypeOrLength)?;
+                let mut field_values = half
+                    .iter()
+                    .copied()
+                    .map(ProofBaseFieldElement::from_canonical)
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
+                ProofEvaluationDomain::new_subgroup(half_size)
+                    .map_err(|_| RefusalReason::InvalidArithmeticRelation)?
+                    .interpolate_base_polynomial_in_place(&mut field_values)
+                    .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
+                return Ok(
+                    CommonProofSourcePolynomial::from_protected_base_coefficients(Zeroizing::new(
+                        field_values,
+                    )),
+                );
+            }
+            let signed_rows = match source_layout {
+                SetupKeyRelationSourceLayout::SameSecret(layout) => {
+                    let mut derivation = SameSecretColumnDerivation {
+                        source: &source,
+                        relation_plan_variant,
+                        relation_context,
+                        ring_degree,
+                        source_layout: layout,
+                        cached_rows: ExactKeyRelationDerivedRowCache::new(
+                            relation_plan_variant.ordered_columns().len(),
+                        ),
+                        active_columns: ExactKeyRelationActiveColumnSet::new(
+                            relation_plan_variant.ordered_columns().len(),
+                        ),
+                        cached_quotient,
+                    };
+                    derivation.derive_rows(column_ordinal)?
+                }
+                SetupKeyRelationSourceLayout::PublicKeyShare(layout) => {
+                    let mut derivation = PublicKeyShareColumnDerivation {
+                        source: &source,
+                        relation_plan_variant,
+                        relation_context,
+                        ring_degree,
+                        source_layout: layout,
+                        cached_rows: ExactKeyRelationDerivedRowCache::new(
+                            relation_plan_variant.ordered_columns().len(),
+                        ),
+                        active_columns: ExactKeyRelationActiveColumnSet::new(
+                            relation_plan_variant.ordered_columns().len(),
+                        ),
+                        cached_quotient,
+                    };
+                    derivation.derive_rows(column_ordinal)?
+                }
+            };
+            let mut field_values = Zeroizing::new(
+                signed_rows
+                    .iter()
+                    .copied()
+                    .map(signed_integer_to_base_field)
+                    .collect::<Result<Vec<_>, _>>()?,
+            );
+            relation_plan_variant
+                .ordered_columns()
+                .get(
+                    usize::try_from(column_ordinal)
                         .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
                 )
-                .map_err(|_| RefusalReason::InvalidArithmeticRelation)?
-                .interpolate_base_polynomial_in_place(&mut field_values)
-                .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
-                Ok(CommonProofSourcePolynomial::from_protected_base_coefficients(field_values))
-            },
-        )
+                .ok_or(RefusalReason::WrongTypeOrLength)?;
+            ProofEvaluationDomain::new_subgroup(
+                usize::try_from(relation_plan_variant.trace_domain_size())
+                    .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
+            )
+            .map_err(|_| RefusalReason::InvalidArithmeticRelation)?
+            .interpolate_base_polynomial_in_place(&mut field_values)
+            .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
+            Ok(CommonProofSourcePolynomial::from_protected_base_coefficients(field_values))
+        };
+        let polynomial = match &self.authority_access {
+            SetupKeyRelationAuthorityAccess::RetainedRegistry(authority_identifier) => {
+                let authority_handle =
+                    SetupGenerationAuthorityHandle::from_identifier(*authority_identifier);
+                with_setup_generation_key_relation::<_, RefusalReason>(
+                    &authority_handle,
+                    &application,
+                    derive_polynomial,
+                )
+            }
+            #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+            SetupKeyRelationAuthorityAccess::CompactPublicKeyDevelopment(authority) => {
+                with_setup_generation_compact_public_key_development_relation_reentry::<
+                    _,
+                    RefusalReason,
+                >(authority, &application, derive_polynomial)
+            }
+        }
         .map_err(|_| CommonProofProverError::InvalidColumn)?;
         Ok(polynomial)
     }
@@ -1138,20 +1444,35 @@ impl CommonProofSourcePolynomialProvider for SetupKeyRelationSourcePolynomialAda
                 )?
             }
             SetupKeyRelationSourceLayout::PublicKeyShare(source_layout) => {
-                public_key_share_source_provider_memory_accounting(
-                    &self.relation_plan_variant,
-                    &self.relation_context,
-                    u64::try_from(self.ring_degree)
-                        .map_err(|_| CommonProofProverError::CountOverflow)?,
-                    source_layout,
-                    self.canonical_application_statement_bytes.len(),
-                )?
+                let ring_degree = u64::try_from(self.ring_degree)
+                    .map_err(|_| CommonProofProverError::CountOverflow)?;
+                match self.request_profile {
+                    SetupKeyRelationSourceRequestProfile::CompleteRelation => {
+                        public_key_share_source_provider_memory_accounting(
+                            &self.relation_plan_variant,
+                            &self.relation_context,
+                            ring_degree,
+                            source_layout,
+                            self.canonical_application_statement_bytes.len(),
+                        )?
+                    }
+                    SetupKeyRelationSourceRequestProfile::CompactPublicKeyAssignment => {
+                        public_key_share_source_provider_memory_accounting_for_requested_columns(
+                            &self.relation_plan_variant,
+                            &self.relation_context,
+                            ring_degree,
+                            source_layout,
+                            self.canonical_application_statement_bytes.len(),
+                            &self.requested_column_ordinals,
+                        )?
+                    }
+                }
             }
         };
-        if setup_provider_payload_for_count::<u32>(self.requested_column_ordinals.len())?
-            != setup_provider_payload_for_count::<u32>(
-                requested_pre_challenge_source_column_ordinals(&self.relation_plan_variant)?.len(),
-            )?
+        if self.requested_column_ordinals.as_ref()
+            != self
+                .independently_expected_requested_column_ordinals()?
+                .as_slice()
             || setup_provider_payload_for_count::<BoundMaterialTreeSource>(
                 self.bound_material_tree_sources.len(),
             )? != setup_provider_payload_for_count::<BoundMaterialTreeSource>(
@@ -1172,7 +1493,21 @@ impl CommonProofSourcePolynomialProvider for SetupKeyRelationSourcePolynomialAda
         {
             return Err(CommonProofProverError::InvalidColumn);
         }
-        add_setup_authority_memory_accounting(base, self.authority_identifier)
+        match &self.authority_access {
+            SetupKeyRelationAuthorityAccess::RetainedRegistry(authority_identifier) => {
+                add_setup_authority_memory_accounting(base, *authority_identifier)
+            }
+            #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+            SetupKeyRelationAuthorityAccess::CompactPublicKeyDevelopment(authority) => {
+                add_setup_authority_payload_memory_accounting(
+                    base,
+                    setup_generation_compact_public_key_development_retained_payload_byte_length(
+                        authority,
+                    )
+                    .map_err(|_| CommonProofProverError::InvalidInput)?,
+                )
+            }
+        }
     }
 
     fn poll_source_polynomial(
@@ -1260,8 +1595,17 @@ impl CommonProofSourcePolynomialProvider for SetupKeyRelationSourcePolynomialAda
             .get(self.next_leaf_salt_source_ordinal)
             .copied()
             .ok_or(CommonProofProverError::InvalidTree)?;
+        let authority_identifier = match &self.authority_access {
+            SetupKeyRelationAuthorityAccess::RetainedRegistry(authority_identifier) => {
+                *authority_identifier
+            }
+            #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+            SetupKeyRelationAuthorityAccess::CompactPublicKeyDevelopment(_) => {
+                return Err(CommonProofProverError::InvalidTree);
+            }
+        };
         let authority_handle =
-            SetupGenerationAuthorityHandle::from_identifier(self.authority_identifier);
+            SetupGenerationAuthorityHandle::from_identifier(authority_identifier);
         let application = self.application();
         let leaf_index = self.next_leaf_salt_index;
         let salt_and_leaf_count = with_setup_generation_key_relation::<_, RefusalReason>(
@@ -2453,7 +2797,7 @@ impl PublicKeyShareColumnDerivation<'_, '_, '_, '_> {
         let product = exact_negacyclic_product_radix(
             &common_reference
                 .into_iter()
-                .map(|value| centered_residue(value, modulus))
+                .map(i128::from)
                 .collect::<Vec<_>>(),
             &secret,
         )?;
@@ -2862,6 +3206,182 @@ fn setup_verifier_sequence(
 }
 
 #[cfg(test)]
+mod compact_source_request_profile_tests {
+    use super::*;
+    use crate::{
+        bgv::{
+            parameters::POLYNOMIAL_DEGREE,
+            proof_suite::{
+                relation_plan::compile_public_key_share_relation_with_source_layout,
+                selected_public_key_share_relation_plan_input,
+                selected_relation_plan_check_context,
+            },
+        },
+        foundation::ProofApplicationSlotCeilings,
+    };
+
+    fn selected_compact_request_fixture() -> (
+        RelationPlanVariant,
+        RelationPlanCheckContext,
+        PublicKeyShareSourceLayout,
+        Vec<u32>,
+    ) {
+        let input = selected_public_key_share_relation_plan_input()
+            .expect("selected public-key relation input");
+        let relation_context = selected_relation_plan_check_context(
+            ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        .expect("selected public-key relation context");
+        let compiled =
+            compile_public_key_share_relation_with_source_layout(&input, &relation_context)
+                .expect("selected public-key relation compiles");
+        let relation_plan_variant = compiled
+            .relation_plan
+            .select_variant(None, None)
+            .expect("selected public-key variant")
+            .clone();
+        let requested_column_ordinals = compact_public_key_assignment_source_column_ordinals(
+            &relation_plan_variant,
+            &compiled.source_layout,
+        )
+        .expect("compact authenticated source sequence derives");
+        let independently_cataloged_column_ordinals =
+            super::super::compact_ring_vector::compact_public_key_authenticated_source_column_ordinals(
+                &input,
+                &relation_plan_variant,
+                &compiled.source_layout,
+            )
+            .expect("compact assignment catalog source sequence derives");
+        assert_eq!(
+            requested_column_ordinals,
+            independently_cataloged_column_ordinals,
+        );
+        (
+            relation_plan_variant,
+            relation_context,
+            compiled.source_layout,
+            requested_column_ordinals,
+        )
+    }
+
+    #[test]
+    fn compact_public_key_provider_profile_accounts_only_the_exact_source_sequence() {
+        let (relation_plan_variant, relation_context, source_layout, requested_column_ordinals) =
+            selected_compact_request_fixture();
+        let complete_requested_column_ordinals =
+            requested_pre_challenge_source_column_ordinals(&relation_plan_variant)
+                .expect("complete source sequence derives");
+        assert_eq!(complete_requested_column_ordinals.len(), 3_302);
+        assert_eq!(requested_column_ordinals.len(), 202);
+        assert!(
+            requested_column_ordinals
+                .windows(2)
+                .all(|pair| pair[0] < pair[1])
+        );
+        assert!(requested_column_ordinals.iter().all(|column_ordinal| {
+            complete_requested_column_ordinals
+                .binary_search(column_ordinal)
+                .is_ok()
+        }));
+        assert_eq!(
+            classify_setup_key_relation_source_request_profile(
+                Some(&source_layout),
+                &relation_plan_variant,
+                &complete_requested_column_ordinals,
+            )
+            .expect("complete request profile classifies"),
+            SetupKeyRelationSourceRequestProfile::CompleteRelation,
+        );
+        assert_eq!(
+            classify_setup_key_relation_source_request_profile(
+                Some(&source_layout),
+                &relation_plan_variant,
+                &requested_column_ordinals,
+            )
+            .expect("compact request profile classifies"),
+            SetupKeyRelationSourceRequestProfile::CompactPublicKeyAssignment,
+        );
+
+        let complete_accounting = public_key_share_source_provider_memory_accounting(
+            &relation_plan_variant,
+            &relation_context,
+            u64::try_from(POLYNOMIAL_DEGREE).expect("ring degree fits u64"),
+            &source_layout,
+            128,
+        )
+        .expect("complete provider accounting derives");
+        let compact_accounting =
+            public_key_share_source_provider_memory_accounting_for_requested_columns(
+                &relation_plan_variant,
+                &relation_context,
+                u64::try_from(POLYNOMIAL_DEGREE).expect("ring degree fits u64"),
+                &source_layout,
+                128,
+                &requested_column_ordinals,
+            )
+            .expect("compact provider accounting derives");
+        let request_vector_payload_reduction = u64::try_from(
+            (complete_requested_column_ordinals.len() - requested_column_ordinals.len())
+                * core::mem::size_of::<u32>(),
+        )
+        .expect("request payload reduction fits u64");
+        assert_eq!(
+            complete_accounting.loading_persistent_resident_byte_length()
+                - compact_accounting.loading_persistent_resident_byte_length(),
+            request_vector_payload_reduction,
+        );
+        assert_eq!(
+            complete_accounting.post_source_polynomial_finish_persistent_resident_byte_length()
+                - compact_accounting
+                    .post_source_polynomial_finish_persistent_resident_byte_length(),
+            request_vector_payload_reduction,
+        );
+        assert!(
+            compact_accounting.additional_loading_transient_byte_length()
+                <= complete_accounting.additional_loading_transient_byte_length()
+        );
+        assert_eq!(
+            compact_accounting.maximum_returned_source_polynomial_byte_length(),
+            complete_accounting.maximum_returned_source_polynomial_byte_length(),
+        );
+    }
+
+    #[test]
+    fn compact_public_key_provider_profile_refuses_noncanonical_source_sequences() {
+        let (relation_plan_variant, relation_context, source_layout, requested_column_ordinals) =
+            selected_compact_request_fixture();
+        let ring_degree = u64::try_from(POLYNOMIAL_DEGREE).expect("ring degree fits u64");
+        let mut reversed = requested_column_ordinals.clone();
+        reversed.swap(0, 1);
+        let mut duplicated = requested_column_ordinals.clone();
+        duplicated[1] = duplicated[0];
+        let mut extraneous = requested_column_ordinals;
+        extraneous[0] = u32::MAX;
+        for malformed in [reversed, duplicated, extraneous, Vec::new()] {
+            assert_eq!(
+                classify_setup_key_relation_source_request_profile(
+                    Some(&source_layout),
+                    &relation_plan_variant,
+                    &malformed,
+                ),
+                Err(CommonProofProverError::InvalidColumn),
+            );
+            assert_eq!(
+                public_key_share_source_provider_memory_accounting_for_requested_columns(
+                    &relation_plan_variant,
+                    &relation_context,
+                    ring_degree,
+                    &source_layout,
+                    128,
+                    &malformed,
+                ),
+                Err(CommonProofProverError::InvalidColumn),
+            );
+        }
+    }
+}
+
+#[cfg(test)]
 mod upper_bound_comparator_tests {
     use super::super::key_relation::BoundedMaterialDigitWitnessLayout;
     use super::*;
@@ -3048,5 +3568,38 @@ mod anchor_quotient_representative_tests {
         .expect("negative-secret quotient");
         assert_eq!(&negative_secret_product[..], &[-16, 0]);
         assert_eq!(&negative_secret_quotient[..], &[1, 0]);
+    }
+
+    #[test]
+    fn public_key_quotient_uses_the_same_least_nonnegative_representative_as_the_relation() {
+        let modulus = 17_u64;
+        let public_key_share = [1_u64, 0];
+        let least_nonnegative_product = exact_negacyclic_product_radix(&[16_i128, 0], &[1_i128, 0])
+            .expect("least-nonnegative public product");
+        let quotient = exact_modular_quotient(
+            public_key_share
+                .iter()
+                .copied()
+                .zip(least_nonnegative_product.iter().copied()),
+            modulus,
+            |(public_key_share, product)| i128::from(public_key_share).checked_add(product),
+        )
+        .expect("least-nonnegative public-key quotient");
+        assert_eq!(&least_nonnegative_product[..], &[16, 0]);
+        assert_eq!(&quotient[..], &[1, 0]);
+
+        let centered_product = exact_negacyclic_product_radix(&[-1_i128, 0], &[1_i128, 0])
+            .expect("centered public product");
+        let centered_quotient = exact_modular_quotient(
+            public_key_share
+                .iter()
+                .copied()
+                .zip(centered_product.iter().copied()),
+            modulus,
+            |(public_key_share, product)| i128::from(public_key_share).checked_add(product),
+        )
+        .expect("centered public-key quotient");
+        assert_eq!(&centered_quotient[..], &[0, 0]);
+        assert_ne!(quotient, centered_quotient);
     }
 }

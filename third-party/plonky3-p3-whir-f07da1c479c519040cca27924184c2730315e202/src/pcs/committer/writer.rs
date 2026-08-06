@@ -1,9 +1,9 @@
 use p3_commit::{ExtensionMmcs, Mmcs};
 use p3_dft::TwoAdicSubgroupDft;
 use p3_field::{ExtensionField, PackedFieldExtension, TwoAdicField};
+use p3_matrix::Matrix;
 use p3_matrix::dense::{DenseMatrix, RowMajorMatrix, RowMajorMatrixView, RowMajorMatrixViewMut};
 use p3_matrix::extension::FlatMatrixView;
-use p3_matrix::Matrix;
 use p3_sumcheck::product_polynomial::PolyView;
 use p3_sumcheck::strategy::VariableOrder;
 use tracing::info_span;

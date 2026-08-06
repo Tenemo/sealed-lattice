@@ -90,30 +90,35 @@ pub extern "C" fn sealed_lattice_allocate(length: usize) -> *mut u8 {
 
 /// Runs one bounded primitive measurement in the opt-in measurement artifact.
 ///
-/// The export is absent from the ordinary kernel. A null result indicates that
-/// the case identifier or its deterministic production geometry was refused.
+/// The export is absent from the ordinary kernel. Status zero returns one
+/// canonical measurement record. Status one returns the internal refusal text
+/// so a long-running browser measurement never loses its root cause.
 ///
 /// # Safety
 ///
 /// `output_length_pointer` must be null or point to writable memory for one
 /// `usize` value in this WebAssembly module's linear memory.
+/// `output_status_pointer` must be null or point to writable memory for one
+/// `u32` value in this WebAssembly module's linear memory.
 #[cfg(feature = "primitive-measurement-evidence")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sealed_lattice_primitive_measurement_with_length(
     case_identifier: u32,
     output_length_pointer: *mut usize,
+    output_status_pointer: *mut u32,
 ) -> *mut u8 {
-    let Ok(output) = run_primitive_measurement(case_identifier) else {
-        if !output_length_pointer.is_null() {
-            unsafe {
-                output_length_pointer.write(0);
-            }
-        }
-        return ptr::null_mut();
+    let (output, status) = match run_primitive_measurement(case_identifier) {
+        Ok(output) => (output, 0_u32),
+        Err(error) => (error.into_bytes(), 1_u32),
     };
     if !output_length_pointer.is_null() {
         unsafe {
             output_length_pointer.write(output.len());
+        }
+    }
+    if !output_status_pointer.is_null() {
+        unsafe {
+            output_status_pointer.write(status);
         }
     }
     leak_bytes(output)

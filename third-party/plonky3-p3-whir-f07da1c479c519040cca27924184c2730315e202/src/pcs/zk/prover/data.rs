@@ -1,4 +1,7 @@
 //! Prover-side oracle state carried between phases.
+//!
+//! Local modification: extension-field source state supports the outer
+//! committed-relation handoff. See `../../../../UPSTREAM.md`.
 
 use alloc::vec::Vec;
 use core::marker::PhantomData;
@@ -24,6 +27,25 @@ where
     pub merkle: MT::ProverData<DenseMatrix<F>>,
     /// Marker tying the data to its extension field.
     pub(crate) _marker: PhantomData<EF>,
+}
+
+/// Prover-side handoff for an extension-field source oracle.
+///
+/// This is the source form required by an outer extension-field reduction,
+/// such as the R1CS-to-constrained-code construction. The commitment is made
+/// through the same base-field MMCS using its extension-field adapter.
+pub struct HidingWhirExtensionProverData<F, EF, MT>
+where
+    F: TwoAdicField,
+    EF: ExtensionField<F>,
+    MT: Mmcs<F>,
+{
+    /// Committed multilinear evaluations.
+    pub message: Poly<EF>,
+    /// Limb-major ZK encoding randomness of the initial oracle.
+    pub randomness: Vec<EF>,
+    /// Merkle prover data behind the initial extension-field commitment.
+    pub merkle: <MT as Mmcs<F>>::ProverData<FlatMatrixView<F, EF, DenseMatrix<EF>>>,
 }
 
 /// Merkle prover data of the active committed oracle.

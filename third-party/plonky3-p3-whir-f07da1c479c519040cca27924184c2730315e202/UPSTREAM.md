@@ -57,6 +57,17 @@ upstream generic bounds retain `rand`, the selected integration supplies all
 secret material through explicit caller-owned inputs drawn from
 sealed-lattice's domain-separated private-coin source.
 
+The compact constrained-code path additionally needs an outer relation
+handoff that upstream hiding WHIR does not expose. The local prover can commit
+an extension-field source oracle and accept mask groups that an outer protocol
+already committed before its relation-batching challenge. The matching
+verifier carries the same commitments and dense linear covectors through every
+masked sumcheck and into the base case without observing the earlier roots a
+second time. Both sides validate caller-owned source, group, message,
+randomness, and covector dimensions with typed errors. The ordinary
+point-opening adapter remains unchanged and drives the same internal reduction
+with no external groups.
+
 The obsolete complete-proof commitment reader and unused round proof-of-work
 getter were removed. Neither the plain prover, resumable verifier, complete
 verifier adapter, hiding implementation, nor tests consumed them. The
@@ -74,8 +85,15 @@ The changes are confined to:
 - `src/pcs/proof.rs`
 - `src/pcs/zk/base_case/mod.rs`
 - `src/pcs/zk/base_case/prover.rs`
+- `src/pcs/zk/constraint/source.rs`
 - `src/pcs/zk/mask.rs`
 - `src/pcs/zk/mod.rs`
+- `src/pcs/zk/prover/data.rs`
+- `src/pcs/zk/prover/masks.rs`
+- `src/pcs/zk/prover/mod.rs`
+- `src/pcs/zk/relation.rs` (added)
+- `src/pcs/zk/verifier/masks.rs`
+- `src/pcs/zk/verifier/mod.rs`
 - `src/fiat_shamir/domain_separator.rs`
 - `src/fiat_shamir/pattern.rs`
 - `src/lib.rs`

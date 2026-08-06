@@ -96,8 +96,19 @@ pub(in crate::bgv) use accepted_setup::{
 };
 #[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) use accepted_setup::{
-    PreparedExactSameSecretGenerationSources, populate_exact_same_secret_evidence_authority,
+    PreparedExactSameSecretGenerationSources,
+    populate_compact_public_key_development_evidence_authority,
+    populate_exact_same_secret_evidence_authority,
     with_setup_generation_vss_material_for_exact_same_secret_evidence,
+};
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+pub(in crate::bgv) use accepted_setup::{
+    SetupGenerationCompactPublicKeyDevelopmentAuthority,
+    resolve_setup_generation_compact_public_key_development_preparation_source,
+    selected_setup_generation_compact_public_key_development_retained_payload_byte_length,
+    setup_generation_compact_public_key_development_retained_payload_byte_length,
+    with_exclusive_setup_generation_compact_public_key_development_relation,
+    with_setup_generation_compact_public_key_development_relation_reentry,
 };
 pub(crate) use accepted_setup::{
     SetupGenerationDealerPublicRecordSource, resolve_setup_generation_dealer_public_record_source,
@@ -110,6 +121,8 @@ pub(in crate::bgv) use accepted_setup::{
 };
 #[cfg(test)]
 pub(crate) use commitment::LatticeAnchorCommitment;
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+pub(crate) use commitment::selected_lattice_anchor_commitment_canonical_byte_length;
 pub(crate) use commitment::{
     SETUP_COMMITMENT_HIDING_ERROR_WIDTH, SETUP_COMMITMENT_HIDING_SECRET_WIDTH,
     SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES,

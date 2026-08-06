@@ -16,11 +16,11 @@ use super::super::{
 use super::{
     AnchorOpeningWitness, AnchorQuotientWitness, BoundPolynomialRootUse, BoundedUnsignedColumn,
     KeyRelationPlanBuilder, KeyVerifierSourceKey, MATERIAL_DIGIT_RADIX, MATERIAL_DIGIT_TRIT_COUNT,
-    MODULAR_QUOTIENT_BIT_COUNT, ProofTreePhase, RecenteredVerifierVectorWitness,
-    ReversibleShiftedSmallVector, ShiftedSmallVector, SplitIntegerVector, TRIT_RADIX,
-    TRUSTEE_QUOTIENT_LOW_TRIT_COUNT, TargetBoundedUnsignedVector, TargetCenteredVector,
-    TargetCommittedMaterialVector, TrusteeAnchorOpeningWitness, TrusteeRadixThreeQuotientWitness,
-    UpperBoundComparatorWitnessLayout,
+    MODULAR_QUOTIENT_BIT_COUNT, MODULAR_QUOTIENT_ENCODING_OFFSET, ProofTreePhase,
+    RecenteredVerifierVectorWitness, ReversibleShiftedSmallVector, ShiftedSmallVector,
+    SplitIntegerVector, TRIT_RADIX, TRUSTEE_QUOTIENT_LOW_TRIT_COUNT, TargetBoundedUnsignedVector,
+    TargetCenteredVector, TargetCommittedMaterialVector, TrusteeAnchorOpeningWitness,
+    TrusteeRadixThreeQuotientWitness, UpperBoundComparatorWitnessLayout,
     column_builder::{fixed_radix_digits, minimum_unsigned_radix_digit_count},
 };
 
@@ -907,7 +907,7 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         let bits = (0..MODULAR_QUOTIENT_BIT_COUNT)
             .map(|_| self.add_binary_column(ProofTreePhase::Base))
             .collect::<Result<Vec<_>, _>>()?;
-        let offset = BigUint::one() << (MODULAR_QUOTIENT_BIT_COUNT - 1);
+        let offset = BigUint::from(MODULAR_QUOTIENT_ENCODING_OFFSET);
         let expression = radix_recomposition_expression(
             target,
             2,
@@ -916,7 +916,8 @@ impl<'context> KeyRelationPlanBuilder<'context> {
             self.context.base_field_modulus,
         )?;
         let constraint_ordinal = self.add_full_trace_constraint(expression, false)?;
-        let maximum = BigInt::from(&offset - BigUint::one());
+        let maximum = BigInt::from((BigUint::one() << MODULAR_QUOTIENT_BIT_COUNT) - BigUint::one())
+            - BigInt::from(offset.clone());
         self.insert_semantic_cell(
             target,
             SignedIntegerInterval::from_bigints(-BigInt::from(offset.clone()), maximum)?,

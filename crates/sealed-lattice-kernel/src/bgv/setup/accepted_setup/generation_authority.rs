@@ -2,6 +2,9 @@ use std::{cell::RefCell, collections::BTreeMap, mem::size_of, rc::Rc, sync::Arc}
 
 use zeroize::{Zeroize, Zeroizing};
 
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+use crate::bgv::setup::selected_lattice_anchor_commitment_canonical_byte_length;
+
 use super::generation_relinearization::{
     SetupGeneratedRelinearizationAggregateSourceAuthority, SetupGeneratedRelinearizationMaterial,
     SetupGeneratedRelinearizationRoundOneSourceAuthority,
@@ -990,6 +993,30 @@ pub(crate) struct SetupGenerationAuthorityInput {
     pub(crate) ordered_galois_entries: Vec<SetupGeneratedGaloisEntry>,
 }
 
+/// Positively derived inputs retained for the standalone compact public-key
+/// development slice. This authority deliberately excludes VSS,
+/// relinearization, and Galois material, and it cannot be serialized or used
+/// as a ceremony setup authority.
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+pub(crate) struct SetupGenerationCompactPublicKeyDevelopmentAuthorityInput {
+    pub(crate) suite_identifier: [u8; Hash512::BYTE_LENGTH],
+    pub(crate) manifest_hash: [u8; Hash512::BYTE_LENGTH],
+    pub(crate) ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
+    pub(crate) action_context_hash: [u8; Hash512::BYTE_LENGTH],
+    pub(crate) roster_hash: [u8; Hash512::BYTE_LENGTH],
+    pub(crate) setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
+    pub(crate) source_setup_intent_object_hash: [u8; Hash512::BYTE_LENGTH],
+    pub(crate) participant_identity: [u8; Hash512::BYTE_LENGTH],
+    pub(crate) roster_position: u16,
+    pub(crate) setup_attempt_identifier: [u8; 32],
+    pub(crate) action_randomness_authorization_hash: [u8; Hash512::BYTE_LENGTH],
+    pub(crate) action_private_randomness: Rc<ActionPrivateRandomness>,
+    pub(crate) public_setup_seed: [u8; Hash512::BYTE_LENGTH],
+    pub(crate) anchor_openings: Vec<SetupGenerationAnchorOpening>,
+    pub(crate) common_secret_coefficients: Zeroizing<Vec<i8>>,
+    pub(crate) public_key_share: SetupGeneratedPublicKeyShare,
+}
+
 struct PinnedProofAttempt {
     attempt_identifier: [u8; 32],
     application_slot_hash: [u8; Hash512::BYTE_LENGTH],
@@ -1918,6 +1945,36 @@ impl SetupGenerationRelinearizationRoundTwoActivation {
     }
 }
 
+/// Nonserializable, Rust-worker-owned capability for the standalone compact
+/// public-key development slice. Cloning the surrounding `Rc` aliases this
+/// one state machine; it does not duplicate witness material.
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+pub(crate) struct SetupGenerationCompactPublicKeyDevelopmentAuthority {
+    state: RefCell<SetupGenerationCompactPublicKeyDevelopmentAuthorityState>,
+}
+
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+struct SetupGenerationCompactPublicKeyDevelopmentAuthorityState {
+    protocol_version: u16,
+    suite_identifier: [u8; Hash512::BYTE_LENGTH],
+    manifest_hash: [u8; Hash512::BYTE_LENGTH],
+    ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
+    action_context_hash: [u8; Hash512::BYTE_LENGTH],
+    roster_hash: [u8; Hash512::BYTE_LENGTH],
+    setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
+    source_setup_intent_object_hash: [u8; Hash512::BYTE_LENGTH],
+    participant_identity: [u8; Hash512::BYTE_LENGTH],
+    roster_position: u16,
+    setup_attempt_identifier: [u8; 32],
+    action_randomness_authorization_hash: [u8; Hash512::BYTE_LENGTH],
+    action_private_randomness: Rc<ActionPrivateRandomness>,
+    public_setup_seed: [u8; Hash512::BYTE_LENGTH],
+    anchor_openings: Box<[SetupGenerationAnchorOpening]>,
+    common_secret_coefficients: Zeroizing<Vec<i8>>,
+    public_key_share: SetupGeneratedPublicKeyShare,
+    pinned_public_key_share_proof_attempt: Option<PinnedProofAttempt>,
+}
+
 struct SetupGenerationAuthority {
     protocol_version: u16,
     suite_identifier: [u8; Hash512::BYTE_LENGTH],
@@ -2029,6 +2086,348 @@ fn canonical_selected_same_secret_generation_statement(
         anchor_commitment_roots,
     )
     .map_err(|_| RefusalReason::OutsideSupportedProfile)
+}
+
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+impl SetupGenerationCompactPublicKeyDevelopmentAuthorityState {
+    fn from_browser_owned_input(
+        input: SetupGenerationCompactPublicKeyDevelopmentAuthorityInput,
+    ) -> Result<Self, RefusalReason> {
+        let relation_input = selected_public_key_share_relation_plan_input()
+            .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+        let ring_degree = usize::try_from(relation_input.ring_degree)
+            .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+        let action_randomness_derivation_input = input.action_private_randomness.derivation_input();
+        let expected_action_randomness_authorization_hash = input
+            .action_private_randomness
+            .setup_action_randomness_authorization(Hash512::from_bytes(input.roster_hash))
+            .map_err(|_| RefusalReason::WrongContext)?
+            .into_bytes();
+        let expected_public_key_share_context_hash =
+            SetupPublicPolynomialContext::public_key_share(
+                input.setup_proof_context_hash,
+                input.participant_identity,
+                input.roster_position,
+            )
+            .and_then(|context| context.context_hash())
+            .map_err(|_| RefusalReason::WrongContext)?;
+        if action_randomness_derivation_input
+            .suite_identifier()
+            .into_bytes()
+            != input.suite_identifier
+            || action_randomness_derivation_input
+                .ceremony_context_hash()
+                .into_bytes()
+                != input.ceremony_context_hash
+            || action_randomness_derivation_input
+                .action_context_hash()
+                .into_bytes()
+                != input.action_context_hash
+            || action_randomness_derivation_input
+                .participant_identity()
+                .into_bytes()
+                != input.participant_identity
+            || input
+                .action_private_randomness
+                .setup_attempt_identifier()
+                .as_bytes()
+                != &input.setup_attempt_identifier
+            || expected_action_randomness_authorization_hash
+                != input.action_randomness_authorization_hash
+            || input.common_secret_coefficients.len() != ring_degree
+            || input
+                .common_secret_coefficients
+                .iter()
+                .any(|coefficient| !(-1..=1).contains(coefficient))
+            || input.public_key_share.ordered_data_modulus_indices()
+                != relation_input.data_modulus_indices.as_slice()
+            || input
+                .public_key_share
+                .ordered_limb_coefficients()
+                .iter()
+                .any(|coefficients| coefficients.len() != ring_degree)
+            || input.public_key_share.centered_error_coefficients().len() != ring_degree
+            || input.public_key_share.public_polynomial_context_hash()
+                != expected_public_key_share_context_hash
+            || input.anchor_openings.len() != SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()
+        {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+        for (anchor, expected_data_prime_index) in input
+            .anchor_openings
+            .iter()
+            .zip(SETUP_COMMITMENT_MODULUS_LIMB_INDICES)
+        {
+            let expected_context_hash = SetupPublicPolynomialContext::lattice_anchor(
+                input.setup_proof_context_hash,
+                input.participant_identity,
+                input.roster_position,
+                u16::try_from(expected_data_prime_index)
+                    .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
+            )
+            .and_then(|context| context.context_hash())
+            .map_err(|_| RefusalReason::WrongContext)?;
+            if usize::from(anchor.commitment_data_prime_index()) != expected_data_prime_index
+                || anchor.public_polynomial_context_hash() != expected_context_hash
+                || anchor.source_polynomial_degree_bound_exclusive() != ring_degree / 2
+            {
+                return Err(RefusalReason::WrongHashOrRoot);
+            }
+        }
+        let state = Self {
+            protocol_version: FOUNDATION_PROFILE.protocol_version,
+            suite_identifier: input.suite_identifier,
+            manifest_hash: input.manifest_hash,
+            ceremony_context_hash: input.ceremony_context_hash,
+            action_context_hash: input.action_context_hash,
+            roster_hash: input.roster_hash,
+            setup_proof_context_hash: input.setup_proof_context_hash,
+            source_setup_intent_object_hash: input.source_setup_intent_object_hash,
+            participant_identity: input.participant_identity,
+            roster_position: input.roster_position,
+            setup_attempt_identifier: input.setup_attempt_identifier,
+            action_randomness_authorization_hash: input.action_randomness_authorization_hash,
+            action_private_randomness: input.action_private_randomness,
+            public_setup_seed: input.public_setup_seed,
+            anchor_openings: input.anchor_openings.into_boxed_slice(),
+            common_secret_coefficients: input.common_secret_coefficients,
+            public_key_share: input.public_key_share,
+            pinned_public_key_share_proof_attempt: None,
+        };
+        if state.retained_payload_byte_length()?
+            != selected_setup_generation_compact_public_key_development_retained_payload_byte_length()?
+        {
+            return Err(RefusalReason::OutsideSupportedProfile);
+        }
+        Ok(state)
+    }
+
+    fn anchor_commitment_roots(&self) -> Result<[[u8; Hash512::BYTE_LENGTH]; 3], RefusalReason> {
+        let [first, second, third] = self.anchor_openings.as_ref() else {
+            return Err(RefusalReason::WrongTypeOrLength);
+        };
+        Ok([first.root(), second.root(), third.root()])
+    }
+
+    fn canonical_public_key_share_statement(&self) -> Result<Vec<u8>, RefusalReason> {
+        canonical_selected_public_key_share_statement(
+            self.setup_proof_context_hash,
+            self.participant_identity,
+            self.roster_position,
+            &self.anchor_commitment_roots()?,
+            self.public_key_share.root(),
+        )
+        .map_err(|_| RefusalReason::OutsideSupportedProfile)
+    }
+
+    fn key_relation_preparation_source(
+        &self,
+    ) -> Result<SetupGenerationKeyRelationPreparationSource, RefusalReason> {
+        Ok(SetupGenerationKeyRelationPreparationSource {
+            family: SetupKeyRelationProofFamily::PublicKeyShare,
+            protocol_version: self.protocol_version,
+            suite_identifier: self.suite_identifier,
+            manifest_hash: self.manifest_hash,
+            ceremony_context_hash: self.ceremony_context_hash,
+            action_context_hash: self.action_context_hash,
+            roster_hash: self.roster_hash,
+            setup_proof_context_hash: self.setup_proof_context_hash,
+            source_setup_intent_object_hash: self.source_setup_intent_object_hash,
+            participant_identity: self.participant_identity,
+            roster_position: self.roster_position,
+            action_randomness_authorization_hash: self.action_randomness_authorization_hash,
+            public_setup_seed: self.public_setup_seed,
+            canonical_application_statement_bytes: self.canonical_public_key_share_statement()?,
+        })
+    }
+
+    fn pin_public_key_share_application(
+        &mut self,
+        application: &SetupGenerationKeyRelationApplication<'_>,
+    ) -> Result<(), RefusalReason> {
+        if application.family != SetupKeyRelationProofFamily::PublicKeyShare {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+        pin_setup_generation_key_relation_application(
+            application,
+            self.protocol_version,
+            self.suite_identifier,
+            self.ceremony_context_hash,
+            self.action_context_hash,
+            self.roster_hash,
+            self.setup_proof_context_hash,
+            self.participant_identity,
+            self.roster_position,
+            &self.canonical_public_key_share_statement()?,
+            &mut self.pinned_public_key_share_proof_attempt,
+        )
+    }
+
+    fn retained_payload_byte_length(&self) -> Result<u64, RefusalReason> {
+        let mut total = size_of::<usize>()
+            .checked_mul(2)
+            .and_then(|length| {
+                length.checked_add(size_of::<SetupGenerationCompactPublicKeyDevelopmentAuthority>())
+            })
+            .and_then(|length| length.checked_add(size_of::<usize>().checked_mul(2)?))
+            .and_then(|length| length.checked_add(size_of::<ActionPrivateRandomness>()))
+            .and_then(|length| u64::try_from(length).ok())
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        let mut add_payload = |byte_length: usize| -> Result<(), RefusalReason> {
+            total = total
+                .checked_add(
+                    u64::try_from(byte_length)
+                        .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
+                )
+                .ok_or(RefusalReason::OutsideSupportedProfile)?;
+            Ok(())
+        };
+        add_payload(
+            self.anchor_openings
+                .len()
+                .checked_mul(size_of::<SetupGenerationAnchorOpening>())
+                .ok_or(RefusalReason::OutsideSupportedProfile)?,
+        )?;
+        for anchor in &self.anchor_openings {
+            add_payload(anchor.canonical_commitment_bytes.len())?;
+            add_payload(
+                anchor
+                    .hiding_secret_polynomials
+                    .len()
+                    .checked_add(anchor.hiding_error_polynomials.len())
+                    .and_then(|count| count.checked_mul(size_of::<Zeroizing<Vec<i8>>>()))
+                    .ok_or(RefusalReason::OutsideSupportedProfile)?,
+            )?;
+            for polynomial in anchor
+                .hiding_secret_polynomials
+                .iter()
+                .chain(anchor.hiding_error_polynomials.iter())
+            {
+                add_payload(polynomial.capacity())?;
+            }
+        }
+        add_payload(self.common_secret_coefficients.capacity())?;
+        add_payload(
+            self.public_key_share
+                .ordered_data_modulus_indices
+                .len()
+                .checked_mul(size_of::<u16>())
+                .ok_or(RefusalReason::OutsideSupportedProfile)?,
+        )?;
+        add_payload(
+            self.public_key_share
+                .ordered_limb_coefficients
+                .len()
+                .checked_mul(size_of::<Zeroizing<Vec<u64>>>())
+                .ok_or(RefusalReason::OutsideSupportedProfile)?,
+        )?;
+        for coefficients in &self.public_key_share.ordered_limb_coefficients {
+            add_payload(
+                coefficients
+                    .capacity()
+                    .checked_mul(size_of::<u64>())
+                    .ok_or(RefusalReason::OutsideSupportedProfile)?,
+            )?;
+        }
+        add_payload(self.public_key_share.centered_error_coefficients.capacity())?;
+        Ok(total)
+    }
+}
+
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+pub(crate) fn selected_setup_generation_compact_public_key_development_retained_payload_byte_length()
+-> Result<u64, RefusalReason> {
+    let relation_input = selected_public_key_share_relation_plan_input()
+        .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+    let ring_degree = usize::try_from(relation_input.ring_degree)
+        .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+    let anchor_count = SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len();
+    let anchor_polynomial_count = SETUP_COMMITMENT_HIDING_SECRET_WIDTH
+        .checked_add(SETUP_COMMITMENT_HIDING_ERROR_WIDTH)
+        .and_then(|count| count.checked_mul(anchor_count))
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    let public_key_limb_count = relation_input.data_modulus_indices.len();
+    let mut total = size_of::<usize>()
+        .checked_mul(2)
+        .and_then(|length| {
+            length.checked_add(size_of::<SetupGenerationCompactPublicKeyDevelopmentAuthority>())
+        })
+        .and_then(|length| length.checked_add(size_of::<usize>().checked_mul(2)?))
+        .and_then(|length| length.checked_add(size_of::<ActionPrivateRandomness>()))
+        .and_then(|length| u64::try_from(length).ok())
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    let mut add_payload = |byte_length: usize| -> Result<(), RefusalReason> {
+        total = total
+            .checked_add(
+                u64::try_from(byte_length).map_err(|_| RefusalReason::OutsideSupportedProfile)?,
+            )
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        Ok(())
+    };
+    add_payload(
+        anchor_count
+            .checked_mul(size_of::<SetupGenerationAnchorOpening>())
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+    )?;
+    for commitment_data_prime_index in SETUP_COMMITMENT_MODULUS_LIMB_INDICES {
+        add_payload(
+            selected_lattice_anchor_commitment_canonical_byte_length(commitment_data_prime_index)
+                .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?,
+        )?;
+    }
+    add_payload(
+        anchor_polynomial_count
+            .checked_mul(size_of::<Zeroizing<Vec<i8>>>())
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+    )?;
+    add_payload(
+        anchor_polynomial_count
+            .checked_mul(ring_degree)
+            .and_then(|length| length.checked_mul(size_of::<i8>()))
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+    )?;
+    add_payload(
+        ring_degree
+            .checked_mul(size_of::<i8>())
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+    )?;
+    add_payload(
+        public_key_limb_count
+            .checked_mul(size_of::<u16>())
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+    )?;
+    add_payload(
+        public_key_limb_count
+            .checked_mul(size_of::<Zeroizing<Vec<u64>>>())
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+    )?;
+    add_payload(
+        public_key_limb_count
+            .checked_mul(ring_degree)
+            .and_then(|length| length.checked_mul(size_of::<u64>()))
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+    )?;
+    add_payload(
+        ring_degree
+            .checked_mul(size_of::<i8>())
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+    )?;
+    Ok(total)
+}
+
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+pub(crate) fn retain_setup_generation_compact_public_key_development_authority(
+    input: SetupGenerationCompactPublicKeyDevelopmentAuthorityInput,
+) -> Result<Rc<SetupGenerationCompactPublicKeyDevelopmentAuthority>, RefusalReason> {
+    Ok(Rc::new(
+        SetupGenerationCompactPublicKeyDevelopmentAuthority {
+            state: RefCell::new(
+                SetupGenerationCompactPublicKeyDevelopmentAuthorityState::from_browser_owned_input(
+                    input,
+                )?,
+            ),
+        },
+    ))
 }
 
 impl SetupGenerationAuthority {
@@ -3642,6 +4041,10 @@ impl<'statement> SetupGenerationKeyRelationApplication<'statement> {
 enum SetupGenerationKeyRelationRetainedAuthority<'authority> {
     AllFamilies(&'authority SetupGenerationAuthority),
     VssProof(&'authority SetupGenerationVssProofAuthority),
+    #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+    CompactPublicKeyDevelopment(
+        &'authority SetupGenerationCompactPublicKeyDevelopmentAuthorityState,
+    ),
 }
 
 macro_rules! setup_generation_key_relation_authority_copy_field {
@@ -3650,6 +4053,8 @@ macro_rules! setup_generation_key_relation_authority_copy_field {
             match self {
                 Self::AllFamilies(authority) => authority.$field,
                 Self::VssProof(authority) => authority.$field,
+                #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+                Self::CompactPublicKeyDevelopment(authority) => authority.$field,
             }
         }
     };
@@ -3708,6 +4113,10 @@ impl<'authority> SetupGenerationKeyRelationRetainedAuthority<'authority> {
         match self {
             Self::AllFamilies(authority) => authority.common_secret_coefficients.as_slice(),
             Self::VssProof(authority) => authority.common_secret_coefficients.as_slice(),
+            #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+            Self::CompactPublicKeyDevelopment(authority) => {
+                authority.common_secret_coefficients.as_slice()
+            }
         }
     }
 
@@ -3715,6 +4124,8 @@ impl<'authority> SetupGenerationKeyRelationRetainedAuthority<'authority> {
         match self {
             Self::AllFamilies(authority) => &authority.anchor_openings,
             Self::VssProof(authority) => &authority.anchor_openings,
+            #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+            Self::CompactPublicKeyDevelopment(authority) => &authority.anchor_openings,
         }
     }
 
@@ -3722,6 +4133,8 @@ impl<'authority> SetupGenerationKeyRelationRetainedAuthority<'authority> {
         match self {
             Self::AllFamilies(authority) => Ok(&authority.public_key_share),
             Self::VssProof(_) => Err(RefusalReason::MissingPrerequisite),
+            #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+            Self::CompactPublicKeyDevelopment(authority) => Ok(&authority.public_key_share),
         }
     }
 
@@ -3736,6 +4149,8 @@ impl<'authority> SetupGenerationKeyRelationRetainedAuthority<'authority> {
             Self::VssProof(authority) => {
                 authority.degree_zero_material(degree_zero_material_ordinal)
             }
+            #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+            Self::CompactPublicKeyDevelopment(_) => Err(RefusalReason::MissingPrerequisite),
         }
     }
 
@@ -3743,6 +4158,8 @@ impl<'authority> SetupGenerationKeyRelationRetainedAuthority<'authority> {
         match self {
             Self::AllFamilies(authority) => authority.degree_zero_material_count(),
             Self::VssProof(authority) => authority.degree_zero_material_count(),
+            #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+            Self::CompactPublicKeyDevelopment(_) => Err(RefusalReason::MissingPrerequisite),
         }
     }
 
@@ -3750,6 +4167,8 @@ impl<'authority> SetupGenerationKeyRelationRetainedAuthority<'authority> {
         match self {
             Self::AllFamilies(authority) => &authority.action_private_randomness,
             Self::VssProof(authority) => &authority.action_private_randomness,
+            #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+            Self::CompactPublicKeyDevelopment(authority) => &authority.action_private_randomness,
         }
     }
 }
@@ -3758,6 +4177,9 @@ pub(crate) struct SetupGenerationKeyRelationSource<'authority, 'statement> {
     authority_identifier: u32,
     authority: SetupGenerationKeyRelationRetainedAuthority<'authority>,
     application: &'authority SetupGenerationKeyRelationApplication<'statement>,
+    #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+    compact_public_key_development_authority:
+        Option<Rc<SetupGenerationCompactPublicKeyDevelopmentAuthority>>,
 }
 
 pub(crate) struct PreparedExactSameSecretGenerationSources {
@@ -3777,6 +4199,15 @@ pub(crate) struct PreparedExactSameSecretGenerationSources {
 impl SetupGenerationKeyRelationSource<'_, '_> {
     pub(crate) const fn authority_identifier(&self) -> u32 {
         self.authority_identifier
+    }
+
+    #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+    pub(crate) fn compact_public_key_development_authority(
+        &self,
+    ) -> Option<Rc<SetupGenerationCompactPublicKeyDevelopmentAuthority>> {
+        self.compact_public_key_development_authority
+            .as_ref()
+            .map(Rc::clone)
     }
 
     pub(crate) const fn family(&self) -> SetupKeyRelationProofFamily {
@@ -6266,6 +6697,28 @@ pub(crate) fn setup_generation_retained_memory_accounting(
     }
 }
 
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+pub(crate) fn setup_generation_compact_public_key_development_retained_payload_byte_length(
+    authority: &SetupGenerationCompactPublicKeyDevelopmentAuthority,
+) -> Result<u64, RefusalReason> {
+    authority
+        .state
+        .try_borrow()
+        .map_err(|_| RefusalReason::ConsumedState)?
+        .retained_payload_byte_length()
+}
+
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+pub(crate) fn resolve_setup_generation_compact_public_key_development_preparation_source(
+    authority: &SetupGenerationCompactPublicKeyDevelopmentAuthority,
+) -> Result<SetupGenerationKeyRelationPreparationSource, RefusalReason> {
+    authority
+        .state
+        .try_borrow()
+        .map_err(|_| RefusalReason::ConsumedState)?
+        .key_relation_preparation_source()
+}
+
 pub(crate) fn resolve_setup_generation_key_relation_preparation_source(
     handle: &SetupGenerationAuthorityHandle,
     family: SetupKeyRelationProofFamily,
@@ -6328,6 +6781,8 @@ where
                 authority_identifier: handle.0,
                 authority: SetupGenerationKeyRelationRetainedAuthority::AllFamilies(authority),
                 application,
+                #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+                compact_public_key_development_authority: None,
             })
         });
     }
@@ -6349,7 +6804,69 @@ where
             authority_identifier: handle.0,
             authority: SetupGenerationKeyRelationRetainedAuthority::VssProof(authority),
             application,
+            #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+            compact_public_key_development_authority: None,
         })
+    })
+}
+
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+pub(crate) fn with_exclusive_setup_generation_compact_public_key_development_relation<
+    Value,
+    Error,
+>(
+    authority: Rc<SetupGenerationCompactPublicKeyDevelopmentAuthority>,
+    application: &SetupGenerationKeyRelationApplication<'_>,
+    operation: impl FnOnce(SetupGenerationKeyRelationSource<'_, '_>) -> Result<Value, Error>,
+) -> Result<Value, Error>
+where
+    Error: From<RefusalReason>,
+{
+    if Rc::strong_count(&authority) != 1 {
+        return Err(Error::from(RefusalReason::ConsumedState));
+    }
+    let mut state = authority
+        .state
+        .try_borrow_mut()
+        .map_err(|_| Error::from(RefusalReason::ConsumedState))?;
+    state
+        .pin_public_key_share_application(application)
+        .map_err(Error::from)?;
+    operation(SetupGenerationKeyRelationSource {
+        // The standalone authority never enters the process-global handle
+        // registry. The adapter carries the `Rc` below for every reentry, so
+        // this reserved value cannot resolve or authorize a source read.
+        authority_identifier: 0,
+        authority: SetupGenerationKeyRelationRetainedAuthority::CompactPublicKeyDevelopment(&state),
+        application,
+        compact_public_key_development_authority: Some(Rc::clone(&authority)),
+    })
+}
+
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+pub(crate) fn with_setup_generation_compact_public_key_development_relation_reentry<Value, Error>(
+    authority: &Rc<SetupGenerationCompactPublicKeyDevelopmentAuthority>,
+    application: &SetupGenerationKeyRelationApplication<'_>,
+    operation: impl FnOnce(SetupGenerationKeyRelationSource<'_, '_>) -> Result<Value, Error>,
+) -> Result<Value, Error>
+where
+    Error: From<RefusalReason>,
+{
+    let mut state = authority
+        .state
+        .try_borrow_mut()
+        .map_err(|_| Error::from(RefusalReason::ConsumedState))?;
+    state
+        .pin_public_key_share_application(application)
+        .map_err(Error::from)?;
+    operation(SetupGenerationKeyRelationSource {
+        authority_identifier: 0,
+        authority: SetupGenerationKeyRelationRetainedAuthority::CompactPublicKeyDevelopment(&state),
+        application,
+        // Reentry borrows the adapter's existing authority. Propagating
+        // another owner here would make the source-loading release boundary
+        // depend on an avoidable `Rc` clone.
+        compact_public_key_development_authority: None,
     })
 }
 
@@ -7525,6 +8042,7 @@ mod tests {
             authority_identifier: 17,
             authority: SetupGenerationKeyRelationRetainedAuthority::VssProof(&authority),
             application: &application,
+            compact_public_key_development_authority: None,
         };
 
         assert_eq!(source.authority_identifier(), 17);

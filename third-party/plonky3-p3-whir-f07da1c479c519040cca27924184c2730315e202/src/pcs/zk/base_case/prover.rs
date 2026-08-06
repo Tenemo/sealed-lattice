@@ -134,9 +134,7 @@ where
             })
             .collect();
         let fresh_material = BaseCaseFreshMaterial {
-            source_message: (0..source_code.message_len)
-                .map(|_| rng.random())
-                .collect(),
+            source_message: (0..source_code.message_len).map(|_| rng.random()).collect(),
             source_randomness: (0..source_code.randomness_len)
                 .map(|_| rng.random())
                 .collect(),
@@ -235,10 +233,7 @@ where
         assert_eq!(source_covector.len(), code.message_len);
         assert_eq!(masks.len(), self.config.mask_groups.len());
         assert_eq!(fresh_material.source_message.len(), code.message_len);
-        assert_eq!(
-            fresh_material.source_randomness.len(),
-            code.randomness_len
-        );
+        assert_eq!(fresh_material.source_randomness.len(), code.randomness_len);
         assert_eq!(
             fresh_material.mask_groups.len(),
             self.config.mask_groups.len()
@@ -297,9 +292,7 @@ where
                 .messages
                 .iter()
                 .zip(&fresh_group.randomness)
-                .map(|(message, randomness)| {
-                    encoding.encode_with_randomness(message, randomness)
-                })
+                .map(|(message, randomness)| encoding.encode_with_randomness(message, randomness))
                 .collect();
             // Row z of the stacked matrix holds position z of every blind.
             let (commitment, data) = self

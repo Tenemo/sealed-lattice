@@ -466,13 +466,6 @@ impl RelationPlanChecker<'_> {
                                     BigInt::from(modulus - 1),
                                 )?
                             }
-                            RelationEmbeddingKind::Centered => {
-                                let absolute_bound = (modulus - 1) / 2;
-                                SignedIntegerInterval::from_bigints(
-                                    -BigInt::from(absolute_bound),
-                                    BigInt::from(absolute_bound),
-                                )?
-                            }
                             _ => return Err(RelationPlanError::InvalidColumn),
                         }
                     }

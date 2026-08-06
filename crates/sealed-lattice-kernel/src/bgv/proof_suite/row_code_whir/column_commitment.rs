@@ -124,7 +124,7 @@ impl StreamingColumnHasher {
         )
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "primitive-measurement-evidence"))]
     pub(super) fn new_with_private_salt(
         expected_row_count: usize,
         encoded_column_count: usize,
@@ -139,7 +139,7 @@ impl StreamingColumnHasher {
         )
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "primitive-measurement-evidence"))]
     fn new_stripe(
         expected_row_count: usize,
         encoded_column_count: usize,
@@ -249,7 +249,7 @@ impl StreamingColumnHasher {
         })
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "primitive-measurement-evidence"))]
     pub(super) fn absorb_row(&mut self, encoded_row: &[Goldilocks]) -> Result<(), String> {
         self.absorb_canonical_row(
             encoded_row.len(),
@@ -313,13 +313,13 @@ impl StreamingColumnHasher {
         Ok(digests)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "primitive-measurement-evidence"))]
     pub(super) fn finalize_root(self) -> Result<ColumnDigest, String> {
         self.finalize_commitment(&[])
             .map(|commitment| commitment.root)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "primitive-measurement-evidence"))]
     pub(super) fn finalize_commitment(
         mut self,
         opened_column_indices: &[usize],
@@ -1137,7 +1137,7 @@ impl StreamingMerkleBuilder {
         Ok(())
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "primitive-measurement-evidence"))]
     fn finish(self) -> Result<StreamingColumnCommitment, String> {
         let commitment = self.finish_with_coordinates()?;
         Ok(StreamingColumnCommitment {

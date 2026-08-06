@@ -1,3 +1,6 @@
+use std::collections::BTreeSet;
+
+use super::super::prover::requested_pre_challenge_source_column_ordinals;
 use super::key_relation::{
     AnchorEquationInputs, AnchorOpeningWitness, AnchorQuotientWitness, BoundPolynomialRootUse,
     ExactRadixDigitColumnCatalog, KeyRelationGeometry, KeyRelationPlanBuilder,
@@ -22,9 +25,88 @@ pub(crate) struct PublicKeyShareSourceLayout {
     pub(super) common_secret: ReversibleShiftedSmallVector,
     pub(super) public_key_error: ShiftedSmallVector,
     pub(super) public_key_share_limbs: Box<[SplitIntegerVector]>,
+    pub(super) public_key_common_reference_limbs: Box<[SplitIntegerVector]>,
     pub(super) ordered_limbs: Box<[PublicKeyShareLimbSourceLayout]>,
     pub(super) ordered_anchors: Box<[PublicKeyShareAnchorSourceLayout]>,
     pub(super) exact_radix_digits_by_column: ExactRadixDigitColumnCatalog,
+}
+
+pub(crate) fn compact_public_key_assignment_source_column_ordinals(
+    relation_plan_variant: &RelationPlanVariant,
+    source_layout: &PublicKeyShareSourceLayout,
+) -> Result<Vec<u32>, RelationPlanError> {
+    let complete_requested_column_ordinals =
+        requested_pre_challenge_source_column_ordinals(relation_plan_variant)
+            .map_err(|_| RelationPlanError::InvalidConstraint)?;
+    if complete_requested_column_ordinals
+        .windows(2)
+        .any(|pair| pair[0] >= pair[1])
+    {
+        return Err(RelationPlanError::NonCanonicalOrder);
+    }
+    let complete_requested_column_set = complete_requested_column_ordinals
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
+    let mut compact_requested_column_set = BTreeSet::new();
+    let mut insert_vector = |vector: SplitIntegerVector| -> Result<(), RelationPlanError> {
+        for column_ordinal in vector.halves {
+            if !complete_requested_column_set.contains(&column_ordinal) {
+                return Err(RelationPlanError::InvalidConstraint);
+            }
+            compact_requested_column_set.insert(column_ordinal);
+        }
+        Ok(())
+    };
+
+    insert_vector(source_layout.common_secret.source.coefficients)?;
+    insert_vector(source_layout.public_key_error.coefficients)?;
+    for vector in source_layout
+        .public_key_share_limbs
+        .iter()
+        .chain(source_layout.public_key_common_reference_limbs.iter())
+        .copied()
+    {
+        insert_vector(vector)?;
+    }
+    for limb in &source_layout.ordered_limbs {
+        insert_vector(SplitIntegerVector {
+            halves: limb.quotient_columns,
+        })?;
+    }
+    for anchor in &source_layout.ordered_anchors {
+        for vector in anchor
+            .commitments
+            .iter()
+            .chain(anchor.first_matrix.iter().flat_map(|row| row.iter()))
+            .chain(anchor.second_matrix.iter())
+            .copied()
+        {
+            insert_vector(vector)?;
+        }
+        for hiding_secret in anchor.opening.hiding_secrets() {
+            insert_vector(hiding_secret.source.coefficients)?;
+        }
+        for hiding_error in anchor.opening.hiding_errors() {
+            insert_vector(hiding_error.coefficients)?;
+        }
+        for quotient_columns in anchor.quotients.rows() {
+            insert_vector(SplitIntegerVector {
+                halves: *quotient_columns,
+            })?;
+        }
+    }
+    if compact_requested_column_set.is_empty() {
+        return Err(RelationPlanError::InvalidConstraint);
+    }
+    let compact_requested_column_ordinals = complete_requested_column_ordinals
+        .into_iter()
+        .filter(|column_ordinal| compact_requested_column_set.contains(column_ordinal))
+        .collect::<Vec<_>>();
+    if compact_requested_column_ordinals.len() != compact_requested_column_set.len() {
+        return Err(RelationPlanError::InvalidConstraint);
+    }
+    Ok(compact_requested_column_ordinals)
 }
 
 pub(super) struct PublicKeyShareLimbSourceLayout {
@@ -99,6 +181,8 @@ pub(crate) fn compile_public_key_share_relation_with_source_layout(
         &data_modulus_references,
         BoundPolynomialRootUse::Output,
     )?;
+    let mut public_key_common_reference_limbs =
+        Vec::with_capacity(input.data_modulus_indices.len());
     let mut limb_source_layouts = Vec::with_capacity(input.data_modulus_indices.len());
     for (limb_ordinal, data_modulus_index) in input.data_modulus_indices.iter().copied().enumerate()
     {
@@ -107,6 +191,7 @@ pub(crate) fn compile_public_key_share_relation_with_source_layout(
             &KeyVerifierSourceKey::PublicKeyCommonReference { data_modulus_index },
             modulus_reference,
         )?;
+        public_key_common_reference_limbs.push(common_reference);
         let quotient_columns = builder.add_public_key_quotient_witness()?;
         for challenge_ordinal in 0..check_context.non_native_theta_repetition_count {
             builder.add_public_key_equation(
@@ -196,6 +281,7 @@ pub(crate) fn compile_public_key_share_relation_with_source_layout(
             common_secret: secret,
             public_key_error,
             public_key_share_limbs: public_key_share_limbs.into_boxed_slice(),
+            public_key_common_reference_limbs: public_key_common_reference_limbs.into_boxed_slice(),
             ordered_limbs: limb_source_layouts.into_boxed_slice(),
             ordered_anchors: anchor_source_layouts.into_boxed_slice(),
             exact_radix_digits_by_column,
@@ -297,5 +383,93 @@ mod tests {
         .expect("production public-key-share relation plan");
         plan.check(&context)
             .expect("checked production public-key-share relation plan");
+    }
+
+    #[test]
+    fn public_key_share_public_ring_maps_use_the_proved_least_nonnegative_representative() {
+        let context = production_context(true);
+        let compiled = compile_public_key_share_relation_with_source_layout(
+            &PublicKeyShareRelationPlanInput {
+                ring_degree: crate::bgv::parameters::POLYNOMIAL_DEGREE as u64,
+                evaluation_domain_size: crate::bgv::proof_suite::selected_profile::SELECTED_EVALUATION_DOMAIN_SIZE,
+                opening_degree_bound_exclusive: crate::bgv::proof_suite::selected_profile::SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE,
+                public_polynomial_column_degree_bound_exclusive: crate::bgv::proof_suite::selected_profile::SELECTED_PUBLIC_POLYNOMIAL_COLUMN_DEGREE_BOUND_EXCLUSIVE,
+                data_modulus_indices: (0..crate::bgv::parameters::DATA_PRIMES.len() as u16).collect(),
+                commitment_data_modulus_indices: vec![0, 1, 2],
+                commitment_module_rank: 1,
+                plaintext_modulus: crate::bgv::parameters::PLAINTEXT_MODULUS,
+            },
+            &context,
+        )
+        .expect("production public-key-share relation plan");
+        let variant = compiled
+            .relation_plan
+            .select_variant(None, None)
+            .expect("production public-key-share plan variant");
+        let public_ring_sources = variant
+            .ordered_verifier_sources
+            .iter()
+            .filter_map(|source| match source {
+                RelationVerifierSource::Protocol {
+                    protocol_source_kind: source_kind @ (5 | 6),
+                    value_layout,
+                    ..
+                } => Some((*source_kind, value_layout.embedding_kind)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(public_ring_sources.len(), 32);
+        assert_eq!(
+            public_ring_sources
+                .iter()
+                .filter(|(source_kind, _)| *source_kind == 5)
+                .count(),
+            9
+        );
+        assert_eq!(
+            public_ring_sources
+                .iter()
+                .filter(|(source_kind, _)| *source_kind == 6)
+                .count(),
+            23
+        );
+        assert!(public_ring_sources.iter().all(|(_, embedding_kind)| {
+            *embedding_kind == RelationEmbeddingKind::LeastNonnegative
+        }));
+
+        let quotient_columns = compiled
+            .source_layout
+            .ordered_limbs
+            .iter()
+            .flat_map(|limb| limb.quotient_columns)
+            .chain(
+                compiled
+                    .source_layout
+                    .ordered_anchors
+                    .iter()
+                    .flat_map(|anchor| anchor.quotients.rows().iter().flatten().copied()),
+            )
+            .collect::<Vec<_>>();
+        assert_eq!(quotient_columns.len(), 58);
+        for quotient_column in quotient_columns {
+            let semantic_cell = variant
+                .ordered_semantic_cells
+                .iter()
+                .find(|cell| cell.column_ordinal == quotient_column)
+                .expect("every quotient column has a semantic range certificate");
+            assert_eq!(
+                semantic_cell.claimed_interval,
+                SignedIntegerInterval::new(
+                    i128::from(super::super::key_relation::MODULAR_QUOTIENT_MINIMUM),
+                    i128::from(super::super::key_relation::MODULAR_QUOTIENT_MAXIMUM),
+                )
+            );
+        }
+
+        // The source provider, exact radix decomposition, quotient derivation,
+        // interval checker, and compact successor must use this one integer
+        // representative. Centering only the quotient numerator changes it by
+        // unknown multiples of the RNS modulus and breaks honest exact replay.
     }
 }

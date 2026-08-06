@@ -44,3 +44,6 @@ zeroize = { version = "=1.8.2", default-features = false, features = ["alloc"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rayon = "1"
+
+[dev-dependencies]
+rand = { version = "0.10.1", default-features = false }

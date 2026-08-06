@@ -159,13 +159,6 @@ pub(super) fn integer_lift_column_interval(
                 RelationEmbeddingKind::LeastNonnegative => {
                     SignedIntegerInterval::from_bigints(BigInt::zero(), BigInt::from(modulus - 1))
                 }
-                RelationEmbeddingKind::Centered => {
-                    let absolute_bound = (modulus - 1) / 2;
-                    SignedIntegerInterval::from_bigints(
-                        -BigInt::from(absolute_bound),
-                        BigInt::from(absolute_bound),
-                    )
-                }
                 _ => Err(RelationPlanError::InvalidSemanticCell),
             }
         }

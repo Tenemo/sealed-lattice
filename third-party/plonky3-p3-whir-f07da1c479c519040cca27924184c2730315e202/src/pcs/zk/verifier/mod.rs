@@ -5,6 +5,10 @@
 //! ```
 //!
 //! The carried claim is tracked symbolically throughout.
+//!
+//! Local modification: an outer extension-field relation can supply its source
+//! and precommitted masks without replaying their roots. See
+//! `../../../../UPSTREAM.md`.
 
 mod masks;
 
@@ -29,12 +33,19 @@ use super::code_switch::{CodeSwitchError, ZkMaskClaim, switch_mask_covector};
 use super::config::ZkWhirConfig;
 use super::constraint::SourceClaim;
 use super::proof::ZkWhirProof;
+use super::relation::{
+    CombinedRelationVerifierInput, HidingWhirRelationInputError, validate_source_covector,
+};
 use crate::pcs::proof::QueryOpening;
 use crate::pcs::utils::get_challenge_stir_queries;
 
 /// Failure modes of the HVZK-WHIR verifier.
 #[derive(Debug, PartialEq, Eq, Error)]
 pub enum ZkVerifierError {
+    /// A caller-owned committed relation is malformed.
+    #[error(transparent)]
+    RelationInput(#[from] HidingWhirRelationInputError),
+
     /// A masked sumcheck batch failed to replay.
     #[error(transparent)]
     Sumcheck(#[from] SumcheckError),
@@ -93,11 +104,11 @@ pub enum ZkVerifierError {
 }
 
 /// The commitment a code-switch round opens against.
-enum ActiveOracle<'a, C> {
+enum ActiveOracle<C> {
     /// Base-field initial oracle.
-    Base(&'a C),
+    Base(C),
     /// Extension-field folded oracle.
-    Ext(&'a C),
+    Ext(C),
 }
 
 /// HVZK-WHIR verifier.
@@ -148,30 +159,7 @@ where
         claims: &[(Point<EF>, EF)],
         challenger: &mut Challenger,
     ) -> Result<(), ZkVerifierError> {
-        let config = self.config;
-        let n_rounds = config.n_rounds();
-
-        // Structural checks before any transcript work.
-        if proof.rounds.len() != n_rounds {
-            return Err(ZkVerifierError::RoundCountMismatch {
-                expected: n_rounds,
-                actual: proof.rounds.len(),
-            });
-        }
-        // One sumcheck transcript and one interleaved mask commitment per
-        // batch; check each count on its own so the error names the culprit.
-        if proof.sumchecks.len() != n_rounds + 1 {
-            return Err(ZkVerifierError::SumcheckBatchCountMismatch {
-                expected: n_rounds + 1,
-                actual: proof.sumchecks.len(),
-            });
-        }
-        if proof.sumcheck_mask_commitments.len() != n_rounds + 1 {
-            return Err(ZkVerifierError::SumcheckBatchCountMismatch {
-                expected: n_rounds + 1,
-                actual: proof.sumcheck_mask_commitments.len(),
-            });
-        }
+        self.check_proof_structure(proof)?;
 
         // Reject malformed statements before any folding arithmetic runs.
         //
@@ -194,7 +182,80 @@ where
             source.push_eq(point.clone(), coeff);
             target += coeff * *eval;
         }
-        let mut masks = VerifierMasks::new();
+        let masks = VerifierMasks::new();
+
+        self.verify_combined_relation_inner(
+            proof,
+            ActiveOracle::Base(commitment.clone()),
+            source,
+            target,
+            masks,
+            challenger,
+        )
+    }
+
+    /// Verifies an outer extension-field committed relation.
+    ///
+    /// The caller must observe the precommitted mask roots and source root in
+    /// outer-protocol order before calling this method. The relation builder
+    /// receives the sampled batching challenge and the proof's explicitly
+    /// revealed values, and must return the combined source and mask claims
+    /// without observing those roots again.
+    #[allow(clippy::too_many_arguments)]
+    pub fn verify_extension_relation<BuildRelation>(
+        &self,
+        proof: &ZkWhirProof<F, EF, MT>,
+        commitment: &MT::Commitment,
+        expected_revealed_value_count: usize,
+        build_relation: BuildRelation,
+        challenger: &mut Challenger,
+    ) -> Result<(), ZkVerifierError>
+    where
+        BuildRelation: FnOnce(
+            EF,
+            &[EF],
+        ) -> Result<
+            CombinedRelationVerifierInput<EF, MT::Commitment>,
+            HidingWhirRelationInputError,
+        >,
+    {
+        self.check_proof_structure(proof)?;
+        if proof.evals.len() != expected_revealed_value_count {
+            return Err(ZkVerifierError::EvalCountMismatch {
+                expected: expected_revealed_value_count,
+                actual: proof.evals.len(),
+            });
+        }
+
+        let batching_challenge: EF = challenger.sample_algebra_element();
+        let relation = build_relation(batching_challenge, &proof.evals)?;
+        validate_source_covector(&relation.source_covector, 1 << self.config.num_variables)?;
+        let mut source = SourceClaim::new();
+        source.push_dense(relation.source_covector);
+        let masks = VerifierMasks::from_precommitted(relation.precommitted_mask_groups)?;
+
+        self.verify_combined_relation_inner(
+            proof,
+            ActiveOracle::Ext(commitment.clone()),
+            source,
+            relation.target,
+            masks,
+            challenger,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+    fn verify_combined_relation_inner(
+        &self,
+        proof: &ZkWhirProof<F, EF, MT>,
+        mut active: ActiveOracle<MT::Commitment>,
+        mut source: SourceClaim<EF>,
+        mut target: EF,
+        mut masks: VerifierMasks<F, EF, MT>,
+        challenger: &mut Challenger,
+    ) -> Result<(), ZkVerifierError> {
+        let config = self.config;
+        let n_rounds = config.n_rounds();
 
         // Initial masked sumcheck batch.
         let mut randomness = self.replay_sumcheck_batch(
@@ -208,7 +269,6 @@ where
             challenger,
         )?;
 
-        let mut active = ActiveOracle::Base(commitment);
         let mut num_variables = config.num_variables - config.round_folding_factor(0);
 
         // Code-switching rounds.
@@ -331,7 +391,7 @@ where
                 challenger,
             )?;
 
-            active = ActiveOracle::Ext(new_commitment);
+            active = ActiveOracle::Ext(new_commitment.clone());
             num_variables -= folding_next;
         }
 
@@ -372,6 +432,30 @@ where
             challenger,
         )?;
 
+        Ok(())
+    }
+
+    fn check_proof_structure(&self, proof: &ZkWhirProof<F, EF, MT>) -> Result<(), ZkVerifierError> {
+        let expected_round_count = self.config.n_rounds();
+        if proof.rounds.len() != expected_round_count {
+            return Err(ZkVerifierError::RoundCountMismatch {
+                expected: expected_round_count,
+                actual: proof.rounds.len(),
+            });
+        }
+        let expected_batch_count = expected_round_count + 1;
+        if proof.sumchecks.len() != expected_batch_count {
+            return Err(ZkVerifierError::SumcheckBatchCountMismatch {
+                expected: expected_batch_count,
+                actual: proof.sumchecks.len(),
+            });
+        }
+        if proof.sumcheck_mask_commitments.len() != expected_batch_count {
+            return Err(ZkVerifierError::SumcheckBatchCountMismatch {
+                expected: expected_batch_count,
+                actual: proof.sumcheck_mask_commitments.len(),
+            });
+        }
         Ok(())
     }
 
@@ -430,7 +514,7 @@ where
     #[allow(clippy::too_many_arguments)]
     fn verify_and_fold_leaf(
         &self,
-        active: &ActiveOracle<'_, MT::Commitment>,
+        active: &ActiveOracle<MT::Commitment>,
         dims: &[Dimensions],
         index: usize,
         opening: &QueryOpening<F, EF, MT::Proof>,

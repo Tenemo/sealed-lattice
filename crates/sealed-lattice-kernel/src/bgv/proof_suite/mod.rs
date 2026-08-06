@@ -12,6 +12,22 @@ mod ballot_validity_runtime;
 mod body;
 mod collective_public_key_runtime;
 mod committed_material;
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+mod compact_cfw;
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+mod compact_cfw_external;
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+mod compact_cfw_external_prover;
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+mod compact_proof_wire;
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+mod compact_public_key_static_catalog;
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+mod compact_response_merkle;
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+mod compact_response_tree_external;
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+mod compact_transcript;
 mod component_material_stream;
 mod component_public_polynomial_runtime;
 mod decoder;
@@ -23,6 +39,8 @@ mod evaluator_source_material;
 mod external_memory;
 mod external_polynomial;
 mod field;
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+mod fixed_uniform_verifier_message;
 mod galois_key_share_runtime;
 mod galois_source_material;
 mod merkle;
@@ -39,7 +57,7 @@ mod relinearization_source_material;
 mod relinearization_verification_runtime;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod resource_accounting_evidence;
-#[cfg(test)]
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
 mod ring_native_candidate;
 #[cfg(any(test, feature = "primitive-measurement-evidence"))]
 mod ring_native_field;

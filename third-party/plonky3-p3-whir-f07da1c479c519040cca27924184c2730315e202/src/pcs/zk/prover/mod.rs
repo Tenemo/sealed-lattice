@@ -3,6 +3,9 @@
 //! ```text
 //!     masked sumcheck batches -> code-switching rounds -> masked base case
 //! ```
+//!
+//! Local modification: an extension-field source and caller-precommitted masks
+//! can enter through an outer committed relation. See `../../../../UPSTREAM.md`.
 
 mod data;
 mod masks;
@@ -10,8 +13,8 @@ mod masks;
 use alloc::vec::Vec;
 use core::marker::PhantomData;
 
-pub use data::HidingWhirProverData;
 use data::ZkRoundData;
+pub use data::{HidingWhirExtensionProverData, HidingWhirProverData};
 use masks::{ProverMasks, fold_limb_chunks};
 use p3_challenger::{CanObserve, CanSampleUniformBits, FieldChallenger, GrindingChallenger};
 use p3_commit::{ExtensionMmcs, Mmcs};
@@ -40,7 +43,15 @@ use crate::pcs::zk::code_switch::{ZkMaskClaim, switch_mask_covector};
 use crate::pcs::zk::committer::{FoldedRsCode, zk_padded_matrix};
 use crate::pcs::zk::config::ZkWhirConfig;
 use crate::pcs::zk::proof::{ZkRoundProof, ZkWhirProof};
+use crate::pcs::zk::relation::{
+    CombinedRelationProverInput, HidingWhirRelationInputError, validate_source_covector,
+};
 use crate::utils::padded_ood_t1;
+
+enum InitialEncodingRandomness<F, EF> {
+    Base(Vec<F>),
+    Extension(Vec<EF>),
+}
 
 /// HVZK-WHIR prover.
 #[derive(Debug)]
@@ -112,6 +123,38 @@ where
         )
     }
 
+    /// Commits an extension-field witness as an interleaved ZK
+    /// Reed-Solomon codeword.
+    ///
+    /// This is the initial-oracle form used when an outer reduction already
+    /// operates over the challenge extension field.
+    pub fn commit_extension<R: Rng>(
+        &self,
+        message: Poly<EF>,
+        challenger: &mut Challenger,
+        rng: &mut R,
+    ) -> (MT::Commitment, HidingWhirExtensionProverData<F, EF, MT>) {
+        assert_eq!(message.num_variables(), self.config.num_variables);
+        let folding = self.config.round_folding_factor(0);
+        let randomness: Vec<EF> = (0..(self.config.oracle_randomness[0] << folding))
+            .map(|_| rng.random())
+            .collect();
+        let height =
+            (1 << (message.num_variables() - folding)) << self.config.starting_log_inv_rate;
+        let padded = zk_padded_matrix(message.as_slice(), &randomness, folding, height);
+        let encoded = self.dft.dft_algebra_batch(padded);
+        let (commitment, merkle) = self.extension_mmcs.commit_matrix(encoded);
+        challenger.observe(commitment.clone());
+        (
+            commitment,
+            HidingWhirExtensionProverData {
+                message,
+                randomness,
+                merkle,
+            },
+        )
+    }
+
     /// Runs the full HVZK opening protocol for evaluation claims
     /// `f(point_i) = eval_i`.
     ///
@@ -125,16 +168,8 @@ where
         challenger: &mut Challenger,
         rng: &mut R,
     ) -> ZkWhirProof<F, EF, MT> {
-        let config = self.config;
-        let num_variables = config.num_variables;
-        let sumcheck_mask_encoding = config.sumcheck_mask.encoding::<EF>();
-
-        // Claimed evaluations
+        let num_variables = self.config.num_variables;
         let claimed_evals: Vec<EF> = claims.iter().map(|(_, eval)| *eval).collect();
-
-        // Initial relation: claims batched by powers of alpha.
-        //
-        //     W = sum_i alpha^i eq(z_i, .)        claim = sum_i alpha^i v_i
         let alpha: EF = challenger.sample_algebra_element();
         let mut weights = EF::zero_vec(1 << num_variables);
         let mut claim = EF::ZERO;
@@ -158,22 +193,94 @@ where
                 claim += *coeff * *eval;
             }
         }
-        // Lift the base-field message into the extension once, in parallel.
-        let evals: Vec<EF> = prover_data
-            .message
+        let HidingWhirProverData {
+            message,
+            randomness,
+            merkle,
+            ..
+        } = prover_data;
+        let extension_message = message
             .as_slice()
             .par_iter()
             .map(|&v| v.into())
-            .collect();
+            .collect::<Vec<EF>>();
+        self.prove_combined_relation_inner(
+            Poly::new(extension_message),
+            InitialEncodingRandomness::Base(randomness),
+            ZkRoundData::Base(merkle),
+            claimed_evals,
+            CombinedRelationProverInput {
+                source_covector: Poly::new(weights),
+                target: claim,
+                precommitted_mask_groups: Vec::new(),
+            },
+            challenger,
+            rng,
+        )
+        .expect("opening claims construct a valid committed relation")
+    }
+
+    /// Reduces an outer extension-field committed relation.
+    ///
+    /// Every precommitted mask root and the source root must already have
+    /// been observed by `challenger` in their outer-protocol order. This
+    /// method samples the relation-batching challenge, asks the caller to
+    /// derive the corresponding combined covectors and target, and does not
+    /// observe those earlier roots again.
+    pub fn prove_extension_relation<R, BuildRelation>(
+        &self,
+        prover_data: HidingWhirExtensionProverData<F, EF, MT>,
+        revealed_values: Vec<EF>,
+        build_relation: BuildRelation,
+        challenger: &mut Challenger,
+        rng: &mut R,
+    ) -> Result<ZkWhirProof<F, EF, MT>, HidingWhirRelationInputError>
+    where
+        R: Rng,
+        BuildRelation:
+            FnOnce(
+                EF,
+            )
+                -> Result<CombinedRelationProverInput<F, EF, MT>, HidingWhirRelationInputError>,
+    {
+        let batching_challenge: EF = challenger.sample_algebra_element();
+        let relation = build_relation(batching_challenge)?;
+        self.prove_combined_relation_inner(
+            prover_data.message,
+            InitialEncodingRandomness::Extension(prover_data.randomness),
+            ZkRoundData::Ext(prover_data.merkle),
+            revealed_values,
+            relation,
+            challenger,
+            rng,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+    fn prove_combined_relation_inner<R: Rng>(
+        &self,
+        source_message: Poly<EF>,
+        initial_encoding_randomness: InitialEncodingRandomness<F, EF>,
+        initial_round_data: ZkRoundData<F, EF, MT>,
+        revealed_values: Vec<EF>,
+        relation: CombinedRelationProverInput<F, EF, MT>,
+        challenger: &mut Challenger,
+        rng: &mut R,
+    ) -> Result<ZkWhirProof<F, EF, MT>, HidingWhirRelationInputError> {
+        let config = self.config;
+        validate_source_covector(&relation.source_covector, 1 << config.num_variables)?;
+        let sumcheck_mask_encoding = config.sumcheck_mask.encoding::<EF>();
         let product = ProductPolynomial::new_unpacked(
             VariableOrder::Prefix,
-            Poly::new(evals),
-            Poly::new(weights),
+            source_message,
+            relation.source_covector,
         );
-        let sumcheck_prover = SumcheckProver::new(product, claim);
+        let mut masks =
+            ProverMasks::<F, EF, MT>::from_precommitted(relation.precommitted_mask_groups)?;
+        let source_target = relation.target - masks.aux;
+        let sumcheck_prover = SumcheckProver::new(product, source_target);
 
         // Initial masked sumcheck batch.
-        let mut masks = ProverMasks::<F, EF, MT>::new();
         let mut zk_data = ZkSumcheckData::default();
         let handoff = sumcheck_prover.into_zk_sumcheck(
             &mut zk_data,
@@ -181,7 +288,7 @@ where
             &self.extension_mmcs,
             config.round_folding_factor(0),
             config.starting_folding_pow_bits,
-            EF::ZERO,
+            masks.aux,
             challenger,
             rng,
         );
@@ -196,17 +303,20 @@ where
             handoff,
             &mut zk_data,
             config.zk.ell_zk,
+            config.sumcheck_mask,
         );
 
         // Current oracle state: message randomness folds along with the
         // message (Lemma 3.26), the Merkle data answers the spot checks.
-        // Mixed-field fold: base-field chunks against the extension eq table.
-        let mut oracle_randomness: Vec<EF> = fold_limb_chunks(
-            &prover_data.randomness,
-            config.oracle_randomness[0],
-            &batch.randomness,
-        );
-        let mut round_data = ZkRoundData::<F, EF, MT>::Base(prover_data.merkle);
+        let mut oracle_randomness = match initial_encoding_randomness {
+            InitialEncodingRandomness::Base(randomness) => {
+                fold_limb_chunks(&randomness, config.oracle_randomness[0], &batch.randomness)
+            }
+            InitialEncodingRandomness::Extension(randomness) => {
+                fold_limb_chunks(&randomness, config.oracle_randomness[0], &batch.randomness)
+            }
+        };
+        let mut round_data = initial_round_data;
 
         // Code-switching rounds.
         for round in 0..config.n_rounds() {
@@ -417,6 +527,7 @@ where
                 mask_message,
                 mask_encoding_randomness,
                 mask_data,
+                *mask_shape,
             );
 
             rounds.push(ZkRoundProof {
@@ -448,6 +559,7 @@ where
                 handoff,
                 &mut zk_data,
                 config.zk.ell_zk,
+                config.sumcheck_mask,
             );
 
             oracle_randomness =
@@ -464,7 +576,7 @@ where
         );
         let base_config = BaseCaseZkConfig {
             code: source_code,
-            mask_groups: config.mask_groups(),
+            mask_groups: masks.groups.iter().map(|(shape, _)| *shape).collect(),
             num_queries: config.final_queries,
             mask_queries: config.mask_queries,
             pow_bits: config.final_pow_bits,
@@ -481,9 +593,9 @@ where
         let mask_witnesses: Vec<MaskGroupWitness<'_, F, EF, MT>> = masks
             .groups
             .iter()
-            .map(|(width, data)| {
-                let range = group_offset..group_offset + width;
-                group_offset += width;
+            .map(|(shape, data)| {
+                let range = group_offset..group_offset + shape.width;
+                group_offset += shape.width;
                 MaskGroupWitness {
                     messages: &masks.messages[range.clone()],
                     randomness: &masks.randomness[range.clone()],
@@ -507,13 +619,13 @@ where
             rng,
         );
 
-        ZkWhirProof {
-            evals: claimed_evals,
+        Ok(ZkWhirProof {
+            evals: revealed_values,
             sumchecks,
             sumcheck_mask_commitments,
             rounds,
             base_case,
-        }
+        })
     }
 
     /// Opens one leaf of the active oracle and folds it at the randomness.

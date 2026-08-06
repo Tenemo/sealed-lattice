@@ -10,7 +10,12 @@ use core::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
+use p3_dft::{Radix2DFTSmallBatch, TwoAdicSubgroupDft};
+use p3_field::{
+    BasedVectorSpace, PrimeCharacteristicRing, PrimeField64, batch_multiplicative_inverse,
+};
 use p3_goldilocks::Goldilocks;
+use p3_matrix::dense::RowMajorMatrix;
 use serde::Serialize;
 use sha3::Shake256;
 use zeroize::Zeroizing;
@@ -40,12 +45,13 @@ use super::commitment_liveness::{
 #[cfg(test)]
 use super::construction_plan::RowCodeWhirTracePhasePlan;
 use super::{
+    ChallengeField,
     bounded_dft::{
         BoundedBaseCosetLaneDft, BoundedSelectedBaseCosetLaneDft, SelectedBaseCosetLaneDftSchedule,
     },
     column_commitment::{
-        ColumnDigest, hash_merkle_parent, hash_opened_column_with_salt,
-        salted_phase_column_leaf_keccak_permutation_count,
+        ColumnDigest, PrivateColumnLeafSaltContext, StreamingColumnHasher, hash_merkle_parent,
+        hash_opened_column_with_salt, salted_phase_column_leaf_keccak_permutation_count,
     },
     commitment_liveness::{
         ROOT_AND_OPENING_PASS_COUNT, derive_phase_commitment_geometry_accounting,
@@ -88,6 +94,11 @@ use crate::bgv::proof_suite::{
         MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
     },
 };
+use crate::bgv::{
+    evaluator::fixed_width_crt::{FIXED_WIDTH_CRT_WORD_COUNT, FixedWidthCenteredBlockCoefficients},
+    modular_arithmetic::inverse_mod,
+    parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
+};
 use crate::foundation::{
     MAXIMUM_LOCAL_RECORD_PLAINTEXT_BYTE_LENGTH, ProofApplicationSlotCeilings,
     measure_common_proof_scratch_record_codec,
@@ -111,6 +122,16 @@ const VSS_FUSED_BOUND_RANGE_CANDIDATE_RETAINED_GROUP_WIDTH: usize = 64;
 const VSS_FUSED_BOUND_RANGE_CANDIDATE_LANE_ORDINAL: usize = 0;
 const AUTHENTICATED_SCRATCH_RECORD_ITERATION_COUNT: usize = 8;
 const SELECTED_CHECKPOINT_LEVEL: u32 = 2;
+const COMPACT_LOOKUP_INVERSE_CHUNK_ELEMENT_COUNT: usize = 1 << 18;
+const COMPACT_LOOKUP_SOURCE_ROW_COUNT: usize = 1 << 16;
+const COMPACT_LOOKUP_RELATION_MESSAGE_ROW_COUNT: usize = 1 << 15;
+const COMPACT_LOOKUP_RANDOM_COEFFICIENT_COUNT_PER_LOGICAL_COLUMN: usize = 393;
+const COMPACT_LOOKUP_ENCODED_ROW_COUNT: usize = 1 << 18;
+const COMPACT_LOOKUP_FULL_PHYSICAL_STRIPE_WIDTH: usize = 128;
+const COMPACT_LOOKUP_TRANSFORM_BATCH_WIDTH: usize = 32;
+const COMPACT_LOOKUP_SALTED_LEAF_ITERATION_COUNT: usize = 4_096;
+const WIDE_KEY_SWITCH_CANDIDATE_DATA_BLOCK_WIDTH: usize = 10;
+const WIDE_KEY_SWITCH_CANDIDATE_MODULUS_DOWN_COMPONENT_COUNT: usize = 2;
 
 #[cfg(target_arch = "wasm32")]
 #[link(wasm_import_module = "env")]
@@ -4836,6 +4857,1070 @@ fn measure_ring_native_proof_field_ntt_round_trip() -> Result<PrimitiveMeasureme
     })
 }
 
+fn measure_compact_logarithmic_derivative_inverse_chunk()
+-> Result<PrimitiveMeasurementRecord, String> {
+    let challenge = ChallengeField::new([
+        Goldilocks::new(17),
+        Goldilocks::new(19),
+        Goldilocks::new(23),
+        Goldilocks::new(29),
+        Goldilocks::new(31),
+    ]);
+    let denominators = (0..COMPACT_LOOKUP_INVERSE_CHUNK_ELEMENT_COUNT)
+        .map(|entry_ordinal| {
+            challenge
+                - ChallengeField::from_u64(
+                    u64::try_from(entry_ordinal)
+                        .expect("compact lookup entry ordinal fits u64")
+                        .wrapping_mul(65_537)
+                        .wrapping_add(41),
+                )
+        })
+        .collect::<Vec<_>>();
+
+    let (inverse_denominators, elapsed_nanoseconds) =
+        measure_elapsed_nanoseconds(|| Ok(batch_multiplicative_inverse(black_box(&denominators))))?;
+    if inverse_denominators.len() != denominators.len() {
+        return Err("compact lookup inverse chunk returned the wrong length".to_owned());
+    }
+    for entry_ordinal in [
+        0,
+        COMPACT_LOOKUP_INVERSE_CHUNK_ELEMENT_COUNT / 2,
+        COMPACT_LOOKUP_INVERSE_CHUNK_ELEMENT_COUNT - 1,
+    ] {
+        if denominators[entry_ordinal] * inverse_denominators[entry_ordinal] != ChallengeField::ONE
+        {
+            return Err("compact lookup inverse chunk failed its product check".to_owned());
+        }
+    }
+
+    let checksum = inverse_denominators.iter().enumerate().fold(
+        0xcbf2_9ce4_8422_2325_u64,
+        |accumulated, (entry_ordinal, inverse)| {
+            <ChallengeField as BasedVectorSpace<Goldilocks>>::as_basis_coefficients_slice(inverse)
+                .iter()
+                .enumerate()
+                .fold(accumulated, |coordinate_checksum, (coordinate, value)| {
+                    coordinate_checksum
+                        .rotate_left(9)
+                        .wrapping_add(value.as_canonical_u64())
+                        .wrapping_add(
+                            u64::try_from(entry_ordinal)
+                                .expect("compact lookup entry ordinal fits u64")
+                                .wrapping_mul(17),
+                        )
+                        .wrapping_add(
+                            u64::try_from(coordinate).expect("compact lookup coordinate fits u64"),
+                        )
+                        .wrapping_mul(0x1000_0000_01b3)
+                })
+        },
+    );
+    black_box(checksum);
+
+    let work_ledger = super::super::ring_native_candidate::preferred_compact_lookup_work_ledger();
+    let projected_chunk_count = usize::try_from(work_ledger.complete_inverse_element_count)
+        .map_err(|_| "compact lookup inverse-element count exceeds usize".to_owned())?
+        .div_ceil(COMPACT_LOOKUP_INVERSE_CHUNK_ELEMENT_COUNT);
+    let modeled_peak_live_byte_length = COMPACT_LOOKUP_INVERSE_CHUNK_ELEMENT_COUNT
+        .checked_mul(size_of::<ChallengeField>())
+        .and_then(|byte_length| byte_length.checked_mul(2))
+        .ok_or_else(|| "compact lookup inverse live-set size overflowed".to_owned())?;
+
+    Ok(PrimitiveMeasurementRecord {
+        schema_version: MEASUREMENT_SCHEMA_VERSION,
+        case_identifier: 14,
+        case_name: "compact-logarithmic-derivative-inverse-chunk",
+        execution_target: execution_target(),
+        iteration_count: 1,
+        elapsed_nanoseconds,
+        modeled_peak_live_byte_length: u64::try_from(modeled_peak_live_byte_length)
+            .map_err(|_| "compact lookup inverse live set exceeds u64".to_owned())?,
+        checksum_hex: format!("{checksum:016x}"),
+        dimensions: vec![
+            dimension("extensionDegree", 5)?,
+            dimension("extensionElementByteLength", size_of::<ChallengeField>())?,
+            dimension(
+                "inverseChunkElementCount",
+                COMPACT_LOOKUP_INVERSE_CHUNK_ELEMENT_COUNT,
+            )?,
+            dimension_u64("quotientEntryCount", work_ledger.quotient_entry_count),
+            dimension_u64(
+                "paddedLookupTableEntryCount",
+                work_ledger.padded_lookup_table_entry_count,
+            ),
+            dimension_u64(
+                "completeInverseElementCount",
+                work_ledger.complete_inverse_element_count,
+            ),
+            dimension("projectedChunkCount", projected_chunk_count)?,
+            dimension_u64(
+                "candidateCompleteTwoPassButterflyCount",
+                work_ledger.complete_two_pass_butterfly_count,
+            ),
+            dimension_u64(
+                "candidateCompleteTwoPassSaltedLeafHashCount",
+                work_ledger.complete_two_pass_salted_leaf_hash_count,
+            ),
+            dimension_u64(
+                "candidatePeakLiveByteLength",
+                work_ledger.peak_live_byte_length,
+            ),
+            dimension_u64(
+                "candidateLogicalColumnCount",
+                work_ledger.logical_column_count,
+            ),
+        ],
+    })
+}
+
+fn measure_compact_lookup_full_stripe_transform() -> Result<PrimitiveMeasurementRecord, String> {
+    let source_element_count = COMPACT_LOOKUP_SOURCE_ROW_COUNT
+        .checked_mul(COMPACT_LOOKUP_FULL_PHYSICAL_STRIPE_WIDTH)
+        .ok_or_else(|| "compact lookup source element count overflowed".to_owned())?;
+    let encoded_element_count = COMPACT_LOOKUP_ENCODED_ROW_COUNT
+        .checked_mul(COMPACT_LOOKUP_FULL_PHYSICAL_STRIPE_WIDTH)
+        .ok_or_else(|| "compact lookup encoded element count overflowed".to_owned())?;
+    let mut coefficient_matrix = Vec::new();
+    coefficient_matrix
+        .try_reserve_exact(encoded_element_count)
+        .map_err(|_| "compact lookup stripe allocation failed".to_owned())?;
+    coefficient_matrix.resize(encoded_element_count, Goldilocks::ZERO);
+    for source_row_ordinal in 0..COMPACT_LOOKUP_SOURCE_ROW_COUNT {
+        for column_ordinal in 0..COMPACT_LOOKUP_FULL_PHYSICAL_STRIPE_WIDTH {
+            let matrix_ordinal = source_row_ordinal
+                .checked_mul(COMPACT_LOOKUP_FULL_PHYSICAL_STRIPE_WIDTH)
+                .and_then(|value| value.checked_add(column_ordinal))
+                .ok_or_else(|| "compact lookup matrix ordinal overflowed".to_owned())?;
+            let source_row = u64::try_from(source_row_ordinal)
+                .map_err(|_| "compact lookup source row exceeds u64".to_owned())?;
+            let column = u64::try_from(column_ordinal)
+                .map_err(|_| "compact lookup column exceeds u64".to_owned())?;
+            coefficient_matrix[matrix_ordinal] = Goldilocks::new(
+                source_row
+                    .wrapping_mul(65_537)
+                    .wrapping_add(column.wrapping_mul(257))
+                    .wrapping_add(41),
+            );
+        }
+    }
+
+    let transform = Radix2DFTSmallBatch::<Goldilocks>::new(COMPACT_LOOKUP_ENCODED_ROW_COUNT);
+    let (encoded_matrix, elapsed_nanoseconds) = measure_elapsed_nanoseconds(|| {
+        Ok(transform.coset_dft_batch(
+            RowMajorMatrix::new(
+                black_box(coefficient_matrix),
+                COMPACT_LOOKUP_FULL_PHYSICAL_STRIPE_WIDTH,
+            ),
+            Goldilocks::new(7),
+        ))
+    })?;
+    if encoded_matrix.values.len() != encoded_element_count {
+        return Err("compact lookup stripe transform returned the wrong length".to_owned());
+    }
+    let checksum = encoded_matrix.values.iter().enumerate().fold(
+        0xcbf2_9ce4_8422_2325_u64,
+        |accumulated, (entry_ordinal, value)| {
+            accumulated
+                .rotate_left(17)
+                .wrapping_add(value.as_canonical_u64())
+                .wrapping_add(u64::try_from(entry_ordinal).expect("encoded ordinal fits u64"))
+                .wrapping_mul(0x1000_0000_01b3)
+        },
+    );
+    black_box(checksum);
+
+    let work_ledger = super::super::ring_native_candidate::preferred_compact_lookup_work_ledger();
+    let full_width_stripe_count = work_ledger
+        .ordered_physical_stripe_widths
+        .iter()
+        .filter(|width| {
+            **width
+                == u64::try_from(COMPACT_LOOKUP_FULL_PHYSICAL_STRIPE_WIDTH)
+                    .expect("stripe width fits u64")
+        })
+        .count();
+    let tail_physical_stripe_widths = work_ledger
+        .ordered_physical_stripe_widths
+        .iter()
+        .copied()
+        .filter(|width| {
+            *width
+                != u64::try_from(COMPACT_LOOKUP_FULL_PHYSICAL_STRIPE_WIDTH)
+                    .expect("stripe width fits u64")
+        })
+        .collect::<Vec<_>>();
+    let minimum_tail_physical_stripe_width = tail_physical_stripe_widths
+        .iter()
+        .copied()
+        .min()
+        .ok_or_else(|| "compact lookup tail stripe is absent".to_owned())?;
+    let maximum_tail_physical_stripe_width = tail_physical_stripe_widths
+        .iter()
+        .copied()
+        .max()
+        .ok_or_else(|| "compact lookup tail stripe is absent".to_owned())?;
+    let butterfly_count = COMPACT_LOOKUP_FULL_PHYSICAL_STRIPE_WIDTH
+        .checked_mul(COMPACT_LOOKUP_ENCODED_ROW_COUNT / 2)
+        .and_then(|count| {
+            count.checked_mul(
+                usize::try_from(COMPACT_LOOKUP_ENCODED_ROW_COUNT.ilog2())
+                    .expect("encoded row logarithm fits usize"),
+            )
+        })
+        .ok_or_else(|| "compact lookup stripe butterfly count overflowed".to_owned())?;
+    let twiddle_field_element_count = COMPACT_LOOKUP_ENCODED_ROW_COUNT
+        .checked_sub(1)
+        .and_then(|count| count.checked_mul(2))
+        .ok_or_else(|| "compact lookup twiddle count overflowed".to_owned())?;
+    let modeled_peak_live_byte_length = encoded_element_count
+        .checked_add(twiddle_field_element_count)
+        .and_then(|count| count.checked_mul(size_of::<Goldilocks>()))
+        .ok_or_else(|| "compact lookup transform live set overflowed".to_owned())?;
+
+    Ok(PrimitiveMeasurementRecord {
+        schema_version: MEASUREMENT_SCHEMA_VERSION,
+        case_identifier: 15,
+        case_name: "compact-lookup-randomized-full-stripe-transform",
+        execution_target: execution_target(),
+        iteration_count: 1,
+        elapsed_nanoseconds,
+        modeled_peak_live_byte_length: u64::try_from(modeled_peak_live_byte_length)
+            .map_err(|_| "compact lookup transform live set exceeds u64".to_owned())?,
+        checksum_hex: format!("{checksum:016x}"),
+        dimensions: vec![
+            dimension("sourceRowCount", COMPACT_LOOKUP_SOURCE_ROW_COUNT)?,
+            dimension(
+                "relationMessageRowCount",
+                COMPACT_LOOKUP_RELATION_MESSAGE_ROW_COUNT,
+            )?,
+            dimension(
+                "privateRandomCoefficientCountPerLogicalColumn",
+                COMPACT_LOOKUP_RANDOM_COEFFICIENT_COUNT_PER_LOGICAL_COLUMN,
+            )?,
+            dimension(
+                "unconstrainedPaddingRowCount",
+                COMPACT_LOOKUP_SOURCE_ROW_COUNT
+                    - COMPACT_LOOKUP_RELATION_MESSAGE_ROW_COUNT
+                    - COMPACT_LOOKUP_RANDOM_COEFFICIENT_COUNT_PER_LOGICAL_COLUMN,
+            )?,
+            dimension("encodedRowCount", COMPACT_LOOKUP_ENCODED_ROW_COUNT)?,
+            dimension(
+                "physicalStripeWidth",
+                COMPACT_LOOKUP_FULL_PHYSICAL_STRIPE_WIDTH,
+            )?,
+            dimension("sourceElementCount", source_element_count)?,
+            dimension("encodedElementCount", encoded_element_count)?,
+            dimension("butterflyCount", butterfly_count)?,
+            dimension("twiddleFieldElementCount", twiddle_field_element_count)?,
+            dimension(
+                "candidatePhysicalStripeCount",
+                work_ledger.ordered_physical_stripe_widths.len(),
+            )?,
+            dimension("candidateFullWidthStripeCount", full_width_stripe_count)?,
+            dimension(
+                "candidateTailPhysicalStripeCount",
+                tail_physical_stripe_widths.len(),
+            )?,
+            dimension_u64(
+                "candidateMinimumTailPhysicalStripeWidth",
+                minimum_tail_physical_stripe_width,
+            ),
+            dimension_u64(
+                "candidateMaximumTailPhysicalStripeWidth",
+                maximum_tail_physical_stripe_width,
+            ),
+            dimension_u64(
+                "candidatePhysicalColumnCount",
+                work_ledger.physical_column_count,
+            ),
+            dimension_u64(
+                "candidateCompleteTwoPassButterflyCount",
+                work_ledger.complete_two_pass_butterfly_count,
+            ),
+            dimension_u64(
+                "candidateCompleteTwoPassEncodedElementCount",
+                work_ledger.complete_two_pass_encoded_field_element_count,
+            ),
+            dimension_u64(
+                "candidatePrivateRandomFieldElementCount",
+                work_ledger.private_random_field_element_count,
+            ),
+            dimension_u64(
+                "candidatePeakLiveByteLength",
+                work_ledger.peak_live_byte_length,
+            ),
+        ],
+    })
+}
+
+fn measure_compact_lookup_salted_leaf() -> Result<PrimitiveMeasurementRecord, String> {
+    let values = (0..COMPACT_LOOKUP_FULL_PHYSICAL_STRIPE_WIDTH)
+        .map(|value_ordinal| {
+            Goldilocks::new(
+                u64::try_from(value_ordinal)
+                    .expect("compact lookup leaf ordinal fits u64")
+                    .wrapping_mul(1_000_003)
+                    .wrapping_add(29),
+            )
+        })
+        .collect::<Vec<_>>();
+    let per_leaf_keccak_permutation_count = salted_phase_column_leaf_keccak_permutation_count(
+        COMPACT_LOOKUP_FULL_PHYSICAL_STRIPE_WIDTH,
+    )?;
+    let salt = derive_private_leaf_salt(
+        &[0x63_u8; 64],
+        b"compact-lookup/stripe",
+        COMPACT_LOOKUP_ENCODED_ROW_COUNT,
+        COMPACT_LOOKUP_FULL_PHYSICAL_STRIPE_WIDTH,
+        0,
+        17,
+    )?;
+    let (checksum, elapsed_nanoseconds) = measure_elapsed_nanoseconds(|| {
+        let mut checksum = 0xcbf2_9ce4_8422_2325_u64;
+        for iteration_ordinal in 0..COMPACT_LOOKUP_SALTED_LEAF_ITERATION_COUNT {
+            let digest = hash_opened_column_with_salt(
+                black_box(&values),
+                COMPACT_LOOKUP_ENCODED_ROW_COUNT,
+                Some(black_box(&salt)),
+            );
+            checksum = checksum
+                .rotate_left(17)
+                .wrapping_add(digest[iteration_ordinal % digest.len()])
+                .wrapping_add(
+                    u64::try_from(iteration_ordinal)
+                        .expect("compact lookup leaf iteration fits u64"),
+                )
+                .wrapping_mul(0x1000_0000_01b3);
+        }
+        Ok(checksum)
+    })?;
+    black_box(checksum);
+
+    let work_ledger = super::super::ring_native_candidate::preferred_compact_lookup_work_ledger();
+    let measured_keccak_permutation_count = per_leaf_keccak_permutation_count
+        .checked_mul(
+            u64::try_from(COMPACT_LOOKUP_SALTED_LEAF_ITERATION_COUNT)
+                .map_err(|_| "compact lookup leaf iteration count exceeds u64".to_owned())?,
+        )
+        .ok_or_else(|| "compact lookup measured permutation count overflowed".to_owned())?;
+    let projected_keccak_permutation_count = per_leaf_keccak_permutation_count
+        .checked_mul(work_ledger.complete_two_pass_salted_leaf_hash_count)
+        .ok_or_else(|| "compact lookup projected permutation count overflowed".to_owned())?;
+    let modeled_peak_live_byte_length = values
+        .len()
+        .checked_mul(size_of::<Goldilocks>())
+        .and_then(|length| length.checked_add(PRIVATE_LEAF_SALT_BYTE_LENGTH))
+        .and_then(|length| length.checked_add(size_of::<Shake256>()))
+        .and_then(|length| length.checked_add(size_of::<ColumnDigest>()))
+        .ok_or_else(|| "compact lookup salted-leaf live set overflowed".to_owned())?;
+
+    Ok(PrimitiveMeasurementRecord {
+        schema_version: MEASUREMENT_SCHEMA_VERSION,
+        case_identifier: 16,
+        case_name: "compact-lookup-salted-leaf",
+        execution_target: execution_target(),
+        iteration_count: u64::try_from(COMPACT_LOOKUP_SALTED_LEAF_ITERATION_COUNT)
+            .map_err(|_| "compact lookup leaf iteration count exceeds u64".to_owned())?,
+        elapsed_nanoseconds,
+        modeled_peak_live_byte_length: u64::try_from(modeled_peak_live_byte_length)
+            .map_err(|_| "compact lookup salted-leaf live set exceeds u64".to_owned())?,
+        checksum_hex: format!("{checksum:016x}"),
+        dimensions: vec![
+            dimension(
+                "logicalLeafWidth",
+                COMPACT_LOOKUP_FULL_PHYSICAL_STRIPE_WIDTH,
+            )?,
+            dimension("saltByteLength", PRIVATE_LEAF_SALT_BYTE_LENGTH)?,
+            dimension_u64(
+                "perLeafKeccakPermutationCount",
+                per_leaf_keccak_permutation_count,
+            ),
+            dimension_u64(
+                "measuredKeccakPermutationCount",
+                measured_keccak_permutation_count,
+            ),
+            dimension_u64(
+                "candidateCompleteTwoPassSaltedLeafHashCount",
+                work_ledger.complete_two_pass_salted_leaf_hash_count,
+            ),
+            dimension_u64(
+                "candidateCompleteTwoPassKeccakPermutationCount",
+                projected_keccak_permutation_count,
+            ),
+        ],
+    })
+}
+
+fn measure_compact_lookup_incremental_stripe_root() -> Result<PrimitiveMeasurementRecord, String> {
+    if !COMPACT_LOOKUP_FULL_PHYSICAL_STRIPE_WIDTH
+        .is_multiple_of(COMPACT_LOOKUP_TRANSFORM_BATCH_WIDTH)
+    {
+        return Err("compact lookup transform batch does not divide the stripe".to_owned());
+    }
+    let transform_batch_count =
+        COMPACT_LOOKUP_FULL_PHYSICAL_STRIPE_WIDTH / COMPACT_LOOKUP_TRANSFORM_BATCH_WIDTH;
+    let populated_source_row_count = COMPACT_LOOKUP_RELATION_MESSAGE_ROW_COUNT
+        .checked_add(COMPACT_LOOKUP_RANDOM_COEFFICIENT_COUNT_PER_LOGICAL_COLUMN)
+        .ok_or_else(|| "compact lookup populated source-row count overflowed".to_owned())?;
+    let batch_encoded_element_count = COMPACT_LOOKUP_ENCODED_ROW_COUNT
+        .checked_mul(COMPACT_LOOKUP_TRANSFORM_BATCH_WIDTH)
+        .ok_or_else(|| "compact lookup batch element count overflowed".to_owned())?;
+    let batch_matrix_byte_length = batch_encoded_element_count
+        .checked_mul(size_of::<Goldilocks>())
+        .ok_or_else(|| "compact lookup batch matrix byte length overflowed".to_owned())?;
+    let replay_column_byte_length = COMPACT_LOOKUP_ENCODED_ROW_COUNT
+        .checked_mul(size_of::<Goldilocks>())
+        .ok_or_else(|| "compact lookup replay-column byte length overflowed".to_owned())?;
+    let hash_state_byte_length =
+        StreamingColumnHasher::exact_state_byte_length(COMPACT_LOOKUP_ENCODED_ROW_COUNT)
+            .ok_or_else(|| "compact lookup hash-state byte length overflowed".to_owned())?;
+    let twiddle_field_element_count = COMPACT_LOOKUP_ENCODED_ROW_COUNT
+        .checked_sub(1)
+        .and_then(|count| count.checked_mul(2))
+        .ok_or_else(|| "compact lookup twiddle count overflowed".to_owned())?;
+    let twiddle_byte_length = twiddle_field_element_count
+        .checked_mul(size_of::<Goldilocks>())
+        .ok_or_else(|| "compact lookup twiddle byte length overflowed".to_owned())?;
+    let modeled_peak_live_byte_length = hash_state_byte_length
+        .checked_add(batch_matrix_byte_length)
+        .and_then(|count| count.checked_add(replay_column_byte_length))
+        .and_then(|count| count.checked_add(twiddle_byte_length))
+        .ok_or_else(|| "compact lookup incremental live set overflowed".to_owned())?;
+    let transform = Radix2DFTSmallBatch::<Goldilocks>::new(COMPACT_LOOKUP_ENCODED_ROW_COUNT);
+
+    let (root, elapsed_nanoseconds) = measure_elapsed_nanoseconds(|| {
+        let private_leaf_salt =
+            PrivateColumnLeafSaltContext::new(&[0x71_u8; 64], b"compact-lookup/incremental-stripe");
+        let mut hasher = StreamingColumnHasher::new_with_private_salt(
+            COMPACT_LOOKUP_FULL_PHYSICAL_STRIPE_WIDTH,
+            COMPACT_LOOKUP_ENCODED_ROW_COUNT,
+            &private_leaf_salt,
+        )?;
+        drop(private_leaf_salt);
+        let mut replay_column = Vec::new();
+        replay_column
+            .try_reserve_exact(COMPACT_LOOKUP_ENCODED_ROW_COUNT)
+            .map_err(|_| "compact lookup replay-column allocation failed".to_owned())?;
+
+        for transform_batch_ordinal in 0..transform_batch_count {
+            let mut coefficient_matrix = Vec::new();
+            coefficient_matrix
+                .try_reserve_exact(batch_encoded_element_count)
+                .map_err(|_| "compact lookup incremental batch allocation failed".to_owned())?;
+            coefficient_matrix.resize(batch_encoded_element_count, Goldilocks::ZERO);
+            for source_row_ordinal in 0..populated_source_row_count {
+                for batch_column_ordinal in 0..COMPACT_LOOKUP_TRANSFORM_BATCH_WIDTH {
+                    let matrix_ordinal = source_row_ordinal
+                        .checked_mul(COMPACT_LOOKUP_TRANSFORM_BATCH_WIDTH)
+                        .and_then(|value| value.checked_add(batch_column_ordinal))
+                        .ok_or_else(|| {
+                            "compact lookup incremental matrix ordinal overflowed".to_owned()
+                        })?;
+                    let global_column_ordinal = transform_batch_ordinal
+                        .checked_mul(COMPACT_LOOKUP_TRANSFORM_BATCH_WIDTH)
+                        .and_then(|value| value.checked_add(batch_column_ordinal))
+                        .ok_or_else(|| {
+                            "compact lookup incremental column ordinal overflowed".to_owned()
+                        })?;
+                    coefficient_matrix[matrix_ordinal] = Goldilocks::new(
+                        u64::try_from(source_row_ordinal)
+                            .expect("compact lookup source row fits u64")
+                            .wrapping_mul(65_537)
+                            .wrapping_add(
+                                u64::try_from(global_column_ordinal)
+                                    .expect("compact lookup column fits u64")
+                                    .wrapping_mul(257),
+                            )
+                            .wrapping_add(73),
+                    );
+                }
+            }
+            let encoded_matrix = transform.coset_dft_batch(
+                RowMajorMatrix::new(coefficient_matrix, COMPACT_LOOKUP_TRANSFORM_BATCH_WIDTH),
+                Goldilocks::new(7),
+            );
+            if encoded_matrix.values.len() != batch_encoded_element_count {
+                return Err(
+                    "compact lookup incremental transform returned the wrong length".to_owned(),
+                );
+            }
+            for batch_column_ordinal in 0..COMPACT_LOOKUP_TRANSFORM_BATCH_WIDTH {
+                replay_column.clear();
+                replay_column.extend(
+                    encoded_matrix
+                        .values
+                        .chunks_exact(COMPACT_LOOKUP_TRANSFORM_BATCH_WIDTH)
+                        .map(|encoded_row| encoded_row[batch_column_ordinal]),
+                );
+                hasher.absorb_row(black_box(&replay_column))?;
+            }
+        }
+        hasher.finalize_root()
+    })?;
+    let checksum = root.iter().enumerate().fold(
+        0xcbf2_9ce4_8422_2325_u64,
+        |accumulated, (word_ordinal, word)| {
+            accumulated
+                .rotate_left(11)
+                .wrapping_add(*word)
+                .wrapping_add(u64::try_from(word_ordinal).expect("digest word fits u64"))
+                .wrapping_mul(0x1000_0000_01b3)
+        },
+    );
+    black_box(checksum);
+
+    let work_ledger = super::super::ring_native_candidate::preferred_compact_lookup_work_ledger();
+    let full_width_stripe_count = work_ledger
+        .ordered_physical_stripe_widths
+        .iter()
+        .filter(|width| {
+            **width
+                == u64::try_from(COMPACT_LOOKUP_FULL_PHYSICAL_STRIPE_WIDTH)
+                    .expect("stripe width fits u64")
+        })
+        .count();
+    let root_pass_butterfly_count = COMPACT_LOOKUP_FULL_PHYSICAL_STRIPE_WIDTH
+        .checked_mul(COMPACT_LOOKUP_ENCODED_ROW_COUNT / 2)
+        .and_then(|count| {
+            count.checked_mul(
+                usize::try_from(COMPACT_LOOKUP_ENCODED_ROW_COUNT.ilog2())
+                    .expect("encoded row logarithm fits usize"),
+            )
+        })
+        .ok_or_else(|| "compact lookup root-pass butterfly count overflowed".to_owned())?;
+    let root_pass_keccak_permutation_count =
+        usize::try_from(salted_phase_column_leaf_keccak_permutation_count(
+            COMPACT_LOOKUP_FULL_PHYSICAL_STRIPE_WIDTH,
+        )?)
+        .map_err(|_| "compact lookup leaf permutation count exceeds usize".to_owned())?
+        .checked_mul(COMPACT_LOOKUP_ENCODED_ROW_COUNT)
+        .ok_or_else(|| "compact lookup root-pass permutation count overflowed".to_owned())?;
+
+    Ok(PrimitiveMeasurementRecord {
+        schema_version: MEASUREMENT_SCHEMA_VERSION,
+        case_identifier: 17,
+        case_name: "compact-lookup-incremental-stripe-root",
+        execution_target: execution_target(),
+        iteration_count: 1,
+        elapsed_nanoseconds,
+        modeled_peak_live_byte_length: u64::try_from(modeled_peak_live_byte_length)
+            .map_err(|_| "compact lookup incremental live set exceeds u64".to_owned())?,
+        checksum_hex: format!("{checksum:016x}"),
+        dimensions: vec![
+            dimension("sourceRowCount", COMPACT_LOOKUP_SOURCE_ROW_COUNT)?,
+            dimension("populatedSourceRowCount", populated_source_row_count)?,
+            dimension(
+                "relationMessageRowCount",
+                COMPACT_LOOKUP_RELATION_MESSAGE_ROW_COUNT,
+            )?,
+            dimension(
+                "privateRandomCoefficientCountPerLogicalColumn",
+                COMPACT_LOOKUP_RANDOM_COEFFICIENT_COUNT_PER_LOGICAL_COLUMN,
+            )?,
+            dimension("encodedRowCount", COMPACT_LOOKUP_ENCODED_ROW_COUNT)?,
+            dimension(
+                "physicalStripeWidth",
+                COMPACT_LOOKUP_FULL_PHYSICAL_STRIPE_WIDTH,
+            )?,
+            dimension("transformBatchWidth", COMPACT_LOOKUP_TRANSFORM_BATCH_WIDTH)?,
+            dimension("transformBatchCount", transform_batch_count)?,
+            dimension("batchEncodedElementCount", batch_encoded_element_count)?,
+            dimension("batchMatrixByteLength", batch_matrix_byte_length)?,
+            dimension("replayColumnByteLength", replay_column_byte_length)?,
+            dimension("hashStateByteLength", hash_state_byte_length)?,
+            dimension("twiddleFieldElementCount", twiddle_field_element_count)?,
+            dimension("twiddleByteLength", twiddle_byte_length)?,
+            dimension("rootPassButterflyCount", root_pass_butterfly_count)?,
+            dimension(
+                "rootPassKeccakPermutationCount",
+                root_pass_keccak_permutation_count,
+            )?,
+            dimension(
+                "rootPassMerkleParentHashCount",
+                COMPACT_LOOKUP_ENCODED_ROW_COUNT - 1,
+            )?,
+            dimension("candidateFullWidthStripeCount", full_width_stripe_count)?,
+            dimension(
+                "candidateCompleteRootPassCount",
+                work_ledger
+                    .ordered_physical_stripe_widths
+                    .len()
+                    .checked_mul(2)
+                    .ok_or_else(|| "compact lookup root-pass count overflowed".to_owned())?,
+            )?,
+        ],
+    })
+}
+
+fn measure_wide_key_switch_fixed_width_crt() -> Result<PrimitiveMeasurementRecord, String> {
+    use super::super::ring_native_candidate::PREFERRED_CANDIDATE_SPECIAL_MODULI;
+
+    let data_residue_limbs = DATA_PRIMES
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(limb_ordinal, modulus)| {
+            (0..POLYNOMIAL_DEGREE)
+                .map(|coefficient_ordinal| {
+                    u64::try_from(coefficient_ordinal)
+                        .expect("polynomial coefficient ordinal fits u64")
+                        .wrapping_mul(65_537)
+                        .wrapping_add(
+                            u64::try_from(limb_ordinal + 1)
+                                .expect("data-limb ordinal fits u64")
+                                .wrapping_mul(257),
+                        )
+                        % modulus
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let special_residue_limb_sets = (0..WIDE_KEY_SWITCH_CANDIDATE_MODULUS_DOWN_COMPONENT_COUNT)
+        .map(|component_ordinal| {
+            PREFERRED_CANDIDATE_SPECIAL_MODULI
+                .iter()
+                .copied()
+                .enumerate()
+                .map(|(limb_ordinal, modulus)| {
+                    (0..POLYNOMIAL_DEGREE)
+                        .map(|coefficient_ordinal| {
+                            u64::try_from(coefficient_ordinal)
+                                .expect("polynomial coefficient ordinal fits u64")
+                                .wrapping_mul(131_071)
+                                .wrapping_add(
+                                    u64::try_from(component_ordinal + 1)
+                                        .expect("component ordinal fits u64")
+                                        .wrapping_mul(65_537),
+                                )
+                                .wrapping_add(
+                                    u64::try_from(limb_ordinal + 1)
+                                        .expect("special-limb ordinal fits u64")
+                                        .wrapping_mul(17),
+                                )
+                                % modulus
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let inverse_plaintext_modulus_by_special_prime = PREFERRED_CANDIDATE_SPECIAL_MODULI
+        .iter()
+        .map(|modulus| inverse_mod(257, *modulus).map_err(|error| error.to_string()))
+        .collect::<Result<Vec<_>, _>>()?;
+    let extended_moduli = DATA_PRIMES
+        .into_iter()
+        .chain(PREFERRED_CANDIDATE_SPECIAL_MODULI)
+        .collect::<Vec<_>>();
+    let retained_input_word_count = data_residue_limbs
+        .iter()
+        .chain(special_residue_limb_sets.iter().flatten())
+        .map(Vec::len)
+        .sum::<usize>();
+    let retained_input_byte_length = retained_input_word_count
+        .checked_mul(size_of::<u64>())
+        .ok_or_else(|| "wide key-switch retained-input byte length overflowed".to_owned())?;
+    let data_block_count = DATA_PRIMES
+        .len()
+        .div_ceil(WIDE_KEY_SWITCH_CANDIDATE_DATA_BLOCK_WIDTH);
+    let data_residue_projection_count = data_block_count
+        .checked_mul(extended_moduli.len())
+        .ok_or_else(|| "wide key-switch data projection count overflowed".to_owned())?;
+    let special_residue_projection_count = WIDE_KEY_SWITCH_CANDIDATE_MODULUS_DOWN_COMPONENT_COUNT
+        .checked_mul(DATA_PRIMES.len())
+        .ok_or_else(|| "wide key-switch special projection count overflowed".to_owned())?;
+    let mut output_residues = Vec::with_capacity(POLYNOMIAL_DEGREE);
+
+    let ((checksum, maximum_reconstruction_retained_byte_length), elapsed_nanoseconds) =
+        measure_elapsed_nanoseconds(|| {
+            let mut checksum = 0xcbf2_9ce4_8422_2325_u64;
+            let mut maximum_reconstruction_retained_byte_length = 0_usize;
+            let mut mix_output = |output: &[u64]| {
+                for (coefficient_ordinal, residue) in output.iter().copied().enumerate() {
+                    checksum = checksum
+                        .rotate_left(11)
+                        .wrapping_add(residue)
+                        .wrapping_add(
+                            u64::try_from(coefficient_ordinal)
+                                .expect("coefficient ordinal fits u64"),
+                        )
+                        .wrapping_mul(0x1000_0000_01b3);
+                }
+            };
+
+            for (data_block, data_moduli) in data_residue_limbs
+                .chunks(WIDE_KEY_SWITCH_CANDIDATE_DATA_BLOCK_WIDTH)
+                .zip(DATA_PRIMES.chunks(WIDE_KEY_SWITCH_CANDIDATE_DATA_BLOCK_WIDTH))
+            {
+                let reconstruction =
+                    FixedWidthCenteredBlockCoefficients::reconstruct(data_block, data_moduli, None)
+                        .map_err(|error| error.to_string())?;
+                maximum_reconstruction_retained_byte_length =
+                    maximum_reconstruction_retained_byte_length
+                        .max(reconstruction.retained_byte_length());
+                if reconstruction.coefficient_count() != POLYNOMIAL_DEGREE {
+                    return Err(
+                        "wide key-switch data reconstruction returned the wrong length".to_owned(),
+                    );
+                }
+                for modulus in &extended_moduli {
+                    reconstruction
+                        .write_residues(*modulus, &mut output_residues)
+                        .map_err(|error| error.to_string())?;
+                    mix_output(black_box(&output_residues));
+                }
+            }
+
+            for special_residue_limbs in &special_residue_limb_sets {
+                let reconstruction = FixedWidthCenteredBlockCoefficients::reconstruct(
+                    special_residue_limbs,
+                    &PREFERRED_CANDIDATE_SPECIAL_MODULI,
+                    Some(&inverse_plaintext_modulus_by_special_prime),
+                )
+                .map_err(|error| error.to_string())?;
+                maximum_reconstruction_retained_byte_length =
+                    maximum_reconstruction_retained_byte_length
+                        .max(reconstruction.retained_byte_length());
+                if reconstruction.coefficient_count() != POLYNOMIAL_DEGREE {
+                    return Err(
+                        "wide key-switch special reconstruction returned the wrong length"
+                            .to_owned(),
+                    );
+                }
+                for modulus in DATA_PRIMES {
+                    reconstruction
+                        .write_residues(modulus, &mut output_residues)
+                        .map_err(|error| error.to_string())?;
+                    mix_output(black_box(&output_residues));
+                }
+            }
+            black_box(checksum);
+            Ok((checksum, maximum_reconstruction_retained_byte_length))
+        })?;
+    let output_residue_byte_length = output_residues
+        .capacity()
+        .checked_mul(size_of::<u64>())
+        .ok_or_else(|| "wide key-switch output byte length overflowed".to_owned())?;
+    let modeled_peak_live_byte_length = retained_input_byte_length
+        .checked_add(maximum_reconstruction_retained_byte_length)
+        .and_then(|byte_length| byte_length.checked_add(output_residue_byte_length))
+        .ok_or_else(|| "wide key-switch modeled live set overflowed".to_owned())?;
+
+    Ok(PrimitiveMeasurementRecord {
+        schema_version: MEASUREMENT_SCHEMA_VERSION,
+        case_identifier: 18,
+        case_name: "wide-key-switch-fixed-width-crt",
+        execution_target: execution_target(),
+        iteration_count: 1,
+        elapsed_nanoseconds,
+        modeled_peak_live_byte_length: u64::try_from(modeled_peak_live_byte_length)
+            .map_err(|_| "wide key-switch modeled live set exceeds u64".to_owned())?,
+        checksum_hex: format!("{checksum:016x}"),
+        dimensions: vec![
+            dimension("polynomialDegree", POLYNOMIAL_DEGREE)?,
+            dimension("fixedWidthWordCount", FIXED_WIDTH_CRT_WORD_COUNT)?,
+            dimension("dataBlockWidth", WIDE_KEY_SWITCH_CANDIDATE_DATA_BLOCK_WIDTH)?,
+            dimension("dataBlockCount", data_block_count)?,
+            dimension("specialLimbCount", PREFERRED_CANDIDATE_SPECIAL_MODULI.len())?,
+            dimension("extendedLimbCount", extended_moduli.len())?,
+            dimension("dataReconstructionCount", data_block_count)?,
+            dimension(
+                "specialReconstructionCount",
+                WIDE_KEY_SWITCH_CANDIDATE_MODULUS_DOWN_COMPONENT_COUNT,
+            )?,
+            dimension("dataResidueProjectionCount", data_residue_projection_count)?,
+            dimension(
+                "specialResidueProjectionCount",
+                special_residue_projection_count,
+            )?,
+            dimension("retainedInputByteLength", retained_input_byte_length)?,
+            dimension(
+                "maximumReconstructionRetainedByteLength",
+                maximum_reconstruction_retained_byte_length,
+            )?,
+            dimension("outputResidueByteLength", output_residue_byte_length)?,
+        ],
+    })
+}
+
+fn measure_compact_quintic_main_code_root_pass(
+    packet_ledger: super::super::ring_native_candidate::CfwTwoEpochPacketStaticLedger,
+    case_identifier: u32,
+    case_name: &'static str,
+    commitment_role: &'static [u8],
+) -> Result<PrimitiveMeasurementRecord, String> {
+    let field_extension_degree = <ChallengeField as BasedVectorSpace<Goldilocks>>::DIMENSION;
+    if u32::try_from(field_extension_degree)
+        .map_err(|_| "compact quintic extension degree exceeds u32".to_owned())?
+        != packet_ledger.field_extension_degree
+    {
+        return Err("compact quintic field degrees disagree".to_owned());
+    }
+    let main_logical_component_count =
+        usize::try_from(packet_ledger.main_interleaved_component_count)
+            .map_err(|_| "compact quintic main component count exceeds usize".to_owned())?;
+    let transform_batch_logical_component_count =
+        usize::try_from(packet_ledger.transform_batch_logical_component_count)
+            .map_err(|_| "compact quintic transform batch width exceeds usize".to_owned())?;
+    if !main_logical_component_count.is_multiple_of(transform_batch_logical_component_count) {
+        return Err("compact quintic transform batch does not divide the main code".to_owned());
+    }
+    let transform_batch_count =
+        main_logical_component_count / transform_batch_logical_component_count;
+    let transform_batch_base_coordinate_width = transform_batch_logical_component_count
+        .checked_mul(field_extension_degree)
+        .ok_or_else(|| "compact quintic coordinate batch width overflowed".to_owned())?;
+    let serialized_base_coordinate_row_count = main_logical_component_count
+        .checked_mul(field_extension_degree)
+        .ok_or_else(|| "compact quintic serialized row count overflowed".to_owned())?;
+    let populated_message_element_count_per_logical_component =
+        usize::try_from(packet_ledger.populated_message_element_count_per_component)
+            .map_err(|_| "compact quintic populated message length exceeds usize".to_owned())?;
+    let encoded_row_count = usize::try_from(packet_ledger.encoded_row_count)
+        .map_err(|_| "compact quintic encoded row count exceeds usize".to_owned())?;
+    let batch_encoded_base_field_element_count = encoded_row_count
+        .checked_mul(transform_batch_base_coordinate_width)
+        .ok_or_else(|| "compact quintic batch element count overflowed".to_owned())?;
+    let batch_matrix_byte_length = batch_encoded_base_field_element_count
+        .checked_mul(size_of::<Goldilocks>())
+        .ok_or_else(|| "compact quintic batch matrix size overflowed".to_owned())?;
+    let replay_base_coordinate_byte_length = encoded_row_count
+        .checked_mul(size_of::<Goldilocks>())
+        .ok_or_else(|| "compact quintic replay size overflowed".to_owned())?;
+    let hash_state_byte_length = StreamingColumnHasher::exact_state_byte_length(encoded_row_count)
+        .ok_or_else(|| "compact quintic hash-state size overflowed".to_owned())?;
+    let twiddle_field_element_count = encoded_row_count
+        .checked_sub(1)
+        .and_then(|count| count.checked_mul(2))
+        .ok_or_else(|| "compact quintic twiddle count overflowed".to_owned())?;
+    let twiddle_byte_length = twiddle_field_element_count
+        .checked_mul(size_of::<Goldilocks>())
+        .ok_or_else(|| "compact quintic twiddle size overflowed".to_owned())?;
+    let modeled_peak_live_byte_length = batch_matrix_byte_length
+        .checked_add(replay_base_coordinate_byte_length)
+        .and_then(|count| count.checked_add(hash_state_byte_length))
+        .and_then(|count| count.checked_add(twiddle_byte_length))
+        .ok_or_else(|| "compact quintic root-pass live set overflowed".to_owned())?;
+    let transform = Radix2DFTSmallBatch::<Goldilocks>::new(encoded_row_count);
+
+    let (root, elapsed_nanoseconds) = measure_elapsed_nanoseconds(|| {
+        let private_leaf_salt = PrivateColumnLeafSaltContext::new(&[0x79_u8; 64], commitment_role);
+        let mut hasher = StreamingColumnHasher::new_with_private_salt(
+            serialized_base_coordinate_row_count,
+            encoded_row_count,
+            &private_leaf_salt,
+        )?;
+        drop(private_leaf_salt);
+        let mut replay_base_coordinate = Vec::new();
+        replay_base_coordinate
+            .try_reserve_exact(encoded_row_count)
+            .map_err(|_| "compact quintic replay allocation failed".to_owned())?;
+
+        // Every transform twiddle lies in the Goldilocks base subfield. An
+        // extension-field DFT is therefore exactly five coordinate DFTs. The
+        // component-major, basis-coordinate-major replay order below is the
+        // canonical serialization of the 256 quintic leaf elements.
+        for transform_batch_ordinal in 0..transform_batch_count {
+            let mut coefficient_matrix = Vec::new();
+            coefficient_matrix
+                .try_reserve_exact(batch_encoded_base_field_element_count)
+                .map_err(|_| "compact quintic batch allocation failed".to_owned())?;
+            coefficient_matrix.resize(batch_encoded_base_field_element_count, Goldilocks::ZERO);
+            for source_row_ordinal in 0..populated_message_element_count_per_logical_component {
+                for batch_coordinate_ordinal in 0..transform_batch_base_coordinate_width {
+                    let matrix_ordinal = source_row_ordinal
+                        .checked_mul(transform_batch_base_coordinate_width)
+                        .and_then(|value| value.checked_add(batch_coordinate_ordinal))
+                        .ok_or_else(|| "compact quintic matrix ordinal overflowed".to_owned())?;
+                    let global_base_coordinate_ordinal = transform_batch_ordinal
+                        .checked_mul(transform_batch_base_coordinate_width)
+                        .and_then(|value| value.checked_add(batch_coordinate_ordinal))
+                        .ok_or_else(|| {
+                            "compact quintic coordinate ordinal overflowed".to_owned()
+                        })?;
+                    coefficient_matrix[matrix_ordinal] = Goldilocks::new(
+                        u64::try_from(source_row_ordinal)
+                            .expect("compact quintic source row fits u64")
+                            .wrapping_mul(65_537)
+                            .wrapping_add(
+                                u64::try_from(global_base_coordinate_ordinal)
+                                    .expect("compact quintic coordinate fits u64")
+                                    .wrapping_mul(257),
+                            )
+                            .wrapping_add(97),
+                    );
+                }
+            }
+            let encoded_matrix = transform.coset_dft_batch(
+                RowMajorMatrix::new(coefficient_matrix, transform_batch_base_coordinate_width),
+                Goldilocks::new(7),
+            );
+            if encoded_matrix.values.len() != batch_encoded_base_field_element_count {
+                return Err("compact quintic transform returned the wrong length".to_owned());
+            }
+            for batch_coordinate_ordinal in 0..transform_batch_base_coordinate_width {
+                replay_base_coordinate.clear();
+                replay_base_coordinate.extend(
+                    encoded_matrix
+                        .values
+                        .chunks_exact(transform_batch_base_coordinate_width)
+                        .map(|encoded_row| encoded_row[batch_coordinate_ordinal]),
+                );
+                hasher.absorb_row(black_box(&replay_base_coordinate))?;
+            }
+        }
+        hasher.finalize_root()
+    })?;
+    let checksum = root.iter().enumerate().fold(
+        0xcbf2_9ce4_8422_2325_u64,
+        |accumulated, (word_ordinal, word)| {
+            accumulated
+                .rotate_left(11)
+                .wrapping_add(*word)
+                .wrapping_add(u64::try_from(word_ordinal).expect("digest word fits u64"))
+                .wrapping_mul(0x1000_0000_01b3)
+        },
+    );
+    black_box(checksum);
+
+    let encoded_row_count_u64 = u64::try_from(encoded_row_count)
+        .map_err(|_| "compact quintic encoded-row count exceeds u64".to_owned())?;
+    let serialized_base_coordinate_row_count_u64 =
+        u64::try_from(serialized_base_coordinate_row_count)
+            .map_err(|_| "compact quintic serialized row count exceeds u64".to_owned())?;
+    let root_pass_base_coordinate_butterfly_count = serialized_base_coordinate_row_count_u64
+        .checked_mul(encoded_row_count_u64 / 2)
+        .and_then(|count| count.checked_mul(u64::from(encoded_row_count.ilog2())))
+        .ok_or_else(|| "compact quintic butterfly count overflowed".to_owned())?;
+    let root_pass_base_coordinate_element_count = serialized_base_coordinate_row_count_u64
+        .checked_mul(encoded_row_count_u64)
+        .ok_or_else(|| "compact quintic encoded-element count overflowed".to_owned())?;
+    let root_pass_keccak_permutation_count =
+        salted_phase_column_leaf_keccak_permutation_count(serialized_base_coordinate_row_count)?
+            .checked_mul(encoded_row_count_u64)
+            .ok_or_else(|| "compact quintic permutation count overflowed".to_owned())?;
+
+    Ok(PrimitiveMeasurementRecord {
+        schema_version: MEASUREMENT_SCHEMA_VERSION,
+        case_identifier,
+        case_name,
+        execution_target: execution_target(),
+        iteration_count: 1,
+        elapsed_nanoseconds,
+        modeled_peak_live_byte_length: u64::try_from(modeled_peak_live_byte_length)
+            .map_err(|_| "compact quintic live set exceeds u64".to_owned())?,
+        checksum_hex: format!("{checksum:016x}"),
+        dimensions: vec![
+            dimension("fieldExtensionDegree", field_extension_degree)?,
+            dimension("extensionElementByteLength", size_of::<ChallengeField>())?,
+            dimension_u64(
+                "ringVectorPackingFactor",
+                packet_ledger.ring_vector_packing_factor,
+            ),
+            dimension("mainLogicalComponentCount", main_logical_component_count)?,
+            dimension(
+                "serializedBaseCoordinateRowCount",
+                serialized_base_coordinate_row_count,
+            )?,
+            dimension(
+                "transformBatchLogicalComponentCount",
+                transform_batch_logical_component_count,
+            )?,
+            dimension(
+                "transformBatchBaseCoordinateWidth",
+                transform_batch_base_coordinate_width,
+            )?,
+            dimension("transformBatchCount", transform_batch_count)?,
+            dimension_u64(
+                "relationMessageRowCount",
+                packet_ledger.relation_message_element_count_per_component,
+            ),
+            dimension(
+                "privateRandomCoefficientCountPerLogicalComponent",
+                COMPACT_LOOKUP_RANDOM_COEFFICIENT_COUNT_PER_LOGICAL_COLUMN,
+            )?,
+            dimension(
+                "populatedMessageElementCountPerLogicalComponent",
+                populated_message_element_count_per_logical_component,
+            )?,
+            dimension("encodedRowCount", encoded_row_count)?,
+            dimension(
+                "batchEncodedBaseFieldElementCount",
+                batch_encoded_base_field_element_count,
+            )?,
+            dimension("batchMatrixByteLength", batch_matrix_byte_length)?,
+            dimension(
+                "replayBaseCoordinateByteLength",
+                replay_base_coordinate_byte_length,
+            )?,
+            dimension("hashStateByteLength", hash_state_byte_length)?,
+            dimension("twiddleFieldElementCount", twiddle_field_element_count)?,
+            dimension("twiddleByteLength", twiddle_byte_length)?,
+            dimension_u64(
+                "rootPassBaseCoordinateButterflyCount",
+                root_pass_base_coordinate_butterfly_count,
+            ),
+            dimension_u64(
+                "rootPassBaseCoordinateElementCount",
+                root_pass_base_coordinate_element_count,
+            ),
+            dimension_u64(
+                "rootPassKeccakPermutationCount",
+                root_pass_keccak_permutation_count,
+            ),
+            dimension("rootPassMerkleParentHashCount", encoded_row_count - 1)?,
+            dimension("candidateMainRootPassCount", 2)?,
+            dimension_u64(
+                "candidateMainCompleteTwoPassBaseCoordinateButterflyCount",
+                packet_ledger.main_complete_two_pass_base_coordinate_butterfly_count,
+            ),
+            dimension_u64(
+                "candidateCompleteTwoPassBaseCoordinateButterflyCount",
+                packet_ledger.complete_two_pass_base_coordinate_butterfly_count,
+            ),
+            dimension_u64(
+                "candidateIncrementalCommitmentPeakLiveByteLength",
+                packet_ledger.incremental_commitment_peak_live_byte_length,
+            ),
+            dimension_u64(
+                "candidateConservativePeakLiveByteLength",
+                packet_ledger.conservative_peak_live_byte_length,
+            ),
+            dimension_u64(
+                "candidateKnownComponentNaivePathSubtotalByteLength",
+                packet_ledger.known_component_naive_path_subtotal_byte_length,
+            ),
+            dimension_u64(
+                "candidateMainOracleQueryAnswerByteLength",
+                packet_ledger.main_oracle_query_answer_byte_length,
+            ),
+            dimension("transformPlanConstructionIncluded", 0)?,
+        ],
+    })
+}
+
+fn measure_compact_quintic_public_main_code_root_pass() -> Result<PrimitiveMeasurementRecord, String>
+{
+    measure_compact_quintic_main_code_root_pass(
+        super::super::ring_native_candidate::public_key_cfw_two_epoch_packet_static_ledger(),
+        19,
+        "compact-quintic-public-main-code-root-pass",
+        b"compact-quintic/public-main-code",
+    )
+}
+
+fn measure_compact_quintic_post_vss_main_code_root_pass()
+-> Result<PrimitiveMeasurementRecord, String> {
+    measure_compact_quintic_main_code_root_pass(
+        super::super::ring_native_candidate::factor_eight_post_vss_cfw_two_epoch_packet_static_ledger(
+        ),
+        20,
+        "compact-quintic-post-vss-main-code-root-pass",
+        b"compact-quintic/post-vss-main-code",
+    )
+}
+
 fn derive_primitive_measurement(
     case_identifier: u32,
 ) -> Result<PrimitiveMeasurementRecord, String> {
@@ -4853,6 +5938,13 @@ fn derive_primitive_measurement(
         11 => measure_vss_fused_bound_range_candidate_retained_group(),
         12 => measure_vss_fused_bound_range_candidate_row_lane_stripe(),
         13 => measure_ring_native_proof_field_ntt_round_trip(),
+        14 => measure_compact_logarithmic_derivative_inverse_chunk(),
+        15 => measure_compact_lookup_full_stripe_transform(),
+        16 => measure_compact_lookup_salted_leaf(),
+        17 => measure_compact_lookup_incremental_stripe_root(),
+        18 => measure_wide_key_switch_fixed_width_crt(),
+        19 => measure_compact_quintic_public_main_code_root_pass(),
+        20 => measure_compact_quintic_post_vss_main_code_root_pass(),
         _ => Err("primitive measurement case is unsupported".to_owned()),
     }
 }
@@ -4906,6 +5998,104 @@ mod tests {
         assert_eq!(
             run_primitive_measurement(u32::MAX),
             Err("primitive measurement case is unsupported".to_owned())
+        );
+    }
+
+    #[test]
+    fn incremental_transform_batches_preserve_the_canonical_full_stripe_root() {
+        const SOURCE_ROW_COUNT: usize = 32;
+        const ENCODED_ROW_COUNT: usize = 128;
+        const LOGICAL_COLUMN_COUNT: usize = 128;
+        const TRANSFORM_BATCH_WIDTH: usize = 32;
+        const COMMITMENT_ROLE: &[u8] = b"compact-lookup/incremental-parity";
+
+        let coefficient = |source_row_ordinal: usize, logical_column_ordinal: usize| {
+            Goldilocks::new(
+                u64::try_from(source_row_ordinal)
+                    .expect("source row fits u64")
+                    .wrapping_mul(65_537)
+                    .wrapping_add(
+                        u64::try_from(logical_column_ordinal)
+                            .expect("logical column fits u64")
+                            .wrapping_mul(257),
+                    )
+                    .wrapping_add(101),
+            )
+        };
+        let transform = Radix2DFTSmallBatch::<Goldilocks>::new(ENCODED_ROW_COUNT);
+        let private_seed = [0x5d_u8; 64];
+
+        let mut complete_coefficients =
+            vec![Goldilocks::ZERO; ENCODED_ROW_COUNT * LOGICAL_COLUMN_COUNT];
+        for source_row_ordinal in 0..SOURCE_ROW_COUNT {
+            for logical_column_ordinal in 0..LOGICAL_COLUMN_COUNT {
+                complete_coefficients
+                    [source_row_ordinal * LOGICAL_COLUMN_COUNT + logical_column_ordinal] =
+                    coefficient(source_row_ordinal, logical_column_ordinal);
+            }
+        }
+        let complete_encoding = transform.coset_dft_batch(
+            RowMajorMatrix::new(complete_coefficients, LOGICAL_COLUMN_COUNT),
+            Goldilocks::new(7),
+        );
+        let complete_salt = PrivateColumnLeafSaltContext::new(&private_seed, COMMITMENT_ROLE);
+        let mut complete_hasher = StreamingColumnHasher::new_with_private_salt(
+            LOGICAL_COLUMN_COUNT,
+            ENCODED_ROW_COUNT,
+            &complete_salt,
+        )
+        .expect("complete-width commitment geometry derives");
+        for logical_column_ordinal in 0..LOGICAL_COLUMN_COUNT {
+            let encoded_column = complete_encoding
+                .values
+                .chunks_exact(LOGICAL_COLUMN_COUNT)
+                .map(|encoded_row| encoded_row[logical_column_ordinal])
+                .collect::<Vec<_>>();
+            complete_hasher
+                .absorb_row(&encoded_column)
+                .expect("complete-width encoded column is canonical");
+        }
+        let complete_root = complete_hasher
+            .finalize_root()
+            .expect("complete-width root derives");
+
+        let incremental_salt = PrivateColumnLeafSaltContext::new(&private_seed, COMMITMENT_ROLE);
+        let mut incremental_hasher = StreamingColumnHasher::new_with_private_salt(
+            LOGICAL_COLUMN_COUNT,
+            ENCODED_ROW_COUNT,
+            &incremental_salt,
+        )
+        .expect("incremental commitment geometry derives");
+        for batch_start in (0..LOGICAL_COLUMN_COUNT).step_by(TRANSFORM_BATCH_WIDTH) {
+            let mut batch_coefficients =
+                vec![Goldilocks::ZERO; ENCODED_ROW_COUNT * TRANSFORM_BATCH_WIDTH];
+            for source_row_ordinal in 0..SOURCE_ROW_COUNT {
+                for within_batch_ordinal in 0..TRANSFORM_BATCH_WIDTH {
+                    batch_coefficients
+                        [source_row_ordinal * TRANSFORM_BATCH_WIDTH + within_batch_ordinal] =
+                        coefficient(source_row_ordinal, batch_start + within_batch_ordinal);
+                }
+            }
+            let batch_encoding = transform.coset_dft_batch(
+                RowMajorMatrix::new(batch_coefficients, TRANSFORM_BATCH_WIDTH),
+                Goldilocks::new(7),
+            );
+            for within_batch_ordinal in 0..TRANSFORM_BATCH_WIDTH {
+                let encoded_column = batch_encoding
+                    .values
+                    .chunks_exact(TRANSFORM_BATCH_WIDTH)
+                    .map(|encoded_row| encoded_row[within_batch_ordinal])
+                    .collect::<Vec<_>>();
+                incremental_hasher
+                    .absorb_row(&encoded_column)
+                    .expect("incremental encoded column is canonical");
+            }
+        }
+        assert_eq!(
+            incremental_hasher
+                .finalize_root()
+                .expect("incremental root derives"),
+            complete_root
         );
     }
 
@@ -6335,5 +7525,47 @@ mod tests {
     #[ignore = "guarded release-native ring-native proof-field NTT measurement"]
     fn ring_native_proof_field_ntt_round_trip_emits_measurement() {
         run_and_validate(13, "ring-native-proof-field-ntt-round-trip");
+    }
+
+    #[test]
+    #[ignore = "guarded release-native compact logarithmic-derivative inverse-chunk measurement"]
+    fn compact_logarithmic_derivative_inverse_chunk_emits_measurement() {
+        run_and_validate(14, "compact-logarithmic-derivative-inverse-chunk");
+    }
+
+    #[test]
+    #[ignore = "guarded release-native compact lookup randomized full-stripe transform measurement"]
+    fn compact_lookup_full_stripe_transform_emits_measurement() {
+        run_and_validate(15, "compact-lookup-randomized-full-stripe-transform");
+    }
+
+    #[test]
+    #[ignore = "guarded release-native compact lookup salted-leaf measurement"]
+    fn compact_lookup_salted_leaf_emits_measurement() {
+        run_and_validate(16, "compact-lookup-salted-leaf");
+    }
+
+    #[test]
+    #[ignore = "guarded release-native compact lookup incremental stripe-root measurement"]
+    fn compact_lookup_incremental_stripe_root_emits_measurement() {
+        run_and_validate(17, "compact-lookup-incremental-stripe-root");
+    }
+
+    #[test]
+    #[ignore = "guarded release-native wide key-switch fixed-width CRT measurement"]
+    fn wide_key_switch_fixed_width_crt_emits_measurement() {
+        run_and_validate(18, "wide-key-switch-fixed-width-crt");
+    }
+
+    #[test]
+    #[ignore = "guarded release-native compact quintic public main-code root-pass measurement"]
+    fn compact_quintic_public_main_code_root_pass_emits_measurement() {
+        run_and_validate(19, "compact-quintic-public-main-code-root-pass");
+    }
+
+    #[test]
+    #[ignore = "guarded release-native compact quintic post-VSS main-code root-pass measurement"]
+    fn compact_quintic_post_vss_main_code_root_pass_emits_measurement() {
+        run_and_validate(20, "compact-quintic-post-vss-main-code-root-pass");
     }
 }

@@ -1,8 +1,8 @@
 //! HVZK-WHIR: honest-verifier zero-knowledge WHIR pipeline.
 //!
-//! Local modification: caller-owned mask material and prepared bounded-source
-//! opening types are exported for the selected integration. See
-//! `../../../UPSTREAM.md`.
+//! Local modification: caller-owned mask material, prepared bounded-source
+//! opening types, and the outer committed-relation handoff are exported for
+//! the selected integration. See `../../../UPSTREAM.md`.
 //!
 //! Composes eprint 2026/391 into a hiding multilinear commitment scheme:
 //!
@@ -68,6 +68,7 @@ mod constraint;
 mod mask;
 mod proof;
 mod prover;
+mod relation;
 mod verifier;
 
 pub use adapter::HidingWhirPcs;
@@ -81,8 +82,12 @@ pub use committer::FoldedRsCode;
 pub use config::{ZkConfigError, ZkParameters, ZkWhirConfig};
 pub use mask::{MaskCodeShape, MaskGroupShape};
 pub use proof::{BaseCaseZkProof, BlindedMask, MaskOpeningPair, ZkRoundProof, ZkWhirProof};
-pub use prover::HidingWhirProverData;
-pub use verifier::ZkVerifierError;
+pub use prover::{HidingWhirExtensionProverData, HidingWhirProver, HidingWhirProverData};
+pub use relation::{
+    CombinedRelationProverInput, CombinedRelationVerifierInput, HidingWhirRelationInputError,
+    PrecommittedMaskProverGroup, PrecommittedMaskVerifierGroup,
+};
+pub use verifier::{HidingWhirVerifier, ZkVerifierError};
 
 #[cfg(test)]
 mod tests;

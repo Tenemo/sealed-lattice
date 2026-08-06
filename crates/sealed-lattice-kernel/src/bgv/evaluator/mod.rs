@@ -31,6 +31,8 @@ pub(crate) mod ballot_aggregation;
 pub(crate) mod ballot_aggregation_runtime;
 pub(crate) mod candidate_evidence;
 pub(crate) mod engine;
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+pub(crate) mod fixed_width_crt;
 pub(crate) mod key_switch;
 pub(crate) mod noise_recurrence;
 pub(crate) mod pair_character_product;

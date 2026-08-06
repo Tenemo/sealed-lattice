@@ -27,10 +27,20 @@ use super::{
 pub(super) const TRIT_RADIX: u64 = 3;
 pub(super) const MATERIAL_DIGIT_RADIX: u64 = 129_140_163;
 pub(super) const MATERIAL_DIGIT_TRIT_COUNT: usize = 17;
-const MODULAR_QUOTIENT_BIT_COUNT: usize = 17;
+pub(crate) const MODULAR_QUOTIENT_BIT_COUNT: usize = 17;
+pub(crate) const MODULAR_QUOTIENT_VALUE_COUNT: u64 = 1_u64 << MODULAR_QUOTIENT_BIT_COUNT;
+// The canonical least-nonnegative anchor equation can attain quotient +65,536
+// but cannot attain -65,536. Keep all 17-bit values and shift the interval to
+// the exact complete range [-65,535, 65,536].
+pub(crate) const MODULAR_QUOTIENT_ENCODING_OFFSET: u64 = MODULAR_QUOTIENT_VALUE_COUNT / 2 - 1;
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+pub(crate) const MODULAR_QUOTIENT_MINIMUM: i64 = -(MODULAR_QUOTIENT_ENCODING_OFFSET as i64);
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+pub(crate) const MODULAR_QUOTIENT_MAXIMUM: i64 =
+    (MODULAR_QUOTIENT_VALUE_COUNT - MODULAR_QUOTIENT_ENCODING_OFFSET - 1) as i64;
 pub(super) const TRUSTEE_QUOTIENT_LOW_TRIT_COUNT: usize = 10;
 pub(super) const TRUSTEE_QUOTIENT_HIGH_RADIX: u16 = 59_049;
-pub(super) const TRUSTEE_QUOTIENT_MAXIMUM_ABSOLUTE_VALUE: u64 = 147_622;
+pub(crate) const TRUSTEE_QUOTIENT_MAXIMUM_ABSOLUTE_VALUE: u64 = 147_622;
 pub(super) const EXACT_INTEGER_LIFT_RADIX: u64 = TRUSTEE_QUOTIENT_HIGH_RADIX as u64;
 pub(super) const EXACT_INTEGER_LIFT_RADIX_TRIT_COUNT: usize = TRUSTEE_QUOTIENT_LOW_TRIT_COUNT;
 

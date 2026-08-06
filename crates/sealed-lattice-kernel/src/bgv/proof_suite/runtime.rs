@@ -1035,6 +1035,8 @@ pub(crate) use generation_worker::{
     CommonProofGenerationSources, CommonProofGenerationWorkerError,
     CommonProofGenerationWorkerPoll, PreparedCommonProofGeneration,
 };
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+pub(crate) use storage_transport::CommonProofStorageTransactionMemoryGeometry;
 pub(crate) use storage_transport::{
     CommonProofStorageTransactionRuntime, PollableCommonProofByteSink,
     PollableCommonProofByteSinkError, ResidentCommonProofByteSource, ResidentCommonProofInputChunk,

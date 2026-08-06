@@ -1,5 +1,6 @@
-// Local modifications: the resumable verifier export and default-off hiding
-// implementation are documented in `../UPSTREAM.md`.
+// Local modifications: the resumable verifier, default-off hiding
+// implementation, and outer committed-relation handoff are documented in
+// `../UPSTREAM.md`.
 #![doc = include_str!("../README.md")]
 #![no_std]
 
@@ -25,8 +26,10 @@ pub use pcs::verifier::{WhirVerificationState, WhirVerifier};
 pub use pcs::zk::{
     BaseCaseFreshMaskGroup, BaseCaseFreshMaterial, BaseCaseZkConfig, BaseCaseZkError,
     BaseCaseZkProof, BaseCaseZkProver, BaseCaseZkVerifier, BlindedMask, CodeSwitchError,
-    FoldedRsCode, HidingWhirPcs, HidingWhirProverData, MaskCodeShape, MaskGroupShape,
-    MaskGroupWitness, MaskOpeningPair, MaskProverData, PreparedBaseCaseZkProof, ZkConfigError,
-    ZkParameters,
+    CombinedRelationProverInput, CombinedRelationVerifierInput, FoldedRsCode,
+    HidingWhirExtensionProverData, HidingWhirPcs, HidingWhirProver, HidingWhirProverData,
+    HidingWhirRelationInputError, HidingWhirVerifier, MaskCodeShape, MaskGroupShape,
+    MaskGroupWitness, MaskOpeningPair, MaskProverData, PrecommittedMaskProverGroup,
+    PrecommittedMaskVerifierGroup, PreparedBaseCaseZkProof, ZkConfigError, ZkParameters,
     ZkRoundProof, ZkVerifierError, ZkWhirConfig, ZkWhirProof, switch_mask_covector,
 };

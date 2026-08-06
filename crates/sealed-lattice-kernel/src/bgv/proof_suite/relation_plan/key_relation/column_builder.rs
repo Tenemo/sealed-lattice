@@ -29,9 +29,8 @@ use super::super::{
     },
     model::{
         ProofPrivacyMode, RelationColumnDescriptor, RelationColumnOrigin, RelationColumnValueType,
-        RelationElementKind, RelationEmbeddingKind, RelationPlanError, RelationSelectorPathStep,
-        RelationTreeDescriptor, RelationValueLayout, RelationVerifierSource, SelectorPathStepKind,
-        SuiteModulusReference,
+        RelationPlanError, RelationSelectorPathStep, RelationTreeDescriptor, RelationValueLayout,
+        RelationVerifierSource, SelectorPathStepKind, SuiteModulusReference,
     },
 };
 use super::{
@@ -948,7 +947,7 @@ pub(in crate::bgv::proof_suite::relation_plan) fn bdlop_matrix_source(
                 u64::from(column),
             ],
             statement_binding_path: vec![RelationSelectorPathStep::tuple_field(0)],
-            value_layout: centered_residue_vector(modulus_reference, ring_degree),
+            value_layout: least_nonnegative_residue_vector(modulus_reference, ring_degree),
         },
     )
 }
@@ -1142,21 +1141,9 @@ pub(in crate::bgv::proof_suite::relation_plan) fn public_key_common_reference_so
             protocol_source_kind: 6,
             source_coordinates: vec![u64::from(data_modulus_index)],
             statement_binding_path: vec![RelationSelectorPathStep::tuple_field(0)],
-            value_layout: centered_residue_vector(modulus_reference, ring_degree),
+            value_layout: least_nonnegative_residue_vector(modulus_reference, ring_degree),
         },
     )
-}
-
-pub(in crate::bgv::proof_suite::relation_plan) fn centered_residue_vector(
-    modulus_reference: SuiteModulusReference,
-    element_count: u64,
-) -> RelationValueLayout {
-    RelationValueLayout {
-        element_kind: RelationElementKind::Residue,
-        residue_modulus: Some(modulus_reference),
-        shape: vec![element_count],
-        embedding_kind: RelationEmbeddingKind::Centered,
-    }
 }
 
 pub(in crate::bgv::proof_suite::relation_plan) fn least_nonnegative_residue_vector(

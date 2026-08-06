@@ -691,6 +691,7 @@ dependencies = [
  "p3-sumcheck",
  "p3-symmetric",
  "p3-whir",
+ "rand",
  "rayon",
  "serde",
  "serde_json",

@@ -61,6 +61,8 @@ pub(super) use computation::{
 };
 #[cfg(test)]
 pub(crate) use lattice_anchor::LatticeAnchorCommitment;
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+pub(crate) use lattice_anchor::selected_lattice_anchor_commitment_canonical_byte_length;
 pub(crate) use lattice_anchor::{
     compute_lattice_anchor_commitment, lattice_anchor_commitment_canonical_bytes,
     parse_lattice_anchor_commitment_canonical_bytes,

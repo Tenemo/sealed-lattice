@@ -6,6 +6,9 @@
 //!  proof side  ->  the wire transcript and one interleaved mask commitment go into the proof
 //!  claim side  ->  the k masks join the carried relation as <xi_i, u_i> terms, settled at the base case
 //! ```
+//!
+//! Local modification: caller-precommitted mask groups can precede the WHIR
+//! mask groups. See `../../../../UPSTREAM.md`.
 
 use alloc::vec::Vec;
 use core::mem::take;
@@ -19,6 +22,10 @@ use p3_sumcheck::zk::{ZkSumcheckData, ZkSumcheckHandoff, mask_residual_covectors
 
 use crate::pcs::zk::base_case::MaskProverData;
 use crate::pcs::zk::constraint::MaskClaims;
+use crate::pcs::zk::mask::{MaskCodeShape, MaskGroupShape};
+use crate::pcs::zk::relation::{
+    HidingWhirRelationInputError, PrecommittedMaskProverGroup, validate_mask_shape,
+};
 
 /// All mask-oracle state the prover carries to the base case.
 ///
@@ -43,7 +50,7 @@ where
     /// Mask encoding randomness, matching order.
     pub(super) randomness: Vec<Vec<EF>>,
     /// Group widths and Merkle prover data, in commit order.
-    pub(super) groups: Vec<(usize, MaskProverData<F, EF, MT>)>,
+    pub(super) groups: Vec<(MaskGroupShape, MaskProverData<F, EF, MT>)>,
     /// Dense covectors with their accumulated scales.
     pub(super) claims: MaskClaims<EF>,
     /// Running mask-claim total `sum_i <xi_i, u_i>` at the current scales.
@@ -69,6 +76,69 @@ where
         }
     }
 
+    /// Starts from mask commitments made by an outer reduction.
+    pub(super) fn from_precommitted(
+        groups: Vec<PrecommittedMaskProverGroup<F, EF, MT>>,
+    ) -> Result<Self, HidingWhirRelationInputError> {
+        let mut masks = Self::new();
+        for (group_ordinal, group) in groups.into_iter().enumerate() {
+            validate_mask_shape(group_ordinal, group.shape)?;
+            if group.messages.len() != group.shape.width
+                || group.randomness.len() != group.shape.width
+                || group.covectors.len() != group.shape.width
+            {
+                return Err(HidingWhirRelationInputError::ProverMaskGroupWidthMismatch {
+                    group: group_ordinal,
+                    expected: group.shape.width,
+                    message_count: group.messages.len(),
+                    randomness_count: group.randomness.len(),
+                    covector_count: group.covectors.len(),
+                });
+            }
+
+            for (member_ordinal, ((message, randomness), covector)) in group
+                .messages
+                .iter()
+                .zip(&group.randomness)
+                .zip(&group.covectors)
+                .enumerate()
+            {
+                if message.len() != group.shape.shape.message_len {
+                    return Err(HidingWhirRelationInputError::MaskMessageLengthMismatch {
+                        group: group_ordinal,
+                        member: member_ordinal,
+                        expected: group.shape.shape.message_len,
+                        actual: message.len(),
+                    });
+                }
+                if randomness.len() != group.shape.shape.randomness_len {
+                    return Err(HidingWhirRelationInputError::MaskRandomnessLengthMismatch {
+                        group: group_ordinal,
+                        member: member_ordinal,
+                        expected: group.shape.shape.randomness_len,
+                        actual: randomness.len(),
+                    });
+                }
+                if covector.len() != group.shape.shape.message_len {
+                    return Err(HidingWhirRelationInputError::MaskCovectorLengthMismatch {
+                        group: group_ordinal,
+                        member: member_ordinal,
+                        expected: group.shape.shape.message_len,
+                        actual: covector.len(),
+                    });
+                }
+                masks.aux +=
+                    dot_product::<EF, _, _>(covector.iter().copied(), message.iter().copied());
+                masks.claims.push(covector.clone());
+            }
+
+            masks.messages.extend(group.messages);
+            masks.randomness.extend(group.randomness);
+            masks.groups.push((group.shape, group.data));
+        }
+        Ok(masks)
+    }
+
     /// Stores one masked sumcheck batch.
     ///
     /// ```text
@@ -83,6 +153,7 @@ where
         mut handoff: ZkSumcheckHandoff<F, EF, ExtensionMmcs<F, EF, MT>>,
         zk_data: &mut ZkSumcheckData<F, EF>,
         ell_zk: usize,
+        mask_shape: MaskCodeShape,
     ) -> BatchState<F, EF>
     where
         F: Send + Sync,
@@ -109,7 +180,13 @@ where
         // reveals, plus its Merkle handle for the spot-check openings.
         self.messages.append(&mut handoff.mask_messages);
         self.randomness.append(&mut handoff.mask_randomness);
-        self.groups.push((folding, handoff.mask_oracle.1));
+        self.groups.push((
+            MaskGroupShape {
+                shape: mask_shape,
+                width: folding,
+            },
+            handoff.mask_oracle.1,
+        ));
 
         BatchState {
             residual_prover: handoff.residual_prover,
@@ -124,12 +201,19 @@ where
         message: Vec<EF>,
         randomness: Vec<EF>,
         data: MaskProverData<F, EF, MT>,
+        mask_shape: MaskCodeShape,
     ) {
         self.aux += dot_product::<EF, _, _>(covector.iter().copied(), message.iter().copied());
         self.claims.push(covector);
         self.messages.push(message);
         self.randomness.push(randomness);
-        self.groups.push((1, data));
+        self.groups.push((
+            MaskGroupShape {
+                shape: mask_shape,
+                width: 1,
+            },
+            data,
+        ));
     }
 }
 
