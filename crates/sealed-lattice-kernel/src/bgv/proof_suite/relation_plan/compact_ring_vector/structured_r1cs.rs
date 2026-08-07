@@ -10,13 +10,22 @@
 
 mod witness_covector;
 
+#[cfg(test)]
+#[path = "production_small_chain.rs"]
+mod production_small_chain;
+
 pub(crate) use witness_covector::{
-    COMPACT_STRUCTURED_WITNESS_COVECTOR_ELEMENT_CHUNK_COUNT,
-    CompactStructuredWitnessCovectorGeometry, CompactStructuredWitnessCovectorHostMemoryGeometry,
-    CompactStructuredWitnessCovectorLifecycleGeometry,
     compact_structured_witness_covector_geometry,
     compact_structured_witness_covector_host_memory_geometry,
     compact_structured_witness_covector_lifecycle_geometry,
+    CompactStructuredWitnessCovectorGeometry, CompactStructuredWitnessCovectorHostMemoryGeometry,
+    CompactStructuredWitnessCovectorLifecycleGeometry,
+    COMPACT_STRUCTURED_WITNESS_COVECTOR_ELEMENT_CHUNK_COUNT,
+};
+
+#[cfg(test)]
+use witness_covector::{
+    CompactStructuredWitnessCovectorHandoff, CompactStructuredWitnessCovectorHandoffPoll,
 };
 
 #[cfg(test)]
@@ -25,11 +34,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use zeroize::Zeroizing;
 
 use crate::bgv::proof_suite::{
-    PROOF_BASE_FIELD_MODULUS, ProofBaseFieldElement, ProofChallengeExtensionElement,
-    ProofEvaluationDomain,
-    compact_cfw::{COMPACT_CFW_MATRIX_COUNT, CompactCfwError},
+    compact_cfw::{CompactCfwError, COMPACT_CFW_MATRIX_COUNT},
     compact_cfw_external_prover::CompactCfwExternalRowSource,
     prover::CommonProofProverError,
+    ProofBaseFieldElement, ProofChallengeExtensionElement, ProofEvaluationDomain,
+    PROOF_BASE_FIELD_MODULUS,
 };
 
 use super::super::expressions::{checked_resident_payload_add, resident_vec_storage_byte_length};
@@ -2590,42 +2599,41 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     use super::super::{
-        PreparedCompactPublicKeyBaseAssignment,
         authenticated_assignment::{
             CompactAuthenticatedAssignmentPoll, CompactLookupInverseMaterializationPoll,
         },
-        prepare_compact_public_key_assignment_sources,
+        prepare_compact_public_key_assignment_sources, PreparedCompactPublicKeyBaseAssignment,
     };
     use super::*;
     use crate::bgv::proof_suite::compact_cfw::{
-        COMPACT_CFW_MATRIX_COUNT, CompactCfwGeometry, CompactCfwMaskMaterial,
-        compact_challenge_from_production,
+        compact_challenge_from_production, CompactCfwGeometry, CompactCfwMaskMaterial,
+        COMPACT_CFW_MATRIX_COUNT,
     };
     use crate::bgv::proof_suite::compact_cfw_external_prover::{
         CompactCfwExternalProverState, CompactCfwExternalRowSource,
     };
     use crate::bgv::proof_suite::external_memory::tests::TestStorage;
     use crate::bgv::proof_suite::field::{
-        PROOF_BASE_FIELD_MODULUS, ProofBaseFieldElement, ProofChallengeExtensionElement,
+        ProofBaseFieldElement, ProofChallengeExtensionElement, PROOF_BASE_FIELD_MODULUS,
     };
     #[cfg(not(target_arch = "wasm32"))]
     use crate::{
         bgv::{
             proof_suite::{
-                CommonProofRelationPlanCapability, CommonProofSourcePolynomialProvider,
-                SelectedApplicationStatementContext,
                 compile_public_key_share_relation_with_source_layout,
                 decode_selected_public_key_share_statement, verified_application_statement_hash,
+                CommonProofRelationPlanCapability, CommonProofSourcePolynomialProvider,
+                SelectedApplicationStatementContext,
             },
             setup::{
-                SetupGenerationKeyRelationApplication, SetupKeyRelationGenerationPreparationError,
-                SetupKeyRelationProofFamily,
                 populate_compact_public_key_development_evidence_authority,
                 resolve_setup_generation_compact_public_key_development_preparation_source,
                 with_exclusive_setup_generation_compact_public_key_development_relation,
+                SetupGenerationKeyRelationApplication, SetupKeyRelationGenerationPreparationError,
+                SetupKeyRelationProofFamily,
             },
         },
-        foundation::{Hash512, ProofApplicationSlot, prepare_exact_same_secret_evidence_attempt},
+        foundation::{prepare_exact_same_secret_evidence_attempt, Hash512, ProofApplicationSlot},
     };
 
     struct CountingCompactCfwExternalRowSource<'source, Source> {
@@ -3635,11 +3643,9 @@ mod tests {
             }
         }
         assert_eq!(loaded_column_ordinals.len(), 202);
-        assert!(
-            loaded_column_ordinals
-                .windows(2)
-                .all(|pair| pair[0] < pair[1])
-        );
+        assert!(loaded_column_ordinals
+            .windows(2)
+            .all(|pair| pair[0] < pair[1]));
         let PreparedCompactPublicKeyBaseAssignment {
             relation,
             base_assignment,

@@ -10,11 +10,16 @@
 
 mod accumulator;
 
+#[cfg(test)]
+pub(super) use accumulator::{
+    CompactStructuredWitnessCovectorHandoff, CompactStructuredWitnessCovectorHandoffPoll,
+};
+
 pub(crate) const COMPACT_STRUCTURED_WITNESS_COVECTOR_ELEMENT_CHUNK_COUNT: u64 = 8_192;
 
 use crate::bgv::proof_suite::{
-    ProofBaseFieldElement, ProofChallengeExtensionElement, compact_cfw::CompactChallengeField,
-    prover::CommonProofProverError,
+    compact_cfw::CompactChallengeField, prover::CommonProofProverError, ProofBaseFieldElement,
+    ProofChallengeExtensionElement,
 };
 
 use super::{
