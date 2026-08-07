@@ -92,10 +92,17 @@ now cross a test-only canonical envelope with the outer CFW proof and all five
 external roots. A fresh decoder derives proof shape from verifier
 configuration, reproduces the exact bytes, and sequentially verifies from the
 decoded sections. Hostile framing, field, external-root, internal-root, CFW,
-and WHIR-section mutations are rejected. Production authority, one canonical
-transcript spanning the pre-challenge source, copy point, CFW, and WHIR,
-production transport integration, durable execution, and measured browser
-evidence are absent, so proof generation remains refused.
+and WHIR-section mutations are rejected. A separate bounded checkpoint cursor
+now reconstructs the compact transcript from canonical public-input bytes,
+verifier-owned geometry, and ordered roots and salts, and the wire assembler
+can reconstruct a contiguous canonical response prefix with the accepted-salt
+registry intact. This does not authenticate or resume the retained-tree
+lifecycle: later-query response sections can lag the transcript, and no durable
+record yet binds that split to stored objects, response values, the private-
+randomness cursor, or last-use deletion state. Production authority, one
+canonical transcript spanning the pre-challenge source, copy point, CFW, and
+WHIR, production transport integration, durable execution, and measured
+browser evidence are absent, so proof generation remains refused.
 
 ## Open security issues
 

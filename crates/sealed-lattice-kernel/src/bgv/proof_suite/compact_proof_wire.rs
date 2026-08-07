@@ -428,6 +428,55 @@ impl<'geometry> CompactProofWireAssembler<'geometry> {
         })
     }
 
+    /// Rebuilds the incremental assembler from a canonical prefix ending
+    /// exactly after `completed_response_count` complete responses.
+    ///
+    /// The fixed header continues to declare the verifier-owned total response
+    /// count. The prefix decoder therefore accepts neither a shortened header
+    /// nor bytes from the next response. It also reconstructs the global leaf-
+    /// salt registry so a duplicate introduced after resume is still refused
+    /// by [`Self::finish`].
+    pub(crate) fn restore_from_canonical_prefix(
+        geometry: &'geometry CompactProofWireGeometry,
+        canonical_prefix_bytes: &[u8],
+        completed_response_count: usize,
+    ) -> Result<Self, CompactProofWireError> {
+        let decoded_prefix = decode_compact_proof_wire_prefix_with_leaf_salts(
+            geometry,
+            canonical_prefix_bytes,
+            completed_response_count,
+        )?;
+        let mut canonical = Vec::new();
+        canonical
+            .try_reserve_exact(geometry.maximum_canonical_byte_length())
+            .map_err(|_| CompactProofWireError::LengthOverflow)?;
+        canonical.extend_from_slice(canonical_prefix_bytes);
+
+        let mut accepted_leaf_salts = decoded_prefix.accepted_leaf_salts;
+        accepted_leaf_salts
+            .try_reserve_exact(
+                geometry
+                    .total_queried_leaf_count()?
+                    .checked_sub(accepted_leaf_salts.len())
+                    .ok_or(CompactProofWireError::InvalidGeometry)?,
+            )
+            .map_err(|_| CompactProofWireError::LengthOverflow)?;
+        Ok(Self {
+            geometry,
+            canonical,
+            accepted_leaf_salts,
+            next_response_index: completed_response_count,
+        })
+    }
+
+    pub(crate) fn canonical_prefix_bytes(&self) -> &[u8] {
+        &self.canonical
+    }
+
+    pub(crate) const fn completed_response_count(&self) -> usize {
+        self.next_response_index
+    }
+
     pub(crate) fn append_response(
         &mut self,
         response: &CompactProofResponseWireInput,
@@ -852,11 +901,51 @@ pub(crate) fn decode_compact_proof_wire(
     if canonical_proof_bytes.len() != declared_proof_byte_length {
         return Err(CompactProofWireError::DeclaredLengthMismatch);
     }
-    if declared_proof_byte_length > geometry.maximum_canonical_byte_length {
+    let decoded = decode_compact_proof_wire_prefix(
+        geometry,
+        canonical_proof_bytes,
+        geometry.responses.len(),
+    )?;
+    Ok(DecodedCompactProofWire {
+        canonical_byte_length: canonical_proof_bytes.len(),
+        responses: decoded.responses,
+    })
+}
+
+struct DecodedCompactProofWirePrefix {
+    responses: Vec<DecodedCompactProofResponse>,
+    accepted_leaf_salts: Vec<[u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH]>,
+}
+
+pub(crate) fn decode_compact_proof_wire_prefix(
+    geometry: &CompactProofWireGeometry,
+    canonical_prefix_bytes: &[u8],
+    completed_response_count: usize,
+) -> Result<DecodedCompactProofWire, CompactProofWireError> {
+    let decoded = decode_compact_proof_wire_prefix_with_leaf_salts(
+        geometry,
+        canonical_prefix_bytes,
+        completed_response_count,
+    )?;
+    Ok(DecodedCompactProofWire {
+        canonical_byte_length: canonical_prefix_bytes.len(),
+        responses: decoded.responses,
+    })
+}
+
+fn decode_compact_proof_wire_prefix_with_leaf_salts(
+    geometry: &CompactProofWireGeometry,
+    canonical_prefix_bytes: &[u8],
+    completed_response_count: usize,
+) -> Result<DecodedCompactProofWirePrefix, CompactProofWireError> {
+    if canonical_prefix_bytes.len() > geometry.maximum_canonical_byte_length {
         return Err(CompactProofWireError::GeometryBoundExceeded);
     }
+    if completed_response_count > geometry.responses.len() {
+        return Err(CompactProofWireError::WrongResponseCount);
+    }
 
-    let mut reader = CompactWireReader::new(canonical_proof_bytes);
+    let mut reader = CompactWireReader::new(canonical_prefix_bytes);
     if reader.read_array::<8>()? != COMPACT_PROOF_WIRE_MAGIC {
         return Err(CompactProofWireError::WrongProofMagic);
     }
@@ -875,7 +964,7 @@ pub(crate) fn decode_compact_proof_wire(
     decoded_responses
         .try_reserve_exact(geometry.responses.len())
         .map_err(|_| CompactProofWireError::LengthOverflow)?;
-    for response_geometry in &geometry.responses {
+    for response_geometry in &geometry.responses[..completed_response_count] {
         let ordinal = reader.read_u32()?;
         if ordinal != response_geometry.ordinal {
             return Err(CompactProofWireError::WrongResponseOrdinal);
@@ -965,9 +1054,9 @@ pub(crate) fn decode_compact_proof_wire(
     {
         return Err(CompactProofWireError::DuplicateLeafSalt);
     }
-    Ok(DecodedCompactProofWire {
-        canonical_byte_length: canonical_proof_bytes.len(),
+    Ok(DecodedCompactProofWirePrefix {
         responses: decoded_responses,
+        accepted_leaf_salts,
     })
 }
 
@@ -1439,6 +1528,85 @@ mod tests {
             heap.maximum_canonical_proof_byte_length()
                 + heap.leaf_salt_registry_byte_length()
                 + heap.maximum_frontier_dictionary_byte_length()
+        );
+    }
+
+    #[test]
+    fn canonical_prefix_restore_rebuilds_global_state_and_refuses_nonboundaries() {
+        let geometry = proof_geometry();
+        let input = proof_input();
+        let expected = encode_compact_proof_wire(&geometry, &input).unwrap();
+
+        let mut initial = CompactProofWireAssembler::new(&geometry).unwrap();
+        initial.append_response(&input.responses[0]).unwrap();
+        assert_eq!(initial.completed_response_count(), 1);
+        let canonical_prefix = initial.canonical_prefix_bytes().to_vec();
+        let decoded_prefix =
+            decode_compact_proof_wire_prefix(&geometry, &canonical_prefix, 1).unwrap();
+        assert_eq!(decoded_prefix.responses().len(), 1);
+        assert_eq!(decoded_prefix.responses()[0].root(), [0x11; 64]);
+
+        let mut restored = CompactProofWireAssembler::restore_from_canonical_prefix(
+            &geometry,
+            &canonical_prefix,
+            1,
+        )
+        .unwrap();
+        assert_eq!(restored.completed_response_count(), 1);
+        assert_eq!(restored.canonical_prefix_bytes(), canonical_prefix);
+        restored.append_response(&input.responses[1]).unwrap();
+        assert_eq!(restored.finish().unwrap(), expected);
+
+        assert_eq!(
+            CompactProofWireAssembler::restore_from_canonical_prefix(
+                &geometry,
+                &canonical_prefix[..canonical_prefix.len() - 1],
+                1,
+            )
+            .map(|_| ()),
+            Err(CompactProofWireError::Truncated)
+        );
+        assert_eq!(
+            CompactProofWireAssembler::restore_from_canonical_prefix(
+                &geometry,
+                &expected[..canonical_prefix.len() + 1],
+                1,
+            )
+            .map(|_| ()),
+            Err(CompactProofWireError::TrailingBytes)
+        );
+        assert_eq!(
+            CompactProofWireAssembler::restore_from_canonical_prefix(
+                &geometry,
+                &canonical_prefix,
+                0,
+            )
+            .map(|_| ()),
+            Err(CompactProofWireError::TrailingBytes)
+        );
+
+        let mut reordered = canonical_prefix.clone();
+        reordered
+            [PROOF_FIXED_HEADER_BYTE_LENGTH..PROOF_FIXED_HEADER_BYTE_LENGTH + size_of::<u32>()]
+            .copy_from_slice(&1_u32.to_le_bytes());
+        assert_eq!(
+            CompactProofWireAssembler::restore_from_canonical_prefix(&geometry, &reordered, 1)
+                .map(|_| ()),
+            Err(CompactProofWireError::WrongResponseOrdinal)
+        );
+
+        let mut duplicate_after_resume = input.responses[1].clone();
+        duplicate_after_resume.leaf_salts[0] = input.responses[0].leaf_salts[0];
+        let mut restored = CompactProofWireAssembler::restore_from_canonical_prefix(
+            &geometry,
+            &canonical_prefix,
+            1,
+        )
+        .unwrap();
+        restored.append_response(&duplicate_after_resume).unwrap();
+        assert_eq!(
+            restored.finish(),
+            Err(CompactProofWireError::DuplicateLeafSalt)
         );
     }
 

@@ -55,6 +55,15 @@ are measured only if verification or transport tradeoffs require them. The
 row-code vectors and historical factor-eight root measurement do not transfer
 to this construction and cannot freeze the suite.
 
+The compact kernel can now encode and restore a bounded canonical transcript
+cursor after a verifier move and recompute every preceding verifier message. It
+can also restore a contiguous canonical response prefix without losing the
+global leaf-salt uniqueness registry. This is only restart groundwork. A
+later-query response can delay encoded-section progress beyond its commitment
+move, and the authenticated checkpoint does not yet bind that split to live
+tree objects, response values, private-randomness progress, or last-use
+deletions.
+
 The first public-key-share proof is a standalone development kill gate. It is
 not a fourth outer setup packet. The canonical provisional setup schedule
 remains dealer VSS, the combined post-VSS packet containing the public-key-share

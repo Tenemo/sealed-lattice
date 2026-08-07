@@ -626,7 +626,16 @@ at `9,703,024`, `9,665,952`, `9,610,288`, and `9,582,848` bytes and are included
 provisional WASM peaks above. A browser-compatible transaction driver writes,
 seals, scans, and deletes the canonical postorder object and advances only
 after exact committed-transaction replay; focused small-tree owners cover both
-direct storage and recorder/replay boundaries. Selected-size response-value
+direct storage and recorder/replay boundaries. A bounded canonical transcript
+cursor now binds the public-input bytes, complete verifier-owned wire geometry,
+and every ordered response root and round salt at a post-verifier-move boundary;
+restore recomputes every preceding verifier message instead of serializing an
+opaque hash state. The incremental wire assembler separately restores a
+contiguous canonical response prefix and its global leaf-salt registry. This is
+not yet an authenticated retained-tree checkpoint: a response selected by a
+later query can leave encoded-section progress behind transcript progress, and
+no durable state yet binds that split to the live tree objects, response values,
+private-randomness cursor, or last-use deletions. Selected-size response-value
 driving and authenticated restart remain absent. The retained lifecycle has
 zero authenticated restart records, so interruption requires one complete-
 attempt replay.
