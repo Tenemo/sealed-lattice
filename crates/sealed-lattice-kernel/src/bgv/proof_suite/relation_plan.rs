@@ -169,9 +169,9 @@ pub(crate) use committed_material_adapter::selected_vss_source_provider_memory_a
 #[cfg(any(test, feature = "primitive-measurement-evidence"))]
 pub(crate) use compact_ring_vector::{
     COMPACT_STRUCTURED_WITNESS_COVECTOR_ELEMENT_CHUNK_COUNT,
-    CompactAuthenticatedAssignmentMemoryGeometry, CompactPublicKeyRelationCatalog,
-    CompactStructuredR1csRowSourceGeometry, CompactStructuredWitnessCovectorGeometry,
-    CompactStructuredWitnessCovectorHostMemoryGeometry,
+    CompactAuthenticatedAssignmentMemoryGeometry, CompactLookupRelationGeometry,
+    CompactPublicKeyRelationCatalog, CompactStructuredR1csRowSourceGeometry,
+    CompactStructuredWitnessCovectorGeometry, CompactStructuredWitnessCovectorHostMemoryGeometry,
     CompactStructuredWitnessCovectorLifecycleGeometry,
     compact_authenticated_assignment_memory_geometry,
     compact_public_key_assignment_prepared_source_control_byte_length,

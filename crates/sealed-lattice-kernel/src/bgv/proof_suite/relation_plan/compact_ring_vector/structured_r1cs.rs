@@ -15,12 +15,12 @@ mod witness_covector;
 mod production_small_chain;
 
 pub(crate) use witness_covector::{
+    COMPACT_STRUCTURED_WITNESS_COVECTOR_ELEMENT_CHUNK_COUNT,
+    CompactStructuredWitnessCovectorGeometry, CompactStructuredWitnessCovectorHostMemoryGeometry,
+    CompactStructuredWitnessCovectorLifecycleGeometry,
     compact_structured_witness_covector_geometry,
     compact_structured_witness_covector_host_memory_geometry,
     compact_structured_witness_covector_lifecycle_geometry,
-    CompactStructuredWitnessCovectorGeometry, CompactStructuredWitnessCovectorHostMemoryGeometry,
-    CompactStructuredWitnessCovectorLifecycleGeometry,
-    COMPACT_STRUCTURED_WITNESS_COVECTOR_ELEMENT_CHUNK_COUNT,
 };
 
 #[cfg(test)]
@@ -31,14 +31,18 @@ use witness_covector::{
 #[cfg(test)]
 use std::collections::{BTreeMap, BTreeSet};
 
+use p3_field::PrimeCharacteristicRing;
 use zeroize::Zeroizing;
 
 use crate::bgv::proof_suite::{
-    compact_cfw::{CompactCfwError, COMPACT_CFW_MATRIX_COUNT},
+    PROOF_BASE_FIELD_MODULUS, ProofBaseFieldElement, ProofChallengeExtensionElement,
+    ProofEvaluationDomain,
+    compact_cfw::{
+        COMPACT_CFW_MATRIX_COUNT, CompactCfwError, CompactCfwMatrixRole, CompactCfwR1csMatrices,
+        CompactChallengeField, compact_challenge_from_production,
+    },
     compact_cfw_external_prover::CompactCfwExternalRowSource,
     prover::CommonProofProverError,
-    ProofBaseFieldElement, ProofChallengeExtensionElement, ProofEvaluationDomain,
-    PROOF_BASE_FIELD_MODULUS,
 };
 
 use super::super::expressions::{checked_resident_payload_add, resident_vec_storage_byte_length};
@@ -2472,6 +2476,681 @@ impl<'source, Assignment: CompactStructuredAssignmentSource + ?Sized>
     }
 }
 
+/// Verifier-owned compact CFW view of the production structured matrices.
+///
+/// The row source contains caches for one honest assignment, but those caches
+/// are not used to evaluate this interface. Every matrix row is instead
+/// interpreted against the `public_input` and `witness` slices supplied by the
+/// CFW caller. This distinction is load-bearing for knowledge extraction: a
+/// candidate witness must be checked against the production matrices rather
+/// than against the assignment that happened to prepare the row source.
+pub(crate) struct CompactPublicKeyCfwMatrices<'source, 'assignment, 'public_input> {
+    row_source: &'source CompactStructuredR1csRowSource<'assignment, CompactPublicKeyAssignment>,
+    canonical_public_input: &'public_input [CompactChallengeField],
+    witness_length: usize,
+    row_count: usize,
+    row_point_variable_count: usize,
+    lookup_challenge: CompactChallengeField,
+}
+
+impl<'source, 'assignment, 'public_input>
+    CompactPublicKeyCfwMatrices<'source, 'assignment, 'public_input>
+{
+    pub(crate) fn new(
+        row_source: &'source CompactStructuredR1csRowSource<
+            'assignment,
+            CompactPublicKeyAssignment,
+        >,
+        canonical_public_input: &'public_input [CompactChallengeField],
+    ) -> Result<Self, CompactCfwError> {
+        let witness_length = usize::try_from(row_source.witness_length())
+            .map_err(|_| CompactCfwError::CountOverflow)?;
+        let row_count =
+            usize::try_from(row_source.row_count()).map_err(|_| CompactCfwError::CountOverflow)?;
+        let expected_row_count = witness_length
+            .checked_mul(2)
+            .ok_or(CompactCfwError::CountOverflow)?;
+        if witness_length == 0
+            || row_count != expected_row_count
+            || !row_count.is_power_of_two()
+            || canonical_public_input.len() != witness_length
+            || row_source.matrices.public_input_length
+                != u64::try_from(witness_length).map_err(|_| CompactCfwError::CountOverflow)?
+            || row_source.matrices.witness_length
+                != u64::try_from(witness_length).map_err(|_| CompactCfwError::CountOverflow)?
+        {
+            return Err(CompactCfwError::InvalidMatrixSource);
+        }
+        for (element_ordinal, supplied_value) in canonical_public_input.iter().copied().enumerate()
+        {
+            let expected_value = row_source
+                .assignment
+                .public_input_value(
+                    u64::try_from(element_ordinal).map_err(|_| CompactCfwError::CountOverflow)?,
+                )
+                .map(compact_challenge_from_production)
+                .map_err(|_| CompactCfwError::InvalidMatrixSource)?;
+            if supplied_value != expected_value {
+                return Err(CompactCfwError::InvalidMatrixSource);
+            }
+        }
+        let row_point_variable_count =
+            usize::try_from(row_count.ilog2()).map_err(|_| CompactCfwError::CountOverflow)?;
+        Ok(Self {
+            row_source,
+            canonical_public_input,
+            witness_length,
+            row_count,
+            row_point_variable_count,
+            lookup_challenge: compact_challenge_from_production(
+                row_source.assignment.lookup_challenge(),
+            ),
+        })
+    }
+
+    fn form_for_role(
+        row: &CompactStructuredR1csRow,
+        matrix_role: CompactCfwMatrixRole,
+    ) -> &CompactStructuredLinearForm {
+        match matrix_role {
+            CompactCfwMatrixRole::LeftMultiplicand => &row.left,
+            CompactCfwMatrixRole::RightMultiplicand => &row.right,
+            CompactCfwMatrixRole::Product => &row.output,
+        }
+    }
+
+    fn little_endian_boolean_weight(
+        point: &[CompactChallengeField],
+        boolean_ordinal: u64,
+    ) -> CompactChallengeField {
+        point
+            .iter()
+            .enumerate()
+            .map(|(coordinate_ordinal, coordinate)| {
+                if (boolean_ordinal >> coordinate_ordinal) & 1 == 0 {
+                    CompactChallengeField::ONE - *coordinate
+                } else {
+                    *coordinate
+                }
+            })
+            .product()
+    }
+
+    fn checked_value_at_column(
+        &self,
+        public_input: &[CompactChallengeField],
+        witness: &[CompactChallengeField],
+        column_ordinal: u64,
+    ) -> Result<CompactChallengeField, CompactCfwError> {
+        let public_input_length = self.row_source.matrices.public_input_length;
+        if column_ordinal < public_input_length {
+            return public_input
+                .get(usize::try_from(column_ordinal).map_err(|_| CompactCfwError::CountOverflow)?)
+                .copied()
+                .ok_or(CompactCfwError::InvalidMatrixSource);
+        }
+        let witness_ordinal = column_ordinal
+            .checked_sub(public_input_length)
+            .ok_or(CompactCfwError::CountOverflow)?;
+        witness
+            .get(usize::try_from(witness_ordinal).map_err(|_| CompactCfwError::CountOverflow)?)
+            .copied()
+            .ok_or(CompactCfwError::InvalidMatrixSource)
+    }
+
+    fn evaluate_form(
+        &self,
+        form: &CompactStructuredLinearForm,
+        public_input: &[CompactChallengeField],
+        witness: &[CompactChallengeField],
+    ) -> Result<CompactChallengeField, CompactCfwError> {
+        let mut sum = CompactChallengeField::ZERO;
+        for term in &form.ordered_terms {
+            let contribution = match *term {
+                CompactStructuredMatrixTerm::StaticEntry {
+                    column_ordinal,
+                    integer_coefficient,
+                } => {
+                    self.checked_value_at_column(public_input, witness, column_ordinal)?
+                        * compact_signed_integer(integer_coefficient)?
+                }
+                CompactStructuredMatrixTerm::LookupChallengeEntry { column_ordinal } => {
+                    self.checked_value_at_column(public_input, witness, column_ordinal)?
+                        * self.lookup_challenge
+                }
+                CompactStructuredMatrixTerm::UniformStaticRange {
+                    first_column_ordinal,
+                    element_count,
+                    integer_coefficient,
+                } => {
+                    let range_end = first_column_ordinal
+                        .checked_add(element_count)
+                        .ok_or(CompactCfwError::CountOverflow)?;
+                    let coefficient = compact_signed_integer(integer_coefficient)?;
+                    let mut range_sum = CompactChallengeField::ZERO;
+                    for column_ordinal in first_column_ordinal..range_end {
+                        range_sum +=
+                            self.checked_value_at_column(public_input, witness, column_ordinal)?
+                                * coefficient;
+                    }
+                    range_sum
+                }
+                CompactStructuredMatrixTerm::NegatedLookupTableReciprocalRange {
+                    first_column_ordinal,
+                    table_value_count,
+                } => {
+                    let mut range_sum = CompactChallengeField::ZERO;
+                    for table_value in 0..table_value_count {
+                        let denominator = self.row_source.assignment.lookup_challenge().add(
+                            ProofChallengeExtensionElement::from_base(
+                                ProofBaseFieldElement::from_canonical(table_value)
+                                    .map_err(|_| CompactCfwError::InvalidMatrixSource)?,
+                            ),
+                        );
+                        let reciprocal = denominator
+                            .inverse()
+                            .map_err(|_| CompactCfwError::InvalidMatrixSource)?
+                            .negate();
+                        range_sum += self.checked_value_at_column(
+                            public_input,
+                            witness,
+                            first_column_ordinal
+                                .checked_add(table_value)
+                                .ok_or(CompactCfwError::CountOverflow)?,
+                        )? * compact_challenge_from_production(reciprocal);
+                    }
+                    range_sum
+                }
+                CompactStructuredMatrixTerm::PublicNegacyclicMatrixBand {
+                    public_vector_first_column_ordinal,
+                    private_vector_first_column_ordinal,
+                    output_coefficient_ordinal,
+                    centered_offset,
+                    integer_coefficient,
+                } => self.evaluate_public_negacyclic_matrix_band(
+                    public_input,
+                    witness,
+                    public_vector_first_column_ordinal,
+                    private_vector_first_column_ordinal,
+                    output_coefficient_ordinal,
+                    centered_offset,
+                    integer_coefficient,
+                )?,
+            };
+            sum += contribution;
+        }
+        Ok(sum)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_public_negacyclic_matrix_band(
+        &self,
+        public_input: &[CompactChallengeField],
+        witness: &[CompactChallengeField],
+        public_vector_first_column_ordinal: u64,
+        private_vector_first_column_ordinal: u64,
+        output_coefficient_ordinal: u64,
+        centered_offset: u64,
+        integer_coefficient: i128,
+    ) -> Result<CompactChallengeField, CompactCfwError> {
+        let ring_degree = self.row_source.relation.ring_degree();
+        let public_input_length = self.row_source.matrices.public_input_length;
+        let matrix_dimension = self.row_source.matrices.matrix_dimension;
+        let public_vector_end = public_vector_first_column_ordinal
+            .checked_add(ring_degree)
+            .filter(|end| *end <= public_input_length)
+            .ok_or(CompactCfwError::InvalidMatrixSource)?;
+        let private_vector_end = private_vector_first_column_ordinal
+            .checked_add(ring_degree)
+            .filter(|end| {
+                private_vector_first_column_ordinal >= public_input_length
+                    && *end <= matrix_dimension
+            })
+            .ok_or(CompactCfwError::InvalidMatrixSource)?;
+        if output_coefficient_ordinal >= ring_degree {
+            return Err(CompactCfwError::InvalidMatrixSource);
+        }
+        let centered_offset = compact_signed_integer(i128::from(centered_offset))?;
+        let mut sum = CompactChallengeField::ZERO;
+        for public_column_ordinal in public_vector_first_column_ordinal..public_vector_end {
+            let public_coefficient_ordinal = public_column_ordinal
+                .checked_sub(public_vector_first_column_ordinal)
+                .ok_or(CompactCfwError::CountOverflow)?;
+            let (private_coefficient_ordinal, signed_integer_coefficient) =
+                if public_coefficient_ordinal <= output_coefficient_ordinal {
+                    (
+                        output_coefficient_ordinal - public_coefficient_ordinal,
+                        integer_coefficient,
+                    )
+                } else {
+                    (
+                        ring_degree
+                            .checked_add(output_coefficient_ordinal)
+                            .and_then(|value| value.checked_sub(public_coefficient_ordinal))
+                            .ok_or(CompactCfwError::CountOverflow)?,
+                        integer_coefficient
+                            .checked_neg()
+                            .ok_or(CompactCfwError::InvalidMatrixSource)?,
+                    )
+                };
+            let public_value =
+                self.checked_value_at_column(public_input, witness, public_column_ordinal)?;
+            let shifted_private_value = self.checked_value_at_column(
+                public_input,
+                witness,
+                private_vector_first_column_ordinal
+                    .checked_add(private_coefficient_ordinal)
+                    .filter(|column_ordinal| *column_ordinal < private_vector_end)
+                    .ok_or(CompactCfwError::InvalidMatrixSource)?,
+            )?;
+            sum += public_value
+                * compact_signed_integer(signed_integer_coefficient)?
+                * (shifted_private_value - centered_offset);
+        }
+        Ok(sum)
+    }
+
+    fn public_form_contribution(
+        &self,
+        form: &CompactStructuredLinearForm,
+        public_input: &[CompactChallengeField],
+    ) -> Result<CompactChallengeField, CompactCfwError> {
+        let public_input_length = self.row_source.matrices.public_input_length;
+        let mut contribution = CompactChallengeField::ZERO;
+        for term in &form.ordered_terms {
+            match *term {
+                CompactStructuredMatrixTerm::StaticEntry {
+                    column_ordinal,
+                    integer_coefficient,
+                } if column_ordinal < public_input_length => {
+                    contribution +=
+                        self.checked_value_at_column(public_input, &[], column_ordinal)?
+                            * compact_signed_integer(integer_coefficient)?;
+                }
+                CompactStructuredMatrixTerm::LookupChallengeEntry { column_ordinal }
+                    if column_ordinal < public_input_length =>
+                {
+                    contribution +=
+                        self.checked_value_at_column(public_input, &[], column_ordinal)?
+                            * self.lookup_challenge;
+                }
+                CompactStructuredMatrixTerm::UniformStaticRange {
+                    first_column_ordinal,
+                    element_count,
+                    integer_coefficient,
+                } => {
+                    let range_end = first_column_ordinal
+                        .checked_add(element_count)
+                        .ok_or(CompactCfwError::CountOverflow)?;
+                    let public_range_end = range_end.min(public_input_length);
+                    if first_column_ordinal < public_range_end {
+                        let coefficient = compact_signed_integer(integer_coefficient)?;
+                        for column_ordinal in first_column_ordinal..public_range_end {
+                            contribution +=
+                                self.checked_value_at_column(public_input, &[], column_ordinal)?
+                                    * coefficient;
+                        }
+                    }
+                }
+                CompactStructuredMatrixTerm::NegatedLookupTableReciprocalRange {
+                    first_column_ordinal,
+                    ..
+                } if first_column_ordinal < public_input_length => {
+                    return Err(CompactCfwError::InvalidMatrixSource);
+                }
+                CompactStructuredMatrixTerm::PublicNegacyclicMatrixBand {
+                    public_vector_first_column_ordinal,
+                    output_coefficient_ordinal,
+                    centered_offset,
+                    integer_coefficient,
+                    ..
+                } => {
+                    let ring_degree = self.row_source.relation.ring_degree();
+                    let public_vector_end = public_vector_first_column_ordinal
+                        .checked_add(ring_degree)
+                        .filter(|end| *end <= public_input_length)
+                        .ok_or(CompactCfwError::InvalidMatrixSource)?;
+                    if output_coefficient_ordinal >= ring_degree {
+                        return Err(CompactCfwError::InvalidMatrixSource);
+                    }
+                    let mut signed_public_sum = CompactChallengeField::ZERO;
+                    for public_column_ordinal in
+                        public_vector_first_column_ordinal..public_vector_end
+                    {
+                        let public_coefficient_ordinal = public_column_ordinal
+                            .checked_sub(public_vector_first_column_ordinal)
+                            .ok_or(CompactCfwError::CountOverflow)?;
+                        let public_value =
+                            self.checked_value_at_column(public_input, &[], public_column_ordinal)?;
+                        if public_coefficient_ordinal <= output_coefficient_ordinal {
+                            signed_public_sum += public_value;
+                        } else {
+                            signed_public_sum -= public_value;
+                        }
+                    }
+                    let centering_coefficient = integer_coefficient
+                        .checked_mul(i128::from(centered_offset))
+                        .and_then(i128::checked_neg)
+                        .ok_or(CompactCfwError::InvalidMatrixSource)?;
+                    contribution +=
+                        signed_public_sum * compact_signed_integer(centering_coefficient)?;
+                }
+                _ => {}
+            }
+        }
+        Ok(contribution)
+    }
+
+    fn accumulate_witness_form(
+        &self,
+        form: &CompactStructuredLinearForm,
+        row_weight: CompactChallengeField,
+        matrix_role_weight: CompactChallengeField,
+        destination: &mut [CompactChallengeField],
+    ) -> Result<(), CompactCfwError> {
+        let public_input_length = self.row_source.matrices.public_input_length;
+        let matrix_dimension = self.row_source.matrices.matrix_dimension;
+        let weighted_row = row_weight * matrix_role_weight;
+        if weighted_row == CompactChallengeField::ZERO {
+            return Ok(());
+        }
+        for term in &form.ordered_terms {
+            match *term {
+                CompactStructuredMatrixTerm::StaticEntry {
+                    column_ordinal,
+                    integer_coefficient,
+                } if column_ordinal >= public_input_length => {
+                    add_compact_witness_covector_entry(
+                        destination,
+                        public_input_length,
+                        matrix_dimension,
+                        column_ordinal,
+                        weighted_row * compact_signed_integer(integer_coefficient)?,
+                    )?;
+                }
+                CompactStructuredMatrixTerm::LookupChallengeEntry { column_ordinal }
+                    if column_ordinal >= public_input_length =>
+                {
+                    add_compact_witness_covector_entry(
+                        destination,
+                        public_input_length,
+                        matrix_dimension,
+                        column_ordinal,
+                        weighted_row * self.lookup_challenge,
+                    )?;
+                }
+                CompactStructuredMatrixTerm::UniformStaticRange {
+                    first_column_ordinal,
+                    element_count,
+                    integer_coefficient,
+                } => {
+                    let range_end = first_column_ordinal
+                        .checked_add(element_count)
+                        .filter(|end| *end <= matrix_dimension)
+                        .ok_or(CompactCfwError::InvalidMatrixSource)?;
+                    let first_witness_column = first_column_ordinal.max(public_input_length);
+                    let coefficient = weighted_row * compact_signed_integer(integer_coefficient)?;
+                    for column_ordinal in first_witness_column..range_end {
+                        add_compact_witness_covector_entry(
+                            destination,
+                            public_input_length,
+                            matrix_dimension,
+                            column_ordinal,
+                            coefficient,
+                        )?;
+                    }
+                }
+                CompactStructuredMatrixTerm::NegatedLookupTableReciprocalRange {
+                    first_column_ordinal,
+                    table_value_count,
+                } => {
+                    if first_column_ordinal < public_input_length {
+                        return Err(CompactCfwError::InvalidMatrixSource);
+                    }
+                    for table_value in 0..table_value_count {
+                        let denominator = self.row_source.assignment.lookup_challenge().add(
+                            ProofChallengeExtensionElement::from_base(
+                                ProofBaseFieldElement::from_canonical(table_value)
+                                    .map_err(|_| CompactCfwError::InvalidMatrixSource)?,
+                            ),
+                        );
+                        let reciprocal = denominator
+                            .inverse()
+                            .map_err(|_| CompactCfwError::InvalidMatrixSource)?
+                            .negate();
+                        add_compact_witness_covector_entry(
+                            destination,
+                            public_input_length,
+                            matrix_dimension,
+                            first_column_ordinal
+                                .checked_add(table_value)
+                                .ok_or(CompactCfwError::CountOverflow)?,
+                            weighted_row * compact_challenge_from_production(reciprocal),
+                        )?;
+                    }
+                }
+                CompactStructuredMatrixTerm::PublicNegacyclicMatrixBand {
+                    public_vector_first_column_ordinal,
+                    private_vector_first_column_ordinal,
+                    output_coefficient_ordinal,
+                    integer_coefficient,
+                    ..
+                } => {
+                    let ring_degree = self.row_source.relation.ring_degree();
+                    let public_vector_end = public_vector_first_column_ordinal
+                        .checked_add(ring_degree)
+                        .filter(|end| *end <= public_input_length)
+                        .ok_or(CompactCfwError::InvalidMatrixSource)?;
+                    let private_vector_end = private_vector_first_column_ordinal
+                        .checked_add(ring_degree)
+                        .filter(|end| {
+                            private_vector_first_column_ordinal >= public_input_length
+                                && *end <= matrix_dimension
+                        })
+                        .ok_or(CompactCfwError::InvalidMatrixSource)?;
+                    if output_coefficient_ordinal >= ring_degree {
+                        return Err(CompactCfwError::InvalidMatrixSource);
+                    }
+                    for public_column_ordinal in
+                        public_vector_first_column_ordinal..public_vector_end
+                    {
+                        let public_coefficient_ordinal = public_column_ordinal
+                            .checked_sub(public_vector_first_column_ordinal)
+                            .ok_or(CompactCfwError::CountOverflow)?;
+                        let (private_coefficient_ordinal, signed_integer_coefficient) =
+                            if public_coefficient_ordinal <= output_coefficient_ordinal {
+                                (
+                                    output_coefficient_ordinal - public_coefficient_ordinal,
+                                    integer_coefficient,
+                                )
+                            } else {
+                                (
+                                    ring_degree
+                                        .checked_add(output_coefficient_ordinal)
+                                        .and_then(|value| {
+                                            value.checked_sub(public_coefficient_ordinal)
+                                        })
+                                        .ok_or(CompactCfwError::CountOverflow)?,
+                                    integer_coefficient
+                                        .checked_neg()
+                                        .ok_or(CompactCfwError::InvalidMatrixSource)?,
+                                )
+                            };
+                        let public_value = self
+                            .canonical_public_input
+                            .get(
+                                usize::try_from(public_column_ordinal)
+                                    .map_err(|_| CompactCfwError::CountOverflow)?,
+                            )
+                            .copied()
+                            .ok_or(CompactCfwError::InvalidMatrixSource)?;
+                        if public_value == CompactChallengeField::ZERO {
+                            continue;
+                        }
+                        add_compact_witness_covector_entry(
+                            destination,
+                            public_input_length,
+                            matrix_dimension,
+                            private_vector_first_column_ordinal
+                                .checked_add(private_coefficient_ordinal)
+                                .filter(|column_ordinal| *column_ordinal < private_vector_end)
+                                .ok_or(CompactCfwError::InvalidMatrixSource)?,
+                            weighted_row
+                                * public_value
+                                * compact_signed_integer(signed_integer_coefficient)?,
+                        )?;
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn check_public_input(
+        &self,
+        public_input: &[CompactChallengeField],
+    ) -> Result<(), CompactCfwError> {
+        if public_input != self.canonical_public_input {
+            return Err(CompactCfwError::InvalidMatrixSource);
+        }
+        Ok(())
+    }
+}
+
+impl CompactCfwR1csMatrices for CompactPublicKeyCfwMatrices<'_, '_, '_> {
+    fn witness_length(&self) -> usize {
+        self.witness_length
+    }
+
+    fn evaluate_assignment_rows(
+        &self,
+        matrix_role: CompactCfwMatrixRole,
+        public_input: &[CompactChallengeField],
+        witness: &[CompactChallengeField],
+    ) -> Result<Vec<CompactChallengeField>, CompactCfwError> {
+        self.check_public_input(public_input)?;
+        if witness.len() != self.witness_length {
+            return Err(CompactCfwError::InvalidMatrixSource);
+        }
+        let mut rows = Vec::new();
+        rows.try_reserve_exact(self.row_count)
+            .map_err(|_| CompactCfwError::AllocationLimitExceeded)?;
+        for row_ordinal in 0..self.row_count {
+            let row = self
+                .row_source
+                .matrices
+                .row(
+                    self.row_source.relation,
+                    u64::try_from(row_ordinal).map_err(|_| CompactCfwError::CountOverflow)?,
+                )
+                .map_err(|_| CompactCfwError::InvalidMatrixSource)?;
+            rows.push(self.evaluate_form(
+                Self::form_for_role(&row, matrix_role),
+                public_input,
+                witness,
+            )?);
+        }
+        Ok(rows)
+    }
+
+    fn public_contribution_at_row_point(
+        &self,
+        matrix_role: CompactCfwMatrixRole,
+        row_point: &[CompactChallengeField],
+        public_input: &[CompactChallengeField],
+    ) -> Result<CompactChallengeField, CompactCfwError> {
+        self.check_public_input(public_input)?;
+        if row_point.len() != self.row_point_variable_count {
+            return Err(CompactCfwError::InvalidMatrixSource);
+        }
+        let mut result = CompactChallengeField::ZERO;
+        for row_ordinal in 0..self.row_count {
+            let row = self
+                .row_source
+                .matrices
+                .row(
+                    self.row_source.relation,
+                    u64::try_from(row_ordinal).map_err(|_| CompactCfwError::CountOverflow)?,
+                )
+                .map_err(|_| CompactCfwError::InvalidMatrixSource)?;
+            let row_weight = Self::little_endian_boolean_weight(
+                row_point,
+                u64::try_from(row_ordinal).map_err(|_| CompactCfwError::CountOverflow)?,
+            );
+            if row_weight != CompactChallengeField::ZERO {
+                result += row_weight
+                    * self.public_form_contribution(
+                        Self::form_for_role(&row, matrix_role),
+                        public_input,
+                    )?;
+            }
+        }
+        Ok(result)
+    }
+
+    fn accumulate_weighted_witness_covector_at_row_point(
+        &self,
+        row_point: &[CompactChallengeField],
+        matrix_role_weights: [CompactChallengeField; COMPACT_CFW_MATRIX_COUNT],
+        destination: &mut [CompactChallengeField],
+    ) -> Result<(), CompactCfwError> {
+        if row_point.len() != self.row_point_variable_count
+            || destination.len() != self.witness_length
+        {
+            return Err(CompactCfwError::InvalidMatrixSource);
+        }
+        for row_ordinal in 0..self.row_count {
+            let row = self
+                .row_source
+                .matrices
+                .row(
+                    self.row_source.relation,
+                    u64::try_from(row_ordinal).map_err(|_| CompactCfwError::CountOverflow)?,
+                )
+                .map_err(|_| CompactCfwError::InvalidMatrixSource)?;
+            let row_weight = Self::little_endian_boolean_weight(
+                row_point,
+                u64::try_from(row_ordinal).map_err(|_| CompactCfwError::CountOverflow)?,
+            );
+            for matrix_role in CompactCfwMatrixRole::ALL {
+                self.accumulate_witness_form(
+                    Self::form_for_role(&row, matrix_role),
+                    row_weight,
+                    matrix_role_weights[matrix_role.ordinal()],
+                    destination,
+                )?;
+            }
+        }
+        Ok(())
+    }
+}
+
+fn compact_signed_integer(value: i128) -> Result<CompactChallengeField, CompactCfwError> {
+    base_element_from_signed_integer(value)
+        .map(ProofChallengeExtensionElement::from_base)
+        .map(compact_challenge_from_production)
+        .map_err(|_| CompactCfwError::InvalidMatrixSource)
+}
+
+fn add_compact_witness_covector_entry(
+    destination: &mut [CompactChallengeField],
+    public_input_length: u64,
+    matrix_dimension: u64,
+    column_ordinal: u64,
+    contribution: CompactChallengeField,
+) -> Result<(), CompactCfwError> {
+    if column_ordinal < public_input_length || column_ordinal >= matrix_dimension {
+        return Err(CompactCfwError::InvalidMatrixSource);
+    }
+    let destination_ordinal = usize::try_from(column_ordinal - public_input_length)
+        .map_err(|_| CompactCfwError::CountOverflow)?;
+    *destination
+        .get_mut(destination_ordinal)
+        .ok_or(CompactCfwError::InvalidMatrixSource)? += contribution;
+    Ok(())
+}
+
 impl<Assignment: CompactStructuredAssignmentSource + ?Sized> CompactCfwExternalRowSource
     for CompactStructuredR1csRowSource<'_, Assignment>
 {
@@ -2599,41 +3278,42 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     use super::super::{
+        PreparedCompactPublicKeyBaseAssignment,
         authenticated_assignment::{
             CompactAuthenticatedAssignmentPoll, CompactLookupInverseMaterializationPoll,
         },
-        prepare_compact_public_key_assignment_sources, PreparedCompactPublicKeyBaseAssignment,
+        prepare_compact_public_key_assignment_sources,
     };
     use super::*;
     use crate::bgv::proof_suite::compact_cfw::{
-        compact_challenge_from_production, CompactCfwGeometry, CompactCfwMaskMaterial,
-        COMPACT_CFW_MATRIX_COUNT,
+        COMPACT_CFW_MATRIX_COUNT, CompactCfwGeometry, CompactCfwMaskMaterial,
+        compact_challenge_from_production,
     };
     use crate::bgv::proof_suite::compact_cfw_external_prover::{
         CompactCfwExternalProverState, CompactCfwExternalRowSource,
     };
     use crate::bgv::proof_suite::external_memory::tests::TestStorage;
     use crate::bgv::proof_suite::field::{
-        ProofBaseFieldElement, ProofChallengeExtensionElement, PROOF_BASE_FIELD_MODULUS,
+        PROOF_BASE_FIELD_MODULUS, ProofBaseFieldElement, ProofChallengeExtensionElement,
     };
     #[cfg(not(target_arch = "wasm32"))]
     use crate::{
         bgv::{
             proof_suite::{
-                compile_public_key_share_relation_with_source_layout,
-                decode_selected_public_key_share_statement, verified_application_statement_hash,
                 CommonProofRelationPlanCapability, CommonProofSourcePolynomialProvider,
                 SelectedApplicationStatementContext,
+                compile_public_key_share_relation_with_source_layout,
+                decode_selected_public_key_share_statement, verified_application_statement_hash,
             },
             setup::{
+                SetupGenerationKeyRelationApplication, SetupKeyRelationGenerationPreparationError,
+                SetupKeyRelationProofFamily,
                 populate_compact_public_key_development_evidence_authority,
                 resolve_setup_generation_compact_public_key_development_preparation_source,
                 with_exclusive_setup_generation_compact_public_key_development_relation,
-                SetupGenerationKeyRelationApplication, SetupKeyRelationGenerationPreparationError,
-                SetupKeyRelationProofFamily,
             },
         },
-        foundation::{prepare_exact_same_secret_evidence_attempt, Hash512, ProofApplicationSlot},
+        foundation::{Hash512, ProofApplicationSlot, prepare_exact_same_secret_evidence_attempt},
     };
 
     struct CountingCompactCfwExternalRowSource<'source, Source> {
@@ -3643,9 +4323,11 @@ mod tests {
             }
         }
         assert_eq!(loaded_column_ordinals.len(), 202);
-        assert!(loaded_column_ordinals
-            .windows(2)
-            .all(|pair| pair[0] < pair[1]));
+        assert!(
+            loaded_column_ordinals
+                .windows(2)
+                .all(|pair| pair[0] < pair[1])
+        );
         let PreparedCompactPublicKeyBaseAssignment {
             relation,
             base_assignment,

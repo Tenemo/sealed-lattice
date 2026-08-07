@@ -246,7 +246,10 @@ impl CfwReductionCatalog {
                 checked_product(&[4, u64::from(relation_variable_logarithm)])?,
                 5,
             )?,
-            initial_consistency_soundness_numerator: OUTER_MASK_MESSAGE_LENGTH
+            // The initial verifier message samples one combining scalar and
+            // the complete equality point. The concrete bad-transition
+            // polynomial has total degree at most `1 + sumcheck_round_count`.
+            initial_consistency_soundness_numerator: u64::from(sumcheck_round_count)
                 .checked_add(1)
                 .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?,
             per_round_soundness_numerator: OUTER_MASK_MESSAGE_LENGTH,
@@ -435,7 +438,10 @@ impl CfwReductionCatalog {
                     checked_product(&[4, u64::from(expected_relation_variable_logarithm)])?,
                     5,
                 )?
-            || self.initial_consistency_soundness_numerator != OUTER_MASK_MESSAGE_LENGTH + 1
+            || self.initial_consistency_soundness_numerator
+                != u64::from(expected_sumcheck_round_count)
+                    .checked_add(1)
+                    .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?
             || self.per_round_soundness_numerator != OUTER_MASK_MESSAGE_LENGTH
             || self.joint_constraint_soundness_numerator != JOINT_CONSTRAINT_SOUNDNESS_NUMERATOR
         {

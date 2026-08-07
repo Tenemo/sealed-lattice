@@ -262,31 +262,74 @@ not used as a substitute for the relaxed extraction theorem.
 The factor-one chronology now has a checked prefix-relation descriptor and
 extractor-step transition for all 82 verifier moves. The catalog instantiates
 the exact CFW input, intermediate, and output relation shapes; the
-`9 / |F|` initial check; 22 ordinary `8 / |F|` sumcheck rows; the final
+semantic initial-transition bound `24 / |F|` for one combining scalar and the
+23-coordinate equality point; 22 ordinary `8 / |F|` sumcheck rows; the final
 `8 / (|F| - 2)` row; the joint `2 / |F|` zero-evader row; and every odd-
 characteristic, mask-length, list-size-one, and sequential-composition
 hypothesis used from CFW Theorem 11.3. Each Reed-Solomon code uses its full
 message-plus-hiding dimension, the strict integer radius
 `floor((N - K - 1) / 2)`, an executable canonical Berlekamp-Welch decoder, and
-an explicit field-operation ceiling. Focused owners recover zero, one, and the
-maximum permitted number of shared row errors, reject excess and malformed
-oracles, recompute concrete R1CS rows through verifier-owned matrices, and
-check decoded source and mask messages against every public linear claim. The
-same owner checks 37 WHIR binary-fold MCA and
-masked-sumcheck transitions, 15 exact adjacent relation boundaries, every
-challenge space, and every commitment-before-challenge barrier. Coordinated
-relation mutations that leave the two boundary copies equal are refused by
-independent reconstruction. The exact maximum per-move extraction error is
-carried into the conditional CDHZ arithmetic and remains at most `2^-266`.
-This is an executable decoder and endpoint-relation foundation, not a complete
-semantic relaxed extractor: the owner does not yet implement CDHZ's prefix-wise
-knowledge-state predicate or deterministic `ERRBR` at every prover move,
-execute the intermediate extracted-witness transitions, or prove the zero
-input- and output-implicit tuple dimensions. The separate construction owner
-records useful masking ranks and
-topology but does not yet close the exact production coefficient-to-view
-correspondence or ideal-uniform simulator. The canonical-byte owner supplies a
-static verifier-consumer map. The resulting CDHZ/Merkle arithmetic remains
+a provisional correction-work ceiling for that decoder. Focused owners recover
+zero, one, and the maximum permitted number of shared row errors, reject excess
+and malformed oracles, recompute concrete R1CS rows through verifier-owned
+matrices, and check decoded source and mask messages against every public
+linear claim. The same owner checks 37 WHIR binary-fold MCA and masked-sumcheck
+transitions, 15 exact adjacent relation boundaries, every challenge space, and
+every commitment-before-challenge barrier. Coordinated relation mutations that
+leave the two boundary copies equal are refused by independent reconstruction.
+Query escape uses the actual ordered sampling-without-replacement law and the
+strict bad-word agreement ceiling `N - t - 1`, with each code's encoding-
+randomness dimension separate from its verifier query count; the shared cross-
+epoch code therefore has 798 hiding coordinates and 399 queries in each epoch.
+The accepted query vectors remain conservative. WHIR binary MCA is charged on
+the committed row-code domain carried by the batch, including internal folds;
+it is not charged on an uncommitted scalar layer. An executable owner derives
+every factor-one bad-event family from the semantic relation, code, and
+challenge geometry and requires all 82 per-move totals and their maximum to
+equal the independently constructed numerical ledger. This is not yet the
+complete bad-transition theorem, so the maximum remains only a conditional
+CDHZ input; it is at most `2^-266`.
+
+The CFW slice now has an executable knowledge-state predicate over a canonical
+statement, verifier-owned matrices and public input, committed source and mask
+oracles, every CFW prover and verifier prefix, and the full CFW transcript. Its
+deterministic `ERRBR` runs canonical unique decoding for the source, inner-mask,
+and outer-mask codes and reconstructs the CFW witness and mask material. It
+does not invoke `KState`: the potentially inefficient knowledge predicate is
+evaluated separately by the bad-transition experiment, while `ERRBR` remains a
+deterministic polynomial-time algorithm. The canonical decoder now owns its
+field-operation ceiling, including evaluation-point generation, system
+construction, deterministic row reduction, monic division, and both executable
+re-encodings. It refuses substituted witnesses, masks, targets, round
+polynomials, final values, and malformed chronology. The production matrix
+adapter evaluates each candidate witness instead of replaying cached honest
+rows. Semantic WHIR owners execute opening batching, masked sumcheck, code
+switching, folding, and both terminal base relations. The exact CFW cross-epoch
+mask witness enters the main WHIR input, and focused owners independently
+reconstruct equal relation-and-instance pairs at all 15 adjacent boundaries in
+both epochs. The production-layout adapter derives the outer statement directly
+from the compiled relation. A checked 82-move schedule dispatches `KState`,
+deterministic `ERRBR`, and bad-transition derivation to the concrete outer, CFW,
+WHIR, and two atomic composition owners; focused fixtures exercise every
+dispatcher branch. The construction-wide catalog structurally derives both
+implicit tuple dimensions as zero: its input RR1CS instance is explicit, every
+code oracle is a prover message, and both terminal output relations are
+trivial. This is still not the complete relaxed theorem. There is no single
+construction-wide prefix object that proves the empty-transcript, every prover-
+prefix, and full-transcript properties over one canonical execution; the
+adjacent extracted-witness transitions and every full-chronology bad-transition
+implication have not been proved together. The historical extraction-work
+ledger still understates executable outer, generalized-WHIR, and terminal
+decoding or re-encoding paths even though the decoder-local ceiling is now
+derived by the canonical implementation, so it is not an accepted
+construction-wide extraction-time bound. The binary WHIR folding and base-combination owners
+derive concrete MCA certificates, while the lookup and cross-epoch owners
+execute their own `KState`, `ERRBR`, and bad-transition certificates.
+The separate construction owner records useful
+masking ranks and topology but does not yet close the exact production
+coefficient-to-view correspondence or ideal-uniform simulator. The canonical-
+byte owner supplies a static verifier-consumer map. The resulting CDHZ/Merkle
+arithmetic remains
 conditional until those theorem premises and one complete emitted production
 proof derive. Production-shaped small-chain integration, durable execution, and
 measured browser evidence also remain open.
@@ -484,15 +527,25 @@ deployed and quantum KMAC256 hybrids start from a fresh 512-bit browser-CSPRNG
 action root and separately charge root guessing, bounded rejection-sampler
 exhaustion, and 1,024-bit leaf-salt collisions. Canonical emitted multiproof
 regions now have exact verifier consumers. Emitted Merkle-root and frontier
-programming, malicious or resettable verifier zero knowledge, full-family and
-complete-ceremony simulation, fixed-SHAKE justification, and QROM zero
-knowledge remain explicit refusals. Several coefficient-to-view identities are
-still catalog labels rather than independently generated matrices from the
-production compiler and verifier, so this is not yet an exact ideal-uniform
-statistical-HVZK simulator. Deployment additionally relies on a computational
-browser-CSPRNG/KMAC quantum-PRF hybrid. CMS19 is a plausible later route for
-compiled QROM zero knowledge only after that simulator and exact root/frontier
-programming derive; production code never reprograms SHAKE.
+programming, full-family and complete-ceremony simulation, fixed-SHAKE
+justification, and QROM zero knowledge remain explicit refusals. Several
+coefficient-to-view identities are still catalog labels rather than
+independently generated matrices from the production compiler and verifier, so
+this is not yet an exact ideal-uniform statistical-HVZK simulator. Deployment
+additionally relies on a computational browser-CSPRNG/KMAC quantum-PRF hybrid.
+CMS19 and BCS16 give a later route from exact statistical HVZK and salted-Merkle
+privacy to single-proof malicious-verifier statistical zero knowledge in the
+explicitly programmable random-oracle model. That route still needs the exact
+salted-leaf privacy error, collision-free programming domains, chronology, and
+emitted root/frontier programming map. It does not use a measure-and-reprogram
+or adaptive-reprogramming loss, but it is not implemented or free of those
+construction obligations. The deployed KMAC hybrid would make the final claim
+computational. Because KMAC256 and SHAKE256 share the fixed Keccak-f primitive,
+the final composition must state one compatible joint assumption or reduction;
+domain separation alone does not prove that the two interfaces are independent
+ideal primitives. Resettable or reused-randomness privacy, shared-oracle multi-
+proof privacy, and full-family and ceremony composition remain separate
+refusals. Production code never reprograms SHAKE.
 
 An independently re-derived authenticated-source mapping now selects exactly
 202 half-polynomials from the existing production
@@ -838,8 +891,8 @@ All four current canonical-payload vectors are below the 671,088,640-byte WASM
 hard bound and the 268,435,456-byte proof-allocation bound. Factors one, two,
 and four are also below the 1,073,741,824-byte scratch bound. Factor eight has
 `52,243,020` bytes of provisional WASM margin but exceeds the scratch bound by
-`8,672,544` bytes under the complete retained-tree lifecycle, so it is not an
-eligible static default. Factor four remains under every byte bound, but these
+`8,672,544` bytes under the complete retained-tree lifecycle, so it is
+statically refused. Factor four remains under every byte bound, but these
 vectors still cannot select it: the compact loader and materializer
 are connected only to the standalone production-derived development authority,
 not ceremony generation; the production row source has only one bounded CFW
@@ -889,7 +942,8 @@ standalone public-key proof below is a development vertical slice, not a fourth
 ceremony packet. The complete 159-relation count includes nine public aggregate
 relations and describes the ceremony, not one proof or participant action.
 
-No production-size successor proof is implemented or selected yet. Focused
+No production-size successor proof, release-WASM proof artifact, or browser
+proof exists, and no compact packing factor is selected. Focused
 owners now pass for the standalone public-key relation matrices and independent
 interpreter, exact two-epoch chronology, round-by-round interactive error
 vector, WHIR geometry, compact Merkle-frontier arithmetic, query-exhaustion
@@ -913,11 +967,23 @@ framing coverage, production constructor coverage, and exact per-factor heap
 ledgers. The factor-one relaxed-theorem catalog enumerates all 82 transition
 labels, 15 relation identities, full-dimension code shapes, correction radii,
 list-size bounds, CFW errors, WHIR MCA terms, challenge dependencies, and an
-extraction-work ceiling. Its canonical decoder and concrete input/output
-relation predicates execute, but it does not implement or prove the prefix-wise
-semantic knowledge-state function, deterministic extractor, and intermediate
-witness transitions required by CDHZ. The emitted-byte
-owner maps static canonical regions and fixed-message candidates to verifier
+incomplete extraction-work ledger. Its CFW slice executes the canonical
+decoder, semantic knowledge-state predicate, and deterministic extractor over
+every CFW message prefix. Its WHIR components execute their semantic relations, the exact
+cross-epoch mask witness enters the main WHIR input, and all 15 adjacent
+relation-and-instance pairs compose exactly in both epochs. The catalog also
+fixes both construction-wide implicit tuple dimensions to zero. Binary WHIR MCA
+certificates execute. The lookup and cross-epoch transition owners decode their
+bound committed-code instances, derive the declared quotient/multiplicity,
+copied-prefix, and two-lane mask views from those witnesses, and reject
+committed-witness substitution. The production-layout adapter and checked
+82-move semantic dispatcher are implemented, and focused fixtures exercise
+each dispatch branch. The full theorem remains open because those local owners
+are not yet composed into one canonical construction-wide prefix state with
+the empty-, prover-prefix-, and full-transcript properties, adjacent extracted-
+witness transitions, a complete extraction-time bound, and every global bad-
+transition implication. The emitted-byte owner maps static canonical
+regions and fixed-message candidates to verifier
 consumers and records conditional 98-, 95-, and 92-bit per-proof, public-key-
 union, and complete-inventory arithmetic under the ideal-QRO assumption. A live
 small Merkle response derives
@@ -961,24 +1027,46 @@ compact profile or exercise it through a retained live authority, because row-
 source preparation has no authenticated cache recovery, and because the
 selected-size CFW and CFW-to-transpose execution, selected-size transpose
 execution, unified production transcript, live production-authority
-integration, durable proof and verifier lifecycle, and
-independently measured resources for the fixed bytes remain
-incomplete. The
-construction-level interactive masking correspondence, canonical proof and
-public-input codecs,
-hostile decoder, one response commitment per logical IOR round, uniform fixed-bit
-challenge decoder, complete static query censuses, and literal transcript-prefix
-work ledger now exist.
+integration, durable proof and verifier lifecycle, and independently measured
+resources for the fixed bytes remain incomplete. The relaxed extraction,
+construction-level masking, and emitted-byte owners also remain incomplete.
+The CFW semantic predicate and deterministic extractor now execute across every
+CFW message prefix. The WHIR semantic components, exact CFW cross-epoch witness
+handoff, all 15 adjacent relation-and-instance equalities, and zero
+construction-wide input- and output-implicit tuple dimensions also execute.
+Binary WHIR folding and base-combination MCA certificates now execute. The
+lookup and cross-epoch semantic transition owners decode their bound committed-
+code instances, derive the declared quotient/multiplicity, copied-prefix, and
+two-lane mask views from those witnesses, and reject committed-witness
+substitution. The production-layout adapter and checked 82-move semantic
+dispatcher now bind every verifier move to an executable local `KState`,
+`ERRBR`, and bad-transition owner. What remains absent is one canonical
+construction-wide prefix state proving the empty-, prover-prefix-, and full-
+transcript properties, every adjacent extracted-witness transition, the exact
+extraction-time bound, and all bad-transition implications across a single
+complete chronology. The masking catalog does not
+independently derive every production coefficient-to-view map, the conditional
+entropy after each prior disclosure, the exact ideal-uniform simulator, or the
+deployed KMAC256 quantum-
+PRF hybrid. The emitted-byte catalog and reduced hostile envelope do not yet
+supply the complete production-shaped small-chain map or instantiate soundness
+against one complete production proof. The existing canonical codecs, hostile
+decoder, response commitments, fixed-bit challenge decoder, static query
+censuses, and transcript-prefix work ledger are bounded development evidence
+only.
 
-The next task is to close those owners one at a time with focused tests, not to
-run a prover or a complete test graph. Construction-level masking now
-reconciles every production coefficient-to-view map and the conditional entropy
-after preceding disclosures. The next integration owner must connect the
-reduced production-equation source path to the ceremony generation host's live
-source authority and browser-rooted attempt custody, drive the pre-challenge,
-cross-epoch, CFW, and WHIR messages through one canonical production transcript,
-and require that production verifier path to consume the existing canonical
-section model. Only that complete small-geometry chain can close this gate.
+The immediate work order is to close the semantic relaxed extractor first,
+then construction-level masking, then the emitted-byte map on one production-
+shaped small chain, and then the authenticated browser-custody lifecycle. Each
+owner receives only focused checks; neither a prover nor the complete test graph
+runs while these gates remain open. The lifecycle owner must connect the reduced
+production-equation source path to the ceremony generation host's live source
+authority and browser-rooted attempt custody, drive the pre-challenge, cross-
+epoch, CFW, and WHIR messages through one canonical production transcript, and
+require that production verifier path to consume the existing canonical section
+model. Only that complete small-geometry chain can authorize selected-size
+diagnostics.
+
 Factors one, two, and four remain eligible engineering comparators
 for the same standalone relation and security target. Factor eight is retained
 only as a statically refused comparator under the current retained-tree
@@ -1216,8 +1304,9 @@ Works today:
   hybrids. Its focused guarded owner passed with a 66.77-second test body,
   `205,246,464` bytes peak sampled process-tree RSS, and no confirmed memory
   violation. It is not emitted-proof evidence, a concrete SHAKE256 reduction,
-  adaptive setup-family simulation, malicious-verifier or resettable zero
-  knowledge, or quantum-random-oracle zero knowledge.
+  adaptive setup-family simulation, compiled single-proof malicious-verifier
+  zero knowledge, resettable zero knowledge, or quantum-random-oracle zero
+  knowledge.
 - The exact same-secret transport correspondence now walks all 22
   construction-plan proof sections through their production decoder and
   semantic-verifier owners. Its current section model derives a
@@ -1578,8 +1667,9 @@ Not yet:
   correspondence and do not overcome the exact state-restoration loss. The
   successor's construction masking is independently derived. Concrete SHAKE256 remains a
   separate assumption for any successor.
-- The generic construction certificate does not establish family simulation,
-  malicious-verifier zero knowledge, or quantum-random-oracle zero knowledge.
+- The generic construction certificate does not by itself establish compiled
+  single-proof malicious-verifier zero knowledge, resettable privacy, family
+  simulation, or quantum-random-oracle zero knowledge.
 - Exact emitted-byte complete-action soundness is not established. The
   selected same-secret aggregate-leaf
   predecessor correspondence, collision arithmetic, aggregate-wide production

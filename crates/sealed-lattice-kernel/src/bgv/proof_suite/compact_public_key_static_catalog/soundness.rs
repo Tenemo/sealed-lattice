@@ -7,7 +7,8 @@
 //! WHIR geometry. This event vector is not a round-by-round theorem: the
 //! separate relaxed-state owner must supply the prefix state, deterministic
 //! extractor, correction bounds, and exact sequential relations before these
-//! magnitudes can enter hash compilation.
+//! magnitudes can enter hash compilation. Distinct-query failures use the
+//! exact without-replacement hypergeometric ratio.
 
 use num_bigint::BigUint;
 use num_traits::{CheckedSub, One};
@@ -157,9 +158,11 @@ impl WhirInteractiveSoundness {
                 .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
             let folding_factor = whir.folding_schedule[batch_ordinal];
             for round_ordinal in 0..folding_factor {
-                let target_domain_size = source_domain_size
-                    .checked_shr(round_ordinal + 1)
-                    .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+                // Production represents every internal binary fold in this
+                // batch as correlated columns over the one committed row
+                // domain. Corollary 4.11 is therefore instantiated with that
+                // code domain, not with an uncommitted scalar-domain layer.
+                let target_domain_size = whir.oracle_heights[batch_ordinal];
                 let failure_numerator = target_domain_size
                     .checked_add(SUMCHECK_MASK_MESSAGE_LENGTH)
                     .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
@@ -200,6 +203,7 @@ impl WhirInteractiveSoundness {
                     query_count,
                 },
                 whir.source_message_lengths[batch_ordinal],
+                whir.query_counts[batch_ordinal],
                 whir.oracle_heights[batch_ordinal],
                 query_count,
             )?);
@@ -252,6 +256,7 @@ impl WhirInteractiveSoundness {
                     query_count: whir.mask_query_count,
                 },
                 group.message_length,
+                group.randomness_length,
                 group.domain_size,
                 whir.mask_query_count,
             )?);
@@ -635,37 +640,42 @@ fn outer_failure_rows(
 fn query_failure_row(
     event: InteractiveFailureEvent,
     message_length: u64,
+    encoding_randomness_length: u64,
     domain_size: u64,
     query_count: u64,
 ) -> Result<ExactInteractiveFailureRow, CompactStaticCatalogError> {
     let dimension = message_length
-        .checked_add(query_count)
+        .checked_add(encoding_randomness_length)
         .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
     if query_count == 0 || dimension >= domain_size {
         return Err(CompactStaticCatalogError::InvalidGeometry);
     }
-    let exponent =
-        u32::try_from(query_count).map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?;
     let selected_decoding_error_count = domain_size
         .checked_sub(dimension)
         .and_then(|slack| slack.checked_sub(1))
         .ok_or(CompactStaticCatalogError::InvalidGeometry)?
         / 2;
-    let minimum_agreement_count = domain_size
+    // A bad word must lie strictly outside the selected decoding radius, so
+    // it can agree with the selected codeword in at most `n - t - 1`
+    // locations. Using `n - t` would count a word that the decoder still
+    // accepts and would overstate the query-escape event.
+    let maximum_bad_agreement_count = domain_size
         .checked_sub(selected_decoding_error_count)
+        .and_then(|count| count.checked_sub(1))
         .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
-    let numerator = BigUint::from(minimum_agreement_count).pow(exponent);
-    let denominator = BigUint::from(domain_size).pow(exponent);
+    let numerator = falling_factorial(maximum_bad_agreement_count, query_count)?;
+    let denominator = falling_factorial(domain_size, query_count)?;
     ExactInteractiveFailureRow::new(event, numerator, denominator)
 }
 
 fn query_failure_probability(
     message_length: u64,
+    encoding_randomness_length: u64,
     domain_size: u64,
     query_count: u64,
 ) -> Result<ExactProbability, CompactStaticCatalogError> {
     let dimension = message_length
-        .checked_add(query_count)
+        .checked_add(encoding_randomness_length)
         .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
     if query_count == 0 || dimension >= domain_size {
         return Err(CompactStaticCatalogError::InvalidGeometry);
@@ -675,16 +685,26 @@ fn query_failure_probability(
         .and_then(|slack| slack.checked_sub(1))
         .ok_or(CompactStaticCatalogError::InvalidGeometry)?
         / 2;
-    let minimum_agreement_count = domain_size
+    let maximum_bad_agreement_count = domain_size
         .checked_sub(selected_decoding_error_count)
+        .and_then(|count| count.checked_sub(1))
         .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
-    let one_query = ExactProbability::new(
-        BigUint::from(minimum_agreement_count),
-        BigUint::from(domain_size),
-    )?;
-    one_query.power(
-        u32::try_from(query_count).map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+    ExactProbability::new(
+        falling_factorial(maximum_bad_agreement_count, query_count)?,
+        falling_factorial(domain_size, query_count)?,
     )
+}
+
+fn falling_factorial(
+    population_size: u64,
+    selection_count: u64,
+) -> Result<BigUint, CompactStaticCatalogError> {
+    if selection_count == 0 || selection_count > population_size {
+        return Err(CompactStaticCatalogError::InvalidGeometry);
+    }
+    (0..selection_count).try_fold(BigUint::one(), |product, selected_count| {
+        Ok(product * (population_size - selected_count))
+    })
 }
 
 fn sum_probabilities(
@@ -735,6 +755,21 @@ fn extension_field_order() -> BigUint {
 mod tests {
     use super::*;
     use crate::bgv::proof_suite::compact_public_key_static_catalog::CompactPublicKeyStaticCatalog;
+
+    #[test]
+    fn query_failure_uses_the_exact_without_replacement_law() {
+        let probability = query_failure_probability(3, 2, 8, 2)
+            .expect("small distinct-query failure probability derives");
+        let exact_without_replacement =
+            ExactProbability::new(BigUint::from(6_u8 * 5), BigUint::from(8_u8 * 7))
+                .expect("exact distinct-query probability derives");
+        let independent_with_replacement =
+            ExactProbability::new(BigUint::from(6_u8).pow(2), BigUint::from(8_u8).pow(2))
+                .expect("comparison probability derives");
+
+        assert_eq!(probability, exact_without_replacement);
+        assert_ne!(probability, independent_with_replacement);
+    }
 
     #[test]
     fn every_packing_has_a_complete_exact_interactive_error_vector() {
@@ -891,6 +926,7 @@ mod tests {
                 .try_fold(ExactProbability::zero(), |sum, group| {
                     sum.add(&query_failure_probability(
                         group.message_length,
+                        group.randomness_length,
                         group.domain_size,
                         main.mask_query_count,
                     )?)

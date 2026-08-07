@@ -345,7 +345,7 @@ impl WhirStaticLedger {
             oracle_heights[batch_ordinal] = message_rows
                 .checked_shl(rates[batch_ordinal])
                 .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
-            query_counts[batch_ordinal] = exact_full_dimension_unique_decoding_query_count(
+            query_counts[batch_ordinal] = conservative_full_dimension_unique_decoding_query_count(
                 WHIR_PROTOCOL_SECURITY_LEVEL,
                 message_rows,
                 oracle_heights[batch_ordinal],
@@ -368,21 +368,35 @@ impl WhirStaticLedger {
             vendored_mask_query_security_level,
             MASK_CODE_LOG_INVERSE_RATE,
         ));
-        let mut mask_message_lengths = Vec::with_capacity(
+        let mut mask_code_shapes = Vec::with_capacity(
             usize::try_from(mask_group_count)
                 .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
         );
-        mask_message_lengths.push(SUMCHECK_MASK_MESSAGE_LENGTH);
+        mask_code_shapes.push((
+            SUMCHECK_MASK_MESSAGE_LENGTH,
+            MaskEncodingRandomnessLength::LocalMaskQueryCount,
+        ));
         for round_ordinal in 0..WHIR_ROUND_COUNT {
-            mask_message_lengths.push(query_counts[round_ordinal]);
-            mask_message_lengths.push(SUMCHECK_MASK_MESSAGE_LENGTH);
+            mask_code_shapes.push((
+                query_counts[round_ordinal],
+                MaskEncodingRandomnessLength::LocalMaskQueryCount,
+            ));
+            mask_code_shapes.push((
+                SUMCHECK_MASK_MESSAGE_LENGTH,
+                MaskEncodingRandomnessLength::LocalMaskQueryCount,
+            ));
         }
-        mask_message_lengths.extend(
+        mask_code_shapes.extend(
             external_mask_group_specifications
                 .iter()
-                .map(|specification| specification.message_length),
+                .map(|specification| {
+                    (
+                        specification.message_length,
+                        specification.encoding_randomness_length,
+                    )
+                }),
         );
-        if mask_message_lengths.len()
+        if mask_code_shapes.len()
             != usize::try_from(mask_group_count)
                 .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?
         {
@@ -392,7 +406,7 @@ impl WhirStaticLedger {
             source_message_lengths[WHIR_ROUND_COUNT],
             oracle_heights[WHIR_ROUND_COUNT],
             query_counts[WHIR_ROUND_COUNT],
-            &mask_message_lengths,
+            &mask_code_shapes,
             vendored_mask_query_count,
             INTERACTIVE_VERIFIER_MOVE_SECURITY_LEVEL,
         )?;
@@ -1405,6 +1419,14 @@ impl PackingStaticCatalog {
             &transcript_chronology,
             &interactive_soundness,
         )?;
+        if packing_factor == 1 {
+            relaxed_round_by_round.check_factor_one_semantic_error_theorem(
+                relation,
+                cfw_reduction,
+                &pre_challenge_whir,
+                &main_whir,
+            )?;
+        }
         if transcript_chronology.distinct_query_group_count
             != query_sampling_lifecycle.query_group_count
             || transcript_chronology.fixed_query_candidate_slot_count
@@ -1864,7 +1886,7 @@ fn exact_query_count(security_level: u32, log_inverse_rate: u32) -> u32 {
     unreachable!("the fixed redundant code reaches the finite security target")
 }
 
-fn exact_full_dimension_unique_decoding_query_count(
+fn conservative_full_dimension_unique_decoding_query_count(
     security_level: u32,
     message_length: u64,
     domain_size: u64,
@@ -1885,7 +1907,11 @@ fn exact_full_dimension_unique_decoding_query_count(
         if dimension >= domain_size {
             return Err(CompactStaticCatalogError::InvalidGeometry);
         }
-        if exact_full_dimension_query_failure_is_at_most_target(
+        // Retain the accepted source geometry selected by the independent-
+        // query upper bound. The transcript samples ordered distinct queries;
+        // its tighter exact probability is checked by the soundness and
+        // relaxed-extraction owners against these fixed counts.
+        if independent_full_dimension_query_failure_is_at_most_target(
             security_level,
             message_length,
             domain_size,
@@ -1899,7 +1925,7 @@ fn exact_full_dimension_unique_decoding_query_count(
     }
 }
 
-fn exact_full_dimension_query_failure_is_at_most_target(
+fn independent_full_dimension_query_failure_is_at_most_target(
     security_level: u32,
     message_length: u64,
     domain_size: u64,
@@ -1918,11 +1944,16 @@ fn exact_full_dimension_query_failure_is_at_most_target(
         .and_then(|slack| slack.checked_sub(1))
         .ok_or(CompactStaticCatalogError::InvalidGeometry)?
         / 2;
-    let minimum_agreement_count = domain_size
+    // Query-count selection intentionally keeps the one-location looser
+    // `n - t` upper bound. The exact theorem and soundness ledgers use the
+    // strict bad-word maximum `n - t - 1`; retaining this conservative bound
+    // cannot underselect queries and preserves stable production geometry.
+    let conservative_bad_agreement_upper_bound = domain_size
         .checked_sub(selected_decoding_error_count)
         .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
     Ok(
-        BigUint::from(minimum_agreement_count).pow(exponent) * (BigUint::one() << security_level)
+        BigUint::from(conservative_bad_agreement_upper_bound).pow(exponent)
+            * (BigUint::one() << security_level)
             <= BigUint::from(domain_size).pow(exponent),
     )
 }
@@ -1931,24 +1962,29 @@ fn exact_mask_query_count_for_final_verifier_move(
     source_message_length: u64,
     source_domain_size: u64,
     source_query_count: u64,
-    mask_message_lengths: &[u64],
+    mask_code_shapes: &[(u64, MaskEncodingRandomnessLength)],
     minimum_mask_query_count: u64,
     verifier_move_security_level: u32,
 ) -> Result<u64, CompactStaticCatalogError> {
-    if source_query_count == 0 || mask_message_lengths.is_empty() || minimum_mask_query_count == 0 {
+    if source_query_count == 0 || mask_code_shapes.is_empty() || minimum_mask_query_count == 0 {
         return Err(CompactStaticCatalogError::InvalidGeometry);
     }
     let source_failure = exact_full_dimension_query_failure_probability(
         source_message_length,
+        source_query_count,
         source_domain_size,
         source_query_count,
     )?;
     let mut candidate_mask_query_count = minimum_mask_query_count;
     loop {
         let mut grouped_move_failure = source_failure.clone();
-        for message_length in mask_message_lengths {
+        for (message_length, encoding_randomness_length) in mask_code_shapes {
+            let encoding_randomness_length = match encoding_randomness_length {
+                MaskEncodingRandomnessLength::LocalMaskQueryCount => candidate_mask_query_count,
+                MaskEncodingRandomnessLength::Fixed(randomness_length) => *randomness_length,
+            };
             let populated_message_length = message_length
-                .checked_add(candidate_mask_query_count)
+                .checked_add(encoding_randomness_length)
                 .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
             let domain_size = populated_message_length
                 .checked_next_power_of_two()
@@ -1957,6 +1993,7 @@ fn exact_mask_query_count_for_final_verifier_move(
             grouped_move_failure =
                 grouped_move_failure.add(&exact_full_dimension_query_failure_probability(
                     *message_length,
+                    encoding_randomness_length,
                     domain_size,
                     candidate_mask_query_count,
                 )?)?;
@@ -1974,11 +2011,12 @@ fn exact_mask_query_count_for_final_verifier_move(
 
 fn exact_full_dimension_query_failure_probability(
     message_length: u64,
+    encoding_randomness_length: u64,
     domain_size: u64,
     query_count: u64,
 ) -> Result<lifecycle::ExactProbability, CompactStaticCatalogError> {
     let dimension = message_length
-        .checked_add(query_count)
+        .checked_add(encoding_randomness_length)
         .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
     if query_count == 0 || dimension >= domain_size {
         return Err(CompactStaticCatalogError::InvalidGeometry);
@@ -1988,15 +2026,25 @@ fn exact_full_dimension_query_failure_probability(
         .and_then(|slack| slack.checked_sub(1))
         .ok_or(CompactStaticCatalogError::InvalidGeometry)?
         / 2;
-    let minimum_agreement_count = domain_size
+    let conservative_bad_agreement_upper_bound = domain_size
         .checked_sub(selected_decoding_error_count)
         .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
-    let exponent =
-        u32::try_from(query_count).map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?;
     lifecycle::ExactProbability::new(
-        BigUint::from(minimum_agreement_count).pow(exponent),
-        BigUint::from(domain_size).pow(exponent),
+        exact_query_falling_factorial(conservative_bad_agreement_upper_bound, query_count)?,
+        exact_query_falling_factorial(domain_size, query_count)?,
     )
+}
+
+fn exact_query_falling_factorial(
+    population_size: u64,
+    selection_count: u64,
+) -> Result<BigUint, CompactStaticCatalogError> {
+    if selection_count == 0 || selection_count > population_size {
+        return Err(CompactStaticCatalogError::InvalidGeometry);
+    }
+    (0..selection_count).try_fold(BigUint::one(), |product, selected_count| {
+        Ok(product * (population_size - selected_count))
+    })
 }
 
 fn ceil_log2(value: u64) -> Result<u32, CompactStaticCatalogError> {

@@ -86,6 +86,203 @@ impl CanonicalReedSolomonGeometry {
     pub(super) fn selected_decoding_error_count(self) -> usize {
         (self.block_length - self.dimension() - 1) / 2
     }
+
+    /// Exact field-operation count of the canonical encoder for this geometry.
+    pub(super) fn encoding_field_operation_count(self) -> Result<u128, CanonicalReedSolomonError> {
+        let evaluation_point_operation_count =
+            canonical_evaluation_point_field_operation_count(self)?;
+        evaluation_point_operation_count
+            .checked_add(canonical_horner_field_operation_count(
+                self.block_length,
+                self.interleaving_width,
+                self.dimension(),
+            )?)
+            .ok_or(CanonicalReedSolomonError::ArithmeticOverflow)
+    }
+
+    /// Worst-case field-operation count of the canonical Berlekamp-Welch
+    /// decoder, including both re-encodings performed by the executable
+    /// implementation.
+    pub(super) fn decoding_field_operation_bound(self) -> Result<u128, CanonicalReedSolomonError> {
+        let block_length = u128::try_from(self.block_length)
+            .map_err(|_| CanonicalReedSolomonError::ArithmeticOverflow)?;
+        let interleaving_width = u128::try_from(self.interleaving_width)
+            .map_err(|_| CanonicalReedSolomonError::ArithmeticOverflow)?;
+        let dimension = u128::try_from(self.dimension())
+            .map_err(|_| CanonicalReedSolomonError::ArithmeticOverflow)?;
+        let maximum_error_count = u128::try_from(self.selected_decoding_error_count())
+            .map_err(|_| CanonicalReedSolomonError::ArithmeticOverflow)?;
+        let unknown_count = dimension
+            .checked_add(
+                maximum_error_count
+                    .checked_mul(2)
+                    .ok_or(CanonicalReedSolomonError::ArithmeticOverflow)?,
+            )
+            .ok_or(CanonicalReedSolomonError::ArithmeticOverflow)?;
+
+        let per_row_system_construction = dimension
+            .checked_add(
+                maximum_error_count
+                    .checked_mul(3)
+                    .ok_or(CanonicalReedSolomonError::ArithmeticOverflow)?,
+            )
+            .and_then(|count| count.checked_add(1))
+            .ok_or(CanonicalReedSolomonError::ArithmeticOverflow)?;
+        let system_construction_bound = block_length
+            .checked_mul(per_row_system_construction)
+            .ok_or(CanonicalReedSolomonError::ArithmeticOverflow)?;
+        let elimination_bound =
+            canonical_linear_system_field_operation_bound(block_length, unknown_count)?;
+        let division_bound = dimension
+            .checked_mul(
+                maximum_error_count
+                    .checked_add(1)
+                    .ok_or(CanonicalReedSolomonError::ArithmeticOverflow)?,
+            )
+            .and_then(|count| count.checked_mul(2))
+            .ok_or(CanonicalReedSolomonError::ArithmeticOverflow)?;
+        let per_component_reencoding_bound = block_length
+            .checked_mul(dimension)
+            .and_then(|count| count.checked_mul(2))
+            .ok_or(CanonicalReedSolomonError::ArithmeticOverflow)?;
+        let per_component_bound = system_construction_bound
+            .checked_add(elimination_bound)
+            .and_then(|count| count.checked_add(division_bound))
+            .and_then(|count| count.checked_add(per_component_reencoding_bound))
+            .ok_or(CanonicalReedSolomonError::ArithmeticOverflow)?;
+        let final_interleaved_reencoding_bound = per_component_reencoding_bound
+            .checked_mul(interleaving_width)
+            .ok_or(CanonicalReedSolomonError::ArithmeticOverflow)?;
+
+        canonical_evaluation_point_field_operation_count(self)?
+            .checked_add(
+                per_component_bound
+                    .checked_mul(interleaving_width)
+                    .ok_or(CanonicalReedSolomonError::ArithmeticOverflow)?,
+            )
+            .and_then(|count| count.checked_add(final_interleaved_reencoding_bound))
+            .ok_or(CanonicalReedSolomonError::ArithmeticOverflow)
+    }
+
+    /// Worst-case field-operation count of the canonical erasure corrector for
+    /// an exact retained-position count.
+    pub(super) fn erasure_correction_field_operation_bound(
+        self,
+        retained_position_count: usize,
+    ) -> Result<u128, CanonicalReedSolomonError> {
+        if retained_position_count < self.dimension() || retained_position_count > self.block_length
+        {
+            return Err(CanonicalReedSolomonError::InvalidGeometry);
+        }
+        let retained_position_count = u128::try_from(retained_position_count)
+            .map_err(|_| CanonicalReedSolomonError::ArithmeticOverflow)?;
+        let interleaving_width = u128::try_from(self.interleaving_width)
+            .map_err(|_| CanonicalReedSolomonError::ArithmeticOverflow)?;
+        let dimension = u128::try_from(self.dimension())
+            .map_err(|_| CanonicalReedSolomonError::ArithmeticOverflow)?;
+        let system_construction_bound = retained_position_count
+            .checked_mul(dimension)
+            .ok_or(CanonicalReedSolomonError::ArithmeticOverflow)?;
+        let elimination_bound =
+            canonical_linear_system_field_operation_bound(retained_position_count, dimension)?;
+        let per_component_bound = system_construction_bound
+            .checked_add(elimination_bound)
+            .ok_or(CanonicalReedSolomonError::ArithmeticOverflow)?;
+        let final_interleaved_reencoding_bound = canonical_horner_field_operation_count(
+            self.block_length,
+            self.interleaving_width,
+            self.dimension(),
+        )?;
+
+        canonical_evaluation_point_field_operation_count(self)?
+            .checked_add(
+                per_component_bound
+                    .checked_mul(interleaving_width)
+                    .ok_or(CanonicalReedSolomonError::ArithmeticOverflow)?,
+            )
+            .and_then(|count| count.checked_add(final_interleaved_reencoding_bound))
+            .ok_or(CanonicalReedSolomonError::ArithmeticOverflow)
+    }
+}
+
+fn canonical_evaluation_point_field_operation_count(
+    geometry: CanonicalReedSolomonGeometry,
+) -> Result<u128, CanonicalReedSolomonError> {
+    let logarithmic_block_length = geometry.block_length().ilog2();
+    let root_exponent = 1_u64
+        .checked_shl(GOLDILOCKS_TWO_ADICITY - logarithmic_block_length)
+        .ok_or(CanonicalReedSolomonError::InvalidGeometry)?;
+    counted_power_field_operation_count(root_exponent)?
+        .checked_add(
+            u128::try_from(geometry.block_length())
+                .map_err(|_| CanonicalReedSolomonError::ArithmeticOverflow)?,
+        )
+        .ok_or(CanonicalReedSolomonError::ArithmeticOverflow)
+}
+
+fn counted_power_field_operation_count(
+    mut exponent: u64,
+) -> Result<u128, CanonicalReedSolomonError> {
+    let mut operation_count = 0_u128;
+    while exponent != 0 {
+        if exponent & 1 == 1 {
+            operation_count = operation_count
+                .checked_add(1)
+                .ok_or(CanonicalReedSolomonError::ArithmeticOverflow)?;
+        }
+        exponent >>= 1;
+        if exponent != 0 {
+            operation_count = operation_count
+                .checked_add(1)
+                .ok_or(CanonicalReedSolomonError::ArithmeticOverflow)?;
+        }
+    }
+    Ok(operation_count)
+}
+
+fn canonical_horner_field_operation_count(
+    block_length: usize,
+    interleaving_width: usize,
+    dimension: usize,
+) -> Result<u128, CanonicalReedSolomonError> {
+    u128::try_from(block_length)
+        .ok()
+        .and_then(|block_length| block_length.checked_mul(u128::try_from(interleaving_width).ok()?))
+        .and_then(|count| count.checked_mul(u128::try_from(dimension).ok()?))
+        .and_then(|count| count.checked_mul(2))
+        .ok_or(CanonicalReedSolomonError::ArithmeticOverflow)
+}
+
+/// Worst case for the executable left-to-right reduced-row-echelon solver.
+/// Every column has a pivot and every non-pivot row has a nonzero elimination
+/// factor. Later pivots touch shorter row suffixes, which is reflected in the
+/// triangular suffix sum rather than a dense rectangular overestimate.
+fn canonical_linear_system_field_operation_bound(
+    row_count: u128,
+    unknown_count: u128,
+) -> Result<u128, CanonicalReedSolomonError> {
+    if row_count == 0 || unknown_count == 0 || unknown_count > row_count {
+        return Err(CanonicalReedSolomonError::InvalidGeometry);
+    }
+    let affected_suffix_length_sum = unknown_count
+        .checked_mul(
+            unknown_count
+                .checked_add(3)
+                .ok_or(CanonicalReedSolomonError::ArithmeticOverflow)?,
+        )
+        .and_then(|count| count.checked_div(2))
+        .ok_or(CanonicalReedSolomonError::ArithmeticOverflow)?;
+    let per_suffix_multiplier = row_count
+        .checked_mul(2)
+        .and_then(|count| count.checked_sub(1))
+        .ok_or(CanonicalReedSolomonError::ArithmeticOverflow)?;
+    unknown_count
+        .checked_add(
+            per_suffix_multiplier
+                .checked_mul(affected_suffix_length_sum)
+                .ok_or(CanonicalReedSolomonError::ArithmeticOverflow)?,
+        )
+        .ok_or(CanonicalReedSolomonError::ArithmeticOverflow)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -94,6 +291,22 @@ pub(super) struct CanonicalReedSolomonDecodedWitness {
     hiding_randomness_columns: Vec<Vec<ProofChallengeExtensionElement>>,
     canonical_codeword_rows: Vec<Vec<ProofChallengeExtensionElement>>,
     field_operation_count: u128,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct CanonicalReedSolomonEncodedRows {
+    rows: Vec<Vec<ProofChallengeExtensionElement>>,
+    field_operation_count: u128,
+}
+
+impl CanonicalReedSolomonEncodedRows {
+    pub(super) fn rows(&self) -> &[Vec<ProofChallengeExtensionElement>] {
+        &self.rows
+    }
+
+    pub(super) const fn field_operation_count(&self) -> u128 {
+        self.field_operation_count
+    }
 }
 
 impl CanonicalReedSolomonDecodedWitness {
@@ -170,6 +383,19 @@ pub(super) fn encode_canonical_interleaved_reed_solomon(
     geometry: CanonicalReedSolomonGeometry,
     coefficient_columns: &[Vec<ProofChallengeExtensionElement>],
 ) -> Result<Vec<Vec<ProofChallengeExtensionElement>>, CanonicalReedSolomonError> {
+    Ok(
+        encode_canonical_interleaved_reed_solomon_with_operation_count(
+            geometry,
+            coefficient_columns,
+        )?
+        .rows,
+    )
+}
+
+pub(super) fn encode_canonical_interleaved_reed_solomon_with_operation_count(
+    geometry: CanonicalReedSolomonGeometry,
+    coefficient_columns: &[Vec<ProofChallengeExtensionElement>],
+) -> Result<CanonicalReedSolomonEncodedRows, CanonicalReedSolomonError> {
     if coefficient_columns.len() != geometry.interleaving_width()
         || coefficient_columns
             .iter()
@@ -179,12 +405,16 @@ pub(super) fn encode_canonical_interleaved_reed_solomon(
     }
     let mut operation_counter = FieldOperationCounter::default();
     let evaluation_points = canonical_evaluation_points(geometry, &mut operation_counter)?;
-    encode_coefficient_columns(
+    let rows = encode_coefficient_columns(
         geometry,
         coefficient_columns,
         &evaluation_points,
         &mut operation_counter,
-    )
+    )?;
+    Ok(CanonicalReedSolomonEncodedRows {
+        rows,
+        field_operation_count: operation_counter.count,
+    })
 }
 
 pub(super) fn decode_canonical_interleaved_reed_solomon(
@@ -233,30 +463,104 @@ pub(super) fn decode_canonical_interleaved_reed_solomon(
         return Err(CanonicalReedSolomonError::OutsideDecodingRadius);
     }
 
-    let mut message_columns = Vec::new();
-    let mut hiding_randomness_columns = Vec::new();
-    message_columns
-        .try_reserve_exact(geometry.interleaving_width())
-        .map_err(|_| CanonicalReedSolomonError::ArithmeticOverflow)?;
-    hiding_randomness_columns
-        .try_reserve_exact(geometry.interleaving_width())
-        .map_err(|_| CanonicalReedSolomonError::ArithmeticOverflow)?;
-    for coefficients in coefficient_columns {
-        message_columns.push(coefficients[..geometry.message_length()].to_vec());
-        let hiding_randomness_end = geometry
-            .message_length()
-            .checked_add(geometry.hiding_randomness_length())
-            .ok_or(CanonicalReedSolomonError::ArithmeticOverflow)?;
-        hiding_randomness_columns
-            .push(coefficients[geometry.message_length()..hiding_randomness_end].to_vec());
+    decoded_witness_from_coefficients(
+        geometry,
+        coefficient_columns,
+        canonical_codeword_rows,
+        operation_counter.count,
+    )
+}
+
+/// Deterministically corrects erasures at every position outside
+/// `retained_positions`.
+///
+/// Construction 7.2 uses this algorithm after forming the largest agreement
+/// set between the revealed combined codeword and the two committed oracle
+/// words. The retained positions are public, strictly increasing, and must
+/// contain at least the complete `message || hiding randomness` dimension.
+/// Every retained value is checked against the uniquely interpolated word;
+/// values outside the set never enter the interpolation.
+pub(super) fn correct_canonical_interleaved_reed_solomon_erasures(
+    geometry: CanonicalReedSolomonGeometry,
+    received_rows: &[Vec<ProofChallengeExtensionElement>],
+    retained_positions: &[usize],
+) -> Result<CanonicalReedSolomonDecodedWitness, CanonicalReedSolomonError> {
+    if retained_positions.len() < geometry.dimension() {
+        return Err(CanonicalReedSolomonError::OutsideDecodingRadius);
+    }
+    if received_rows.len() != geometry.block_length()
+        || received_rows
+            .iter()
+            .any(|row| row.len() != geometry.interleaving_width())
+        || retained_positions
+            .windows(2)
+            .any(|positions| positions[0] >= positions[1])
+        || retained_positions
+            .last()
+            .is_some_and(|position| *position >= geometry.block_length())
+    {
+        return Err(CanonicalReedSolomonError::MalformedOracle);
     }
 
-    Ok(CanonicalReedSolomonDecodedWitness {
-        message_columns,
-        hiding_randomness_columns,
+    let mut operation_counter = FieldOperationCounter::default();
+    let evaluation_points = canonical_evaluation_points(geometry, &mut operation_counter)?;
+    let mut coefficient_columns = Vec::new();
+    coefficient_columns
+        .try_reserve_exact(geometry.interleaving_width())
+        .map_err(|_| CanonicalReedSolomonError::ArithmeticOverflow)?;
+    for component_ordinal in 0..geometry.interleaving_width() {
+        let mut system = Vec::new();
+        system
+            .try_reserve_exact(retained_positions.len())
+            .map_err(|_| CanonicalReedSolomonError::ArithmeticOverflow)?;
+        for &position in retained_positions {
+            let evaluation_point = evaluation_points[position];
+            let mut row = vec![
+                ProofChallengeExtensionElement::ZERO;
+                geometry
+                    .dimension()
+                    .checked_add(1)
+                    .ok_or(CanonicalReedSolomonError::ArithmeticOverflow)?
+            ];
+            let mut power = ProofChallengeExtensionElement::ONE;
+            for coefficient in &mut row[..geometry.dimension()] {
+                *coefficient = power;
+                power = operation_counter.multiply(power, evaluation_point)?;
+            }
+            row[geometry.dimension()] = received_rows[position][component_ordinal];
+            system.push(row);
+        }
+        coefficient_columns.push(solve_canonical_linear_system(
+            &mut system,
+            geometry.dimension(),
+            &mut operation_counter,
+        )?);
+    }
+
+    let canonical_codeword_rows = encode_coefficient_columns(
+        geometry,
+        &coefficient_columns,
+        &evaluation_points,
+        &mut operation_counter,
+    )?;
+    if retained_positions
+        .iter()
+        .any(|position| received_rows[*position] != canonical_codeword_rows[*position])
+    {
+        return Err(CanonicalReedSolomonError::InconsistentLinearSystem);
+    }
+    decoded_witness_from_coefficients(
+        geometry,
+        coefficient_columns,
         canonical_codeword_rows,
-        field_operation_count: operation_counter.count,
-    })
+        operation_counter.count,
+    )
+}
+
+pub(super) fn canonical_reed_solomon_evaluation_points(
+    geometry: CanonicalReedSolomonGeometry,
+) -> Result<Vec<ProofChallengeExtensionElement>, CanonicalReedSolomonError> {
+    canonical_evaluation_points(geometry, &mut FieldOperationCounter::default())
 }
 
 fn canonical_evaluation_points(
@@ -292,6 +596,44 @@ fn canonical_evaluation_points(
         return Err(CanonicalReedSolomonError::InvalidGeometry);
     }
     Ok(evaluation_points)
+}
+
+fn decoded_witness_from_coefficients(
+    geometry: CanonicalReedSolomonGeometry,
+    coefficient_columns: Vec<Vec<ProofChallengeExtensionElement>>,
+    canonical_codeword_rows: Vec<Vec<ProofChallengeExtensionElement>>,
+    field_operation_count: u128,
+) -> Result<CanonicalReedSolomonDecodedWitness, CanonicalReedSolomonError> {
+    if coefficient_columns.len() != geometry.interleaving_width()
+        || coefficient_columns
+            .iter()
+            .any(|column| column.len() != geometry.dimension())
+    {
+        return Err(CanonicalReedSolomonError::MalformedOracle);
+    }
+    let hiding_randomness_end = geometry
+        .message_length()
+        .checked_add(geometry.hiding_randomness_length())
+        .ok_or(CanonicalReedSolomonError::ArithmeticOverflow)?;
+    let mut message_columns = Vec::new();
+    let mut hiding_randomness_columns = Vec::new();
+    message_columns
+        .try_reserve_exact(geometry.interleaving_width())
+        .map_err(|_| CanonicalReedSolomonError::ArithmeticOverflow)?;
+    hiding_randomness_columns
+        .try_reserve_exact(geometry.interleaving_width())
+        .map_err(|_| CanonicalReedSolomonError::ArithmeticOverflow)?;
+    for coefficients in coefficient_columns {
+        message_columns.push(coefficients[..geometry.message_length()].to_vec());
+        hiding_randomness_columns
+            .push(coefficients[geometry.message_length()..hiding_randomness_end].to_vec());
+    }
+    Ok(CanonicalReedSolomonDecodedWitness {
+        message_columns,
+        hiding_randomness_columns,
+        canonical_codeword_rows,
+        field_operation_count,
+    })
 }
 
 fn counted_power(
@@ -585,6 +927,42 @@ mod tests {
                 .expect("the original coefficients encode")
         );
         assert!(decoded.field_operation_count() > 0);
+        assert!(
+            decoded.field_operation_count()
+                <= geometry()
+                    .decoding_field_operation_bound()
+                    .expect("the decoder operation bound derives")
+        );
+    }
+
+    #[test]
+    fn canonical_operation_bounds_cover_every_executable_correction_path() {
+        let encoded = encode_canonical_interleaved_reed_solomon_with_operation_count(
+            geometry(),
+            &coefficient_columns(),
+        )
+        .expect("the canonical rows encode with an operation count");
+        assert_eq!(
+            encoded.field_operation_count(),
+            geometry()
+                .encoding_field_operation_count()
+                .expect("the exact encoder operation count derives")
+        );
+
+        for retained_positions in [vec![0, 1, 2], vec![0, 2, 4, 6], (0..8).collect()] {
+            let corrected = correct_canonical_interleaved_reed_solomon_erasures(
+                geometry(),
+                encoded.rows(),
+                &retained_positions,
+            )
+            .expect("the retained positions determine the original codeword");
+            assert!(
+                corrected.field_operation_count()
+                    <= geometry()
+                        .erasure_correction_field_operation_bound(retained_positions.len())
+                        .expect("the erasure-correction operation bound derives")
+            );
+        }
     }
 
     #[test]
@@ -631,6 +1009,67 @@ mod tests {
             decode_canonical_interleaved_reed_solomon(geometry(), &wrong_width),
             Err(CanonicalReedSolomonError::MalformedOracle)
         );
+    }
+
+    #[test]
+    fn canonical_erasure_corrector_uses_only_the_retained_agreement_set() {
+        let canonical_rows =
+            encode_canonical_interleaved_reed_solomon(geometry(), &coefficient_columns())
+                .expect("the canonical rows encode");
+        let retained_positions = vec![0, 2, 4, 6];
+        let mut changed_erased_rows = canonical_rows.clone();
+        for position in [1_usize, 3, 5, 7] {
+            for component_ordinal in 0..geometry().interleaving_width() {
+                changed_erased_rows[position][component_ordinal] =
+                    changed_erased_rows[position][component_ordinal].add(field(
+                        31 + u64::try_from(position + component_ordinal).unwrap(),
+                    ));
+            }
+        }
+        let corrected = correct_canonical_interleaved_reed_solomon_erasures(
+            geometry(),
+            &changed_erased_rows,
+            &retained_positions,
+        )
+        .expect("four retained positions determine the dimension-three word");
+        assert_eq!(corrected.canonical_codeword_rows(), canonical_rows);
+        assert!(corrected.field_operation_count() > 0);
+
+        let mut inconsistent_retained_rows = changed_erased_rows;
+        inconsistent_retained_rows[6][2] = inconsistent_retained_rows[6][2].add(field(1));
+        assert_eq!(
+            correct_canonical_interleaved_reed_solomon_erasures(
+                geometry(),
+                &inconsistent_retained_rows,
+                &retained_positions,
+            ),
+            Err(CanonicalReedSolomonError::InconsistentLinearSystem)
+        );
+    }
+
+    #[test]
+    fn canonical_erasure_corrector_refuses_short_duplicate_and_unsorted_sets() {
+        let canonical_rows =
+            encode_canonical_interleaved_reed_solomon(geometry(), &coefficient_columns())
+                .expect("the canonical rows encode");
+        assert_eq!(
+            correct_canonical_interleaved_reed_solomon_erasures(
+                geometry(),
+                &canonical_rows,
+                &[0, 1],
+            ),
+            Err(CanonicalReedSolomonError::OutsideDecodingRadius)
+        );
+        for retained_positions in [vec![0, 2, 2], vec![0, 4, 2]] {
+            assert_eq!(
+                correct_canonical_interleaved_reed_solomon_erasures(
+                    geometry(),
+                    &canonical_rows,
+                    &retained_positions,
+                ),
+                Err(CanonicalReedSolomonError::MalformedOracle)
+            );
+        }
     }
 
     #[test]

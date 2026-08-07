@@ -147,6 +147,120 @@ pub(crate) struct CompactWitnessSegment {
     element_count: u64,
 }
 
+/// Exact production coefficient ranges used by the lookup reduction.
+///
+/// The pre-challenge source contains the modular quotients followed by one
+/// multiplicity for every table value. The challenge-dependent inverses live
+/// in the final operative segment of the complete main witness. Keeping these
+/// ranges in the relation owner prevents semantic proof code from reconstructing
+/// a parallel layout or accepting an inverse vector unrelated to the committed
+/// main witness.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CompactLookupRelationGeometry {
+    source_first_element: u64,
+    source_element_count: u64,
+    multiplicity_first_element: u64,
+    table_value_count: u64,
+    inverse_first_element: u64,
+    inverse_element_count: u64,
+    pre_challenge_message_element_count: u64,
+    main_message_element_count: u64,
+    soundness_numerator: u64,
+    challenge_excludes_base_subfield: bool,
+}
+
+impl CompactLookupRelationGeometry {
+    fn derive(catalog: &CompactPublicKeyRelationCatalog) -> Result<Self, RelationPlanError> {
+        let quotient_segment =
+            unique_witness_segment(catalog, CompactWitnessSegmentKind::ModularQuotients)?;
+        let multiplicity_segment =
+            unique_witness_segment(catalog, CompactWitnessSegmentKind::LookupMultiplicities)?;
+        let inverse_segment =
+            unique_witness_segment(catalog, CompactWitnessSegmentKind::LookupInverses)?;
+        let cross_epoch_geometry = CompactCrossEpochCopyGeometry::derive(catalog)?;
+        let occupied_pre_challenge_element_count = quotient_segment
+            .element_count
+            .checked_add(multiplicity_segment.element_count)
+            .ok_or(RelationPlanError::CountOverflow)?;
+        let expected_soundness_numerator = occupied_pre_challenge_element_count
+            .checked_sub(1)
+            .ok_or(RelationPlanError::InvalidConstraint)?;
+        let inverse_end = inverse_segment
+            .first_element
+            .checked_add(inverse_segment.element_count)
+            .ok_or(RelationPlanError::CountOverflow)?;
+        if quotient_segment.first_element != 0
+            || quotient_segment.element_count == 0
+            || quotient_segment.ring_vector_count != catalog.quotient_vector_count()
+            || multiplicity_segment.first_element != quotient_segment.element_count
+            || multiplicity_segment.element_count != catalog.quotient_lookup_table_value_count
+            || multiplicity_segment.ring_vector_count
+                != catalog.quotient_lookup_table_ring_vector_count
+            || inverse_segment.element_count != quotient_segment.element_count
+            || inverse_segment.ring_vector_count != quotient_segment.ring_vector_count
+            || inverse_end > catalog.padded_witness_element_count
+            || occupied_pre_challenge_element_count != cross_epoch_geometry.copied_element_count
+            || expected_soundness_numerator != catalog.lookup_soundness_numerator
+            || !catalog.lookup_challenge_excludes_base_subfield
+        {
+            return Err(RelationPlanError::InvalidConstraint);
+        }
+        Ok(Self {
+            source_first_element: quotient_segment.first_element,
+            source_element_count: quotient_segment.element_count,
+            multiplicity_first_element: multiplicity_segment.first_element,
+            table_value_count: multiplicity_segment.element_count,
+            inverse_first_element: inverse_segment.first_element,
+            inverse_element_count: inverse_segment.element_count,
+            pre_challenge_message_element_count: cross_epoch_geometry
+                .pre_challenge_message_element_count,
+            main_message_element_count: cross_epoch_geometry.main_message_element_count,
+            soundness_numerator: catalog.lookup_soundness_numerator,
+            challenge_excludes_base_subfield: catalog.lookup_challenge_excludes_base_subfield,
+        })
+    }
+
+    pub(crate) const fn source_first_element(self) -> u64 {
+        self.source_first_element
+    }
+
+    pub(crate) const fn source_element_count(self) -> u64 {
+        self.source_element_count
+    }
+
+    pub(crate) const fn multiplicity_first_element(self) -> u64 {
+        self.multiplicity_first_element
+    }
+
+    pub(crate) const fn table_value_count(self) -> u64 {
+        self.table_value_count
+    }
+
+    pub(crate) const fn inverse_first_element(self) -> u64 {
+        self.inverse_first_element
+    }
+
+    pub(crate) const fn inverse_element_count(self) -> u64 {
+        self.inverse_element_count
+    }
+
+    pub(crate) const fn pre_challenge_message_element_count(self) -> u64 {
+        self.pre_challenge_message_element_count
+    }
+
+    pub(crate) const fn main_message_element_count(self) -> u64 {
+        self.main_message_element_count
+    }
+
+    pub(crate) const fn soundness_numerator(self) -> u64 {
+        self.soundness_numerator
+    }
+
+    pub(crate) const fn challenge_excludes_base_subfield(self) -> bool {
+        self.challenge_excludes_base_subfield
+    }
+}
+
 /// Exact coefficient layout used to bind the pre-challenge lookup message to
 /// its copy at the front of the complete R1CS witness.
 ///
@@ -395,6 +509,12 @@ impl CompactPublicKeyRelationCatalog {
 
     pub(crate) const fn lookup_soundness_numerator(&self) -> u64 {
         self.lookup_soundness_numerator
+    }
+
+    pub(crate) fn lookup_relation_geometry(
+        &self,
+    ) -> Result<CompactLookupRelationGeometry, RelationPlanError> {
+        CompactLookupRelationGeometry::derive(self)
     }
 
     pub(crate) fn cross_epoch_copy_geometry(
@@ -1180,6 +1300,24 @@ fn witness_segments(
     Ok((segments, first_element))
 }
 
+fn unique_witness_segment(
+    catalog: &CompactPublicKeyRelationCatalog,
+    kind: CompactWitnessSegmentKind,
+) -> Result<CompactWitnessSegment, RelationPlanError> {
+    let mut matching_segments = catalog
+        .ordered_witness_segments
+        .iter()
+        .copied()
+        .filter(|segment| segment.kind == kind);
+    let segment = matching_segments
+        .next()
+        .ok_or(RelationPlanError::InvalidConstraint)?;
+    if matching_segments.next().is_some() {
+        return Err(RelationPlanError::InvalidConstraint);
+    }
+    Ok(segment)
+}
+
 fn constraint_segments(
     operative_counts: &[(CompactR1csConstraintKind, u64)],
     padded_constraint_count: u64,
@@ -1403,6 +1541,19 @@ mod tests {
             PUBLIC_KEY_SHARE_PRODUCT_COUNT + ANCHOR_PRODUCT_COUNT
         );
         assert_eq!(catalog.lookup_soundness_numerator(), 1_081_343);
+        let lookup = catalog
+            .lookup_relation_geometry()
+            .expect("selected lookup coefficient geometry");
+        assert_eq!(lookup.source_first_element(), 0);
+        assert_eq!(lookup.source_element_count(), 950_272);
+        assert_eq!(lookup.multiplicity_first_element(), 950_272);
+        assert_eq!(lookup.table_value_count(), 131_072);
+        assert_eq!(lookup.inverse_first_element(), 1_867_776);
+        assert_eq!(lookup.inverse_element_count(), 950_272);
+        assert_eq!(lookup.pre_challenge_message_element_count(), 2_097_152);
+        assert_eq!(lookup.main_message_element_count(), 4_194_304);
+        assert_eq!(lookup.soundness_numerator(), 1_081_343);
+        assert!(lookup.challenge_excludes_base_subfield());
         assert_eq!(
             catalog.maximum_residual_interval_width(),
             Ok(662_283_957_175_299)

@@ -64,10 +64,6 @@ impl ExactProbability {
         Self::new(&self.numerator * multiplier, self.denominator.clone())
     }
 
-    pub(super) fn power(&self, exponent: u32) -> Result<Self, CompactStaticCatalogError> {
-        Self::new(self.numerator.pow(exponent), self.denominator.pow(exponent))
-    }
-
     pub(super) fn is_at_most_inverse_power_of_two(&self, exponent: usize) -> bool {
         (&self.numerator << exponent) <= self.denominator
     }

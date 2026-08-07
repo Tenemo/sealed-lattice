@@ -18,8 +18,8 @@ pub(super) use accumulator::{
 pub(crate) const COMPACT_STRUCTURED_WITNESS_COVECTOR_ELEMENT_CHUNK_COUNT: u64 = 8_192;
 
 use crate::bgv::proof_suite::{
-    compact_cfw::CompactChallengeField, prover::CommonProofProverError, ProofBaseFieldElement,
-    ProofChallengeExtensionElement,
+    ProofBaseFieldElement, ProofChallengeExtensionElement, compact_cfw::CompactChallengeField,
+    prover::CommonProofProverError,
 };
 
 use super::{

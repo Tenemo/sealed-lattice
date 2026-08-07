@@ -23,11 +23,10 @@ use super::transcript_chronology::{
     ExactChallengeSpace, PackingTranscriptChronology, TranscriptEpoch, VerifierMoveRole,
 };
 use super::{
-    CompactStaticCatalogError, GOLDILOCKS_BASE_FIELD_MODULUS,
-    INTERACTIVE_VERIFIER_MOVE_SECURITY_LEVEL, MAIN_CODE_LOG_INVERSE_RATE, MaskGroupRole,
-    MaskGroupStaticLedger, QUINTIC_EXTENSION_DEGREE, SUMCHECK_MASK_MESSAGE_LENGTH,
-    WHIR_FOLD_BATCH_COUNT, WHIR_PROTOCOL_SECURITY_LEVEL, WHIR_ROUND_COUNT, WhirStaticLedger,
-    checked_add, checked_product,
+    CROSS_EPOCH_POINT_COORDINATE_COUNT, CompactStaticCatalogError, GOLDILOCKS_BASE_FIELD_MODULUS,
+    INTERACTIVE_VERIFIER_MOVE_SECURITY_LEVEL, MaskGroupRole, MaskGroupStaticLedger,
+    QUINTIC_EXTENSION_DEGREE, SUMCHECK_MASK_MESSAGE_LENGTH, WHIR_FOLD_BATCH_COUNT,
+    WHIR_PROTOCOL_SECURITY_LEVEL, WHIR_ROUND_COUNT, WhirStaticLedger, checked_add, checked_product,
 };
 use crate::bgv::proof_suite::compact_cfw::{
     COMPACT_CFW_INNER_MASK_MESSAGE_LENGTH, COMPACT_CFW_MATRIX_COUNT,
@@ -65,12 +64,13 @@ struct UniqueDecodingCode {
     dimension: u64,
     block_length: u64,
     interleaving_width: u64,
+    query_count: u64,
     minimum_distance_numerator: u64,
     minimum_distance_denominator: u64,
     decoding_radius_numerator: u64,
     decoding_radius_denominator: u64,
     selected_decoding_error_count: u64,
-    minimum_agreement_count: u64,
+    maximum_bad_agreement_count: u64,
     list_size_bound: u64,
     correction_algorithm: DeterministicCorrectionAlgorithm,
     correction_field_operation_bound: u128,
@@ -81,6 +81,7 @@ impl UniqueDecodingCode {
         role: CodeRole,
         message_length: u64,
         hiding_randomness_length: u64,
+        query_count: u64,
         block_length: u64,
         interleaving_width: u64,
     ) -> Result<Self, CompactStaticCatalogError> {
@@ -89,6 +90,7 @@ impl UniqueDecodingCode {
             .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
         if message_length == 0
             || hiding_randomness_length == 0
+            || query_count == 0
             || interleaving_width == 0
             || dimension >= block_length
         {
@@ -105,8 +107,9 @@ impl UniqueDecodingCode {
             .checked_sub(1)
             .ok_or(CompactStaticCatalogError::InvalidGeometry)?
             / 2;
-        let minimum_agreement_count = block_length
+        let maximum_bad_agreement_count = block_length
             .checked_sub(selected_decoding_error_count)
+            .and_then(|count| count.checked_sub(1))
             .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
 
         // Deterministic error correction uses the canonical Berlekamp-Welch
@@ -122,50 +125,29 @@ impl UniqueDecodingCode {
         // 4. re-encode over the canonical domain and reject unless the Hamming
         //    distance is at most the selected integer radius.
         //
-        // The following is an explicit field-operation ceiling for that fixed
-        // algorithm: system construction, dense canonical elimination,
-        // polynomial division, Horner re-encoding, and final comparison. Each
-        // interleaved component is decoded separately.
-        let dimension_128 = u128::from(dimension);
-        let block_length_128 = u128::from(block_length);
-        let maximum_errors_128 = u128::from(selected_decoding_error_count);
-        let system_width = dimension_128
-            .checked_add(
-                maximum_errors_128
-                    .checked_mul(2)
-                    .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?,
-            )
-            .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
-        let system_construction_bound = block_length_128
-            .checked_mul(system_width)
-            .and_then(|count| count.checked_mul(3))
-            .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
-        let elimination_bound = system_width
-            .checked_mul(
-                system_width
-                    .checked_add(1)
-                    .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?,
-            )
-            .and_then(|count| count.checked_mul(block_length_128.checked_mul(2)?.checked_add(1)?))
-            .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
-        let division_bound = dimension_128
-            .checked_add(maximum_errors_128)
-            .and_then(|count| count.checked_mul(maximum_errors_128.checked_add(1)?))
-            .and_then(|count| count.checked_mul(2))
-            .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
-        let reencoding_bound = block_length_128
-            .checked_mul(dimension_128)
-            .and_then(|count| count.checked_mul(2))
-            .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
-        let per_component_correction_bound = system_construction_bound
-            .checked_add(elimination_bound)
-            .and_then(|count| count.checked_add(division_bound))
-            .and_then(|count| count.checked_add(reencoding_bound))
-            .and_then(|count| count.checked_add(block_length_128))
-            .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
-        let correction_field_operation_bound = per_component_correction_bound
-            .checked_mul(u128::from(interleaving_width))
-            .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+        // The canonical implementation owns the operation formula. It counts
+        // evaluation-point generation, system construction, the exact
+        // triangular suffix ceiling for deterministic elimination, monic
+        // division, and both executable re-encodings.
+        let decoder_geometry = CanonicalReedSolomonGeometry::new(
+            usize::try_from(message_length)
+                .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+            usize::try_from(hiding_randomness_length)
+                .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+            usize::try_from(block_length)
+                .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+            usize::try_from(interleaving_width)
+                .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+        )
+        .map_err(|_| CompactStaticCatalogError::InvalidGeometry)?;
+        let correction_field_operation_bound = decoder_geometry
+            .decoding_field_operation_bound()
+            .map_err(|error| match error {
+                CanonicalReedSolomonError::ArithmeticOverflow => {
+                    CompactStaticCatalogError::ArithmeticOverflow
+                }
+                _ => CompactStaticCatalogError::InvalidGeometry,
+            })?;
 
         let code = Self {
             role,
@@ -174,12 +156,13 @@ impl UniqueDecodingCode {
             dimension,
             block_length,
             interleaving_width,
+            query_count,
             minimum_distance_numerator,
             minimum_distance_denominator: block_length,
             decoding_radius_numerator: selected_decoding_error_count,
             decoding_radius_denominator: block_length,
             selected_decoding_error_count,
-            minimum_agreement_count,
+            maximum_bad_agreement_count,
             list_size_bound: 1,
             correction_algorithm: DeterministicCorrectionAlgorithm::CanonicalBerlekampWelch,
             correction_field_operation_bound,
@@ -198,9 +181,11 @@ impl UniqueDecodingCode {
             || self.decoding_radius_numerator != self.selected_decoding_error_count
             || self.decoding_radius_denominator != self.block_length
             || 2 * self.selected_decoding_error_count >= self.block_length - self.dimension
-            || self.minimum_agreement_count
-                != self.block_length - self.selected_decoding_error_count
-            || self.minimum_agreement_count < self.dimension
+            || self.maximum_bad_agreement_count
+                != self.block_length - self.selected_decoding_error_count - 1
+            || self.maximum_bad_agreement_count < self.dimension
+            || self.query_count == 0
+            || self.query_count > self.maximum_bad_agreement_count
             || self.list_size_bound != 1
             || self.correction_algorithm
                 != DeterministicCorrectionAlgorithm::CanonicalBerlekampWelch
@@ -235,16 +220,22 @@ impl UniqueDecodingCode {
 
     fn exact_query_failure(&self) -> Result<ExactProbability, CompactStaticCatalogError> {
         ExactProbability::new(
-            BigUint::from(self.minimum_agreement_count).pow(
-                u32::try_from(self.hiding_randomness_length)
-                    .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
-            ),
-            BigUint::from(self.block_length).pow(
-                u32::try_from(self.hiding_randomness_length)
-                    .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
-            ),
+            falling_factorial(self.maximum_bad_agreement_count, self.query_count)?,
+            falling_factorial(self.block_length, self.query_count)?,
         )
     }
+}
+
+fn falling_factorial(
+    population_size: u64,
+    selection_count: u64,
+) -> Result<BigUint, CompactStaticCatalogError> {
+    if selection_count == 0 || selection_count > population_size {
+        return Err(CompactStaticCatalogError::InvalidGeometry);
+    }
+    (0..selection_count).try_fold(BigUint::one(), |product, selected_count| {
+        Ok(product * (population_size - selected_count))
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -391,7 +382,11 @@ struct CfwTheoremInstantiation {
     outer_mask_code: CodeRole,
     inner_mask_message_length: u64,
     outer_mask_message_length: u64,
+    initial_randomness_element_count: u32,
+    per_round_randomness_element_count: u32,
     sumcheck_round_count: u32,
+    joint_constraint_randomness_element_count: u32,
+    last_round_excluded_element_count: u64,
     query_count: u64,
     zero_evader_exponents: [u32; COMPACT_CFW_MATRIX_COUNT],
     initial_consistency_error: ExactProbability,
@@ -421,6 +416,12 @@ pub(super) struct RelaxedRoundByRoundCatalog {
     whir_mca_bounds: Vec<WhirMcaTransitionBound>,
     transitions: Vec<KnowledgeTransition>,
     composition_boundaries: Vec<SequentialCompositionBoundary>,
+    /// The composed IOR starts from the explicit RR1CS statement. Every code
+    /// oracle is a prover message, not an input implicit-instance string.
+    input_implicit_instance_tuple_size: u64,
+    /// Both WHIR base components end in the trivial relation, so no internal
+    /// code oracle is selected as an output implicit-instance string.
+    output_implicit_instance_tuple_size: u64,
     maximum_per_move_extraction_error: ExactProbability,
     total_extraction_field_operation_bound: u128,
 }
@@ -469,8 +470,16 @@ impl RelaxedRoundByRoundCatalog {
             .iter()
             .find(|group| group.role == MaskGroupRole::CfwOuter)
             .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
-        codes.push(code_from_mask_group(CodeRole::CfwInnerMasks, inner_group)?);
-        codes.push(code_from_mask_group(CodeRole::CfwOuterMasks, outer_group)?);
+        codes.push(code_from_mask_group(
+            CodeRole::CfwInnerMasks,
+            inner_group,
+            main_whir.mask_query_count,
+        )?);
+        codes.push(code_from_mask_group(
+            CodeRole::CfwOuterMasks,
+            outer_group,
+            main_whir.mask_query_count,
+        )?);
 
         let cfw_main_code = code_by_role(&codes, CodeRole::CfwMain)?;
         let cfw_inner_code = code_by_role(&codes, CodeRole::CfwInnerMasks)?;
@@ -524,7 +533,12 @@ impl RelaxedRoundByRoundCatalog {
             outer_mask_code: cfw_outer_code.role,
             inner_mask_message_length: cfw_reduction.inner_mask_message_length(),
             outer_mask_message_length: cfw_reduction.outer_mask_message_length(),
+            initial_randomness_element_count: cfw_reduction.initial_randomness_element_count(),
+            per_round_randomness_element_count: cfw_reduction.per_round_randomness_element_count(),
             sumcheck_round_count: cfw_reduction.sumcheck_round_count(),
+            joint_constraint_randomness_element_count: cfw_reduction
+                .joint_constraint_randomness_element_count(),
+            last_round_excluded_element_count: cfw_reduction.last_round_excluded_element_count(),
             query_count: 0,
             zero_evader_exponents: COMPACT_CFW_ZERO_EVADER_EXPONENTS,
             initial_consistency_error,
@@ -553,6 +567,7 @@ impl RelaxedRoundByRoundCatalog {
         }
         let mut transitions = Vec::with_capacity(chronology.verifier_moves().len());
         let mut total_extraction_field_operation_bound = 0_u128;
+        let mut maximum_per_move_extraction_error = ExactProbability::zero();
         for (verifier_move, move_failure) in
             chronology.verifier_moves().iter().zip(move_failures.iter())
         {
@@ -586,6 +601,18 @@ impl RelaxedRoundByRoundCatalog {
             total_extraction_field_operation_bound = total_extraction_field_operation_bound
                 .checked_add(extraction_field_operation_bound)
                 .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+            let extraction_error = derive_independent_transition_error(
+                verifier_move.roles(),
+                relation,
+                cfw_reduction,
+                &codes,
+                &whir_mca_bounds,
+                pre_challenge_whir,
+                main_whir,
+            )?;
+            if extraction_error.is_greater_than(&maximum_per_move_extraction_error) {
+                maximum_per_move_extraction_error = extraction_error.clone();
+            }
             transitions.push(KnowledgeTransition {
                 verifier_move_ordinal: verifier_move.ordinal(),
                 roles: verifier_move.roles().to_vec(),
@@ -597,7 +624,7 @@ impl RelaxedRoundByRoundCatalog {
                 output_relation: current_state.clone(),
                 extractor_steps,
                 extraction_field_operation_bound,
-                extraction_error: move_failure.probability().clone(),
+                extraction_error,
             });
         }
 
@@ -607,9 +634,9 @@ impl RelaxedRoundByRoundCatalog {
             whir_mca_bounds,
             transitions,
             composition_boundaries,
-            maximum_per_move_extraction_error: interactive_soundness
-                .maximum_verifier_move_failure()
-                .clone(),
+            input_implicit_instance_tuple_size: 0,
+            output_implicit_instance_tuple_size: 0,
+            maximum_per_move_extraction_error,
             total_extraction_field_operation_bound,
         };
         catalog.check(
@@ -651,7 +678,15 @@ impl RelaxedRoundByRoundCatalog {
                     .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?
             || self.cfw.outer_mask_message_length < 2 * self.cfw.inner_mask_message_length
             || self.cfw.inner_mask_message_length < 4
+            || self.cfw.initial_randomness_element_count
+                != cfw_reduction.initial_randomness_element_count()
+            || self.cfw.per_round_randomness_element_count
+                != cfw_reduction.per_round_randomness_element_count()
             || self.cfw.sumcheck_round_count != relation.padded_witness_element_count().ilog2() + 1
+            || self.cfw.joint_constraint_randomness_element_count
+                != cfw_reduction.joint_constraint_randomness_element_count()
+            || self.cfw.last_round_excluded_element_count
+                != cfw_reduction.last_round_excluded_element_count()
             || self.cfw.query_count != 0
             || self.cfw.zero_evader_exponents != [0, 1, 2]
             || self.cfw.initial_consistency_error
@@ -771,6 +806,15 @@ impl RelaxedRoundByRoundCatalog {
                             .checked_add(extractor_step_bound(step, &self.codes)?)
                             .ok_or(CompactStaticCatalogError::ArithmeticOverflow)
                     })?;
+            let independently_derived_extraction_error = derive_independent_transition_error(
+                verifier_move.roles(),
+                relation,
+                cfw_reduction,
+                &self.codes,
+                &self.whir_mca_bounds,
+                pre_challenge_whir,
+                main_whir,
+            )?;
             if transition.verifier_move_ordinal
                 != u32::try_from(transition_ordinal)
                     .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?
@@ -788,6 +832,7 @@ impl RelaxedRoundByRoundCatalog {
                 || transition.extractor_steps != interpreted_extractor_steps
                 || transition.extraction_field_operation_bound
                     != interpreted_extraction_field_operation_bound
+                || transition.extraction_error != independently_derived_extraction_error
                 || transition.extraction_error != *move_failure.probability()
                 || (transition.extraction_error != ExactProbability::zero()
                     && !transition
@@ -823,6 +868,8 @@ impl RelaxedRoundByRoundCatalog {
             )
             || interpreted_state.pre_challenge_whir != WhirRelaxedRelation::OutputTrivial
             || interpreted_state.main_whir != WhirRelaxedRelation::OutputTrivial
+            || self.input_implicit_instance_tuple_size != 0
+            || self.output_implicit_instance_tuple_size != 0
             || self.maximum_per_move_extraction_error
                 != *interactive_soundness.maximum_verifier_move_failure()
             || self.maximum_per_move_extraction_error != interpreted_maximum_error
@@ -852,6 +899,213 @@ impl RelaxedRoundByRoundCatalog {
 
     pub(super) const fn total_extraction_field_operation_bound(&self) -> u128 {
         self.total_extraction_field_operation_bound
+    }
+
+    pub(super) fn check_factor_one_semantic_error_theorem(
+        &self,
+        relation: &CompactPublicKeyRelationCatalog,
+        cfw_reduction: &CfwReductionCatalog,
+        pre_challenge_whir: &WhirStaticLedger,
+        main_whir: &WhirStaticLedger,
+    ) -> Result<(), CompactStaticCatalogError> {
+        let theorem = semantic_relations::derive_factor_one_semantic_error_theorem(
+            self,
+            relation,
+            cfw_reduction,
+            pre_challenge_whir,
+            main_whir,
+        )?;
+        if theorem.moves.len() != self.transitions.len()
+            || theorem
+                .moves
+                .iter()
+                .zip(&self.transitions)
+                .any(|(semantic_move, transition)| {
+                    semantic_move.verifier_move_ordinal != transition.verifier_move_ordinal
+                        || semantic_move.total_probability != transition.extraction_error
+                })
+            || theorem.maximum_per_move_error != self.maximum_per_move_extraction_error
+        {
+            return Err(CompactStaticCatalogError::InvalidGeometry);
+        }
+        Ok(())
+    }
+}
+
+// Recompute each magnitude from operative code, challenge, and relation
+// parameters without consulting the numerical event ledger. Equality with the
+// ledger is a consistency check only; these formulas do not replace the
+// still-open semantic bad-transition implications.
+#[allow(clippy::too_many_arguments)]
+fn derive_independent_transition_error(
+    roles: &[VerifierMoveRole],
+    relation: &CompactPublicKeyRelationCatalog,
+    cfw_reduction: &CfwReductionCatalog,
+    codes: &[UniqueDecodingCode],
+    whir_mca_bounds: &[WhirMcaTransitionBound],
+    pre_challenge_whir: &WhirStaticLedger,
+    main_whir: &WhirStaticLedger,
+) -> Result<ExactProbability, CompactStaticCatalogError> {
+    roles
+        .iter()
+        .try_fold(ExactProbability::zero(), |sum, role| {
+            sum.add(&derive_independent_role_error(
+                *role,
+                relation,
+                cfw_reduction,
+                codes,
+                whir_mca_bounds,
+                pre_challenge_whir,
+                main_whir,
+            )?)
+        })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn derive_independent_role_error(
+    role: VerifierMoveRole,
+    relation: &CompactPublicKeyRelationCatalog,
+    cfw_reduction: &CfwReductionCatalog,
+    codes: &[UniqueDecodingCode],
+    whir_mca_bounds: &[WhirMcaTransitionBound],
+    pre_challenge_whir: &WhirStaticLedger,
+    main_whir: &WhirStaticLedger,
+) -> Result<ExactProbability, CompactStaticCatalogError> {
+    let extension_field_order = extension_field_order();
+    match role {
+        VerifierMoveRole::LookupChallenge => ExactProbability::new(
+            BigUint::from(relation.lookup_soundness_numerator()),
+            extension_field_order
+                .checked_sub(&BigUint::from(GOLDILOCKS_BASE_FIELD_MODULUS))
+                .ok_or(CompactStaticCatalogError::InvalidGeometry)?,
+        ),
+        VerifierMoveRole::CrossEpochPoint => ExactProbability::new(
+            BigUint::from(CROSS_EPOCH_POINT_COORDINATE_COUNT),
+            extension_field_order,
+        ),
+        VerifierMoveRole::CfwInitialRandomness => ExactProbability::new(
+            BigUint::from(cfw_reduction.initial_consistency_soundness_numerator()),
+            extension_field_order,
+        ),
+        VerifierMoveRole::CfwSumcheckRound { round_ordinal } => {
+            if round_ordinal >= cfw_reduction.sumcheck_round_count() {
+                return Err(CompactStaticCatalogError::InvalidGeometry);
+            }
+            let denominator = if round_ordinal + 1 == cfw_reduction.sumcheck_round_count() {
+                extension_field_order
+                    .checked_sub(&BigUint::from(
+                        cfw_reduction.last_round_excluded_element_count(),
+                    ))
+                    .ok_or(CompactStaticCatalogError::InvalidGeometry)?
+            } else {
+                extension_field_order
+            };
+            ExactProbability::new(
+                BigUint::from(cfw_reduction.per_round_soundness_numerator()),
+                denominator,
+            )
+        }
+        VerifierMoveRole::CfwJointConstraint => ExactProbability::new(
+            BigUint::from(cfw_reduction.joint_constraint_soundness_numerator()),
+            extension_field_order,
+        ),
+        VerifierMoveRole::WhirOpeningBatching { epoch } => {
+            let whir = whir_for_epoch(epoch, pre_challenge_whir, main_whir);
+            ExactProbability::new(
+                BigUint::from(
+                    whir.opening_batching_claim_count
+                        .checked_sub(1)
+                        .ok_or(CompactStaticCatalogError::InvalidGeometry)?,
+                ),
+                extension_field_order,
+            )
+        }
+        VerifierMoveRole::WhirMaskedSumcheckCombination { .. } => {
+            ExactProbability::new(BigUint::one(), extension_field_order)
+        }
+        VerifierMoveRole::WhirFolding {
+            epoch,
+            batch_ordinal,
+            round_ordinal,
+        } => {
+            let mut matches = whir_mca_bounds.iter().filter(|bound| {
+                bound.epoch == epoch
+                    && bound.batch_ordinal == batch_ordinal
+                    && bound.round_ordinal == round_ordinal
+            });
+            let bound = matches
+                .next()
+                .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
+            if matches.next().is_some() {
+                return Err(CompactStaticCatalogError::InvalidGeometry);
+            }
+            bound
+                .exact_mca_error
+                .add(&bound.exact_masked_sumcheck_error)
+        }
+        VerifierMoveRole::WhirRoundQueryAndCombination {
+            epoch,
+            round_ordinal,
+        } => {
+            let source_code = code_by_role(
+                codes,
+                CodeRole::WhirSource {
+                    epoch,
+                    batch_ordinal: round_ordinal,
+                },
+            )?;
+            source_code
+                .exact_query_failure()?
+                .add(&ExactProbability::new(
+                    BigUint::from(
+                        source_code
+                            .hiding_randomness_length
+                            .checked_add(1)
+                            .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?,
+                    ),
+                    extension_field_order,
+                )?)
+        }
+        VerifierMoveRole::WhirBaseCombination { epoch } => {
+            let whir = whir_for_epoch(epoch, pre_challenge_whir, main_whir);
+            let mask_domain_size_sum =
+                whir.mask_groups_in_commitment_order()
+                    .try_fold(0_u64, |sum, group| {
+                        sum.checked_add(group.domain_size)
+                            .ok_or(CompactStaticCatalogError::ArithmeticOverflow)
+                    })?;
+            let numerator = whir.oracle_heights[WHIR_ROUND_COUNT]
+                .checked_add(mask_domain_size_sum)
+                .and_then(|value| value.checked_add(1))
+                .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+            ExactProbability::new(BigUint::from(numerator), extension_field_order)
+        }
+        VerifierMoveRole::WhirFinalQueries { epoch } => {
+            let whir = whir_for_epoch(epoch, pre_challenge_whir, main_whir);
+            let source_code = code_by_role(
+                codes,
+                CodeRole::WhirSource {
+                    epoch,
+                    batch_ordinal: u8::try_from(WHIR_ROUND_COUNT)
+                        .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+                },
+            )?;
+            let mut error = source_code.exact_query_failure()?;
+            for group_ordinal in 0..whir.mask_groups_in_commitment_order().count() {
+                error = error.add(
+                    &code_by_role(
+                        codes,
+                        CodeRole::WhirMask {
+                            epoch,
+                            group_ordinal: u8::try_from(group_ordinal)
+                                .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+                        },
+                    )?
+                    .exact_query_failure()?,
+                )?;
+            }
+            Ok(error)
+        }
     }
 }
 
@@ -958,28 +1212,18 @@ fn derive_whir_mca_bounds(
         (TranscriptEpoch::PreChallenge, pre_challenge_whir),
         (TranscriptEpoch::Main, main_whir),
     ] {
-        let source_rates = [
-            MAIN_CODE_LOG_INVERSE_RATE,
-            whir.round_log_inverse_rates[0],
-            whir.round_log_inverse_rates[1],
-            whir.round_log_inverse_rates[2],
-        ];
-        let mut source_variable_count = whir.polynomial_variable_count;
-        for (batch_ordinal, source_rate) in source_rates.into_iter().enumerate() {
-            let source_domain_exponent = source_variable_count
-                .checked_add(source_rate)
-                .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
-            let source_domain_size = 1_u64
-                .checked_shl(source_domain_exponent)
-                .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+        for batch_ordinal in 0..WHIR_FOLD_BATCH_COUNT {
+            let target_domain_size = whir.oracle_heights[batch_ordinal];
+            if target_domain_size == 0 {
+                return Err(CompactStaticCatalogError::InvalidGeometry);
+            }
             for round_ordinal in 0..whir.folding_schedule[batch_ordinal] {
-                let target_domain_size = source_domain_size
-                    .checked_shr(round_ordinal + 1)
-                    .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
-                // A binary fold invokes Corollary 4.11 with two correlated
-                // functions. In the strict unique-decoding regime its MCA
-                // term is `(2 - 1) * target_domain_size / |F|`; the masked
-                // sumcheck contributes its separate degree-eight term.
+                // The production batch stores the intermediate functions as
+                // correlated columns over its final committed row domain.
+                // A binary fold therefore invokes Corollary 4.11 on that
+                // same code at every internal challenge. With two correlated
+                // functions the MCA term is `(2 - 1) * |L| / |F|`; the
+                // masked sumcheck contributes its separate degree term.
                 bounds.push(WhirMcaTransitionBound {
                     epoch,
                     batch_ordinal: u8::try_from(batch_ordinal)
@@ -998,12 +1242,6 @@ fn derive_whir_mca_bounds(
                     )?,
                 });
             }
-            source_variable_count = source_variable_count
-                .checked_sub(whir.folding_schedule[batch_ordinal])
-                .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
-        }
-        if source_variable_count != whir.final_variable_count {
-            return Err(CompactStaticCatalogError::InvalidGeometry);
         }
     }
     Ok(bounds)
@@ -1023,6 +1261,7 @@ fn append_whir_codes(
             },
             whir.source_message_lengths[batch_ordinal],
             whir.query_counts[batch_ordinal],
+            whir.query_counts[batch_ordinal],
             whir.oracle_heights[batch_ordinal],
             whir.oracle_widths[batch_ordinal],
         )?);
@@ -1035,6 +1274,7 @@ fn append_whir_codes(
                     .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
             },
             group,
+            whir.mask_query_count,
         )?);
     }
     Ok(())
@@ -1043,11 +1283,13 @@ fn append_whir_codes(
 fn code_from_mask_group(
     role: CodeRole,
     group: &MaskGroupStaticLedger,
+    query_count: u64,
 ) -> Result<UniqueDecodingCode, CompactStaticCatalogError> {
     UniqueDecodingCode::derive(
         role,
         group.message_length,
         group.randomness_length,
+        query_count,
         group.domain_size,
         group.width,
     )
@@ -1220,62 +1462,6 @@ fn initial_prefix_knowledge_state(
     })
 }
 
-fn whir_stage_relation(
-    whir: &WhirStaticLedger,
-    batch_ordinal: usize,
-) -> Result<GeneralizedCommittedRelation, CompactStaticCatalogError> {
-    let source_message_element_count = checked_product(&[
-        whir.oracle_widths[batch_ordinal],
-        whir.source_message_lengths[batch_ordinal],
-    ])?;
-    let source_hiding_element_count = checked_product(&[
-        whir.oracle_widths[batch_ordinal],
-        whir.query_counts[batch_ordinal],
-    ])?;
-    let mask_message_element_count =
-        whir.mask_groups_in_commitment_order()
-            .try_fold(0_u64, |count, group| {
-                checked_add(
-                    count,
-                    checked_product(&[group.width, group.message_length])?,
-                )
-            })?;
-    let opening_evaluation_claim_count = whir.opening_evaluation_count;
-    let carried_reduction_claim_count = whir.external_generalized_relation_claim_count;
-    let claim_count = checked_add(
-        opening_evaluation_claim_count,
-        carried_reduction_claim_count,
-    )?;
-    if claim_count != whir.opening_batching_claim_count {
-        return Err(CompactStaticCatalogError::InvalidGeometry);
-    }
-    Ok(GeneralizedCommittedRelation {
-        source_code: committed_code_relation(
-            whir.source_message_lengths[batch_ordinal],
-            whir.query_counts[batch_ordinal],
-            whir.oracle_heights[batch_ordinal],
-            whir.oracle_widths[batch_ordinal],
-        ),
-        mask_codes: whir
-            .mask_groups_in_commitment_order()
-            .map(committed_mask_code_relation)
-            .collect(),
-        source_message_element_count,
-        source_hiding_element_count,
-        mask_message_element_count,
-        covector_extension_element_count: [
-            source_message_element_count,
-            1,
-            mask_message_element_count,
-        ]
-        .into_iter()
-        .try_fold(0_u64, checked_add)?,
-        opening_evaluation_claim_count,
-        carried_reduction_claim_count,
-        claim_count,
-    })
-}
-
 fn derive_composition_boundaries(
     codes: &[UniqueDecodingCode],
     handoff: &CfwToWhirHandoffCatalog,
@@ -1290,7 +1476,9 @@ fn derive_composition_boundaries(
             TranscriptEpoch::Main,
             main_whir,
             0,
-            true,
+            main_whir.oracle_widths[0],
+            0,
+            WhirClaimShape::UnbatchedInput,
         )?,
     }];
     append_whir_composition_boundaries(
@@ -1310,19 +1498,36 @@ fn append_whir_composition_boundaries(
     whir: &WhirStaticLedger,
 ) -> Result<(), CompactStaticCatalogError> {
     for round_ordinal in 0..WHIR_ROUND_COUNT {
+        let sumcheck_mask_count = round_ordinal
+            .checked_mul(2)
+            .and_then(|count| count.checked_add(1))
+            .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+        let code_switch_mask_count = sumcheck_mask_count
+            .checked_add(1)
+            .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
         boundaries.push(SequentialCompositionBoundary {
             role: CompositionBoundaryRole::MaskedSumcheckToCodeSwitch {
                 epoch,
                 round_ordinal: u8::try_from(round_ordinal)
                     .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
             },
-            left_output_relation: whir_stage_relation(whir, round_ordinal)?,
+            left_output_relation: whir_relation_from_codes(
+                codes,
+                epoch,
+                whir,
+                round_ordinal,
+                1,
+                sumcheck_mask_count,
+                WhirClaimShape::Batched,
+            )?,
             right_input_relation: whir_relation_from_codes(
                 codes,
                 epoch,
                 whir,
                 round_ordinal,
-                false,
+                1,
+                sumcheck_mask_count,
+                WhirClaimShape::Batched,
             )?,
         });
         boundaries.push(SequentialCompositionBoundary {
@@ -1336,23 +1541,50 @@ fn append_whir_composition_boundaries(
                 epoch,
                 whir,
                 round_ordinal + 1,
-                false,
+                whir.oracle_widths[round_ordinal + 1],
+                code_switch_mask_count,
+                WhirClaimShape::Batched,
             )?,
-            right_input_relation: whir_stage_relation(whir, round_ordinal + 1)?,
+            right_input_relation: whir_relation_from_codes(
+                codes,
+                epoch,
+                whir,
+                round_ordinal + 1,
+                whir.oracle_widths[round_ordinal + 1],
+                code_switch_mask_count,
+                WhirClaimShape::Batched,
+            )?,
         });
     }
+    let final_internal_mask_count = whir.internal_mask_groups.len();
     boundaries.push(SequentialCompositionBoundary {
         role: CompositionBoundaryRole::FinalMaskedSumcheckToBase { epoch },
-        left_output_relation: whir_stage_relation(whir, WHIR_ROUND_COUNT)?,
+        left_output_relation: whir_relation_from_codes(
+            codes,
+            epoch,
+            whir,
+            WHIR_ROUND_COUNT,
+            1,
+            final_internal_mask_count,
+            WhirClaimShape::Batched,
+        )?,
         right_input_relation: whir_relation_from_codes(
             codes,
             epoch,
             whir,
             WHIR_ROUND_COUNT,
-            false,
+            1,
+            final_internal_mask_count,
+            WhirClaimShape::Batched,
         )?,
     });
     Ok(())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WhirClaimShape {
+    UnbatchedInput,
+    Batched,
 }
 
 fn whir_relation_from_codes(
@@ -1360,7 +1592,9 @@ fn whir_relation_from_codes(
     epoch: TranscriptEpoch,
     whir: &WhirStaticLedger,
     batch_ordinal: usize,
-    external_masks_only: bool,
+    source_interleaving_width: u64,
+    included_internal_mask_group_count: usize,
+    claim_shape: WhirClaimShape,
 ) -> Result<GeneralizedCommittedRelation, CompactStaticCatalogError> {
     let source_code = code_by_role(
         codes,
@@ -1370,17 +1604,23 @@ fn whir_relation_from_codes(
                 .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
         },
     )?;
+    if (source_interleaving_width != 1
+        && source_interleaving_width != source_code.interleaving_width)
+        || included_internal_mask_group_count > whir.internal_mask_groups.len()
+    {
+        return Err(CompactStaticCatalogError::InvalidGeometry);
+    }
     let source_message_element_count =
-        checked_product(&[source_code.interleaving_width, source_code.message_length])?;
+        checked_product(&[source_interleaving_width, source_code.message_length])?;
     let source_hiding_element_count = checked_product(&[
-        source_code.interleaving_width,
+        source_interleaving_width,
         source_code.hiding_randomness_length,
     ])?;
-    let last_mask_ordinal = if external_masks_only {
-        whir.external_mask_groups.len()
-    } else {
-        whir.internal_mask_groups.len() + whir.external_mask_groups.len()
-    };
+    let last_mask_ordinal = whir
+        .external_mask_groups
+        .len()
+        .checked_add(included_internal_mask_group_count)
+        .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
     let mask_groups = whir.mask_groups_in_commitment_order().collect::<Vec<_>>();
     let mut mask_code_count = 0_usize;
     let mut mask_message_element_count = 0_u64;
@@ -1417,21 +1657,37 @@ fn whir_relation_from_codes(
     if mask_code_count != last_mask_ordinal {
         return Err(CompactStaticCatalogError::InvalidGeometry);
     }
-    let opening_evaluation_claim_count = whir.opening_evaluation_count;
-    let carried_reduction_claim_count = whir.external_generalized_relation_claim_count;
-    let claim_count = checked_add(
-        opening_evaluation_claim_count,
-        carried_reduction_claim_count,
-    )?;
-    if claim_count != whir.opening_batching_claim_count {
-        return Err(CompactStaticCatalogError::InvalidGeometry);
-    }
+    let (opening_evaluation_claim_count, carried_reduction_claim_count, claim_count) =
+        match claim_shape {
+            WhirClaimShape::UnbatchedInput => {
+                let claim_count = checked_add(
+                    whir.opening_evaluation_count,
+                    whir.external_generalized_relation_claim_count,
+                )?;
+                if included_internal_mask_group_count != 0
+                    || source_interleaving_width != source_code.interleaving_width
+                    || claim_count != whir.opening_batching_claim_count
+                {
+                    return Err(CompactStaticCatalogError::InvalidGeometry);
+                }
+                (
+                    whir.opening_evaluation_count,
+                    whir.external_generalized_relation_claim_count,
+                    claim_count,
+                )
+            }
+            // Once the opening claims have been alpha-batched, every WHIR
+            // component carries one committed linear relation. Sumcheck and
+            // code switching change its source and mask witnesses, but they
+            // do not resurrect the pre-batching claim vector.
+            WhirClaimShape::Batched => (0, 1, 1),
+        };
     Ok(GeneralizedCommittedRelation {
         source_code: committed_code_relation(
             source_code.message_length,
             source_code.hiding_randomness_length,
             source_code.block_length,
-            source_code.interleaving_width,
+            source_interleaving_width,
         ),
         mask_codes,
         source_message_element_count,
@@ -1746,7 +2002,7 @@ mod tests {
 
     #[test]
     fn deterministic_extractor_executes_canonical_correction_within_its_field_operation_bound() {
-        let code = UniqueDecodingCode::derive(CodeRole::CfwMain, 2, 1, 8, 3)
+        let code = UniqueDecodingCode::derive(CodeRole::CfwMain, 2, 1, 1, 8, 3)
             .expect("small semantic code derives");
         let coefficient_columns = vec![
             vec![
@@ -1798,6 +2054,24 @@ mod tests {
     }
 
     #[test]
+    fn semantic_query_escape_uses_the_exact_distinct_query_distribution() {
+        let code = UniqueDecodingCode::derive(CodeRole::CfwMain, 3, 2, 2, 8, 1)
+            .expect("small semantic code derives");
+        let exact_without_replacement =
+            ExactProbability::new(BigUint::from(6_u8 * 5), BigUint::from(8_u8 * 7))
+                .expect("exact distinct-query probability derives");
+        let independent_with_replacement =
+            ExactProbability::new(BigUint::from(7_u8).pow(2), BigUint::from(8_u8).pow(2))
+                .expect("comparison probability derives");
+
+        assert_eq!(
+            code.exact_query_failure().unwrap(),
+            exact_without_replacement
+        );
+        assert_ne!(exact_without_replacement, independent_with_replacement);
+    }
+
+    #[test]
     fn factor_one_instantiates_every_relaxed_transition_and_extractor() {
         let catalog =
             CompactPublicKeyStaticCatalog::derive().expect("compact public-key static catalog");
@@ -1815,7 +2089,7 @@ mod tests {
         let field_order = extension_field_order();
         assert_eq!(
             theorem.cfw.initial_consistency_error,
-            ExactProbability::new(BigUint::from(9_u8), field_order.clone())
+            ExactProbability::new(BigUint::from(24_u8), field_order.clone())
                 .expect("initial CFW error")
         );
         assert_eq!(theorem.cfw.sumcheck_round_errors.len(), 23);
@@ -1842,6 +2116,8 @@ mod tests {
         assert_eq!(theorem.cfw.main_list_size_bound, 1);
         assert_eq!(theorem.cfw.interleaved_inner_list_size_bound, 1);
         assert_eq!(theorem.cfw.interleaved_outer_list_size_bound, 1);
+        assert_eq!(theorem.input_implicit_instance_tuple_size, 0);
+        assert_eq!(theorem.output_implicit_instance_tuple_size, 0);
         assert_eq!(theorem.whir_mca_bounds.len(), 37);
         assert!(theorem.whir_mca_bounds.iter().all(|bound| {
             bound.correlated_function_count == 2
@@ -1945,6 +2221,119 @@ mod tests {
             162
         );
         assert_eq!(cfw_to_whir_boundary.left_output_relation.claim_count, 164);
+
+        for (epoch, whir) in [
+            (
+                TranscriptEpoch::PreChallenge,
+                &factor_one.pre_challenge_whir,
+            ),
+            (TranscriptEpoch::Main, &factor_one.main_whir),
+        ] {
+            for round_ordinal in 0..WHIR_ROUND_COUNT {
+                let sumcheck_boundary = theorem
+                    .composition_boundaries
+                    .iter()
+                    .find(|boundary| {
+                        boundary.role
+                            == CompositionBoundaryRole::MaskedSumcheckToCodeSwitch {
+                                epoch,
+                                round_ordinal: u8::try_from(round_ordinal)
+                                    .expect("WHIR round ordinal fits in u8"),
+                            }
+                    })
+                    .expect("masked-sumcheck composition boundary");
+                assert_eq!(
+                    sumcheck_boundary
+                        .left_output_relation
+                        .source_code
+                        .interleaving_width,
+                    1
+                );
+                assert_eq!(
+                    sumcheck_boundary.left_output_relation.mask_codes.len(),
+                    whir.external_mask_groups.len() + round_ordinal * 2 + 1
+                );
+                assert_eq!(
+                    (
+                        sumcheck_boundary
+                            .left_output_relation
+                            .opening_evaluation_claim_count,
+                        sumcheck_boundary
+                            .left_output_relation
+                            .carried_reduction_claim_count,
+                        sumcheck_boundary.left_output_relation.claim_count,
+                    ),
+                    (0, 1, 1)
+                );
+
+                let code_switch_boundary = theorem
+                    .composition_boundaries
+                    .iter()
+                    .find(|boundary| {
+                        boundary.role
+                            == CompositionBoundaryRole::CodeSwitchToNextMaskedSumcheck {
+                                epoch,
+                                round_ordinal: u8::try_from(round_ordinal)
+                                    .expect("WHIR round ordinal fits in u8"),
+                            }
+                    })
+                    .expect("code-switch composition boundary");
+                assert_eq!(
+                    code_switch_boundary
+                        .left_output_relation
+                        .source_code
+                        .interleaving_width,
+                    whir.oracle_widths[round_ordinal + 1]
+                );
+                assert_eq!(
+                    code_switch_boundary.left_output_relation.mask_codes.len(),
+                    whir.external_mask_groups.len() + round_ordinal * 2 + 2
+                );
+                assert_eq!(
+                    (
+                        code_switch_boundary
+                            .left_output_relation
+                            .opening_evaluation_claim_count,
+                        code_switch_boundary
+                            .left_output_relation
+                            .carried_reduction_claim_count,
+                        code_switch_boundary.left_output_relation.claim_count,
+                    ),
+                    (0, 1, 1)
+                );
+            }
+
+            let final_boundary = theorem
+                .composition_boundaries
+                .iter()
+                .find(|boundary| {
+                    boundary.role == CompositionBoundaryRole::FinalMaskedSumcheckToBase { epoch }
+                })
+                .expect("final masked-sumcheck composition boundary");
+            assert_eq!(
+                final_boundary
+                    .left_output_relation
+                    .source_code
+                    .interleaving_width,
+                1
+            );
+            assert_eq!(
+                final_boundary.left_output_relation.mask_codes.len(),
+                whir.external_mask_groups.len() + whir.internal_mask_groups.len()
+            );
+            assert_eq!(
+                (
+                    final_boundary
+                        .left_output_relation
+                        .opening_evaluation_claim_count,
+                    final_boundary
+                        .left_output_relation
+                        .carried_reduction_claim_count,
+                    final_boundary.left_output_relation.claim_count,
+                ),
+                (0, 1, 1)
+            );
+        }
     }
 
     #[test]
@@ -1973,35 +2362,22 @@ mod tests {
                 .map(|code| (
                     code.message_length,
                     code.hiding_randomness_length,
+                    code.query_count,
                     code.block_length,
                     code.dimension,
                 ))
                 .collect::<Vec<_>>(),
             vec![
-                (32_768, 396, 131_072, 33_164),
-                (2_048, 432, 8_192, 2_480),
-                (128, 400, 2_048, 528),
-                (8, 348, 2_048, 356),
+                (32_768, 396, 396, 131_072, 33_164),
+                (2_048, 432, 432, 8_192, 2_480),
+                (128, 400, 400, 2_048, 528),
+                (8, 348, 348, 2_048, 356),
             ]
         );
         for code in source_codes {
             assert!(
                 code.exact_query_failure()
                     .expect("exact source query failure")
-                    .is_at_most_inverse_power_of_two(267)
-            );
-            let previous = UniqueDecodingCode::derive(
-                code.role,
-                code.message_length,
-                code.hiding_randomness_length - 1,
-                code.block_length,
-                code.interleaving_width,
-            )
-            .expect("previous source code shape");
-            assert!(
-                !previous
-                    .exact_query_failure()
-                    .expect("exact previous query failure")
                     .is_at_most_inverse_power_of_two(267)
             );
         }
@@ -2109,6 +2485,21 @@ mod tests {
         changed_dimension.codes[0].hiding_randomness_length += 1;
         assert_eq!(
             changed_dimension.check(
+                &relation,
+                &catalog.cfw_reduction,
+                &catalog.cfw_to_whir_handoff,
+                &factor_one.pre_challenge_whir,
+                &factor_one.main_whir,
+                &factor_one.transcript_chronology,
+                &factor_one.interactive_soundness,
+            ),
+            Err(CompactStaticCatalogError::InvalidGeometry)
+        );
+
+        let mut changed_query_count = factor_one.relaxed_round_by_round.clone();
+        changed_query_count.codes[0].query_count += 1;
+        assert_eq!(
+            changed_query_count.check(
                 &relation,
                 &catalog.cfw_reduction,
                 &catalog.cfw_to_whir_handoff,

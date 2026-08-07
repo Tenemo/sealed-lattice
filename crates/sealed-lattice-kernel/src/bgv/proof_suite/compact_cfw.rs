@@ -160,6 +160,19 @@ pub(crate) struct CompactCfwMaskMaterial {
 }
 
 impl CompactCfwMaskMaterial {
+    pub(crate) fn from_canonical_messages(
+        geometry: CompactCfwGeometry,
+        inner_masks: Vec<[CompactChallengeField; COMPACT_CFW_INNER_MASK_MESSAGE_LENGTH]>,
+        outer_masks: Vec<[CompactChallengeField; COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH]>,
+    ) -> Result<Self, CompactCfwError> {
+        let material = Self {
+            inner_masks,
+            outer_masks,
+        };
+        material.check(geometry)?;
+        Ok(material)
+    }
+
     pub(crate) fn sample(
         geometry: CompactCfwGeometry,
         mut sample_extension_element: impl FnMut() -> CompactChallengeField,
@@ -348,6 +361,171 @@ impl PreparedCompactCfwProver {
             scalar_state,
         })
     }
+}
+
+/// Derives the true masked-sumcheck polynomial after an arbitrary prefix of
+/// verifier challenges, without trusting any prover-supplied round polynomial.
+///
+/// This is the executable knowledge-state owner used by the relaxed
+/// round-by-round theorem. It deliberately bypasses transcript consistency:
+/// the caller compares this independently derived polynomial with the wire
+/// polynomial at the selected challenge.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn compact_cfw_semantic_round_polynomial(
+    matrices: &impl CompactCfwR1csMatrices,
+    public_input: &[CompactChallengeField],
+    witness: &[CompactChallengeField],
+    mask_material: &CompactCfwMaskMaterial,
+    constraint_combining_challenge: CompactChallengeField,
+    equality_point: &[CompactChallengeField],
+    prior_round_challenges: &[CompactChallengeField],
+    round_ordinal: usize,
+) -> Result<[CompactChallengeField; COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH], CompactCfwError> {
+    let geometry = CompactCfwGeometry::derive(matrices.witness_length())?;
+    if public_input.len() != geometry.witness_length()
+        || witness.len() != geometry.witness_length()
+        || equality_point.len() != geometry.sumcheck_round_count()
+        || prior_round_challenges.len() != round_ordinal
+        || round_ordinal >= geometry.sumcheck_round_count()
+    {
+        return Err(CompactCfwError::InvalidGeometry);
+    }
+    mask_material.check(geometry)?;
+    let mut matrix_rows = CompactCfwMatrixRole::ALL
+        .map(|matrix_role| matrices.evaluate_assignment_rows(matrix_role, public_input, witness))
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()?;
+    if matrix_rows
+        .iter()
+        .any(|rows| rows.len() != geometry.r1cs_row_count())
+    {
+        return Err(CompactCfwError::InvalidMatrixSource);
+    }
+    for &challenge in prior_round_challenges {
+        for rows in &mut matrix_rows {
+            if rows.len() % 2 != 0 {
+                return Err(CompactCfwError::InvalidMatrixSource);
+            }
+            *rows = rows
+                .chunks_exact(2)
+                .map(|pair| compact_cfw_fold_row_pair(pair[0], pair[1], challenge))
+                .collect();
+        }
+    }
+
+    let mut equality_prefix_evaluation = CompactChallengeField::ONE;
+    let mut past_inner_mask_evaluations = [CompactChallengeField::ZERO; COMPACT_CFW_MATRIX_COUNT];
+    let mut past_outer_mask_evaluation = CompactChallengeField::ZERO;
+    for (prior_ordinal, &challenge) in prior_round_challenges.iter().enumerate() {
+        let equality_coordinate = equality_point[prior_ordinal];
+        equality_prefix_evaluation *= (CompactChallengeField::ONE - equality_coordinate)
+            + challenge
+                * (CompactChallengeField::from_u64(2) * equality_coordinate
+                    - CompactChallengeField::ONE);
+        for matrix_role in CompactCfwMatrixRole::ALL {
+            past_inner_mask_evaluations[matrix_role.ordinal()] +=
+                CompactChallengeField::from_u64(COMPACT_CFW_INNER_MASK_APPLICATION_MULTIPLIER)
+                    * evaluate_polynomial(
+                        mask_material.inner_mask(prior_ordinal, matrix_role)?,
+                        challenge,
+                    );
+        }
+        past_outer_mask_evaluation += evaluate_polynomial(
+            mask_material
+                .outer_masks()
+                .get(prior_ordinal)
+                .ok_or(CompactCfwError::InvalidMaskMaterial)?,
+            challenge,
+        );
+    }
+
+    let mut accumulator = CompactCfwRoundAccumulator::new(
+        geometry,
+        mask_material,
+        round_ordinal,
+        constraint_combining_challenge,
+        equality_point,
+        equality_prefix_evaluation,
+        past_inner_mask_evaluations,
+        past_outer_mask_evaluation,
+    )?;
+    let suffix_count = accumulator.expected_suffix_count;
+    if matrix_rows
+        .iter()
+        .any(|rows| rows.len() != suffix_count.saturating_mul(2))
+    {
+        return Err(CompactCfwError::InvalidMatrixSource);
+    }
+    for suffix_ordinal in 0..suffix_count {
+        let first_row = suffix_ordinal
+            .checked_mul(2)
+            .ok_or(CompactCfwError::CountOverflow)?;
+        let values_at_zero =
+            core::array::from_fn(|matrix_ordinal| matrix_rows[matrix_ordinal][first_row]);
+        let values_at_one =
+            core::array::from_fn(|matrix_ordinal| matrix_rows[matrix_ordinal][first_row + 1]);
+        accumulator.absorb_next_row_pair(values_at_zero, values_at_one)?;
+    }
+    accumulator.finish()
+}
+
+/// Independently folds the production matrix rows and evaluates every inner
+/// and outer mask at a complete sumcheck point.
+pub(crate) fn compact_cfw_semantic_final_message(
+    matrices: &impl CompactCfwR1csMatrices,
+    public_input: &[CompactChallengeField],
+    witness: &[CompactChallengeField],
+    mask_material: &CompactCfwMaskMaterial,
+    sumcheck_point: &[CompactChallengeField],
+) -> Result<CompactCfwProverFinish, CompactCfwError> {
+    let geometry = CompactCfwGeometry::derive(matrices.witness_length())?;
+    if public_input.len() != geometry.witness_length()
+        || witness.len() != geometry.witness_length()
+        || sumcheck_point.len() != geometry.sumcheck_round_count()
+    {
+        return Err(CompactCfwError::InvalidGeometry);
+    }
+    mask_material.check(geometry)?;
+    let mut matrix_rows = CompactCfwMatrixRole::ALL
+        .map(|matrix_role| matrices.evaluate_assignment_rows(matrix_role, public_input, witness))
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()?;
+    for &challenge in sumcheck_point {
+        for rows in &mut matrix_rows {
+            if rows.len() % 2 != 0 {
+                return Err(CompactCfwError::InvalidMatrixSource);
+            }
+            *rows = rows
+                .chunks_exact(2)
+                .map(|pair| compact_cfw_fold_row_pair(pair[0], pair[1], challenge))
+                .collect();
+        }
+    }
+    if matrix_rows.iter().any(|rows| rows.len() != 1) {
+        return Err(CompactCfwError::InvalidMatrixSource);
+    }
+    let mut final_values = core::array::from_fn(|matrix_ordinal| matrix_rows[matrix_ordinal][0]);
+    for (round_ordinal, &challenge) in sumcheck_point.iter().enumerate() {
+        for matrix_role in CompactCfwMatrixRole::ALL {
+            final_values[matrix_role.ordinal()] +=
+                CompactChallengeField::from_u64(COMPACT_CFW_INNER_MASK_APPLICATION_MULTIPLIER)
+                    * evaluate_polynomial(
+                        mask_material.inner_mask(round_ordinal, matrix_role)?,
+                        challenge,
+                    );
+        }
+    }
+    let outer_evaluations = mask_material
+        .outer_masks()
+        .iter()
+        .zip(sumcheck_point)
+        .map(|(mask, &challenge)| evaluate_polynomial(mask, challenge))
+        .collect();
+    Ok(CompactCfwProverFinish {
+        mask_material: mask_material.clone(),
+        outer_evaluations,
+        final_values,
+    })
 }
 
 pub(crate) struct CompactCfwProverState {

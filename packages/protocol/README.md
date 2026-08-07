@@ -15,13 +15,35 @@ two commitment epochs, all CFW inner and outer masks, code-switch and WHIR
 static catalogs, canonical proof and public-input codecs, one salted Merkle
 commitment per logical response, and complete live-prefix query schedules for
 every production packing geometry. The factor-one relaxed-theorem, interactive
-masking, emitted-byte consumer, and conditional CDHZ/QROM modules are checked
-development owners. The theorem owner now executes canonical correction and
-concrete input/output relation predicates, but does not yet supply prefix-wise
-semantic `KState`/`ERRBR` or intermediate witness transitions. Independently
-derived production coefficient-to-view matrices, an exact ideal-uniform
-simulator and deployed KMAC quantum-PRF hybrid, and one complete emitted
-production proof also remain absent. The shared two-epoch mask oracle is
+masking, emitted-byte consumer, and conditional CDHZ/QROM modules remain
+incomplete development owners. The CFW theorem slice now executes canonical
+correction, a semantic `KState`, and deterministic `ERRBR` for every CFW
+message prefix and separates encoding randomness from the ordered distinct-
+query count. `ERRBR` does not call the potentially inefficient `KState`; the
+bad-transition experiment evaluates it separately. Canonical Reed-Solomon code
+owns the decoder-local field-operation ceiling, including evaluation-point
+generation, system construction, deterministic row reduction, monic division,
+and both executable re-encodings. The WHIR semantic components execute, the exact CFW cross-epoch
+mask witness enters the main WHIR input, all 15 adjacent relation-and-instance
+pairs compose exactly in both epochs, and both construction-wide implicit tuple
+dimensions are zero. Binary WHIR folding and base-combination MCA certificates
+now execute. The lookup and cross-epoch semantic transition owners decode their
+bound committed-code instances, derive the declared quotient/multiplicity,
+copied-prefix, and two-lane mask views from those witnesses, and reject
+committed-witness substitution. The production-layout adapter and checked 82-
+move dispatcher bind each verifier move to a concrete local `KState`,
+deterministic `ERRBR`, and bad-transition owner. The semantic error owner uses
+the strict `N - t - 1` bad-word agreement ceiling, charges WHIR MCA on each
+committed batch row domain, and requires every per-move total to match the
+independent ledger. Closure still lacks one canonical construction-wide prefix
+state with the empty-, prover-prefix-, and full-transcript properties, every
+adjacent extracted-witness transition, the exact extraction-time bound, and all
+bad-transition implications over one chronology; the broader ledger still
+omits executable outer, generalized-WHIR, and terminal decoder or re-encoder
+work. Independently derived
+production coefficient-to-view matrices, an exact ideal-uniform simulator and
+deployed KMAC quantum-PRF hybrid, and one complete emitted production proof
+also remain absent. The shared two-epoch mask oracle is
 owned once by the canonical response catalog; its two later verifier-message
 groups open their sorted unique union through bounded canonical response counts.
 These are static development owners, not an accepted proof path.
@@ -33,7 +55,7 @@ are `(26,927,670, 385,505,540, 640,811,508)`,
 `(25,526,102, 618,845,620, 1,082,414,368)` for factors one, two, four, and
 eight. Factors one, two, and four remain below every absolute byte bound.
 Factor eight exceeds the scratch bound by `8,672,544` bytes under the complete
-retained-tree lifecycle and is not a static default. No factor is selected.
+retained-tree lifecycle and is statically refused. No factor is selected.
 Factor one's proof and scratch estimates are `26,927,670` and `640,811,508`
 bytes. They exceed the `7,864,320`-byte proof and `402,653,184`-byte scratch
 automatic-variance bands but remain below their absolute bounds, so they require
@@ -51,16 +73,25 @@ The relaxed round-by-round, construction masking, canonical emitted-byte, and
 noninteractive soundness catalogs remain conditional for this standalone
 geometry. Their 98/95/92-bit arithmetic is not a theorem result until the
 semantic extractor, exact masking correspondence, and complete emitted proof
-derive. CMS19 root/frontier programming and QROM zero knowledge remain later
-work. Fixed SHAKE256 remains an explicit ideal-QRO assumption; the 2025 quantum
-sponge theorem is quantitatively vacuous at the declared `2^80` query budget
-and does not prove fixed Keccak-f. The 316 production schedules now derive
-from sequential canonical transcripts over the exact public-input and response
-geometries. Each schedule becomes available at its exact last query move and
-refuses both premature and delayed message prefixes. The public input,
-commitments, and salts remain deterministic test inputs, and this owner does
-not construct response values or trees, publish checkpoints, or drive a
-prover. A reduced production-family chain verifies
+derive. CMS19 and BCS16 could compile exact ideal-uniform statistical HVZK and
+salted-Merkle privacy into single-proof malicious-verifier statistical zero
+knowledge in the explicitly programmable random-oracle model. The required BCS
+privacy error, collision-free programming domains, root/frontier programming
+map, and deployed KMAC quantum-PRF hybrid have not been instantiated. Because
+KMAC256 and SHAKE256 share fixed Keccak-f, their final composition also needs a
+compatible joint assumption or reduction; domain separation alone is not an
+independence theorem. This route does not charge a measure-and-reprogram loss,
+but resettable or reused-randomness privacy and shared-oracle family and
+ceremony composition remain
+separate later work. Fixed SHAKE256 remains an explicit ideal-QRO assumption;
+the 2025 quantum sponge theorem is quantitatively vacuous at the declared
+`2^80` query budget and does not prove fixed Keccak-f. The 316 production
+schedules now derive from sequential canonical transcripts over the exact
+public-input and response geometries. Each schedule becomes available at its
+exact last query move and refuses both premature and delayed message prefixes.
+The public input, commitments, and salts remain deterministic test inputs, and
+this owner does not construct response values or trees, publish checkpoints, or
+drive a prover. A reduced production-family chain verifies
 transported CFW bytes and sequential hiding-WHIR proofs from one fixed-order
 canonical envelope containing the CFW section, five external roots, and both
 WHIR sections. A fresh decoder derives every WHIR shape from verifier
