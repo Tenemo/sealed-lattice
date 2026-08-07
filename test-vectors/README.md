@@ -24,11 +24,17 @@ acceptance result. The row-code prover is now operationally rejected as the
 mobile backend, so this construction-specific vector cannot select a suite even
 if its remaining imports close. The compact ring-vector replacement prefers
 one extension-linear execution over the quintic Goldilocks field and a bound
-two-epoch lookup transcript. It must generate its own exact limb-and-quotient
-relation, cross-epoch explicit-point openings, CFW/WHIR mask and code-switch
-catalog, extraction, hiding, and classical/QROM vectors. The existing checked
-public-key inventory, static candidate ledgers, and primitive measurements are
-not deterministic suite vectors.
+two-epoch lookup transcript. Its current checked relation, relaxed-extraction,
+masking, emitted-byte, transcript-work, topology, and resource records are
+static development catalogs, and its reduced transport and checkpoint owners
+are bounded kernel evidence. They are not deterministic suite vectors. The
+successor now has an executable canonical decoder and concrete input/output
+relation predicates, but still needs prefix-wise semantic `KState`/`ERRBR` and
+their intermediate extracted-witness transitions, independently derived
+production view matrices, the exact ideal-uniform simulator and deployed KMAC
+quantum-PRF hybrid, one complete emitted production proof, and the resulting
+exact CDHZ/Merkle/QROM soundness partition before it can generate replacement
+security vectors or select a suite.
 
 `selected-lattice-security-estimator-evidence.json` still binds the superseded
 twenty-option topology with data-block width three and three special primes. Its

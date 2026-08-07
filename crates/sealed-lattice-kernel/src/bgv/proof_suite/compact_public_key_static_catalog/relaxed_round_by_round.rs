@@ -11,6 +11,10 @@
 use num_bigint::BigUint;
 use num_traits::{CheckedSub, One};
 
+use super::canonical_reed_solomon::{
+    CanonicalReedSolomonDecodedWitness, CanonicalReedSolomonError, CanonicalReedSolomonGeometry,
+    decode_canonical_interleaved_reed_solomon,
+};
 use super::cfw_reduction::CfwReductionCatalog;
 use super::cfw_to_whir_handoff::CfwToWhirHandoffCatalog;
 use super::lifecycle::ExactProbability;
@@ -30,6 +34,8 @@ use crate::bgv::proof_suite::compact_cfw::{
     COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH, COMPACT_CFW_ZERO_EVADER_EXPONENTS,
 };
 use crate::bgv::proof_suite::relation_plan::CompactPublicKeyRelationCatalog;
+
+mod semantic_relations;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CodeRole {
@@ -202,7 +208,29 @@ impl UniqueDecodingCode {
         {
             return Err(CompactStaticCatalogError::InvalidGeometry);
         }
+        self.decoder_geometry()
+            .map_err(|_| CompactStaticCatalogError::InvalidGeometry)?;
         Ok(())
+    }
+
+    fn decoder_geometry(&self) -> Result<CanonicalReedSolomonGeometry, CanonicalReedSolomonError> {
+        CanonicalReedSolomonGeometry::new(
+            usize::try_from(self.message_length)
+                .map_err(|_| CanonicalReedSolomonError::InvalidGeometry)?,
+            usize::try_from(self.hiding_randomness_length)
+                .map_err(|_| CanonicalReedSolomonError::InvalidGeometry)?,
+            usize::try_from(self.block_length)
+                .map_err(|_| CanonicalReedSolomonError::InvalidGeometry)?,
+            usize::try_from(self.interleaving_width)
+                .map_err(|_| CanonicalReedSolomonError::InvalidGeometry)?,
+        )
+    }
+
+    fn decode_received_rows(
+        &self,
+        received_rows: &[Vec<crate::bgv::proof_suite::ProofChallengeExtensionElement>],
+    ) -> Result<CanonicalReedSolomonDecodedWitness, CanonicalReedSolomonError> {
+        decode_canonical_interleaved_reed_solomon(self.decoder_geometry()?, received_rows)
     }
 
     fn exact_query_failure(&self) -> Result<ExactProbability, CompactStaticCatalogError> {
@@ -1706,6 +1734,68 @@ fn extension_field_order() -> BigUint {
 mod tests {
     use super::*;
     use crate::bgv::proof_suite::compact_public_key_static_catalog::CompactPublicKeyStaticCatalog;
+    use crate::bgv::proof_suite::compact_public_key_static_catalog::canonical_reed_solomon::encode_canonical_interleaved_reed_solomon;
+    use crate::bgv::proof_suite::{ProofBaseFieldElement, ProofChallengeExtensionElement};
+
+    fn small_semantic_field_element(value: u64) -> ProofChallengeExtensionElement {
+        ProofChallengeExtensionElement::from_base(
+            ProofBaseFieldElement::from_canonical(value)
+                .expect("small semantic field element is canonical"),
+        )
+    }
+
+    #[test]
+    fn deterministic_extractor_executes_canonical_correction_within_its_field_operation_bound() {
+        let code = UniqueDecodingCode::derive(CodeRole::CfwMain, 2, 1, 8, 3)
+            .expect("small semantic code derives");
+        let coefficient_columns = vec![
+            vec![
+                small_semantic_field_element(3),
+                small_semantic_field_element(5),
+                small_semantic_field_element(7),
+            ],
+            vec![
+                small_semantic_field_element(11),
+                small_semantic_field_element(13),
+                small_semantic_field_element(17),
+            ],
+            vec![
+                small_semantic_field_element(19),
+                small_semantic_field_element(23),
+                small_semantic_field_element(29),
+            ],
+        ];
+        let mut received_rows = encode_canonical_interleaved_reed_solomon(
+            code.decoder_geometry()
+                .expect("small decoder geometry derives"),
+            &coefficient_columns,
+        )
+        .expect("small semantic codeword encodes");
+        received_rows[1][0] = received_rows[1][0].add(small_semantic_field_element(31));
+        received_rows[6][2] = received_rows[6][2].add(small_semantic_field_element(37));
+
+        let decoded = code
+            .decode_received_rows(&received_rows)
+            .expect("the deterministic extractor corrects the maximum two shared row errors");
+        assert_eq!(
+            decoded.message_columns(),
+            coefficient_columns
+                .iter()
+                .map(|column| column[..2].to_vec())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            decoded.hiding_randomness_columns(),
+            coefficient_columns
+                .iter()
+                .map(|column| column[2..].to_vec())
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            decoded.field_operation_count() <= code.correction_field_operation_bound,
+            "the executed correction exceeded the theorem's explicit field-operation ceiling"
+        );
+    }
 
     #[test]
     fn factor_one_instantiates_every_relaxed_transition_and_extractor() {

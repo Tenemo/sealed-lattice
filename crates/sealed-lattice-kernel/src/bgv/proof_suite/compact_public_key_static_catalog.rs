@@ -35,6 +35,7 @@ use super::relation_plan::{
     CompactPublicKeyRelationCatalog, selected_compact_public_key_relation_catalog,
 };
 
+mod canonical_reed_solomon;
 mod cfw_lifecycle;
 mod cfw_reduction;
 mod cfw_to_whir_handoff;

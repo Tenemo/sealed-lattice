@@ -19,4 +19,15 @@ ineligible under the retained-tree scratch bound, while factors one, two, and
 four still require theorem closure, live transcript driving, authenticated
 restart, selected-size execution, and one reproducible scalar browser artifact.
 
+The reduced compact kernel chain now publishes all 24 response boundaries
+through the common authenticated checkpoint event chain, binding the exact
+schedule and response ordinal plus the combined construction-private and
+transcript cursor. Its focused owner covers genesis replay, continuation
+authority, exact target-cursor release, and changed-target refusal. This is
+kernel checkpoint-publication evidence only: browser custody does not yet
+append and replay the compact chain's authenticated live-object and deletion
+trailer, restore a live compact state at the target, or checkpoint internal CFW
+and WHIR safe boundaries. No selected-size durable-restart or release-WASM
+evidence follows from it.
+
 Raw cryptographic operations, proof witnesses, setup secrets, and decryption helpers remain internal.

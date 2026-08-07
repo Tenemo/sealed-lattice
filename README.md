@@ -259,25 +259,31 @@ explicit cross-epoch openings. Its exact batching error is therefore
 These are exact rational checks for the generated interactive catalog. They are
 not used as a substitute for the relaxed extraction theorem.
 
-The factor-one chronology now has a checked prefix knowledge state and a
-deterministic extractor transition for all 82 verifier moves. The catalog
-instantiates the exact CFW input, intermediate, and output relations; the
+The factor-one chronology now has a checked prefix-relation descriptor and
+extractor-step transition for all 82 verifier moves. The catalog instantiates
+the exact CFW input, intermediate, and output relation shapes; the
 `9 / |F|` initial check; 22 ordinary `8 / |F|` sumcheck rows; the final
 `8 / (|F| - 2)` row; the joint `2 / |F|` zero-evader row; and every odd-
 characteristic, mask-length, list-size-one, and sequential-composition
 hypothesis used from CFW Theorem 11.3. Each Reed-Solomon code uses its full
 message-plus-hiding dimension, the strict integer radius
-`floor((N - K - 1) / 2)`, canonical Berlekamp-Welch correction, and an explicit
-field-operation ceiling. The same owner checks 37 WHIR binary-fold MCA and
+`floor((N - K - 1) / 2)`, an executable canonical Berlekamp-Welch decoder, and
+an explicit field-operation ceiling. Focused owners recover zero, one, and the
+maximum permitted number of shared row errors, reject excess and malformed
+oracles, recompute concrete R1CS rows through verifier-owned matrices, and
+check decoded source and mask messages against every public linear claim. The
+same owner checks 37 WHIR binary-fold MCA and
 masked-sumcheck transitions, 15 exact adjacent relation boundaries, every
 challenge space, and every commitment-before-challenge barrier. Coordinated
 relation mutations that leave the two boundary copies equal are refused by
 independent reconstruction. The exact maximum per-move extraction error is
 carried into the conditional CDHZ arithmetic and remains at most `2^-266`.
-This is a static catalog result, not a semantic relaxed extractor: the owner
-does not implement CDHZ's knowledge-state predicate or deterministic `ERRBR`,
-execute the selected decoder, or prove the zero input- and output-implicit tuple
-dimensions. The separate construction owner records useful masking ranks and
+This is an executable decoder and endpoint-relation foundation, not a complete
+semantic relaxed extractor: the owner does not yet implement CDHZ's prefix-wise
+knowledge-state predicate or deterministic `ERRBR` at every prover move,
+execute the intermediate extracted-witness transitions, or prove the zero
+input- and output-implicit tuple dimensions. The separate construction owner
+records useful masking ranks and
 topology but does not yet close the exact production coefficient-to-view
 correspondence or ideal-uniform simulator. The canonical-byte owner supplies a
 static verifier-consumer map. The resulting CDHZ/Merkle arithmetic remains
@@ -907,8 +913,10 @@ framing coverage, production constructor coverage, and exact per-factor heap
 ledgers. The factor-one relaxed-theorem catalog enumerates all 82 transition
 labels, 15 relation identities, full-dimension code shapes, correction radii,
 list-size bounds, CFW errors, WHIR MCA terms, challenge dependencies, and an
-extraction-work ceiling. It does not implement or prove the semantic knowledge-
-state function and deterministic extractor required by CDHZ. The emitted-byte
+extraction-work ceiling. Its canonical decoder and concrete input/output
+relation predicates execute, but it does not implement or prove the prefix-wise
+semantic knowledge-state function, deterministic extractor, and intermediate
+witness transitions required by CDHZ. The emitted-byte
 owner maps static canonical regions and fixed-message candidates to verifier
 consumers and records conditional 98-, 95-, and 92-bit per-proof, public-key-
 union, and complete-inventory arithmetic under the ideal-QRO assumption. A live

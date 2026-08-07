@@ -16,10 +16,12 @@ static catalogs, canonical proof and public-input codecs, one salted Merkle
 commitment per logical response, and complete live-prefix query schedules for
 every production packing geometry. The factor-one relaxed-theorem, interactive
 masking, emitted-byte consumer, and conditional CDHZ/QROM modules are checked
-static catalogs. They do not yet supply semantic `KState`/`ERRBR`, independently
+development owners. The theorem owner now executes canonical correction and
+concrete input/output relation predicates, but does not yet supply prefix-wise
+semantic `KState`/`ERRBR` or intermediate witness transitions. Independently
 derived production coefficient-to-view matrices, an exact ideal-uniform
-simulator and deployed KMAC quantum-PRF hybrid, or one complete emitted
-production proof. The shared two-epoch mask oracle is
+simulator and deployed KMAC quantum-PRF hybrid, and one complete emitted
+production proof also remain absent. The shared two-epoch mask oracle is
 owned once by the canonical response catalog; its two later verifier-message
 groups open their sorted unique union through bounded canonical response counts.
 These are static development owners, not an accepted proof path.
