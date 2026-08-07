@@ -17,12 +17,12 @@ commitment per logical response, and complete deterministic test-message query
 schedules. These are static development owners, not an accepted proof path.
 
 The current packing-factor proof, provisional WASM-peak, and scratch triples
-are `(25,412,778, 383,173,896, 640,811,508)`,
-`(24,535,650, 415,776,128, 693,240,308)`,
-`(24,088,610, 482,330,704, 798,097,908)`, and
-`(23,964,002, 616,334,496, 1,078,341,144)` for factors one, two, four, and
+are `(26,436,090, 384,911,816, 640,811,508)`,
+`(25,518,898, 417,464,816, 693,240,308)`,
+`(24,815,706, 483,692,008, 798,097,908)`, and
+`(24,871,730, 617,926,352, 1,080,840,728)` for factors one, two, four, and
 eight. Factors one, two, and four remain below every absolute byte bound.
-Factor eight exceeds the scratch bound by `4,599,320` bytes under the complete
+Factor eight exceeds the scratch bound by `7,098,904` bytes under the complete
 retained-tree lifecycle and is not a static default. No factor is selected.
 The retained lifecycle keeps at most ten response trees and peaks at
 `52,952,832`, `105,381,632`, `210,239,232`, or `419,954,432` bytes. Its

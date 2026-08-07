@@ -276,8 +276,10 @@ independent reconstruction. The exact maximum per-move extraction error is
 carried into the conditional CDHZ arithmetic and remains at most `2^-266`.
 This closes the static relaxed extraction premise. The separate construction
 owner described below now closes interactive masking and leakage
-correspondence. Emitted-byte correspondence, complete CDHZ/Merkle composition,
-and QROM soundness remain open.
+correspondence. The canonical-byte owner described below now closes the static
+emitted-byte and verifier-consumer correspondence and feeds the complete
+CDHZ/Merkle arithmetic. Production-shaped small-chain integration, durable
+execution, and measured browser evidence remain open.
 
 The focused CDHZ owner now derives one complete, power-of-two-padded Merkle
 vector for every logical IOR response. The verifier derives distinct one-based
@@ -292,14 +294,35 @@ counts are `242,165`, `245,181`, `246,489`, and `250,241`.
 
 The exact conditional Theorem 6.10 arithmetic still uses `2^80 - 1`
 adversarial queries, work bound equal to that query bound, and the current
-uniform fixed-bit verifier messages. After the Theorem 11.3 factor of four,
-the recorded positive terms are at most `2^-96` for every packing. This is not
-an emitted-proof theorem: the checked extractor now supplies its exact maximum
-per-move error and interactive construction masking is checked separately, but
-the concrete prefix-digest plus fixed seed/block SHAKE256 graph still lacks
-complete emitted-byte CDHZ, Merkle, and QROM correspondence. The canonical proof encoder can now append one
-logical response at a time in verifier-owned order and release that response
-before accepting the next. It produces the same bytes as the batch encoder,
+uniform fixed-bit verifier messages. The exact five positive terms give a
+conservative 98-bit adaptive-QROM bound per standalone proof, 95 bits after the
+exact ten-public-key-proof union, and 92 bits under the conditional
+103-physical-proof inventory union. The last figure is a conservative
+multiplicity check, not permission for later packet families to inherit this
+standalone geometry. It remains above the 80-bit complete-partition rejection
+threshold. Classical soundness uses the same upper bound because classical
+adversaries are contained in the modeled quantum-random-oracle adversaries.
+The extraction-time owner records the exact scale inside the theorems' stated
+big-O bounds; it does not invent a hidden constant. Fixed, domain-separated
+SHAKE256 remains an explicit ideal 512-bit quantum-random-oracle assumption,
+not a proved concrete random oracle.
+
+The canonical-byte owner independently assigns every public-input header,
+binding, count, and field-value region and every proof header, response root,
+round salt, opened value, leaf salt, frontier count, dictionary, and reference
+region to its decoder, transcript, relation, Merkle, and protocol consumers.
+It separately partitions every fixed verifier-message candidate region among
+its bounded-rejection output consumers and checks distinct prefix, seed, block,
+leaf, and parent domains. A small live-transcript fixture commits a real salted
+Merkle response, derives its query schedule from the canonical public input and
+commitment prefix, transports the encoded bytes, derives the same message in a
+fresh verifier path, and refuses bound-section and structural mutations. This
+is emitted-byte correspondence evidence, not the complete production-shaped
+CFW/transpose/WHIR chain.
+
+The canonical proof encoder can append one logical response at a time in
+verifier-owned order and release that response before accepting the next. It
+produces the same bytes as the batch encoder,
 refuses incomplete or extra response sequences and globally duplicated leaf
 salts, and gives exact
 target-independent owned-heap payloads of `37,532,090`, `36,567,730`,
@@ -324,9 +347,10 @@ frontier coordinates, extracts them from those postorder bytes, and reconstructs
 the same root as the resident reference tree. The focused owner covers every
 node offset, irregular final chunks, wrong chunk lengths, truncation, and
 incomplete writer and scanner states. External-memory transaction driving,
-the selected-size response-value replay source, transcript-derived query
-hookup, authenticated tree restart, and full compact producer/verifier
-orchestration remain absent, so emitted-proof correspondence is still open.
+the selected-size response-value replay source, selected-size transcript
+driving, authenticated tree restart, and full production-shaped compact
+producer/verifier orchestration remain absent. The small live transcript closes
+the byte-map fixture only.
 
 One quintic execution requires 69 inner and 23 outer CFW mask oracles for the
 nonlinear R1CS reduction. Each WHIR execution derives seven internal sumcheck
@@ -367,10 +391,11 @@ canonical root from values, salts, and its minimal frontier; the interactive
 simulator consumes the exact public claims and abstract oracle queries. The
 deployed and quantum KMAC256 hybrids start from a fresh 512-bit browser-CSPRNG
 action root and separately charge root guessing, bounded rejection-sampler
-exhaustion, and 1,024-bit leaf-salt collisions. Concrete emitted multiproof and
-frontier programming, malicious or resettable verifier zero knowledge, full-
-family simulation, fixed-SHAKE justification, and QROM zero knowledge remain
-explicit refusals.
+exhaustion, and 1,024-bit leaf-salt collisions. Canonical emitted multiproof
+regions now have exact verifier consumers. Emitted Merkle-root and frontier
+programming, malicious or resettable verifier zero knowledge, full-family and
+complete-ceremony simulation, fixed-SHAKE justification, and QROM zero
+knowledge remain explicit refusals.
 
 An independently re-derived authenticated-source mapping now selects exactly
 202 half-polynomials from the existing production
@@ -637,7 +662,11 @@ public-input passes. That is `1,311,267,084`, `1,279,284,960`,
 before the small triangular root-and-salt prefixes. Including those prefixes,
 the total absorbed bytes are `1,311,716,936`, `1,279,713,280`,
 `1,247,710,152`, and `1,215,707,552`. The concrete prefix, seed, and block
-SHAKE256 call counts are `162,692`, `164,928`, `165,084`, and `165,752`.
+SHAKE256 call counts are `181,604`, `183,360`, `179,548`, and `183,288`.
+The independently reconciled fixed-message candidate-slot counts are
+`1,339,520`, `1,355,392`, `1,326,720`, and `1,358,464`; their seed-and-block
+call counts are `181,522`, `183,280`, `179,470`, and `183,212` before adding
+one prefix call per verifier move.
 These are static work counts, not browser timings, and are part of packing
 selection rather than hidden transcript overhead.
 
@@ -656,8 +685,8 @@ response values or a durable transcript lifecycle; target-layout
 controls are not yet complete; complete selected-size CFW execution, the production
 CFW-to-transpose handoff, selected-size transpose execution, and the WHIR
 invocation are absent; and the
-emitted proof/verifier path is not connected; the concrete
-QROM and measured lifecycle ledgers are incomplete; and none has current
+production-shaped proof/verifier path is not connected; the measured lifecycle
+ledger is incomplete; and none has current
 release-WASM browser work. The
 factor-eight one-attempt
 rejection-exhaustion union is at
@@ -721,13 +750,20 @@ ledgers. The factor-one relaxed theorem owner now independently reconstructs
 all 82 knowledge transitions, 15 exact relation boundaries, full-dimension
 code shapes, strict correction radii, list-size bounds, CFW errors, WHIR MCA
 terms, challenge dependencies, and its explicit extraction-work ceiling.
+The emitted-byte owner maps every canonical region and fixed-message candidate
+to its verifier consumer, closes the five-term CDHZ/Merkle sum under the ideal-
+QRO assumption, and records 98-, 95-, and 92-bit per-proof, public-key-union,
+and conditional complete-inventory bounds. A live small Merkle response derives
+its schedule from the canonical transcript and freshly verifies transported
+bytes with hostile mutations.
+
 The static gate remains closed because current generation does not select the
 compact profile or exercise it through a retained live authority, because row-
 source preparation has no authenticated cache recovery, and because the
 selected-size CFW execution, live CFW-to-transpose driving, selected-size
-transpose execution, WHIR invocation, emitted-proof and verifier integration,
-exact remaining CDHZ/Merkle/composition/QROM arithmetic, and independently
-measured lifecycle resources for the fixed bytes remain incomplete. The
+transpose execution, WHIR invocation, complete production-shaped small-chain
+integration, durable proof and verifier lifecycle, and independently measured
+resources for the fixed bytes remain incomplete. The
 construction-level interactive masking correspondence, canonical proof and
 public-input codecs,
 hostile decoder, one response commitment per logical IOR round, uniform fixed-bit
@@ -737,16 +773,17 @@ work ledger now exist.
 The next task is to close those owners one at a time with focused tests, not to
 run a prover or a complete test graph. Construction-level masking now
 reconciles every production coefficient-to-view map and the conditional entropy
-after preceding disclosures. The canonical logical transcript must next be
-mapped section by section to emitted bytes and every verifier consumer before
-the remaining CDHZ and QROM composition can authorize generation. Factors one,
-two, and four remain eligible engineering comparators
+after preceding disclosures. The next owner is one complete production-shaped
+small-geometry chain from authenticated source loading through compact
+assignment, CFW, transpose, retained response construction, CFW-to-WHIR
+handoff, WHIR, canonical encoding, and fresh transported-byte verification.
+Factors one, two, and four remain eligible engineering comparators
 for the same standalone relation and security target. Factor eight is retained
 only as a statically refused comparator under the current retained-tree
 lifecycle; the unimplemented 18-response recomputation alternative is not the
-next work item. No factor is selected. After emitted-byte, live-transcript, and
-authenticated-restart gates pass, factor one is the first
-selected-size execution target because it minimizes projected prover memory,
+next work item. No factor is selected. After the production-shaped small-chain
+and authenticated-restart gates pass, factor one is the first selected-size
+execution target because it minimizes projected prover memory,
 scratch, retained response-tree bytes, and butterfly work. Factors two and four
 need measurement only if factor-one verification or transport costs prove
 decisive. A passing bounded development slice does not change the 60-packet

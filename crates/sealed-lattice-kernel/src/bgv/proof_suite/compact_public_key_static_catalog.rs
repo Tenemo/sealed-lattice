@@ -37,6 +37,7 @@ use super::relation_plan::{
 mod cfw_lifecycle;
 mod cfw_reduction;
 mod cfw_to_whir_handoff;
+mod emitted_byte_correspondence;
 #[cfg(test)]
 mod external_mask_integration;
 mod lifecycle;
@@ -1181,6 +1182,7 @@ struct PackingStaticCatalog {
     masking_leakage: masking_leakage::PackingMaskingLeakageCorrespondence,
     interactive_soundness: soundness::PackingInteractiveSoundness,
     relaxed_round_by_round: relaxed_round_by_round::RelaxedRoundByRoundCatalog,
+    emitted_byte_correspondence: emitted_byte_correspondence::PackingEmittedByteCorrespondence,
     non_interactive_soundness: non_interactive_soundness::PackingNonInteractiveSoundness,
     proof_wire_geometry: CompactProofWireGeometry,
     proof_assembler_heap_geometry: CompactProofWireAssemblerHeapGeometry,
@@ -1444,6 +1446,16 @@ impl PackingStaticCatalog {
             public_input_wire_geometry,
             &uniform_verifier_randomness,
         )?;
+        let emitted_byte_correspondence =
+            emitted_byte_correspondence::PackingEmittedByteCorrespondence::derive(
+                &transcript_chronology,
+                &uniform_verifier_randomness,
+                &response_commitments,
+                &proof_wire_geometry,
+                public_input_wire_geometry,
+                &transcript_binding,
+                cfw_reduction,
+            )?;
         let non_interactive_soundness =
             non_interactive_soundness::PackingNonInteractiveSoundness::derive(
                 &transcript_chronology,
@@ -1451,6 +1463,7 @@ impl PackingStaticCatalog {
                 &response_commitments,
                 &transcript_binding,
                 &relaxed_round_by_round,
+                &emitted_byte_correspondence,
             )?;
         let maximum_proof_byte_length =
             u64::try_from(proof_wire_geometry.maximum_canonical_byte_length())
@@ -1618,6 +1631,7 @@ impl PackingStaticCatalog {
             masking_leakage,
             interactive_soundness,
             relaxed_round_by_round,
+            emitted_byte_correspondence,
             non_interactive_soundness,
             proof_wire_geometry,
             proof_assembler_heap_geometry,

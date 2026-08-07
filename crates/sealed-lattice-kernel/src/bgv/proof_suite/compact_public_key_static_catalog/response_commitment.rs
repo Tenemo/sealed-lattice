@@ -42,7 +42,7 @@ const WHIR_AUXILIARY_TARGET_COUNT: u64 = 1;
 const WHIR_BASE_MASKED_CLAIM_COUNT: u64 = 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ResponseComponentRole {
+pub(super) enum ResponseComponentRole {
     PreChallengeSource,
     CfwInnerMasks,
     MainSource,
@@ -99,13 +99,13 @@ enum ResponseComponentRole {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct ResponseComponentLedger {
-    role: ResponseComponentRole,
-    first_leaf_ordinal: u64,
-    leaf_count: u64,
-    queried_leaf_count: u64,
-    query_selection: CompactResponseQuerySelection,
-    value_byte_length_per_leaf: u64,
+pub(super) struct ResponseComponentLedger {
+    pub(super) role: ResponseComponentRole,
+    pub(super) first_leaf_ordinal: u64,
+    pub(super) leaf_count: u64,
+    pub(super) queried_leaf_count: u64,
+    pub(super) query_selection: CompactResponseQuerySelection,
+    pub(super) value_byte_length_per_leaf: u64,
 }
 
 impl ResponseComponentLedger {
@@ -115,14 +115,14 @@ impl ResponseComponentLedger {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct ResponseVectorLedger {
-    ordinal: u32,
-    vector_commitment_oracle_identifier: u32,
-    verifier_move_roles: Vec<VerifierMoveRole>,
-    components: Vec<ResponseComponentLedger>,
-    meaningful_leaf_count: u64,
-    merkle_leaf_count: u64,
-    queried_leaf_count: u64,
+pub(super) struct ResponseVectorLedger {
+    pub(super) ordinal: u32,
+    pub(super) vector_commitment_oracle_identifier: u32,
+    pub(super) verifier_move_roles: Vec<VerifierMoveRole>,
+    pub(super) components: Vec<ResponseComponentLedger>,
+    pub(super) meaningful_leaf_count: u64,
+    pub(super) merkle_leaf_count: u64,
+    pub(super) queried_leaf_count: u64,
     queried_value_byte_length: u64,
     fiat_shamir_round_salt_byte_length: u64,
     transported_leaf_salt_byte_length: u64,
@@ -549,6 +549,10 @@ impl PackingResponseCommitmentCatalog {
 
     pub(super) const fn maximum_opening_parent_hash_count(&self) -> u64 {
         self.maximum_opening_parent_hash_count
+    }
+
+    pub(super) fn responses(&self) -> &[ResponseVectorLedger] {
+        &self.responses
     }
 
     pub(super) fn production_wire_geometries(

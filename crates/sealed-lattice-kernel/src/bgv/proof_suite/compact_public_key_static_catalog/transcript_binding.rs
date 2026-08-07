@@ -288,7 +288,7 @@ mod tests {
                     commitment_prefix_entry_absorption_count: 3_403,
                     total_prefix_payload_byte_length: 1_311_716_936,
                     maximum_prefix_payload_byte_length: 16_001_894,
-                    total_concrete_fiat_shamir_hash_query_count: 162_692,
+                    total_concrete_fiat_shamir_hash_query_count: 181_604,
                 },
                 TranscriptWorkSnapshot {
                     packing_factor: 2,
@@ -297,7 +297,7 @@ mod tests {
                     commitment_prefix_entry_absorption_count: 3_240,
                     total_prefix_payload_byte_length: 1_279_713_280,
                     maximum_prefix_payload_byte_length: 16_001_630,
-                    total_concrete_fiat_shamir_hash_query_count: 164_928,
+                    total_concrete_fiat_shamir_hash_query_count: 183_360,
                 },
                 TranscriptWorkSnapshot {
                     packing_factor: 4,
@@ -306,7 +306,7 @@ mod tests {
                     commitment_prefix_entry_absorption_count: 3_081,
                     total_prefix_payload_byte_length: 1_247_710_152,
                     maximum_prefix_payload_byte_length: 16_001_366,
-                    total_concrete_fiat_shamir_hash_query_count: 165_084,
+                    total_concrete_fiat_shamir_hash_query_count: 179_548,
                 },
                 TranscriptWorkSnapshot {
                     packing_factor: 8,
@@ -315,7 +315,7 @@ mod tests {
                     commitment_prefix_entry_absorption_count: 2_926,
                     total_prefix_payload_byte_length: 1_215_707_552,
                     maximum_prefix_payload_byte_length: 16_001_102,
-                    total_concrete_fiat_shamir_hash_query_count: 165_752,
+                    total_concrete_fiat_shamir_hash_query_count: 183_288,
                 },
             ]
         );

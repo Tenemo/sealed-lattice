@@ -23,9 +23,9 @@ use super::{
 };
 use crate::foundation::{CanonicalItem, Hash512, hash_foundation_tuple_512};
 
-const COMPACT_RESPONSE_LEAF_HASH_DOMAIN: &str =
+pub(crate) const COMPACT_RESPONSE_LEAF_HASH_DOMAIN: &str =
     "sealed-lattice/common-proof/compact-response/leaf/v1";
-const COMPACT_RESPONSE_MERKLE_NODE_HASH_DOMAIN: &str =
+pub(crate) const COMPACT_RESPONSE_MERKLE_NODE_HASH_DOMAIN: &str =
     "sealed-lattice/common-proof/compact-response/merkle-node/v1";
 pub(crate) const COMPACT_RESPONSE_TREE_STORAGE_CHUNK_BYTE_LENGTH: usize = 1_048_576;
 
@@ -1413,15 +1413,19 @@ mod tests {
     }
 
     fn response_geometry() -> CompactResponseMerkleGeometry {
+        response_geometry_for_ordinal(0)
+    }
+
+    fn response_geometry_for_ordinal(response_ordinal: u32) -> CompactResponseMerkleGeometry {
         CompactResponseMerkleGeometry::new(
-            0,
+            response_ordinal,
             vec![
                 CompactResponseComponentGeometry::new(
                     0,
                     2,
                     1,
                     CompactResponseQuerySelection::VerifierMessageDistinctGroup {
-                        logical_verifier_move_ordinal: 0,
+                        logical_verifier_move_ordinal: response_ordinal,
                         distinct_query_group_ordinal: 0,
                     },
                     CompactResponseLeafValueKind::BaseField,
@@ -1429,18 +1433,18 @@ mod tests {
                 ),
                 CompactResponseComponentGeometry::new(
                     2,
-                    3,
+                    4,
                     2,
                     CompactResponseQuerySelection::VerifierMessageDistinctGroup {
-                        logical_verifier_move_ordinal: 0,
+                        logical_verifier_move_ordinal: response_ordinal,
                         distinct_query_group_ordinal: 1,
                     },
                     CompactResponseLeafValueKind::ExtensionField,
                     1,
                 ),
                 CompactResponseComponentGeometry::new(
-                    5,
-                    3,
+                    6,
+                    2,
                     0,
                     CompactResponseQuerySelection::Unqueried,
                     CompactResponseLeafValueKind::Padding,
@@ -1458,7 +1462,7 @@ mod tests {
             OwnedLeafValue::ExtensionField(vec![extension(23)]),
             OwnedLeafValue::ExtensionField(vec![extension(29)]),
             OwnedLeafValue::ExtensionField(vec![extension(31)]),
-            OwnedLeafValue::Padding,
+            OwnedLeafValue::ExtensionField(vec![extension(37)]),
             OwnedLeafValue::Padding,
             OwnedLeafValue::Padding,
         ]
@@ -1533,7 +1537,7 @@ mod tests {
             1,
             vec![
                 FixedUniformDistinctQueryGeometry::new(2, 1),
-                FixedUniformDistinctQueryGeometry::new(3, 2),
+                FixedUniformDistinctQueryGeometry::new(4, 2),
             ],
         )
         .expect("small verifier-message geometry")
@@ -1795,7 +1799,7 @@ mod tests {
             );
         }
 
-        for malformed_queries in [&[2, 0, 4][..], &[0, 0, 4], &[0, 2, 5], &[0, 2, 8]] {
+        for malformed_queries in [&[2, 0, 4][..], &[0, 0, 4], &[0, 2, 6], &[0, 2, 8]] {
             assert_eq!(
                 verify_decoded_compact_response_opening(
                     &geometry,
@@ -1819,8 +1823,7 @@ mod tests {
             ),
             Err(CompactResponseMerkleError::RootMismatch)
         );
-        let changed_response_geometry =
-            CompactResponseMerkleGeometry::new(1, geometry.components.clone()).unwrap();
+        let changed_response_geometry = response_geometry_for_ordinal(1);
         assert_eq!(
             verify_decoded_compact_response_opening(
                 &changed_response_geometry,
@@ -1874,10 +1877,11 @@ mod tests {
             )
             .unwrap()
         );
+        let next_response_geometry = response_geometry_for_ordinal(1);
         assert_ne!(
             parent,
             compact_response_merkle_parent_digest(
-                &CompactResponseMerkleGeometry::new(1, geometry.components.clone()).unwrap(),
+                &next_response_geometry,
                 1,
                 0,
                 base_digest,

@@ -4,9 +4,10 @@
 //! message masks, randomized encodings, fresh base-case mirrors, and derived
 //! linear images; proves the conditional rank of every affine verifier view;
 //! and reconciles the commitment and opening topology with the checked
-//! transcript chronology. The construction theorem is interactive. Concrete
-//! emitted multiproof bytes and every compiled or QROM zero-knowledge claim
-//! remain typed refusals rather than being inferred from this ledger.
+//! transcript chronology. The construction theorem is interactive. Canonical
+//! emitted multiproof regions are mapped by the separate byte-correspondence
+//! owner, while root/frontier programming and every compiled or QROM
+//! zero-knowledge claim remain typed refusals rather than being inferred here.
 
 use num_bigint::BigUint;
 use num_traits::One;
@@ -368,7 +369,6 @@ enum MaskingPrivacyRefusal {
     CompleteCeremonySimulation,
     QromZeroKnowledge,
     FixedShake256RandomOracleJustification,
-    EmittedCanonicalMultiproofCorrespondence,
     EmittedMerkleRootAndFrontierProgramming,
 }
 
@@ -1389,7 +1389,6 @@ fn privacy_refusals() -> Vec<MaskingPrivacyRefusal> {
         MaskingPrivacyRefusal::CompleteCeremonySimulation,
         MaskingPrivacyRefusal::QromZeroKnowledge,
         MaskingPrivacyRefusal::FixedShake256RandomOracleJustification,
-        MaskingPrivacyRefusal::EmittedCanonicalMultiproofCorrespondence,
         MaskingPrivacyRefusal::EmittedMerkleRootAndFrontierProgramming,
     ]
 }

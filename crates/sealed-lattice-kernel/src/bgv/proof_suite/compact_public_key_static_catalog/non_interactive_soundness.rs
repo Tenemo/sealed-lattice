@@ -6,22 +6,25 @@
 //! relaxed round-by-round extractor theorem rather than the numerical event
 //! union directly.
 //! The fixed-bit layout, bounded-rejection decoder, and complete SHAKE256
-//! schedule are production-owned and independently reconciled. Typed refusals
-//! keep the missing emitted-proof correspondence, or any producer assertion,
-//! from authorizing proof generation. Construction-level masking is owned and
-//! checked separately before this ledger is derived.
+//! schedule are production-owned and independently reconciled with the
+//! canonical proof and public-input byte map before this ledger is derived.
+//! Fixed SHAKE256 is still an explicit ideal quantum-random-oracle assumption;
+//! this arithmetic does not claim to prove that assumption. Construction-level
+//! masking is owned and checked separately.
 
 use num_bigint::BigUint;
 use num_traits::One;
 
 use super::CompactStaticCatalogError;
+use super::emitted_byte_correspondence::PackingEmittedByteCorrespondence;
 use super::lifecycle::ExactProbability;
 use super::relaxed_round_by_round::RelaxedRoundByRoundCatalog;
 use super::response_commitment::PackingResponseCommitmentCatalog;
 use super::transcript_binding::PackingTranscriptBindingLedger;
 use super::transcript_chronology::PackingTranscriptChronology;
 use super::uniform_verifier_randomness::PackingUniformVerifierRandomness;
-use crate::foundation::DECLARED_ADVERSARIAL_QUERY_BUDGET;
+use crate::bgv::proof_suite::selected_accounting::resource_accounting::derive_selected_proof_family_application_inventory;
+use crate::foundation::{DECLARED_ADVERSARIAL_QUERY_BUDGET, ProofApplicationSlotCeilings};
 
 const CDHZ_STATE_RESTORATION_MULTIPLIER: u64 = 80;
 const CDHZ_COMPOSITION_STATE_MULTIPLIER: u64 = 4;
@@ -30,10 +33,24 @@ const CDHZ_MERKLE_OFFLINE_WORK_MULTIPLIER: u64 = 160;
 const CDHZ_MERKLE_OFFLINE_QUERY_MULTIPLIER: u64 = 16;
 const CDHZ_MERKLE_ONLINE_WORK_MULTIPLIER: u64 = 240;
 const MERKLE_RANDOM_ORACLE_OUTPUT_BIT_LENGTH: u64 = 512;
+const FIAT_SHAMIR_ROUND_SALT_BIT_LENGTH: u64 = 512;
+const REQUIRED_PER_PROOF_SOUNDNESS_SECURITY_LEVEL: u32 = 96;
+const REQUIRED_COMPLETE_ACTION_SOUNDNESS_SECURITY_LEVEL: u32 = 80;
+const MAXIMUM_REPORTED_BINARY_SECURITY_LEVEL: u32 = 512;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum NonInteractiveCompletionRefusal {
-    MissingEmittedProofCorrespondence,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CdhzCompositionVariant {
+    AppendixATrivialImplicitInputAndOutput,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RandomOracleModelAssumption {
+    FixedDomainSeparatedShake256IsAnIdealQuantumRandomOracle,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ClassicalSoundnessDerivation {
+    ClassicalAdversariesAreContainedInQuantumRandomOracleAdversaries,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -53,6 +70,8 @@ struct ConditionalCdhzStateRestorationArithmetic {
     verifier_randomness_term: ExactProbability,
     conditional_composed_round_by_round_term: ExactProbability,
     conditional_composed_verifier_randomness_term: ExactProbability,
+    extraction_field_operation_scale_without_hidden_constant: BigUint,
+    theorem_extraction_time_has_hidden_constant: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -78,6 +97,7 @@ struct ConditionalCdhzMerkleArithmetic {
     fixed_merkle_offline_term: ExactProbability,
     merkle_commutativity_term: ExactProbability,
     extraction_work_scale_without_hidden_constant: BigUint,
+    theorem_extraction_time_has_hidden_constant: bool,
 }
 
 impl ConditionalCdhzMerkleArithmetic {
@@ -215,6 +235,7 @@ impl ConditionalCdhzMerkleArithmetic {
             fixed_merkle_offline_term,
             merkle_commutativity_term,
             extraction_work_scale_without_hidden_constant,
+            theorem_extraction_time_has_hidden_constant: true,
         })
     }
 }
@@ -251,6 +272,10 @@ impl ConditionalCdhzStateRestorationArithmetic {
             round_by_round_term.scale(&BigUint::from(CDHZ_COMPOSITION_STATE_MULTIPLIER))?;
         let conditional_composed_verifier_randomness_term =
             verifier_randomness_term.scale(&BigUint::from(CDHZ_COMPOSITION_STATE_MULTIPLIER))?;
+        let extraction_field_operation_scale_without_hidden_constant =
+            BigUint::from(logical_round_count)
+                * BigUint::from(relaxed_round_by_round.total_extraction_field_operation_bound())
+                + BigUint::from(FIAT_SHAMIR_ROUND_SALT_BIT_LENGTH);
 
         Ok(Self {
             adversarial_query_bound,
@@ -262,19 +287,35 @@ impl ConditionalCdhzStateRestorationArithmetic {
             verifier_randomness_term,
             conditional_composed_round_by_round_term,
             conditional_composed_verifier_randomness_term,
+            extraction_field_operation_scale_without_hidden_constant,
+            theorem_extraction_time_has_hidden_constant: true,
         })
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct PackingNonInteractiveSoundness {
+    composition_variant: CdhzCompositionVariant,
+    random_oracle_model_assumption: RandomOracleModelAssumption,
+    classical_soundness_derivation: ClassicalSoundnessDerivation,
     conditional_state_restoration: ConditionalCdhzStateRestorationArithmetic,
     conditional_cdhz_merkle: ConditionalCdhzMerkleArithmetic,
+    per_proof_adaptive_qrom_soundness_bound: ExactProbability,
+    per_proof_classical_soundness_bound: ExactProbability,
+    per_proof_binary_security_level: u32,
+    public_key_share_physical_proof_count: u32,
+    public_key_share_qrom_union_bound: ExactProbability,
+    public_key_share_binary_security_level: u32,
+    selected_inventory_physical_proof_count: u32,
+    selected_inventory_logical_relation_instance_count: u32,
+    selected_inventory_conditional_qrom_union_bound: ExactProbability,
+    selected_inventory_conditional_binary_security_level: u32,
+    total_extraction_work_scale_without_hidden_constant: BigUint,
+    theorem_extraction_time_has_hidden_constant: bool,
     merkle_random_oracle_output_bit_length: u64,
     bcs_response_root_count: u64,
     proof_oracle_query_count: u64,
     maximum_proof_oracle_length: u64,
-    completion_refusals: Vec<NonInteractiveCompletionRefusal>,
 }
 
 impl PackingNonInteractiveSoundness {
@@ -284,42 +325,23 @@ impl PackingNonInteractiveSoundness {
         response_commitments: &PackingResponseCommitmentCatalog,
         transcript_binding: &PackingTranscriptBindingLedger,
         relaxed_round_by_round: &RelaxedRoundByRoundCatalog,
+        emitted_byte_correspondence: &PackingEmittedByteCorrespondence,
     ) -> Result<Self, CompactStaticCatalogError> {
-        let conditional_state_restoration = ConditionalCdhzStateRestorationArithmetic::derive(
-            chronology,
-            uniform_verifier_randomness,
-            relaxed_round_by_round,
-        )?;
-        let conditional_cdhz_merkle = ConditionalCdhzMerkleArithmetic::derive(
+        let ledger = Self::derive_without_check(
             chronology,
             uniform_verifier_randomness,
             response_commitments,
             transcript_binding,
             relaxed_round_by_round,
+            emitted_byte_correspondence,
         )?;
-        if response_commitments.bcs_response_root_count()
-            != chronology.logical_verifier_move_count()?
-        {
-            return Err(CompactStaticCatalogError::InvalidGeometry);
-        }
-
-        let ledger = Self {
-            conditional_state_restoration,
-            conditional_cdhz_merkle,
-            merkle_random_oracle_output_bit_length: MERKLE_RANDOM_ORACLE_OUTPUT_BIT_LENGTH,
-            bcs_response_root_count: response_commitments.bcs_response_root_count(),
-            proof_oracle_query_count: response_commitments.proof_oracle_query_count(),
-            maximum_proof_oracle_length: response_commitments.maximum_proof_oracle_length(),
-            completion_refusals: vec![
-                NonInteractiveCompletionRefusal::MissingEmittedProofCorrespondence,
-            ],
-        };
         ledger.check(
             chronology,
             uniform_verifier_randomness,
             response_commitments,
             transcript_binding,
             relaxed_round_by_round,
+            emitted_byte_correspondence,
         )?;
         Ok(ledger)
     }
@@ -331,6 +353,7 @@ impl PackingNonInteractiveSoundness {
         response_commitments: &PackingResponseCommitmentCatalog,
         transcript_binding: &PackingTranscriptBindingLedger,
         relaxed_round_by_round: &RelaxedRoundByRoundCatalog,
+        emitted_byte_correspondence: &PackingEmittedByteCorrespondence,
     ) -> Result<(), CompactStaticCatalogError> {
         let expected_state = ConditionalCdhzStateRestorationArithmetic::derive(
             chronology,
@@ -350,27 +373,49 @@ impl PackingNonInteractiveSoundness {
             response_commitments,
             transcript_binding,
             relaxed_round_by_round,
+            emitted_byte_correspondence,
         )?;
         if self != &expected
             || self.conditional_state_restoration != expected_state
             || self.conditional_cdhz_merkle != expected_cdhz_merkle
-            || self.completion_refusals.is_empty()
+            || self.composition_variant
+                != CdhzCompositionVariant::AppendixATrivialImplicitInputAndOutput
+            || self.random_oracle_model_assumption
+                != RandomOracleModelAssumption::FixedDomainSeparatedShake256IsAnIdealQuantumRandomOracle
+            || self.classical_soundness_derivation
+                != ClassicalSoundnessDerivation::ClassicalAdversariesAreContainedInQuantumRandomOracleAdversaries
+            || self.per_proof_classical_soundness_bound
+                != self.per_proof_adaptive_qrom_soundness_bound
+            || self.per_proof_binary_security_level
+                < REQUIRED_PER_PROOF_SOUNDNESS_SECURITY_LEVEL
+            || self.public_key_share_physical_proof_count != 10
+            || self.selected_inventory_physical_proof_count != 103
+            || self.selected_inventory_logical_relation_instance_count != 159
+            || !self.theorem_extraction_time_has_hidden_constant
+            || !self
+                .conditional_state_restoration
+                .theorem_extraction_time_has_hidden_constant
+            || !self
+                .conditional_cdhz_merkle
+                .theorem_extraction_time_has_hidden_constant
             || self.merkle_random_oracle_output_bit_length != MERKLE_RANDOM_ORACLE_OUTPUT_BIT_LENGTH
             || self.bcs_response_root_count != chronology.logical_verifier_move_count()?
             || self.proof_oracle_query_count == 0
             || self.maximum_proof_oracle_length == 0
-            || !factored_probability_sum_is_at_most_inverse_power_of_two(
-                &[
-                    &self.conditional_cdhz_merkle.fixed_round_by_round_state_term,
-                    &self
-                        .conditional_cdhz_merkle
-                        .fixed_verifier_randomness_state_term,
-                    &self.conditional_cdhz_merkle.maximum_work_term,
-                    &self.conditional_cdhz_merkle.fixed_merkle_offline_term,
-                    &self.conditional_cdhz_merkle.merkle_commutativity_term,
-                ],
-                96,
-            )
+            || emitted_byte_correspondence.total_concrete_fiat_shamir_hash_query_count()
+                != transcript_binding.total_concrete_fiat_shamir_hash_query_count()
+            || self.per_proof_binary_security_level
+                != conservative_binary_security_level(
+                    &self.per_proof_adaptive_qrom_soundness_bound,
+                )
+            || self.public_key_share_binary_security_level
+                != conservative_binary_security_level(&self.public_key_share_qrom_union_bound)
+            || self.selected_inventory_conditional_binary_security_level
+                != conservative_binary_security_level(
+                    &self.selected_inventory_conditional_qrom_union_bound,
+                )
+            || self.selected_inventory_conditional_binary_security_level
+                < REQUIRED_COMPLETE_ACTION_SOUNDNESS_SECURITY_LEVEL
         {
             return Err(CompactStaticCatalogError::InvalidGeometry);
         }
@@ -383,6 +428,7 @@ impl PackingNonInteractiveSoundness {
         response_commitments: &PackingResponseCommitmentCatalog,
         transcript_binding: &PackingTranscriptBindingLedger,
         relaxed_round_by_round: &RelaxedRoundByRoundCatalog,
+        emitted_byte_correspondence: &PackingEmittedByteCorrespondence,
     ) -> Result<Self, CompactStaticCatalogError> {
         let conditional_state_restoration = ConditionalCdhzStateRestorationArithmetic::derive(
             chronology,
@@ -396,16 +442,73 @@ impl PackingNonInteractiveSoundness {
             transcript_binding,
             relaxed_round_by_round,
         )?;
+        if response_commitments.bcs_response_root_count()
+            != chronology.logical_verifier_move_count()?
+            || emitted_byte_correspondence.total_concrete_fiat_shamir_hash_query_count()
+                != transcript_binding.total_concrete_fiat_shamir_hash_query_count()
+        {
+            return Err(CompactStaticCatalogError::InvalidGeometry);
+        }
+        let per_proof_adaptive_qrom_soundness_bound = sum_probabilities(&[
+            &conditional_cdhz_merkle.fixed_round_by_round_state_term,
+            &conditional_cdhz_merkle.fixed_verifier_randomness_state_term,
+            &conditional_cdhz_merkle.maximum_work_term,
+            &conditional_cdhz_merkle.fixed_merkle_offline_term,
+            &conditional_cdhz_merkle.merkle_commutativity_term,
+        ])?;
+        let inventory = derive_selected_proof_family_application_inventory()
+            .map_err(|_| CompactStaticCatalogError::InvalidGeometry)?;
+        let public_key_share_physical_proof_count = inventory
+            .family_entry(
+                ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+            )
+            .ok_or(CompactStaticCatalogError::InvalidGeometry)?
+            .physical_proof_application_count();
+        let selected_inventory_physical_proof_count = inventory
+            .total_physical_proof_application_count()
+            .map_err(|_| CompactStaticCatalogError::InvalidGeometry)?;
+        let selected_inventory_logical_relation_instance_count = inventory
+            .total_logical_relation_instance_count()
+            .map_err(|_| CompactStaticCatalogError::InvalidGeometry)?;
+        let public_key_share_qrom_union_bound = per_proof_adaptive_qrom_soundness_bound
+            .scale(&BigUint::from(public_key_share_physical_proof_count))?;
+        let selected_inventory_conditional_qrom_union_bound =
+            per_proof_adaptive_qrom_soundness_bound
+                .scale(&BigUint::from(selected_inventory_physical_proof_count))?;
+        let total_extraction_work_scale_without_hidden_constant = &conditional_state_restoration
+            .extraction_field_operation_scale_without_hidden_constant
+            + &conditional_cdhz_merkle.extraction_work_scale_without_hidden_constant;
+        let per_proof_binary_security_level =
+            conservative_binary_security_level(&per_proof_adaptive_qrom_soundness_bound);
+        let public_key_share_binary_security_level =
+            conservative_binary_security_level(&public_key_share_qrom_union_bound);
+        let selected_inventory_conditional_binary_security_level =
+            conservative_binary_security_level(&selected_inventory_conditional_qrom_union_bound);
         Ok(Self {
+            composition_variant: CdhzCompositionVariant::AppendixATrivialImplicitInputAndOutput,
+            random_oracle_model_assumption:
+                RandomOracleModelAssumption::FixedDomainSeparatedShake256IsAnIdealQuantumRandomOracle,
+            classical_soundness_derivation:
+                ClassicalSoundnessDerivation::ClassicalAdversariesAreContainedInQuantumRandomOracleAdversaries,
             conditional_state_restoration,
             conditional_cdhz_merkle,
+            per_proof_classical_soundness_bound:
+                per_proof_adaptive_qrom_soundness_bound.clone(),
+            per_proof_adaptive_qrom_soundness_bound,
+            per_proof_binary_security_level,
+            public_key_share_physical_proof_count,
+            public_key_share_qrom_union_bound,
+            public_key_share_binary_security_level,
+            selected_inventory_physical_proof_count,
+            selected_inventory_logical_relation_instance_count,
+            selected_inventory_conditional_qrom_union_bound,
+            selected_inventory_conditional_binary_security_level,
+            total_extraction_work_scale_without_hidden_constant,
+            theorem_extraction_time_has_hidden_constant: true,
             merkle_random_oracle_output_bit_length: MERKLE_RANDOM_ORACLE_OUTPUT_BIT_LENGTH,
             bcs_response_root_count: response_commitments.bcs_response_root_count(),
             proof_oracle_query_count: response_commitments.proof_oracle_query_count(),
             maximum_proof_oracle_length: response_commitments.maximum_proof_oracle_length(),
-            completion_refusals: vec![
-                NonInteractiveCompletionRefusal::MissingEmittedProofCorrespondence,
-            ],
         })
     }
 }
@@ -419,6 +522,23 @@ fn power_of_two(bit_length: u64) -> Result<BigUint, CompactStaticCatalogError> {
 fn checked_u64_add(left: u64, right: u64) -> Result<u64, CompactStaticCatalogError> {
     left.checked_add(right)
         .ok_or(CompactStaticCatalogError::ArithmeticOverflow)
+}
+
+fn sum_probabilities(
+    terms: &[&ExactProbability],
+) -> Result<ExactProbability, CompactStaticCatalogError> {
+    let mut terms = terms.iter();
+    let first = terms
+        .next()
+        .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
+    terms.try_fold((*first).clone(), |sum, term| sum.add(term))
+}
+
+fn conservative_binary_security_level(probability: &ExactProbability) -> u32 {
+    (1..=MAXIMUM_REPORTED_BINARY_SECURITY_LEVEL)
+        .take_while(|level| probability.is_at_most_inverse_power_of_two(*level as usize))
+        .last()
+        .unwrap_or(0)
 }
 
 fn factored_probability_sum_is_at_most_inverse_power_of_two(
@@ -450,7 +570,7 @@ mod tests {
     use crate::bgv::proof_suite::compact_public_key_static_catalog::CompactPublicKeyStaticCatalog;
 
     #[test]
-    fn response_geometry_closes_before_the_remaining_cdhz_owners() {
+    fn every_factor_closes_the_exact_cdhz_arithmetic_and_inventory_multiplicities() {
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
         let expected_logical_round_counts = [82, 80, 78, 76];
@@ -475,7 +595,12 @@ mod tests {
             let expected_maximum_leaf_value_byte_length =
                 expected_maximum_leaf_value_byte_lengths[factor_ordinal];
             let ledger = &factor.non_interactive_soundness;
-            assert_eq!(ledger.completion_refusals.len(), 1);
+            assert_eq!(ledger.per_proof_binary_security_level, 98);
+            assert_eq!(ledger.public_key_share_binary_security_level, 95);
+            assert_eq!(
+                ledger.selected_inventory_conditional_binary_security_level,
+                92
+            );
             assert_eq!(ledger.bcs_response_root_count, expected_logical_round_count);
             assert_eq!(
                 ledger.proof_oracle_query_count,
@@ -547,11 +672,61 @@ mod tests {
                 ],
                 96,
             ));
+            assert_eq!(
+                ledger.per_proof_adaptive_qrom_soundness_bound,
+                sum_probabilities(&[
+                    &ledger
+                        .conditional_cdhz_merkle
+                        .fixed_round_by_round_state_term,
+                    &ledger
+                        .conditional_cdhz_merkle
+                        .fixed_verifier_randomness_state_term,
+                    &ledger.conditional_cdhz_merkle.maximum_work_term,
+                    &ledger.conditional_cdhz_merkle.fixed_merkle_offline_term,
+                    &ledger.conditional_cdhz_merkle.merkle_commutativity_term,
+                ])
+                .expect("exact five-term CDHZ sum")
+            );
+            assert_eq!(ledger.public_key_share_physical_proof_count, 10);
+            assert_eq!(ledger.selected_inventory_physical_proof_count, 103);
+            assert_eq!(
+                ledger.selected_inventory_logical_relation_instance_count,
+                159
+            );
+            assert_eq!(
+                ledger.public_key_share_qrom_union_bound,
+                ledger
+                    .per_proof_adaptive_qrom_soundness_bound
+                    .scale(&BigUint::from(10_u8))
+                    .expect("public-key-share proof union")
+            );
+            assert_eq!(
+                ledger.selected_inventory_conditional_qrom_union_bound,
+                ledger
+                    .per_proof_adaptive_qrom_soundness_bound
+                    .scale(&BigUint::from(103_u8))
+                    .expect("conditional selected-inventory union")
+            );
             assert!(
                 ledger
                     .conditional_cdhz_merkle
                     .extraction_work_scale_without_hidden_constant
                     > BigUint::one()
+            );
+            assert!(
+                ledger
+                    .conditional_state_restoration
+                    .extraction_field_operation_scale_without_hidden_constant
+                    > BigUint::one()
+            );
+            assert_eq!(
+                ledger.total_extraction_work_scale_without_hidden_constant,
+                &ledger
+                    .conditional_state_restoration
+                    .extraction_field_operation_scale_without_hidden_constant
+                    + &ledger
+                        .conditional_cdhz_merkle
+                        .extraction_work_scale_without_hidden_constant
             );
             assert_eq!(
                 ledger
@@ -575,24 +750,5 @@ mod tests {
                 96,
             ));
         }
-    }
-
-    #[test]
-    fn non_interactive_ledger_rejects_a_producer_supplied_completion_change() {
-        let catalog = CompactPublicKeyStaticCatalog::derive()
-            .expect("compact public-key static packing ledger");
-        let factor = &catalog.factor_catalogs[3];
-        let mut ledger = factor.non_interactive_soundness.clone();
-        ledger.completion_refusals.clear();
-        assert_eq!(
-            ledger.check(
-                &factor.transcript_chronology,
-                &factor.uniform_verifier_randomness,
-                &factor.response_commitments,
-                &factor.transcript_binding,
-                &factor.relaxed_round_by_round,
-            ),
-            Err(CompactStaticCatalogError::InvalidGeometry)
-        );
     }
 }

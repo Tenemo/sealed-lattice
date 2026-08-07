@@ -20,18 +20,19 @@ use super::fixed_uniform_verifier_message::FixedUniformVerifierMessageGeometry;
 use super::{COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_BYTE_LENGTH};
 use crate::foundation::Hash512;
 
-const COMPACT_PROOF_WIRE_MAGIC: [u8; 8] = *b"SLCPRF01";
-const COMPACT_PUBLIC_INPUT_WIRE_MAGIC: [u8; 8] = *b"SLCPUB01";
+pub(crate) const COMPACT_PROOF_WIRE_MAGIC: [u8; 8] = *b"SLCPRF01";
+pub(crate) const COMPACT_PUBLIC_INPUT_WIRE_MAGIC: [u8; 8] = *b"SLCPUB01";
 const MERKLE_DIGEST_BYTE_LENGTH: usize = Hash512::BYTE_LENGTH;
 /// CDHZ exposes the Fiat-Shamir salt size as a construction parameter. The
 /// compact construction fixes it to the existing 512-bit transcript width.
 /// This public round salt is independent of the 128-byte secret-leaf salt.
 pub(crate) const COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH: usize = Hash512::BYTE_LENGTH;
-const FRONTIER_DICTIONARY_REFERENCE_BYTE_LENGTH: usize = size_of::<u32>();
-const PROOF_FIXED_HEADER_BYTE_LENGTH: usize =
+pub(crate) const FRONTIER_DICTIONARY_REFERENCE_BYTE_LENGTH: usize = size_of::<u32>();
+pub(crate) const PROOF_FIXED_HEADER_BYTE_LENGTH: usize =
     COMPACT_PROOF_WIRE_MAGIC.len() + size_of::<u16>() + size_of::<u32>();
-const PUBLIC_INPUT_BINDING_COUNT: usize = 4;
-const PUBLIC_INPUT_FIXED_HEADER_BYTE_LENGTH: usize = COMPACT_PUBLIC_INPUT_WIRE_MAGIC.len()
+pub(crate) const PUBLIC_INPUT_BINDING_COUNT: usize = 4;
+pub(crate) const PUBLIC_INPUT_FIXED_HEADER_BYTE_LENGTH: usize = COMPACT_PUBLIC_INPUT_WIRE_MAGIC
+    .len()
     + size_of::<u16>()
     + PUBLIC_INPUT_BINDING_COUNT * Hash512::BYTE_LENGTH
     + 3 * size_of::<u32>();
@@ -108,7 +109,7 @@ impl CompactProofResponseWireGeometry {
         Ok(())
     }
 
-    fn maximum_canonical_byte_length(&self) -> Result<usize, CompactProofWireError> {
+    pub(crate) fn maximum_canonical_byte_length(&self) -> Result<usize, CompactProofWireError> {
         self.validate()?;
         let base_value_byte_length = checked_usize_product(&[
             checked_usize(self.queried_base_field_element_count())?,
@@ -637,6 +638,18 @@ impl CompactPublicInputWireGeometry {
 
     pub(crate) const fn exact_canonical_byte_length(self) -> usize {
         self.exact_canonical_byte_length
+    }
+
+    pub(crate) const fn packing_factor(self) -> u16 {
+        self.packing_factor
+    }
+
+    pub(crate) const fn ring_vector_count(self) -> u32 {
+        self.ring_vector_count
+    }
+
+    pub(crate) const fn ring_degree(self) -> u32 {
+        self.ring_degree
     }
 
     pub(crate) const fn field_element_count(self) -> u32 {

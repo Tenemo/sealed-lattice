@@ -27,7 +27,7 @@ use crate::foundation::{
     CanonicalItem, Hash512, StreamingFoundationHashError, StreamingFoundationTupleHash512,
 };
 
-const COMPACT_FIAT_SHAMIR_PREFIX_DOMAIN: &str =
+pub(crate) const COMPACT_FIAT_SHAMIR_PREFIX_DOMAIN: &str =
     "sealed-lattice/proof/compact-fiat-shamir-prefix/v1";
 const COMPACT_FIAT_SHAMIR_PREFIX_VERSION: u16 = 1;
 const COMMITMENT_PREFIX_ENTRY_BYTE_LENGTH: usize = size_of::<u32>() + 2 * Hash512::BYTE_LENGTH;

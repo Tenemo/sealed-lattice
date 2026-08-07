@@ -23,9 +23,9 @@ use crate::foundation::{
     foundation_tuple_hash512_seeded_stream_query_count,
 };
 
-const FIXED_UNIFORM_VERIFIER_MESSAGE_SEED_DOMAIN: &str =
+pub(crate) const FIXED_UNIFORM_VERIFIER_MESSAGE_SEED_DOMAIN: &str =
     "sealed-lattice/proof/fixed-uniform-verifier-message-seed/v1";
-const FIXED_UNIFORM_VERIFIER_MESSAGE_BLOCK_DOMAIN: &str =
+pub(crate) const FIXED_UNIFORM_VERIFIER_MESSAGE_BLOCK_DOMAIN: &str =
     "sealed-lattice/proof/fixed-uniform-verifier-message-block/v1";
 const FIXED_UNIFORM_VERIFIER_MESSAGE_GEOMETRY_VERSION: u16 = 1;
 const EXTENSION_CANDIDATE_BYTE_LENGTH: usize = 64;

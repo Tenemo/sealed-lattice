@@ -821,6 +821,10 @@ impl RelaxedRoundByRoundCatalog {
     pub(super) fn maximum_per_move_extraction_error(&self) -> &ExactProbability {
         &self.maximum_per_move_extraction_error
     }
+
+    pub(super) const fn total_extraction_field_operation_bound(&self) -> u128 {
+        self.total_extraction_field_operation_bound
+    }
 }
 
 fn is_cfw_role(role: &VerifierMoveRole) -> bool {
