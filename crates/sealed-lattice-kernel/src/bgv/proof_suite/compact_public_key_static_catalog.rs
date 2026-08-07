@@ -40,6 +40,7 @@ mod cfw_to_whir_handoff;
 #[cfg(test)]
 mod external_mask_integration;
 mod lifecycle;
+mod masking_leakage;
 mod non_interactive_soundness;
 mod relaxed_round_by_round;
 mod resource_overlap;
@@ -74,6 +75,9 @@ const PRE_CHALLENGE_PADDED_RING_VECTOR_COUNT: u64 = 64;
 const PRE_CHALLENGE_MESSAGE_ELEMENT_COUNT: u64 = 2_097_152;
 const CROSS_EPOCH_POINT_COORDINATE_COUNT: u32 = 21;
 const CROSS_EPOCH_EXPLICIT_OPENING_COUNT: u64 = 2;
+const CROSS_EPOCH_DISCLOSED_VALUE_COUNT: u64 = 3;
+const CROSS_EPOCH_MASK_WIDTH: u64 = 2;
+const CROSS_EPOCH_MASK_MESSAGE_LENGTH: u64 = 1;
 const CANONICAL_WHIR_PROOF_FRAME_BYTE_LENGTH: u64 = 32;
 const TRANSPORT_CHUNK_BYTE_LENGTH: u64 = 1_048_576;
 const WASM_HARD_BOUND_BYTE_LENGTH: u64 = 671_088_640;
@@ -121,6 +125,7 @@ enum CompactStaticCatalogError {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MaskGroupRole {
+    CrossEpochOpening,
     CfwInner,
     CfwOuter,
     WhirSumcheck { batch_ordinal: u8 },
@@ -134,6 +139,25 @@ struct MaskGroupStaticLedger {
     message_length: u64,
     randomness_length: u64,
     domain_size: u64,
+    committed_encoding_source: MaskCommittedEncodingSource,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MaskCommittedEncodingSource {
+    OwnedByThisEpoch,
+    ReusedFromPreChallenge,
+}
+
+impl MaskCommittedEncodingSource {
+    const fn is_owned_by_this_epoch(self) -> bool {
+        matches!(self, Self::OwnedByThisEpoch)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MaskEncodingRandomnessLength {
+    LocalMaskQueryCount,
+    Fixed(u64),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -141,6 +165,8 @@ struct MaskGroupStaticSpecification {
     role: MaskGroupRole,
     width: u64,
     message_length: u64,
+    encoding_randomness_length: MaskEncodingRandomnessLength,
+    committed_encoding_source: MaskCommittedEncodingSource,
 }
 
 impl MaskGroupStaticLedger {
@@ -149,8 +175,14 @@ impl MaskGroupStaticLedger {
         width: u64,
         message_length: u64,
         randomness_length: u64,
+        committed_encoding_source: MaskCommittedEncodingSource,
     ) -> Result<Self, CompactStaticCatalogError> {
-        if width == 0 || message_length == 0 || randomness_length == 0 {
+        if width == 0
+            || message_length == 0
+            || randomness_length == 0
+            || (committed_encoding_source == MaskCommittedEncodingSource::ReusedFromPreChallenge
+                && role != MaskGroupRole::CrossEpochOpening)
+        {
             return Err(CompactStaticCatalogError::InvalidGeometry);
         }
         let populated_message_length = message_length
@@ -166,6 +198,7 @@ impl MaskGroupStaticLedger {
             message_length,
             randomness_length,
             domain_size,
+            committed_encoding_source,
         })
     }
 
@@ -200,7 +233,6 @@ struct WhirStaticLedger {
     external_generalized_relation_claim_count: u64,
     external_carried_mask_message_randomness_element_count: u64,
     mask_query_union_branch_count: u64,
-    external_mask_integration_is_implemented: bool,
     opening_evaluation_count: u64,
     opening_batching_claim_count: u64,
     initial_oracle_value_byte_length: u64,
@@ -247,9 +279,8 @@ impl WhirStaticLedger {
         external_carried_mask_message_randomness_element_count: u64,
     ) -> Result<Self, CompactStaticCatalogError> {
         if external_mask_group_specifications.is_empty()
-            != (external_generalized_relation_claim_count == 0)
-            || external_mask_group_specifications.is_empty()
-                != (external_carried_mask_message_randomness_element_count == 0)
+            && (external_generalized_relation_claim_count != 0
+                || external_carried_mask_message_randomness_element_count != 0)
         {
             return Err(CompactStaticCatalogError::InvalidGeometry);
         }
@@ -370,6 +401,7 @@ impl WhirStaticLedger {
             u64::from(folding_schedule[0]),
             SUMCHECK_MASK_MESSAGE_LENGTH,
             mask_query_count,
+            MaskCommittedEncodingSource::OwnedByThisEpoch,
         )?);
         for round_ordinal in 0..WHIR_ROUND_COUNT {
             internal_mask_groups.push(MaskGroupStaticLedger::derive(
@@ -380,6 +412,7 @@ impl WhirStaticLedger {
                 1,
                 query_counts[round_ordinal],
                 mask_query_count,
+                MaskCommittedEncodingSource::OwnedByThisEpoch,
             )?);
             internal_mask_groups.push(MaskGroupStaticLedger::derive(
                 MaskGroupRole::WhirSumcheck {
@@ -389,18 +422,22 @@ impl WhirStaticLedger {
                 u64::from(folding_schedule[round_ordinal + 1]),
                 SUMCHECK_MASK_MESSAGE_LENGTH,
                 mask_query_count,
+                MaskCommittedEncodingSource::OwnedByThisEpoch,
             )?);
         }
-        let external_mask_integration_is_implemented =
-            external_mask_group_specifications.is_empty();
         let external_mask_groups = external_mask_group_specifications
             .iter()
             .map(|specification| {
+                let randomness_length = match specification.encoding_randomness_length {
+                    MaskEncodingRandomnessLength::LocalMaskQueryCount => mask_query_count,
+                    MaskEncodingRandomnessLength::Fixed(randomness_length) => randomness_length,
+                };
                 MaskGroupStaticLedger::derive(
                     specification.role,
                     specification.width,
                     specification.message_length,
-                    mask_query_count,
+                    randomness_length,
+                    specification.committed_encoding_source,
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -604,9 +641,14 @@ impl WhirStaticLedger {
             )?;
         }
         for group in &external_mask_groups {
+            let encoding_count = if group.committed_encoding_source.is_owned_by_this_epoch() {
+                2
+            } else {
+                1
+            };
             encoded_extension_element_count = checked_add(
                 encoded_extension_element_count,
-                checked_product(&[2, group.encoded_extension_element_count()?])?,
+                checked_product(&[encoding_count, group.encoded_extension_element_count()?])?,
             )?;
         }
 
@@ -621,7 +663,9 @@ impl WhirStaticLedger {
             .collect::<Vec<_>>();
         commitment_tree_shapes.push((1, final_height));
         for group in &all_mask_groups {
-            commitment_tree_shapes.push((group.width, group.domain_size));
+            if group.committed_encoding_source.is_owned_by_this_epoch() {
+                commitment_tree_shapes.push((group.width, group.domain_size));
+            }
             commitment_tree_shapes.push((group.width, group.domain_size));
         }
         let committed_leaf_count = commitment_tree_shapes
@@ -644,9 +688,15 @@ impl WhirStaticLedger {
                             .ok_or(CompactStaticCatalogError::InvalidGeometry)?,
                     )
                 })?;
+        let owned_external_commitment_count = external_mask_groups
+            .iter()
+            .filter(|group| group.committed_encoding_source.is_owned_by_this_epoch())
+            .count();
         let expected_total_commitment_count = merkle_root_count_in_proof
             .checked_add(1)
-            .and_then(|count| count.checked_add(u64::try_from(external_mask_groups.len()).ok()?))
+            .and_then(|count| {
+                count.checked_add(u64::try_from(owned_external_commitment_count).ok()?)
+            })
             .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
         if u64::try_from(commitment_tree_shapes.len())
             .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?
@@ -712,9 +762,18 @@ impl WhirStaticLedger {
             )?;
         }
         for group in &external_mask_groups {
+            let encoding_count = if group.committed_encoding_source.is_owned_by_this_epoch() {
+                2
+            } else {
+                1
+            };
             base_coordinate_butterfly_count = checked_add(
                 base_coordinate_butterfly_count,
-                checked_product(&[2, group.butterfly_count()?, QUINTIC_EXTENSION_DEGREE])?,
+                checked_product(&[
+                    encoding_count,
+                    group.butterfly_count()?,
+                    QUINTIC_EXTENSION_DEGREE,
+                ])?,
             )?;
         }
 
@@ -742,7 +801,9 @@ impl WhirStaticLedger {
                         checked_product(&[group.width, group.message_length])?
                     }
                     MaskGroupRole::WhirCodeSwitch { .. } => 0,
-                    MaskGroupRole::CfwInner | MaskGroupRole::CfwOuter => {
+                    MaskGroupRole::CrossEpochOpening
+                    | MaskGroupRole::CfwInner
+                    | MaskGroupRole::CfwOuter => {
                         return Err(CompactStaticCatalogError::InvalidGeometry);
                     }
                 };
@@ -752,8 +813,10 @@ impl WhirStaticLedger {
             internal_carried_mask_message_randomness_element_count,
             external_carried_mask_message_randomness_element_count,
         )?;
-        let carried_mask_encoding_randomness_element_count =
-            all_mask_groups.iter().try_fold(0_u64, |count, group| {
+        let carried_mask_encoding_randomness_element_count = all_mask_groups
+            .iter()
+            .filter(|group| group.committed_encoding_source.is_owned_by_this_epoch())
+            .try_fold(0_u64, |count, group| {
                 checked_add(
                     count,
                     checked_product(&[group.width, group.randomness_length])?,
@@ -767,7 +830,12 @@ impl WhirStaticLedger {
                 )
             })?;
         let fresh_mirror_encoding_randomness_element_count =
-            carried_mask_encoding_randomness_element_count;
+            all_mask_groups.iter().try_fold(0_u64, |count, group| {
+                checked_add(
+                    count,
+                    checked_product(&[group.width, group.randomness_length])?,
+                )
+            })?;
         let fresh_source_message_randomness_element_count = 1_u64
             .checked_shl(final_variable_count)
             .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
@@ -800,7 +868,6 @@ impl WhirStaticLedger {
             external_generalized_relation_claim_count,
             external_carried_mask_message_randomness_element_count,
             mask_query_union_branch_count,
-            external_mask_integration_is_implemented,
             opening_evaluation_count,
             opening_batching_claim_count,
             initial_oracle_value_byte_length,
@@ -850,7 +917,9 @@ impl WhirStaticLedger {
                         checked_product(&[group.width, group.message_length])?
                     }
                     MaskGroupRole::WhirCodeSwitch { .. } => 0,
-                    MaskGroupRole::CfwInner | MaskGroupRole::CfwOuter => {
+                    MaskGroupRole::CrossEpochOpening
+                    | MaskGroupRole::CfwInner
+                    | MaskGroupRole::CfwOuter => {
                         return Err(CompactStaticCatalogError::InvalidGeometry);
                     }
                 };
@@ -861,6 +930,15 @@ impl WhirStaticLedger {
             self.external_carried_mask_message_randomness_element_count,
         )?;
         let expected_carried_mask_encoding_randomness_element_count = self
+            .mask_groups_in_commitment_order()
+            .filter(|group| group.committed_encoding_source.is_owned_by_this_epoch())
+            .try_fold(0_u64, |count, group| {
+                checked_add(
+                    count,
+                    checked_product(&[group.width, group.randomness_length])?,
+                )
+            })?;
+        let expected_fresh_mirror_encoding_randomness_element_count = self
             .mask_groups_in_commitment_order()
             .try_fold(0_u64, |count, group| {
                 checked_add(
@@ -886,7 +964,7 @@ impl WhirStaticLedger {
             expected_carried_mask_message_randomness_element_count,
             expected_carried_mask_encoding_randomness_element_count,
             expected_fresh_mirror_message_randomness_element_count,
-            expected_carried_mask_encoding_randomness_element_count,
+            expected_fresh_mirror_encoding_randomness_element_count,
             expected_fresh_source_message_randomness_element_count,
             expected_fresh_source_encoding_randomness_element_count,
         ]
@@ -902,7 +980,7 @@ impl WhirStaticLedger {
             || self.fresh_mirror_message_randomness_element_count
                 != expected_fresh_mirror_message_randomness_element_count
             || self.fresh_mirror_encoding_randomness_element_count
-                != expected_carried_mask_encoding_randomness_element_count
+                != expected_fresh_mirror_encoding_randomness_element_count
             || self.fresh_source_message_randomness_element_count
                 != expected_fresh_source_message_randomness_element_count
             || self.fresh_source_encoding_randomness_element_count
@@ -1048,6 +1126,7 @@ impl WhirStaticLedger {
                         .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
                     domain_size: u64::try_from(group.shape.domain_size)
                         .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+                    committed_encoding_source: MaskCommittedEncodingSource::OwnedByThisEpoch,
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -1055,18 +1134,12 @@ impl WhirStaticLedger {
         let vendored_mask_query_count = u64::try_from(configuration.mask_queries)
             .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?;
         let internal_mask_groups_match = vendored_mask_query_count == self.mask_query_count
-            && internal_mask_groups == self.internal_mask_groups
-            && self.external_mask_integration_is_implemented
-                == self.external_mask_groups.is_empty();
+            && internal_mask_groups == self.internal_mask_groups;
         let opening_batching_claim_count_matches = self.opening_batching_claim_count
             == self
                 .opening_evaluation_count
                 .checked_add(self.external_generalized_relation_claim_count)
-                .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?
-            && self.external_mask_groups.is_empty()
-                == (self.external_generalized_relation_claim_count == 0)
-            && self.external_mask_groups.is_empty()
-                == (self.external_carried_mask_message_randomness_element_count == 0);
+                .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
 
         if configuration.folding_schedule != folding_schedule
             || configuration.params.round_log_inv_rates != round_log_inverse_rates
@@ -1105,6 +1178,7 @@ struct PackingStaticCatalog {
     response_commitment_lifecycle:
         response_commitment_lifecycle::PackingResponseCommitmentLifecycle,
     query_sampling_lifecycle: lifecycle::PackingQuerySamplingLifecycle,
+    masking_leakage: masking_leakage::PackingMaskingLeakageCorrespondence,
     interactive_soundness: soundness::PackingInteractiveSoundness,
     relaxed_round_by_round: relaxed_round_by_round::RelaxedRoundByRoundCatalog,
     non_interactive_soundness: non_interactive_soundness::PackingNonInteractiveSoundness,
@@ -1193,30 +1267,80 @@ impl PackingStaticCatalog {
             return Err(CompactStaticCatalogError::IncompleteLifecycle);
         }
         let cfw_mask_group_specifications = cfw_reduction.mask_group_specifications().to_vec();
+        let preliminary_cross_epoch_mask_specification = MaskGroupStaticSpecification {
+            role: MaskGroupRole::CrossEpochOpening,
+            width: CROSS_EPOCH_MASK_WIDTH,
+            message_length: CROSS_EPOCH_MASK_MESSAGE_LENGTH,
+            encoding_randomness_length: MaskEncodingRandomnessLength::LocalMaskQueryCount,
+            committed_encoding_source: MaskCommittedEncodingSource::OwnedByThisEpoch,
+        };
+        let preliminary_pre_challenge_whir = WhirStaticLedger::derive(
+            PRE_CHALLENGE_MESSAGE_ELEMENT_COUNT.ilog2(),
+            pre_challenge_first_folding_factor,
+            round_log_inverse_rates,
+            1,
+            BASE_FIELD_ELEMENT_BYTE_LENGTH,
+            vec![preliminary_cross_epoch_mask_specification],
+            0,
+            CROSS_EPOCH_MASK_WIDTH * CROSS_EPOCH_MASK_MESSAGE_LENGTH,
+        )?;
+        let mut preliminary_main_mask_group_specifications = cfw_mask_group_specifications.clone();
+        preliminary_main_mask_group_specifications.push(MaskGroupStaticSpecification {
+            committed_encoding_source: MaskCommittedEncodingSource::ReusedFromPreChallenge,
+            ..preliminary_cross_epoch_mask_specification
+        });
+        let preliminary_main_whir = WhirStaticLedger::derive(
+            relation.padded_witness_element_count().ilog2(),
+            main_first_folding_factor,
+            round_log_inverse_rates,
+            2,
+            EXTENSION_FIELD_ELEMENT_BYTE_LENGTH,
+            preliminary_main_mask_group_specifications,
+            cfw_reduction.generalized_committed_relation_claim_count(),
+            cfw_reduction.fresh_mask_randomness_element_count(),
+        )?;
+        let shared_cross_epoch_encoding_randomness_length = checked_add(
+            preliminary_pre_challenge_whir.mask_query_count,
+            preliminary_main_whir.mask_query_count,
+        )?;
+        let cross_epoch_mask_specification = MaskGroupStaticSpecification {
+            encoding_randomness_length: MaskEncodingRandomnessLength::Fixed(
+                shared_cross_epoch_encoding_randomness_length,
+            ),
+            ..preliminary_cross_epoch_mask_specification
+        };
         let pre_challenge_whir = WhirStaticLedger::derive(
             PRE_CHALLENGE_MESSAGE_ELEMENT_COUNT.ilog2(),
             pre_challenge_first_folding_factor,
             round_log_inverse_rates,
             1,
             BASE_FIELD_ELEMENT_BYTE_LENGTH,
-            Vec::new(),
+            vec![cross_epoch_mask_specification],
             0,
-            0,
+            CROSS_EPOCH_MASK_WIDTH * CROSS_EPOCH_MASK_MESSAGE_LENGTH,
         )?;
+        let mut main_mask_group_specifications = cfw_mask_group_specifications;
+        main_mask_group_specifications.push(MaskGroupStaticSpecification {
+            committed_encoding_source: MaskCommittedEncodingSource::ReusedFromPreChallenge,
+            ..cross_epoch_mask_specification
+        });
         let main_whir = WhirStaticLedger::derive(
             relation.padded_witness_element_count().ilog2(),
             main_first_folding_factor,
             round_log_inverse_rates,
             2,
             EXTENSION_FIELD_ELEMENT_BYTE_LENGTH,
-            cfw_mask_group_specifications,
+            main_mask_group_specifications,
             cfw_reduction.generalized_committed_relation_claim_count(),
             cfw_reduction.fresh_mask_randomness_element_count(),
         )?;
-        if pre_challenge_whir.mask_query_union_branch_count != 8
-            || main_whir.mask_query_union_branch_count != 10
+        if pre_challenge_whir.mask_query_union_branch_count != 9
+            || main_whir.mask_query_union_branch_count != 11
             || pre_challenge_whir.mask_query_count == 0
             || main_whir.mask_query_count == 0
+            || pre_challenge_whir.mask_query_count
+                != preliminary_pre_challenge_whir.mask_query_count
+            || main_whir.mask_query_count != preliminary_main_whir.mask_query_count
         {
             return Err(CompactStaticCatalogError::InvalidGeometry);
         }
@@ -1253,6 +1377,13 @@ impl PackingStaticCatalog {
             response_commitments.maximum_response_tree_kernel_heap_byte_length()?;
         let query_sampling_lifecycle =
             lifecycle::PackingQuerySamplingLifecycle::derive(&pre_challenge_whir, &main_whir)?;
+        let masking_leakage = masking_leakage::PackingMaskingLeakageCorrespondence::derive(
+            &pre_challenge_whir,
+            &main_whir,
+            &transcript_chronology,
+            &query_sampling_lifecycle,
+            cfw_reduction,
+        )?;
         let interactive_soundness = soundness::PackingInteractiveSoundness::derive(
             relation,
             &pre_challenge_whir,
@@ -1484,6 +1615,7 @@ impl PackingStaticCatalog {
             response_commitments,
             response_commitment_lifecycle,
             query_sampling_lifecycle,
+            masking_leakage,
             interactive_soundness,
             relaxed_round_by_round,
             non_interactive_soundness,
@@ -2031,10 +2163,18 @@ mod tests {
             MaskGroupRole::WhirCodeSwitch { round_ordinal: 2 },
             MaskGroupRole::WhirSumcheck { batch_ordinal: 3 },
         ];
-        let expected_main_roles = [MaskGroupRole::CfwInner, MaskGroupRole::CfwOuter]
+        let expected_pre_challenge_roles = [MaskGroupRole::CrossEpochOpening]
             .into_iter()
             .chain(expected_whir_roles.iter().copied())
             .collect::<Vec<_>>();
+        let expected_main_roles = [
+            MaskGroupRole::CfwInner,
+            MaskGroupRole::CfwOuter,
+            MaskGroupRole::CrossEpochOpening,
+        ]
+        .into_iter()
+        .chain(expected_whir_roles.iter().copied())
+        .collect::<Vec<_>>();
 
         for factor in &catalog.factor_catalogs {
             assert_eq!(
@@ -2043,7 +2183,7 @@ mod tests {
                     .mask_groups_in_commitment_order()
                     .map(|group| group.role)
                     .collect::<Vec<_>>(),
-                expected_whir_roles
+                expected_pre_challenge_roles
             );
             assert_eq!(
                 factor
@@ -2063,6 +2203,10 @@ mod tests {
             assert_eq!(cfw_inner_group.width, 69);
             assert_eq!(cfw_inner_group.message_length, 4);
             assert_eq!(cfw_inner_group.randomness_length, 399);
+            assert_eq!(
+                cfw_inner_group.committed_encoding_source,
+                MaskCommittedEncodingSource::OwnedByThisEpoch
+            );
 
             let cfw_outer_group = factor
                 .main_whir
@@ -2073,6 +2217,39 @@ mod tests {
             assert_eq!(cfw_outer_group.width, 23);
             assert_eq!(cfw_outer_group.message_length, 8);
             assert_eq!(cfw_outer_group.randomness_length, 399);
+            assert_eq!(
+                cfw_outer_group.committed_encoding_source,
+                MaskCommittedEncodingSource::OwnedByThisEpoch
+            );
+
+            let pre_challenge_cross_epoch_group = factor
+                .pre_challenge_whir
+                .external_mask_groups
+                .first()
+                .expect("pre-challenge cross-epoch mask group");
+            let main_cross_epoch_group = factor
+                .main_whir
+                .external_mask_groups
+                .get(2)
+                .expect("main cross-epoch mask group");
+            assert_eq!(
+                pre_challenge_cross_epoch_group.role,
+                MaskGroupRole::CrossEpochOpening
+            );
+            assert_eq!(pre_challenge_cross_epoch_group.width, 2);
+            assert_eq!(pre_challenge_cross_epoch_group.message_length, 1);
+            assert_eq!(pre_challenge_cross_epoch_group.randomness_length, 798);
+            assert_eq!(
+                pre_challenge_cross_epoch_group.committed_encoding_source,
+                MaskCommittedEncodingSource::OwnedByThisEpoch
+            );
+            assert_eq!(
+                main_cross_epoch_group,
+                &MaskGroupStaticLedger {
+                    committed_encoding_source: MaskCommittedEncodingSource::ReusedFromPreChallenge,
+                    ..*pre_challenge_cross_epoch_group
+                }
+            );
 
             // Definition 11.1 has one global claim, two claims per inner
             // mask, and one per outer mask. The two explicit cross-epoch
@@ -2123,43 +2300,43 @@ mod tests {
             vec![
                 WhirPrivateRandomnessSnapshot {
                     source_oracle_encoding: 44_224,
-                    carried_mask_messages: 54,
-                    carried_mask_encoding: 8_379,
-                    fresh_mirror_messages: 1_282,
-                    fresh_mirror_encoding: 8_379,
+                    carried_mask_messages: 56,
+                    carried_mask_encoding: 9_975,
+                    fresh_mirror_messages: 1_284,
+                    fresh_mirror_encoding: 9_975,
                     fresh_source_message: 8,
                     fresh_source_encoding: 348,
-                    total: 62_674,
+                    total: 65_870,
                 },
                 WhirPrivateRandomnessSnapshot {
                     source_oracle_encoding: 32_544,
-                    carried_mask_messages: 51,
-                    carried_mask_encoding: 7_980,
-                    fresh_mirror_messages: 1_339,
-                    fresh_mirror_encoding: 7_980,
+                    carried_mask_messages: 53,
+                    carried_mask_encoding: 9_576,
+                    fresh_mirror_messages: 1_341,
+                    fresh_mirror_encoding: 9_576,
                     fresh_source_message: 16,
                     fresh_source_encoding: 351,
-                    total: 50_261,
+                    total: 53_457,
                 },
                 WhirPrivateRandomnessSnapshot {
                     source_oracle_encoding: 24_448,
-                    carried_mask_messages: 48,
-                    carried_mask_encoding: 7_581,
-                    fresh_mirror_messages: 1_219,
-                    fresh_mirror_encoding: 7_581,
+                    carried_mask_messages: 50,
+                    carried_mask_encoding: 9_177,
+                    fresh_mirror_messages: 1_221,
+                    fresh_mirror_encoding: 9_177,
                     fresh_source_message: 32,
                     fresh_source_encoding: 357,
-                    total: 41_266,
+                    total: 44_462,
                 },
                 WhirPrivateRandomnessSnapshot {
                     source_oracle_encoding: 23_288,
-                    carried_mask_messages: 45,
-                    carried_mask_encoding: 7_182,
-                    fresh_mirror_messages: 1_327,
-                    fresh_mirror_encoding: 7_182,
+                    carried_mask_messages: 47,
+                    carried_mask_encoding: 8_778,
+                    fresh_mirror_messages: 1_329,
+                    fresh_mirror_encoding: 8_778,
                     fresh_source_message: 64,
                     fresh_source_encoding: 371,
-                    total: 39_459,
+                    total: 42_655,
                 },
             ]
         );
@@ -2170,41 +2347,41 @@ mod tests {
                     source_oracle_encoding: 69_568,
                     carried_mask_messages: 379,
                     carried_mask_encoding: 45_486,
-                    fresh_mirror_messages: 1_745,
-                    fresh_mirror_encoding: 45_486,
+                    fresh_mirror_messages: 1_747,
+                    fresh_mirror_encoding: 47_082,
                     fresh_source_message: 8,
                     fresh_source_encoding: 348,
-                    total: 163_020,
+                    total: 164_618,
                 },
                 WhirPrivateRandomnessSnapshot {
                     source_oracle_encoding: 45_184,
                     carried_mask_messages: 376,
                     carried_mask_encoding: 45_087,
-                    fresh_mirror_messages: 1_802,
-                    fresh_mirror_encoding: 45_087,
+                    fresh_mirror_messages: 1_804,
+                    fresh_mirror_encoding: 46_683,
                     fresh_source_message: 16,
                     fresh_source_encoding: 351,
-                    total: 137_903,
+                    total: 139_501,
                 },
                 WhirPrivateRandomnessSnapshot {
                     source_oracle_encoding: 30_768,
                     carried_mask_messages: 373,
                     carried_mask_encoding: 44_688,
-                    fresh_mirror_messages: 1_682,
-                    fresh_mirror_encoding: 44_688,
+                    fresh_mirror_messages: 1_684,
+                    fresh_mirror_encoding: 46_284,
                     fresh_source_message: 32,
                     fresh_source_encoding: 357,
-                    total: 122_588,
+                    total: 124_186,
                 },
                 WhirPrivateRandomnessSnapshot {
                     source_oracle_encoding: 26_448,
                     carried_mask_messages: 370,
                     carried_mask_encoding: 44_289,
-                    fresh_mirror_messages: 1_790,
-                    fresh_mirror_encoding: 44_289,
+                    fresh_mirror_messages: 1_792,
+                    fresh_mirror_encoding: 45_885,
                     fresh_source_message: 64,
                     fresh_source_encoding: 371,
-                    total: 117_621,
+                    total: 119_219,
                 },
             ]
         );
@@ -2217,7 +2394,7 @@ mod tests {
             factor
                 .pre_challenge_whir
                 .external_carried_mask_message_randomness_element_count
-                == 0
+                == 2
                 && factor
                     .main_whir
                     .external_carried_mask_message_randomness_element_count
@@ -2239,84 +2416,84 @@ mod tests {
             vec![
                 PackingResourceCeilingSnapshot {
                     packing_factor: 1,
-                    pre_challenge_proof_byte_length: 4_470_900,
-                    main_proof_byte_length: 11_204_796,
-                    maximum_proof_byte_length: 25_858_402,
+                    pre_challenge_proof_byte_length: 4_868_556,
+                    main_proof_byte_length: 11_602_452,
+                    maximum_proof_byte_length: 26_436_090,
                     public_input_byte_length: 15_991_062,
-                    transport_byte_length: 41_849_464,
-                    transport_chunk_count: 40,
+                    transport_byte_length: 42_427_152,
+                    transport_chunk_count: 41,
                     commitment_peak_byte_length: 75_497_456,
-                    cfw_to_whir_retained_payload_byte_length: 167_790_600,
-                    wasm_peak_byte_length: 383_745_984,
+                    cfw_to_whir_retained_payload_byte_length: 167_790_680,
+                    wasm_peak_byte_length: 384_911_816,
                     scratch_byte_length: 640_811_508,
-                    base_coordinate_butterfly_count: 915_861_504,
-                    committed_leaf_count: 1_020_198,
-                    commitment_leaf_hash_query_count: 27_541_798,
-                    commitment_parent_hash_query_count: 1_020_074,
-                    verifier_opened_leaf_hash_query_count: 491_387,
+                    base_coordinate_butterfly_count: 916_598_784,
+                    committed_leaf_count: 1_032_486,
+                    commitment_leaf_hash_query_count: 27_590_950,
+                    commitment_parent_hash_query_count: 1_032_359,
+                    verifier_opened_leaf_hash_query_count: 503_917,
                     maximum_uninterrupted_butterfly_count: 44_564_480,
                     maximum_uninterrupted_leaf_hash_count: 131_072,
                     deterministic_checkpoint_count: 2_677,
                 },
                 PackingResourceCeilingSnapshot {
                     packing_factor: 2,
-                    pre_challenge_proof_byte_length: 4_426_484,
-                    main_proof_byte_length: 10_245_692,
-                    maximum_proof_byte_length: 24_941_414,
+                    pre_challenge_proof_byte_length: 4_824_140,
+                    main_proof_byte_length: 10_643_348,
+                    maximum_proof_byte_length: 25_518_898,
                     public_input_byte_length: 15_991_062,
-                    transport_byte_length: 40_932_476,
+                    transport_byte_length: 41_509_960,
                     transport_chunk_count: 40,
                     commitment_peak_byte_length: 109_051_888,
-                    cfw_to_whir_retained_payload_byte_length: 167_790_600,
-                    wasm_peak_byte_length: 416_299_188,
+                    cfw_to_whir_retained_payload_byte_length: 167_790_680,
+                    wasm_peak_byte_length: 417_464_816,
                     scratch_byte_length: 693_240_308,
-                    base_coordinate_butterfly_count: 971_603_968,
-                    committed_leaf_count: 1_724_706,
-                    commitment_leaf_hash_query_count: 28_778_786,
-                    commitment_parent_hash_query_count: 1_724_584,
-                    verifier_opened_leaf_hash_query_count: 457_018,
+                    base_coordinate_butterfly_count: 972_341_248,
+                    committed_leaf_count: 1_736_994,
+                    commitment_leaf_hash_query_count: 28_827_938,
+                    commitment_parent_hash_query_count: 1_736_869,
+                    verifier_opened_leaf_hash_query_count: 469_545,
                     maximum_uninterrupted_butterfly_count: 47_185_920,
                     maximum_uninterrupted_leaf_hash_count: 262_144,
                     deterministic_checkpoint_count: 2_677,
                 },
                 PackingResourceCeilingSnapshot {
                     packing_factor: 4,
-                    pre_challenge_proof_byte_length: 4_306_300,
-                    main_proof_byte_length: 9_670_468,
-                    maximum_proof_byte_length: 24_238_630,
+                    pre_challenge_proof_byte_length: 4_703_956,
+                    main_proof_byte_length: 10_068_124,
+                    maximum_proof_byte_length: 24_815_706,
                     public_input_byte_length: 15_991_062,
-                    transport_byte_length: 40_229_692,
+                    transport_byte_length: 40_806_768,
                     transport_chunk_count: 39,
                     commitment_peak_byte_length: 176_160_752,
-                    cfw_to_whir_retained_payload_byte_length: 167_790_600,
-                    wasm_peak_byte_length: 482_526_788,
+                    cfw_to_whir_retained_payload_byte_length: 167_790_680,
+                    wasm_peak_byte_length: 483_692_008,
                     scratch_byte_length: 798_097_908,
-                    base_coordinate_butterfly_count: 1_040_617_472,
-                    committed_leaf_count: 3_137_822,
-                    commitment_leaf_hash_query_count: 31_334_686,
-                    commitment_parent_hash_query_count: 3_137_702,
-                    verifier_opened_leaf_hash_query_count: 433_818,
+                    base_coordinate_butterfly_count: 1_041_354_752,
+                    committed_leaf_count: 3_150_110,
+                    commitment_leaf_hash_query_count: 31_383_838,
+                    commitment_parent_hash_query_count: 3_149_987,
+                    verifier_opened_leaf_hash_query_count: 446_339,
                     maximum_uninterrupted_butterfly_count: 49_807_360,
                     maximum_uninterrupted_leaf_hash_count: 524_288,
                     deterministic_checkpoint_count: 2_677,
                 },
                 PackingResourceCeilingSnapshot {
                     packing_factor: 8,
-                    pre_challenge_proof_byte_length: 4_403_364,
-                    main_proof_byte_length: 9_540_012,
-                    maximum_proof_byte_length: 24_295_606,
+                    pre_challenge_proof_byte_length: 4_801_020,
+                    main_proof_byte_length: 9_937_668,
+                    maximum_proof_byte_length: 24_871_730,
                     public_input_byte_length: 15_991_062,
-                    transport_byte_length: 40_286_668,
+                    transport_byte_length: 40_862_792,
                     transport_chunk_count: 39,
                     commitment_peak_byte_length: 310_378_480,
-                    cfw_to_whir_retained_payload_byte_length: 167_790_600,
-                    wasm_peak_byte_length: 616_762_084,
-                    scratch_byte_length: 1_079_100_336,
-                    base_coordinate_butterfly_count: 1_131_094_016,
-                    committed_leaf_count: 5_955_866,
-                    commitment_leaf_hash_query_count: 36_307_226,
-                    commitment_parent_hash_query_count: 5_955_748,
-                    verifier_opened_leaf_hash_query_count: 431_094,
+                    cfw_to_whir_retained_payload_byte_length: 167_790_680,
+                    wasm_peak_byte_length: 617_926_352,
+                    scratch_byte_length: 1_080_840_728,
+                    base_coordinate_butterfly_count: 1_131_831_296,
+                    committed_leaf_count: 5_968_154,
+                    commitment_leaf_hash_query_count: 36_356_378,
+                    commitment_parent_hash_query_count: 5_968_033,
+                    verifier_opened_leaf_hash_query_count: 443_601,
                     maximum_uninterrupted_butterfly_count: 52_428_800,
                     maximum_uninterrupted_leaf_hash_count: 1_048_576,
                     deterministic_checkpoint_count: 2_677,
@@ -2367,10 +2544,10 @@ mod tests {
         assert_eq!(
             heap_snapshots,
             vec![
-                (1, 25_858_402, 9_538_176, 1_148_736, 36_545_314),
-                (2, 24_941_414, 9_469_824, 1_169_920, 35_581_158),
-                (4, 24_238_630, 9_315_200, 1_201_728, 34_755_558),
-                (8, 24_295_606, 9_287_552, 1_217_408, 34_800_566),
+                (1, 26_436_090, 10_049_536, 1_046_464, 37_532_090),
+                (2, 25_518_898, 9_981_184, 1_067_648, 36_567_730),
+                (4, 24_815_706, 9_826_560, 1_099_456, 35_741_722),
+                (8, 24_871_730, 9_798_912, 1_115_136, 35_785_778),
             ]
         );
     }
@@ -2407,16 +2584,16 @@ mod tests {
             heap_snapshots,
             vec![
                 (
-                    1, 1_050_944, 1_435_920, 368, 64, 380_696, 9_524_048, 9_524_048
+                    1, 1_050_944, 1_308_080, 368, 64, 393_480, 9_703_024, 9_703_024
                 ),
                 (
-                    2, 1_051_072, 1_462_400, 368, 64, 378_048, 9_486_976, 9_486_976
+                    2, 1_051_072, 1_334_560, 368, 64, 390_832, 9_665_952, 9_665_952
                 ),
                 (
-                    4, 1_051_200, 1_502_160, 368, 64, 374_072, 9_431_312, 9_431_312
+                    4, 1_051_200, 1_374_320, 368, 64, 386_856, 9_610_288, 9_610_288
                 ),
                 (
-                    8, 1_051_328, 1_521_760, 368, 64, 372_112, 9_403_872, 9_403_872
+                    8, 1_051_328, 1_393_920, 368, 64, 384_896, 9_582_848, 9_582_848
                 ),
             ]
         );
@@ -2463,14 +2640,8 @@ mod tests {
             );
             assert_eq!(factor.pre_challenge_whir.mask_query_count, 399);
             assert_eq!(factor.main_whir.mask_query_count, 399);
-            assert_eq!(factor.pre_challenge_whir.mask_query_union_branch_count, 8);
-            assert_eq!(factor.main_whir.mask_query_union_branch_count, 10);
-            assert!(
-                factor
-                    .pre_challenge_whir
-                    .external_mask_integration_is_implemented
-            );
-            assert!(!factor.main_whir.external_mask_integration_is_implemented);
+            assert_eq!(factor.pre_challenge_whir.mask_query_union_branch_count, 9);
+            assert_eq!(factor.main_whir.mask_query_union_branch_count, 11);
         }
     }
 

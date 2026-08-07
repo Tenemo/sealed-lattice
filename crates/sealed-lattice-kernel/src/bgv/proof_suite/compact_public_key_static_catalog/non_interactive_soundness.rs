@@ -7,9 +7,9 @@
 //! union directly.
 //! The fixed-bit layout, bounded-rejection decoder, and complete SHAKE256
 //! schedule are production-owned and independently reconciled. Typed refusals
-//! keep the missing construction-level masking and emitted-proof
-//! correspondences, or any producer assertion, from authorizing proof
-//! generation.
+//! keep the missing emitted-proof correspondence, or any producer assertion,
+//! from authorizing proof generation. Construction-level masking is owned and
+//! checked separately before this ledger is derived.
 
 use num_bigint::BigUint;
 use num_traits::One;
@@ -33,7 +33,6 @@ const MERKLE_RANDOM_ORACLE_OUTPUT_BIT_LENGTH: u64 = 512;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum NonInteractiveCompletionRefusal {
-    MissingConstructionMaskingCorrespondence,
     MissingEmittedProofCorrespondence,
 }
 
@@ -312,7 +311,6 @@ impl PackingNonInteractiveSoundness {
             proof_oracle_query_count: response_commitments.proof_oracle_query_count(),
             maximum_proof_oracle_length: response_commitments.maximum_proof_oracle_length(),
             completion_refusals: vec![
-                NonInteractiveCompletionRefusal::MissingConstructionMaskingCorrespondence,
                 NonInteractiveCompletionRefusal::MissingEmittedProofCorrespondence,
             ],
         };
@@ -406,7 +404,6 @@ impl PackingNonInteractiveSoundness {
             proof_oracle_query_count: response_commitments.proof_oracle_query_count(),
             maximum_proof_oracle_length: response_commitments.maximum_proof_oracle_length(),
             completion_refusals: vec![
-                NonInteractiveCompletionRefusal::MissingConstructionMaskingCorrespondence,
                 NonInteractiveCompletionRefusal::MissingEmittedProofCorrespondence,
             ],
         })
@@ -458,11 +455,11 @@ mod tests {
             .expect("compact public-key static packing ledger");
         let expected_logical_round_counts = [82, 80, 78, 76];
         let expected_maximum_proof_oracle_lengths = [262_144, 524_288, 1_048_576, 2_097_152];
-        let expected_proof_oracle_query_counts = [74_517, 73_983, 72_775, 72_559];
+        let expected_proof_oracle_query_counts = [78_512, 77_978, 76_770, 76_554];
         let expected_maximum_verifier_merkle_hash_query_counts =
-            [235_937, 238_958, 240_274, 244_042];
+            [242_083, 245_101, 246_411, 250_165];
         let expected_abstract_bcs_verifier_oracle_query_counts =
-            [236_019, 239_038, 240_352, 244_118];
+            [242_165, 245_181, 246_489, 250_241];
         let expected_maximum_leaf_value_byte_lengths = [5_120, 2_760, 2_760, 2_760];
 
         for (factor_ordinal, factor) in catalog.factor_catalogs.iter().enumerate() {
@@ -478,7 +475,7 @@ mod tests {
             let expected_maximum_leaf_value_byte_length =
                 expected_maximum_leaf_value_byte_lengths[factor_ordinal];
             let ledger = &factor.non_interactive_soundness;
-            assert_eq!(ledger.completion_refusals.len(), 2);
+            assert_eq!(ledger.completion_refusals.len(), 1);
             assert_eq!(ledger.bcs_response_root_count, expected_logical_round_count);
             assert_eq!(
                 ledger.proof_oracle_query_count,

@@ -238,6 +238,10 @@ impl PackingTranscriptChronology {
         &self.verifier_moves
     }
 
+    pub(super) const fn commitment_count(&self) -> u64 {
+        self.commitment_count
+    }
+
     fn check(
         &self,
         pre_challenge_whir: &WhirStaticLedger,
@@ -247,8 +251,8 @@ impl PackingTranscriptChronology {
         let expected = derive_catalog(pre_challenge_whir, main_whir, cfw_reduction)?;
         if self != &expected
             || self.verifier_moves.is_empty()
-            || self.commitment_count != 42
-            || self.distinct_query_group_count != 24
+            || self.commitment_count != 45
+            || self.distinct_query_group_count != 26
             || self.minimum_verifier_message_bit_length != 319
             || self.retry_attempt_domain_is_bound
             || self.retry_uses_fresh_commitment_roots
@@ -330,7 +334,7 @@ fn append_outer_chronology(
     )?;
     builder.record_prover_response(1)?;
     builder.record_prover_response(1)?;
-    builder.record_prover_response(1)?;
+    builder.record_prover_response(2)?;
     builder.record_verifier_move(
         VerifierMoveRole::CrossEpochPoint,
         ExactChallengeSpace::ExtensionVector {
@@ -423,8 +427,8 @@ fn append_whir_after_opening(
 ) -> Result<(), CompactStaticCatalogError> {
     if whir.folding_schedule.len() != whir.query_counts.len()
         || whir.internal_mask_groups.len() != 7
-        || (epoch == TranscriptEpoch::PreChallenge && !whir.external_mask_groups.is_empty())
-        || (epoch == TranscriptEpoch::Main && whir.external_mask_groups.len() != 2)
+        || (epoch == TranscriptEpoch::PreChallenge && whir.external_mask_groups.len() != 1)
+        || (epoch == TranscriptEpoch::Main && whir.external_mask_groups.len() != 3)
     {
         return Err(CompactStaticCatalogError::InvalidGeometry);
     }
@@ -627,7 +631,7 @@ mod tests {
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
         let expected_round_counts = [82, 80, 78, 76];
-        let expected_candidate_slot_counts = [1_220_608, 1_236_736, 1_208_320, 1_240_320];
+        let expected_candidate_slot_counts = [1_322_752, 1_338_880, 1_310_464, 1_342_464];
         for ((factor, expected_round_count), expected_candidate_slot_count) in catalog
             .factor_catalogs
             .iter()
@@ -636,8 +640,8 @@ mod tests {
         {
             let chronology = &factor.transcript_chronology;
             assert_eq!(chronology.verifier_moves.len(), expected_round_count);
-            assert_eq!(chronology.commitment_count, 42);
-            assert_eq!(chronology.distinct_query_group_count, 24);
+            assert_eq!(chronology.commitment_count, 45);
+            assert_eq!(chronology.distinct_query_group_count, 26);
             assert_eq!(
                 chronology.fixed_query_candidate_slot_count,
                 expected_candidate_slot_count
@@ -791,7 +795,7 @@ mod tests {
                 ExactChallengeSpace::ExtensionVectorAndDistinctQueries {
                     extension_element_count: 1,
                     ref groups,
-                } if groups.len() == 8
+                } if groups.len() == 9
             ));
         }
     }

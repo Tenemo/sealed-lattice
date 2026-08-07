@@ -12,15 +12,21 @@
 //! keeps a masking argument from silently assuming that values expanded from
 //! one keyed stream are information-theoretically independent.
 
+#[cfg(test)]
 use super::domain::PrivateRandomnessDomain;
+#[cfg(test)]
 use super::material::ActionRandomnessDerivationInput;
+#[cfg(test)]
 use super::proof_coins::PrivateRandomnessAttemptIdentifier;
+#[cfg(test)]
 use super::stream::PrivateRandomBlockInput;
 use super::{
     ACTION_RANDOMNESS_KEY_MATERIAL_BYTE_LENGTH, ACTION_RANDOMNESS_ROOT_BYTE_LENGTH,
     PRIVATE_RANDOMNESS_BLOCK_BYTE_LENGTH, PRIVATE_RANDOMNESS_STREAM_KEY_BYTE_LENGTH,
 };
-use crate::foundation::{DECLARED_ADVERSARIAL_QUERY_BUDGET, Hash512};
+use crate::foundation::DECLARED_ADVERSARIAL_QUERY_BUDGET;
+#[cfg(test)]
+use crate::foundation::Hash512;
 
 /// What one replacement hop costs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

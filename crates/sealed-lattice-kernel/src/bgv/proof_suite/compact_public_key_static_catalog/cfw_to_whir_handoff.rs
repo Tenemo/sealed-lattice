@@ -24,6 +24,7 @@ pub(super) struct CfwToWhirHandoffCatalog {
     preceding_opening_claim_extension_element_count: u64,
     cfw_claim_batch_extension_element_count: u64,
     source_covector_extension_element_count: u64,
+    cross_epoch_mask_covector_extension_element_count: u64,
     inner_mask_covector_extension_element_count: u64,
     outer_mask_covector_extension_element_count: u64,
     combined_relation_extension_element_count: u64,
@@ -42,11 +43,19 @@ impl CfwToWhirHandoffCatalog {
         let source_covector_extension_element_count = relation.padded_witness_element_count();
         if source_covector_extension_element_count == 0
             || !source_covector_extension_element_count.is_power_of_two()
-            || preceding_opening_claim_count == 0
+            || preceding_opening_claim_count != 2
         {
             return Err(CompactStaticCatalogError::InvalidGeometry);
         }
         let source_variable_count = u64::from(source_covector_extension_element_count.ilog2());
+        let cross_epoch_copy = relation
+            .cross_epoch_copy_geometry()
+            .map_err(|_| CompactStaticCatalogError::InvalidGeometry)?;
+        if cross_epoch_copy.main_message_element_count() != source_covector_extension_element_count
+            || u64::from(cross_epoch_copy.point_coordinate_count()) + 1 != source_variable_count
+        {
+            return Err(CompactStaticCatalogError::InvalidGeometry);
+        }
         let preceding_opening_claim_extension_element_count = checked_product(&[
             preceding_opening_claim_count,
             checked_add(source_variable_count, 1)?,
@@ -68,9 +77,11 @@ impl CfwToWhirHandoffCatalog {
             cfw_reduction.outer_mask_count(),
             cfw_reduction.outer_mask_message_length(),
         ])?;
+        let cross_epoch_mask_covector_extension_element_count = 2;
         let combined_relation_extension_element_count = [
             source_covector_extension_element_count,
             1,
+            cross_epoch_mask_covector_extension_element_count,
             inner_mask_covector_extension_element_count,
             outer_mask_covector_extension_element_count,
         ]
@@ -102,6 +113,7 @@ impl CfwToWhirHandoffCatalog {
             preceding_opening_claim_extension_element_count,
             cfw_claim_batch_extension_element_count,
             source_covector_extension_element_count,
+            cross_epoch_mask_covector_extension_element_count,
             inner_mask_covector_extension_element_count,
             outer_mask_covector_extension_element_count,
             combined_relation_extension_element_count,
@@ -118,16 +130,19 @@ impl CfwToWhirHandoffCatalog {
         &self,
         relation: &CompactPublicKeyRelationCatalog,
     ) -> Result<(), CompactStaticCatalogError> {
-        let runtime_geometry = CompactCfwToWhirPayloadGeometry::derive(
-            CompactCfwGeometry::derive(
-                usize::try_from(relation.padded_witness_element_count())
+        let runtime_geometry =
+            CompactCfwToWhirPayloadGeometry::derive_with_preceding_mask_covector_element_count(
+                CompactCfwGeometry::derive(
+                    usize::try_from(relation.padded_witness_element_count())
+                        .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+                )
+                .map_err(|_| CompactStaticCatalogError::InvalidGeometry)?,
+                usize::try_from(self.preceding_opening_claim_count)
+                    .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+                usize::try_from(self.cross_epoch_mask_covector_extension_element_count)
                     .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
             )
-            .map_err(|_| CompactStaticCatalogError::InvalidGeometry)?,
-            usize::try_from(self.preceding_opening_claim_count)
-                .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
-        )
-        .map_err(|_| CompactStaticCatalogError::InvalidGeometry)?;
+            .map_err(|_| CompactStaticCatalogError::InvalidGeometry)?;
         if self.source_variable_count
             != u64::try_from(runtime_geometry.source_variable_count())
                 .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?
@@ -139,6 +154,9 @@ impl CfwToWhirHandoffCatalog {
                     .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?
             || self.source_covector_extension_element_count
                 != u64::try_from(runtime_geometry.source_covector_extension_element_count())
+                    .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?
+            || self.cross_epoch_mask_covector_extension_element_count
+                != u64::try_from(runtime_geometry.preceding_mask_covector_extension_element_count())
                     .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?
             || self.inner_mask_covector_extension_element_count
                 != u64::try_from(runtime_geometry.inner_mask_covector_extension_element_count())
@@ -196,35 +214,21 @@ mod tests {
         let catalog = CfwToWhirHandoffCatalog::derive(&relation, &cfw_reduction, 2)
             .expect("selected CFW-to-WHIR handoff");
 
+        assert_eq!(catalog.source_variable_count, 22);
+        assert_eq!(catalog.preceding_opening_claim_count, 2);
+        assert_eq!(catalog.preceding_opening_claim_extension_element_count, 46);
+        assert_eq!(catalog.cfw_claim_batch_extension_element_count, 50);
+        assert_eq!(catalog.source_covector_extension_element_count, 4_194_304);
+        assert_eq!(catalog.cross_epoch_mask_covector_extension_element_count, 2);
+        assert_eq!(catalog.inner_mask_covector_extension_element_count, 276);
+        assert_eq!(catalog.outer_mask_covector_extension_element_count, 184);
+        assert_eq!(catalog.combined_relation_extension_element_count, 4_194_767);
+        assert_eq!(catalog.combined_relation_claim_count, 164);
+        assert_eq!(catalog.transition_live_extension_element_count, 4_194_863);
         assert_eq!(
-            (
-                catalog.source_variable_count,
-                catalog.preceding_opening_claim_count,
-                catalog.preceding_opening_claim_extension_element_count,
-                catalog.cfw_claim_batch_extension_element_count,
-                catalog.source_covector_extension_element_count,
-                catalog.inner_mask_covector_extension_element_count,
-                catalog.outer_mask_covector_extension_element_count,
-                catalog.combined_relation_extension_element_count,
-                catalog.combined_relation_claim_count,
-                catalog.transition_live_extension_element_count,
-                catalog.retained_combined_relation_payload_byte_length,
-                catalog.transition_payload_byte_length,
-            ),
-            (
-                22,
-                2,
-                46,
-                50,
-                4_194_304,
-                276,
-                184,
-                4_194_765,
-                164,
-                4_194_861,
-                167_790_600,
-                167_794_440,
-            )
+            catalog.retained_combined_relation_payload_byte_length,
+            167_790_680
         );
+        assert_eq!(catalog.transition_payload_byte_length, 167_794_520);
     }
 }

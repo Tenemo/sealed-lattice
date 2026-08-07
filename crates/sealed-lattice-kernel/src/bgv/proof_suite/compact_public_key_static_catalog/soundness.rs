@@ -138,7 +138,7 @@ impl WhirInteractiveSoundness {
         ];
         let mut source_variable_count = whir.polynomial_variable_count;
         let mut fold_failure_row_count = 0_u64;
-        for batch_ordinal in 0..WHIR_FOLD_BATCH_COUNT {
+        for (batch_ordinal, source_rate) in source_rates.into_iter().enumerate() {
             rows.push(ExactInteractiveFailureRow::new(
                 InteractiveFailureEvent::WhirMaskedSumcheckInitial {
                     epoch,
@@ -150,7 +150,7 @@ impl WhirInteractiveSoundness {
             )?);
 
             let source_domain_exponent = source_variable_count
-                .checked_add(source_rates[batch_ordinal])
+                .checked_add(source_rate)
                 .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
             let source_domain_size = 1_u64
                 .checked_shl(source_domain_exponent)
@@ -740,7 +740,7 @@ mod tests {
     fn every_packing_has_a_complete_exact_interactive_error_vector() {
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
-        let expected_event_counts = [106, 104, 102, 100];
+        let expected_event_counts = [108, 106, 104, 102];
         let expected_verifier_move_counts = [82, 80, 78, 76];
         for ((factor, expected_event_count), expected_verifier_move_count) in catalog
             .factor_catalogs
@@ -758,8 +758,8 @@ mod tests {
                 expected_verifier_move_count
             );
             assert_eq!(soundness.outer_rows.len(), 27);
-            assert_eq!(soundness.pre_challenge.mask_query_branch_count, 7);
-            assert_eq!(soundness.main.mask_query_branch_count, 9);
+            assert_eq!(soundness.pre_challenge.mask_query_branch_count, 8);
+            assert_eq!(soundness.main.mask_query_branch_count, 10);
             assert!(
                 soundness
                     .interactive_union_bound
@@ -865,7 +865,7 @@ mod tests {
                     .contains(&VerifierMoveRole::WhirFinalQueries {
                         epoch: TranscriptEpoch::PreChallenge,
                     })
-                    && verifier_move_failure.contributing_event_count == 9
+                    && verifier_move_failure.contributing_event_count == 10
             }));
             assert!(final_query_failures.iter().any(|verifier_move_failure| {
                 verifier_move_failure
@@ -873,18 +873,18 @@ mod tests {
                     .contains(&VerifierMoveRole::WhirFinalQueries {
                         epoch: TranscriptEpoch::Main,
                     })
-                    && verifier_move_failure.contributing_event_count == 10
+                    && verifier_move_failure.contributing_event_count == 11
             }));
         }
     }
 
     #[test]
-    fn main_mask_queries_cover_all_ten_base_query_branches() {
+    fn main_mask_queries_cover_all_eleven_base_query_branches() {
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
         for factor in &catalog.factor_catalogs {
             let main = &factor.main_whir;
-            assert_eq!(main.mask_query_union_branch_count, 10);
+            assert_eq!(main.mask_query_union_branch_count, 11);
             assert_eq!(main.mask_query_count, 399);
             let mask_union_probability = main
                 .mask_groups_in_commitment_order()

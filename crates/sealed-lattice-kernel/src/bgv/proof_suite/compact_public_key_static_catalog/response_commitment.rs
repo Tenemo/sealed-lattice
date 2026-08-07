@@ -15,7 +15,7 @@ use super::transcript_chronology::{
 };
 use super::uniform_verifier_randomness::PackingUniformVerifierRandomness;
 use super::{
-    BASE_FIELD_ELEMENT_BYTE_LENGTH, CROSS_EPOCH_EXPLICIT_OPENING_COUNT, CompactStaticCatalogError,
+    BASE_FIELD_ELEMENT_BYTE_LENGTH, CROSS_EPOCH_DISCLOSED_VALUE_COUNT, CompactStaticCatalogError,
     EXTENSION_FIELD_ELEMENT_BYTE_LENGTH, MERKLE_DIGEST_BYTE_LENGTH,
     MERKLE_FRONTIER_COUNT_BYTE_LENGTH, MaskGroupRole, MaskGroupStaticLedger,
     PRIVATE_LEAF_SALT_BYTE_LENGTH, WHIR_ROUND_COUNT, WhirStaticLedger, checked_add,
@@ -25,11 +25,12 @@ use crate::bgv::proof_suite::compact_proof_wire::{
     COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH, CompactProofResponseWireGeometry,
     CompactProofWireError,
 };
+#[cfg(test)]
+use crate::bgv::proof_suite::compact_response_merkle::CompactResponseQuerySchedule;
 use crate::bgv::proof_suite::compact_response_merkle::{
     CompactResponseComponentGeometry, CompactResponseFrontierScannerHeapGeometry,
     CompactResponseLeafValueKind, CompactResponseMerkleError, CompactResponseMerkleGeometry,
-    CompactResponsePostorderWriterHeapGeometry, CompactResponseQuerySchedule,
-    CompactResponseQuerySelection,
+    CompactResponsePostorderWriterHeapGeometry, CompactResponseQuerySelection,
 };
 use crate::bgv::proof_suite::compact_response_tree_external::{
     CompactResponseTreeExternalMemoryGeometry, CompactResponseTreeExternalMemorySetupError,
@@ -919,7 +920,7 @@ fn append_response_components(
             append_extension_scalars(
                 builder,
                 ResponseComponentRole::CrossEpochOpeningEvaluations,
-                CROSS_EPOCH_EXPLICIT_OPENING_COUNT,
+                CROSS_EPOCH_DISCLOSED_VALUE_COUNT,
             )?;
             append_extension_scalars(
                 builder,
@@ -1408,12 +1409,12 @@ mod tests {
             .expect("compact public-key static packing ledger");
         let expected_response_counts = [82, 80, 78, 76];
         let expected_maximum_lengths = [262_144, 524_288, 1_048_576, 2_097_152];
-        let expected_proof_oracle_query_counts = [74_517, 73_983, 72_775, 72_559];
+        let expected_proof_oracle_query_counts = [78_512, 77_978, 76_770, 76_554];
         let expected_maximum_opening_byte_lengths =
-            [25_509_792, 24_576_472, 23_858_784, 23_898_984];
+            [26_094_856, 25_161_344, 24_443_272, 24_482_576];
         let expected_committed_leaf_counts = [639_270, 1_065_250, 1_917_214, 3_621_146];
         let expected_commitment_parent_hash_counts = [639_188, 1_065_170, 1_917_136, 3_621_070];
-        let expected_maximum_opening_parent_hash_counts = [161_420, 164_975, 167_499, 171_483];
+        let expected_maximum_opening_parent_hash_counts = [163_571, 167_123, 169_641, 173_611];
 
         for (factor_ordinal, factor) in catalog.factor_catalogs.iter().enumerate() {
             let expected_response_count = expected_response_counts[factor_ordinal];
@@ -1707,9 +1708,9 @@ mod tests {
             .iter()
             .flat_map(|response| &response.components)
             .find(|component| component.role == ResponseComponentRole::CrossEpochOpeningEvaluations)
-            .expect("two explicit cross-epoch openings");
-        assert_eq!(cross_epoch_openings.leaf_count, 2);
-        assert_eq!(cross_epoch_openings.queried_leaf_count, 2);
+            .expect("three cross-epoch disclosures");
+        assert_eq!(cross_epoch_openings.leaf_count, 3);
+        assert_eq!(cross_epoch_openings.queried_leaf_count, 3);
     }
 
     #[test]

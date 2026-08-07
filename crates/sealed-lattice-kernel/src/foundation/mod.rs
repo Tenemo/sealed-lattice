@@ -163,13 +163,13 @@ pub(crate) use prepared_signed_carrier::{
     retain_prepared_signed_carrier,
 };
 pub(crate) use private_randomness::PersistentProofWitnessCoinBinding;
-#[cfg(test)]
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
 pub(crate) use private_randomness::generator_hybrid::{
     MaskGeneratorHonestAbortEvent, MaskGeneratorHybridAssumption, MaskGeneratorHybridHop,
     MaskGeneratorHybridLoss, action_root_expansion_summary, deployed_mask_generator_hybrid,
     quantum_mask_generator_hybrid,
 };
-#[cfg(all(test, feature = "theorem-evidence"))]
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
 pub(crate) use private_randomness::generator_hybrid::{
     deployed_private_stream_hybrid, quantum_private_stream_hybrid,
 };

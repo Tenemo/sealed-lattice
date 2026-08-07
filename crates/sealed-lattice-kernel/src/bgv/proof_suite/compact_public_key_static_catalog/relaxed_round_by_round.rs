@@ -169,8 +169,7 @@ impl UniqueDecodingCode {
             block_length,
             interleaving_width,
             minimum_distance_numerator,
-            minimum_distance_denominator: u64::try_from(block_length)
-                .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+            minimum_distance_denominator: block_length,
             decoding_radius_numerator: selected_decoding_error_count,
             decoding_radius_denominator: block_length,
             selected_decoding_error_count,
@@ -934,9 +933,9 @@ fn derive_whir_mca_bounds(
             whir.round_log_inverse_rates[2],
         ];
         let mut source_variable_count = whir.polynomial_variable_count;
-        for batch_ordinal in 0..WHIR_FOLD_BATCH_COUNT {
+        for (batch_ordinal, source_rate) in source_rates.into_iter().enumerate() {
             let source_domain_exponent = source_variable_count
-                .checked_add(source_rates[batch_ordinal])
+                .checked_add(source_rate)
                 .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
             let source_domain_size = 1_u64
                 .checked_shl(source_domain_exponent)
@@ -1826,6 +1825,15 @@ mod tests {
                         hiding_randomness_length: 399,
                         block_length: 2_048,
                         interleaving_width: 23,
+                    },
+                },
+                CommittedMaskCodeRelation {
+                    role: MaskGroupRole::CrossEpochOpening,
+                    code: CommittedCodeRelation {
+                        message_length: 1,
+                        hiding_randomness_length: 798,
+                        block_length: 4_096,
+                        interleaving_width: 2,
                     },
                 },
             ]

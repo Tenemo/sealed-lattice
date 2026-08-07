@@ -450,11 +450,17 @@ impl CfwReductionCatalog {
                 role: MaskGroupRole::CfwInner,
                 width: self.inner_mask_count(),
                 message_length: INNER_MASK_MESSAGE_LENGTH,
+                encoding_randomness_length:
+                    super::MaskEncodingRandomnessLength::LocalMaskQueryCount,
+                committed_encoding_source: super::MaskCommittedEncodingSource::OwnedByThisEpoch,
             },
             MaskGroupStaticSpecification {
                 role: MaskGroupRole::CfwOuter,
                 width: self.outer_mask_count(),
                 message_length: OUTER_MASK_MESSAGE_LENGTH,
+                encoding_randomness_length:
+                    super::MaskEncodingRandomnessLength::LocalMaskQueryCount,
+                committed_encoding_source: super::MaskCommittedEncodingSource::OwnedByThisEpoch,
             },
         ]
     }
