@@ -185,6 +185,7 @@ export const destroyCommonProofCheckpointResumeDescriptor = (
     }
     descriptor.checkpointLineageIdentifier.fill(0);
     descriptor.commonProofEnvironmentIdentifier.fill(0);
+    descriptor.externalMemoryStateDigest.fill(0);
     descriptor.generationCursorManifestBytes.fill(0);
     descriptor.privateRandomnessStreamAttemptIdentifier?.fill(0);
     descriptor.stableAttemptBindingHash.fill(0);
@@ -209,6 +210,7 @@ export const copyCommonProofCheckpointResumeDescriptorForWorker = (
     }
     let checkpointLineageIdentifier = new Uint8Array(0);
     let commonProofEnvironmentIdentifier = new Uint8Array(0);
+    let externalMemoryStateDigest = new Uint8Array(0);
     let generationCursorManifestBytes = new Uint8Array(0);
     let privateRandomnessStreamAttemptIdentifier:
         | Uint8Array<ArrayBuffer>
@@ -227,6 +229,13 @@ export const copyCommonProofCheckpointResumeDescriptorForWorker = (
                 descriptor.commonProofEnvironmentIdentifier,
                 mutationIdentifierByteLength,
                 'Checkpoint common-proof environment identifier',
+            ),
+        );
+        externalMemoryStateDigest = Uint8Array.from(
+            copyBytes(
+                descriptor.externalMemoryStateDigest,
+                storageRootCommitmentByteLength,
+                'Checkpoint external-memory state digest',
             ),
         );
         generationCursorManifestBytes = Uint8Array.from(
@@ -256,6 +265,7 @@ export const copyCommonProofCheckpointResumeDescriptorForWorker = (
         return Object.freeze({
             checkpointLineageIdentifier,
             commonProofEnvironmentIdentifier,
+            externalMemoryStateDigest,
             generationCursorManifestBytes,
             ...(privateRandomnessStreamAttemptIdentifier === undefined
                 ? {}
@@ -266,6 +276,7 @@ export const copyCommonProofCheckpointResumeDescriptorForWorker = (
     } catch (error) {
         checkpointLineageIdentifier.fill(0);
         commonProofEnvironmentIdentifier.fill(0);
+        externalMemoryStateDigest.fill(0);
         generationCursorManifestBytes.fill(0);
         privateRandomnessStreamAttemptIdentifier?.fill(0);
         stableAttemptBindingHash.fill(0);

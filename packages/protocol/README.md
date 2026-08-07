@@ -58,11 +58,16 @@ to this construction and cannot freeze the suite.
 The compact kernel can now encode and restore a bounded canonical transcript
 cursor after a verifier move and recompute every preceding verifier message. It
 can also restore a contiguous canonical response prefix without losing the
-global leaf-salt uniqueness registry. This is only restart groundwork. A
-later-query response can delay encoded-section progress beyond its commitment
-move, and the authenticated checkpoint does not yet bind that split to live
-tree objects, response values, private-randomness progress, or last-use
-deletions.
+global leaf-salt uniqueness registry. Generic common-proof browser custody now
+adds an authenticated external-memory state trailer to each checkpoint. It binds
+partial and sealed live objects by canonical content chain and lifecycle state,
+binds last-use deletions through a rolling ordered chain, and refuses normal
+execution or checkpoint replacement until deterministic prefix replay
+reconstructs the exact digest. This remains restart groundwork. The compact
+transcript and response assembler are not connected to that host owner, so a
+later-query response can still delay encoded-section progress beyond its
+commitment move without binding that split or its response values into one
+durable compact checkpoint.
 
 The first public-key-share proof is a standalone development kill gate. It is
 not a fourth outer setup packet. The canonical provisional setup schedule

@@ -250,6 +250,8 @@ export const createSelectedProofRuntimeEvidenceAccounting = (input: {
         prefixReplayExternalMemory: CommonProofBrowserCustody['prefixReplayExternalMemory'],
     ): CommonProofBrowserCustody['prefixReplayExternalMemory'] =>
         Object.freeze({
+            confirmAuthenticatedCheckpointExternalMemoryState: () =>
+                prefixReplayExternalMemory.confirmAuthenticatedCheckpointExternalMemoryState(),
             executeDeterministicPrefixReplayTransaction: async (
                 request: CommonProofExternalMemoryRequest,
             ) => {

@@ -1,5 +1,8 @@
 import { shake256 } from '@noble/hashes/sha3.js';
-import { BrowserActionStorageCustodyError } from '@sealed-lattice/types';
+import {
+    BrowserActionStorageCustodyError,
+    foundationProfile,
+} from '@sealed-lattice/types';
 import {
     openClosedWorkerCommonProofScratchStorage,
     type AuthenticatedCommonProofInputStore,
@@ -52,6 +55,7 @@ import {
     type CommonProofExternalMemoryIdentifierInput,
     type ExternalMemoryRecordDescriptor,
     type ExternalMemoryObjectState,
+    type ExternalMemoryDeletionState,
     type StagedExternalMemoryRecordChange,
     type ExternalMemoryShadowState,
     type CanonicalOutputChunk,
@@ -83,6 +87,22 @@ const storedRecordDigestDomain =
     'sealed-lattice/common-proof/stored-record-digest/v1';
 const storedPayloadDigestDomain =
     'sealed-lattice/common-proof/stored-payload-digest/v1';
+const externalMemoryObjectContentGenesisDigestDomain =
+    'sealed-lattice/common-proof/external-memory-object-content-genesis/v1';
+const externalMemoryObjectContentAppendDigestDomain =
+    'sealed-lattice/common-proof/external-memory-object-content-append/v1';
+const externalMemoryObjectContentSealDigestDomain =
+    'sealed-lattice/common-proof/external-memory-object-content-seal/v1';
+const externalMemoryObjectStateDigestDomain =
+    'sealed-lattice/common-proof/external-memory-object-state/v1';
+const externalMemoryDeletionStateGenesisDigestDomain =
+    'sealed-lattice/common-proof/external-memory-deletion-state-genesis/v1';
+const externalMemoryDeletionStateAppendDigestDomain =
+    'sealed-lattice/common-proof/external-memory-deletion-state-append/v1';
+const checkpointExternalMemoryStateDigestDomain =
+    'sealed-lattice/common-proof/checkpoint-external-memory-state/v1';
+const checkpointExternalMemoryStateDigestVersion = 1;
+const checkpointExternalMemoryStateTrailerByteLength = foundationHashByteLength;
 
 const destroyOwnedPayloadBuffer = (bytes: Uint8Array | undefined): void => {
     if (bytes === undefined) {
@@ -162,22 +182,41 @@ const addPayloadBufferAccounting = (
             transaction.transferredByteLength,
     });
 
-const custodyDigest = (
+const unsigned16Bytes = (value: number): Uint8Array<ArrayBuffer> => {
+    const bytes = new Uint8Array(2);
+    new DataView(bytes.buffer).setUint16(0, value, true);
+    return bytes;
+};
+
+const unsigned64Bytes = (value: bigint): Uint8Array<ArrayBuffer> => {
+    const bytes = new Uint8Array(8);
+    new DataView(bytes.buffer).setBigUint64(0, value, true);
+    return bytes;
+};
+
+const custodyDigestParts = (
     domain: string,
-    bytes: Uint8Array,
+    parts: readonly Uint8Array[],
 ): Uint8Array<ArrayBuffer> => {
     const hash = shake256.create({ dkLen: foundationHashByteLength });
     try {
         const domainBytes = textEncoder.encode(domain);
         hash.update(unsigned32Bytes(domainBytes.byteLength));
         hash.update(domainBytes);
-        hash.update(unsigned32Bytes(bytes.byteLength));
-        hash.update(bytes);
+        for (const part of parts) {
+            hash.update(unsigned32Bytes(part.byteLength));
+            hash.update(part);
+        }
         return hash.digest();
     } finally {
         hash.destroy();
     }
 };
+
+const custodyDigest = (
+    domain: string,
+    bytes: Uint8Array,
+): Uint8Array<ArrayBuffer> => custodyDigestParts(domain, [bytes]);
 
 export const openCommonProofBrowserCustody = (
     input: CommonProofBrowserCustodyInput,
@@ -353,6 +392,8 @@ export const openCommonProofBrowserCustody = (
         'open';
     let checkpointOperationIdentity = initialCheckpointOperationIdentity;
     let checkpointRestoreAttempted = false;
+    let checkpointExternalMemoryStateConfirmed =
+        latestCheckpointResumeDescriptor === undefined;
     const checkedAccountingAdd = (
         currentValue: number,
         increment: number,
@@ -366,6 +407,224 @@ export const openCommonProofBrowserCustody = (
             );
         }
         return result;
+    };
+    const externalMemoryProtectionCode = (
+        protection: ExternalMemoryObjectState['protection'],
+    ): number => (protection === 'public-integrity' ? 1 : 2);
+    const initialExternalMemoryObjectContentDigest = (inputValue: {
+        exactByteLength: bigint;
+        objectOrdinal: number;
+        protection: ExternalMemoryObjectState['protection'];
+    }): Uint8Array<ArrayBuffer> =>
+        custodyDigestParts(externalMemoryObjectContentGenesisDigestDomain, [
+            commonProofEnvironmentIdentifier,
+            commonProofRuntimeBindingHash,
+            proofAttemptLineageIdentifier,
+            unsigned32Bytes(inputValue.objectOrdinal),
+            unsigned16Bytes(
+                externalMemoryProtectionCode(inputValue.protection),
+            ),
+            unsigned64Bytes(inputValue.exactByteLength),
+        ]);
+    const appendedExternalMemoryObjectContentDigest = (inputValue: {
+        byteOffset: bigint;
+        chunkByteLength: number;
+        chunkOrdinal: number;
+        currentContentDigest: Uint8Array;
+        payload: Uint8Array;
+    }): Uint8Array<ArrayBuffer> => {
+        const payloadDigest = custodyDigest(
+            storedPayloadDigestDomain,
+            inputValue.payload,
+        );
+        try {
+            return custodyDigestParts(
+                externalMemoryObjectContentAppendDigestDomain,
+                [
+                    inputValue.currentContentDigest,
+                    unsigned32Bytes(inputValue.chunkOrdinal),
+                    unsigned64Bytes(inputValue.byteOffset),
+                    unsigned32Bytes(inputValue.chunkByteLength),
+                    payloadDigest,
+                ],
+            );
+        } finally {
+            payloadDigest.fill(0);
+        }
+    };
+    const sealedExternalMemoryObjectContentDigest = (inputValue: {
+        contentDigest: Uint8Array;
+        exactByteLength: bigint;
+        sealMarkerChunkOrdinal: number;
+    }): Uint8Array<ArrayBuffer> =>
+        custodyDigestParts(externalMemoryObjectContentSealDigestDomain, [
+            inputValue.contentDigest,
+            unsigned64Bytes(inputValue.exactByteLength),
+            unsigned32Bytes(inputValue.sealMarkerChunkOrdinal),
+        ]);
+    const externalMemoryObjectStateDigest = (inputValue: {
+        object: ExternalMemoryObjectState;
+        objectOrdinal: number;
+    }): Uint8Array<ArrayBuffer> => {
+        const { object, objectOrdinal } = inputValue;
+        const sealed = object.sealMarker !== undefined;
+        const expectedNextChunkOrdinal =
+            object.chunks.length + (sealed ? 2 : 1);
+        if (
+            !isSafeUnsigned32(objectOrdinal) ||
+            object.contentDigest.byteLength !== foundationHashByteLength ||
+            sealed !== (object.sealedContentDigest !== undefined) ||
+            object.appendedByteLength < 0n ||
+            object.appendedByteLength > object.exactByteLength ||
+            !isSafeUnsigned32(expectedNextChunkOrdinal) ||
+            object.nextChunkOrdinal !== expectedNextChunkOrdinal ||
+            !isSafeUnsigned32(object.nextChunkOrdinal)
+        ) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidState',
+                'A common-proof external-memory object has malformed checkpoint state.',
+            );
+        }
+        return custodyDigestParts(externalMemoryObjectStateDigestDomain, [
+            commonProofEnvironmentIdentifier,
+            commonProofRuntimeBindingHash,
+            proofAttemptLineageIdentifier,
+            unsigned32Bytes(objectOrdinal),
+            unsigned16Bytes(externalMemoryProtectionCode(object.protection)),
+            unsigned64Bytes(object.exactByteLength),
+            unsigned64Bytes(object.appendedByteLength),
+            unsigned32Bytes(object.nextChunkOrdinal),
+            unsigned16Bytes(sealed ? 1 : 0),
+            object.contentDigest,
+            ...(object.sealedContentDigest === undefined
+                ? []
+                : [object.sealedContentDigest]),
+        ]);
+    };
+    let externalMemoryDeletionState: ExternalMemoryDeletionState = {
+        deletedObjectCount: 0,
+        deletionStateDigest: custodyDigestParts(
+            externalMemoryDeletionStateGenesisDigestDomain,
+            [
+                commonProofEnvironmentIdentifier,
+                commonProofRuntimeBindingHash,
+                proofAttemptLineageIdentifier,
+            ],
+        ),
+    };
+    const appendedExternalMemoryDeletionStateDigest = (inputValue: {
+        currentDeletionStateDigest: Uint8Array;
+        deletedObjectCount: number;
+        objectOrdinal: number;
+        objectStateDigest: Uint8Array;
+    }): Uint8Array<ArrayBuffer> =>
+        custodyDigestParts(externalMemoryDeletionStateAppendDigestDomain, [
+            inputValue.currentDeletionStateDigest,
+            unsigned32Bytes(inputValue.deletedObjectCount),
+            unsigned32Bytes(inputValue.objectOrdinal),
+            inputValue.objectStateDigest,
+        ]);
+    const checkpointExternalMemoryStateDigest = (): Uint8Array<ArrayBuffer> => {
+        const liveObjects = [...objects].sort(
+            ([leftOrdinal], [rightOrdinal]) => leftOrdinal - rightOrdinal,
+        );
+        if (liveObjects.length > 0xffff_ffff) {
+            throw new BrowserActionStorageCustodyError(
+                'StorageFailure',
+                'Common-proof checkpoint external-memory state exceeds its canonical count range.',
+            );
+        }
+        const temporaryObjectStateDigests: Uint8Array<ArrayBuffer>[] = [];
+        try {
+            const parts: Uint8Array[] = [
+                unsigned16Bytes(checkpointExternalMemoryStateDigestVersion),
+                commonProofEnvironmentIdentifier,
+                commonProofRuntimeBindingHash,
+                proofAttemptLineageIdentifier,
+                unsigned32Bytes(liveObjects.length),
+            ];
+            for (const [objectOrdinal, object] of liveObjects) {
+                const objectStateDigest = externalMemoryObjectStateDigest({
+                    object,
+                    objectOrdinal,
+                });
+                temporaryObjectStateDigests.push(objectStateDigest);
+                parts.push(unsigned32Bytes(objectOrdinal), objectStateDigest);
+            }
+            if (
+                !isSafeUnsigned32(
+                    externalMemoryDeletionState.deletedObjectCount,
+                ) ||
+                externalMemoryDeletionState.deletionStateDigest.byteLength !==
+                    foundationHashByteLength
+            ) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidState',
+                    'A common-proof checkpoint boundary has malformed deletion state.',
+                );
+            }
+            parts.push(
+                unsigned32Bytes(externalMemoryDeletionState.deletedObjectCount),
+                externalMemoryDeletionState.deletionStateDigest,
+            );
+            return custodyDigestParts(
+                checkpointExternalMemoryStateDigestDomain,
+                parts,
+            );
+        } finally {
+            for (const objectStateDigest of temporaryObjectStateDigests) {
+                objectStateDigest.fill(0);
+            }
+        }
+    };
+    const authenticatedCheckpointStateBytes = (inputValue: {
+        canonicalStateBytes: Uint8Array;
+        externalMemoryStateDigest: Uint8Array;
+    }): Uint8Array<ArrayBuffer> => {
+        if (
+            inputValue.canonicalStateBytes.byteLength === 0 ||
+            inputValue.externalMemoryStateDigest.byteLength !==
+                checkpointExternalMemoryStateTrailerByteLength ||
+            inputValue.canonicalStateBytes.byteLength >
+                foundationProfile.maximumCanonicalStreamByteLength -
+                    checkpointExternalMemoryStateTrailerByteLength
+        ) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidInput',
+                'A common-proof checkpoint state cannot carry its authenticated external-memory trailer.',
+            );
+        }
+        const authenticatedStateBytes = new Uint8Array(
+            inputValue.canonicalStateBytes.byteLength +
+                checkpointExternalMemoryStateTrailerByteLength,
+        );
+        authenticatedStateBytes.set(inputValue.canonicalStateBytes);
+        authenticatedStateBytes.set(
+            inputValue.externalMemoryStateDigest,
+            inputValue.canonicalStateBytes.byteLength,
+        );
+        return authenticatedStateBytes;
+    };
+    const checkpointStateChunks = (
+        authenticatedStateBytes: Uint8Array,
+    ): readonly Uint8Array[] => {
+        const chunks: Uint8Array[] = [];
+        for (
+            let byteOffset = 0;
+            byteOffset < authenticatedStateBytes.byteLength;
+            byteOffset += foundationProfile.streamChunkByteLength
+        ) {
+            chunks.push(
+                authenticatedStateBytes.subarray(
+                    byteOffset,
+                    Math.min(
+                        authenticatedStateBytes.byteLength,
+                        byteOffset + foundationProfile.streamChunkByteLength,
+                    ),
+                ),
+            );
+        }
+        return Object.freeze(chunks);
     };
     const monotonicMilliseconds = (): number =>
         globalThis.performance?.now() ?? Date.now();
@@ -489,6 +748,7 @@ export const openCommonProofBrowserCustody = (
         for (const object of objects.values()) {
             destroyExternalMemoryObjectInMemory(object);
         }
+        externalMemoryDeletionState.deletionStateDigest.fill(0);
         checkpointOperationIdentity = undefined;
         if (latestCheckpointResumeDescriptor !== undefined) {
             destroyCheckpointResumeDescriptor(latestCheckpointResumeDescriptor);
@@ -497,7 +757,7 @@ export const openCommonProofBrowserCustody = (
     };
 
     const checkpointBoundary = (inputValue: {
-        canonicalStateBytes?: Uint8Array;
+        authenticatedStateBytes?: Uint8Array;
         commonProofEnvironmentIdentifier: Uint8Array;
         generationCursorManifestBytes: Uint8Array;
         privateRandomnessStreamAttemptIdentifier?: Uint8Array;
@@ -533,12 +793,12 @@ export const openCommonProofBrowserCustody = (
                           inputValue.privateRandomnessStreamAttemptIdentifier.slice(),
                   }),
             safeBoundaryOrdinal: inputValue.safeBoundaryOrdinal,
-            ...(inputValue.canonicalStateBytes === undefined
+            ...(inputValue.authenticatedStateBytes === undefined
                 ? {}
                 : {
                       stateStreamDescriptorBytes:
                           describeAuthenticatedCheckpointStateStream({
-                              stateBytes: inputValue.canonicalStateBytes,
+                              stateBytes: inputValue.authenticatedStateBytes,
                               stateStreamDomain: checkpointStateStreamDomain,
                           }),
                   }),
@@ -592,6 +852,12 @@ export const openCommonProofBrowserCustody = (
                               'The common-proof kernel exposed a malformed checkpoint.',
                           );
                       }
+                      if (!checkpointExternalMemoryStateConfirmed) {
+                          throw new BrowserActionStorageCustodyError(
+                              'InvalidState',
+                              'A resumed common-proof attempt cannot publish before its external-memory state is confirmed.',
+                          );
+                      }
                       if (
                           !bytesEqual(
                               checkpoint.stableAttemptBindingHash,
@@ -618,12 +884,24 @@ export const openCommonProofBrowserCustody = (
                       const generationCursorManifestBytes = Uint8Array.from(
                           checkpoint.generationCursorManifestBytes,
                       );
-                      const privateRandomnessStreamAttemptIdentifier =
-                          checkpoint.privateRandomnessStreamAttemptIdentifier?.slice();
+                      let externalMemoryStateDigest = new Uint8Array(0);
+                      let authenticatedStateBytes = new Uint8Array(0);
+                      let privateRandomnessStreamAttemptIdentifier:
+                          | Uint8Array<ArrayBuffer>
+                          | undefined;
                       try {
+                          externalMemoryStateDigest =
+                              checkpointExternalMemoryStateDigest();
+                          authenticatedStateBytes =
+                              authenticatedCheckpointStateBytes({
+                                  canonicalStateBytes:
+                                      checkpoint.canonicalStateBytes,
+                                  externalMemoryStateDigest,
+                              });
+                          privateRandomnessStreamAttemptIdentifier =
+                              checkpoint.privateRandomnessStreamAttemptIdentifier?.slice();
                           const boundary = checkpointBoundary({
-                              canonicalStateBytes:
-                                  checkpoint.canonicalStateBytes,
+                              authenticatedStateBytes,
                               commonProofEnvironmentIdentifier,
                               generationCursorManifestBytes,
                               ...(privateRandomnessStreamAttemptIdentifier ===
@@ -646,15 +924,16 @@ export const openCommonProofBrowserCustody = (
                           await input.checkpoint!.store.publish({
                               boundary,
                               identity: checkpointOperationIdentity,
-                              stateChunks: [
-                                  checkpoint.canonicalStateBytes.slice(),
-                              ],
+                              stateChunks: checkpointStateChunks(
+                                  authenticatedStateBytes,
+                              ),
                           });
                           const nextResumeDescriptor =
                               copyCheckpointResumeDescriptor({
                                   checkpointLineageIdentifier:
                                       checkpointOperationIdentity.checkpointLineageIdentifier,
                                   commonProofEnvironmentIdentifier,
+                                  externalMemoryStateDigest,
                                   generationCursorManifestBytes,
                                   ...(privateRandomnessStreamAttemptIdentifier ===
                                   undefined
@@ -675,6 +954,8 @@ export const openCommonProofBrowserCustody = (
                           latestCheckpointResumeDescriptor =
                               nextResumeDescriptor;
                       } finally {
+                          authenticatedStateBytes.fill(0);
+                          externalMemoryStateDigest.fill(0);
                           generationCursorManifestBytes.fill(0);
                           privateRandomnessStreamAttemptIdentifier?.fill(0);
                       }
@@ -750,17 +1031,40 @@ export const openCommonProofBrowserCustody = (
                                   restoredState.set(chunk, offset);
                                   offset += chunk.byteLength;
                               }
+                              if (
+                                  restoredState.byteLength <=
+                                      checkpointExternalMemoryStateTrailerByteLength ||
+                                  !bytesEqual(
+                                      restoredState.subarray(
+                                          restoredState.byteLength -
+                                              checkpointExternalMemoryStateTrailerByteLength,
+                                      ),
+                                      resumeDescriptor.externalMemoryStateDigest,
+                                  )
+                              ) {
+                                  restoredState.fill(0);
+                                  throw new BrowserActionStorageCustodyError(
+                                      'RecordAuthenticationFailed',
+                                      'The authenticated common-proof checkpoint carries another external-memory state.',
+                                  );
+                              }
+                              const canonicalStateBytes = restoredState.slice(
+                                  0,
+                                  restoredState.byteLength -
+                                      checkpointExternalMemoryStateTrailerByteLength,
+                              );
+                              restoredState.fill(0);
                               let generationCursorManifestBytes =
                                   new Uint8Array(0);
                               try {
                                   generationCursorManifestBytes =
                                       resumeDescriptor.generationCursorManifestBytes.slice();
                                   return Object.freeze({
-                                      canonicalStateBytes: restoredState,
+                                      canonicalStateBytes,
                                       generationCursorManifestBytes,
                                   });
                               } catch (error) {
-                                  restoredState.fill(0);
+                                  canonicalStateBytes.fill(0);
                                   generationCursorManifestBytes.fill(0);
                                   throw error;
                               }
@@ -1732,6 +2036,11 @@ export const openCommonProofBrowserCustody = (
         shadow.objects.set(operation.objectOrdinal, {
             appendedByteLength: 0n,
             chunks: [],
+            contentDigest: initialExternalMemoryObjectContentDigest({
+                exactByteLength: operation.exactByteLength,
+                objectOrdinal: operation.objectOrdinal,
+                protection: operation.protection,
+            }),
             exactByteLength: operation.exactByteLength,
             header,
             nextChunkOrdinal: 1,
@@ -1780,6 +2089,14 @@ export const openCommonProofBrowserCustody = (
             operation.bytes,
             'decoded-append',
         );
+        const nextContentDigest = appendedExternalMemoryObjectContentDigest({
+            byteOffset,
+            chunkByteLength,
+            chunkOrdinal,
+            currentContentDigest: object.contentDigest,
+            payload: operation.bytes,
+        });
+        let nextContentDigestAdopted = false;
         try {
             reserveRecord(shadow);
             const descriptor = await createDescriptor(
@@ -1803,9 +2120,15 @@ export const openCommonProofBrowserCustody = (
                 byteOffset,
                 descriptor,
             });
+            object.contentDigest.fill(0);
+            object.contentDigest = nextContentDigest;
+            nextContentDigestAdopted = true;
             object.nextChunkOrdinal += 1;
             object.appendedByteLength += BigInt(chunkByteLength);
         } catch (error) {
+            if (!nextContentDigestAdopted) {
+                nextContentDigest.fill(0);
+            }
             destroyOwnedPayloadBuffer(operation.bytes);
             payloadLedger.releaseIfLive(payloadOwnership);
             throw error;
@@ -1841,9 +2164,23 @@ export const openCommonProofBrowserCustody = (
             object.protection,
         );
         shadow.createdDescriptors.add(sealMarker);
-        await stageRecordWrite(shadow, sealMarker, new Uint8Array(0));
-        object.nextChunkOrdinal += 1;
-        object.sealMarker = sealMarker;
+        const sealedContentDigest = sealedExternalMemoryObjectContentDigest({
+            contentDigest: object.contentDigest,
+            exactByteLength: object.exactByteLength,
+            sealMarkerChunkOrdinal: object.nextChunkOrdinal,
+        });
+        let sealedContentDigestAdopted = false;
+        try {
+            await stageRecordWrite(shadow, sealMarker, new Uint8Array(0));
+            object.nextChunkOrdinal += 1;
+            object.sealedContentDigest = sealedContentDigest;
+            sealedContentDigestAdopted = true;
+            object.sealMarker = sealMarker;
+        } finally {
+            if (!sealedContentDigestAdopted) {
+                sealedContentDigest.fill(0);
+            }
+        }
     };
 
     const readObject = async (
@@ -1995,12 +2332,39 @@ export const openCommonProofBrowserCustody = (
         objectOrdinal: number,
     ): void => {
         const object = requireObject(shadow.objects, objectOrdinal);
-        for (const descriptor of allObjectDescriptors(object)) {
-            stageRecordDeletion(shadow, descriptor);
+        if (shadow.deletionState.deletedObjectCount === 0xffff_ffff) {
+            throw new BrowserActionStorageCustodyError(
+                'StorageFailure',
+                'Common-proof external-memory deletion ordinals are exhausted.',
+            );
+        }
+        const objectStateDigest = externalMemoryObjectStateDigest({
+            object,
+            objectOrdinal,
+        });
+        try {
+            for (const descriptor of allObjectDescriptors(object)) {
+                stageRecordDeletion(shadow, descriptor);
+            }
+            const nextDeletionStateDigest =
+                appendedExternalMemoryDeletionStateDigest({
+                    currentDeletionStateDigest:
+                        shadow.deletionState.deletionStateDigest,
+                    deletedObjectCount: shadow.deletionState.deletedObjectCount,
+                    objectOrdinal,
+                    objectStateDigest,
+                });
+            shadow.deletionState.deletionStateDigest.fill(0);
+            shadow.deletionState.deletionStateDigest = nextDeletionStateDigest;
+            shadow.deletionState.deletedObjectCount += 1;
+        } finally {
+            objectStateDigest.fill(0);
         }
         shadow.recordCount -= allObjectDescriptors(object).length;
         shadow.payloadByteLength -= object.exactByteLength;
         shadow.objects.delete(objectOrdinal);
+        object.contentDigest.fill(0);
+        object.sealedContentDigest?.fill(0);
     };
 
     const executeTransaction = async (
@@ -2008,6 +2372,18 @@ export const openCommonProofBrowserCustody = (
         replay: boolean,
     ): Promise<readonly CommonProofExternalMemoryReadResult[]> => {
         assertOpen();
+        if (
+            (replay &&
+                (latestCheckpointResumeDescriptor === undefined ||
+                    !checkpointRestoreAttempted ||
+                    checkpointExternalMemoryStateConfirmed)) ||
+            (!replay && !checkpointExternalMemoryStateConfirmed)
+        ) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidState',
+                'A common-proof external-memory transaction is outside its authenticated replay phase.',
+            );
+        }
         const firstOperationKind = request.operations[0]?.operationKind;
         if (
             firstOperationKind === undefined ||
@@ -2041,12 +2417,25 @@ export const openCommonProofBrowserCustody = (
         const shadow: ExternalMemoryShadowState = {
             changes: new Map(),
             createdDescriptors: new Set(),
+            deletionState: {
+                deletedObjectCount:
+                    externalMemoryDeletionState.deletedObjectCount,
+                deletionStateDigest:
+                    externalMemoryDeletionState.deletionStateDigest.slice(),
+            },
             objects: new Map(
                 [...objects].map(([objectOrdinal, object]) => [
                     objectOrdinal,
                     {
                         ...object,
                         chunks: [...object.chunks],
+                        contentDigest: object.contentDigest.slice(),
+                        ...(object.sealedContentDigest === undefined
+                            ? {}
+                            : {
+                                  sealedContentDigest:
+                                      object.sealedContentDigest.slice(),
+                              }),
                     },
                 ]),
             ),
@@ -2094,10 +2483,16 @@ export const openCommonProofBrowserCustody = (
                     destroyIdentifierInput(descriptor.identifierInput);
                 }
             }
+            for (const object of objects.values()) {
+                object.contentDigest.fill(0);
+                object.sealedContentDigest?.fill(0);
+            }
             objects.clear();
             for (const [objectOrdinal, object] of shadow.objects) {
                 objects.set(objectOrdinal, object);
             }
+            externalMemoryDeletionState.deletionStateDigest.fill(0);
+            externalMemoryDeletionState = shadow.deletionState;
             externalMemoryPayloadByteLength = shadow.payloadByteLength;
             externalMemoryRecordCount = shadow.recordCount;
             shadow.createdDescriptors.clear();
@@ -2109,6 +2504,11 @@ export const openCommonProofBrowserCustody = (
             for (const descriptor of shadow.createdDescriptors) {
                 destroyIdentifierInput(descriptor.identifierInput);
             }
+            for (const object of shadow.objects.values()) {
+                object.contentDigest.fill(0);
+                object.sealedContentDigest?.fill(0);
+            }
+            shadow.deletionState.deletionStateDigest.fill(0);
             shadow.createdDescriptors.clear();
             throw error;
         } finally {
@@ -2118,6 +2518,37 @@ export const openCommonProofBrowserCustody = (
                 payloadBufferAccounting,
                 payloadLedger.snapshot().accounting,
             );
+        }
+    };
+
+    const confirmAuthenticatedCheckpointExternalMemoryState = (): void => {
+        assertOpen();
+        if (
+            latestCheckpointResumeDescriptor === undefined ||
+            !checkpointRestoreAttempted ||
+            checkpointExternalMemoryStateConfirmed
+        ) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidState',
+                'Common-proof external-memory state confirmation is outside the authenticated resume boundary.',
+            );
+        }
+        const reconstructedStateDigest = checkpointExternalMemoryStateDigest();
+        try {
+            if (
+                !bytesEqual(
+                    reconstructedStateDigest,
+                    latestCheckpointResumeDescriptor.externalMemoryStateDigest,
+                )
+            ) {
+                throw new BrowserActionStorageCustodyError(
+                    'RecordAuthenticationFailed',
+                    'The replay-reconstructed common-proof external-memory state differs from the authenticated checkpoint.',
+                );
+            }
+            checkpointExternalMemoryStateConfirmed = true;
+        } finally {
+            reconstructedStateDigest.fill(0);
         }
     };
 
@@ -2957,6 +3388,7 @@ export const openCommonProofBrowserCustody = (
         }),
         outputStore,
         prefixReplayExternalMemory: Object.freeze({
+            confirmAuthenticatedCheckpointExternalMemoryState,
             executeDeterministicPrefixReplayTransaction: (
                 request: CommonProofExternalMemoryRequest,
             ) => executeTransaction(request, true),

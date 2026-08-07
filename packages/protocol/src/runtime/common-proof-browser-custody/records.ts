@@ -71,11 +71,18 @@ type ExternalMemoryDataChunk = Readonly<{
 export type ExternalMemoryObjectState = {
     appendedByteLength: bigint;
     chunks: ExternalMemoryDataChunk[];
+    contentDigest: Uint8Array<ArrayBuffer>;
     exactByteLength: bigint;
     header: ExternalMemoryRecordDescriptor;
     nextChunkOrdinal: number;
     protection: 'public-integrity' | 'secret-authenticated-encryption';
+    sealedContentDigest?: Uint8Array<ArrayBuffer>;
     sealMarker?: ExternalMemoryRecordDescriptor;
+};
+
+export type ExternalMemoryDeletionState = {
+    deletedObjectCount: number;
+    deletionStateDigest: Uint8Array<ArrayBuffer>;
 };
 
 type StagedExternalMemoryRecordWrite = {
@@ -317,6 +324,7 @@ export type StagedExternalMemoryRecordChange =
 export type ExternalMemoryShadowState = {
     readonly changes: Map<string, StagedExternalMemoryRecordChange>;
     readonly createdDescriptors: Set<ExternalMemoryRecordDescriptor>;
+    readonly deletionState: ExternalMemoryDeletionState;
     readonly objects: Map<number, ExternalMemoryObjectState>;
     payloadByteLength: bigint;
     recordCount: number;
@@ -361,6 +369,7 @@ export type CommonProofBrowserCustodyInput = Readonly<{
 export type CommonProofCheckpointResumeDescriptor = Readonly<{
     checkpointLineageIdentifier: Uint8Array;
     commonProofEnvironmentIdentifier: Uint8Array;
+    externalMemoryStateDigest: Uint8Array;
     generationCursorManifestBytes: Uint8Array;
     privateRandomnessStreamAttemptIdentifier?: Uint8Array;
     safeBoundaryOrdinal: number;
@@ -424,6 +433,7 @@ export type CommonProofBrowserCustody = Readonly<{
         | undefined;
     externalMemory: CommonProofExternalMemoryTransactionExecutor;
     prefixReplayExternalMemory: Readonly<{
+        confirmAuthenticatedCheckpointExternalMemoryState(): void;
         executeDeterministicPrefixReplayTransaction(
             request: CommonProofExternalMemoryRequest,
         ): Promise<readonly CommonProofExternalMemoryReadResult[]>;
@@ -570,6 +580,7 @@ export const copyCheckpointResumeDescriptor = (
     }
     let checkpointLineageIdentifier = new Uint8Array(0);
     let commonProofEnvironmentIdentifier = new Uint8Array(0);
+    let externalMemoryStateDigest = new Uint8Array(0);
     let generationCursorManifestBytes = new Uint8Array(0);
     let privateRandomnessStreamAttemptIdentifier:
         | Uint8Array<ArrayBuffer>
@@ -585,6 +596,11 @@ export const copyCheckpointResumeDescriptor = (
             value.commonProofEnvironmentIdentifier,
             identifierByteLength,
             'Checkpoint common-proof environment identifier',
+        );
+        externalMemoryStateDigest = copyExactBytes(
+            value.externalMemoryStateDigest,
+            foundationHashByteLength,
+            'Checkpoint external-memory state digest',
         );
         generationCursorManifestBytes = Uint8Array.from(
             value.generationCursorManifestBytes,
@@ -605,6 +621,7 @@ export const copyCheckpointResumeDescriptor = (
         return Object.freeze({
             checkpointLineageIdentifier,
             commonProofEnvironmentIdentifier,
+            externalMemoryStateDigest,
             generationCursorManifestBytes,
             ...(privateRandomnessStreamAttemptIdentifier === undefined
                 ? {}
@@ -615,6 +632,7 @@ export const copyCheckpointResumeDescriptor = (
     } catch (error) {
         checkpointLineageIdentifier.fill(0);
         commonProofEnvironmentIdentifier.fill(0);
+        externalMemoryStateDigest.fill(0);
         generationCursorManifestBytes.fill(0);
         privateRandomnessStreamAttemptIdentifier?.fill(0);
         stableAttemptBindingHash.fill(0);
@@ -627,6 +645,7 @@ export const destroyCheckpointResumeDescriptor = (
 ): void => {
     descriptor.checkpointLineageIdentifier.fill(0);
     descriptor.commonProofEnvironmentIdentifier.fill(0);
+    descriptor.externalMemoryStateDigest.fill(0);
     descriptor.stableAttemptBindingHash.fill(0);
     descriptor.generationCursorManifestBytes.fill(0);
     descriptor.privateRandomnessStreamAttemptIdentifier?.fill(0);
@@ -651,6 +670,8 @@ export const allObjectDescriptors = (
 export const destroyExternalMemoryObjectInMemory = (
     object: ExternalMemoryObjectState,
 ): void => {
+    object.contentDigest.fill(0);
+    object.sealedContentDigest?.fill(0);
     for (const descriptor of allObjectDescriptors(object)) {
         destroyIdentifierInput(descriptor.identifierInput);
     }

@@ -68,6 +68,7 @@ export type CommonProofExternalMemoryTransactionExecutor = Readonly<{
  * existing object merely because its ordinal matches.
  */
 type CommonProofExternalMemoryPrefixReplayExecutor = Readonly<{
+    confirmAuthenticatedCheckpointExternalMemoryState(): void;
     /** Returned read-buffer ownership transfers to this runtime. */
     executeDeterministicPrefixReplayTransaction(
         request: CommonProofExternalMemoryRequest,
@@ -1549,6 +1550,14 @@ const runPreparedCommonProofGenerationWorkerWithAuthenticatedState = async (
                     ) {
                         throw kernelFailure(
                             'The common-proof kernel returned an unexpected resume-complete signal.',
+                        );
+                    }
+                    try {
+                        resume.prefixReplayExternalMemory.confirmAuthenticatedCheckpointExternalMemoryState();
+                    } catch (error) {
+                        throw storageFailure(
+                            'The browser store could not confirm the authenticated common-proof external-memory state.',
+                            error,
                         );
                     }
                     deterministicPrefixReplayComplete = true;

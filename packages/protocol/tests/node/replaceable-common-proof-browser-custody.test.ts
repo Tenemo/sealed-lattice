@@ -59,6 +59,9 @@ const controlledCustody = (input: {
             },
         }),
         prefixReplayExternalMemory: Object.freeze({
+            confirmAuthenticatedCheckpointExternalMemoryState: () => {
+                recordEvent('confirm-prefix-replay');
+            },
             executeDeterministicPrefixReplayTransaction: () => {
                 recordEvent('prefix-replay');
                 return Promise.resolve([]);
@@ -123,6 +126,7 @@ describe('Replaceable common-proof browser custody', () => {
         await replaceable.custody.prefixReplayExternalMemory.executeDeterministicPrefixReplayTransaction(
             {} as never,
         );
+        replaceable.custody.prefixReplayExternalMemory.confirmAuthenticatedCheckpointExternalMemoryState();
         replaceable.custody.sealCanonicalOutput();
         replaceable.custody.authenticatedOutput();
         await replaceable.custody.completeVerifiedOutput();
@@ -134,6 +138,7 @@ describe('Replaceable common-proof browser custody', () => {
             'fresh:suspend',
             'resumed:restore-checkpoint',
             'resumed:prefix-replay',
+            'resumed:confirm-prefix-replay',
             'resumed:seal-output',
             'resumed:authenticated-output',
             'resumed:complete',

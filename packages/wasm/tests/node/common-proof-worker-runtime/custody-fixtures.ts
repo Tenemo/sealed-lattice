@@ -1986,6 +1986,7 @@ export const openReadyCommonProofApplication = async (): Promise<
             } finally {
                 resumeDescriptor.checkpointLineageIdentifier.fill(0);
                 resumeDescriptor.commonProofEnvironmentIdentifier.fill(0);
+                resumeDescriptor.externalMemoryStateDigest.fill(0);
                 resumeDescriptor.generationCursorManifestBytes.fill(0);
                 resumeDescriptor.privateRandomnessStreamAttemptIdentifier?.fill(
                     0,

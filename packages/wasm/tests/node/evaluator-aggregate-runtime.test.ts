@@ -772,6 +772,7 @@ const unusedResumeOptions = Object.freeze({
                 ),
         }),
         prefixReplayExternalMemory: Object.freeze({
+            confirmAuthenticatedCheckpointExternalMemoryState: () => {},
             executeDeterministicPrefixReplayTransaction: () =>
                 Promise.resolve([]),
         }),

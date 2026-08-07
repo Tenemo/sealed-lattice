@@ -407,7 +407,9 @@ describe('Selected proof runtime evidence accounting', () => {
         const executeDeterministicPrefixReplayTransaction = vi.fn(() =>
             Promise.resolve(Object.freeze([])),
         );
+        const confirmAuthenticatedCheckpointExternalMemoryState = vi.fn();
         const prefixReplay = accounting.wrapPrefixReplayExternalMemory({
+            confirmAuthenticatedCheckpointExternalMemoryState,
             executeDeterministicPrefixReplayTransaction,
         });
 
@@ -451,6 +453,10 @@ describe('Selected proof runtime evidence accounting', () => {
         });
         expect(
             executeDeterministicPrefixReplayTransaction,
+        ).toHaveBeenCalledOnce();
+        prefixReplay.confirmAuthenticatedCheckpointExternalMemoryState();
+        expect(
+            confirmAuthenticatedCheckpointExternalMemoryState,
         ).toHaveBeenCalledOnce();
     });
 

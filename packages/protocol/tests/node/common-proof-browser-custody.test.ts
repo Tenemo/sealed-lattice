@@ -3,8 +3,10 @@ import { webcrypto } from 'node:crypto';
 import {
     BrowserActionStorageCustodyError,
     type BrowserActionStorageWorkerKernel,
+    type BrowserLocalRecordIdentifierInput,
+    type BrowserLocalRecordOpenableIdentifierInput,
 } from '@sealed-lattice/types';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
     openAuthenticatedCheckpointStore,
@@ -18,7 +20,10 @@ import {
     openCommonProofBrowserCustody,
     type CommonProofBrowserCustody,
 } from '#packages/protocol/src/runtime/common-proof-browser-custody';
-import { maximumCanonicalDataChunkByteLength } from '#packages/protocol/src/runtime/common-proof-browser-custody/records';
+import {
+    destroyCheckpointResumeDescriptor,
+    maximumCanonicalDataChunkByteLength,
+} from '#packages/protocol/src/runtime/common-proof-browser-custody/records';
 import type {
     UntrustedStorageExclusiveCapacityReservation,
     UntrustedStorageTransactionStore,
@@ -30,6 +35,10 @@ import {
 } from '#packages/protocol/src/runtime/web-lock-owned-untrusted-storage-transaction-store';
 import { commonProofScratchByteLength } from '#packages/protocol/src/runtime/web-lock-owned-untrusted-storage-transaction-store/records';
 import {
+    TestActionStorageWorkerKernel,
+    testActionStorageRootByteLength,
+} from '#packages/protocol/tests/support/action-storage-custody-test-support';
+import {
     generateRuntimeStorageEncryptionKey,
     InMemoryRuntimeStorageAdapter,
     openRuntimeTestStore,
@@ -38,10 +47,11 @@ import {
 import {
     createWasmBrowserActionStorageWorkerKernel,
     loadFreshTranscriptCoreKernel,
+    type ClosedWorkerCommonProofScratchRecordIdentifierInput,
     type CommonProofExternalMemoryOperation,
     type CommonProofExternalMemoryRequest,
-    type TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
+import { closedWorkerCommonProofScratchStorage } from '#packages/wasm/src/local-storage-root-worker-kernel/authorities';
 
 const cryptoProvider = webcrypto as unknown as Crypto;
 const checkpointLimits = {
@@ -68,6 +78,75 @@ const runtimeBindingHash = new Uint8Array(64).fill(0x66);
 const proofAttemptLineageIdentifier = new Uint8Array(32).fill(0x77);
 const applicationStatementSchemaIdentifier = 0x1217;
 
+const asBrowserLocalRecordIdentifier = (
+    identifierInput: ClosedWorkerCommonProofScratchRecordIdentifierInput,
+): BrowserLocalRecordOpenableIdentifierInput =>
+    identifierInput as unknown as BrowserLocalRecordOpenableIdentifierInput;
+
+const createInitializedTestWorkerKernel =
+    async (): Promise<BrowserActionStorageWorkerKernel> => {
+        const workerKernel = new TestActionStorageWorkerKernel({
+            actionStorageRoot: new Uint8Array(
+                testActionStorageRootByteLength,
+            ).fill(0x5a),
+            cryptoProvider,
+        });
+        await workerKernel.createAndStageDeviceWrappingState({ binding });
+        await workerKernel.commitStagedActionStorageRoot();
+        closedWorkerCommonProofScratchStorage.set(
+            workerKernel,
+            Object.freeze({
+                deriveRecordIdentifier: (identifierInput) =>
+                    workerKernel.deriveActiveLocalRecordIdentifier(
+                        identifierInput as unknown as BrowserLocalRecordIdentifierInput,
+                    ),
+                openRecord: async (input) => {
+                    const encodedPlaintext =
+                        await workerKernel.openActiveLocalRecord({
+                            actionRandomnessCommitment:
+                                input.actionRandomnessCommitment,
+                            envelope: input.envelope,
+                            identifierInput: asBrowserLocalRecordIdentifier(
+                                input.identifierInput,
+                            ),
+                            recordVersion: 1n,
+                        });
+                    try {
+                        if (encodedPlaintext[0] !== 0xa5) {
+                            throw new Error(
+                                'The test common-proof record has an invalid framing byte.',
+                            );
+                        }
+                        return encodedPlaintext.slice(1);
+                    } finally {
+                        encodedPlaintext.fill(0);
+                    }
+                },
+                sealRecord: async (input) => {
+                    const encodedPlaintext = new Uint8Array(
+                        input.plaintext.byteLength + 1,
+                    );
+                    encodedPlaintext[0] = 0xa5;
+                    encodedPlaintext.set(input.plaintext, 1);
+                    try {
+                        return await workerKernel.sealActiveLocalRecord({
+                            actionRandomnessCommitment:
+                                input.actionRandomnessCommitment,
+                            identifierInput: asBrowserLocalRecordIdentifier(
+                                input.identifierInput,
+                            ),
+                            plaintext: encodedPlaintext,
+                            recordVersion: 1n,
+                        });
+                    } finally {
+                        encodedPlaintext.fill(0);
+                    }
+                },
+            }),
+        );
+        return workerKernel;
+    };
+
 const emptyPrivateRandomCursorManifest = (): Uint8Array<ArrayBuffer> =>
     Uint8Array.of(
         0x53,
@@ -90,17 +169,6 @@ const emptyPrivateRandomCursorManifest = (): Uint8Array<ArrayBuffer> =>
         0x00,
         0x00,
     );
-
-const bytesFromHex = (encoded: string): Uint8Array<ArrayBuffer> => {
-    const bytes = new Uint8Array(encoded.length / 2);
-    for (let byteIndex = 0; byteIndex < bytes.byteLength; byteIndex += 1) {
-        bytes[byteIndex] = Number.parseInt(
-            encoded.slice(byteIndex * 2, byteIndex * 2 + 2),
-            16,
-        );
-    }
-    return bytes;
-};
 
 const request = (
     operations: readonly CommonProofExternalMemoryOperation[],
@@ -270,14 +338,9 @@ const ensureAuthenticatedRepairHead = async (
 };
 
 describe('Common-proof browser custody', () => {
-    let transcriptCoreKernel: TranscriptCoreKernel;
     const openedCustodies: CommonProofBrowserCustody[] = [];
     const openedCheckpointStores: TransferableAuthenticatedCheckpointStore[] =
         [];
-
-    beforeAll(async () => {
-        transcriptCoreKernel = await loadFreshTranscriptCoreKernel();
-    });
 
     afterEach(async () => {
         await Promise.allSettled(
@@ -470,14 +533,11 @@ describe('Common-proof browser custody', () => {
             store: checkpointStorage.store,
         });
         openedCheckpointStores.push(checkpointStore);
-        const workerKernel = createWasmBrowserActionStorageWorkerKernel({
-            kernel: await loadFreshTranscriptCoreKernel(),
-        });
-        await workerKernel.createAndStageDeviceWrappingState({ binding });
-        await workerKernel.commitStagedActionStorageRoot();
+        const workerKernel = await createInitializedTestWorkerKernel();
         const descriptorBase = {
             checkpointLineageIdentifier: new Uint8Array(32).fill(0x12),
             commonProofEnvironmentIdentifier: new Uint8Array(32).fill(0x99),
+            externalMemoryStateDigest: new Uint8Array(64).fill(0x44),
             safeBoundaryOrdinal: 1,
             stableAttemptBindingHash: runtimeBindingHash.slice(),
         } as const;
@@ -504,13 +564,27 @@ describe('Common-proof browser custody', () => {
             }),
         ).rejects.toMatchObject({ code: 'InvalidInput' });
 
+        await expect(
+            openFixture({
+                checkpointStore,
+                resumeDescriptor: {
+                    ...descriptorBase,
+                    externalMemoryStateDigest: new Uint8Array(63),
+                    generationCursorManifestBytes:
+                        emptyPrivateRandomCursorManifest(),
+                },
+                workerKernel,
+            }),
+        ).rejects.toMatchObject({ code: 'InvalidInput' });
+
         const malformedAttemptIdentifier = new Uint8Array(31).fill(0x56);
         await expect(
             openFixture({
                 checkpointStore,
                 resumeDescriptor: {
                     ...descriptorBase,
-                    generationCursorManifestBytes: new Uint8Array(),
+                    generationCursorManifestBytes:
+                        emptyPrivateRandomCursorManifest(),
                     privateRandomnessStreamAttemptIdentifier:
                         malformedAttemptIdentifier,
                 },
@@ -978,49 +1052,120 @@ describe('Common-proof browser custody', () => {
             adapter,
             checkpointStore,
             store: openedStore.store,
+            workerKernel: await createInitializedTestWorkerKernel(),
         });
         const replayBytes = Uint8Array.from(
             { length: 100_003 },
             (_unused, index) => (index * 13 + 17) & 0xff,
         );
-        const createReplayRequests = () => {
+        const firstDeletedObjectBytes = Uint8Array.from(
+            { length: 257 },
+            (_unused, index) => (index * 19 + 23) & 0xff,
+        );
+        const secondDeletedObjectBytes = Uint8Array.from(
+            { length: 389 },
+            (_unused, index) => (index * 31 + 29) & 0xff,
+        );
+        const createObjectLifecycleReplayRequests = (input: {
+            bytes: Uint8Array;
+            deleteObjectAfterReplay: boolean;
+            firstRequestSequence: bigint;
+            objectOrdinal: number;
+            sealObjectBeforeReplayEnds: boolean;
+        }): readonly CommonProofExternalMemoryRequest[] => {
+            let nextRequestSequence = input.firstRequestSequence;
+            const lifecycleRequests = [
+                request(
+                    [
+                        createOperation(
+                            input.objectOrdinal,
+                            BigInt(input.bytes.byteLength),
+                        ),
+                    ],
+                    nextRequestSequence,
+                ),
+            ];
+            nextRequestSequence += 1n;
             const replayAppendRequests = canonicalAppendRequests(
-                8,
-                replayBytes,
-                2n,
+                input.objectOrdinal,
+                input.bytes,
+                nextRequestSequence,
             );
-            return [
-                request(
-                    [createOperation(8, BigInt(replayBytes.byteLength))],
-                    1n,
-                ),
-                ...replayAppendRequests,
-                request(
-                    [sealOperation(8)],
-                    2n + BigInt(replayAppendRequests.length),
-                ),
-            ] as const;
+            lifecycleRequests.push(...replayAppendRequests);
+            nextRequestSequence += BigInt(replayAppendRequests.length);
+            if (input.sealObjectBeforeReplayEnds) {
+                lifecycleRequests.push(
+                    request(
+                        [sealOperation(input.objectOrdinal)],
+                        nextRequestSequence,
+                    ),
+                );
+                nextRequestSequence += 1n;
+            }
+            if (input.deleteObjectAfterReplay) {
+                lifecycleRequests.push(
+                    request(
+                        [deleteOperation(input.objectOrdinal)],
+                        nextRequestSequence,
+                    ),
+                );
+            }
+            return Object.freeze(lifecycleRequests);
         };
-        const replayRequests = createReplayRequests();
-        const resumedReplayRequests = createReplayRequests();
-        for (const replayRequest of resumedReplayRequests) {
+        const createSealedRetainedObjectReplayRequests = () =>
+            createObjectLifecycleReplayRequests({
+                bytes: replayBytes,
+                deleteObjectAfterReplay: false,
+                firstRequestSequence: 1n,
+                objectOrdinal: 8,
+                sealObjectBeforeReplayEnds: true,
+            });
+        const createIncompleteRetainedObjectReplayRequests = () =>
+            Object.freeze([request([createOperation(11, 4_097n)], 300n)]);
+        const createReplacementRetainedObjectReplayRequests = () =>
+            Object.freeze([request([createOperation(12, 8_191n)], 400n)]);
+        const createRetainedStateReplayRequests = () =>
+            Object.freeze([
+                ...createSealedRetainedObjectReplayRequests(),
+                ...createIncompleteRetainedObjectReplayRequests(),
+                ...createReplacementRetainedObjectReplayRequests(),
+            ]);
+        const createFirstDeletedObjectReplayRequests = () =>
+            createObjectLifecycleReplayRequests({
+                bytes: firstDeletedObjectBytes,
+                deleteObjectAfterReplay: true,
+                firstRequestSequence: 100n,
+                objectOrdinal: 9,
+                sealObjectBeforeReplayEnds: false,
+            });
+        const createSecondDeletedObjectReplayRequests = () =>
+            createObjectLifecycleReplayRequests({
+                bytes: secondDeletedObjectBytes,
+                deleteObjectAfterReplay: true,
+                firstRequestSequence: 200n,
+                objectOrdinal: 10,
+                sealObjectBeforeReplayEnds: true,
+            });
+        const createInitialCheckpointReplayRequests = () =>
+            Object.freeze([
+                ...createSealedRetainedObjectReplayRequests(),
+                ...createIncompleteRetainedObjectReplayRequests(),
+                ...createFirstDeletedObjectReplayRequests(),
+                ...createSecondDeletedObjectReplayRequests(),
+            ]);
+        const createLatestCheckpointReplayRequests = () =>
+            Object.freeze([
+                ...createInitialCheckpointReplayRequests(),
+                ...createReplacementRetainedObjectReplayRequests(),
+            ]);
+        const replayRequests = createLatestCheckpointReplayRequests();
+        const initialReplayRequests = createInitialCheckpointReplayRequests();
+        for (const replayRequest of initialReplayRequests) {
             await first.custody.externalMemory.executeTransaction(
                 replayRequest,
             );
         }
-        const committedPrefixRecordBytes = ownedStorageRecordKeys(adapter)
-            .filter((key) => key.includes('/objects/'))
-            .map((key) => adapter.rawRead(key))
-            .filter((value): value is Uint8Array => value !== undefined);
-        const cursorBytes = bytesFromHex(
-            transcriptCoreKernel.encodePrivateRandomCursor({
-                derivationContextHash: 'ab'.repeat(64),
-                family: 0x0200,
-                nextCounter: '37',
-                purpose: 2,
-                streamAttemptIdentifierHex: 'cd'.repeat(32),
-            }).canonicalBytesHex,
-        );
+        const cursorBytes = emptyPrivateRandomCursorManifest();
         const checkpointState = Uint8Array.from(
             { length: 733 },
             (_unused, index) => (index * 41 + 9) & 0xff,
@@ -1050,6 +1195,34 @@ describe('Common-proof browser custody', () => {
         expect(publishedOperationKinds).toEqual([
             applicationStatementSchemaIdentifier,
         ]);
+        const firstResumeDescriptor =
+            first.custody.copyCheckpointResumeDescriptor();
+        if (firstResumeDescriptor === undefined) {
+            throw new Error(
+                'Expected the first authenticated checkpoint descriptor.',
+            );
+        }
+        for (const replacementStateRequest of createReplacementRetainedObjectReplayRequests()) {
+            await first.custody.externalMemory.executeTransaction(
+                replacementStateRequest,
+            );
+        }
+        const committedPrefixRecordBytes = ownedStorageRecordKeys(adapter)
+            .filter((key) => key.includes('/objects/'))
+            .map((key) => adapter.rawRead(key))
+            .filter((value): value is Uint8Array => value !== undefined);
+        await first.custody.checkpointCustody?.publishAuthenticatedCheckpoint({
+            canonicalStateBytes: checkpointState,
+            generationCursorManifestBytes: cursorBytes,
+            privateRandomnessStreamAttemptIdentifier:
+                proofAttemptLineageIdentifier.slice(),
+            safeBoundaryOrdinal: 7,
+            stableAttemptBindingHash: runtimeBindingHash.slice(),
+        });
+        expect(publishedOperationKinds).toEqual([
+            applicationStatementSchemaIdentifier,
+            applicationStatementSchemaIdentifier,
+        ]);
         const checkpointWriteAccounting =
             first.custody.copyPhysicalStorageAccounting();
         expect(checkpointWriteAccounting.sealCallCount).toBeGreaterThan(0);
@@ -1067,6 +1240,11 @@ describe('Common-proof browser custody', () => {
         if (resumeDescriptor === undefined) {
             throw new Error('Expected an authenticated checkpoint descriptor.');
         }
+        expect(resumeDescriptor.externalMemoryStateDigest).toHaveLength(64);
+        expect(resumeDescriptor.externalMemoryStateDigest).not.toEqual(
+            firstResumeDescriptor.externalMemoryStateDigest,
+        );
+        destroyCheckpointResumeDescriptor(firstResumeDescriptor);
         await first.custody.suspendForAuthenticatedResume();
         const suspendedPhysicalAccounting =
             first.custody.copyPhysicalStorageAccounting();
@@ -1122,6 +1300,21 @@ describe('Common-proof browser custody', () => {
         expect(resumedOperationKinds).toEqual([
             applicationStatementSchemaIdentifier,
         ]);
+        await expect(
+            resumed.custody.externalMemory.executeTransaction(
+                request([readOperation(8, 0n, 1)]),
+            ),
+        ).rejects.toMatchObject({ code: 'InvalidState' });
+        await expect(
+            resumed.custody.checkpointCustody?.publishAuthenticatedCheckpoint({
+                canonicalStateBytes: checkpointState,
+                generationCursorManifestBytes: cursorBytes,
+                privateRandomnessStreamAttemptIdentifier:
+                    proofAttemptLineageIdentifier.slice(),
+                safeBoundaryOrdinal: 7,
+                stableAttemptBindingHash: runtimeBindingHash.slice(),
+            }),
+        ).rejects.toMatchObject({ code: 'InvalidState' });
 
         for (const replayRequest of replayRequests) {
             await resumed.custody.prefixReplayExternalMemory.executeDeterministicPrefixReplayTransaction(
@@ -1133,6 +1326,17 @@ describe('Common-proof browser custody', () => {
                 request([readOperation(8, 27_000n, 61_111)]),
             );
         expect(replayRead[0]?.bytes).toEqual(replayBytes.slice(27_000, 88_111));
+        resumed.custody.prefixReplayExternalMemory.confirmAuthenticatedCheckpointExternalMemoryState();
+        expect(() =>
+            resumed.custody.prefixReplayExternalMemory.confirmAuthenticatedCheckpointExternalMemoryState(),
+        ).toThrow(expect.objectContaining({ code: 'InvalidState' }));
+        const postConfirmationRead =
+            await resumed.custody.externalMemory.executeTransaction(
+                request([readOperation(8, 19n, 37)]),
+            );
+        expect(postConfirmationRead[0]?.bytes).toEqual(
+            replayBytes.slice(19, 56),
+        );
         const recordsAfterReplay = ownedStorageRecordKeys(adapter)
             .filter((key) => key.includes('/objects/'))
             .map((key) => adapter.rawRead(key))
@@ -1174,6 +1378,54 @@ describe('Common-proof browser custody', () => {
         );
         await resumed.custody.suspendForAuthenticatedResume();
 
+        const omittedDeletionReplay = await openFixture({
+            adapter,
+            checkpointStore,
+            resumeDescriptor,
+            store: openedStore.store,
+            workerKernel: first.workerKernel,
+        });
+        await omittedDeletionReplay.custody.checkpointCustody?.restoreAuthenticatedCheckpoint();
+        for (const retainedObjectRequest of createRetainedStateReplayRequests()) {
+            await omittedDeletionReplay.custody.prefixReplayExternalMemory.executeDeterministicPrefixReplayTransaction(
+                retainedObjectRequest,
+            );
+        }
+        expect(() =>
+            omittedDeletionReplay.custody.prefixReplayExternalMemory.confirmAuthenticatedCheckpointExternalMemoryState(),
+        ).toThrow(
+            expect.objectContaining({ code: 'RecordAuthenticationFailed' }),
+        );
+        await omittedDeletionReplay.custody.suspendForAuthenticatedResume();
+
+        const reorderedDeletionReplay = await openFixture({
+            adapter,
+            checkpointStore,
+            resumeDescriptor,
+            store: openedStore.store,
+            workerKernel: first.workerKernel,
+        });
+        await reorderedDeletionReplay.custody.checkpointCustody?.restoreAuthenticatedCheckpoint();
+        for (const retainedObjectRequest of createRetainedStateReplayRequests()) {
+            await reorderedDeletionReplay.custody.prefixReplayExternalMemory.executeDeterministicPrefixReplayTransaction(
+                retainedObjectRequest,
+            );
+        }
+        for (const deletedObjectRequest of [
+            ...createSecondDeletedObjectReplayRequests(),
+            ...createFirstDeletedObjectReplayRequests(),
+        ]) {
+            await reorderedDeletionReplay.custody.prefixReplayExternalMemory.executeDeterministicPrefixReplayTransaction(
+                deletedObjectRequest,
+            );
+        }
+        expect(() =>
+            reorderedDeletionReplay.custody.prefixReplayExternalMemory.confirmAuthenticatedCheckpointExternalMemoryState(),
+        ).toThrow(
+            expect.objectContaining({ code: 'RecordAuthenticationFailed' }),
+        );
+        await reorderedDeletionReplay.custody.suspendForAuthenticatedResume();
+
         const changedReplay = await openFixture({
             adapter,
             checkpointStore,
@@ -1183,7 +1435,7 @@ describe('Common-proof browser custody', () => {
         });
         await changedReplay.custody.checkpointCustody?.restoreAuthenticatedCheckpoint();
         await changedReplay.custody.prefixReplayExternalMemory.executeDeterministicPrefixReplayTransaction(
-            replayRequests[0],
+            request([createOperation(8, BigInt(replayBytes.byteLength))], 1n),
         );
         const changedBytes = replayBytes.slice();
         changedBytes[changedBytes.byteLength - 1] ^= 1;
@@ -1206,6 +1458,24 @@ describe('Common-proof browser custody', () => {
             changedReplay.custody.prefixReplayExternalMemory.executeDeterministicPrefixReplayTransaction(
                 changedFinalAppendRequest,
             ),
+        ).rejects.toMatchObject({ code: 'RecordAuthenticationFailed' });
+        await changedReplay.custody.suspendForAuthenticatedResume();
+
+        const mismatchedExternalMemoryStateDigest =
+            resumeDescriptor.externalMemoryStateDigest.slice();
+        mismatchedExternalMemoryStateDigest[0] ^= 0xff;
+        const substitutedStateDescriptorReplay = await openFixture({
+            adapter,
+            checkpointStore,
+            resumeDescriptor: {
+                ...resumeDescriptor,
+                externalMemoryStateDigest: mismatchedExternalMemoryStateDigest,
+            },
+            store: openedStore.store,
+            workerKernel: first.workerKernel,
+        });
+        await expect(
+            substitutedStateDescriptorReplay.custody.checkpointCustody?.restoreAuthenticatedCheckpoint(),
         ).rejects.toMatchObject({ code: 'RecordAuthenticationFailed' });
     });
 
@@ -1665,8 +1935,11 @@ describe('Common-proof browser custody', () => {
 
     it('uses typed custody failures for malformed environment inputs', async () => {
         const openedStore = await openRuntimeTestStore();
-        const workerKernel = createWasmBrowserActionStorageWorkerKernel({
-            kernel: transcriptCoreKernel,
+        const workerKernel = new TestActionStorageWorkerKernel({
+            actionStorageRoot: new Uint8Array(
+                testActionStorageRootByteLength,
+            ).fill(0x5a),
+            cryptoProvider,
         });
         await ensureAuthenticatedRepairHead(openedStore.store);
         const capacityReservation =

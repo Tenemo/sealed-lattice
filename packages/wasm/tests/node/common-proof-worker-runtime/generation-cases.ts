@@ -1883,6 +1883,7 @@ describe('common-proof generation runtime', () => {
         );
         const underlyingWriteCount = 1;
         let prefixReplayCount = 0;
+        let prefixReplayStateConfirmationCount = 0;
         let liveTransactionCount = 0;
         let committedOutputBytes: Uint8Array<ArrayBuffer> | undefined;
         const familyAdapter =
@@ -1933,6 +1934,10 @@ describe('common-proof generation runtime', () => {
                             ),
                     },
                     prefixReplayExternalMemory: {
+                        confirmAuthenticatedCheckpointExternalMemoryState:
+                            () => {
+                                prefixReplayStateConfirmationCount += 1;
+                            },
                         executeDeterministicPrefixReplayTransaction: (
                             request,
                         ) => {
@@ -1951,6 +1956,7 @@ describe('common-proof generation runtime', () => {
 
         expect(underlyingWriteCount).toBe(1);
         expect(prefixReplayCount).toBe(1);
+        expect(prefixReplayStateConfirmationCount).toBe(1);
         expect(liveTransactionCount).toBe(1);
         expect([...(committedOutputBytes ?? [])]).toEqual([
             ...expectedOutputBytes,
@@ -2046,6 +2052,8 @@ describe('common-proof generation runtime', () => {
                                 Promise.reject(restorationError),
                         },
                         prefixReplayExternalMemory: {
+                            confirmAuthenticatedCheckpointExternalMemoryState:
+                                () => {},
                             executeDeterministicPrefixReplayTransaction: () =>
                                 Promise.resolve([]),
                         },

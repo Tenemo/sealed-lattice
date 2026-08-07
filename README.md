@@ -510,7 +510,8 @@ phase peaks are `63,582,852` bytes during authenticated source loading,
 preparation, and `77,348,928` for the ready row source. The source wrapper,
 checked relation and variant, assignment cursor, matrix catalogs, transform
 buffers, and ready row-source controls are included. Ceremony-path compact
-selection, authenticated checkpoint integration, connection of the incremental
+selection, compact-state integration with the authenticated host checkpoint,
+connection of the incremental
 proof encoder to actual response roots and transcript lifecycle controls,
 completion of the selected-size CFW lifecycle, live selected-size
 CFW-to-transpose driving, selected-size transpose execution, and the WHIR
@@ -631,14 +632,25 @@ cursor now binds the public-input bytes, complete verifier-owned wire geometry,
 and every ordered response root and round salt at a post-verifier-move boundary;
 restore recomputes every preceding verifier message instead of serializing an
 opaque hash state. The incremental wire assembler separately restores a
-contiguous canonical response prefix and its global leaf-salt registry. This is
-not yet an authenticated retained-tree checkpoint: a response selected by a
-later query can leave encoded-section progress behind transcript progress, and
-no durable state yet binds that split to the live tree objects, response values,
-private-randomness cursor, or last-use deletions. Selected-size response-value
-driving and authenticated restart remain absent. The retained lifecycle has
-zero authenticated restart records, so interruption requires one complete-
-attempt replay.
+contiguous canonical response prefix and its global leaf-salt registry. The
+generic common-proof browser custody now appends one authenticated 64-byte
+external-memory state digest to each mutable checkpoint state stream. That
+digest binds the environment, runtime and proof attempt, every sorted live
+object's exact length, appended length, canonical content chain, next chunk and
+seal state, plus a constant-memory rolling chain of last-use deletions. Restore
+authenticates the trailer, deterministic prefix replay reconstructs the state,
+and the worker refuses live transactions or another checkpoint until the
+reconstructed digest matches at `resume-complete`. Focused host coverage accepts
+successive checkpoints after the live set changes and refuses an incomplete
+replay, reversed deletion order, changed payload, substituted state digest, and
+transactions outside the replay phase, including incomplete live objects and
+unsealed deletion. This is retained-tree restart infrastructure, not compact
+proof integration. A response selected by a later query can still leave encoded-
+section progress behind transcript progress, and the compact path does not yet
+bind that split or its response values to the host checkpoint owner. Selected-
+size response-value driving and authenticated compact restart remain absent.
+The connected retained lifecycle therefore still has zero authenticated restart
+records, so interruption requires one complete-attempt replay.
 
 A separately measured root-only recomputation alternative would replay 18
 responses for every factor and add `(557,056, 557,038)`,

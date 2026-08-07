@@ -66,6 +66,8 @@ export const createReplaceableCommonProofBrowserCustody = (
                 ),
         }),
         prefixReplayExternalMemory: Object.freeze({
+            confirmAuthenticatedCheckpointExternalMemoryState: () =>
+                requireCurrentCustody().prefixReplayExternalMemory.confirmAuthenticatedCheckpointExternalMemoryState(),
             executeDeterministicPrefixReplayTransaction: (
                 request: CommonProofExternalMemoryRequest,
             ) =>
