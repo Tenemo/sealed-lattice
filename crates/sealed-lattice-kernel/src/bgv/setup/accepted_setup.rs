@@ -99,14 +99,17 @@ pub(in crate::bgv) use self::generation_authority::{
 #[cfg(any(test, feature = "primitive-measurement-evidence"))]
 pub(in crate::bgv) use self::generation_authority::{
     SetupGenerationCompactPublicKeyDevelopmentAuthority,
-    resolve_setup_generation_compact_public_key_development_preparation_source,
     selected_setup_generation_compact_public_key_development_retained_payload_byte_length,
     setup_generation_compact_public_key_development_retained_payload_byte_length,
-    with_exclusive_setup_generation_compact_public_key_development_relation,
     with_setup_generation_compact_public_key_development_relation_reentry,
 };
 pub(crate) use self::generation_authority::{
     SetupGenerationDealerPublicRecordSource, resolve_setup_generation_dealer_public_record_source,
+};
+#[cfg(test)]
+pub(in crate::bgv) use self::generation_authority::{
+    resolve_setup_generation_compact_public_key_development_preparation_source,
+    with_exclusive_setup_generation_compact_public_key_development_relation,
 };
 pub(in crate::bgv) use self::generation_population::populate_browser_owned_setup_generation_authority;
 #[cfg(all(test, not(target_arch = "wasm32")))]

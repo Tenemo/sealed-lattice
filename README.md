@@ -637,7 +637,19 @@ cursor now binds the public-input bytes, complete verifier-owned wire geometry,
 and every ordered response root and round salt at a post-verifier-move boundary;
 restore recomputes every preceding verifier message instead of serializing an
 opaque hash state. The incremental wire assembler separately restores a
-contiguous canonical response prefix and its global leaf-salt registry. The
+contiguous canonical response prefix and its global leaf-salt registry. A new
+verifier-derived checkpoint schedule connects those two states without assuming
+that one committed response immediately yields one encoded proof section. For
+packing factors one, two, four, and eight, 81 of 82, 79 of 80, 77 of 78, and 75
+of 76 response boundaries are encoder-lagged; the maximum pending canonical
+section counts are 80, 78, 76, and 74. At each response boundary the owner
+requires the exact schedule-derived prefix count, checks every available root
+and round salt against the transcript, and binds the schedule, two progress
+counters, exact transcript cursor, and every byte of the current canonical
+proof prefix into the common checkpoint boundary. Focused coverage includes a
+canonical header-only prefix, a later response that is ready behind an earlier
+unavailable section, exact reconstruction, wrong progress, root substitution,
+premature query sources, and changed response values. The
 generic common-proof browser custody now appends one authenticated 64-byte
 external-memory state digest to each mutable checkpoint state stream. That
 digest binds the environment, runtime and proof attempt, every sorted live
@@ -650,12 +662,11 @@ successive checkpoints after the live set changes and refuses an incomplete
 replay, reversed deletion order, changed payload, substituted state digest, and
 transactions outside the replay phase, including incomplete live objects and
 unsealed deletion. This is retained-tree restart infrastructure, not compact
-proof integration. A response selected by a later query can still leave encoded-
-section progress behind transcript progress, and the compact path does not yet
-bind that split or its response values to the host checkpoint owner. Selected-
-size response-value driving and authenticated compact restart remain absent.
-The connected retained lifecycle therefore still has zero authenticated restart
-records, so interruption requires one complete-attempt replay.
+proof integration. The compact response boundary is not yet published or
+resumed by the generation host, and selected-size response-value and private-
+randomness custody is absent. The connected retained lifecycle therefore still
+has zero authenticated restart records, so interruption requires one complete-
+attempt replay.
 
 A separately measured root-only recomputation alternative would replay 18
 responses for every factor and add `(557,056, 557,038)`,

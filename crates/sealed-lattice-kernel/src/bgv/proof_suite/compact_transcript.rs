@@ -260,6 +260,10 @@ impl CompactTranscriptCheckpointCursor {
     pub(crate) const fn digest(&self) -> [u8; Hash512::BYTE_LENGTH] {
         self.digest
     }
+
+    pub(crate) fn into_canonical_bytes(self) -> Vec<u8> {
+        self.canonical_bytes
+    }
 }
 
 fn compact_proof_wire_geometry_digest(
@@ -423,6 +427,10 @@ impl<'input> CompactProverTranscript<'input> {
         self.commitment_entries.len()
     }
 
+    pub(crate) fn total_response_count(&self) -> usize {
+        self.geometry.responses().len()
+    }
+
     /// Encodes the complete canonical commitment prefix at a deterministic
     /// post-verifier-move boundary. No opaque SHAKE state is serialized.
     pub(crate) fn checkpoint_cursor(
@@ -584,21 +592,42 @@ impl<'input> CompactProverTranscript<'input> {
         &self,
         canonical_proof_prefix_bytes: &[u8],
     ) -> Result<(), CompactTranscriptError> {
+        self.validate_canonical_proof_prefix_at_response_count(
+            canonical_proof_prefix_bytes,
+            self.commitment_entries.len(),
+        )
+    }
+
+    /// Binds a durable transcript cursor to an independently decoded initial
+    /// proof prefix whose response openings may lag their commitments.
+    ///
+    /// A response root and round salt enter the transcript before its verifier
+    /// message, while a proper-subset opening can depend on a later verifier
+    /// message. The incremental proof encoder therefore carries only the
+    /// longest complete initial response prefix available at the checkpoint.
+    pub(crate) fn validate_canonical_proof_prefix_at_response_count(
+        &self,
+        canonical_proof_prefix_bytes: &[u8],
+        completed_proof_response_count: usize,
+    ) -> Result<(), CompactTranscriptError> {
         if self.verifier_message_pending || self.commitment_entries.is_empty() {
             return Err(CompactTranscriptError::WrongProverPhase);
+        }
+        if completed_proof_response_count > self.commitment_entries.len() {
+            return Err(CompactTranscriptError::WrongCheckpointCursor);
         }
         let decoded_prefix = decode_compact_proof_wire_prefix(
             self.geometry,
             canonical_proof_prefix_bytes,
-            self.commitment_entries.len(),
+            completed_proof_response_count,
         )?;
-        if decoded_prefix.responses().len() != self.commitment_entries.len() {
+        if decoded_prefix.responses().len() != completed_proof_response_count {
             return Err(CompactTranscriptError::WrongCheckpointCursor);
         }
         for (decoded_response, entry) in decoded_prefix
             .responses()
             .iter()
-            .zip(&self.commitment_entries)
+            .zip(&self.commitment_entries[..completed_proof_response_count])
         {
             if decoded_response.root() != entry.root
                 || decoded_response.fiat_shamir_round_salt(canonical_proof_prefix_bytes)?

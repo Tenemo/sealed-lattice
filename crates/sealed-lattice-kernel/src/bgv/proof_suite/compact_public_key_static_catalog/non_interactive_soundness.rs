@@ -23,7 +23,7 @@ use super::response_commitment::PackingResponseCommitmentCatalog;
 use super::transcript_binding::PackingTranscriptBindingLedger;
 use super::transcript_chronology::PackingTranscriptChronology;
 use super::uniform_verifier_randomness::PackingUniformVerifierRandomness;
-use crate::bgv::proof_suite::selected_accounting::resource_accounting::derive_selected_proof_family_application_inventory;
+use crate::bgv::proof_suite::selected_accounting::derive_selected_proof_family_application_inventory;
 use crate::foundation::{DECLARED_ADVERSARIAL_QUERY_BUDGET, ProofApplicationSlotCeilings};
 
 const CDHZ_STATE_RESTORATION_MULTIPLIER: u64 = 80;

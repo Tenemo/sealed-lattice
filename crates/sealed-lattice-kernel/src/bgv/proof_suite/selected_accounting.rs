@@ -395,6 +395,49 @@ mod runtime_limit_tests {
     }
 }
 
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+pub(crate) fn derive_selected_proof_family_application_inventory()
+-> Result<crate::foundation::ProofFamilyApplicationInventory, SelectedProofAccountingError> {
+    use crate::bgv::evaluator::program::selected_evaluator_program_set;
+    use crate::foundation::{
+        FOUNDATION_PROFILE, ProofApplicationSlotCeilings,
+        SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION,
+    };
+
+    let key_positions = selected_evaluator_program_set()
+        .and_then(|program| program.key_positions())
+        .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+    let selected_relinearization_position_count =
+        u32::try_from(key_positions.relinearization_catalog_levels().len())
+            .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
+    let selected_galois_batch_count =
+        u32::try_from(super::selected_galois_key_share_batch_schedule().len())
+            .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
+    let application_slot_ceilings = ProofApplicationSlotCeilings::derive(
+        FOUNDATION_PROFILE.participant_count,
+        selected_relinearization_position_count,
+        selected_galois_batch_count,
+        SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION,
+    )
+    .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+    let galois_entries = u32::try_from(
+        super::selected_galois_key_share_relation_plan_input()
+            .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
+            .ordered_entries
+            .len(),
+    )
+    .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
+    let evaluator_entries = u32::try_from(
+        super::selected_evaluator_entry_positions(FOUNDATION_PROFILE.option_count)
+            .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
+            .len(),
+    )
+    .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
+    application_slot_ceilings
+        .derive_proof_family_application_inventory(galois_entries, evaluator_entries)
+        .map_err(|_| SelectedProofAccountingError::InvalidProfile)
+}
+
 #[cfg(test)]
 pub(crate) use resource_accounting::selected_complete_proof_resource_accounting;
 
@@ -1797,42 +1840,6 @@ pub(crate) mod resource_accounting {
             one_participant_paired_target_partial_stream_byte_length,
             ceremony_paired_target_partial_stream_byte_length,
         })
-    }
-
-    pub(crate) fn derive_selected_proof_family_application_inventory()
-    -> Result<ProofFamilyApplicationInventory, SelectedProofAccountingError> {
-        let key_positions = selected_evaluator_program_set()
-            .and_then(|program| program.key_positions())
-            .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
-        let selected_relinearization_position_count =
-            u32::try_from(key_positions.relinearization_catalog_levels().len())
-                .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
-        let selected_galois_batch_count =
-            u32::try_from(selected_galois_key_share_batch_schedule().len())
-                .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
-        let application_slot_ceilings = ProofApplicationSlotCeilings::derive(
-            FOUNDATION_PROFILE.participant_count,
-            selected_relinearization_position_count,
-            selected_galois_batch_count,
-            SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION,
-        )
-        .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
-        let galois_entries = u32::try_from(
-            selected_galois_key_share_relation_plan_input()
-                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
-                .ordered_entries
-                .len(),
-        )
-        .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
-        let evaluator_entries = u32::try_from(
-            selected_evaluator_entry_positions(FOUNDATION_PROFILE.option_count)
-                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
-                .len(),
-        )
-        .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
-        application_slot_ceilings
-            .derive_proof_family_application_inventory(galois_entries, evaluator_entries)
-            .map_err(|_| SelectedProofAccountingError::InvalidProfile)
     }
 
     #[derive(Clone, Debug, PartialEq, Eq)]

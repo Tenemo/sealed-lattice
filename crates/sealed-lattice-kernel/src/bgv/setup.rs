@@ -104,10 +104,8 @@ pub(crate) use accepted_setup::{
 #[cfg(any(test, feature = "primitive-measurement-evidence"))]
 pub(in crate::bgv) use accepted_setup::{
     SetupGenerationCompactPublicKeyDevelopmentAuthority,
-    resolve_setup_generation_compact_public_key_development_preparation_source,
     selected_setup_generation_compact_public_key_development_retained_payload_byte_length,
     setup_generation_compact_public_key_development_retained_payload_byte_length,
-    with_exclusive_setup_generation_compact_public_key_development_relation,
     with_setup_generation_compact_public_key_development_relation_reentry,
 };
 pub(crate) use accepted_setup::{
@@ -118,6 +116,11 @@ pub(in crate::bgv) use accepted_setup::{
     VerifiedPublicRandomness, VerifiedSetupPolynomialLowDegreePrerequisite,
     VerifiedVssQualificationTerminals, VerifiedVssShareLinkageTerminal,
     derive_recipient_input_root, verify_public_randomness_board_sources,
+};
+#[cfg(test)]
+pub(in crate::bgv) use accepted_setup::{
+    resolve_setup_generation_compact_public_key_development_preparation_source,
+    with_exclusive_setup_generation_compact_public_key_development_relation,
 };
 #[cfg(test)]
 pub(crate) use commitment::LatticeAnchorCommitment;

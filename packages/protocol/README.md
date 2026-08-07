@@ -64,10 +64,15 @@ partial and sealed live objects by canonical content chain and lifecycle state,
 binds last-use deletions through a rolling ordered chain, and refuses normal
 execution or checkpoint replacement until deterministic prefix replay
 reconstructs the exact digest. This remains restart groundwork. The compact
-transcript and response assembler are not connected to that host owner, so a
-later-query response can still delay encoded-section progress beyond its
-commitment move without binding that split or its response values into one
-durable compact checkpoint.
+response checkpoint owner now derives the exact transcript/encoder split from
+the production Merkle query dependencies. The four packing geometries have
+`(82, 81, 80)`, `(80, 79, 78)`, `(78, 77, 76)`, and `(76, 75, 74)` response,
+lagged-boundary, and maximum-pending-section counts. Every response boundary
+checks the schedule-derived canonical prefix length, matches its available
+roots and salts to the transcript, and binds the exact cursor and exact proof
+prefix bytes into the common checkpoint digest. The compact generation host
+does not yet publish or resume those boundaries, and selected-size response-
+value and private-randomness custody remains absent.
 
 The first public-key-share proof is a standalone development kill gate. It is
 not a fourth outer setup packet. The canonical provisional setup schedule

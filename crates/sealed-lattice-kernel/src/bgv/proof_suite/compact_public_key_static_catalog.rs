@@ -21,6 +21,7 @@ use p3_goldilocks::Goldilocks;
 use p3_whir::{FoldingFactor, ProtocolParameters, SecurityAssumption, ZkParameters, ZkWhirConfig};
 
 use super::PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT;
+use super::compact_generation_checkpoint::CompactResponseCheckpointSchedule;
 use super::compact_proof_wire::{
     CompactProofWireAssemblerHeapGeometry, CompactProofWireError, CompactProofWireGeometry,
     CompactPublicInputWireGeometry,
@@ -1185,6 +1186,7 @@ struct PackingStaticCatalog {
     emitted_byte_correspondence: emitted_byte_correspondence::PackingEmittedByteCorrespondence,
     non_interactive_soundness: non_interactive_soundness::PackingNonInteractiveSoundness,
     proof_wire_geometry: CompactProofWireGeometry,
+    response_checkpoint_schedule: CompactResponseCheckpointSchedule,
     proof_assembler_heap_geometry: CompactProofWireAssemblerHeapGeometry,
     response_postorder_writer_heap_geometry: CompactResponsePostorderWriterHeapGeometry,
     response_frontier_scanner_heap_geometry: CompactResponseFrontierScannerHeapGeometry,
@@ -1417,6 +1419,11 @@ impl PackingStaticCatalog {
             response_commitments.production_wire_geometries(&uniform_verifier_randomness)?,
         )
         .map_err(map_production_wire_error)?;
+        let response_checkpoint_schedule = CompactResponseCheckpointSchedule::derive(
+            &proof_wire_geometry,
+            &response_commitments.production_merkle_geometries()?,
+        )
+        .map_err(|_| CompactStaticCatalogError::InvalidGeometry)?;
         let public_input_wire_geometry = CompactPublicInputWireGeometry::new(
             packing_factor_u16,
             relation.public_input_ring_vector_count(),
@@ -1430,6 +1437,14 @@ impl PackingStaticCatalog {
             || u64::try_from(proof_wire_geometry.responses().len())
                 .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?
                 != response_commitments.bcs_response_root_count()
+            || response_checkpoint_schedule.total_response_count()
+                != proof_wire_geometry.responses().len()
+            || response_checkpoint_schedule.lagging_checkpoint_count() == 0
+            || response_checkpoint_schedule.maximum_pending_proof_response_count() == 0
+            || response_checkpoint_schedule
+                .completed_proof_response_count(response_checkpoint_schedule.total_response_count())
+                .map_err(|_| CompactStaticCatalogError::InvalidGeometry)?
+                != response_checkpoint_schedule.total_response_count()
             || u64::from(public_input_wire_geometry.field_element_count())
                 != checked_product(&[
                     relation.public_input_ring_vector_count(),
@@ -1634,6 +1649,7 @@ impl PackingStaticCatalog {
             emitted_byte_correspondence,
             non_interactive_soundness,
             proof_wire_geometry,
+            response_checkpoint_schedule,
             proof_assembler_heap_geometry,
             response_postorder_writer_heap_geometry,
             response_frontier_scanner_heap_geometry,
@@ -2562,6 +2578,37 @@ mod tests {
                 (2, 26_064_742, 10_083_328, 1_067_648, 37_215_718),
                 (4, 25_415_814, 9_928_704, 1_150_464, 36_494_982),
                 (8, 25_526_102, 9_901_056, 1_277_888, 36_705_046),
+            ]
+        );
+    }
+
+    #[test]
+    fn production_response_checkpoint_schedule_preserves_canonical_section_order() {
+        let catalog = CompactPublicKeyStaticCatalog::derive()
+            .expect("compact public-key static packing ledger");
+        let snapshots = catalog
+            .factor_catalogs
+            .iter()
+            .map(|factor| {
+                (
+                    factor.packing_factor,
+                    factor.response_checkpoint_schedule.total_response_count(),
+                    factor
+                        .response_checkpoint_schedule
+                        .lagging_checkpoint_count(),
+                    factor
+                        .response_checkpoint_schedule
+                        .maximum_pending_proof_response_count(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            snapshots,
+            vec![
+                (1, 82, 81, 80),
+                (2, 80, 79, 78),
+                (4, 78, 77, 76),
+                (8, 76, 75, 74)
             ]
         );
     }

@@ -19,6 +19,8 @@ mod compact_cfw_external;
 #[cfg(any(test, feature = "primitive-measurement-evidence"))]
 mod compact_cfw_external_prover;
 #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+mod compact_generation_checkpoint;
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
 mod compact_proof_wire;
 #[cfg(any(test, feature = "primitive-measurement-evidence"))]
 mod compact_public_key_static_catalog;

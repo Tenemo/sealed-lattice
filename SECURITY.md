@@ -109,8 +109,16 @@ chain. It requires deterministic replay to reconstruct the exact digest before
 live transactions or a later checkpoint can proceed. Focused hostile coverage
 refuses omitted and reordered deletion state, changed payload, and a substituted
 trailer digest. The compact transcript and response assembler are not connected
-to that host owner: later-query response sections can still lag transcript
-progress, and response-value custody is absent. The provider, commitment
+to that host owner. A verifier-derived response-boundary owner now accounts for
+their lag explicitly: the production packing geometries have 81, 79, 77, or 75
+lagged boundaries and at most 80, 78, 76, or 74 pending canonical sections. It
+refuses the wrong encoded-prefix count, checks every available root and salt
+against the transcript, and binds its exact current response values, salts, and
+frontiers through the canonical-prefix contribution to the common checkpoint
+digest. Focused restore coverage includes a header-only prefix and a ready
+later response blocked by an earlier section. The generation host does not yet
+publish or resume this compact boundary, and selected-size response-value and
+private-randomness custody is absent. The provider, commitment
 construction, proof coins, WHIR challenger, and CFW mask transport remain
 test-only; production authority, compact durable execution, and measured
 browser evidence are absent, so proof generation remains refused.
