@@ -324,10 +324,18 @@ commitment, and compares resident and external round polynomials, retained
 tree bytes, transcript messages, and final values. A fresh path decodes the
 transported public-input and proof bytes, verifies every opening and the CFW
 transcript, and matches the pollable structured transpose to the independent
-direct claim combination coefficient for coefficient. That owner uses ring
-degree 2,048, a zero-centered valid assignment, a constant test provider,
-deterministic test salts, and disclosed test masks, and it stops before WHIR.
-It therefore does not complete the production-shaped CFW/transpose/WHIR chain.
+direct claim combination coefficient for coefficient. It then binds those
+canonical CFW and public-input bytes into a hiding-WHIR challenger, commits the
+actual CFW inner masks, compact witness, and outer masks in that order, and
+builds the production structured transpose from WHIR's own batching challenge.
+A fresh WHIR verifier accepts the resulting three-round proof and rejects
+changed targets, source and mask covectors, commitment chronology, and base-
+case values. The owner uses ring degree 2,048, a zero-centered valid assignment,
+a constant test provider, deterministic test salts and coins, disclosed CFW
+masks in the outer CFW-only wire, and a reduced first fold. Its WHIR proof is
+still an in-memory vendored structure: the pre-challenge and cross-epoch path,
+canonical WHIR sections, and transported-byte verification remain absent. It
+therefore does not complete the production-shaped CFW/transpose/WHIR chain.
 
 The canonical proof encoder can append one logical response at a time in
 verifier-owned order and release that response before accepting the next. It
@@ -766,14 +774,17 @@ and conditional complete-inventory bounds. A live small Merkle response derives
 its schedule from the canonical transcript and freshly verifies transported
 bytes with hostile mutations. The reduced production-family integration owner
 additionally reaches verified CFW claims and the production structured
-transpose with resident/external and retained-tree byte parity. It is not a
-production-authority, WHIR, selected-size, or zero-knowledge owner.
+transpose with resident/external and retained-tree byte parity, then proves and
+freshly verifies that main-epoch combined relation through three hiding-WHIR
+rounds. It is not a production-authority, pre-challenge, cross-epoch, canonical-
+WHIR-transport, selected-size, or zero-knowledge owner.
 
 The static gate remains closed because current generation does not select the
 compact profile or exercise it through a retained live authority, because row-
 source preparation has no authenticated cache recovery, and because the
 selected-size CFW and CFW-to-transpose execution, selected-size transpose
-execution, WHIR invocation, complete production-shaped small-chain
+execution, pre-challenge and canonically transported WHIR integration, complete
+production-shaped small-chain
 integration, durable proof and verifier lifecycle, and independently measured
 resources for the fixed bytes remain incomplete. The
 construction-level interactive masking correspondence, canonical proof and
@@ -786,10 +797,10 @@ The next task is to close those owners one at a time with focused tests, not to
 run a prover or a complete test graph. Construction-level masking now
 reconciles every production coefficient-to-view map and the conditional entropy
 after preceding disclosures. The next integration owner must replace the
-reduced constant source with the real production authority, carry the verified
-structured handoff through WHIR and its canonical sections, and freshly verify
-the resulting transported bytes with hostile mutations. Only that complete
-small-geometry chain can close this gate.
+reduced constant source with the real production authority, connect the pre-
+challenge and cross-epoch claims, map the now-live WHIR proof into its canonical
+sections, and freshly verify the resulting transported bytes with section-wide
+hostile mutations. Only that complete small-geometry chain can close this gate.
 Factors one, two, and four remain eligible engineering comparators
 for the same standalone relation and security target. Factor eight is retained
 only as a statically refused comparator under the current retained-tree
