@@ -337,11 +337,20 @@ pre-challenge and main targets, source and mask covectors, commitment order,
 cross-epoch openings, and either base-case value. The owner uses ring degree
 2,048, a zero-centered valid assignment, a constant test provider,
 deterministic test salts and coins, disclosed CFW masks in the outer CFW-only
-wire, and reduced first folds. Both WHIR proofs remain in-memory vendored
-structures. The pre-challenge source root, copy point, CFW challenges, and WHIR
-messages are not yet driven by one canonical production transcript, and no
-canonical WHIR sections are encoded or freshly verified from transported
-bytes. The owner therefore does not complete the production-shaped chain.
+wire, and reduced first folds. A test-only canonical envelope now assigns the
+outer CFW proof, five external roots, pre-challenge WHIR proof, and main WHIR
+proof to eight fixed ordered sections. WHIR vector lengths come only from the
+verifier configuration, field limbs are canonical, and query coordinates remain
+Fiat-Shamir-derived rather than producer-supplied. A fresh decoder reproduces
+the envelope byte for byte, rechecks the embedded CFW openings and messages,
+and sequentially verifies both WHIR proofs using only decoded roots and proof
+objects. It refuses wrong framing, duplicate or reordered sections, empty or
+oversized sections, truncation, trailing bytes, noncanonical fields, missing or
+unused WHIR bytes, and structural or semantic mutations across the CFW, every
+external root, and both WHIR sections. The pre-challenge source root, copy
+point, CFW challenges, and WHIR messages are still not driven by one canonical
+production transcript. The owner therefore does not complete the
+production-shaped chain.
 
 The canonical proof encoder can append one logical response at a time in
 verifier-owned order and release that response before accepting the next. It
@@ -786,17 +795,19 @@ additionally reaches verified CFW claims and the production structured
 transpose with resident/external and retained-tree byte parity. Its test-only
 WHIR chronology now proves and freshly verifies the pre-challenge base-source
 relation and the main CFW relation through three rounds each, with one shared
-cross-epoch mask root and the exact copied witness prefix. It is not a
-production-authority, unified canonical-transcript, canonical-WHIR-transport,
+cross-epoch mask root and the exact copied witness prefix. Its fixed-order
+canonical envelope transports the embedded CFW proof, every external root, and
+both WHIR proofs through a fresh decoder and verifier with section-wide hostile
+coverage. It is not a production-authority, unified canonical-transcript,
 selected-size, or zero-knowledge owner.
 
 The static gate remains closed because current generation does not select the
 compact profile or exercise it through a retained live authority, because row-
 source preparation has no authenticated cache recovery, and because the
 selected-size CFW and CFW-to-transpose execution, selected-size transpose
-execution, unified canonical transcript and transported WHIR integration,
-complete production-shaped small-chain integration, durable proof and verifier
-lifecycle, and independently measured resources for the fixed bytes remain
+execution, unified production transcript, complete production-shaped
+small-chain integration, durable proof and verifier lifecycle, and
+independently measured resources for the fixed bytes remain
 incomplete. The
 construction-level interactive masking correspondence, canonical proof and
 public-input codecs,
@@ -810,9 +821,9 @@ reconciles every production coefficient-to-view map and the conditional entropy
 after preceding disclosures. The next integration owner must replace the
 reduced constant source with the real production authority, drive the now-live
 pre-challenge, cross-epoch, CFW, and WHIR messages through one canonical
-transcript, map both WHIR proofs into their canonical sections, and freshly
-verify the resulting transported bytes with section-wide hostile mutations.
-Only that complete small-geometry chain can close this gate.
+transcript, and require that production verifier path to consume the existing
+canonical section model. Only that complete small-geometry chain can close
+this gate.
 Factors one, two, and four remain eligible engineering comparators
 for the same standalone relation and security target. Factor eight is retained
 only as a statically refused comparator under the current retained-tree

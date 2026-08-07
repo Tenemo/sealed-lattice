@@ -41,13 +41,16 @@ canonical emitted-byte map, and conditional noninteractive soundness owner are
 closed for this standalone geometry. The 316 schedules derived from complete
 deterministic fixed verifier messages are still test-state evidence, not live
 prover transcript driving. A reduced production-family chain verifies
-transported CFW bytes and sequential in-memory hiding-WHIR proofs, but it still
-uses a constant provider, deterministic development coins, a separate WHIR
-challenger, and no canonical transported WHIR sections. Production authority,
-one canonical transcript, authenticated restart, selected-size CFW and
-transpose execution, WHIR transport, and release-WASM browser evidence remain
-open. After those gates pass, factor one is the first selected-size execution
-target; factors two and four
+transported CFW bytes and sequential hiding-WHIR proofs from one fixed-order
+canonical envelope containing the CFW section, five external roots, and both
+WHIR sections. A fresh decoder derives every WHIR shape from verifier
+configuration, re-encodes the exact bytes, and rejects hostile framing, field,
+root, and proof-section mutations. The chain still uses a constant provider,
+deterministic development coins, and a separate WHIR challenger. Production
+authority, one canonical production transcript, authenticated restart,
+selected-size CFW and transpose execution, production transport integration,
+and release-WASM browser evidence remain open. After those gates pass, factor
+one is the first selected-size execution target; factors two and four
 are measured only if verification or transport tradeoffs require them. The
 row-code vectors and historical factor-eight root measurement do not transfer
 to this construction and cannot freeze the suite.

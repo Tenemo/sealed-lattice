@@ -69,8 +69,18 @@ use crate::bgv::proof_suite::{
     },
     ProofBaseFieldElement, ProofChallengeExtensionElement,
     COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, PROOF_BASE_FIELD_MODULUS,
+    PROOF_CHALLENGE_EXTENSION_DEGREE,
 };
 use crate::foundation::{Hash512, ProofApplicationSlotCeilings};
+
+#[path = "production_small_chain_canonical_transport.rs"]
+mod production_small_chain_canonical_transport;
+
+use production_small_chain_canonical_transport::{
+    decode_small_chain_canonical_proof, encode_small_chain_canonical_proof,
+    small_chain_canonical_section_payload_range, DecodedSmallChainCanonicalProof,
+    SmallChainCanonicalSection, SmallChainCanonicalTransportError, SmallChainExternalCommitments,
+};
 
 const SMALL_CHAIN_RING_DEGREE: u64 = 2_048;
 const SMALL_CHAIN_HASH_OUTPUT_BYTE_LENGTH: usize = 64;
@@ -330,25 +340,19 @@ struct SmallChainWhirExecution {
     main_configuration: SmallChainWhirConfiguration,
     commitment_scheme: SmallChainCommitmentScheme,
     transcript_binding: [u8; Hash512::BYTE_LENGTH],
-    canonical_cfw_proof_bytes: Vec<u8>,
-    pre_challenge_source_commitment: SmallChainCommitment,
-    main_source_commitment: SmallChainCommitment,
     inner_mask_shape: MaskGroupShape,
-    inner_mask_commitment: SmallChainCommitment,
     outer_mask_shape: MaskGroupShape,
-    outer_mask_commitment: SmallChainCommitment,
     shared_mask_shape: MaskGroupShape,
-    shared_mask_commitment: SmallChainCommitment,
     copied_main_source_element_count: usize,
-    cross_epoch_point: Vec<CompactChallengeField>,
+    cross_epoch_variable_count: usize,
     expected_relation_claim_count: usize,
-    pre_challenge_proof: SmallChainWhirProof,
-    main_proof: SmallChainWhirProof,
 }
 
 impl SmallChainWhirExecution {
     fn verify(
         &self,
+        commitments: &SmallChainExternalCommitments,
+        canonical_cfw_proof_bytes: &[u8],
         pre_challenge_proof: &SmallChainWhirProof,
         main_proof: &SmallChainWhirProof,
         claim_batch: &CompactCfwClaimBatch,
@@ -356,26 +360,23 @@ impl SmallChainWhirExecution {
         mutation: SmallChainWhirVerificationMutation,
     ) -> Result<(), ZkVerifierError> {
         let mut challenger = small_chain_whir_challenger(self.transcript_binding);
-        challenger.observe(self.pre_challenge_source_commitment.clone());
+        challenger.observe(commitments.pre_challenge_source.clone());
         if matches!(
             mutation,
             SmallChainWhirVerificationMutation::GroupChronology
         ) {
-            challenger.observe(self.outer_mask_commitment.clone());
-            challenger.observe(self.main_source_commitment.clone());
-            challenger.observe(self.inner_mask_commitment.clone());
+            challenger.observe(commitments.outer_masks.clone());
+            challenger.observe(commitments.main_source.clone());
+            challenger.observe(commitments.inner_masks.clone());
         } else {
-            challenger.observe(self.inner_mask_commitment.clone());
-            challenger.observe(self.main_source_commitment.clone());
-            challenger.observe(self.outer_mask_commitment.clone());
+            challenger.observe(commitments.inner_masks.clone());
+            challenger.observe(commitments.main_source.clone());
+            challenger.observe(commitments.outer_masks.clone());
         }
-        challenger.observe(self.shared_mask_commitment.clone());
-        let sampled_cross_epoch_point = (0..self.cross_epoch_point.len())
+        challenger.observe(commitments.shared_masks.clone());
+        let sampled_cross_epoch_point = (0..self.cross_epoch_variable_count)
             .map(|_| challenger.sample_algebra_element())
             .collect::<Vec<CompactChallengeField>>();
-        if mutation == SmallChainWhirVerificationMutation::None {
-            assert_eq!(sampled_cross_epoch_point, self.cross_epoch_point);
-        }
         let [masked_pre_challenge_evaluation] = pre_challenge_proof.evals.as_slice() else {
             return Err(ZkVerifierError::EvalCountMismatch {
                 expected: 1,
@@ -398,14 +399,14 @@ impl SmallChainWhirExecution {
         ] {
             challenger.observe_algebra_element(value);
         }
-        observe_small_chain_canonical_cfw_bytes(&mut challenger, &self.canonical_cfw_proof_bytes);
+        observe_small_chain_canonical_cfw_bytes(&mut challenger, canonical_cfw_proof_bytes);
 
         let pre_challenge_verifier =
             HidingWhirVerifier::new(&self.pre_challenge_configuration, &self.commitment_scheme);
-        let shared_mask_commitment = self.shared_mask_commitment.clone();
+        let shared_mask_commitment = commitments.shared_masks.clone();
         pre_challenge_verifier.verify_base_source_relation(
             pre_challenge_proof,
-            &self.pre_challenge_source_commitment,
+            &commitments.pre_challenge_source,
             1,
             |_, revealed_values| {
                 let mut source_covector =
@@ -446,12 +447,12 @@ impl SmallChainWhirExecution {
 
         let main_verifier =
             HidingWhirVerifier::new(&self.main_configuration, &self.commitment_scheme);
-        let inner_mask_commitment = self.inner_mask_commitment.clone();
-        let outer_mask_commitment = self.outer_mask_commitment.clone();
-        let shared_mask_commitment = self.shared_mask_commitment.clone();
+        let inner_mask_commitment = commitments.inner_masks.clone();
+        let outer_mask_commitment = commitments.outer_masks.clone();
+        let shared_mask_commitment = commitments.shared_masks.clone();
         main_verifier.verify_extension_relation(
             main_proof,
-            &self.main_source_commitment,
+            &commitments.main_source,
             2,
             |batching_challenge, revealed_values| {
                 let combination = claim_batch
@@ -1342,6 +1343,33 @@ fn request_context(
         None,
         None,
     )
+}
+
+fn replace_small_chain_canonical_section_payload(
+    canonical: &[u8],
+    section: SmallChainCanonicalSection,
+    replacement_payload: &[u8],
+) -> Vec<u8> {
+    assert!(!replacement_payload.is_empty());
+    let payload_range = small_chain_canonical_section_payload_range(canonical, section)
+        .expect("the canonical small-chain section exists");
+    let declared_length_start = payload_range
+        .start
+        .checked_sub(size_of::<u32>())
+        .expect("the section payload follows its declared length");
+    let replacement_length = u32::try_from(replacement_payload.len())
+        .expect("the reduced replacement payload length fits u32");
+    let resulting_length = canonical
+        .len()
+        .checked_sub(payload_range.len())
+        .and_then(|length| length.checked_add(replacement_payload.len()))
+        .expect("the reduced replacement length fits usize");
+    let mut replaced = Vec::with_capacity(resulting_length);
+    replaced.extend_from_slice(&canonical[..declared_length_start]);
+    replaced.extend_from_slice(&replacement_length.to_le_bytes());
+    replaced.extend_from_slice(replacement_payload);
+    replaced.extend_from_slice(&canonical[payload_range.end..]);
+    replaced
 }
 
 #[test]
@@ -2362,34 +2390,152 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         main_whir_proof.sumchecks.len(),
         main_whir_configuration.n_rounds() + 1
     );
+    let external_commitments = SmallChainExternalCommitments {
+        pre_challenge_source: pre_challenge_source_commitment,
+        inner_masks: inner_mask_commitment,
+        main_source: main_source_commitment,
+        outer_masks: outer_mask_commitment,
+        shared_masks: shared_mask_commitment,
+    };
+    let canonical_small_chain_proof_bytes = encode_small_chain_canonical_proof(
+        &pre_challenge_whir_configuration,
+        &main_whir_configuration,
+        inner_mask_shape,
+        outer_mask_shape,
+        shared_mask_shape,
+        &canonical_proof_bytes,
+        &external_commitments,
+        &pre_challenge_whir_proof,
+        &main_whir_proof,
+    )
+    .expect("the complete reduced CFW and WHIR chain encodes canonically");
+    let decoded_small_chain_proof = decode_small_chain_canonical_proof(
+        &pre_challenge_whir_configuration,
+        &main_whir_configuration,
+        inner_mask_shape,
+        outer_mask_shape,
+        shared_mask_shape,
+        &canonical_small_chain_proof_bytes,
+    )
+    .expect("a fresh decoder accepts the complete reduced CFW and WHIR chain");
+    assert_eq!(
+        decoded_small_chain_proof.canonical_cfw_proof_bytes,
+        canonical_proof_bytes
+    );
+    assert_eq!(
+        decoded_small_chain_proof.commitments.pre_challenge_source,
+        external_commitments.pre_challenge_source
+    );
+    assert_eq!(
+        decoded_small_chain_proof.commitments.inner_masks,
+        external_commitments.inner_masks
+    );
+    assert_eq!(
+        decoded_small_chain_proof.commitments.main_source,
+        external_commitments.main_source
+    );
+    assert_eq!(
+        decoded_small_chain_proof.commitments.outer_masks,
+        external_commitments.outer_masks
+    );
+    assert_eq!(
+        decoded_small_chain_proof.commitments.shared_masks,
+        external_commitments.shared_masks
+    );
+
+    let transported_cfw_proof = decode_compact_proof_wire(
+        &proof_wire_geometry,
+        &decoded_small_chain_proof.canonical_cfw_proof_bytes,
+        decoded_small_chain_proof.canonical_cfw_proof_bytes.len(),
+    )
+    .expect("the CFW section remains independently canonical after transport");
+    for (response_ordinal, ((built_response, wire_geometry), decoded_response)) in built_responses
+        .iter()
+        .zip(proof_wire_geometry.responses())
+        .zip(transported_cfw_proof.responses())
+        .enumerate()
+    {
+        verify_decoded_compact_response_opening(
+            &built_response.merkle_geometry,
+            wire_geometry,
+            decoded_response,
+            &decoded_small_chain_proof.canonical_cfw_proof_bytes,
+            &built_response.query_leaf_ordinals,
+        )
+        .unwrap_or_else(|error| {
+            panic!("transported response {response_ordinal} opening failed: {error:?}")
+        });
+        let verifier_message = derive_compact_fiat_shamir_verifier_message(
+            &proof_wire_geometry,
+            &transported_cfw_proof,
+            &decoded_small_chain_proof.canonical_cfw_proof_bytes,
+            &decoded_public_input,
+            &canonical_public_input_bytes,
+            u32::try_from(response_ordinal).expect("response ordinal fits u32"),
+        )
+        .expect("the fresh verifier derives a message from the transported CFW section");
+        assert_eq!(
+            verifier_message, prover_verifier_messages[response_ordinal],
+            "transported transcript message mismatch at response {response_ordinal}"
+        );
+    }
+
+    let fresh_whir_transcript_binding = crate::hashing::hash_framed_parts_512(
+        "sealed-lattice/test/production-small-chain-whir-outer-prefix/v1",
+        &[&canonical_public_input_bytes, &source_replay_binding],
+    );
+    assert_eq!(fresh_whir_transcript_binding, whir_transcript_binding);
     let whir_execution = SmallChainWhirExecution {
         pre_challenge_configuration: pre_challenge_whir_configuration,
         main_configuration: main_whir_configuration,
         commitment_scheme: whir_commitment_scheme,
-        transcript_binding: whir_transcript_binding,
-        canonical_cfw_proof_bytes: canonical_proof_bytes.clone(),
-        pre_challenge_source_commitment,
-        main_source_commitment,
+        transcript_binding: fresh_whir_transcript_binding,
         inner_mask_shape,
-        inner_mask_commitment,
         outer_mask_shape,
-        outer_mask_commitment,
         shared_mask_shape,
-        shared_mask_commitment,
         copied_main_source_element_count,
-        cross_epoch_point,
+        cross_epoch_variable_count: cross_epoch_point.len(),
         expected_relation_claim_count,
-        pre_challenge_proof: pre_challenge_whir_proof,
-        main_proof: main_whir_proof,
     };
-    whir_execution
-        .verify(
-            &whir_execution.pre_challenge_proof,
-            &whir_execution.main_proof,
+    let reencoded_small_chain_proof = encode_small_chain_canonical_proof(
+        &whir_execution.pre_challenge_configuration,
+        &whir_execution.main_configuration,
+        whir_execution.inner_mask_shape,
+        whir_execution.outer_mask_shape,
+        whir_execution.shared_mask_shape,
+        &decoded_small_chain_proof.canonical_cfw_proof_bytes,
+        &decoded_small_chain_proof.commitments,
+        &decoded_small_chain_proof.pre_challenge_whir_proof,
+        &decoded_small_chain_proof.main_whir_proof,
+    )
+    .expect("decoded small-chain fields re-encode canonically");
+    assert_eq!(
+        reencoded_small_chain_proof,
+        canonical_small_chain_proof_bytes
+    );
+
+    let decode_transported_small_chain = |canonical: &[u8]| {
+        decode_small_chain_canonical_proof(
+            &whir_execution.pre_challenge_configuration,
+            &whir_execution.main_configuration,
+            whir_execution.inner_mask_shape,
+            whir_execution.outer_mask_shape,
+            whir_execution.shared_mask_shape,
+            canonical,
+        )
+    };
+    let verify_transported_small_chain = |transported: &DecodedSmallChainCanonicalProof| {
+        whir_execution.verify(
+            &transported.commitments,
+            &transported.canonical_cfw_proof_bytes,
+            &transported.pre_challenge_whir_proof,
+            &transported.main_whir_proof,
             &verified_claim_batch,
             &resident_matrices,
             SmallChainWhirVerificationMutation::None,
         )
+    };
+    verify_transported_small_chain(&decoded_small_chain_proof)
         .expect("fresh verifier accepts the CFW-bound WHIR proof");
     for mutation in [
         SmallChainWhirVerificationMutation::PreChallengeTarget,
@@ -2402,42 +2548,52 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
     ] {
         assert!(whir_execution
             .verify(
-                &whir_execution.pre_challenge_proof,
-                &whir_execution.main_proof,
+                &decoded_small_chain_proof.commitments,
+                &decoded_small_chain_proof.canonical_cfw_proof_bytes,
+                &decoded_small_chain_proof.pre_challenge_whir_proof,
+                &decoded_small_chain_proof.main_whir_proof,
                 &verified_claim_batch,
                 &resident_matrices,
                 mutation,
             )
             .is_err());
     }
-    let mut mutated_pre_challenge_proof = whir_execution.pre_challenge_proof.clone();
+    let mut mutated_pre_challenge_proof =
+        decoded_small_chain_proof.pre_challenge_whir_proof.clone();
     mutated_pre_challenge_proof.base_case.masked_claim += CompactChallengeField::ONE;
     assert!(whir_execution
         .verify(
+            &decoded_small_chain_proof.commitments,
+            &decoded_small_chain_proof.canonical_cfw_proof_bytes,
             &mutated_pre_challenge_proof,
-            &whir_execution.main_proof,
+            &decoded_small_chain_proof.main_whir_proof,
             &verified_claim_batch,
             &resident_matrices,
             SmallChainWhirVerificationMutation::None,
         )
         .is_err());
-    let mut mutated_main_proof = whir_execution.main_proof.clone();
+    let mut mutated_main_proof = decoded_small_chain_proof.main_whir_proof.clone();
     mutated_main_proof.base_case.masked_claim += CompactChallengeField::ONE;
     assert!(whir_execution
         .verify(
-            &whir_execution.pre_challenge_proof,
+            &decoded_small_chain_proof.commitments,
+            &decoded_small_chain_proof.canonical_cfw_proof_bytes,
+            &decoded_small_chain_proof.pre_challenge_whir_proof,
             &mutated_main_proof,
             &verified_claim_batch,
             &resident_matrices,
             SmallChainWhirVerificationMutation::None,
         )
         .is_err());
-    let mut mutated_pre_challenge_opening = whir_execution.pre_challenge_proof.clone();
-    let mut mutated_main_opening = whir_execution.main_proof.clone();
+    let mut mutated_pre_challenge_opening =
+        decoded_small_chain_proof.pre_challenge_whir_proof.clone();
+    let mut mutated_main_opening = decoded_small_chain_proof.main_whir_proof.clone();
     mutated_pre_challenge_opening.evals[0] += CompactChallengeField::ONE;
     mutated_main_opening.evals[0] += CompactChallengeField::ONE;
     assert!(whir_execution
         .verify(
+            &decoded_small_chain_proof.commitments,
+            &decoded_small_chain_proof.canonical_cfw_proof_bytes,
             &mutated_pre_challenge_opening,
             &mutated_main_opening,
             &verified_claim_batch,
@@ -2445,24 +2601,29 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
             SmallChainWhirVerificationMutation::None,
         )
         .is_err());
-    let mut mutated_main_openings = whir_execution.main_proof.clone();
+    let mut mutated_main_openings = decoded_small_chain_proof.main_whir_proof.clone();
     mutated_main_openings.evals[0] += CompactChallengeField::ONE;
     mutated_main_openings.evals[1] -= CompactChallengeField::ONE;
     assert!(whir_execution
         .verify(
-            &whir_execution.pre_challenge_proof,
+            &decoded_small_chain_proof.commitments,
+            &decoded_small_chain_proof.canonical_cfw_proof_bytes,
+            &decoded_small_chain_proof.pre_challenge_whir_proof,
             &mutated_main_openings,
             &verified_claim_batch,
             &resident_matrices,
             SmallChainWhirVerificationMutation::None,
         )
         .is_err());
-    let mut missing_pre_challenge_opening = whir_execution.pre_challenge_proof.clone();
+    let mut missing_pre_challenge_opening =
+        decoded_small_chain_proof.pre_challenge_whir_proof.clone();
     missing_pre_challenge_opening.evals.clear();
     assert!(matches!(
         whir_execution.verify(
+            &decoded_small_chain_proof.commitments,
+            &decoded_small_chain_proof.canonical_cfw_proof_bytes,
             &missing_pre_challenge_opening,
-            &whir_execution.main_proof,
+            &decoded_small_chain_proof.main_whir_proof,
             &verified_claim_batch,
             &resident_matrices,
             SmallChainWhirVerificationMutation::None,
@@ -2472,6 +2633,222 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
             actual: 0
         })
     ));
+
+    let mut noncanonical_pre_challenge_proof =
+        decoded_small_chain_proof.pre_challenge_whir_proof.clone();
+    noncanonical_pre_challenge_proof.evals.clear();
+    assert_eq!(
+        encode_small_chain_canonical_proof(
+            &whir_execution.pre_challenge_configuration,
+            &whir_execution.main_configuration,
+            whir_execution.inner_mask_shape,
+            whir_execution.outer_mask_shape,
+            whir_execution.shared_mask_shape,
+            &decoded_small_chain_proof.canonical_cfw_proof_bytes,
+            &decoded_small_chain_proof.commitments,
+            &noncanonical_pre_challenge_proof,
+            &decoded_small_chain_proof.main_whir_proof,
+        )
+        .err(),
+        Some(SmallChainCanonicalTransportError::NonCanonicalProofShape)
+    );
+
+    let mut wrong_magic = canonical_small_chain_proof_bytes.clone();
+    wrong_magic[0] ^= 1;
+    assert_eq!(
+        decode_transported_small_chain(&wrong_magic).err(),
+        Some(SmallChainCanonicalTransportError::WrongMagic)
+    );
+    let mut wrong_section_count = canonical_small_chain_proof_bytes.clone();
+    wrong_section_count[size_of::<u64>()..size_of::<u64>() + size_of::<u16>()]
+        .copy_from_slice(&7_u16.to_le_bytes());
+    assert_eq!(
+        decode_transported_small_chain(&wrong_section_count).err(),
+        Some(SmallChainCanonicalTransportError::WrongSectionCount)
+    );
+
+    let outer_cfw_payload_range = small_chain_canonical_section_payload_range(
+        &canonical_small_chain_proof_bytes,
+        SmallChainCanonicalSection::OuterCfwProof,
+    )
+    .expect("the outer CFW payload range derives");
+    let pre_challenge_source_payload_range = small_chain_canonical_section_payload_range(
+        &canonical_small_chain_proof_bytes,
+        SmallChainCanonicalSection::PreChallengeSourceRoot,
+    )
+    .expect("the pre-challenge source-root payload range derives");
+    let inner_mask_payload_range = small_chain_canonical_section_payload_range(
+        &canonical_small_chain_proof_bytes,
+        SmallChainCanonicalSection::InnerMaskRoot,
+    )
+    .expect("the inner-mask-root payload range derives");
+
+    let mut duplicate_section = canonical_small_chain_proof_bytes.clone();
+    let outer_cfw_tag_range = outer_cfw_payload_range.start - size_of::<u16>() - size_of::<u32>()
+        ..outer_cfw_payload_range.start - size_of::<u32>();
+    let pre_challenge_source_tag_range =
+        pre_challenge_source_payload_range.start - size_of::<u16>() - size_of::<u32>()
+            ..pre_challenge_source_payload_range.start - size_of::<u32>();
+    duplicate_section[pre_challenge_source_tag_range.clone()]
+        .copy_from_slice(&canonical_small_chain_proof_bytes[outer_cfw_tag_range]);
+    assert_eq!(
+        decode_transported_small_chain(&duplicate_section).err(),
+        Some(SmallChainCanonicalTransportError::WrongSectionOrder)
+    );
+
+    let pre_challenge_source_record_range =
+        pre_challenge_source_payload_range.start - size_of::<u16>() - size_of::<u32>()
+            ..pre_challenge_source_payload_range.end;
+    let inner_mask_record_range = inner_mask_payload_range.start
+        - size_of::<u16>()
+        - size_of::<u32>()..inner_mask_payload_range.end;
+    assert_eq!(
+        pre_challenge_source_record_range.len(),
+        inner_mask_record_range.len()
+    );
+    let mut reordered_sections = canonical_small_chain_proof_bytes.clone();
+    reordered_sections[pre_challenge_source_record_range.clone()]
+        .copy_from_slice(&canonical_small_chain_proof_bytes[inner_mask_record_range.clone()]);
+    reordered_sections[inner_mask_record_range]
+        .copy_from_slice(&canonical_small_chain_proof_bytes[pre_challenge_source_record_range]);
+    assert_eq!(
+        decode_transported_small_chain(&reordered_sections).err(),
+        Some(SmallChainCanonicalTransportError::WrongSectionOrder)
+    );
+
+    let outer_cfw_declared_length_range =
+        outer_cfw_payload_range.start - size_of::<u32>()..outer_cfw_payload_range.start;
+    let mut empty_section = canonical_small_chain_proof_bytes.clone();
+    empty_section[outer_cfw_declared_length_range.clone()].copy_from_slice(&0_u32.to_le_bytes());
+    assert_eq!(
+        decode_transported_small_chain(&empty_section).err(),
+        Some(SmallChainCanonicalTransportError::EmptySection)
+    );
+    let mut oversized_section = canonical_small_chain_proof_bytes.clone();
+    oversized_section[outer_cfw_declared_length_range].copy_from_slice(&u32::MAX.to_le_bytes());
+    assert_eq!(
+        decode_transported_small_chain(&oversized_section).err(),
+        Some(SmallChainCanonicalTransportError::ByteLengthExceeded)
+    );
+    assert_eq!(
+        decode_transported_small_chain(
+            &canonical_small_chain_proof_bytes[..canonical_small_chain_proof_bytes.len() - 1]
+        )
+        .err(),
+        Some(SmallChainCanonicalTransportError::Truncated)
+    );
+    let mut trailing_small_chain_bytes = canonical_small_chain_proof_bytes.clone();
+    trailing_small_chain_bytes.push(0);
+    assert_eq!(
+        decode_transported_small_chain(&trailing_small_chain_bytes).err(),
+        Some(SmallChainCanonicalTransportError::TrailingBytes)
+    );
+
+    let main_whir_payload_range = small_chain_canonical_section_payload_range(
+        &canonical_small_chain_proof_bytes,
+        SmallChainCanonicalSection::MainWhirProof,
+    )
+    .expect("the main WHIR payload range derives");
+    let main_whir_payload =
+        canonical_small_chain_proof_bytes[main_whir_payload_range.clone()].to_vec();
+    let missing_main_whir_bytes = replace_small_chain_canonical_section_payload(
+        &canonical_small_chain_proof_bytes,
+        SmallChainCanonicalSection::MainWhirProof,
+        &main_whir_payload[..main_whir_payload.len() - size_of::<u64>()],
+    );
+    assert_eq!(
+        decode_transported_small_chain(&missing_main_whir_bytes).err(),
+        Some(SmallChainCanonicalTransportError::Truncated)
+    );
+    let mut extended_main_whir_payload = main_whir_payload;
+    extended_main_whir_payload.extend_from_slice(&0_u64.to_le_bytes());
+    let unused_main_whir_bytes = replace_small_chain_canonical_section_payload(
+        &canonical_small_chain_proof_bytes,
+        SmallChainCanonicalSection::MainWhirProof,
+        &extended_main_whir_payload,
+    );
+    assert_eq!(
+        decode_transported_small_chain(&unused_main_whir_bytes).err(),
+        Some(SmallChainCanonicalTransportError::TrailingBytes)
+    );
+
+    for section in [
+        SmallChainCanonicalSection::PreChallengeSourceRoot,
+        SmallChainCanonicalSection::InnerMaskRoot,
+        SmallChainCanonicalSection::MainSourceRoot,
+        SmallChainCanonicalSection::OuterMaskRoot,
+        SmallChainCanonicalSection::SharedMaskRoot,
+    ] {
+        let payload_range = small_chain_canonical_section_payload_range(
+            &canonical_small_chain_proof_bytes,
+            section,
+        )
+        .expect("each external commitment has one canonical payload");
+        let mut mutated_commitment = canonical_small_chain_proof_bytes.clone();
+        mutated_commitment[payload_range.start] ^= 1;
+        let decoded_mutated_commitment = decode_transported_small_chain(&mutated_commitment)
+            .expect("a hash-root mutation remains structurally canonical");
+        assert!(verify_transported_small_chain(&decoded_mutated_commitment).is_err());
+    }
+
+    let extension_field_byte_length = PROOF_CHALLENGE_EXTENSION_DEGREE * size_of::<u64>();
+    for (section, evaluation_count) in [
+        (SmallChainCanonicalSection::PreChallengeWhirProof, 1_usize),
+        (SmallChainCanonicalSection::MainWhirProof, 2_usize),
+    ] {
+        let payload_range = small_chain_canonical_section_payload_range(
+            &canonical_small_chain_proof_bytes,
+            section,
+        )
+        .expect("each WHIR proof has one canonical payload");
+
+        let mut noncanonical_field = canonical_small_chain_proof_bytes.clone();
+        noncanonical_field[payload_range.start..payload_range.start + size_of::<u64>()]
+            .copy_from_slice(&PROOF_BASE_FIELD_MODULUS.to_le_bytes());
+        assert_eq!(
+            decode_transported_small_chain(&noncanonical_field).err(),
+            Some(SmallChainCanonicalTransportError::NonCanonicalField)
+        );
+
+        let mut mutated_revealed_value = canonical_small_chain_proof_bytes.clone();
+        mutated_revealed_value[payload_range.start] ^= 1;
+        let decoded_mutated_revealed_value =
+            decode_transported_small_chain(&mutated_revealed_value)
+                .expect("a canonical WHIR field mutation decodes");
+        assert!(verify_transported_small_chain(&decoded_mutated_revealed_value).is_err());
+
+        let initial_sumcheck_mask_root_start = payload_range.start
+            + evaluation_count
+                .checked_mul(extension_field_byte_length)
+                .expect("the reduced evaluation prefix length fits usize");
+        let mut mutated_internal_root = canonical_small_chain_proof_bytes.clone();
+        mutated_internal_root[initial_sumcheck_mask_root_start] ^= 1;
+        let decoded_mutated_internal_root = decode_transported_small_chain(&mutated_internal_root)
+            .expect("a WHIR root mutation remains structurally canonical");
+        assert!(verify_transported_small_chain(&decoded_mutated_internal_root).is_err());
+    }
+
+    let mut mutated_outer_cfw_section = canonical_small_chain_proof_bytes.clone();
+    let outer_cfw_first_root_byte =
+        outer_cfw_payload_range.start + PROOF_FIXED_HEADER_BYTE_LENGTH + size_of::<u32>();
+    mutated_outer_cfw_section[outer_cfw_first_root_byte] ^= 1;
+    let decoded_mutated_outer_cfw = decode_transported_small_chain(&mutated_outer_cfw_section)
+        .expect("an embedded CFW root mutation remains structurally canonical");
+    let mutated_outer_cfw_proof = decode_compact_proof_wire(
+        &proof_wire_geometry,
+        &decoded_mutated_outer_cfw.canonical_cfw_proof_bytes,
+        decoded_mutated_outer_cfw.canonical_cfw_proof_bytes.len(),
+    )
+    .expect("the embedded CFW decoder accepts the mutated root bytes");
+    assert!(verify_decoded_compact_response_opening(
+        &built_responses[0].merkle_geometry,
+        &proof_wire_geometry.responses()[0],
+        &mutated_outer_cfw_proof.responses()[0],
+        &decoded_mutated_outer_cfw.canonical_cfw_proof_bytes,
+        &built_responses[0].query_leaf_ordinals,
+    )
+    .is_err());
+    assert!(verify_transported_small_chain(&decoded_mutated_outer_cfw).is_err());
 
     decoded_round_polynomials[0][0] += CompactChallengeField::ONE;
     let mutated_cfw_transcript = CompactCfwTranscript::new(
@@ -2491,22 +2868,6 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
     )
     .is_err());
 
-    let mut wrong_root_bytes = canonical_proof_bytes.clone();
-    wrong_root_bytes[PROOF_FIXED_HEADER_BYTE_LENGTH + size_of::<u32>()] ^= 1;
-    let wrong_root_proof = decode_compact_proof_wire(
-        &proof_wire_geometry,
-        &wrong_root_bytes,
-        wrong_root_bytes.len(),
-    )
-    .expect("a canonical root mutation remains structurally decodable");
-    assert!(verify_decoded_compact_response_opening(
-        &built_responses[0].merkle_geometry,
-        &proof_wire_geometry.responses()[0],
-        &wrong_root_proof.responses()[0],
-        &wrong_root_bytes,
-        &built_responses[0].query_leaf_ordinals,
-    )
-    .is_err());
     assert!(decode_compact_proof_wire(
         &proof_wire_geometry,
         &canonical_proof_bytes[..canonical_proof_bytes.len() - 1],
