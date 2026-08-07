@@ -111,6 +111,8 @@ pub(in crate::bgv) use self::generation_authority::{
     resolve_setup_generation_compact_public_key_development_preparation_source,
     with_exclusive_setup_generation_compact_public_key_development_relation,
 };
+#[cfg(test)]
+pub(crate) use self::generation_population::construct_public_key_share_limb;
 pub(in crate::bgv) use self::generation_population::populate_browser_owned_setup_generation_authority;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) use self::generation_population::{

@@ -519,7 +519,7 @@ fn construct_public_key_share(
     )
 }
 
-fn construct_public_key_share_limb(
+pub(crate) fn construct_public_key_share_limb(
     common_reference: &[u64],
     common_secret_coefficients: &[i8],
     centered_error_coefficients: &[i8],

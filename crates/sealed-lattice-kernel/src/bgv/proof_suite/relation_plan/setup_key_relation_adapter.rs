@@ -48,10 +48,10 @@ use super::{
     RelationPlanVariant, RelationTreeDescriptor, RelationVerifierSource, SameSecretSourceLayout,
     SuiteModulusReference,
     galois_key_share_adapter::{
-        anchor_full_row, canonical_comparator_column_rows, exact_modular_quotient,
-        exact_negacyclic_product_radix, exact_negacyclic_product_small, half_position,
-        resolve_integer_lift_coefficient, signed_integer_to_base_field, split_rows_match,
-        split_signed_i8_polynomial, split_signed_polynomial,
+        canonical_comparator_column_rows, exact_modular_quotient, exact_negacyclic_product_radix,
+        exact_negacyclic_product_small, half_position, resolve_integer_lift_coefficient,
+        signed_integer_to_base_field, split_rows_match, split_signed_i8_polynomial,
+        split_signed_polynomial,
     },
     key_relation::{
         EXACT_INTEGER_LIFT_RADIX, ExactRadixDigitColumnCatalog, MATERIAL_DIGIT_RADIX,
@@ -121,6 +121,378 @@ enum CachedQuotientKey {
 struct CachedQuotient {
     key: CachedQuotientKey,
     coefficients: Zeroizing<Vec<i128>>,
+}
+
+trait SetupKeyRelationAnchorCoefficientSource {
+    fn source_family(&self) -> SetupKeyRelationProofFamily;
+    fn public_setup_seed_bytes(&self) -> [u8; Hash512::BYTE_LENGTH];
+    fn common_secret_coefficient_slice(&self) -> &[i8];
+    fn anchor_count(&self) -> usize;
+    fn anchor_hiding_secret_polynomial(
+        &self,
+        anchor_ordinal: usize,
+        polynomial_ordinal: usize,
+    ) -> Result<&[i8], RefusalReason>;
+    fn anchor_hiding_error_polynomial(
+        &self,
+        anchor_ordinal: usize,
+        polynomial_ordinal: usize,
+    ) -> Result<&[i8], RefusalReason>;
+    fn anchor_commitment_trace_row_half(
+        &self,
+        anchor_ordinal: usize,
+        row_ordinal: usize,
+        half_ordinal: usize,
+    ) -> Result<Zeroizing<Vec<i128>>, RefusalReason>;
+    fn anchor_commitment_row(
+        &self,
+        anchor_ordinal: usize,
+        row_ordinal: usize,
+    ) -> Result<Vec<i128>, RefusalReason>;
+    fn public_key_common_reference_limb(
+        &self,
+        data_modulus_index: u16,
+        ring_degree: usize,
+    ) -> Result<Vec<u64>, RefusalReason>;
+}
+
+trait PublicKeyShareCoefficientSource: SetupKeyRelationAnchorCoefficientSource {
+    fn public_key_error_coefficient_slice(&self) -> Result<&[i8], RefusalReason>;
+    fn public_key_limb_coefficient_slice(
+        &self,
+        limb_ordinal: usize,
+    ) -> Result<&[u64], RefusalReason>;
+    fn public_key_limb_count(&self) -> Result<usize, RefusalReason>;
+}
+
+impl SetupKeyRelationAnchorCoefficientSource for SetupGenerationKeyRelationSource<'_, '_> {
+    fn source_family(&self) -> SetupKeyRelationProofFamily {
+        self.family()
+    }
+
+    fn public_setup_seed_bytes(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.public_setup_seed()
+    }
+
+    fn common_secret_coefficient_slice(&self) -> &[i8] {
+        self.common_secret_coefficients()
+    }
+
+    fn anchor_count(&self) -> usize {
+        self.anchor_openings().len()
+    }
+
+    fn anchor_hiding_secret_polynomial(
+        &self,
+        anchor_ordinal: usize,
+        polynomial_ordinal: usize,
+    ) -> Result<&[i8], RefusalReason> {
+        self.anchor_openings()
+            .get(anchor_ordinal)
+            .and_then(|anchor| anchor.hiding_secret_polynomials().get(polynomial_ordinal))
+            .map(|polynomial| polynomial.as_slice())
+            .ok_or(RefusalReason::WrongTypeOrLength)
+    }
+
+    fn anchor_hiding_error_polynomial(
+        &self,
+        anchor_ordinal: usize,
+        polynomial_ordinal: usize,
+    ) -> Result<&[i8], RefusalReason> {
+        self.anchor_openings()
+            .get(anchor_ordinal)
+            .and_then(|anchor| anchor.hiding_error_polynomials().get(polynomial_ordinal))
+            .map(|polynomial| polynomial.as_slice())
+            .ok_or(RefusalReason::WrongTypeOrLength)
+    }
+
+    fn anchor_commitment_trace_row_half(
+        &self,
+        anchor_ordinal: usize,
+        row_ordinal: usize,
+        half_ordinal: usize,
+    ) -> Result<Zeroizing<Vec<i128>>, RefusalReason> {
+        self.anchor_openings()
+            .get(anchor_ordinal)
+            .ok_or(RefusalReason::WrongTypeOrLength)?
+            .commitment_trace_row_half(row_ordinal, half_ordinal)
+    }
+
+    fn anchor_commitment_row(
+        &self,
+        anchor_ordinal: usize,
+        row_ordinal: usize,
+    ) -> Result<Vec<i128>, RefusalReason> {
+        self.anchor_openings()
+            .get(anchor_ordinal)
+            .ok_or(RefusalReason::WrongTypeOrLength)?
+            .commitment_row(row_ordinal)
+    }
+
+    fn public_key_common_reference_limb(
+        &self,
+        data_modulus_index: u16,
+        ring_degree: usize,
+    ) -> Result<Vec<u64>, RefusalReason> {
+        if self.family() != SetupKeyRelationProofFamily::PublicKeyShare {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+        sample_collective_public_key_common_reference_limb(
+            &self.public_setup_seed(),
+            data_modulus_index,
+            ring_degree,
+        )
+        .map_err(|_| RefusalReason::InvalidArithmeticRelation)
+    }
+}
+
+impl PublicKeyShareCoefficientSource for SetupGenerationKeyRelationSource<'_, '_> {
+    fn public_key_error_coefficient_slice(&self) -> Result<&[i8], RefusalReason> {
+        Ok(self.public_key_share()?.centered_error_coefficients())
+    }
+
+    fn public_key_limb_coefficient_slice(
+        &self,
+        limb_ordinal: usize,
+    ) -> Result<&[u64], RefusalReason> {
+        self.public_key_share()?
+            .ordered_limb_coefficients()
+            .get(limb_ordinal)
+            .map(|coefficients| coefficients.as_slice())
+            .ok_or(RefusalReason::WrongTypeOrLength)
+    }
+
+    fn public_key_limb_count(&self) -> Result<usize, RefusalReason> {
+        Ok(self.public_key_share()?.ordered_limb_coefficients().len())
+    }
+}
+
+#[cfg(test)]
+pub(crate) struct CompactPublicKeyDevelopmentAnchorCoefficientSource {
+    commitment_data_modulus_index: u16,
+    commitment_rows: Box<[Vec<u64>]>,
+    hiding_secret_polynomials: Box<[Zeroizing<Vec<i8>>]>,
+    hiding_error_polynomials: Box<[Zeroizing<Vec<i8>>]>,
+}
+
+#[cfg(test)]
+impl CompactPublicKeyDevelopmentAnchorCoefficientSource {
+    pub(crate) fn new(
+        commitment_data_modulus_index: u16,
+        commitment_rows: Vec<Vec<u64>>,
+        hiding_secret_polynomials: Vec<Zeroizing<Vec<i8>>>,
+        hiding_error_polynomials: Vec<Zeroizing<Vec<i8>>>,
+        ring_degree: usize,
+    ) -> Result<Self, RefusalReason> {
+        if ring_degree == 0
+            || commitment_rows.len() != SETUP_COMMITMENT_MODULE_RANK + 1
+            || commitment_rows.iter().any(|row| row.len() != ring_degree)
+            || hiding_secret_polynomials.len()
+                != crate::bgv::setup::SETUP_COMMITMENT_HIDING_SECRET_WIDTH
+            || hiding_error_polynomials.len()
+                != crate::bgv::setup::SETUP_COMMITMENT_HIDING_ERROR_WIDTH
+            || hiding_secret_polynomials.iter().any(|polynomial| {
+                polynomial.len() != ring_degree
+                    || polynomial
+                        .iter()
+                        .any(|coefficient| !(-1..=1).contains(coefficient))
+            })
+            || hiding_error_polynomials.iter().any(|polynomial| {
+                polynomial.len() != ring_degree
+                    || polynomial
+                        .iter()
+                        .any(|coefficient| !(-1..=1).contains(coefficient))
+            })
+        {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+        Ok(Self {
+            commitment_data_modulus_index,
+            commitment_rows: commitment_rows.into_boxed_slice(),
+            hiding_secret_polynomials: hiding_secret_polynomials.into_boxed_slice(),
+            hiding_error_polynomials: hiding_error_polynomials.into_boxed_slice(),
+        })
+    }
+}
+
+#[cfg(test)]
+pub(crate) struct CompactPublicKeyDevelopmentCoefficientSource {
+    public_setup_seed: [u8; Hash512::BYTE_LENGTH],
+    common_secret_coefficients: Zeroizing<Vec<i8>>,
+    public_key_error_coefficients: Zeroizing<Vec<i8>>,
+    ordered_public_key_limb_coefficients: Box<[Zeroizing<Vec<u64>>]>,
+    ordered_anchor_sources: Box<[CompactPublicKeyDevelopmentAnchorCoefficientSource]>,
+}
+
+#[cfg(test)]
+impl CompactPublicKeyDevelopmentCoefficientSource {
+    pub(crate) fn new(
+        public_setup_seed: [u8; Hash512::BYTE_LENGTH],
+        common_secret_coefficients: Zeroizing<Vec<i8>>,
+        public_key_error_coefficients: Zeroizing<Vec<i8>>,
+        ordered_public_key_limb_coefficients: Vec<Zeroizing<Vec<u64>>>,
+        ordered_anchor_sources: Vec<CompactPublicKeyDevelopmentAnchorCoefficientSource>,
+    ) -> Result<Self, RefusalReason> {
+        let ring_degree = common_secret_coefficients.len();
+        if ring_degree == 0
+            || !ring_degree.is_power_of_two()
+            || common_secret_coefficients
+                .iter()
+                .any(|coefficient| !(-1..=1).contains(coefficient))
+            || public_key_error_coefficients.len() != ring_degree
+            || public_key_error_coefficients
+                .iter()
+                .any(|coefficient| !(-2..=2).contains(coefficient))
+            || ordered_public_key_limb_coefficients.is_empty()
+            || ordered_public_key_limb_coefficients
+                .iter()
+                .any(|coefficients| coefficients.len() != ring_degree)
+            || ordered_anchor_sources.is_empty()
+            || ordered_anchor_sources.iter().any(|anchor| {
+                anchor
+                    .commitment_rows
+                    .iter()
+                    .any(|row| row.len() != ring_degree)
+                    || anchor
+                        .hiding_secret_polynomials
+                        .iter()
+                        .chain(anchor.hiding_error_polynomials.iter())
+                        .any(|polynomial| polynomial.len() != ring_degree)
+            })
+        {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+        Ok(Self {
+            public_setup_seed,
+            common_secret_coefficients,
+            public_key_error_coefficients,
+            ordered_public_key_limb_coefficients: ordered_public_key_limb_coefficients
+                .into_boxed_slice(),
+            ordered_anchor_sources: ordered_anchor_sources.into_boxed_slice(),
+        })
+    }
+
+    fn ring_degree(&self) -> usize {
+        self.common_secret_coefficients.len()
+    }
+}
+
+#[cfg(test)]
+impl SetupKeyRelationAnchorCoefficientSource for CompactPublicKeyDevelopmentCoefficientSource {
+    fn source_family(&self) -> SetupKeyRelationProofFamily {
+        SetupKeyRelationProofFamily::PublicKeyShare
+    }
+
+    fn public_setup_seed_bytes(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.public_setup_seed
+    }
+
+    fn common_secret_coefficient_slice(&self) -> &[i8] {
+        &self.common_secret_coefficients
+    }
+
+    fn anchor_count(&self) -> usize {
+        self.ordered_anchor_sources.len()
+    }
+
+    fn anchor_hiding_secret_polynomial(
+        &self,
+        anchor_ordinal: usize,
+        polynomial_ordinal: usize,
+    ) -> Result<&[i8], RefusalReason> {
+        self.ordered_anchor_sources
+            .get(anchor_ordinal)
+            .and_then(|anchor| anchor.hiding_secret_polynomials.get(polynomial_ordinal))
+            .map(|polynomial| polynomial.as_slice())
+            .ok_or(RefusalReason::WrongTypeOrLength)
+    }
+
+    fn anchor_hiding_error_polynomial(
+        &self,
+        anchor_ordinal: usize,
+        polynomial_ordinal: usize,
+    ) -> Result<&[i8], RefusalReason> {
+        self.ordered_anchor_sources
+            .get(anchor_ordinal)
+            .and_then(|anchor| anchor.hiding_error_polynomials.get(polynomial_ordinal))
+            .map(|polynomial| polynomial.as_slice())
+            .ok_or(RefusalReason::WrongTypeOrLength)
+    }
+
+    fn anchor_commitment_trace_row_half(
+        &self,
+        anchor_ordinal: usize,
+        row_ordinal: usize,
+        half_ordinal: usize,
+    ) -> Result<Zeroizing<Vec<i128>>, RefusalReason> {
+        let row = self
+            .ordered_anchor_sources
+            .get(anchor_ordinal)
+            .and_then(|anchor| anchor.commitment_rows.get(row_ordinal))
+            .ok_or(RefusalReason::WrongTypeOrLength)?;
+        let half_size = self.ring_degree() / 2;
+        let start = half_ordinal
+            .checked_mul(half_size)
+            .filter(|_| half_ordinal < 2)
+            .ok_or(RefusalReason::WrongTypeOrLength)?;
+        let end = start
+            .checked_add(half_size)
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        Ok(Zeroizing::new(
+            row.get(start..end)
+                .ok_or(RefusalReason::WrongTypeOrLength)?
+                .iter()
+                .copied()
+                .map(i128::from)
+                .collect(),
+        ))
+    }
+
+    fn anchor_commitment_row(
+        &self,
+        anchor_ordinal: usize,
+        row_ordinal: usize,
+    ) -> Result<Vec<i128>, RefusalReason> {
+        self.ordered_anchor_sources
+            .get(anchor_ordinal)
+            .and_then(|anchor| anchor.commitment_rows.get(row_ordinal))
+            .map(|row| row.iter().copied().map(i128::from).collect())
+            .ok_or(RefusalReason::WrongTypeOrLength)
+    }
+
+    fn public_key_common_reference_limb(
+        &self,
+        data_modulus_index: u16,
+        ring_degree: usize,
+    ) -> Result<Vec<u64>, RefusalReason> {
+        crate::bgv::setup::sample_collective_public_key_common_reference_limb_for_development_degree(
+            &self.public_setup_seed,
+            data_modulus_index,
+            ring_degree,
+        )
+        .map_err(|_| RefusalReason::InvalidArithmeticRelation)
+    }
+}
+
+#[cfg(test)]
+impl PublicKeyShareCoefficientSource for CompactPublicKeyDevelopmentCoefficientSource {
+    fn public_key_error_coefficient_slice(&self) -> Result<&[i8], RefusalReason> {
+        Ok(&self.public_key_error_coefficients)
+    }
+
+    fn public_key_limb_coefficient_slice(
+        &self,
+        limb_ordinal: usize,
+    ) -> Result<&[u64], RefusalReason> {
+        self.ordered_public_key_limb_coefficients
+            .get(limb_ordinal)
+            .map(|coefficients| coefficients.as_slice())
+            .ok_or(RefusalReason::WrongTypeOrLength)
+    }
+
+    fn public_key_limb_count(&self) -> Result<usize, RefusalReason> {
+        Ok(self.ordered_public_key_limb_coefficients.len())
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -1308,80 +1680,35 @@ impl SetupKeyRelationSourcePolynomialAdapter {
                     CommonProofSourcePolynomial::from_protected_base_coefficients(coefficients),
                 );
             }
-            if let SetupKeyRelationSourceLayout::PublicKeyShare(layout) = source_layout
-                && let Some((limb_ordinal, half_ordinal)) =
-                    public_key_bound_half(layout, column_ordinal)
-            {
-                let coefficients = source
-                    .public_key_share()?
-                    .ordered_limb_coefficients()
-                    .get(limb_ordinal)
-                    .ok_or(RefusalReason::WrongTypeOrLength)?;
-                if coefficients.len() != ring_degree || coefficients.len() % 2 != 0 {
-                    return Err(RefusalReason::WrongTypeOrLength);
-                }
-                let half_size = coefficients.len() / 2;
-                let start = half_ordinal
-                    .checked_mul(half_size)
-                    .ok_or(RefusalReason::OutsideSupportedProfile)?;
-                let end = start
-                    .checked_add(half_size)
-                    .ok_or(RefusalReason::OutsideSupportedProfile)?;
-                let half = coefficients
-                    .get(start..end)
-                    .ok_or(RefusalReason::WrongTypeOrLength)?;
-                let mut field_values = half
-                    .iter()
-                    .copied()
-                    .map(ProofBaseFieldElement::from_canonical)
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
-                ProofEvaluationDomain::new_subgroup(half_size)
-                    .map_err(|_| RefusalReason::InvalidArithmeticRelation)?
-                    .interpolate_base_polynomial_in_place(&mut field_values)
-                    .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
-                return Ok(
-                    CommonProofSourcePolynomial::from_protected_base_coefficients(Zeroizing::new(
-                        field_values,
-                    )),
+            if let SetupKeyRelationSourceLayout::PublicKeyShare(layout) = source_layout {
+                return derive_public_key_share_source_polynomial(
+                    &source,
+                    relation_plan_variant,
+                    relation_context,
+                    ring_degree,
+                    layout,
+                    column_ordinal,
+                    cached_quotient,
                 );
             }
-            let signed_rows = match source_layout {
-                SetupKeyRelationSourceLayout::SameSecret(layout) => {
-                    let mut derivation = SameSecretColumnDerivation {
-                        source: &source,
-                        relation_plan_variant,
-                        relation_context,
-                        ring_degree,
-                        source_layout: layout,
-                        cached_rows: ExactKeyRelationDerivedRowCache::new(
-                            relation_plan_variant.ordered_columns().len(),
-                        ),
-                        active_columns: ExactKeyRelationActiveColumnSet::new(
-                            relation_plan_variant.ordered_columns().len(),
-                        ),
-                        cached_quotient,
-                    };
-                    derivation.derive_rows(column_ordinal)?
-                }
-                SetupKeyRelationSourceLayout::PublicKeyShare(layout) => {
-                    let mut derivation = PublicKeyShareColumnDerivation {
-                        source: &source,
-                        relation_plan_variant,
-                        relation_context,
-                        ring_degree,
-                        source_layout: layout,
-                        cached_rows: ExactKeyRelationDerivedRowCache::new(
-                            relation_plan_variant.ordered_columns().len(),
-                        ),
-                        active_columns: ExactKeyRelationActiveColumnSet::new(
-                            relation_plan_variant.ordered_columns().len(),
-                        ),
-                        cached_quotient,
-                    };
-                    derivation.derive_rows(column_ordinal)?
-                }
+            let SetupKeyRelationSourceLayout::SameSecret(layout) = source_layout else {
+                return Err(RefusalReason::WrongTypeOrLength);
             };
+            let mut derivation = SameSecretColumnDerivation {
+                source: &source,
+                relation_plan_variant,
+                relation_context,
+                ring_degree,
+                source_layout: layout,
+                cached_rows: ExactKeyRelationDerivedRowCache::new(
+                    relation_plan_variant.ordered_columns().len(),
+                ),
+                active_columns: ExactKeyRelationActiveColumnSet::new(
+                    relation_plan_variant.ordered_columns().len(),
+                ),
+                cached_quotient,
+            };
+            let signed_rows = derivation.derive_rows(column_ordinal)?;
             let mut field_values = Zeroizing::new(
                 signed_rows
                     .iter()
@@ -1872,6 +2199,167 @@ fn public_key_bound_half(
                 .position(|candidate| *candidate == column_ordinal)
                 .map(|half_ordinal| (limb_ordinal, half_ordinal))
         })
+}
+
+fn derive_public_key_share_source_polynomial<Source>(
+    source: &Source,
+    relation_plan_variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
+    ring_degree: usize,
+    source_layout: &PublicKeyShareSourceLayout,
+    column_ordinal: u32,
+    cached_quotient: &mut Option<CachedQuotient>,
+) -> Result<CommonProofSourcePolynomial, RefusalReason>
+where
+    Source: PublicKeyShareCoefficientSource + ?Sized,
+{
+    if let Some((limb_ordinal, half_ordinal)) = public_key_bound_half(source_layout, column_ordinal)
+    {
+        let coefficients = source.public_key_limb_coefficient_slice(limb_ordinal)?;
+        if coefficients.len() != ring_degree || coefficients.len() % 2 != 0 {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+        let half_size = coefficients.len() / 2;
+        let start = half_ordinal
+            .checked_mul(half_size)
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        let end = start
+            .checked_add(half_size)
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        let half = coefficients
+            .get(start..end)
+            .ok_or(RefusalReason::WrongTypeOrLength)?;
+        let mut field_values = half
+            .iter()
+            .copied()
+            .map(ProofBaseFieldElement::from_canonical)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
+        ProofEvaluationDomain::new_subgroup(half_size)
+            .map_err(|_| RefusalReason::InvalidArithmeticRelation)?
+            .interpolate_base_polynomial_in_place(&mut field_values)
+            .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
+        return Ok(
+            CommonProofSourcePolynomial::from_protected_base_coefficients(Zeroizing::new(
+                field_values,
+            )),
+        );
+    }
+
+    let mut derivation = PublicKeyShareColumnDerivation {
+        source,
+        relation_plan_variant,
+        relation_context,
+        ring_degree,
+        source_layout,
+        cached_rows: ExactKeyRelationDerivedRowCache::new(
+            relation_plan_variant.ordered_columns().len(),
+        ),
+        active_columns: ExactKeyRelationActiveColumnSet::new(
+            relation_plan_variant.ordered_columns().len(),
+        ),
+        cached_quotient,
+    };
+    let signed_rows = derivation.derive_rows(column_ordinal)?;
+    let mut field_values = Zeroizing::new(
+        signed_rows
+            .iter()
+            .copied()
+            .map(signed_integer_to_base_field)
+            .collect::<Result<Vec<_>, _>>()?,
+    );
+    relation_plan_variant
+        .ordered_columns()
+        .get(usize::try_from(column_ordinal).map_err(|_| RefusalReason::OutsideSupportedProfile)?)
+        .ok_or(RefusalReason::WrongTypeOrLength)?;
+    ProofEvaluationDomain::new_subgroup(
+        usize::try_from(relation_plan_variant.trace_domain_size())
+            .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
+    )
+    .map_err(|_| RefusalReason::InvalidArithmeticRelation)?
+    .interpolate_base_polynomial_in_place(&mut field_values)
+    .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
+    Ok(CommonProofSourcePolynomial::from_protected_base_coefficients(field_values))
+}
+
+#[cfg(test)]
+pub(crate) fn derive_compact_public_key_development_source_polynomials(
+    source: &CompactPublicKeyDevelopmentCoefficientSource,
+    relation_plan_variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
+    source_layout: &PublicKeyShareSourceLayout,
+    requested_column_ordinals: &[u32],
+) -> Result<Vec<(u32, CommonProofSourcePolynomial)>, CommonProofProverError> {
+    let expected_column_ordinals =
+        compact_public_key_assignment_source_column_ordinals(relation_plan_variant, source_layout)?;
+    let trace_domain_size = usize::try_from(relation_plan_variant.trace_domain_size())
+        .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let ring_degree = source.ring_degree();
+    if requested_column_ordinals != expected_column_ordinals
+        || trace_domain_size
+            .checked_mul(2)
+            .filter(|derived_ring_degree| *derived_ring_degree == ring_degree)
+            .is_none()
+        || source
+            .public_key_limb_count()
+            .map_err(|_| CommonProofProverError::InvalidColumn)?
+            != source_layout.ordered_limbs.len()
+        || source.anchor_count() != source_layout.ordered_anchors.len()
+    {
+        return Err(CommonProofProverError::InvalidColumn);
+    }
+    for (limb_ordinal, limb_layout) in source_layout.ordered_limbs.iter().enumerate() {
+        let modulus = relation_context
+            .resolved_modulus(SuiteModulusReference::data(limb_layout.data_modulus_index))
+            .map_err(|_| CommonProofProverError::InvalidColumn)?;
+        if source
+            .public_key_limb_coefficient_slice(limb_ordinal)
+            .map_err(|_| CommonProofProverError::InvalidColumn)?
+            .iter()
+            .any(|coefficient| *coefficient >= modulus)
+        {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+    }
+    for (anchor_source, anchor_layout) in source
+        .ordered_anchor_sources
+        .iter()
+        .zip(source_layout.ordered_anchors.iter())
+    {
+        let modulus = relation_context
+            .resolved_modulus(SuiteModulusReference::data(
+                anchor_layout.data_modulus_index,
+            ))
+            .map_err(|_| CommonProofProverError::InvalidColumn)?;
+        if anchor_source.commitment_data_modulus_index != anchor_layout.data_modulus_index
+            || anchor_source
+                .commitment_rows
+                .iter()
+                .flatten()
+                .any(|coefficient| *coefficient >= modulus)
+        {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+    }
+
+    let mut cached_quotient = None;
+    requested_column_ordinals
+        .iter()
+        .copied()
+        .map(|column_ordinal| {
+            derive_public_key_share_source_polynomial(
+                source,
+                relation_plan_variant,
+                relation_context,
+                ring_degree,
+                source_layout,
+                column_ordinal,
+                &mut cached_quotient,
+            )
+            .map(|polynomial| (column_ordinal, polynomial))
+            .map_err(|_| CommonProofProverError::InvalidColumn)
+        })
+        .collect()
 }
 
 type CachedExactKeyRelationRows = Box<[Option<Zeroizing<Box<[i128]>>>]>;
@@ -2614,18 +3102,15 @@ impl KeyRelationColumnDerivation for SameSecretColumnDerivation<'_, '_, '_, '_> 
         &self,
         source: &RelationVerifierSource,
     ) -> Result<Vec<u64>, RefusalReason> {
-        setup_verifier_sequence(
-            source,
-            self.source.public_setup_seed(),
-            self.relation_context,
-            self.ring_degree,
-            false,
-        )
+        setup_verifier_sequence(source, self.source, self.relation_context, self.ring_degree)
     }
 }
 
-struct PublicKeyShareColumnDerivation<'source, 'authority, 'statement, 'plan> {
-    source: &'source SetupGenerationKeyRelationSource<'authority, 'statement>,
+struct PublicKeyShareColumnDerivation<'source, 'plan, Source>
+where
+    Source: PublicKeyShareCoefficientSource + ?Sized,
+{
+    source: &'source Source,
     relation_plan_variant: &'plan RelationPlanVariant,
     relation_context: &'plan RelationPlanCheckContext,
     ring_degree: usize,
@@ -2635,7 +3120,10 @@ struct PublicKeyShareColumnDerivation<'source, 'authority, 'statement, 'plan> {
     cached_quotient: &'plan mut Option<CachedQuotient>,
 }
 
-impl KeyRelationColumnDerivation for PublicKeyShareColumnDerivation<'_, '_, '_, '_> {
+impl<Source> KeyRelationColumnDerivation for PublicKeyShareColumnDerivation<'_, '_, Source>
+where
+    Source: PublicKeyShareCoefficientSource + ?Sized,
+{
     fn relation_plan_variant(&self) -> &RelationPlanVariant {
         self.relation_plan_variant
     }
@@ -2669,7 +3157,7 @@ impl KeyRelationColumnDerivation for PublicKeyShareColumnDerivation<'_, '_, '_, 
             column_ordinal,
         ) {
             return split_i8_polynomial_with_relation_offset(
-                self.source.common_secret_coefficients(),
+                self.source.common_secret_coefficient_slice(),
                 half_ordinal,
                 self.source_layout.common_secret.source.offset,
             )
@@ -2680,9 +3168,7 @@ impl KeyRelationColumnDerivation for PublicKeyShareColumnDerivation<'_, '_, '_, 
             column_ordinal,
         ) {
             return split_i8_polynomial_with_relation_offset(
-                self.source
-                    .public_key_share()?
-                    .centered_error_coefficients(),
+                self.source.public_key_error_coefficient_slice()?,
                 half_ordinal,
                 self.source_layout.public_key_error.offset,
             )
@@ -2697,10 +3183,7 @@ impl KeyRelationColumnDerivation for PublicKeyShareColumnDerivation<'_, '_, '_, 
         {
             let coefficients = self
                 .source
-                .public_key_share()?
-                .ordered_limb_coefficients()
-                .get(limb_ordinal)
-                .ok_or(RefusalReason::WrongTypeOrLength)?;
+                .public_key_limb_coefficient_slice(limb_ordinal)?;
             if let Some(half_ordinal) = half_position(limb_layout, column_ordinal) {
                 let signed = coefficients
                     .iter()
@@ -2736,17 +3219,14 @@ impl KeyRelationColumnDerivation for PublicKeyShareColumnDerivation<'_, '_, '_, 
         &self,
         source: &RelationVerifierSource,
     ) -> Result<Vec<u64>, RefusalReason> {
-        setup_verifier_sequence(
-            source,
-            self.source.public_setup_seed(),
-            self.relation_context,
-            self.ring_degree,
-            true,
-        )
+        setup_verifier_sequence(source, self.source, self.relation_context, self.ring_degree)
     }
 }
 
-impl PublicKeyShareColumnDerivation<'_, '_, '_, '_> {
+impl<Source> PublicKeyShareColumnDerivation<'_, '_, Source>
+where
+    Source: PublicKeyShareCoefficientSource + ?Sized,
+{
     fn cached_public_key_quotient(
         &mut self,
         limb_ordinal: usize,
@@ -2777,19 +3257,13 @@ impl PublicKeyShareColumnDerivation<'_, '_, '_, '_> {
             .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
         let public_key_share = self
             .source
-            .public_key_share()?
-            .ordered_limb_coefficients()
-            .get(limb_ordinal)
-            .ok_or(RefusalReason::WrongTypeOrLength)?;
-        let common_reference = sample_collective_public_key_common_reference_limb(
-            &self.source.public_setup_seed(),
-            limb_layout.data_modulus_index,
-            self.ring_degree,
-        )
-        .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
+            .public_key_limb_coefficient_slice(limb_ordinal)?;
+        let common_reference = self
+            .source
+            .public_key_common_reference_limb(limb_layout.data_modulus_index, self.ring_degree)?;
         let secret = self
             .source
-            .common_secret_coefficients()
+            .common_secret_coefficient_slice()
             .iter()
             .copied()
             .map(i128::from)
@@ -2801,10 +3275,7 @@ impl PublicKeyShareColumnDerivation<'_, '_, '_, '_> {
                 .collect::<Vec<_>>(),
             &secret,
         )?;
-        let error = self
-            .source
-            .public_key_share()?
-            .centered_error_coefficients();
+        let error = self.source.public_key_error_coefficient_slice()?;
         exact_modular_quotient(
             public_key_share
                 .iter()
@@ -2875,8 +3346,8 @@ impl AnchorSourceLayout for super::public_key_share::PublicKeyShareAnchorSourceL
 }
 
 #[allow(clippy::too_many_arguments)]
-fn anchor_direct_witness_rows<Layout: AnchorSourceLayout>(
-    source: &SetupGenerationKeyRelationSource<'_, '_>,
+fn anchor_direct_witness_rows<Layout, Source>(
+    source: &Source,
     relation_plan_variant: &RelationPlanVariant,
     relation_context: &RelationPlanCheckContext,
     ring_degree: usize,
@@ -2884,10 +3355,15 @@ fn anchor_direct_witness_rows<Layout: AnchorSourceLayout>(
     layouts: &[Layout],
     column_ordinal: u32,
     cached_quotient: &mut Option<CachedQuotient>,
-) -> Result<Option<Zeroizing<Vec<i128>>>, RefusalReason> {
-    for (anchor_ordinal, (layout, anchor)) in
-        layouts.iter().zip(source.anchor_openings()).enumerate()
-    {
+) -> Result<Option<Zeroizing<Vec<i128>>>, RefusalReason>
+where
+    Layout: AnchorSourceLayout,
+    Source: SetupKeyRelationAnchorCoefficientSource + ?Sized,
+{
+    if layouts.len() != source.anchor_count() || source.source_family() != family {
+        return Err(RefusalReason::WrongTypeOrLength);
+    }
+    for (anchor_ordinal, layout) in layouts.iter().enumerate() {
         for (polynomial_ordinal, hiding_secret) in
             layout.opening().hiding_secrets().iter().enumerate()
         {
@@ -2895,10 +3371,7 @@ fn anchor_direct_witness_rows<Layout: AnchorSourceLayout>(
                 half_position(hiding_secret.source.coefficients, column_ordinal)
             {
                 return split_i8_polynomial_with_relation_offset(
-                    anchor
-                        .hiding_secret_polynomials()
-                        .get(polynomial_ordinal)
-                        .ok_or(RefusalReason::WrongTypeOrLength)?,
+                    source.anchor_hiding_secret_polynomial(anchor_ordinal, polynomial_ordinal)?,
                     half_ordinal,
                     hiding_secret.source.offset,
                 )
@@ -2910,10 +3383,7 @@ fn anchor_direct_witness_rows<Layout: AnchorSourceLayout>(
         {
             if let Some(half_ordinal) = half_position(hiding_error.coefficients, column_ordinal) {
                 return split_i8_polynomial_with_relation_offset(
-                    anchor
-                        .hiding_error_polynomials()
-                        .get(polynomial_ordinal)
-                        .ok_or(RefusalReason::WrongTypeOrLength)?,
+                    source.anchor_hiding_error_polynomial(anchor_ordinal, polynomial_ordinal)?,
                     half_ordinal,
                     hiding_error.offset,
                 )
@@ -2922,8 +3392,8 @@ fn anchor_direct_witness_rows<Layout: AnchorSourceLayout>(
         }
         for (row_ordinal, commitment) in layout.commitments().iter().copied().enumerate() {
             if let Some(half_ordinal) = half_position(commitment, column_ordinal) {
-                return anchor
-                    .commitment_trace_row_half(row_ordinal, half_ordinal)
+                return source
+                    .anchor_commitment_trace_row_half(anchor_ordinal, row_ordinal, half_ordinal)
                     .map(Some);
             }
         }
@@ -2999,14 +3469,17 @@ fn split_i8_polynomial_with_relation_offset(
     Ok(rows)
 }
 
-fn recentered_matrix_rows(
+fn recentered_matrix_rows<Source>(
     matrix: &SplitIntegerVector,
     column_ordinal: u32,
-    source: &SetupGenerationKeyRelationSource<'_, '_>,
+    source: &Source,
     relation_plan_variant: &RelationPlanVariant,
     relation_context: &RelationPlanCheckContext,
     ring_degree: usize,
-) -> Result<Option<Zeroizing<Vec<i128>>>, RefusalReason> {
+) -> Result<Option<Zeroizing<Vec<i128>>>, RefusalReason>
+where
+    Source: SetupKeyRelationAnchorCoefficientSource + ?Sized,
+{
     for half_ordinal in 0..2 {
         if matrix.halves[half_ordinal] == column_ordinal {
             let canonical_column = matrix.halves[half_ordinal];
@@ -3028,13 +3501,8 @@ fn recentered_matrix_rows(
             let verifier_source = relation_plan_variant
                 .verifier_source(*verifier_source_ordinal)
                 .ok_or(RefusalReason::InvalidArithmeticRelation)?;
-            let sequence = setup_verifier_sequence(
-                verifier_source,
-                source.public_setup_seed(),
-                relation_context,
-                ring_degree,
-                source.family() == SetupKeyRelationProofFamily::PublicKeyShare,
-            )?;
+            let sequence =
+                setup_verifier_sequence(verifier_source, source, relation_context, ring_degree)?;
             let trace_size = usize::try_from(relation_plan_variant.trace_domain_size())
                 .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
             let first_index = usize::try_from(*first_logical_element_index)
@@ -3057,26 +3525,29 @@ fn recentered_matrix_rows(
     Ok(None)
 }
 
-fn derive_anchor_quotient<Layout: AnchorSourceLayout>(
-    source: &SetupGenerationKeyRelationSource<'_, '_>,
+fn derive_anchor_quotient<Layout, Source>(
+    source: &Source,
     relation_context: &RelationPlanCheckContext,
     ring_degree: usize,
     layout: &Layout,
     anchor_ordinal: usize,
     row_ordinal: usize,
-) -> Result<Zeroizing<Vec<i128>>, RefusalReason> {
-    let anchor = source
-        .anchor_openings()
-        .get(anchor_ordinal)
-        .ok_or(RefusalReason::WrongTypeOrLength)?;
+) -> Result<Zeroizing<Vec<i128>>, RefusalReason>
+where
+    Layout: AnchorSourceLayout,
+    Source: SetupKeyRelationAnchorCoefficientSource + ?Sized,
+{
+    if anchor_ordinal >= source.anchor_count() {
+        return Err(RefusalReason::WrongTypeOrLength);
+    }
     if row_ordinal > SETUP_COMMITMENT_MODULE_RANK {
         return Err(RefusalReason::WrongTypeOrLength);
     }
     let modulus = relation_context
         .resolved_modulus(SuiteModulusReference::data(layout.data_modulus_index()))
         .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
-    let commitment = anchor_full_row(anchor, row_ordinal)?;
-    let seed = encode_hex(&source.public_setup_seed());
+    let commitment = source.anchor_commitment_row(anchor_ordinal, row_ordinal)?;
+    let seed = encode_hex(&source.public_setup_seed_bytes());
     let mut products = Vec::new();
     let product_columns = if row_ordinal < SETUP_COMMITMENT_MODULE_RANK {
         SETUP_COMMITMENT_MODULE_RANK + 1
@@ -3098,19 +3569,15 @@ fn derive_anchor_quotient<Layout: AnchorSourceLayout>(
             modulus,
         )
         .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
-        let hiding_secret = anchor
-            .hiding_secret_polynomials()
-            .get(column_ordinal)
-            .ok_or(RefusalReason::WrongTypeOrLength)?;
+        let hiding_secret =
+            source.anchor_hiding_secret_polynomial(anchor_ordinal, column_ordinal)?;
         products.push(exact_anchor_matrix_product(matrix, hiding_secret)?);
     }
-    let last_hiding_secret = anchor
-        .hiding_secret_polynomials()
-        .get(SETUP_COMMITMENT_MODULE_RANK)
-        .ok_or(RefusalReason::WrongTypeOrLength)?;
+    let last_hiding_secret =
+        source.anchor_hiding_secret_polynomial(anchor_ordinal, SETUP_COMMITMENT_MODULE_RANK)?;
     let hiding_error = (row_ordinal < SETUP_COMMITMENT_MODULE_RANK)
-        .then(|| anchor.hiding_error_polynomials().get(row_ordinal))
-        .flatten();
+        .then(|| source.anchor_hiding_error_polynomial(anchor_ordinal, row_ordinal))
+        .transpose()?;
     exact_modular_quotient(0..ring_degree, modulus, |coefficient_ordinal| {
         let product_sum = products.iter().try_fold(0_i128, |sum, product| {
             sum.checked_add(product[coefficient_ordinal])
@@ -3123,7 +3590,7 @@ fn derive_anchor_quotient<Layout: AnchorSourceLayout>(
                 .checked_sub(i128::from(last_hiding_secret[coefficient_ordinal]))
                 .and_then(|value| {
                     value.checked_sub(i128::from(
-                        source.common_secret_coefficients()[coefficient_ordinal],
+                        source.common_secret_coefficient_slice()[coefficient_ordinal],
                     ))
                 })
         }
@@ -3147,13 +3614,15 @@ fn exact_anchor_matrix_product(
     )
 }
 
-fn setup_verifier_sequence(
+fn setup_verifier_sequence<Source>(
     source: &RelationVerifierSource,
-    public_setup_seed: [u8; Hash512::BYTE_LENGTH],
+    coefficient_source: &Source,
     relation_context: &RelationPlanCheckContext,
     ring_degree: usize,
-    allow_public_key_reference: bool,
-) -> Result<Vec<u64>, RefusalReason> {
+) -> Result<Vec<u64>, RefusalReason>
+where
+    Source: SetupKeyRelationAnchorCoefficientSource + ?Sized,
+{
     match source {
         RelationVerifierSource::Protocol {
             protocol_source_kind: 5,
@@ -3177,7 +3646,7 @@ fn setup_verifier_sequence(
                 .resolved_modulus(SuiteModulusReference::data(data_modulus_index))
                 .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
             setup_commitment_matrix_polynomial(
-                &encode_hex(&public_setup_seed),
+                &encode_hex(&coefficient_source.public_setup_seed_bytes()),
                 usize::from(data_modulus_index),
                 matrix_row,
                 usize::try_from(*column).map_err(|_| RefusalReason::WrongTypeOrLength)?,
@@ -3190,16 +3659,14 @@ fn setup_verifier_sequence(
             protocol_source_kind: 6,
             source_coordinates,
             ..
-        } if allow_public_key_reference => {
+        } if coefficient_source.source_family() == SetupKeyRelationProofFamily::PublicKeyShare => {
             let [data_modulus_index] = source_coordinates.as_slice() else {
                 return Err(RefusalReason::WrongTypeOrLength);
             };
-            sample_collective_public_key_common_reference_limb(
-                &public_setup_seed,
+            coefficient_source.public_key_common_reference_limb(
                 u16::try_from(*data_modulus_index).map_err(|_| RefusalReason::WrongTypeOrLength)?,
                 ring_degree,
             )
-            .map_err(|_| RefusalReason::InvalidArithmeticRelation)
         }
         _ => Err(RefusalReason::WrongTypeOrLength),
     }

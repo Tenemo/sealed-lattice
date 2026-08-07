@@ -45,16 +45,25 @@ transported CFW bytes and sequential hiding-WHIR proofs from one fixed-order
 canonical envelope containing the CFW section, five external roots, and both
 WHIR sections. A fresh decoder derives every WHIR shape from verifier
 configuration, re-encodes the exact bytes, and rejects hostile framing, field,
-root, and proof-section mutations. The chain still uses a constant provider,
-and a separate WHIR challenger. Its fixed test action root now drives the
-production action-private KMAC coin source for CFW and WHIR masks, domain-
-separated response salts, and WHIR randomness. A canonical cursor combines the
-private-coin manifest with the live WHIR block and buffered-byte position, but
-the generation host does not yet authenticate or resume it. Production
-authority, one canonical production transcript, authenticated restart,
-selected-size CFW and transpose execution, production transport integration,
-and release-WASM browser evidence remain open. After those gates pass, factor
-one is the first selected-size execution target; factors two and four
+root, and proof-section mutations. Its reduced source authority derives nonzero
+public-key-share and anchor coefficients through the shared production
+equations from deterministic test witness and public-seed material. It serves
+202 canonical 8,192-byte coefficient objects, totaling 1,654,784 authenticated
+external bytes, and refuses truncation, mutation, and equal-length cross-object
+substitution. The selected production public sampler still rejects reduced ring
+degrees; only a test-only divisor-degree sampler preserves its coordinate
+grammar for this owner. A separate WHIR challenger remains test-only. The fixed
+test action root drives the production action-private KMAC coin source for CFW
+and WHIR masks, domain-separated response salts, and WHIR randomness. A
+canonical cursor combines the private-coin manifest with the live WHIR block
+and buffered-byte position, but the generation host does not yet authenticate
+or resume it. Live ceremony source authority, browser-rooted attempt custody,
+one canonical production transcript, production public-polynomial roots and
+openings, authenticated restart, selected-size CFW and transpose execution,
+production transport integration, and release-WASM browser evidence remain
+open. The reduced nonzero public-matrix expansion is correctness evidence, not
+selected-size performance evidence. After those gates pass, factor one is the
+first selected-size execution target; factors two and four
 are measured only if verification or transport tradeoffs require them. The
 row-code vectors and historical factor-eight root measurement do not transfer
 to this construction and cannot freeze the suite.

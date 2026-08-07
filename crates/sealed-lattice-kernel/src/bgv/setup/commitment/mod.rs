@@ -59,10 +59,12 @@ use computation::compute_setup_signed_lifted_commitment_for_degree;
 pub(super) use computation::{
     compute_setup_commitment_for_degree, compute_setup_commitment_from_typed_opening_for_degree,
 };
-#[cfg(test)]
-pub(crate) use lattice_anchor::LatticeAnchorCommitment;
 #[cfg(any(test, feature = "primitive-measurement-evidence"))]
 pub(crate) use lattice_anchor::selected_lattice_anchor_commitment_canonical_byte_length;
+#[cfg(test)]
+pub(crate) use lattice_anchor::{
+    LatticeAnchorCommitment, compute_lattice_anchor_commitment_for_development_degree,
+};
 pub(crate) use lattice_anchor::{
     compute_lattice_anchor_commitment, lattice_anchor_commitment_canonical_bytes,
     parse_lattice_anchor_commitment_canonical_bytes,

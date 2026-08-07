@@ -11,6 +11,8 @@ mod vss;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+pub(crate) use accepted_setup::construct_public_key_share_limb;
 pub(in crate::bgv) use accepted_setup::{
     BrowserOwnedAggregateThresholdShareLimb, CanonicalAcceptedSetupPackage,
     CanonicalPackageStreamKind, SetupGaloisGenerationPreparationError,
@@ -122,10 +124,12 @@ pub(in crate::bgv) use accepted_setup::{
     resolve_setup_generation_compact_public_key_development_preparation_source,
     with_exclusive_setup_generation_compact_public_key_development_relation,
 };
-#[cfg(test)]
-pub(crate) use commitment::LatticeAnchorCommitment;
 #[cfg(any(test, feature = "primitive-measurement-evidence"))]
 pub(crate) use commitment::selected_lattice_anchor_commitment_canonical_byte_length;
+#[cfg(test)]
+pub(crate) use commitment::{
+    LatticeAnchorCommitment, compute_lattice_anchor_commitment_for_development_degree,
+};
 pub(crate) use commitment::{
     SETUP_COMMITMENT_HIDING_ERROR_WIDTH, SETUP_COMMITMENT_HIDING_SECRET_WIDTH,
     SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
@@ -138,6 +142,8 @@ pub(in crate::bgv) use commitment::{
     setup_commitment_matrix_ntt_cache_coefficient_payload_byte_length,
     setup_commitment_matrix_polynomial,
 };
+#[cfg(test)]
+pub(in crate::bgv) use sampling::sample_collective_public_key_common_reference_limb_for_development_degree;
 pub(in crate::bgv) use sampling::{
     sample_collective_public_key_common_reference_limb, sample_galois_common_reference_limb,
     sample_relinearization_common_reference_limb,

@@ -77,9 +77,15 @@ explicit ideal 512-bit QRO assumption. Emitted root and frontier programming,
 malicious-verifier or resettable zero knowledge, full-family and complete-
 ceremony simulation, fixed-SHAKE justification, and quantum-random-oracle zero
 knowledge remain explicit refusals. A reduced production-family owner now
-reaches freshly verified CFW claims and the pollable production structured
-transpose with resident/external polynomial, retained-tree, transcript-message,
-and canonical-byte parity. A test-only commitment construction commits the
+derives nonzero public-key-share and lattice-anchor coefficients through the
+shared production equations from deterministic test witness and public-seed
+material. It authenticates 202 canonical 8,192-byte coefficient objects,
+totaling 1,654,784 external bytes, and refuses truncation, mutation, and equal-
+length cross-object substitution. The resident CFW reference path expands the
+real nonzero public negacyclic matrix bands. The owner then reaches freshly
+verified CFW claims and the pollable production structured transpose with
+resident/external polynomial, retained-tree, transcript-message, and canonical-
+byte parity. A test-only commitment construction commits the
 base-field quotient-and-multiplicity source before lookup materialization, then
 the actual CFW inner masks, main source, outer masks, and one shared two-lane
 cross-epoch mask root. Canonical root-section digests enter the first two outer
@@ -92,8 +98,11 @@ sequential WHIR proving. A fresh path reconstructs those bindings from
 transported bytes, rederives every outer message, rechecks CFW, and verifies the
 pre-challenge base-source and main CFW relations sequentially. It rejects
 hostile relation, root-substitution, opening, and base-case mutations. The owner
-uses a constant test provider, a zero-centered valid assignment, disclosed CFW
-masks in the outer CFW-only wire, and reduced first folds. A fixed test action
+uses a reduced test authority, deterministic witness and seed material,
+disclosed CFW masks in the outer CFW-only wire, and reduced first folds. Its
+test-only divisor-degree public sampler preserves the production coordinate
+grammar while the selected production sampler continues to reject every non-
+selected ring degree. A fixed test action
 root now drives the production action-private KMAC coin source. The hiding
 coordinate supplies the CFW and WHIR mask samples and independent WHIR and
 response-salt seeds; leaf and round salts are domain-separated, and the
@@ -127,9 +136,11 @@ later response blocked by an earlier section. The generation host does not yet
 publish or resume this compact boundary, and selected-size response-value and
 private-randomness custody is absent. The provider, commitment construction,
 WHIR challenger, CFW mask transport, and host custody of the small-chain
-randomness cursor remain test-only; production authority, compact durable
-execution, and measured browser evidence are absent, so proof generation
-remains refused.
+randomness cursor remain test-only; live ceremony authority, browser-rooted
+attempt custody, production public-polynomial roots and openings, compact
+durable execution, and measured browser evidence are absent, so proof
+generation remains refused. The reduced nonzero public-matrix expansion is
+correctness evidence, not selected-size performance evidence.
 
 ## Open security issues
 

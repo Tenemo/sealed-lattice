@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, convert::Infallible, rc::Rc};
+use std::{convert::Infallible, mem::size_of, rc::Rc};
 
 use p3_challenger::{CanObserve, HashChallenger, SerializingChallenger64};
 use p3_commit::{ExtensionMmcs, Mmcs};
@@ -23,13 +23,18 @@ use sha3::{
 use tiny_keccak::Kmac;
 use zeroize::Zeroizing;
 
+use super::super::super::setup_key_relation_adapter::{
+    CompactPublicKeyDevelopmentAnchorCoefficientSource,
+    CompactPublicKeyDevelopmentCoefficientSource,
+    derive_compact_public_key_development_source_polynomials,
+};
 use super::super::authenticated_assignment::{
     CompactAuthenticatedAssignmentCatalog, CompactAuthenticatedAssignmentCursor,
     CompactAuthenticatedAssignmentPoll, CompactLookupInverseMaterializationPoll,
 };
 use super::super::{
-    CompactPublicKeyRelationCatalog, CompactRingVectorReference, CompactStructuredLinearTerm,
-    derive_compact_public_key_relation_catalog, selected_input_and_context,
+    CompactPublicKeyRelationCatalog, derive_compact_public_key_relation_catalog,
+    selected_input_and_context,
 };
 use super::*;
 use crate::bgv::proof_suite::prover::{
@@ -43,6 +48,7 @@ use crate::bgv::proof_suite::prover::{
     ProvidedCommonProofSourcePolynomial,
 };
 use crate::bgv::proof_suite::relation_plan::{
+    PublicKeyShareRelationPlanInput, PublicKeyShareSourceLayout, RelationPlanCheckContext,
     RelationPlanVariant, compile_public_key_share_relation_with_source_layout,
 };
 use crate::bgv::proof_suite::{
@@ -79,11 +85,18 @@ use crate::bgv::proof_suite::{
         DecodedFixedUniformVerifierMessage, FixedUniformVerifierMessageGeometry,
     },
 };
+use crate::bgv::setup::{
+    SETUP_COMMITMENT_HIDING_ERROR_WIDTH, SETUP_COMMITMENT_HIDING_SECRET_WIDTH,
+    compute_lattice_anchor_commitment_for_development_degree, construct_public_key_share_limb,
+    sample_collective_public_key_common_reference_limb_for_development_degree,
+};
 use crate::foundation::{
     ACTION_RANDOMNESS_ROOT_BYTE_LENGTH, ActionRandomnessDerivationInput, ActionRandomnessRoot,
     Hash512, ParticipantIdentity, PersistentProofCoinInput, ProofApplicationSlot,
     ProofApplicationSlotCeilings, SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
 };
+use crate::hashing::hash_framed_parts_512;
+use crate::transcript_core::encode_hex;
 
 #[path = "production_small_chain_canonical_transport.rs"]
 mod production_small_chain_canonical_transport;
@@ -1192,22 +1205,32 @@ fn small_chain_proof_wire_geometry(
     CompactProofWireGeometry::new(1, responses).expect("small-chain proof wire geometry")
 }
 
-struct ProductionRowSourceResidentMatrices<'source, 'assignment> {
+struct ProductionRowSourceResidentMatrices<'source, 'assignment, 'public_input> {
     row_source: &'source CompactStructuredR1csRowSource<'assignment, CompactPublicKeyAssignment>,
-    public_ring_vectors_are_zero: bool,
+    public_input: &'public_input [CompactChallengeField],
 }
 
-impl<'source, 'assignment> ProductionRowSourceResidentMatrices<'source, 'assignment> {
+impl<'source, 'assignment, 'public_input>
+    ProductionRowSourceResidentMatrices<'source, 'assignment, 'public_input>
+{
     fn new(
         row_source: &'source CompactStructuredR1csRowSource<
             'assignment,
             CompactPublicKeyAssignment,
         >,
-        public_input: &[CompactChallengeField],
+        public_input: &'public_input [CompactChallengeField],
     ) -> Result<Self, CompactCfwError> {
+        let used_public_input_count = row_source
+            .relation
+            .public_input_ring_vector_count()
+            .checked_mul(row_source.relation.ring_degree())
+            .and_then(|count| count.checked_add(1))
+            .and_then(|count| usize::try_from(count).ok())
+            .ok_or(CompactCfwError::CountOverflow)?;
         if u64::try_from(public_input.len()).ok() != Some(row_source.witness_length())
             || public_input.first() != Some(&CompactChallengeField::ONE)
-            || public_input[1..]
+            || used_public_input_count > public_input.len()
+            || public_input[used_public_input_count..]
                 .iter()
                 .any(|value| *value != CompactChallengeField::ZERO)
         {
@@ -1215,7 +1238,7 @@ impl<'source, 'assignment> ProductionRowSourceResidentMatrices<'source, 'assignm
         }
         Ok(Self {
             row_source,
-            public_ring_vectors_are_zero: true,
+            public_input,
         })
     }
 
@@ -1302,10 +1325,52 @@ impl<'source, 'assignment> ProductionRowSourceResidentMatrices<'source, 'assignm
                 } if first_column_ordinal < public_input_length => {
                     return Err(CompactCfwError::InvalidMatrixSource);
                 }
-                CompactStructuredMatrixTerm::PublicNegacyclicMatrixBand { .. } => {
-                    if !self.public_ring_vectors_are_zero {
+                CompactStructuredMatrixTerm::PublicNegacyclicMatrixBand {
+                    public_vector_first_column_ordinal,
+                    output_coefficient_ordinal,
+                    centered_offset,
+                    integer_coefficient,
+                    ..
+                } => {
+                    let ring_degree = self.row_source.relation.ring_degree();
+                    let public_vector_end = public_vector_first_column_ordinal
+                        .checked_add(ring_degree)
+                        .filter(|end| *end <= public_input_length)
+                        .ok_or(CompactCfwError::InvalidMatrixSource)?;
+                    if output_coefficient_ordinal >= ring_degree {
                         return Err(CompactCfwError::InvalidMatrixSource);
                     }
+                    let mut signed_public_sum = CompactChallengeField::ZERO;
+                    for public_column_ordinal in
+                        public_vector_first_column_ordinal..public_vector_end
+                    {
+                        let public_coefficient_ordinal = public_column_ordinal
+                            .checked_sub(public_vector_first_column_ordinal)
+                            .ok_or(CompactCfwError::CountOverflow)?;
+                        let public_value = public_input
+                            .get(
+                                usize::try_from(public_column_ordinal)
+                                    .map_err(|_| CompactCfwError::CountOverflow)?,
+                            )
+                            .copied()
+                            .ok_or(CompactCfwError::InvalidMatrixSource)?;
+                        if public_coefficient_ordinal <= output_coefficient_ordinal {
+                            signed_public_sum += public_value;
+                        } else {
+                            signed_public_sum -= public_value;
+                        }
+                    }
+                    let centering_coefficient = integer_coefficient
+                        .checked_mul(i128::from(centered_offset))
+                        .and_then(i128::checked_neg)
+                        .ok_or(CompactCfwError::InvalidMatrixSource)?;
+                    contribution += signed_public_sum
+                        * compact_challenge_from_production(
+                            ProofChallengeExtensionElement::from_base(
+                                base_element_from_signed_integer(centering_coefficient)
+                                    .map_err(|_| CompactCfwError::InvalidMatrixSource)?,
+                            ),
+                        );
                 }
                 _ => {}
             }
@@ -1323,6 +1388,9 @@ impl<'source, 'assignment> ProductionRowSourceResidentMatrices<'source, 'assignm
         let public_input_length = self.row_source.matrices.public_input_length;
         let matrix_dimension = self.row_source.matrices.matrix_dimension;
         let weighted_row = row_weight * matrix_role_weight;
+        if weighted_row == CompactChallengeField::ZERO {
+            return Ok(());
+        }
         for term in &form.ordered_terms {
             match *term {
                 CompactStructuredMatrixTerm::StaticEntry {
@@ -1412,9 +1480,85 @@ impl<'source, 'assignment> ProductionRowSourceResidentMatrices<'source, 'assignm
                         )?;
                     }
                 }
-                CompactStructuredMatrixTerm::PublicNegacyclicMatrixBand { .. } => {
-                    if !self.public_ring_vectors_are_zero {
+                CompactStructuredMatrixTerm::PublicNegacyclicMatrixBand {
+                    public_vector_first_column_ordinal,
+                    private_vector_first_column_ordinal,
+                    output_coefficient_ordinal,
+                    integer_coefficient,
+                    ..
+                } => {
+                    let ring_degree = self.row_source.relation.ring_degree();
+                    let public_vector_end = public_vector_first_column_ordinal
+                        .checked_add(ring_degree)
+                        .filter(|end| *end <= public_input_length)
+                        .ok_or(CompactCfwError::InvalidMatrixSource)?;
+                    let private_vector_end = private_vector_first_column_ordinal
+                        .checked_add(ring_degree)
+                        .filter(|end| {
+                            private_vector_first_column_ordinal >= public_input_length
+                                && *end <= matrix_dimension
+                        })
+                        .ok_or(CompactCfwError::InvalidMatrixSource)?;
+                    if output_coefficient_ordinal >= ring_degree
+                        || private_vector_end <= private_vector_first_column_ordinal
+                    {
                         return Err(CompactCfwError::InvalidMatrixSource);
+                    }
+                    for public_column_ordinal in
+                        public_vector_first_column_ordinal..public_vector_end
+                    {
+                        let public_coefficient_ordinal = public_column_ordinal
+                            .checked_sub(public_vector_first_column_ordinal)
+                            .ok_or(CompactCfwError::CountOverflow)?;
+                        let (private_coefficient_ordinal, signed_integer_coefficient) =
+                            if public_coefficient_ordinal <= output_coefficient_ordinal {
+                                (
+                                    output_coefficient_ordinal - public_coefficient_ordinal,
+                                    integer_coefficient,
+                                )
+                            } else {
+                                (
+                                    ring_degree
+                                        .checked_add(output_coefficient_ordinal)
+                                        .and_then(|value| {
+                                            value.checked_sub(public_coefficient_ordinal)
+                                        })
+                                        .ok_or(CompactCfwError::CountOverflow)?,
+                                    integer_coefficient
+                                        .checked_neg()
+                                        .ok_or(CompactCfwError::InvalidMatrixSource)?,
+                                )
+                            };
+                        let public_value = self
+                            .public_input
+                            .get(
+                                usize::try_from(public_column_ordinal)
+                                    .map_err(|_| CompactCfwError::CountOverflow)?,
+                            )
+                            .copied()
+                            .ok_or(CompactCfwError::InvalidMatrixSource)?;
+                        if public_value == CompactChallengeField::ZERO {
+                            continue;
+                        }
+                        add_witness_covector_entry(
+                            destination,
+                            public_input_length,
+                            matrix_dimension,
+                            private_vector_first_column_ordinal
+                                .checked_add(private_coefficient_ordinal)
+                                .filter(|column_ordinal| *column_ordinal < private_vector_end)
+                                .ok_or(CompactCfwError::InvalidMatrixSource)?,
+                            weighted_row
+                                * public_value
+                                * compact_challenge_from_production(
+                                    ProofChallengeExtensionElement::from_base(
+                                        base_element_from_signed_integer(
+                                            signed_integer_coefficient,
+                                        )
+                                        .map_err(|_| CompactCfwError::InvalidMatrixSource)?,
+                                    ),
+                                ),
+                        )?;
                     }
                 }
                 _ => {}
@@ -1424,7 +1568,7 @@ impl<'source, 'assignment> ProductionRowSourceResidentMatrices<'source, 'assignm
     }
 }
 
-impl CompactCfwR1csMatrices for ProductionRowSourceResidentMatrices<'_, '_> {
+impl CompactCfwR1csMatrices for ProductionRowSourceResidentMatrices<'_, '_, '_> {
     fn witness_length(&self) -> usize {
         usize::try_from(self.row_source.witness_length())
             .expect("small-chain witness length fits usize")
@@ -1479,6 +1623,9 @@ impl CompactCfwR1csMatrices for ProductionRowSourceResidentMatrices<'_, '_> {
                 .row(self.row_source.relation, row_ordinal)
                 .map_err(|_| CompactCfwError::InvalidMatrixSource)?;
             let row_weight = Self::little_endian_boolean_weight(row_point, row_ordinal);
+            if row_weight == CompactChallengeField::ZERO {
+                continue;
+            }
             result += row_weight
                 * self.public_form_contribution(
                     Self::form_for_role(&row, matrix_role),
@@ -1537,153 +1684,403 @@ fn add_witness_covector_entry(
     Ok(())
 }
 
-struct AuthenticatedConstantSourceProvider {
+const SMALL_CHAIN_SOURCE_DESCRIPTOR_BINDING_DOMAIN: &str =
+    "sealed-lattice/compact-small-chain/source-descriptor-binding/v1";
+const SMALL_CHAIN_SOURCE_STREAM_DIGEST_DOMAIN: &str =
+    "sealed-lattice/compact-small-chain/source-stream-digest/v1";
+const SMALL_CHAIN_SOURCE_MATERIAL_ROOT_DOMAIN: &str =
+    "sealed-lattice/compact-small-chain/source-material-root/v1";
+const SMALL_CHAIN_SOURCE_CATALOG_BINDING_DOMAIN: &str =
+    "sealed-lattice/compact-small-chain/source-catalog-binding/v1";
+const SMALL_CHAIN_SOURCE_REPLAY_IDENTITY_DOMAIN: &str =
+    "sealed-lattice/compact-small-chain/source-replay-identity/v1";
+
+struct ReducedRelationFixture {
+    input: PublicKeyShareRelationPlanInput,
+    relation_context: RelationPlanCheckContext,
+    source_layout: PublicKeyShareSourceLayout,
+    relation_plan_variant: RelationPlanVariant,
+    relation: CompactPublicKeyRelationCatalog,
+    assignment_catalog: CompactAuthenticatedAssignmentCatalog,
+}
+
+struct AuthenticatedProductionSourceObject {
+    column_ordinal: u32,
+    descriptor_binding: [u8; 64],
+    material_root: [u8; 64],
+    stream_digest: [u8; 64],
+    storage_byte_offset: u64,
+    byte_length: u32,
+    coefficient_count: usize,
+}
+
+struct AuthenticatedProductionSourceStorage {
+    bytes: Zeroizing<Box<[u8]>>,
+}
+
+impl AuthenticatedProductionSourceStorage {
+    fn read(
+        &self,
+        request: CommonProofAuthenticatedSourceReadRequest,
+    ) -> Result<Zeroizing<Box<[u8]>>, CommonProofProverError> {
+        if request.source_stream_byte_offset() != 0
+            || request.source_stream_total_byte_length() != u64::from(request.source_byte_length())
+            || request.authentication_chunk_index() != 0
+        {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        let start = usize::try_from(request.storage_byte_offset())
+            .map_err(|_| CommonProofProverError::CountOverflow)?;
+        let end = start
+            .checked_add(
+                usize::try_from(request.source_byte_length())
+                    .map_err(|_| CommonProofProverError::CountOverflow)?,
+            )
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        self.bytes
+            .get(start..end)
+            .map(|bytes| Zeroizing::new(bytes.to_vec().into_boxed_slice()))
+            .ok_or(CommonProofProverError::InvalidColumn)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AuthenticatedProductionSourceReadPurpose {
+    Initial,
+    Replay,
+}
+
+struct PendingAuthenticatedProductionSourceRead {
+    source_index: usize,
+    purpose: AuthenticatedProductionSourceReadPurpose,
+    request: CommonProofAuthenticatedSourceReadRequest,
+    authenticated_bytes: Option<Zeroizing<Box<[u8]>>>,
+}
+
+struct AuthenticatedProductionSourceProvider {
     relation_plan_variant: RelationPlanVariant,
     request_context: CommonProofSourcePolynomialRequestContext,
-    ordered_source_column_ordinals: Vec<u32>,
-    canonical_values: BTreeMap<u32, u64>,
+    source_catalog_binding: [u8; 64],
+    ordered_sources: Box<[AuthenticatedProductionSourceObject]>,
     next_source_index: usize,
-    pending_authenticated_read: Option<CommonProofAuthenticatedSourceReadRequest>,
-    first_authenticated_read_supplied: bool,
+    pending_authenticated_read: Option<PendingAuthenticatedProductionSourceRead>,
     finished: bool,
 }
 
-impl AuthenticatedConstantSourceProvider {
+impl AuthenticatedProductionSourceProvider {
     fn new(
         relation: &CompactPublicKeyRelationCatalog,
         relation_plan_variant: RelationPlanVariant,
         request_context: CommonProofSourcePolynomialRequestContext,
-    ) -> Result<Self, CommonProofProverError> {
+        relation_context: &RelationPlanCheckContext,
+        source_layout: &PublicKeyShareSourceLayout,
+        coefficient_source: &CompactPublicKeyDevelopmentCoefficientSource,
+    ) -> Result<(Self, AuthenticatedProductionSourceStorage), CommonProofProverError> {
         let assignment_catalog =
             CompactAuthenticatedAssignmentCatalog::derive(relation, &relation_plan_variant)?;
         let ordered_source_column_ordinals = assignment_catalog.source_column_ordinals();
-        let mut canonical_values = BTreeMap::new();
-        for vector in &relation.ordered_public_vectors {
-            insert_vector_source_value(&mut canonical_values, *vector, 0)?;
-        }
-        for compact_relation in &relation.ordered_relations {
-            for term in &compact_relation.ordered_terms {
-                if let CompactStructuredLinearTerm::ModulusQuotient {
-                    quotient_vector, ..
-                } = term
-                {
-                    insert_vector_source_value(&mut canonical_values, *quotient_vector, 0)?;
-                }
-            }
-        }
-        for descriptor in &relation.ordered_private_small_vectors {
-            insert_vector_source_value(
-                &mut canonical_values,
-                descriptor.vector,
-                descriptor.centered_offset,
-            )?;
-        }
-        if canonical_values.keys().copied().collect::<Vec<_>>() != ordered_source_column_ordinals {
+        let source_polynomials = derive_compact_public_key_development_source_polynomials(
+            coefficient_source,
+            &relation_plan_variant,
+            relation_context,
+            source_layout,
+            &ordered_source_column_ordinals,
+        )?;
+        if source_polynomials.len() != ordered_source_column_ordinals.len() {
             return Err(CommonProofProverError::InvalidColumn);
         }
-        Ok(Self {
-            relation_plan_variant,
-            request_context,
-            ordered_source_column_ordinals,
-            canonical_values,
-            next_source_index: 0,
-            pending_authenticated_read: None,
-            first_authenticated_read_supplied: false,
-            finished: false,
-        })
+
+        let mut storage_bytes = Vec::new();
+        let mut ordered_sources = Vec::with_capacity(source_polynomials.len());
+        let mut catalog_material = Vec::with_capacity(source_polynomials.len() * 148);
+        for ((expected_column_ordinal, polynomial), actual_column_ordinal) in source_polynomials
+            .into_iter()
+            .zip(ordered_source_column_ordinals.iter().copied())
+        {
+            if expected_column_ordinal != actual_column_ordinal {
+                return Err(CommonProofProverError::InvalidColumn);
+            }
+            let CommonProofSourcePolynomial::Base(coefficients) = polynomial else {
+                return Err(CommonProofProverError::InvalidColumn);
+            };
+            let coefficient_count = coefficients.len();
+            let source_byte_length = coefficient_count
+                .checked_mul(size_of::<u64>())
+                .ok_or(CommonProofProverError::CountOverflow)?;
+            let byte_length = u32::try_from(source_byte_length)
+                .map_err(|_| CommonProofProverError::CountOverflow)?;
+            if source_byte_length == 0
+                || source_byte_length
+                    > crate::foundation::FOUNDATION_PROFILE.stream_chunk_byte_length
+            {
+                return Err(CommonProofProverError::CountOverflow);
+            }
+            let storage_byte_offset = u64::try_from(storage_bytes.len())
+                .map_err(|_| CommonProofProverError::CountOverflow)?;
+            for coefficient in coefficients.iter() {
+                storage_bytes.extend_from_slice(&coefficient.canonical().to_le_bytes());
+            }
+            let source_bytes = storage_bytes
+                .get(
+                    usize::try_from(storage_byte_offset)
+                        .map_err(|_| CommonProofProverError::CountOverflow)?
+                        ..storage_bytes.len(),
+                )
+                .ok_or(CommonProofProverError::CountOverflow)?;
+            let descriptor_binding = hash_framed_parts_512(
+                SMALL_CHAIN_SOURCE_DESCRIPTOR_BINDING_DOMAIN,
+                &[
+                    &request_context.stable_generation_binding_hash(),
+                    &actual_column_ordinal.to_le_bytes(),
+                    &u64::try_from(coefficient_count)
+                        .map_err(|_| CommonProofProverError::CountOverflow)?
+                        .to_le_bytes(),
+                ],
+            );
+            let stream_digest = hash_framed_parts_512(
+                SMALL_CHAIN_SOURCE_STREAM_DIGEST_DOMAIN,
+                &[&actual_column_ordinal.to_le_bytes(), source_bytes],
+            );
+            let material_root = hash_framed_parts_512(
+                SMALL_CHAIN_SOURCE_MATERIAL_ROOT_DOMAIN,
+                &[
+                    &descriptor_binding,
+                    &stream_digest,
+                    &u64::from(byte_length).to_le_bytes(),
+                ],
+            );
+            catalog_material.extend_from_slice(&actual_column_ordinal.to_le_bytes());
+            catalog_material.extend_from_slice(&descriptor_binding);
+            catalog_material.extend_from_slice(&material_root);
+            catalog_material.extend_from_slice(&stream_digest);
+            catalog_material.extend_from_slice(&byte_length.to_le_bytes());
+            ordered_sources.push(AuthenticatedProductionSourceObject {
+                column_ordinal: actual_column_ordinal,
+                descriptor_binding,
+                material_root,
+                stream_digest,
+                storage_byte_offset,
+                byte_length,
+                coefficient_count,
+            });
+        }
+        let source_catalog_binding = hash_framed_parts_512(
+            SMALL_CHAIN_SOURCE_CATALOG_BINDING_DOMAIN,
+            &[
+                &request_context.stable_generation_binding_hash(),
+                relation.relation_plan_hash().as_slice(),
+                &catalog_material,
+            ],
+        );
+        Ok((
+            Self {
+                relation_plan_variant,
+                request_context,
+                source_catalog_binding,
+                ordered_sources: ordered_sources.into_boxed_slice(),
+                next_source_index: 0,
+                pending_authenticated_read: None,
+                finished: false,
+            },
+            AuthenticatedProductionSourceStorage {
+                bytes: Zeroizing::new(storage_bytes.into_boxed_slice()),
+            },
+        ))
     }
 
-    fn validate_request(
+    fn source_index_for_request(
         &self,
         request: CommonProofSourcePolynomialRequest<'_>,
-    ) -> Result<(u32, u64), CommonProofProverError> {
-        let expected_column_ordinal = *self
-            .ordered_source_column_ordinals
-            .get(self.next_source_index)
+        purpose: AuthenticatedProductionSourceReadPurpose,
+    ) -> Result<usize, CommonProofProverError> {
+        if request.request_context() != self.request_context {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        let source_index = match purpose {
+            AuthenticatedProductionSourceReadPurpose::Initial => self.next_source_index,
+            AuthenticatedProductionSourceReadPurpose::Replay => self
+                .ordered_sources
+                .binary_search_by_key(&request.column_ordinal(), |source| source.column_ordinal)
+                .map_err(|_| CommonProofProverError::InvalidColumn)?,
+        };
+        let source = self
+            .ordered_sources
+            .get(source_index)
             .ok_or(CommonProofProverError::InvalidColumn)?;
-        if self.finished
-            || request.request_context() != self.request_context
-            || request.column_ordinal() != expected_column_ordinal
+        if request.column_ordinal() != source.column_ordinal
             || self.relation_plan_variant.ordered_columns().get(
-                usize::try_from(expected_column_ordinal)
+                usize::try_from(source.column_ordinal)
                     .map_err(|_| CommonProofProverError::CountOverflow)?,
             ) != Some(request.descriptor())
         {
             return Err(CommonProofProverError::InvalidColumn);
         }
-        let canonical_value = *self
-            .canonical_values
-            .get(&expected_column_ordinal)
+        Ok(source_index)
+    }
+
+    fn read_request(
+        &self,
+        source_index: usize,
+        engine_request: CommonProofSourcePolynomialRequest<'_>,
+    ) -> Result<CommonProofAuthenticatedSourceReadRequest, CommonProofProverError> {
+        let source = self
+            .ordered_sources
+            .get(source_index)
             .ok_or(CommonProofProverError::InvalidColumn)?;
-        Ok((expected_column_ordinal, canonical_value))
+        CommonProofAuthenticatedSourceReadRequest::from_authenticated_source(
+            engine_request,
+            self.source_catalog_binding,
+            source.descriptor_binding,
+            source.material_root,
+            source.stream_digest,
+            u64::from(source.byte_length),
+            0,
+            source.storage_byte_offset,
+            source.byte_length,
+            0,
+        )
+    }
+
+    fn replay_identity(
+        &self,
+        source: &AuthenticatedProductionSourceObject,
+    ) -> Result<CommonProofSourcePolynomialReplayIdentity, CommonProofProverError> {
+        CommonProofSourcePolynomialReplayIdentity::from_authenticated_source(hash_framed_parts_512(
+            SMALL_CHAIN_SOURCE_REPLAY_IDENTITY_DOMAIN,
+            &[
+                &self.request_context.stable_generation_binding_hash(),
+                &self.source_catalog_binding,
+                &source.column_ordinal.to_le_bytes(),
+                &source.descriptor_binding,
+                &source.material_root,
+                &source.stream_digest,
+                &source.storage_byte_offset.to_le_bytes(),
+                &source.byte_length.to_le_bytes(),
+            ],
+        ))
+    }
+
+    fn poll_requested_source(
+        &mut self,
+        request: CommonProofSourcePolynomialRequest<'_>,
+        purpose: AuthenticatedProductionSourceReadPurpose,
+    ) -> Result<CommonProofSourcePolynomialProviderPoll, CommonProofProverError> {
+        let source_index = self.source_index_for_request(request, purpose)?;
+        if self.pending_authenticated_read.is_none() {
+            let authenticated_request = self.read_request(source_index, request)?;
+            self.pending_authenticated_read = Some(PendingAuthenticatedProductionSourceRead {
+                source_index,
+                purpose,
+                request: authenticated_request,
+                authenticated_bytes: None,
+            });
+            return Ok(CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired);
+        }
+        let pending = self
+            .pending_authenticated_read
+            .as_mut()
+            .ok_or(CommonProofProverError::InvalidColumn)?;
+        if pending.source_index != source_index || pending.purpose != purpose {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        let Some(authenticated_bytes) = pending.authenticated_bytes.take() else {
+            return Ok(CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired);
+        };
+        self.pending_authenticated_read = None;
+        let source = self
+            .ordered_sources
+            .get(source_index)
+            .ok_or(CommonProofProverError::InvalidColumn)?;
+        if authenticated_bytes.len()
+            != source
+                .coefficient_count
+                .checked_mul(size_of::<u64>())
+                .ok_or(CommonProofProverError::CountOverflow)?
+        {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        let coefficients = authenticated_bytes
+            .chunks_exact(size_of::<u64>())
+            .map(|canonical_bytes| -> Result<_, CommonProofProverError> {
+                let canonical_bytes: [u8; 8] = canonical_bytes
+                    .try_into()
+                    .map_err(|_| CommonProofProverError::InvalidColumn)?;
+                Ok(ProofBaseFieldElement::from_canonical(u64::from_le_bytes(
+                    canonical_bytes,
+                ))?)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let replay_identity = self.replay_identity(source)?;
+        if purpose == AuthenticatedProductionSourceReadPurpose::Initial {
+            self.next_source_index = self
+                .next_source_index
+                .checked_add(1)
+                .ok_or(CommonProofProverError::CountOverflow)?;
+        }
+        Ok(CommonProofSourcePolynomialProviderPoll::Ready(
+            ProvidedCommonProofSourcePolynomial::new(
+                CommonProofSourcePolynomial::from_base_coefficients(coefficients),
+                replay_identity,
+            ),
+        ))
     }
 }
 
-impl CommonProofSourcePolynomialProvider for AuthenticatedConstantSourceProvider {
+impl CommonProofSourcePolynomialProvider for AuthenticatedProductionSourceProvider {
     fn memory_accounting(
         &self,
     ) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
-        Ok(CommonProofSourceProviderMemoryAccounting::new(1, 1, 8, 8))
+        let retained_byte_length = size_of::<Self>()
+            .checked_add(
+                self.ordered_sources
+                    .len()
+                    .checked_mul(size_of::<AuthenticatedProductionSourceObject>())
+                    .ok_or(CommonProofProverError::CountOverflow)?,
+            )
+            .and_then(|byte_length| u64::try_from(byte_length).ok())
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        let maximum_source_byte_length = self
+            .ordered_sources
+            .iter()
+            .map(|source| u64::from(source.byte_length))
+            .max()
+            .ok_or(CommonProofProverError::InvalidColumn)?;
+        Ok(CommonProofSourceProviderMemoryAccounting::new(
+            retained_byte_length,
+            retained_byte_length,
+            maximum_source_byte_length,
+            maximum_source_byte_length,
+        ))
     }
 
     fn poll_source_polynomial(
         &mut self,
         request: CommonProofSourcePolynomialRequest<'_>,
     ) -> Result<CommonProofSourcePolynomialProviderPoll, CommonProofProverError> {
-        let (column_ordinal, canonical_value) = self.validate_request(request)?;
-        if self.next_source_index == 0 && !self.first_authenticated_read_supplied {
-            if self.pending_authenticated_read.is_none() {
-                self.pending_authenticated_read = Some(
-                    CommonProofAuthenticatedSourceReadRequest::from_authenticated_source(
-                        request,
-                        [11_u8; 64],
-                        [12_u8; 64],
-                        [13_u8; 64],
-                        [14_u8; 64],
-                        8,
-                        0,
-                        0,
-                        8,
-                        0,
-                    )?,
-                );
-            }
-            return Ok(CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired);
+        if self.finished {
+            return Err(CommonProofProverError::InvalidColumn);
         }
-        let replay_identity = CommonProofSourcePolynomialReplayIdentity::from_authenticated_source(
-            crate::hashing::hash_framed_parts_512(
-                "sealed-lattice/test/production-small-chain-source/v1",
-                &[
-                    &column_ordinal.to_le_bytes(),
-                    &canonical_value.to_le_bytes(),
-                ],
-            ),
-        )?;
-        self.next_source_index = self
-            .next_source_index
-            .checked_add(1)
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        Ok(CommonProofSourcePolynomialProviderPoll::Ready(
-            ProvidedCommonProofSourcePolynomial::new(
-                CommonProofSourcePolynomial::from_base_coefficients(vec![
-                    ProofBaseFieldElement::from_canonical(canonical_value)?,
-                ]),
-                replay_identity,
-            ),
-        ))
+        self.poll_requested_source(request, AuthenticatedProductionSourceReadPurpose::Initial)
     }
 
     fn poll_replayed_source_polynomial(
         &mut self,
-        _request: CommonProofSourcePolynomialRequest<'_>,
+        request: CommonProofSourcePolynomialRequest<'_>,
     ) -> Result<CommonProofSourcePolynomialProviderPoll, CommonProofProverError> {
-        Err(CommonProofProverError::InvalidColumn)
+        if !self.finished {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        self.poll_requested_source(request, AuthenticatedProductionSourceReadPurpose::Replay)
     }
 
     fn pending_authenticated_source_read_request(
         &self,
     ) -> Result<Option<CommonProofAuthenticatedSourceReadRequest>, CommonProofProverError> {
-        Ok(self.pending_authenticated_read)
+        Ok(self
+            .pending_authenticated_read
+            .as_ref()
+            .filter(|pending| pending.authenticated_bytes.is_none())
+            .map(|pending| pending.request))
     }
 
     fn supply_authenticated_source_range(
@@ -1691,13 +2088,35 @@ impl CommonProofSourcePolynomialProvider for AuthenticatedConstantSourceProvider
         request: CommonProofAuthenticatedSourceReadRequest,
         authenticated_bytes: Zeroizing<Box<[u8]>>,
     ) -> Result<(), CommonProofProverError> {
-        if self.pending_authenticated_read != Some(request)
-            || authenticated_bytes.as_ref() != [0xa5_u8; 8]
+        let pending = self
+            .pending_authenticated_read
+            .as_mut()
+            .ok_or(CommonProofProverError::InvalidColumn)?;
+        let source = self
+            .ordered_sources
+            .get(pending.source_index)
+            .ok_or(CommonProofProverError::InvalidColumn)?;
+        if pending.request != request
+            || pending.authenticated_bytes.is_some()
+            || authenticated_bytes.len()
+                != usize::try_from(source.byte_length)
+                    .map_err(|_| CommonProofProverError::CountOverflow)?
+            || hash_framed_parts_512(
+                SMALL_CHAIN_SOURCE_STREAM_DIGEST_DOMAIN,
+                &[&source.column_ordinal.to_le_bytes(), &authenticated_bytes],
+            ) != source.stream_digest
+            || hash_framed_parts_512(
+                SMALL_CHAIN_SOURCE_MATERIAL_ROOT_DOMAIN,
+                &[
+                    &source.descriptor_binding,
+                    &source.stream_digest,
+                    &u64::from(source.byte_length).to_le_bytes(),
+                ],
+            ) != source.material_root
         {
             return Err(CommonProofProverError::InvalidColumn);
         }
-        self.pending_authenticated_read = None;
-        self.first_authenticated_read_supplied = true;
+        pending.authenticated_bytes = Some(authenticated_bytes);
         Ok(())
     }
 
@@ -1708,43 +2127,32 @@ impl CommonProofSourcePolynomialProvider for AuthenticatedConstantSourceProvider
     fn finish(&mut self) -> Result<(), CommonProofProverError> {
         if self.finished
             || self.pending_authenticated_read.is_some()
-            || self.next_source_index != self.ordered_source_column_ordinals.len()
+            || self.next_source_index != self.ordered_sources.len()
         {
             return Err(CommonProofProverError::InvalidColumn);
         }
         self.finished = true;
         Ok(())
     }
-}
 
-fn insert_vector_source_value(
-    values: &mut BTreeMap<u32, u64>,
-    vector: CompactRingVectorReference,
-    canonical_value: u64,
-) -> Result<(), CommonProofProverError> {
-    for column_ordinal in vector.column_ordinals {
-        match values.insert(column_ordinal, canonical_value) {
-            None => {}
-            Some(previous_value) if previous_value == canonical_value => {}
-            Some(_) => return Err(CommonProofProverError::InvalidColumn),
+    fn finish_source_replay(&mut self) -> Result<(), CommonProofProverError> {
+        if !self.finished || self.pending_authenticated_read.is_some() {
+            return Err(CommonProofProverError::InvalidColumn);
         }
+        Ok(())
     }
-    Ok(())
 }
 
-fn reduced_relation() -> (
-    CompactPublicKeyRelationCatalog,
-    RelationPlanVariant,
-    CompactAuthenticatedAssignmentCatalog,
-) {
-    let (mut input, context) = selected_input_and_context().expect("selected relation inputs");
+fn reduced_relation() -> ReducedRelationFixture {
+    let (mut input, relation_context) =
+        selected_input_and_context().expect("selected relation inputs");
     input.ring_degree = SMALL_CHAIN_RING_DEGREE;
     input.public_polynomial_column_degree_bound_exclusive = SMALL_CHAIN_RING_DEGREE / 2;
-    let compiled = compile_public_key_share_relation_with_source_layout(&input, &context)
+    let compiled = compile_public_key_share_relation_with_source_layout(&input, &relation_context)
         .expect("reduced production-family relation compiles");
     compiled
         .relation_plan
-        .check(&context)
+        .check(&relation_context)
         .expect("reduced relation plan checks");
     let relation_plan_variant = compiled
         .relation_plan
@@ -1760,7 +2168,152 @@ fn reduced_relation() -> (
     let assignment_catalog =
         CompactAuthenticatedAssignmentCatalog::derive(&relation, &relation_plan_variant)
             .expect("reduced authenticated assignment derives");
-    (relation, relation_plan_variant, assignment_catalog)
+    ReducedRelationFixture {
+        input,
+        relation_context,
+        source_layout: compiled.source_layout,
+        relation_plan_variant,
+        relation,
+        assignment_catalog,
+    }
+}
+
+fn reduced_production_coefficient_source(
+    fixture: &ReducedRelationFixture,
+) -> Result<CompactPublicKeyDevelopmentCoefficientSource, CommonProofProverError> {
+    let ring_degree = usize::try_from(fixture.input.ring_degree)
+        .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let public_setup_seed = hash_framed_parts_512(
+        "sealed-lattice/compact-small-chain/public-setup-seed/v1",
+        &[&fixture.relation.relation_plan_hash()],
+    );
+    let common_secret_coefficients = Zeroizing::new(
+        (0..ring_degree)
+            .map(|coefficient_ordinal| {
+                i8::try_from((coefficient_ordinal * 17 + coefficient_ordinal / 11) % 3)
+                    .expect("the ternary residue fits i8")
+                    - 1
+            })
+            .collect::<Vec<_>>(),
+    );
+    let public_key_error_coefficients = Zeroizing::new(
+        (0..ring_degree)
+            .map(|coefficient_ordinal| {
+                i8::try_from((coefficient_ordinal * 13 + coefficient_ordinal / 7 + 2) % 5)
+                    .expect("the eta-two residue fits i8")
+                    - 2
+            })
+            .collect::<Vec<_>>(),
+    );
+    let ordered_public_key_limb_coefficients = fixture
+        .input
+        .data_modulus_indices
+        .iter()
+        .copied()
+        .map(|data_modulus_index| {
+            let modulus = *crate::bgv::parameters::DATA_PRIMES
+                .get(usize::from(data_modulus_index))
+                .ok_or(CommonProofProverError::InvalidColumn)?;
+            let common_reference =
+                sample_collective_public_key_common_reference_limb_for_development_degree(
+                    &public_setup_seed,
+                    data_modulus_index,
+                    ring_degree,
+                )
+                .map_err(|_| CommonProofProverError::InvalidColumn)?;
+            construct_public_key_share_limb(
+                &common_reference,
+                &common_secret_coefficients,
+                &public_key_error_coefficients,
+                modulus,
+            )
+            .map_err(|_| CommonProofProverError::InvalidColumn)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let public_setup_seed_hex = encode_hex(&public_setup_seed);
+    let ordered_anchor_sources = fixture
+        .input
+        .commitment_data_modulus_indices
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(anchor_ordinal, commitment_data_modulus_index)| {
+            let hiding_secret_polynomials = (0..SETUP_COMMITMENT_HIDING_SECRET_WIDTH)
+                .map(|polynomial_ordinal| {
+                    Zeroizing::new(
+                        (0..ring_degree)
+                            .map(|coefficient_ordinal| {
+                                i8::try_from(
+                                    (coefficient_ordinal * 19
+                                        + anchor_ordinal * 7
+                                        + polynomial_ordinal * 5
+                                        + coefficient_ordinal / 13)
+                                        % 3,
+                                )
+                                .expect("the ternary residue fits i8")
+                                    - 1
+                            })
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let hiding_error_polynomials = (0..SETUP_COMMITMENT_HIDING_ERROR_WIDTH)
+                .map(|polynomial_ordinal| {
+                    Zeroizing::new(
+                        (0..ring_degree)
+                            .map(|coefficient_ordinal| {
+                                i8::try_from(
+                                    (coefficient_ordinal * 23
+                                        + anchor_ordinal * 11
+                                        + polynomial_ordinal * 3
+                                        + coefficient_ordinal / 17
+                                        + 1)
+                                        % 3,
+                                )
+                                .expect("the ternary residue fits i8")
+                                    - 1
+                            })
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let opening_polynomials = hiding_secret_polynomials
+                .iter()
+                .chain(hiding_error_polynomials.iter())
+                .map(|polynomial| polynomial.as_slice())
+                .collect::<Vec<_>>();
+            let commitment = compute_lattice_anchor_commitment_for_development_degree(
+                &public_setup_seed_hex,
+                usize::from(commitment_data_modulus_index),
+                &common_secret_coefficients,
+                &opening_polynomials,
+                ring_degree,
+            )
+            .map_err(|_| CommonProofProverError::InvalidColumn)?;
+            if commitment.commitment_data_prime_index != usize::from(commitment_data_modulus_index)
+                || commitment.ring_degree != ring_degree
+            {
+                return Err(CommonProofProverError::InvalidColumn);
+            }
+            CompactPublicKeyDevelopmentAnchorCoefficientSource::new(
+                commitment_data_modulus_index,
+                commitment.rows,
+                hiding_secret_polynomials,
+                hiding_error_polynomials,
+                ring_degree,
+            )
+            .map_err(|_| CommonProofProverError::InvalidColumn)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    CompactPublicKeyDevelopmentCoefficientSource::new(
+        public_setup_seed,
+        common_secret_coefficients,
+        public_key_error_coefficients,
+        ordered_public_key_limb_coefficients,
+        ordered_anchor_sources,
+    )
+    .map_err(|_| CommonProofProverError::InvalidColumn)
 }
 
 fn request_context(
@@ -1859,7 +2412,8 @@ fn small_chain_attempt_private_randomness(
 
 #[test]
 fn production_small_chain_private_randomness_binds_attempt_geometry_and_live_cursor() {
-    let (_, relation_plan_variant, _) = reduced_relation();
+    let fixture = reduced_relation();
+    let relation_plan_variant = fixture.relation_plan_variant;
     let canonical_public_input_bytes = b"canonical reduced public-key input fixture";
     let source_replay_binding = [0x71_u8; Hash512::BYTE_LENGTH];
     let mut first = small_chain_attempt_private_randomness(
@@ -1943,6 +2497,110 @@ fn production_small_chain_private_randomness_binds_attempt_geometry_and_live_cur
     );
 }
 
+#[test]
+fn production_small_chain_source_authority_authenticates_exact_derived_coefficients() {
+    let fixture = reduced_relation();
+    let coefficient_source = reduced_production_coefficient_source(&fixture)
+        .expect("the reduced production coefficient authority derives");
+    let request_context = request_context(&fixture.relation);
+    let (mut source_provider, source_storage) = AuthenticatedProductionSourceProvider::new(
+        &fixture.relation,
+        fixture.relation_plan_variant.clone(),
+        request_context,
+        &fixture.relation_context,
+        &fixture.source_layout,
+        &coefficient_source,
+    )
+    .expect("the authenticated coefficient catalog derives");
+    assert_eq!(source_provider.ordered_sources.len(), 202);
+    assert_eq!(
+        source_storage.bytes.len(),
+        202 * usize::try_from(SMALL_CHAIN_RING_DEGREE / 2)
+            .expect("the reduced half-ring fits usize")
+            * size_of::<u64>()
+    );
+
+    let first_source = &source_provider.ordered_sources[0];
+    let first_descriptor = fixture
+        .relation_plan_variant
+        .ordered_columns()
+        .get(usize::try_from(first_source.column_ordinal).expect("the column ordinal fits usize"))
+        .expect("the first source descriptor exists");
+    let first_engine_request =
+        request_context.request(first_source.column_ordinal, first_descriptor);
+    assert!(matches!(
+        source_provider
+            .poll_source_polynomial(first_engine_request)
+            .expect("the first source request is accepted"),
+        CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired,
+    ));
+    let authenticated_read = source_provider
+        .pending_authenticated_source_read_request()
+        .expect("the pending authenticated request is readable")
+        .expect("the first coefficient object requires authentication");
+    let exact_bytes = source_storage
+        .read(authenticated_read)
+        .expect("the first coefficient object is present");
+
+    let mut truncated_bytes = exact_bytes.to_vec();
+    truncated_bytes.pop();
+    assert_eq!(
+        source_provider.supply_authenticated_source_range(
+            authenticated_read,
+            Zeroizing::new(truncated_bytes.into_boxed_slice()),
+        ),
+        Err(CommonProofProverError::InvalidColumn)
+    );
+    let mut substituted_bytes = exact_bytes.to_vec();
+    substituted_bytes[0] ^= 1;
+    assert_eq!(
+        source_provider.supply_authenticated_source_range(
+            authenticated_read,
+            Zeroizing::new(substituted_bytes.into_boxed_slice()),
+        ),
+        Err(CommonProofProverError::InvalidColumn)
+    );
+    let second_source = &source_provider.ordered_sources[1];
+    let second_start = usize::try_from(second_source.storage_byte_offset)
+        .expect("the second storage offset fits usize");
+    let second_end = second_start
+        + usize::try_from(second_source.byte_length).expect("the second source length fits usize");
+    assert_eq!(
+        source_provider.supply_authenticated_source_range(
+            authenticated_read,
+            Zeroizing::new(
+                source_storage.bytes[second_start..second_end]
+                    .to_vec()
+                    .into_boxed_slice()
+            ),
+        ),
+        Err(CommonProofProverError::InvalidColumn)
+    );
+    source_provider
+        .supply_authenticated_source_range(authenticated_read, exact_bytes)
+        .expect("the exact production-derived coefficient object authenticates");
+    let CommonProofSourcePolynomialProviderPoll::Ready(provided) = source_provider
+        .poll_source_polynomial(first_engine_request)
+        .expect("the authenticated first source decodes")
+    else {
+        panic!("the supplied source object must be ready")
+    };
+    let (polynomial, replay_identity) = provided.into_parts();
+    let CommonProofSourcePolynomial::Base(coefficients) = polynomial else {
+        panic!("the public-key source is a base-field polynomial")
+    };
+    assert_eq!(
+        coefficients.len(),
+        usize::try_from(SMALL_CHAIN_RING_DEGREE / 2).expect("the reduced half-ring fits usize")
+    );
+    assert!(
+        coefficients
+            .iter()
+            .any(|coefficient| coefficient.canonical() != 0)
+    );
+    assert_ne!(replay_identity.bytes(), [0_u8; 64]);
+}
+
 fn replace_small_chain_canonical_section_payload(
     canonical: &[u8],
     section: SmallChainCanonicalSection,
@@ -1972,7 +2630,17 @@ fn replace_small_chain_canonical_section_payload(
 
 #[test]
 fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequential_whir() {
-    let (relation, relation_plan_variant, assignment_catalog) = reduced_relation();
+    let fixture = reduced_relation();
+    let coefficient_source = reduced_production_coefficient_source(&fixture)
+        .expect("the reduced production coefficient authority derives");
+    let ReducedRelationFixture {
+        relation_context,
+        source_layout,
+        relation_plan_variant,
+        relation,
+        assignment_catalog,
+        ..
+    } = fixture;
     assert_eq!(relation.ring_degree(), SMALL_CHAIN_RING_DEGREE);
     assert_eq!(relation.public_key_share_relation_count(), 23);
     assert_eq!(relation.ordinary_anchor_relation_count(), 3);
@@ -1998,43 +2666,40 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
     assert_eq!(assignment_catalog.source_column_ordinals().len(), 202);
 
     let request_context = request_context(&relation);
-    let mut source_provider = AuthenticatedConstantSourceProvider::new(
+    let (mut source_provider, source_storage) = AuthenticatedProductionSourceProvider::new(
         &relation,
         relation_plan_variant.clone(),
         request_context,
+        &relation_context,
+        &source_layout,
+        &coefficient_source,
     )
-    .expect("authenticated source provider derives from the reduced relation");
+    .expect("production-derived authenticated source provider derives");
     let mut assignment_cursor = CompactAuthenticatedAssignmentCursor::new(
         &relation,
         &relation_plan_variant,
         request_context,
     )
     .expect("authenticated assignment loading starts");
-    assert!(matches!(
-        assignment_cursor
-            .next_source(&relation, &relation_plan_variant, &mut source_provider,)
-            .expect("first source requests authenticated bytes"),
-        CompactAuthenticatedAssignmentPoll::AuthenticatedSourceReadRequired,
-    ));
-    let authenticated_read = source_provider
-        .pending_authenticated_source_read_request()
-        .expect("authenticated read state")
-        .expect("authenticated read request");
-    source_provider
-        .supply_authenticated_source_range(
-            authenticated_read,
-            Zeroizing::new(vec![0xa5_u8; 8].into_boxed_slice()),
-        )
-        .expect("authenticated source bytes bind the first read");
-
     let mut loaded_source_count = 0_usize;
+    let mut authenticated_source_read_count = 0_usize;
     loop {
         match assignment_cursor
             .next_source(&relation, &relation_plan_variant, &mut source_provider)
             .expect("authenticated source loading advances")
         {
             CompactAuthenticatedAssignmentPoll::AuthenticatedSourceReadRequired => {
-                panic!("the authenticated source range was already supplied")
+                let authenticated_read = source_provider
+                    .pending_authenticated_source_read_request()
+                    .expect("authenticated read state")
+                    .expect("authenticated source range request");
+                let authenticated_bytes = source_storage
+                    .read(authenticated_read)
+                    .expect("the reduced authority storage contains the requested source object");
+                source_provider
+                    .supply_authenticated_source_range(authenticated_read, authenticated_bytes)
+                    .expect("the source provider authenticates the exact coefficient object");
+                authenticated_source_read_count += 1;
             }
             CompactAuthenticatedAssignmentPoll::SourceLoaded { .. } => {
                 loaded_source_count += 1;
@@ -2043,6 +2708,7 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         }
     }
     assert_eq!(loaded_source_count, 202);
+    assert_eq!(authenticated_source_read_count, 202);
     let base_assignment = assignment_cursor
         .finish(&relation, &relation_plan_variant)
         .expect("authenticated assignment loading finishes");
@@ -2286,6 +2952,51 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         .collect::<Vec<_>>();
     let resident_matrices = ProductionRowSourceResidentMatrices::new(&row_source, &public_input)
         .expect("resident matrix view binds the structured row source");
+    let first_row = row_source
+        .matrices
+        .row(row_source.relation, 0)
+        .expect("the first structured row exists");
+    assert!(first_row.left.ordered_terms.iter().any(|term| matches!(
+        term,
+        CompactStructuredMatrixTerm::PublicNegacyclicMatrixBand { .. }
+    )));
+    let first_row_point = (0..row_source.row_count().ilog2())
+        .map(|_| CompactChallengeField::ZERO)
+        .collect::<Vec<_>>();
+    let first_row_public_contribution = resident_matrices
+        .public_contribution_at_row_point(
+            CompactCfwMatrixRole::LeftMultiplicand,
+            &first_row_point,
+            &public_input,
+        )
+        .expect("the nonzero public matrix contribution derives");
+    let mut first_row_witness_covector = vec![CompactChallengeField::ZERO; witness.len()];
+    resident_matrices
+        .accumulate_weighted_witness_covector_at_row_point(
+            &first_row_point,
+            [
+                CompactChallengeField::ONE,
+                CompactChallengeField::ZERO,
+                CompactChallengeField::ZERO,
+            ],
+            &mut first_row_witness_covector,
+        )
+        .expect("the nonzero public matrix band accumulates into the witness covector");
+    let first_row_witness_contribution = first_row_witness_covector
+        .iter()
+        .copied()
+        .zip(witness.iter().copied())
+        .map(|(coefficient, value)| coefficient * value)
+        .sum::<CompactChallengeField>();
+    assert_eq!(
+        first_row_public_contribution + first_row_witness_contribution,
+        compact_challenge_from_production(
+            row_source
+                .evaluate_row(0)
+                .expect("the first production row evaluates")
+                .left
+        )
+    );
     let cfw_private_extension_element_count = cfw_geometry
         .inner_mask_count()
         .checked_mul(2)

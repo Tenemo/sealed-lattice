@@ -318,10 +318,15 @@ Merkle response, derives its query schedule from the canonical public input and
 commitment prefix, transports the encoded bytes, derives the same message in a
 fresh verifier path, and refuses bound-section and structural mutations. This
 remains byte-map evidence. A separate reduced production-family owner now
-drives all 202 source halves through the authenticated-provider contract,
-derives each CFW challenge from the preceding canonical retained-tree
-commitment, and compares resident and external round polynomials, retained
-tree bytes, transcript messages, and final values. A fresh path decodes the
+derives all 202 source polynomials through the shared production coefficient
+path from a deterministic common secret, eta-two error, public setup seed,
+public-key-share equation, and lattice-anchor construction. It stores each
+1,024-coefficient polynomial as one canonical 8,192-byte authenticated object,
+for 1,654,784 external bytes in total, and drives every object through the
+authenticated-provider contract. It derives each CFW challenge from the
+preceding canonical retained-tree commitment and compares resident and external
+round polynomials, retained tree bytes, transcript messages, and final values.
+A fresh path decodes the
 transported public-input and proof bytes, verifies every opening and the CFW
 transcript, and matches the pollable structured transpose to the independent
 direct claim combination coefficient for coefficient at main WHIR's actual
@@ -342,9 +347,11 @@ outer message, verifies both root bindings and CFW, reconstructs the same
 handoff from transported bytes, and then verifies both three-round WHIR proofs.
 It rejects changed targets, source and mask covectors, cross-epoch openings,
 either base-case value, or any root-section substitution. The owner uses ring
-degree 2,048, a zero-centered valid assignment, a constant test provider,
-disclosed CFW masks in the outer CFW-only wire, and reduced first folds. Its
-fixed test action root now enters the production action-private KMAC custody:
+degree 2,048, deterministic test witness and public-seed material, a test-only
+divisor-degree public sampler that preserves the production coordinate grammar,
+disclosed CFW masks in the outer CFW-only wire, and reduced first folds. The
+selected production sampler continues to reject every non-selected ring degree.
+Its fixed test action root now enters the production action-private KMAC custody:
 the hiding coordinate supplies every CFW and WHIR mask sample plus independent
 WHIR and response-salt seeds, leaf salts bind the complete response-leaf
 geometry, round salts use a separate KMAC domain, and the canonical randomness
@@ -360,10 +367,13 @@ Fiat-Shamir-derived rather than producer-supplied. A fresh decoder reproduces
 the envelope byte for byte and refuses wrong framing, duplicate or reordered
 sections, empty and oversized sections, truncation, trailing bytes,
 noncanonical fields, missing or unused WHIR bytes, and structural or semantic
-mutations across every section. The source provider, commitment construction,
-WHIR challenger, CFW mask transport, and host custody of the canonical
-randomness cursor remain test-only rather than production runtime owners. The
-owner therefore does not complete the production-shaped chain.
+mutations across every section. The reduced authority and storage owner,
+commitment construction, WHIR challenger, CFW mask transport, and host custody
+of the canonical randomness cursor remain test-only rather than production
+runtime owners. Live ceremony source loading, browser-rooted entropy and
+attempt custody, production public-polynomial roots and openings, and durable
+generation integration remain absent. The owner therefore does not complete
+the production-shaped chain.
 
 The canonical proof encoder can append one logical response at a time in
 verifier-owned order and release that response before accepting the next. It
@@ -837,8 +847,14 @@ and conditional complete-inventory bounds. A live small Merkle response derives
 its schedule from the canonical transcript and freshly verifies transported
 bytes with hostile mutations. The reduced production-family integration owner
 additionally reaches verified CFW claims and the production structured
-transpose with resident/external and retained-tree byte parity. Its test-only
-WHIR chronology now proves and freshly verifies the pre-challenge base-source
+transpose with resident/external and retained-tree byte parity. Its
+authenticated source owner derives nonzero public-key and anchor coefficients
+through the shared production equations, serves 202 canonical coefficient
+objects totaling 1,654,784 bytes, and refuses truncation, mutation, and equal-
+length cross-object substitution. The resident CFW reference path now expands
+nonzero public negacyclic matrix bands and matches the structured row
+evaluation. Its test-only WHIR chronology now proves and freshly verifies the
+pre-challenge base-source
 relation and the main CFW relation through three rounds each, with one shared
 cross-epoch mask root and the exact copied witness prefix. Canonical root-section
 digests enter the outer transcript before their dependent challenges, and the
@@ -847,17 +863,18 @@ handoff. Its fixed-order canonical envelope transports the embedded CFW proof,
 every external root, and both WHIR proofs through a fresh decoder and verifier
 with section-wide hostile coverage. It is not a production-authority,
 production-transcript, authenticated-resume, selected-size, or zero-knowledge
-owner. Its masks and salts now use the production action-private KMAC coin
-source under a fixed test root, and its canonical cursor includes both the
-private-coin manifest and live WHIR byte position; neither is yet connected to
-the production generation host.
+owner. This reduced reference expansion is not a selected-size performance path
+or resource measurement. Its masks and salts now use the production action-
+private KMAC coin source under a fixed test root, and its canonical cursor
+includes both the private-coin manifest and live WHIR byte position; neither is
+yet connected to the production generation host.
 
 The static gate remains closed because current generation does not select the
 compact profile or exercise it through a retained live authority, because row-
 source preparation has no authenticated cache recovery, and because the
 selected-size CFW and CFW-to-transpose execution, selected-size transpose
-execution, unified production transcript, complete production-shaped
-small-chain integration, durable proof and verifier lifecycle, and
+execution, unified production transcript, live production-authority
+integration, durable proof and verifier lifecycle, and
 independently measured resources for the fixed bytes remain
 incomplete. The
 construction-level interactive masking correspondence, canonical proof and
@@ -869,12 +886,12 @@ work ledger now exist.
 The next task is to close those owners one at a time with focused tests, not to
 run a prover or a complete test graph. Construction-level masking now
 reconciles every production coefficient-to-view map and the conditional entropy
-after preceding disclosures. The next integration owner must replace the
-reduced constant source with the real production authority, drive the now-live
-pre-challenge, cross-epoch, CFW, and WHIR messages through one canonical
-transcript, and require that production verifier path to consume the existing
-canonical section model. Only that complete small-geometry chain can close
-this gate.
+after preceding disclosures. The next integration owner must connect the
+reduced production-equation source path to the ceremony generation host's live
+source authority and browser-rooted attempt custody, drive the pre-challenge,
+cross-epoch, CFW, and WHIR messages through one canonical production transcript,
+and require that production verifier path to consume the existing canonical
+section model. Only that complete small-geometry chain can close this gate.
 Factors one, two, and four remain eligible engineering comparators
 for the same standalone relation and security target. Factor eight is retained
 only as a statically refused comparator under the current retained-tree

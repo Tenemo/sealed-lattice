@@ -332,6 +332,26 @@ where
     })
 }
 
+#[cfg(test)]
+pub(crate) fn compute_lattice_anchor_commitment_for_development_degree<OpeningPolynomial>(
+    public_matrix_seed_hash: &str,
+    commitment_data_prime_index: usize,
+    secret_contribution_coefficients: &[i8],
+    opening_polynomials: &[OpeningPolynomial],
+    ring_degree: usize,
+) -> CanonicalResult<LatticeAnchorCommitment>
+where
+    OpeningPolynomial: AsRef<[i8]>,
+{
+    compute_lattice_anchor_commitment_for_degree(
+        public_matrix_seed_hash,
+        commitment_data_prime_index,
+        secret_contribution_coefficients,
+        opening_polynomials,
+        ring_degree,
+    )
+}
+
 fn selected_commitment_prime(commitment_data_prime_index: usize) -> CanonicalResult<u64> {
     if !SETUP_COMMITMENT_MODULUS_LIMB_INDICES.contains(&commitment_data_prime_index) {
         return Err(invalid_commitment_input(

@@ -142,6 +142,46 @@ pub(in crate::bgv) fn sample_collective_public_key_common_reference_limb(
     data_prime_index: u16,
     ring_degree: usize,
 ) -> CanonicalResult<Vec<u64>> {
+    if ring_degree != POLYNOMIAL_DEGREE {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "collective public-key common-reference ring degree does not match the selected suite",
+        ));
+    }
+    sample_collective_public_key_common_reference_limb_for_degree(
+        public_setup_seed,
+        data_prime_index,
+        ring_degree,
+    )
+}
+
+#[cfg(test)]
+pub(in crate::bgv) fn sample_collective_public_key_common_reference_limb_for_development_degree(
+    public_setup_seed: &[u8; 64],
+    data_prime_index: u16,
+    ring_degree: usize,
+) -> CanonicalResult<Vec<u64>> {
+    if ring_degree == 0
+        || !ring_degree.is_power_of_two()
+        || !POLYNOMIAL_DEGREE.is_multiple_of(ring_degree)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "development common-reference ring degree must divide the selected suite ring",
+        ));
+    }
+    sample_collective_public_key_common_reference_limb_for_degree(
+        public_setup_seed,
+        data_prime_index,
+        ring_degree,
+    )
+}
+
+fn sample_collective_public_key_common_reference_limb_for_degree(
+    public_setup_seed: &[u8; 64],
+    data_prime_index: u16,
+    ring_degree: usize,
+) -> CanonicalResult<Vec<u64>> {
     let data_prime_ordinal = usize::from(data_prime_index);
     let modulus = DATA_PRIMES.get(data_prime_ordinal).copied().ok_or_else(|| {
         CanonicalError::new(
@@ -149,12 +189,6 @@ pub(in crate::bgv) fn sample_collective_public_key_common_reference_limb(
             "collective public-key common-reference data-prime index is outside the selected basis",
         )
     })?;
-    if ring_degree != POLYNOMIAL_DEGREE {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "collective public-key common-reference ring degree does not match the selected suite",
-        ));
-    }
     let coordinate_bytes = CanonicalTuple::new(
         COLLECTIVE_PUBLIC_KEY_COMMON_REFERENCE_COORDINATE_SCHEMA_IDENTIFIER,
         FOUNDATION_SCHEMA_VERSION,
