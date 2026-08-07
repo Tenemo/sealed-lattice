@@ -142,6 +142,10 @@ impl CompactResponseCheckpointSchedule {
         self.completed_proof_response_counts.len()
     }
 
+    pub(crate) const fn checkpoint_schedule_digest(&self) -> Hash512 {
+        Hash512::from_bytes(self.dependency_digest)
+    }
+
     pub(crate) fn lagging_checkpoint_count(&self) -> usize {
         self.completed_proof_response_counts
             .iter()

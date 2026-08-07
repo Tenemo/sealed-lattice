@@ -274,12 +274,16 @@ challenge space, and every commitment-before-challenge barrier. Coordinated
 relation mutations that leave the two boundary copies equal are refused by
 independent reconstruction. The exact maximum per-move extraction error is
 carried into the conditional CDHZ arithmetic and remains at most `2^-266`.
-This closes the static relaxed extraction premise. The separate construction
-owner described below now closes interactive masking and leakage
-correspondence. The canonical-byte owner described below now closes the static
-emitted-byte and verifier-consumer correspondence and feeds the complete
-CDHZ/Merkle arithmetic. Complete production-shaped small-chain integration,
-durable execution, and measured browser evidence remain open.
+This is a static catalog result, not a semantic relaxed extractor: the owner
+does not implement CDHZ's knowledge-state predicate or deterministic `ERRBR`,
+execute the selected decoder, or prove the zero input- and output-implicit tuple
+dimensions. The separate construction owner records useful masking ranks and
+topology but does not yet close the exact production coefficient-to-view
+correspondence or ideal-uniform simulator. The canonical-byte owner supplies a
+static verifier-consumer map. The resulting CDHZ/Merkle arithmetic remains
+conditional until those theorem premises and one complete emitted production
+proof derive. Production-shaped small-chain integration, durable execution, and
+measured browser evidence also remain open.
 
 The focused CDHZ owner now derives one complete, power-of-two-padded Merkle
 vector for every logical IOR response. The verifier derives distinct one-based
@@ -305,7 +309,11 @@ adversaries are contained in the modeled quantum-random-oracle adversaries.
 The extraction-time owner records the exact scale inside the theorems' stated
 big-O bounds; it does not invent a hidden constant. Fixed, domain-separated
 SHAKE256 remains an explicit ideal 512-bit quantum-random-oracle assumption,
-not a proved concrete random oracle.
+not a proved concrete random oracle. The 2025 quantum sponge-indifferentiability
+theorem does not change that status: at the declared `2^80` adversarial-query
+budget its formal first term already contains a `2^104` factor before message-
+length overhead, and it assumes an ideal random permutation rather than proving
+fixed Keccak-f.
 
 The canonical-byte owner independently assigns every public-input header,
 binding, count, and field-value region and every proof header, response root,
@@ -333,7 +341,13 @@ committed transactions and 24 last-use deletions, with a 192-byte peak. A
 separate delayed-use owner keeps earlier trees across later moves and deletes
 multiple due trees in response order. Incremental proof bytes equal the
 monolithic encoder, and every response yields the common canonical checkpoint
-boundary. The slice also compares resident and external CFW round polynomials,
+boundary. All 24 boundaries now enter the same ordered checkpoint event chain
+used by the common generation worker. Each produces one authenticated state and
+composite private-coin/transcript cursor manifest, is acknowledged before the
+next boundary, and decodes with the exact compact schedule and response
+ordinal. A focused chain owner separately covers continuation authority,
+genesis replay, exact target-cursor release, and refusal when the target event
+changes. The slice also compares resident and external CFW round polynomials,
 transcript messages, and final values. A fresh path decodes the transported
 public-input and proof bytes, verifies every opening and the CFW
 transcript, and matches the pollable structured transpose to the independent
@@ -368,9 +382,11 @@ buffered-byte position. Every reduced response boundary now commits those exact
 cursor bytes into its compact committed-state digest; empty, oversized, and
 substituted cursors are refused or produce a distinct digest. A focused owner
 checks replay parity, attempt separation, geometry separation, and cursor
-movement. This is production private-coin
-machinery driven by a deterministic test root, not browser entropy or an
-authenticated resume integration. A test-only canonical envelope assigns the outer
+movement. The compact committed-state digest and the common cursor-manifest
+digest now occur in one authenticated kernel checkpoint event. This is
+production private-coin machinery driven by a deterministic test root, not
+browser entropy or a compact execution resumed through browser custody. A
+test-only canonical envelope assigns the outer
 CFW proof, five external roots, pre-challenge WHIR proof, and main WHIR proof to
 eight fixed ordered sections. WHIR vector lengths come only from verifier
 configuration, field limbs are canonical, and query coordinates remain
@@ -441,7 +457,7 @@ It also checks the theorem-proof
 normalization that applies each inner mask with a factor of two. This is an
 in-memory reference execution.
 
-The construction-level masking owner now independently reconstructs the
+The construction-level masking catalog records the
 production source, carried-mask, fresh-mirror, code-switch, fold, quotient,
 sumcheck, explicit-point, and terminal views. It checks the three-by-two cross-
 epoch disclosure map at rank two, all 184 outer-CFW mask coordinates, the rank-
@@ -464,7 +480,13 @@ exhaustion, and 1,024-bit leaf-salt collisions. Canonical emitted multiproof
 regions now have exact verifier consumers. Emitted Merkle-root and frontier
 programming, malicious or resettable verifier zero knowledge, full-family and
 complete-ceremony simulation, fixed-SHAKE justification, and QROM zero
-knowledge remain explicit refusals.
+knowledge remain explicit refusals. Several coefficient-to-view identities are
+still catalog labels rather than independently generated matrices from the
+production compiler and verifier, so this is not yet an exact ideal-uniform
+statistical-HVZK simulator. Deployment additionally relies on a computational
+browser-CSPRNG/KMAC quantum-PRF hybrid. CMS19 is a plausible later route for
+compiled QROM zero knowledge only after that simulator and exact root/frontier
+programming derive; production code never reprograms SHAKE.
 
 An independently re-derived authenticated-source mapping now selects exactly
 202 half-polynomials from the existing production
@@ -625,6 +647,15 @@ maximum wire and static resource vectors:
 |              4 |  25,415,814 |         15,991,062 |      41,406,876 |                         484,445,268 |   798,097,908 |               1,041,354,752 |
 |              8 |  25,526,102 |         15,991,062 |      41,517,164 |                         618,845,620 | 1,082,414,368 |               1,131,831,296 |
 
+Factor one's `26,927,670` proof bytes exceed the `7,864,320`-byte automatic
+proof band, and its `640,811,508` scratch bytes exceed the `402,653,184`-byte
+automatic scratch band. Both remain below their absolute bounds and therefore
+require engineering review rather than cryptographic refusal. Its
+`385,505,540`-byte provisional WASM payload remains below the nominal
+`402,653,184`-byte WASM target. The same soft-bound classification must be
+recomputed from live measurements; static eligibility alone does not establish
+mobile feasibility.
+
 The WHIR-internal commitment peaks remain `75,497,456`, `109,051,888`,
 `176,160,752`, and `310,378,480` bytes. The complete committed-leaf counts,
 including every logical outer response tree, are `1,032,486`, `1,736,994`,
@@ -709,15 +740,17 @@ replay, reversed deletion order, changed payload, substituted state digest, and
 transactions outside the replay phase, including incomplete live objects and
 unsealed deletion. The reduced production-shaped chain now connects the
 registry-level retention coordinator, live-prefix schedules, incremental proof
-assembler, and common checkpoint boundary for all 24 responses. It reconciles
+assembler, common checkpoint boundary, and common kernel checkpoint event chain
+for all 24 responses. It reconciles
 1,664 bytes written and read through 120 transactions and 24 last-use
 deletions. Every tree reaches last use in its own verifier move, so the maximum
 concurrently retained tree bytes are 192. This remains small-geometry
-development evidence: the construction-private cursor is bound inside the
-kernel boundary, but the boundary is not published or resumed by the
-authenticated generation host, the common host cursor and external-object
-deletion state are not joined to it, and selected-size response-value custody
-is absent. The selected retained lifecycle therefore
+development evidence: the construction-private cursor and common cursor
+manifest are bound into one kernel checkpoint event, but the browser host does
+not yet append the authenticated external-object state trailer to these compact
+publications or drive a compact execution from genesis to reproduce the target
+before resume. Internal CFW and WHIR checkpoint cadence and selected-size
+response-value custody are also absent. The selected retained lifecycle therefore
 still has zero authenticated restart records, so interruption requires one
 complete-attempt replay.
 
@@ -871,14 +904,15 @@ derived task, poll, work, host-control, and full-replay ledgers plus a small
 dense-matrix correspondence owner. The canonical postorder response-tree writer
 and frontier scanner now have independent byte-order correspondence, hostile
 framing coverage, production constructor coverage, and exact per-factor heap
-ledgers. The factor-one relaxed theorem owner now independently reconstructs
-all 82 knowledge transitions, 15 exact relation boundaries, full-dimension
-code shapes, strict correction radii, list-size bounds, CFW errors, WHIR MCA
-terms, challenge dependencies, and its explicit extraction-work ceiling.
-The emitted-byte owner maps every canonical region and fixed-message candidate
-to its verifier consumer, closes the five-term CDHZ/Merkle sum under the ideal-
-QRO assumption, and records 98-, 95-, and 92-bit per-proof, public-key-union,
-and conditional complete-inventory bounds. A live small Merkle response derives
+ledgers. The factor-one relaxed-theorem catalog enumerates all 82 transition
+labels, 15 relation identities, full-dimension code shapes, correction radii,
+list-size bounds, CFW errors, WHIR MCA terms, challenge dependencies, and an
+extraction-work ceiling. It does not implement or prove the semantic knowledge-
+state function and deterministic extractor required by CDHZ. The emitted-byte
+owner maps static canonical regions and fixed-message candidates to verifier
+consumers and records conditional 98-, 95-, and 92-bit per-proof, public-key-
+union, and complete-inventory arithmetic under the ideal-QRO assumption. A live
+small Merkle response derives
 its schedule from the canonical transcript and freshly verifies transported
 bytes with hostile mutations. The reduced production-family integration owner
 additionally reaches verified CFW claims and the production structured
@@ -909,8 +943,10 @@ owner. This reduced reference expansion is not a selected-size performance path
 or resource measurement. Its masks and salts now use the production action-
 private KMAC coin source under a fixed test root, and its canonical cursor
 includes both the private-coin manifest and live WHIR byte position. The exact
-cursor now enters every reduced response boundary's committed-state digest, but
-that boundary is not yet connected to the production generation host.
+cursor now enters every reduced response boundary's committed-state digest, and
+all 24 boundaries publish through the common kernel checkpoint chain. A live
+compact generation state, browser-custody external-memory join, and compact
+deterministic replay remain absent.
 
 The static gate remains closed because current generation does not select the
 compact profile or exercise it through a retained live authority, because row-
@@ -1505,8 +1541,8 @@ Not yet:
   complete concrete QROM composition, emitted proof bytes, or complete-proof
   browser result. Its public-key development slice now has the
   complete structured relation, mask and code-switch catalogs, exact compact
-  CFW algebra and claim batching, the factor-one relaxed extraction theorem,
-  construction-level interactive masking and leakage correspondence, a
+  CFW algebra and claim batching, the factor-one relaxed-theorem catalog,
+  construction-level interactive masking catalog, a
   bounded static CFW lifecycle, one canonical
   Merkle response per logical round, canonical proof and public-input codecs,
   fixed verifier-message decoding, and exact static transcript workload. Those

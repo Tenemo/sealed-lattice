@@ -172,6 +172,11 @@ fn generated_capability_attempt_preflight_refusals_are_retryable() {
         [0x35; HASH_BYTE_LENGTH],
         [0x36; HASH_BYTE_LENGTH],
         [0x37; HASH_BYTE_LENGTH],
+        CommonProofGenerationTestCheckpointAuthority::new(
+            [0x91; 32],
+            [0x92; 32],
+            Hash512::from_bytes([0x93; HASH_BYTE_LENGTH]),
+        ),
     )
     .expect("the live generated-capability test authorization is valid");
     let expected_generation_binding_hash = authorization.binding_hash();

@@ -1027,13 +1027,17 @@ pub(crate) use authorization_registry::{
     PendingCommonProofAuthorizationHandle, VerifiedCommonProofCapabilityHandle,
     durable_authorization_frame_digest,
 };
-#[cfg(test)]
-pub(crate) use generation_worker::MAXIMUM_COMMON_PROOF_GENERATION_CURSOR_MANIFEST_BYTE_LENGTH;
 pub(crate) use generation_worker::{
     AuthenticatedCommonProofGenerationCheckpoint, CommonProofGenerationAuthorization,
     CommonProofGenerationExternalMemoryAccounting, CommonProofGenerationPreparationError,
     CommonProofGenerationSources, CommonProofGenerationWorkerError,
     CommonProofGenerationWorkerPoll, PreparedCommonProofGeneration,
+};
+#[cfg(test)]
+pub(crate) use generation_worker::{
+    CommonProofGenerationCheckpointChain, CommonProofGenerationCheckpointChainAdvance,
+    CommonProofGenerationTestCheckpointAuthority,
+    MAXIMUM_COMMON_PROOF_GENERATION_CURSOR_MANIFEST_BYTE_LENGTH,
 };
 #[cfg(any(test, feature = "primitive-measurement-evidence"))]
 pub(crate) use storage_transport::CommonProofStorageTransactionMemoryGeometry;

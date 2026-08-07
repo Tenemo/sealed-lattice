@@ -177,9 +177,9 @@ pub(crate) use generation_storage::{
 };
 pub(crate) use private_coins::{
     COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_MAGIC, CheckpointableCommonProofPrivateCoinSource,
-    CommonProofPrivateCoinCoordinate, CommonProofPrivateCoinCoordinateCapacity,
-    CommonProofPrivateCoinSource, PrivateRandomnessCommonProofCoinError,
-    PrivateRandomnessCommonProofCoinSource,
+    CommonProofCheckpointCursorManifestError, CommonProofPrivateCoinCoordinate,
+    CommonProofPrivateCoinCoordinateCapacity, CommonProofPrivateCoinSource,
+    PrivateRandomnessCommonProofCoinError, PrivateRandomnessCommonProofCoinSource,
 };
 #[cfg(test)]
 pub(crate) use private_coins::{

@@ -14,10 +14,12 @@ now has a production-derived structured relation and independent interpreter,
 two commitment epochs, all CFW inner and outer masks, code-switch and WHIR
 static catalogs, canonical proof and public-input codecs, one salted Merkle
 commitment per logical response, and complete live-prefix query schedules for
-every production packing geometry. The factor-one relaxed extractor,
-construction-level interactive
-masking correspondence, emitted-byte consumer map, and conditional CDHZ/QROM
-composition are independently checked. The shared two-epoch mask oracle is
+every production packing geometry. The factor-one relaxed-theorem, interactive
+masking, emitted-byte consumer, and conditional CDHZ/QROM modules are checked
+static catalogs. They do not yet supply semantic `KState`/`ERRBR`, independently
+derived production coefficient-to-view matrices, an exact ideal-uniform
+simulator and deployed KMAC quantum-PRF hybrid, or one complete emitted
+production proof. The shared two-epoch mask oracle is
 owned once by the canonical response catalog; its two later verifier-message
 groups open their sorted unique union through bounded canonical response counts.
 These are static development owners, not an accepted proof path.
@@ -30,6 +32,12 @@ are `(26,927,670, 385,505,540, 640,811,508)`,
 eight. Factors one, two, and four remain below every absolute byte bound.
 Factor eight exceeds the scratch bound by `8,672,544` bytes under the complete
 retained-tree lifecycle and is not a static default. No factor is selected.
+Factor one's proof and scratch estimates are `26,927,670` and `640,811,508`
+bytes. They exceed the `7,864,320`-byte proof and `402,653,184`-byte scratch
+automatic-variance bands but remain below their absolute bounds, so they require
+engineering review rather than cryptographic rejection. Its `385,505,540`-byte
+provisional WASM payload remains below the nominal WASM target. Live execution
+must reclassify all three values.
 The retained lifecycle keeps at most ten response trees and peaks at
 `52,952,832`, `105,381,632`, `210,239,232`, or `419,954,432` bytes. Its
 separate root-only alternative needs 18 response replays, but root-only
@@ -37,9 +45,14 @@ commitment, authenticated salt replay, and response-value replay remain
 unimplemented. That alternative is deferred rather than treated as a way to
 rescue factor eight.
 
-The relaxed round-by-round theorem, construction masking correspondence,
-canonical emitted-byte map, and conditional noninteractive soundness owner are
-closed for this standalone geometry. The 316 production schedules now derive
+The relaxed round-by-round, construction masking, canonical emitted-byte, and
+noninteractive soundness catalogs remain conditional for this standalone
+geometry. Their 98/95/92-bit arithmetic is not a theorem result until the
+semantic extractor, exact masking correspondence, and complete emitted proof
+derive. CMS19 root/frontier programming and QROM zero knowledge remain later
+work. Fixed SHAKE256 remains an explicit ideal-QRO assumption; the 2025 quantum
+sponge theorem is quantitatively vacuous at the declared `2^80` query budget
+and does not prove fixed Keccak-f. The 316 production schedules now derive
 from sequential canonical transcripts over the exact public-input and response
 geometries. Each schedule becomes available at its exact last query move and
 refuses both premature and delayed message prefixes. The public input,
@@ -61,12 +74,16 @@ bytes match a separate resident writer; live-prefix schedules drive frontier
 scans and last-use deletion; 1,664 bytes are written and read through 120
 committed transactions and 24 deletions, with a 192-byte retained-tree peak.
 Incremental proof assembly matches the monolithic canonical bytes, and each
-response derives one common checkpoint boundary. A separate delayed
+response derives one common checkpoint boundary. All 24 boundaries now publish
+through the same ordered kernel checkpoint chain as the common generation
+worker. Each authenticated state binds its compact committed-state digest and
+composite private-coin/transcript cursor-manifest digest, and decodes with the
+exact schedule and response ordinal. A separate delayed
 three-response owner keeps two objects live, opens them in order `1, 0, 2`, and
 reconciles 320 bytes written and read, a 256-byte peak, 15 transactions, and
 three deletions. The coordinator and reduced chain remain kernel lifecycle
-evidence; they do not publish or restore an authenticated generation-host
-checkpoint. The selected production public sampler still rejects reduced ring
+evidence; browser custody does not yet append and replay its authenticated
+external-object state for these compact publications. The selected production public sampler still rejects reduced ring
 degrees; only a test-only divisor-degree sampler preserves its coordinate
 grammar for this owner. A separate WHIR challenger remains test-only. The fixed
 test action root drives the production action-private KMAC coin source for CFW
@@ -74,8 +91,9 @@ and WHIR masks, domain-separated response salts, and WHIR randomness. A
 canonical cursor combines the private-coin manifest with the live WHIR block
 and buffered-byte position. Every reduced response boundary now commits those
 exact cursor bytes; empty, oversized, and substituted construction cursors are
-refused or change the committed-state digest. The generation host does not yet
-publish or resume that boundary. Live ceremony source authority, browser-rooted
+refused or change the committed-state digest. The common kernel checkpoint
+chain publishes that boundary, but no live compact generation state yet
+reproduces it through browser-custody resume. Live ceremony source authority, browser-rooted
 attempt custody, one canonical production transcript, production public-
 polynomial roots and openings, authenticated restart, selected-size CFW and
 transpose execution, production transport integration, and release-WASM
@@ -105,10 +123,11 @@ roots and salts to the transcript, and binds the exact cursor and exact proof
 prefix bytes into the common checkpoint digest. The reduced chain now
 exercises the retention coordinator, transcript, assembler, and boundary
 connection at small geometry.
-The compact generation host does not yet publish or resume those boundaries or
-join their kernel-bound construction cursor to the common host cursor and
-authenticated external-object deletion state, and selected-size response-value
-custody remains absent.
+The compact committed-state digest and common cursor-manifest digest now share
+one authenticated kernel checkpoint event. The browser host does not yet join
+that event to its authenticated external-object deletion trailer or drive a
+compact execution from genesis through `resume-complete`; internal CFW and WHIR
+safe-boundary cadence and selected-size response-value custody remain absent.
 
 The first public-key-share proof is a standalone development kill gate. It is
 not a fourth outer setup packet. The canonical provisional setup schedule

@@ -92,6 +92,11 @@ use crate::bgv::proof_suite::{
     fixed_uniform_verifier_message::{
         DecodedFixedUniformVerifierMessage, FixedUniformVerifierMessageGeometry,
     },
+    runtime::{
+        AuthenticatedCommonProofGenerationCheckpoint, CommonProofGenerationAuthorization,
+        CommonProofGenerationCheckpointChain, CommonProofGenerationCheckpointChainAdvance,
+        CommonProofGenerationTestCheckpointAuthority,
+    },
 };
 use crate::bgv::setup::{
     SETUP_COMMITMENT_HIDING_ERROR_WIDTH, SETUP_COMMITMENT_HIDING_SECRET_WIDTH,
@@ -100,8 +105,9 @@ use crate::bgv::setup::{
 };
 use crate::foundation::{
     ACTION_RANDOMNESS_ROOT_BYTE_LENGTH, ActionRandomnessDerivationInput, ActionRandomnessRoot,
-    Hash512, ParticipantIdentity, PersistentProofCoinInput, ProofApplicationSlot,
-    ProofApplicationSlotCeilings, SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+    Hash512, ParticipantIdentity, PersistentProofCoinInput, PrivateRandomnessAttemptIdentifier,
+    ProofApplicationSlot, ProofApplicationSlotCeilings,
+    SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
 };
 use crate::hashing::hash_framed_parts_512;
 use crate::transcript_core::encode_hex;
@@ -379,6 +385,7 @@ impl TryCryptoRng for SmallChainKmacRandomSource {}
 
 struct SmallChainAttemptPrivateRandomness {
     private_coins: PrivateRandomnessCommonProofCoinSource,
+    proof_attempt_identifier: [u8; 32],
     response_salt_seed: Zeroizing<[u8; SMALL_CHAIN_PRIVATE_RANDOM_SEED_BYTE_LENGTH]>,
     whir_random_source: SmallChainKmacRandomSource,
 }
@@ -386,14 +393,20 @@ struct SmallChainAttemptPrivateRandomness {
 impl SmallChainAttemptPrivateRandomness {
     fn new(
         mut private_coins: PrivateRandomnessCommonProofCoinSource,
+        proof_attempt_identifier: PrivateRandomnessAttemptIdentifier,
     ) -> Result<Self, PrivateRandomnessCommonProofCoinError> {
         let whir_random_seed = sample_small_chain_private_seed(&mut private_coins)?;
         let response_salt_seed = sample_small_chain_private_seed(&mut private_coins)?;
         Ok(Self {
             private_coins,
+            proof_attempt_identifier: *proof_attempt_identifier.as_bytes(),
             response_salt_seed,
             whir_random_source: SmallChainKmacRandomSource::new(whir_random_seed),
         })
+    }
+
+    const fn proof_attempt_identifier(&self) -> [u8; 32] {
+        self.proof_attempt_identifier
     }
 
     fn sample_extension_element(
@@ -956,6 +969,11 @@ struct BuiltResponse {
     external_tree_usage: ProofExternalMemoryUsage,
 }
 
+struct SmallChainCheckpointPublication {
+    encoded_state: Vec<u8>,
+    cursor_manifest_bytes: Vec<u8>,
+}
+
 fn response_wire_geometry(
     response_ordinal: u32,
     base_field_element_count: u64,
@@ -1021,6 +1039,8 @@ struct SmallChainResponseExecutionContext<'execution, 'geometry> {
     checkpoint_schedule: &'execution CompactResponseCheckpointSchedule,
     response_tree_retention_driver: &'execution mut CompactResponseTreeRetentionDriver<'geometry>,
     response_tree_storage: &'execution mut TestStorage,
+    checkpoint_chain: &'execution mut CommonProofGenerationCheckpointChain,
+    checkpoint_publications: &'execution mut Vec<SmallChainCheckpointPublication>,
 }
 
 fn build_commit_open_and_checkpoint_response(
@@ -1036,6 +1056,8 @@ fn build_commit_open_and_checkpoint_response(
         checkpoint_schedule,
         response_tree_retention_driver,
         response_tree_storage,
+        checkpoint_chain,
+        checkpoint_publications,
     } = execution_context;
     assert!(!leaves.is_empty());
     assert!(leaves.len().is_power_of_two());
@@ -1192,6 +1214,26 @@ fn build_commit_open_and_checkpoint_response(
         &canonical_private_randomness_cursor_bytes,
     )
     .expect("small-chain response publishes one canonical checkpoint boundary");
+    assert_eq!(
+        checkpoint_chain
+            .advance(
+                checkpoint_boundary.clone(),
+                &private_randomness.private_coins,
+            )
+            .expect("the common generation checkpoint chain accepts the compact boundary"),
+        CommonProofGenerationCheckpointChainAdvance::PublicationReady
+    );
+    let pending_checkpoint = checkpoint_chain
+        .pending_checkpoint()
+        .expect("the compact boundary has one common host publication");
+    assert_eq!(pending_checkpoint.safe_boundary_ordinal(), response_ordinal);
+    checkpoint_publications.push(SmallChainCheckpointPublication {
+        encoded_state: pending_checkpoint.encoded_state().to_vec(),
+        cursor_manifest_bytes: pending_checkpoint.cursor_manifest_bytes().to_vec(),
+    });
+    checkpoint_chain
+        .advance_pending_checkpoint()
+        .expect("the common host commits the compact checkpoint publication");
     (
         BuiltResponse {
             wire_input,
@@ -2563,7 +2605,7 @@ fn small_chain_attempt_private_randomness(
         coordinate_capacity,
     )
     .expect("the reduced production-private coin source starts");
-    SmallChainAttemptPrivateRandomness::new(private_coins)
+    SmallChainAttemptPrivateRandomness::new(private_coins, attempt_identifier)
         .expect("the reduced construction-private seeds derive")
 }
 
@@ -3008,6 +3050,56 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         &response_merkle_geometries,
     )
     .expect("small-chain response checkpoint schedule derives");
+    let mut action_context_bytes = [0x23; Hash512::BYTE_LENGTH];
+    action_context_bytes[Hash512::BYTE_LENGTH - 1] = 1;
+    let checkpoint_application_slot = ProofApplicationSlot::new(
+        Hash512::from_bytes([0x21; Hash512::BYTE_LENGTH]),
+        Hash512::from_bytes([0x22; Hash512::BYTE_LENGTH]),
+        Hash512::from_bytes(action_context_bytes),
+        ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+        Some(0),
+        None,
+        None,
+    )
+    .expect("the reduced checkpoint application slot is canonical");
+    let checkpoint_lineage_digest = hash_framed_parts_512(
+        "sealed-lattice/test/production-small-chain-checkpoint-lineage/v1",
+        &[
+            &private_randomness.proof_attempt_identifier(),
+            &checkpoint_schedule
+                .checkpoint_schedule_digest()
+                .into_bytes(),
+        ],
+    );
+    let mut checkpoint_lineage_identifier = [0_u8; 32];
+    checkpoint_lineage_identifier.copy_from_slice(&checkpoint_lineage_digest[..32]);
+    let checkpoint_authorization =
+        CommonProofGenerationAuthorization::from_genuine_test_application(
+            1,
+            checkpoint_application_slot,
+            hash_framed_parts_512(
+                SMALL_CHAIN_PRIVATE_COIN_STATEMENT_DOMAIN,
+                &[&canonical_public_input_bytes],
+            ),
+            hash_framed_parts_512(
+                "sealed-lattice/test/production-small-chain-proof-header/v1",
+                &[&canonical_public_input_bytes],
+            ),
+            relation.relation_plan_hash(),
+            relation_plan_variant
+                .canonical_hash()
+                .expect("the reduced relation variant hashes canonically"),
+            CommonProofGenerationTestCheckpointAuthority::new(
+                private_randomness.proof_attempt_identifier(),
+                checkpoint_lineage_identifier,
+                checkpoint_schedule.checkpoint_schedule_digest(),
+            ),
+        )
+        .expect("the reduced compact checkpoint authorization is canonical");
+    let mut checkpoint_chain =
+        CommonProofGenerationCheckpointChain::at_genesis(checkpoint_authorization)
+            .expect("the reduced common checkpoint chain starts at genesis");
+    let mut checkpoint_publications = Vec::with_capacity(proof_wire_geometry.responses().len());
     let mut proof_wire_assembler = CompactProofWireAssembler::new(&proof_wire_geometry)
         .expect("small-chain incremental proof assembler starts");
     let mut response_tree_retention_driver = CompactResponseTreeRetentionDriver::new(
@@ -3037,6 +3129,8 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
             checkpoint_schedule: &checkpoint_schedule,
             response_tree_retention_driver: &mut response_tree_retention_driver,
             response_tree_storage: &mut response_tree_storage,
+            checkpoint_chain: &mut checkpoint_chain,
+            checkpoint_publications: &mut checkpoint_publications,
         },
     );
     let lookup_message = prover_verifier_messages
@@ -3399,6 +3493,8 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
             checkpoint_schedule: &checkpoint_schedule,
             response_tree_retention_driver: &mut response_tree_retention_driver,
             response_tree_storage: &mut response_tree_storage,
+            checkpoint_chain: &mut checkpoint_chain,
+            checkpoint_publications: &mut checkpoint_publications,
         },
     );
     let cross_epoch_message = prover_verifier_messages
@@ -3457,6 +3553,8 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
                 checkpoint_schedule: &checkpoint_schedule,
                 response_tree_retention_driver: &mut response_tree_retention_driver,
                 response_tree_storage: &mut response_tree_storage,
+                checkpoint_chain: &mut checkpoint_chain,
+                checkpoint_publications: &mut checkpoint_publications,
             },
         );
     let initial_cfw_message = prover_verifier_messages
@@ -3526,6 +3624,8 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
                 checkpoint_schedule: &checkpoint_schedule,
                 response_tree_retention_driver: &mut response_tree_retention_driver,
                 response_tree_storage: &mut response_tree_storage,
+                checkpoint_chain: &mut checkpoint_chain,
+                checkpoint_publications: &mut checkpoint_publications,
             },
         );
         let round_message = prover_verifier_messages
@@ -3601,6 +3701,8 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
             checkpoint_schedule: &checkpoint_schedule,
             response_tree_retention_driver: &mut response_tree_retention_driver,
             response_tree_storage: &mut response_tree_storage,
+            checkpoint_chain: &mut checkpoint_chain,
+            checkpoint_publications: &mut checkpoint_publications,
         },
     );
     let external_final_response_values = external_output
@@ -3637,6 +3739,47 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
     assert_eq!(
         checkpoint_boundaries.len(),
         proof_wire_geometry.responses().len()
+    );
+    assert_eq!(
+        checkpoint_publications.len(),
+        proof_wire_geometry.responses().len()
+    );
+    assert!(checkpoint_chain.pending_checkpoint().is_none());
+    for (response_ordinal, publication) in checkpoint_publications.iter().enumerate() {
+        let authenticated_checkpoint = AuthenticatedCommonProofGenerationCheckpoint::decode(
+            &publication.encoded_state,
+            &publication.cursor_manifest_bytes,
+        )
+        .expect("the common host authenticates the exact compact checkpoint publication");
+        assert_eq!(
+            usize::try_from(authenticated_checkpoint.safe_boundary_ordinal())
+                .expect("the compact checkpoint ordinal fits usize"),
+            response_ordinal
+        );
+        assert_eq!(
+            authenticated_checkpoint.checkpoint_schedule_digest(),
+            checkpoint_schedule.checkpoint_schedule_digest()
+        );
+    }
+    assert_ne!(
+        checkpoint_publications
+            .first()
+            .expect("the first compact checkpoint publication exists")
+            .encoded_state,
+        checkpoint_publications
+            .last()
+            .expect("the final compact checkpoint publication exists")
+            .encoded_state
+    );
+    assert_ne!(
+        checkpoint_publications
+            .first()
+            .expect("the first compact checkpoint publication exists")
+            .cursor_manifest_bytes,
+        checkpoint_publications
+            .last()
+            .expect("the final compact checkpoint publication exists")
+            .cursor_manifest_bytes
     );
     assert_eq!(response_tree_storage.committed_object_count(), 0);
     let expected_response_tree_byte_length = response_merkle_geometries
