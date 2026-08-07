@@ -18,13 +18,15 @@ use crate::hashing::StreamingHash512;
 const COMPACT_RESPONSE_CHECKPOINT_SCHEDULE_DIGEST_DOMAIN: &str =
     "sealed-lattice/proof/compact-response-checkpoint-schedule/v1";
 const COMPACT_RESPONSE_CHECKPOINT_COMMITTED_STATE_DIGEST_DOMAIN: &str =
-    "sealed-lattice/proof/compact-response-checkpoint-committed-state/v1";
+    "sealed-lattice/proof/compact-response-checkpoint-committed-state/v2";
 const COMPACT_RESPONSE_CHECKPOINT_POSITION_VERSION: u8 = 1;
 const COMPACT_RESPONSE_CHECKPOINT_POSITION_STAGE: u8 = 1;
+const MAXIMUM_COMPACT_CONSTRUCTION_PRIVATE_RANDOMNESS_CURSOR_BYTE_LENGTH: usize = 16 * 1_024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CompactGenerationCheckpointError {
     InvalidGeometry,
+    InvalidPrivateRandomnessCursor,
     LengthOverflow,
     WrongResponseBoundary,
     ResponseMerkle(CompactResponseMerkleError),
@@ -182,14 +184,23 @@ impl CompactResponseCheckpointSchedule {
 }
 
 /// Constructs the common checkpoint boundary consumed by the authenticated
-/// generation host. The host separately binds the suite and action context,
-/// proof attempt and source authority, private-randomness cursor, external
-/// object identities and digests, and deletion state.
+/// generation host. The committed state additionally binds the compact
+/// construction's private-randomness cursor, including state owned below the
+/// common private-coin source. The host separately binds the suite and action
+/// context, proof attempt and source authority, the common private-coin cursor
+/// manifest, external object identities and digests, and deletion state.
 pub(crate) fn compact_response_generation_checkpoint_boundary(
     checkpoint_schedule: &CompactResponseCheckpointSchedule,
     prover_transcript: &CompactProverTranscript<'_>,
     proof_wire_assembler: &CompactProofWireAssembler<'_>,
+    canonical_construction_private_randomness_cursor_bytes: &[u8],
 ) -> Result<CommonProofGenerationCheckpointBoundary, CompactGenerationCheckpointError> {
+    if canonical_construction_private_randomness_cursor_bytes.is_empty()
+        || canonical_construction_private_randomness_cursor_bytes.len()
+            > MAXIMUM_COMPACT_CONSTRUCTION_PRIVATE_RANDOMNESS_CURSOR_BYTE_LENGTH
+    {
+        return Err(CompactGenerationCheckpointError::InvalidPrivateRandomnessCursor);
+    }
     let completed_transcript_response_count = prover_transcript.completed_response_count();
     if prover_transcript.total_response_count() != checkpoint_schedule.total_response_count() {
         return Err(CompactGenerationCheckpointError::InvalidGeometry);
@@ -225,11 +236,12 @@ pub(crate) fn compact_response_generation_checkpoint_boundary(
     let transcript_cursor = prover_transcript.checkpoint_cursor()?;
     let transcript_cursor_digest = transcript_cursor.digest();
     let mut committed_state_hasher =
-        StreamingHash512::new(COMPACT_RESPONSE_CHECKPOINT_COMMITTED_STATE_DIGEST_DOMAIN, 4);
+        StreamingHash512::new(COMPACT_RESPONSE_CHECKPOINT_COMMITTED_STATE_DIGEST_DOMAIN, 5);
     committed_state_hasher.absorb_part(&position);
     committed_state_hasher.absorb_part(&checkpoint_schedule.dependency_digest);
     committed_state_hasher.absorb_part(transcript_cursor.canonical_bytes());
     committed_state_hasher.absorb_part(proof_wire_assembler.canonical_prefix_bytes());
+    committed_state_hasher.absorb_part(canonical_construction_private_randomness_cursor_bytes);
     let committed_state_digest = committed_state_hasher.finalize();
 
     Ok(CommonProofGenerationCheckpointBoundary::new(
@@ -262,6 +274,8 @@ mod tests {
     };
 
     const RESPONSE_COUNT: usize = 4;
+    const CONSTRUCTION_PRIVATE_RANDOMNESS_CURSOR_BYTES: &[u8] =
+        b"canonical compact construction private-randomness cursor";
 
     fn verifier_message_geometry(
         logical_verifier_move_ordinal: u32,
@@ -509,9 +523,13 @@ mod tests {
         for verifier_move_ordinal in 0..RESPONSE_COUNT {
             record_response_and_derive_message(&mut transcript, verifier_move_ordinal);
             append_available_responses(&mut assembler, &responses, verifier_move_ordinal);
-            let boundary =
-                compact_response_generation_checkpoint_boundary(&schedule, &transcript, &assembler)
-                    .expect("response checkpoint boundary");
+            let boundary = compact_response_generation_checkpoint_boundary(
+                &schedule,
+                &transcript,
+                &assembler,
+                CONSTRUCTION_PRIVATE_RANDOMNESS_CURSOR_BYTES,
+            )
+            .expect("response checkpoint boundary");
             assert_eq!(
                 boundary.safe_boundary_ordinal(),
                 u32::try_from(verifier_move_ordinal).expect("small verifier move")
@@ -563,6 +581,7 @@ mod tests {
                 &schedule,
                 &restored_transcript,
                 &restored_assembler,
+                CONSTRUCTION_PRIVATE_RANDOMNESS_CURSOR_BYTES,
             )
             .expect("reconstructed checkpoint boundary"),
             retained_boundary.clone()
@@ -642,9 +661,13 @@ mod tests {
             assembler.canonical_prefix_bytes().len(),
             PROOF_FIXED_HEADER_BYTE_LENGTH
         );
-        let boundary =
-            compact_response_generation_checkpoint_boundary(&schedule, &transcript, &assembler)
-                .expect("header-only durable boundary");
+        let boundary = compact_response_generation_checkpoint_boundary(
+            &schedule,
+            &transcript,
+            &assembler,
+            CONSTRUCTION_PRIVATE_RANDOMNESS_CURSOR_BYTES,
+        )
+        .expect("header-only durable boundary");
 
         let restored_transcript = CompactProverTranscript::restore_from_checkpoint_cursor(
             &proof_geometry,
@@ -667,6 +690,7 @@ mod tests {
                 &schedule,
                 &restored_transcript,
                 &restored_assembler,
+                CONSTRUCTION_PRIVATE_RANDOMNESS_CURSOR_BYTES,
             )
             .unwrap(),
             boundary
@@ -699,8 +723,42 @@ mod tests {
             &schedule,
             &transcript,
             &canonical_assembler,
+            CONSTRUCTION_PRIVATE_RANDOMNESS_CURSOR_BYTES,
         )
         .expect("canonical checkpoint boundary");
+        assert_eq!(
+            compact_response_generation_checkpoint_boundary(
+                &schedule,
+                &transcript,
+                &canonical_assembler,
+                &[],
+            ),
+            Err(CompactGenerationCheckpointError::InvalidPrivateRandomnessCursor)
+        );
+        let oversized_private_randomness_cursor =
+            vec![0x41; MAXIMUM_COMPACT_CONSTRUCTION_PRIVATE_RANDOMNESS_CURSOR_BYTE_LENGTH + 1];
+        assert_eq!(
+            compact_response_generation_checkpoint_boundary(
+                &schedule,
+                &transcript,
+                &canonical_assembler,
+                &oversized_private_randomness_cursor,
+            ),
+            Err(CompactGenerationCheckpointError::InvalidPrivateRandomnessCursor)
+        );
+        let changed_private_randomness_cursor_boundary =
+            compact_response_generation_checkpoint_boundary(
+                &schedule,
+                &transcript,
+                &canonical_assembler,
+                b"changed compact construction private-randomness cursor",
+            )
+            .expect("changed private-randomness cursor remains canonical");
+        assert_ne!(
+            changed_private_randomness_cursor_boundary.committed_state_digest(),
+            canonical_boundary.committed_state_digest(),
+            "the exact compact construction private-randomness cursor must enter the committed checkpoint state"
+        );
 
         let mut over_advanced_assembler = CompactProofWireAssembler::new(&proof_geometry).unwrap();
         over_advanced_assembler
@@ -714,6 +772,7 @@ mod tests {
                 &schedule,
                 &transcript,
                 &over_advanced_assembler,
+                CONSTRUCTION_PRIVATE_RANDOMNESS_CURSOR_BYTES,
             ),
             Err(CompactGenerationCheckpointError::WrongResponseBoundary)
         );
@@ -729,6 +788,7 @@ mod tests {
                 &schedule,
                 &transcript,
                 &substituted_root_assembler,
+                CONSTRUCTION_PRIVATE_RANDOMNESS_CURSOR_BYTES,
             ),
             Err(CompactGenerationCheckpointError::Transcript(
                 CompactTranscriptError::WrongCheckpointCursor
@@ -744,6 +804,7 @@ mod tests {
             &schedule,
             &transcript,
             &changed_value_assembler,
+            CONSTRUCTION_PRIVATE_RANDOMNESS_CURSOR_BYTES,
         )
         .expect("root-and-salt-compatible changed response bytes");
         assert_ne!(
@@ -758,6 +819,7 @@ mod tests {
                 &schedule,
                 &transcript,
                 &canonical_assembler,
+                CONSTRUCTION_PRIVATE_RANDOMNESS_CURSOR_BYTES,
             ),
             Err(CompactGenerationCheckpointError::WrongResponseBoundary)
         );

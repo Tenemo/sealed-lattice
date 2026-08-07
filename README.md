@@ -363,9 +363,12 @@ Its fixed test action root now enters the production action-private KMAC custody
 the hiding coordinate supplies every CFW and WHIR mask sample plus independent
 WHIR and response-salt seeds, leaf salts bind the complete response-leaf
 geometry, round salts use a separate KMAC domain, and the canonical randomness
-cursor combines the private-coin manifest with the live WHIR block and buffered-
-byte position. A focused owner checks replay parity, attempt separation,
-geometry separation, and cursor movement. This is production private-coin
+cursor combines the private-coin manifest with the live WHIR block and
+buffered-byte position. Every reduced response boundary now commits those exact
+cursor bytes into its compact committed-state digest; empty, oversized, and
+substituted cursors are refused or produce a distinct digest. A focused owner
+checks replay parity, attempt separation, geometry separation, and cursor
+movement. This is production private-coin
 machinery driven by a deterministic test root, not browser entropy or an
 authenticated resume integration. A test-only canonical envelope assigns the outer
 CFW proof, five external roots, pre-challenge WHIR proof, and main WHIR proof to
@@ -686,11 +689,13 @@ of 76 response boundaries are encoder-lagged; the maximum pending canonical
 section counts are 80, 78, 76, and 74. At each response boundary the owner
 requires the exact schedule-derived prefix count, checks every available root
 and round salt against the transcript, and binds the schedule, two progress
-counters, exact transcript cursor, and every byte of the current canonical
-proof prefix into the common checkpoint boundary. Focused coverage includes a
+counters, exact transcript cursor, every byte of the current canonical proof
+prefix, and a nonempty bounded construction-private randomness cursor into the
+common checkpoint boundary. Focused coverage includes a
 canonical header-only prefix, a later response that is ready behind an earlier
 unavailable section, exact reconstruction, wrong progress, root substitution,
-premature query sources, and changed response values. The
+premature query sources, changed response values, and empty, oversized, or
+substituted construction cursors. The
 generic common-proof browser custody now appends one authenticated 64-byte
 external-memory state digest to each mutable checkpoint state stream. That
 digest binds the environment, runtime and proof attempt, every sorted live
@@ -708,10 +713,11 @@ assembler, and common checkpoint boundary for all 24 responses. It reconciles
 1,664 bytes written and read through 120 transactions and 24 last-use
 deletions. Every tree reaches last use in its own verifier move, so the maximum
 concurrently retained tree bytes are 192. This remains small-geometry
-development evidence: the boundary is not published or resumed by the
-authenticated generation host, its private-randomness cursor and external-
-object deletion state are not joined into one host checkpoint, and selected-
-size response-value custody is absent. The selected retained lifecycle therefore
+development evidence: the construction-private cursor is bound inside the
+kernel boundary, but the boundary is not published or resumed by the
+authenticated generation host, the common host cursor and external-object
+deletion state are not joined to it, and selected-size response-value custody
+is absent. The selected retained lifecycle therefore
 still has zero authenticated restart records, so interruption requires one
 complete-attempt replay.
 
@@ -902,8 +908,9 @@ production-transcript, authenticated-resume, selected-size, or zero-knowledge
 owner. This reduced reference expansion is not a selected-size performance path
 or resource measurement. Its masks and salts now use the production action-
 private KMAC coin source under a fixed test root, and its canonical cursor
-includes both the private-coin manifest and live WHIR byte position; neither is
-yet connected to the production generation host.
+includes both the private-coin manifest and live WHIR byte position. The exact
+cursor now enters every reduced response boundary's committed-state digest, but
+that boundary is not yet connected to the production generation host.
 
 The static gate remains closed because current generation does not select the
 compact profile or exercise it through a retained live authority, because row-

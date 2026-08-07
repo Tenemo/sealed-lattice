@@ -72,13 +72,16 @@ grammar for this owner. A separate WHIR challenger remains test-only. The fixed
 test action root drives the production action-private KMAC coin source for CFW
 and WHIR masks, domain-separated response salts, and WHIR randomness. A
 canonical cursor combines the private-coin manifest with the live WHIR block
-and buffered-byte position, but the generation host does not yet authenticate
-or resume it. Live ceremony source authority, browser-rooted attempt custody,
-one canonical production transcript, production public-polynomial roots and
-openings, authenticated restart, selected-size CFW and transpose execution,
-production transport integration, and release-WASM browser evidence remain
-open. The reduced nonzero public-matrix expansion is correctness evidence, not
-selected-size performance evidence. After those gates pass, factor one is the
+and buffered-byte position. Every reduced response boundary now commits those
+exact cursor bytes; empty, oversized, and substituted construction cursors are
+refused or change the committed-state digest. The generation host does not yet
+publish or resume that boundary. Live ceremony source authority, browser-rooted
+attempt custody, one canonical production transcript, production public-
+polynomial roots and openings, authenticated restart, selected-size CFW and
+transpose execution, production transport integration, and release-WASM
+browser evidence remain open. The reduced nonzero public-matrix expansion is
+correctness evidence, not selected-size performance evidence. After those gates
+pass, factor one is the
 first selected-size execution target; factors two and four
 are measured only if verification or transport tradeoffs require them. The
 row-code vectors and historical factor-eight root measurement do not transfer
@@ -103,8 +106,9 @@ prefix bytes into the common checkpoint digest. The reduced chain now
 exercises the retention coordinator, transcript, assembler, and boundary
 connection at small geometry.
 The compact generation host does not yet publish or resume those boundaries or
-join them to the private-randomness cursor and authenticated external-object
-deletion state, and selected-size response-value custody remains absent.
+join their kernel-bound construction cursor to the common host cursor and
+authenticated external-object deletion state, and selected-size response-value
+custody remains absent.
 
 The first public-key-share proof is a standalone development kill gate. It is
 not a fourth outer setup packet. The canonical provisional setup schedule

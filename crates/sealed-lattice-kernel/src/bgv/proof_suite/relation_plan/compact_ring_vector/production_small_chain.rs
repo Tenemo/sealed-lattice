@@ -470,7 +470,7 @@ impl SmallChainAttemptPrivateRandomness {
         salt
     }
 
-    fn canonical_randomness_cursor_bytes(&self) -> Vec<u8> {
+    fn canonical_construction_private_randomness_cursor_bytes(&self) -> Vec<u8> {
         let private_coin_cursor_manifest = self
             .private_coins
             .checkpoint_cursor_manifest()
@@ -1183,10 +1183,13 @@ fn build_commit_open_and_checkpoint_response(
     proof_wire_assembler
         .append_response(&wire_input)
         .expect("small-chain external response appends to the canonical proof prefix");
+    let canonical_private_randomness_cursor_bytes =
+        private_randomness.canonical_construction_private_randomness_cursor_bytes();
     let checkpoint_boundary = compact_response_generation_checkpoint_boundary(
         checkpoint_schedule,
         prover_transcript,
         proof_wire_assembler,
+        &canonical_private_randomness_cursor_bytes,
     )
     .expect("small-chain response publishes one canonical checkpoint boundary");
     (
@@ -2589,11 +2592,14 @@ fn production_small_chain_private_randomness_binds_attempt_geometry_and_live_cur
         2,
     );
 
-    let initial_cursor = first.canonical_randomness_cursor_bytes();
-    assert_eq!(initial_cursor, replayed.canonical_randomness_cursor_bytes());
+    let initial_cursor = first.canonical_construction_private_randomness_cursor_bytes();
+    assert_eq!(
+        initial_cursor,
+        replayed.canonical_construction_private_randomness_cursor_bytes()
+    );
     assert_ne!(
         initial_cursor,
-        changed_attempt.canonical_randomness_cursor_bytes()
+        changed_attempt.canonical_construction_private_randomness_cursor_bytes()
     );
 
     let first_extension = first
@@ -2607,7 +2613,10 @@ fn production_small_chain_private_randomness_binds_attempt_geometry_and_live_cur
         .expect("the changed-attempt extension element samples");
     assert_eq!(first_extension, replayed_extension);
     assert_ne!(first_extension, changed_extension);
-    assert_ne!(initial_cursor, first.canonical_randomness_cursor_bytes());
+    assert_ne!(
+        initial_cursor,
+        first.canonical_construction_private_randomness_cursor_bytes()
+    );
 
     let leaf = OwnedResponseLeaf::Base(vec![
         ProofBaseFieldElement::from_canonical(7).expect("seven is canonical"),
@@ -2629,7 +2638,7 @@ fn production_small_chain_private_randomness_binds_attempt_geometry_and_live_cur
         first.fiat_shamir_round_salt(3)
     );
 
-    let cursor_before_whir = first.canonical_randomness_cursor_bytes();
+    let cursor_before_whir = first.canonical_construction_private_randomness_cursor_bytes();
     let mut first_whir_bytes = [0_u8; 97];
     let mut replayed_whir_bytes = [0_u8; 97];
     first
@@ -2643,11 +2652,11 @@ fn production_small_chain_private_randomness_binds_attempt_geometry_and_live_cur
     assert_eq!(first_whir_bytes, replayed_whir_bytes);
     assert_ne!(
         cursor_before_whir,
-        first.canonical_randomness_cursor_bytes()
+        first.canonical_construction_private_randomness_cursor_bytes()
     );
     assert_eq!(
-        first.canonical_randomness_cursor_bytes(),
-        replayed.canonical_randomness_cursor_bytes()
+        first.canonical_construction_private_randomness_cursor_bytes(),
+        replayed.canonical_construction_private_randomness_cursor_bytes()
     );
 }
 
