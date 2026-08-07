@@ -25,6 +25,29 @@ pub(crate) struct TestStorage {
     committed_transaction_count: u64,
 }
 
+impl TestStorage {
+    pub(crate) fn committed_object_bytes(
+        &self,
+        object: ProofExternalMemoryObject,
+    ) -> Option<&[u8]> {
+        self.committed
+            .get(&object)
+            .map(|stored_object| stored_object.bytes.as_slice())
+    }
+
+    pub(crate) fn committed_object_count(&self) -> usize {
+        self.committed.len()
+    }
+
+    pub(crate) fn deleted_object_count(&self) -> usize {
+        self.deleted_objects.len()
+    }
+
+    pub(crate) const fn committed_transaction_count(&self) -> u64 {
+        self.committed_transaction_count
+    }
+}
+
 impl ProofExternalMemory for TestStorage {
     type Error = TestStorageError;
 

@@ -55,7 +55,13 @@ public-key-share and anchor coefficients through the shared production
 equations from deterministic test witness and public-seed material. It serves
 202 canonical 8,192-byte coefficient objects, totaling 1,654,784 authenticated
 external bytes, and refuses truncation, mutation, and equal-length cross-object
-substitution. The selected production public sampler still rejects reduced ring
+substitution. All 24 reduced responses now use the transactional external-tree
+driver before their roots enter the transcript. Exact stored postorder bytes
+match a separate resident writer; live-prefix schedules drive frontier
+scans and last-use deletion; 1,664 bytes are written and read through 120
+committed transactions and 24 deletions. Incremental proof assembly matches the
+monolithic canonical bytes, and each response derives one common checkpoint
+boundary. The selected production public sampler still rejects reduced ring
 degrees; only a test-only divisor-degree sampler preserves its coordinate
 grammar for this owner. A separate WHIR challenger remains test-only. The fixed
 test action root drives the production action-private KMAC coin source for CFW
@@ -88,9 +94,11 @@ the production Merkle query dependencies. The four packing geometries have
 lagged-boundary, and maximum-pending-section counts. Every response boundary
 checks the schedule-derived canonical prefix length, matches its available
 roots and salts to the transcript, and binds the exact cursor and exact proof
-prefix bytes into the common checkpoint digest. The compact generation host
-does not yet publish or resume those boundaries, and selected-size response-
-value and private-randomness custody remains absent.
+prefix bytes into the common checkpoint digest. The reduced chain now exercises
+that tree, transcript, assembler, and boundary connection at small geometry.
+The compact generation host does not yet publish or resume those boundaries or
+join them to the private-randomness cursor and authenticated external-object
+deletion state, and selected-size response-value custody remains absent.
 
 The first public-key-share proof is a standalone development kill gate. It is
 not a fourth outer setup packet. The canonical provisional setup schedule

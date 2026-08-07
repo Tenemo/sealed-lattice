@@ -323,11 +323,17 @@ path from a deterministic common secret, eta-two error, public setup seed,
 public-key-share equation, and lattice-anchor construction. It stores each
 1,024-coefficient polynomial as one canonical 8,192-byte authenticated object,
 for 1,654,784 external bytes in total, and drives every object through the
-authenticated-provider contract. It derives each CFW challenge from the
-preceding canonical retained-tree commitment and compares resident and external
-round polynomials, retained tree bytes, transcript messages, and final values.
-A fresh path decodes the
-transported public-input and proof bytes, verifies every opening and the CFW
+authenticated-provider contract. For all 24 reduced responses, the existing
+transactional external-tree driver now writes and seals the exact postorder
+tree before its root enters the transcript. The stored bytes match a separate
+resident writer byte for byte; the opening schedule derives at the
+live last-query prefix; and the driver scans and deletes the tree before the
+next response. The slice writes and reads 1,664 bytes through 120 committed
+transactions and 24 last-use deletions. Its incremental proof bytes equal the
+monolithic encoder, and every response yields the common canonical checkpoint
+boundary. It also compares resident and external CFW round polynomials,
+transcript messages, and final values. A fresh path decodes the transported
+public-input and proof bytes, verifies every opening and the CFW
 transcript, and matches the pollable structured transpose to the independent
 direct claim combination coefficient for coefficient at main WHIR's actual
 batching challenge. Its test-only commitment construction commits the
@@ -534,8 +540,8 @@ preparation, and `77,348,928` for the ready row source. The source wrapper,
 checked relation and variant, assignment cursor, matrix catalogs, transform
 buffers, and ready row-source controls are included. Ceremony-path compact
 selection, compact-state integration with the authenticated host checkpoint,
-connection of the incremental
-proof encoder to actual response roots and transcript lifecycle controls,
+selected-size connection of the incremental proof encoder to actual response
+roots and transcript lifecycle controls,
 completion of the selected-size CFW lifecycle, live selected-size
 CFW-to-transpose driving, selected-size transpose execution, and the WHIR
 invocation remain hard static gates.
@@ -684,12 +690,15 @@ reconstructed digest matches at `resume-complete`. Focused host coverage accepts
 successive checkpoints after the live set changes and refuses an incomplete
 replay, reversed deletion order, changed payload, substituted state digest, and
 transactions outside the replay phase, including incomplete live objects and
-unsealed deletion. This is retained-tree restart infrastructure, not compact
-proof integration. The compact response boundary is not yet published or
-resumed by the generation host, and selected-size response-value and private-
-randomness custody is absent. The connected retained lifecycle therefore still
-has zero authenticated restart records, so interruption requires one complete-
-attempt replay.
+unsealed deletion. The reduced production-shaped chain now connects this tree
+driver, the live-prefix schedule, incremental proof assembler, and common
+checkpoint boundary for all 24 of its responses. This remains small-geometry
+development evidence: the boundary is not published or resumed by the
+authenticated generation host, its private-randomness cursor and external-
+object deletion state are not joined into one host checkpoint, and selected-
+size response-value custody is absent. The selected retained lifecycle therefore
+still has zero authenticated restart records, so interruption requires one
+complete-attempt replay.
 
 A separately measured root-only recomputation alternative would replay 18
 responses for every factor and add `(557,056, 557,038)`,
@@ -852,7 +861,10 @@ and conditional complete-inventory bounds. A live small Merkle response derives
 its schedule from the canonical transcript and freshly verifies transported
 bytes with hostile mutations. The reduced production-family integration owner
 additionally reaches verified CFW claims and the production structured
-transpose with resident/external and retained-tree byte parity. Its
+transpose. Its 24 response roots come from transactional external trees whose
+stored bytes match the resident writer exactly; live-prefix scans delete every
+tree at last use, and incremental proof bytes and common checkpoint boundaries
+match the canonical transcript chronology. Its
 authenticated source owner derives nonzero public-key and anchor coefficients
 through the shared production equations, serves 202 canonical coefficient
 objects totaling 1,654,784 bytes, and refuses truncation, mutation, and equal-
