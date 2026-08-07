@@ -627,12 +627,17 @@ names the exact later verifier move and distinct-query group that selects it.
 The production registry covers every query group, permits the intended shared
 groups, refuses premature or unused sources, and follows WHIR's active-source
 order: a newly committed source is queried by the next round or by final
-queries, while code-switch masks use their final mask groups. A focused
-all-factor owner derives complete fixed verifier messages from deterministic
-test transcript states and constructs every response schedule one at a time.
-All 316 schedules have exact sorted leaf counts and owned heap bytes, their
-factor totals reconcile, and a truncated message registry is refused. These
-test states do not establish live prover transcript driving.
+queries, while code-switch masks use their final mask groups. A focused all-
+factor owner now starts from one canonical test public-input encoding for each
+production geometry, records distinct deterministic test commitments and round
+salts in verifier order, and derives every fixed verifier message from the
+actual preceding
+transcript prefix. It derives each response schedule at exactly that response's
+last query move and refuses both a shorter premature prefix and a longer delayed
+prefix. All 316 live-prefix schedules have exact sorted leaf counts and owned
+heap bytes, and their factor totals reconcile. This closes the independently
+fabricated message-state gap for schedule chronology; it does not construct
+production response values or trees, publish checkpoints, or drive a prover.
 
 The complete retained-tree lifecycle commits each canonical postorder tree
 before its verifier move and keeps it through its last query source. It retains

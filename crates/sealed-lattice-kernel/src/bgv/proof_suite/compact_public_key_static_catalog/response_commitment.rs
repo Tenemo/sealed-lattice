@@ -1640,8 +1640,12 @@ fn final_mask_query_group_ordinal(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bgv::proof_suite::compact_proof_wire::{
+        CompactPublicInputBindings, decode_compact_public_input, encode_compact_public_input,
+    };
     use crate::bgv::proof_suite::compact_public_key_static_catalog::CompactPublicKeyStaticCatalog;
-    use crate::bgv::proof_suite::fixed_uniform_verifier_message::derive_fixed_uniform_verifier_message;
+    use crate::bgv::proof_suite::compact_transcript::CompactProverTranscript;
+    use crate::bgv::proof_suite::field::ProofBaseFieldElement;
     use crate::foundation::Hash512;
 
     #[test]
@@ -1842,9 +1846,10 @@ mod tests {
     }
 
     #[test]
-    fn every_production_response_derives_one_exact_schedule_from_complete_messages() {
+    fn every_production_response_derives_one_exact_schedule_at_its_live_last_query_boundary() {
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
+        let mut complete_response_schedule_count = 0_usize;
 
         for factor in &catalog.factor_catalogs {
             let wire_geometries = factor
@@ -1857,27 +1862,64 @@ mod tests {
                 .expect("production response Merkle geometries");
             CompactResponseQuerySchedule::validate_registry(&merkle_geometries, &wire_geometries)
                 .expect("complete production response query registry");
-            let verifier_messages = (0..factor.uniform_verifier_randomness.move_count())
-                .map(|move_ordinal| {
-                    let mut starting_transcript_state_bytes = [0_u8; Hash512::BYTE_LENGTH];
-                    starting_transcript_state_bytes[..8]
-                        .copy_from_slice(&factor.packing_factor.to_le_bytes());
-                    starting_transcript_state_bytes[8..16].copy_from_slice(
-                        &u64::try_from(move_ordinal)
-                            .expect("move ordinal fits u64")
-                            .to_le_bytes(),
-                    );
-                    derive_fixed_uniform_verifier_message(
-                        Hash512::from_bytes(starting_transcript_state_bytes),
-                        u32::try_from(move_ordinal).expect("move ordinal fits u32"),
-                        &factor
-                            .uniform_verifier_randomness
-                            .fixed_message_geometry(move_ordinal)
-                            .expect("fixed verifier-message geometry"),
-                    )
-                    .expect("complete decoded verifier message")
-                })
-                .collect::<Vec<_>>();
+            let public_input_bindings = CompactPublicInputBindings::new(
+                Hash512::from_bytes([0x21_u8; Hash512::BYTE_LENGTH]),
+                Hash512::from_bytes([0x22_u8; Hash512::BYTE_LENGTH]),
+                Hash512::from_bytes([0x23_u8; Hash512::BYTE_LENGTH]),
+                Hash512::from_bytes(catalog.relation_plan_hash),
+            );
+            let public_input_values =
+                vec![
+                    ProofBaseFieldElement::ZERO;
+                    usize::try_from(factor.public_input_wire_geometry.field_element_count())
+                        .expect("production public-input count fits usize")
+                ];
+            let canonical_public_input_bytes = encode_compact_public_input(
+                factor.public_input_wire_geometry,
+                public_input_bindings,
+                &public_input_values,
+            )
+            .expect("production public input encodes canonically");
+            drop(public_input_values);
+            let decoded_public_input = decode_compact_public_input(
+                factor.public_input_wire_geometry,
+                public_input_bindings,
+                &canonical_public_input_bytes,
+            )
+            .expect("production public input decodes canonically");
+            let mut transcript = CompactProverTranscript::new(
+                &factor.proof_wire_geometry,
+                &decoded_public_input,
+                &canonical_public_input_bytes,
+            )
+            .expect("production transcript starts");
+            let mut verifier_messages = Vec::with_capacity(wire_geometries.len());
+            for response_ordinal in 0..wire_geometries.len() {
+                let response_ordinal =
+                    u32::try_from(response_ordinal).expect("production response ordinal fits u32");
+                let mut response_root = [0x41_u8; Hash512::BYTE_LENGTH];
+                response_root[..8].copy_from_slice(&factor.packing_factor.to_le_bytes());
+                response_root[8..12].copy_from_slice(&response_ordinal.to_le_bytes());
+                let mut fiat_shamir_round_salt =
+                    [0x51_u8; COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH];
+                fiat_shamir_round_salt[..8].copy_from_slice(&factor.packing_factor.to_le_bytes());
+                fiat_shamir_round_salt[8..12].copy_from_slice(&response_ordinal.to_le_bytes());
+                transcript
+                    .record_response_commitment(response_root, fiat_shamir_round_salt)
+                    .expect("production response commitment enters the transcript");
+                verifier_messages.push(
+                    transcript
+                        .derive_verifier_message()
+                        .expect("production verifier message derives from the live prefix"),
+                );
+            }
+            transcript
+                .finish()
+                .expect("production transcript consumes every response");
+            assert_eq!(
+                verifier_messages.len(),
+                factor.uniform_verifier_randomness.move_count()
+            );
 
             let mut total_queried_leaf_count = 0_u64;
             let mut maximum_schedule_heap_byte_length = 0_u64;
@@ -1892,6 +1934,40 @@ mod tests {
                     &verifier_messages,
                 )
                 .expect("one production response query schedule");
+                let last_query_message_count = usize::try_from(
+                    merkle_geometry
+                        .last_query_verifier_move_ordinal()
+                        .checked_add(1)
+                        .expect("last-query message count fits u32"),
+                )
+                .expect("last-query message count fits usize");
+                let live_schedule = CompactResponseQuerySchedule::derive_at_last_query_boundary(
+                    merkle_geometry,
+                    &wire_geometries,
+                    &verifier_messages[..last_query_message_count],
+                )
+                .expect("live last-query prefix derives the exact schedule");
+                assert_eq!(live_schedule, schedule);
+                assert_eq!(
+                    CompactResponseQuerySchedule::derive_at_last_query_boundary(
+                        merkle_geometry,
+                        &wire_geometries,
+                        &verifier_messages[..last_query_message_count - 1],
+                    ),
+                    Err(CompactResponseMerkleError::InvalidOpeningIndices)
+                );
+                let mut delayed_message_prefix =
+                    verifier_messages[..last_query_message_count].to_vec();
+                delayed_message_prefix
+                    .push(verifier_messages[last_query_message_count - 1].clone());
+                assert_eq!(
+                    CompactResponseQuerySchedule::derive_at_last_query_boundary(
+                        merkle_geometry,
+                        &wire_geometries,
+                        &delayed_message_prefix,
+                    ),
+                    Err(CompactResponseMerkleError::InvalidOpeningIndices)
+                );
                 assert_eq!(
                     usize::try_from(merkle_geometry.response_ordinal()).unwrap(),
                     response_ordinal
@@ -1915,6 +1991,7 @@ mod tests {
                 .unwrap();
                 maximum_schedule_heap_byte_length =
                     maximum_schedule_heap_byte_length.max(schedule_heap_byte_length);
+                complete_response_schedule_count += 1;
             }
             assert!(
                 (factor
@@ -1942,6 +2019,7 @@ mod tests {
                 Err(CompactResponseMerkleError::InvalidOpeningIndices)
             );
         }
+        assert_eq!(complete_response_schedule_count, 316);
     }
 
     #[test]

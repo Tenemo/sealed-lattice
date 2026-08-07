@@ -13,8 +13,9 @@ objects in their existing RNS representation. The standalone public-key slice
 now has a production-derived structured relation and independent interpreter,
 two commitment epochs, all CFW inner and outer masks, code-switch and WHIR
 static catalogs, canonical proof and public-input codecs, one salted Merkle
-commitment per logical response, and complete deterministic test-message query
-schedules. The factor-one relaxed extractor, construction-level interactive
+commitment per logical response, and complete live-prefix query schedules for
+every production packing geometry. The factor-one relaxed extractor,
+construction-level interactive
 masking correspondence, emitted-byte consumer map, and conditional CDHZ/QROM
 composition are independently checked. The shared two-epoch mask oracle is
 owned once by the canonical response catalog; its two later verifier-message
@@ -38,9 +39,13 @@ rescue factor eight.
 
 The relaxed round-by-round theorem, construction masking correspondence,
 canonical emitted-byte map, and conditional noninteractive soundness owner are
-closed for this standalone geometry. The 316 schedules derived from complete
-deterministic fixed verifier messages are still test-state evidence, not live
-prover transcript driving. A reduced production-family chain verifies
+closed for this standalone geometry. The 316 production schedules now derive
+from sequential canonical transcripts over the exact public-input and response
+geometries. Each schedule becomes available at its exact last query move and
+refuses both premature and delayed message prefixes. The public input,
+commitments, and salts remain deterministic test inputs, and this owner does
+not construct response values or trees, publish checkpoints, or drive a
+prover. A reduced production-family chain verifies
 transported CFW bytes and sequential hiding-WHIR proofs from one fixed-order
 canonical envelope containing the CFW section, five external roots, and both
 WHIR sections. A fresh decoder derives every WHIR shape from verifier

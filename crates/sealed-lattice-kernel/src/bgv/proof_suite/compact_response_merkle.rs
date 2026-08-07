@@ -618,27 +618,43 @@ impl CompactResponseQuerySchedule {
         if verifier_messages.len() != wire_geometries.len() {
             return Err(CompactResponseMerkleError::InvalidOpeningIndices);
         }
-        for (wire_geometry, verifier_message) in wire_geometries.iter().zip(verifier_messages) {
-            let decoded_query_groups = verifier_message.distinct_query_groups();
-            let query_group_geometries = wire_geometry
-                .verifier_message_geometry()
-                .distinct_query_groups();
-            if decoded_query_groups.len() != query_group_geometries.len()
-                || decoded_query_groups.iter().zip(query_group_geometries).any(
-                    |(decoded_group, group_geometry)| {
-                        u64::try_from(decoded_group.len()).ok()
-                            != Some(group_geometry.query_count())
-                            || decoded_group.windows(2).any(|pair| pair[0] >= pair[1])
-                            || decoded_group.last().is_some_and(|ordinal| {
-                                *ordinal >= group_geometry.domain_cardinality()
-                            })
-                    },
-                )
-            {
-                return Err(CompactResponseMerkleError::InvalidOpeningIndices);
-            }
-        }
+        validate_decoded_verifier_message_prefix(wire_geometries, verifier_messages)?;
+        Self::derive_from_validated_messages(merkle_geometry, verifier_messages)
+    }
 
+    /// Derives one response's exact opening schedule as soon as its last query
+    /// message exists. The prefix must end at that move: accepting an earlier
+    /// prefix would permit premature opening, while accepting a later prefix
+    /// would delay last-use deletion and checkpoint publication.
+    pub(crate) fn derive_at_last_query_boundary(
+        merkle_geometry: &CompactResponseMerkleGeometry,
+        wire_geometries: &[CompactProofResponseWireGeometry],
+        verifier_message_prefix: &[DecodedFixedUniformVerifierMessage],
+    ) -> Result<Self, CompactResponseMerkleError> {
+        Self::validate_geometry(merkle_geometry, wire_geometries)?;
+        let expected_prefix_length = usize::try_from(
+            merkle_geometry
+                .last_query_verifier_move_ordinal()
+                .checked_add(1)
+                .ok_or(CompactResponseMerkleError::CountOverflow)?,
+        )
+        .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
+        if verifier_message_prefix.len() != expected_prefix_length
+            || expected_prefix_length > wire_geometries.len()
+        {
+            return Err(CompactResponseMerkleError::InvalidOpeningIndices);
+        }
+        validate_decoded_verifier_message_prefix(
+            &wire_geometries[..expected_prefix_length],
+            verifier_message_prefix,
+        )?;
+        Self::derive_from_validated_messages(merkle_geometry, verifier_message_prefix)
+    }
+
+    fn derive_from_validated_messages(
+        merkle_geometry: &CompactResponseMerkleGeometry,
+        verifier_messages: &[DecodedFixedUniformVerifierMessage],
+    ) -> Result<Self, CompactResponseMerkleError> {
         let maximum_queried_leaf_count =
             usize::try_from(merkle_geometry.maximum_queried_leaf_count)
                 .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
@@ -722,6 +738,35 @@ impl CompactResponseQuerySchedule {
             })
             .ok_or(CompactResponseMerkleError::CountOverflow)
     }
+}
+
+fn validate_decoded_verifier_message_prefix(
+    wire_geometries: &[CompactProofResponseWireGeometry],
+    verifier_messages: &[DecodedFixedUniformVerifierMessage],
+) -> Result<(), CompactResponseMerkleError> {
+    if wire_geometries.len() != verifier_messages.len() {
+        return Err(CompactResponseMerkleError::InvalidOpeningIndices);
+    }
+    for (wire_geometry, verifier_message) in wire_geometries.iter().zip(verifier_messages) {
+        let decoded_query_groups = verifier_message.distinct_query_groups();
+        let query_group_geometries = wire_geometry
+            .verifier_message_geometry()
+            .distinct_query_groups();
+        if decoded_query_groups.len() != query_group_geometries.len()
+            || decoded_query_groups.iter().zip(query_group_geometries).any(
+                |(decoded_group, group_geometry)| {
+                    u64::try_from(decoded_group.len()).ok() != Some(group_geometry.query_count())
+                        || decoded_group.windows(2).any(|pair| pair[0] >= pair[1])
+                        || decoded_group
+                            .last()
+                            .is_some_and(|ordinal| *ordinal >= group_geometry.domain_cardinality())
+                },
+            )
+        {
+            return Err(CompactResponseMerkleError::InvalidOpeningIndices);
+        }
+    }
+    Ok(())
 }
 
 fn decoded_query_group(
