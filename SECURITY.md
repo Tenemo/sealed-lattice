@@ -75,16 +75,19 @@ ceremony simulation, fixed-SHAKE justification, and quantum-random-oracle zero
 knowledge remain explicit refusals. A reduced production-family owner now
 reaches freshly verified CFW claims and the pollable production structured
 transpose with resident/external polynomial, retained-tree, transcript-message,
-and canonical-byte parity. It binds those CFW bytes into a hiding-WHIR
-challenger, commits the actual CFW inner masks, source witness, and outer masks
-in order, constructs the production transpose from WHIR's batching challenge,
-and freshly verifies one three-round main-epoch proof with relation and
-chronology mutations. It uses a constant test provider, a zero-centered valid
-assignment, deterministic test salts and coins, disclosed CFW masks in the
-outer CFW-only wire, and a reduced first fold. The WHIR proof remains an in-
-memory vendored structure; production authority, pre-challenge and cross-epoch
-claims, canonical WHIR transport, durable execution, and measured browser
-evidence are absent, so proof generation remains refused.
+and canonical-byte parity. A separate test-only hiding-WHIR transcript commits
+the base-field quotient-and-multiplicity source before lookup materialization,
+then the actual CFW inner masks, main source, outer masks, and one shared two-
+lane cross-epoch mask root before the copy point. It proves and freshly verifies
+the pre-challenge base-source relation and the main CFW relation sequentially,
+with exact prefix correspondence and hostile relation, commitment-order,
+opening, and base-case mutations. It uses a constant test provider, a zero-
+centered valid assignment, deterministic test salts and coins, disclosed CFW
+masks in the outer CFW-only wire, and reduced first folds. Both WHIR proofs
+remain in-memory vendored structures. Production authority, one canonical
+transcript spanning the pre-challenge source, copy point, CFW, and WHIR,
+canonical WHIR transport, durable execution, and measured browser evidence are
+absent, so proof generation remains refused.
 
 ## Open security issues
 
@@ -108,8 +111,8 @@ evidence are absent, so proof generation remains refused.
 
 The compile-time-only handoff and WHIR-invocation statements retained in
 `SEC-004`, `SEC-005`, and `SEC-020` are superseded only for the reduced in-
-memory main-epoch owner described above. The selected-size, production-
-authority, pre-challenge, cross-epoch, canonical-transport, authenticated-
+memory two-epoch owner described above. The selected-size, production-
+authority, unified-canonical-transcript, canonical-transport, authenticated-
 restart, lifecycle, and browser consequences remain open.
 
 Identifiers are stable and are not reused. `SEC-009` and `SEC-012` through
@@ -132,12 +135,13 @@ production-row-source handoff occupies 1,040 inline bytes and 14,160 control
 bytes including the task catalogs, with a 174,352,000-byte connected host
 maximum. The split and synchronous claim combinations agree, and the split
 finish recomputes the target and mask contributions after matrix accumulation.
-A reduced runtime owner now carries the split result into one in-memory main-
-epoch hiding-WHIR proof, but this remains diagnostic host evidence rather than
-selected-size or release-WASM evidence and excludes allocator metadata. The
-accumulator writes zero authenticated restart records, so interruption requires
-full replay. Live selected-size driving, authenticated restart, target-layout
-reconciliation, pre-challenge and cross-epoch integration, and canonical WHIR
+A reduced runtime owner now carries the split result through sequential in-
+memory pre-challenge and main hiding-WHIR proofs with one shared cross-epoch
+mask root, but this remains diagnostic host evidence rather than selected-size
+or release-WASM evidence and excludes allocator metadata. The accumulator
+writes zero authenticated restart records, so interruption requires full
+replay. Live selected-size driving, authenticated restart, target-layout
+reconciliation, unified canonical transcript integration, and canonical WHIR
 transport remain unresolved.
 
 ## Required security boundary

@@ -278,8 +278,8 @@ This closes the static relaxed extraction premise. The separate construction
 owner described below now closes interactive masking and leakage
 correspondence. The canonical-byte owner described below now closes the static
 emitted-byte and verifier-consumer correspondence and feeds the complete
-CDHZ/Merkle arithmetic. Production-shaped small-chain integration, durable
-execution, and measured browser evidence remain open.
+CDHZ/Merkle arithmetic. Complete production-shaped small-chain integration,
+durable execution, and measured browser evidence remain open.
 
 The focused CDHZ owner now derives one complete, power-of-two-padded Merkle
 vector for every logical IOR response. The verifier derives distinct one-based
@@ -324,18 +324,24 @@ commitment, and compares resident and external round polynomials, retained
 tree bytes, transcript messages, and final values. A fresh path decodes the
 transported public-input and proof bytes, verifies every opening and the CFW
 transcript, and matches the pollable structured transpose to the independent
-direct claim combination coefficient for coefficient. It then binds those
-canonical CFW and public-input bytes into a hiding-WHIR challenger, commits the
-actual CFW inner masks, compact witness, and outer masks in that order, and
-builds the production structured transpose from WHIR's own batching challenge.
-A fresh WHIR verifier accepts the resulting three-round proof and rejects
-changed targets, source and mask covectors, commitment chronology, and base-
-case values. The owner uses ring degree 2,048, a zero-centered valid assignment,
-a constant test provider, deterministic test salts and coins, disclosed CFW
-masks in the outer CFW-only wire, and a reduced first fold. Its WHIR proof is
-still an in-memory vendored structure: the pre-challenge and cross-epoch path,
-canonical WHIR sections, and transported-byte verification remain absent. It
-therefore does not complete the production-shaped CFW/transpose/WHIR chain.
+direct claim combination coefficient for coefficient. Its separate test-only
+hiding-WHIR transcript commits the base-field quotient-and-multiplicity source
+with canonical zero padding before lookup materialization. It then commits the
+actual CFW inner masks, compact witness, outer masks, and one shared two-lane
+cross-epoch mask root before sampling the 18-coordinate copy point. The owner
+checks every copied coefficient, proves the masked pre-challenge base-source
+relation, reuses the same mask root in the main relation, and builds the
+production structured transpose from main WHIR's own batching challenge. A
+fresh sequential verifier accepts both three-round proofs and rejects changed
+pre-challenge and main targets, source and mask covectors, commitment order,
+cross-epoch openings, and either base-case value. The owner uses ring degree
+2,048, a zero-centered valid assignment, a constant test provider,
+deterministic test salts and coins, disclosed CFW masks in the outer CFW-only
+wire, and reduced first folds. Both WHIR proofs remain in-memory vendored
+structures. The pre-challenge source root, copy point, CFW challenges, and WHIR
+messages are not yet driven by one canonical production transcript, and no
+canonical WHIR sections are encoded or freshly verified from transported
+bytes. The owner therefore does not complete the production-shaped chain.
 
 The canonical proof encoder can append one logical response at a time in
 verifier-owned order and release that response before accepting the next. It
@@ -774,19 +780,21 @@ and conditional complete-inventory bounds. A live small Merkle response derives
 its schedule from the canonical transcript and freshly verifies transported
 bytes with hostile mutations. The reduced production-family integration owner
 additionally reaches verified CFW claims and the production structured
-transpose with resident/external and retained-tree byte parity, then proves and
-freshly verifies that main-epoch combined relation through three hiding-WHIR
-rounds. It is not a production-authority, pre-challenge, cross-epoch, canonical-
-WHIR-transport, selected-size, or zero-knowledge owner.
+transpose with resident/external and retained-tree byte parity. Its test-only
+WHIR chronology now proves and freshly verifies the pre-challenge base-source
+relation and the main CFW relation through three rounds each, with one shared
+cross-epoch mask root and the exact copied witness prefix. It is not a
+production-authority, unified canonical-transcript, canonical-WHIR-transport,
+selected-size, or zero-knowledge owner.
 
 The static gate remains closed because current generation does not select the
 compact profile or exercise it through a retained live authority, because row-
 source preparation has no authenticated cache recovery, and because the
 selected-size CFW and CFW-to-transpose execution, selected-size transpose
-execution, pre-challenge and canonically transported WHIR integration, complete
-production-shaped small-chain
-integration, durable proof and verifier lifecycle, and independently measured
-resources for the fixed bytes remain incomplete. The
+execution, unified canonical transcript and transported WHIR integration,
+complete production-shaped small-chain integration, durable proof and verifier
+lifecycle, and independently measured resources for the fixed bytes remain
+incomplete. The
 construction-level interactive masking correspondence, canonical proof and
 public-input codecs,
 hostile decoder, one response commitment per logical IOR round, uniform fixed-bit
@@ -797,10 +805,11 @@ The next task is to close those owners one at a time with focused tests, not to
 run a prover or a complete test graph. Construction-level masking now
 reconciles every production coefficient-to-view map and the conditional entropy
 after preceding disclosures. The next integration owner must replace the
-reduced constant source with the real production authority, connect the pre-
-challenge and cross-epoch claims, map the now-live WHIR proof into its canonical
-sections, and freshly verify the resulting transported bytes with section-wide
-hostile mutations. Only that complete small-geometry chain can close this gate.
+reduced constant source with the real production authority, drive the now-live
+pre-challenge, cross-epoch, CFW, and WHIR messages through one canonical
+transcript, map both WHIR proofs into their canonical sections, and freshly
+verify the resulting transported bytes with section-wide hostile mutations.
+Only that complete small-geometry chain can close this gate.
 Factors one, two, and four remain eligible engineering comparators
 for the same standalone relation and security target. Factor eight is retained
 only as a statically refused comparator under the current retained-tree

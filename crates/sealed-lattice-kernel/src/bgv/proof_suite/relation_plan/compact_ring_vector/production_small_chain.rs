@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use p3_challenger::{CanObserve, HashChallenger, SerializingChallenger64};
+use p3_challenger::{CanObserve, FieldChallenger, HashChallenger, SerializingChallenger64};
 use p3_commit::{ExtensionMmcs, Mmcs};
 use p3_dft::Radix2DFTSmallBatch;
 use p3_field::{PrimeCharacteristicRing, PrimeField64};
@@ -45,8 +45,9 @@ use crate::bgv::proof_suite::{
     compact_cfw::{
         compact_challenge_from_production, compact_challenge_to_production,
         verify_compact_cfw_transcript, CompactCfwClaimBatch, CompactCfwError, CompactCfwGeometry,
-        CompactCfwMaskMaterial, CompactCfwMatrixRole, CompactCfwR1csMatrices, CompactCfwTranscript,
-        CompactChallengeField, PreparedCompactCfwProver, COMPACT_CFW_MATRIX_COUNT,
+        CompactCfwMaskMaterial, CompactCfwMaskedCrossEpochClaims, CompactCfwMatrixRole,
+        CompactCfwR1csMatrices, CompactCfwTranscript, CompactChallengeField,
+        PreparedCompactCfwProver, COMPACT_CFW_MATRIX_COUNT,
     },
     compact_cfw_external_prover::{CompactCfwExternalProverState, CompactCfwExternalRowSource},
     compact_proof_wire::{
@@ -180,13 +181,16 @@ impl CryptographicHasher<u64, [u64; SMALL_CHAIN_HASH_OUTPUT_WORD_LENGTH]> for Sm
     }
 }
 
-fn small_chain_whir_configuration(variable_count: usize) -> SmallChainWhirConfiguration {
+fn small_chain_whir_configuration(
+    variable_count: usize,
+    first_folding_factor: usize,
+) -> SmallChainWhirConfiguration {
     ZkWhirConfig::new(
         variable_count,
         ProtocolParameters {
             starting_log_inv_rate: SMALL_CHAIN_WHIR_MAIN_LOG_INVERSE_RATE,
             round_log_inv_rates: vec![2, 4, 8],
-            folding_factor: FoldingFactor::PerRound(vec![3, 4, 4, 4]),
+            folding_factor: FoldingFactor::PerRound(vec![first_folding_factor, 4, 4, 4]),
             soundness_type: SecurityAssumption::UniqueDecoding,
             security_level: SMALL_CHAIN_WHIR_SECURITY_LEVEL,
             pow_bits: 0,
@@ -231,6 +235,18 @@ fn commit_small_chain_mask_group(
     commitment_scheme: &SmallChainExtensionCommitmentScheme,
     challenger: &mut SmallChainChallenger,
 ) -> SmallChainCommittedMaskGroup {
+    let committed_group =
+        build_small_chain_mask_group(shape, messages, randomness_seed, commitment_scheme);
+    challenger.observe(committed_group.commitment.clone());
+    committed_group
+}
+
+fn build_small_chain_mask_group(
+    shape: MaskGroupShape,
+    messages: Vec<Vec<CompactChallengeField>>,
+    randomness_seed: u64,
+    commitment_scheme: &SmallChainExtensionCommitmentScheme,
+) -> SmallChainCommittedMaskGroup {
     assert_eq!(messages.len(), shape.width);
     let randomness = (0..shape.width)
         .map(|message_ordinal| {
@@ -251,13 +267,39 @@ fn commit_small_chain_mask_group(
         })
         .collect::<Vec<_>>();
     let (commitment, data) = commitment_scheme.commit_matrix(stack_codewords(&codewords));
-    challenger.observe(commitment.clone());
     SmallChainCommittedMaskGroup {
         shape,
         messages,
         randomness,
         commitment,
         data,
+    }
+}
+
+fn small_chain_multilinear_equality_covector(
+    point: &[CompactChallengeField],
+) -> Vec<CompactChallengeField> {
+    Poly::new_from_point(point, CompactChallengeField::ONE)
+        .as_slice()
+        .to_vec()
+}
+
+fn observe_small_chain_canonical_cfw_bytes(
+    challenger: &mut SmallChainChallenger,
+    canonical_proof_bytes: &[u8],
+) {
+    let digest = crate::hashing::hash_framed_parts_512(
+        "sealed-lattice/test/production-small-chain-canonical-cfw/v1",
+        &[canonical_proof_bytes],
+    );
+    for digest_word in digest.chunks_exact(size_of::<u64>()) {
+        challenger.observe_algebra_element(CompactChallengeField::from(Goldilocks::from_u64(
+            u64::from_le_bytes(
+                digest_word
+                    .try_into()
+                    .expect("one canonical CFW digest word has eight bytes"),
+            ),
+        )));
     }
 }
 
@@ -271,83 +313,197 @@ fn deterministic_extension_vector(element_count: usize, seed: u64) -> Vec<Compac
         .collect()
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum SmallChainWhirVerificationMutation {
     None,
-    Target,
-    SourceCovector,
+    PreChallengeTarget,
+    PreChallengeSourceCovector,
+    MainTarget,
+    MainSourceCovector,
     InnerMaskCovector,
+    SharedMaskCovector,
     GroupChronology,
 }
 
 struct SmallChainWhirExecution {
-    configuration: SmallChainWhirConfiguration,
+    pre_challenge_configuration: SmallChainWhirConfiguration,
+    main_configuration: SmallChainWhirConfiguration,
     commitment_scheme: SmallChainCommitmentScheme,
     transcript_binding: [u8; Hash512::BYTE_LENGTH],
-    source_commitment: SmallChainCommitment,
+    canonical_cfw_proof_bytes: Vec<u8>,
+    pre_challenge_source_commitment: SmallChainCommitment,
+    main_source_commitment: SmallChainCommitment,
     inner_mask_shape: MaskGroupShape,
     inner_mask_commitment: SmallChainCommitment,
     outer_mask_shape: MaskGroupShape,
     outer_mask_commitment: SmallChainCommitment,
+    shared_mask_shape: MaskGroupShape,
+    shared_mask_commitment: SmallChainCommitment,
+    copied_main_source_element_count: usize,
+    cross_epoch_point: Vec<CompactChallengeField>,
     expected_relation_claim_count: usize,
-    proof: SmallChainWhirProof,
+    pre_challenge_proof: SmallChainWhirProof,
+    main_proof: SmallChainWhirProof,
 }
 
 impl SmallChainWhirExecution {
     fn verify(
         &self,
-        proof: &SmallChainWhirProof,
+        pre_challenge_proof: &SmallChainWhirProof,
+        main_proof: &SmallChainWhirProof,
         claim_batch: &CompactCfwClaimBatch,
         matrices: &impl CompactCfwR1csMatrices,
         mutation: SmallChainWhirVerificationMutation,
     ) -> Result<(), ZkVerifierError> {
         let mut challenger = small_chain_whir_challenger(self.transcript_binding);
+        challenger.observe(self.pre_challenge_source_commitment.clone());
         if matches!(
             mutation,
             SmallChainWhirVerificationMutation::GroupChronology
         ) {
             challenger.observe(self.outer_mask_commitment.clone());
-            challenger.observe(self.source_commitment.clone());
+            challenger.observe(self.main_source_commitment.clone());
             challenger.observe(self.inner_mask_commitment.clone());
         } else {
             challenger.observe(self.inner_mask_commitment.clone());
-            challenger.observe(self.source_commitment.clone());
+            challenger.observe(self.main_source_commitment.clone());
             challenger.observe(self.outer_mask_commitment.clone());
         }
-        let verifier = HidingWhirVerifier::new(&self.configuration, &self.commitment_scheme);
+        challenger.observe(self.shared_mask_commitment.clone());
+        let sampled_cross_epoch_point = (0..self.cross_epoch_point.len())
+            .map(|_| challenger.sample_algebra_element())
+            .collect::<Vec<CompactChallengeField>>();
+        if mutation == SmallChainWhirVerificationMutation::None {
+            assert_eq!(sampled_cross_epoch_point, self.cross_epoch_point);
+        }
+        let [masked_pre_challenge_evaluation] = pre_challenge_proof.evals.as_slice() else {
+            return Err(ZkVerifierError::EvalCountMismatch {
+                expected: 1,
+                actual: pre_challenge_proof.evals.len(),
+            });
+        };
+        let [masked_main_evaluation, mask_difference] = main_proof.evals.as_slice() else {
+            return Err(ZkVerifierError::EvalCountMismatch {
+                expected: 2,
+                actual: main_proof.evals.len(),
+            });
+        };
+        let masked_pre_challenge_evaluation = *masked_pre_challenge_evaluation;
+        let masked_main_evaluation = *masked_main_evaluation;
+        let mask_difference = *mask_difference;
+        for value in [
+            masked_pre_challenge_evaluation,
+            masked_main_evaluation,
+            mask_difference,
+        ] {
+            challenger.observe_algebra_element(value);
+        }
+        observe_small_chain_canonical_cfw_bytes(&mut challenger, &self.canonical_cfw_proof_bytes);
+
+        let pre_challenge_verifier =
+            HidingWhirVerifier::new(&self.pre_challenge_configuration, &self.commitment_scheme);
+        let shared_mask_commitment = self.shared_mask_commitment.clone();
+        pre_challenge_verifier.verify_base_source_relation(
+            pre_challenge_proof,
+            &self.pre_challenge_source_commitment,
+            1,
+            |_, revealed_values| {
+                let mut source_covector =
+                    small_chain_multilinear_equality_covector(&sampled_cross_epoch_point);
+                let mut target = revealed_values[0];
+                let mut shared_mask_covectors = vec![
+                    vec![CompactChallengeField::ONE],
+                    vec![CompactChallengeField::ZERO],
+                ];
+                match mutation {
+                    SmallChainWhirVerificationMutation::PreChallengeTarget => {
+                        target += CompactChallengeField::ONE;
+                    }
+                    SmallChainWhirVerificationMutation::PreChallengeSourceCovector => {
+                        source_covector[0] += CompactChallengeField::ONE;
+                    }
+                    SmallChainWhirVerificationMutation::SharedMaskCovector => {
+                        shared_mask_covectors[0][0] += CompactChallengeField::ONE;
+                    }
+                    SmallChainWhirVerificationMutation::None
+                    | SmallChainWhirVerificationMutation::MainTarget
+                    | SmallChainWhirVerificationMutation::MainSourceCovector
+                    | SmallChainWhirVerificationMutation::InnerMaskCovector
+                    | SmallChainWhirVerificationMutation::GroupChronology => {}
+                }
+                Ok(CombinedRelationVerifierInput {
+                    source_covector: Poly::new(source_covector),
+                    target,
+                    precommitted_mask_groups: vec![PrecommittedMaskVerifierGroup {
+                        shape: self.shared_mask_shape,
+                        covectors: shared_mask_covectors,
+                        commitment: shared_mask_commitment,
+                    }],
+                })
+            },
+            &mut challenger,
+        )?;
+
+        let main_verifier =
+            HidingWhirVerifier::new(&self.main_configuration, &self.commitment_scheme);
         let inner_mask_commitment = self.inner_mask_commitment.clone();
         let outer_mask_commitment = self.outer_mask_commitment.clone();
-        verifier.verify_extension_relation(
-            proof,
-            &self.source_commitment,
-            0,
+        let shared_mask_commitment = self.shared_mask_commitment.clone();
+        main_verifier.verify_extension_relation(
+            main_proof,
+            &self.main_source_commitment,
+            2,
             |batching_challenge, revealed_values| {
-                assert!(revealed_values.is_empty());
-                let combined_relation = claim_batch
+                let combination = claim_batch
                     .clone()
-                    .combine_with_preceding_opening_claims(matrices, &[], batching_challenge)
-                    .expect("fresh verifier rebuilds the CFW relation for the WHIR challenge");
+                    .begin_combining_with_masked_cross_epoch_claims(
+                        CompactCfwMaskedCrossEpochClaims::new(
+                            sampled_cross_epoch_point,
+                            self.copied_main_source_element_count,
+                            masked_pre_challenge_evaluation,
+                            revealed_values[0],
+                            revealed_values[1],
+                        ),
+                        batching_challenge,
+                    )
+                    .expect("fresh verifier rebuilds the masked cross-epoch CFW relation");
+                let (continuation, mut source_covector) = combination.into_parts();
+                matrices
+                    .accumulate_weighted_witness_covector_at_row_point(
+                        continuation.row_point(),
+                        continuation.matrix_role_weights(),
+                        &mut source_covector,
+                    )
+                    .expect("fresh verifier accumulates the structured matrix covector");
+                let combined_relation = continuation
+                    .finish_after_matrix_accumulation(source_covector)
+                    .expect("fresh verifier finishes the masked cross-epoch CFW relation");
                 let (
                     mut source_covector,
                     mut target,
-                    preceding_mask_covectors,
+                    mut preceding_mask_covectors,
                     mut inner_mask_covectors,
                     outer_mask_covectors,
                     relation_claim_count,
                 ) = combined_relation.into_parts();
-                assert!(preceding_mask_covectors.is_empty());
+                assert_eq!(preceding_mask_covectors.len(), self.shared_mask_shape.width);
                 assert_eq!(relation_claim_count, self.expected_relation_claim_count);
                 match mutation {
                     SmallChainWhirVerificationMutation::None
+                    | SmallChainWhirVerificationMutation::PreChallengeTarget
+                    | SmallChainWhirVerificationMutation::PreChallengeSourceCovector
                     | SmallChainWhirVerificationMutation::GroupChronology => {}
-                    SmallChainWhirVerificationMutation::Target => {
+                    SmallChainWhirVerificationMutation::MainTarget => {
                         target += CompactChallengeField::ONE;
                     }
-                    SmallChainWhirVerificationMutation::SourceCovector => {
+                    SmallChainWhirVerificationMutation::MainSourceCovector => {
                         source_covector[0] += CompactChallengeField::ONE;
                     }
                     SmallChainWhirVerificationMutation::InnerMaskCovector => {
                         inner_mask_covectors[0][0] += CompactChallengeField::ONE;
+                    }
+                    SmallChainWhirVerificationMutation::SharedMaskCovector => {
+                        preceding_mask_covectors[0][0] += CompactChallengeField::ONE;
                     }
                 }
                 Ok(CombinedRelationVerifierInput {
@@ -363,6 +519,11 @@ impl SmallChainWhirExecution {
                             shape: self.outer_mask_shape,
                             covectors: outer_mask_covectors,
                             commitment: outer_mask_commitment,
+                        },
+                        PrecommittedMaskVerifierGroup {
+                            shape: self.shared_mask_shape,
+                            covectors: preceding_mask_covectors,
+                            commitment: shared_mask_commitment,
                         },
                     ],
                 })
@@ -1184,7 +1345,7 @@ fn request_context(
 }
 
 #[test]
-fn production_small_chain_reconciles_authenticated_cfw_transcript_and_structured_handoff() {
+fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequential_whir() {
     let (relation, relation_plan_variant, assignment_catalog) = reduced_relation();
     assert_eq!(relation.ring_degree(), SMALL_CHAIN_RING_DEGREE);
     assert_eq!(relation.public_key_share_relation_count(), 23);
@@ -1300,6 +1461,77 @@ fn production_small_chain_reconciles_authenticated_cfw_transcript_and_structured
         &canonical_public_input_bytes,
     )
     .expect("fresh small-chain public-input decoder accepts transported bytes");
+
+    let copied_main_source_element_count = usize::try_from(cross_epoch_copy.copied_element_count())
+        .expect("reduced copied source length fits usize");
+    let pre_challenge_source_element_count =
+        usize::try_from(cross_epoch_copy.pre_challenge_message_element_count())
+            .expect("reduced pre-challenge source length fits usize");
+    let mut pre_challenge_source_values = Vec::with_capacity(pre_challenge_source_element_count);
+    for element_ordinal in 0..copied_main_source_element_count {
+        pre_challenge_source_values.push(Goldilocks::from_u64(
+            base_assignment
+                .witness_base_value(
+                    u64::try_from(element_ordinal).expect("copied source ordinal fits u64"),
+                )
+                .expect("the copied quotient-and-multiplicity prefix is base-field material")
+                .canonical(),
+        ));
+    }
+    pre_challenge_source_values.resize(pre_challenge_source_element_count, Goldilocks::ZERO);
+    assert!(pre_challenge_source_values.len().is_power_of_two());
+
+    let pre_challenge_variable_count = pre_challenge_source_element_count.ilog2() as usize;
+    let main_variable_count = usize::try_from(cross_epoch_copy.main_message_element_count())
+        .expect("reduced main source length fits usize")
+        .ilog2() as usize;
+    let pre_challenge_whir_configuration =
+        small_chain_whir_configuration(pre_challenge_variable_count, 2);
+    let main_whir_configuration = small_chain_whir_configuration(main_variable_count, 3);
+    assert_eq!(
+        pre_challenge_whir_configuration.folding_schedule,
+        [2, 4, 4, 4]
+    );
+    assert_eq!(main_whir_configuration.folding_schedule, [3, 4, 4, 4]);
+    assert_eq!(
+        pre_challenge_whir_configuration.final_sumcheck_rounds,
+        main_whir_configuration.final_sumcheck_rounds
+    );
+    assert_eq!(
+        pre_challenge_whir_configuration.params.security_level,
+        SMALL_CHAIN_WHIR_SECURITY_LEVEL
+    );
+    assert_eq!(
+        main_whir_configuration.params.security_level,
+        SMALL_CHAIN_WHIR_SECURITY_LEVEL
+    );
+    let whir_commitment_scheme = small_chain_commitment_scheme();
+    let whir_extension_commitment_scheme =
+        SmallChainExtensionCommitmentScheme::new(whir_commitment_scheme.clone());
+    let whir_discrete_fourier_transform = Radix2DFTSmallBatch::<Goldilocks>::default();
+    let pre_challenge_whir_prover = HidingWhirProver::new(
+        &pre_challenge_whir_configuration,
+        &whir_discrete_fourier_transform,
+        &whir_commitment_scheme,
+    );
+    let main_whir_prover = HidingWhirProver::new(
+        &main_whir_configuration,
+        &whir_discrete_fourier_transform,
+        &whir_commitment_scheme,
+    );
+    let whir_transcript_binding = crate::hashing::hash_framed_parts_512(
+        "sealed-lattice/test/production-small-chain-whir-outer-prefix/v1",
+        &[&canonical_public_input_bytes, &source_replay_binding],
+    );
+    let mut whir_challenger = small_chain_whir_challenger(whir_transcript_binding);
+    let mut whir_random_source = SmallRng::seed_from_u64(0x5e_a1_ed_1a_77_1c_e);
+    let (pre_challenge_source_commitment, pre_challenge_source_prover_data) =
+        pre_challenge_whir_prover.commit(
+            Poly::new(pre_challenge_source_values.clone()),
+            &mut whir_challenger,
+            &mut whir_random_source,
+        );
+
     let mut prover_transcript = CompactProverTranscript::new(
         &proof_wire_geometry,
         &decoded_public_input,
@@ -1426,6 +1658,156 @@ fn production_small_chain_reconciles_authenticated_cfw_transcript_and_structured
     )
     .expect("resident CFW prepares from production-family rows");
     let auxiliary_target = prepared_resident.auxiliary_target();
+
+    for element_ordinal in 0..copied_main_source_element_count {
+        assert_eq!(
+            witness[element_ordinal],
+            CompactChallengeField::from(pre_challenge_source_values[element_ordinal]),
+            "pre-challenge and main copied coefficients differ at ordinal {element_ordinal}"
+        );
+    }
+    assert!(
+        pre_challenge_source_values[copied_main_source_element_count..]
+            .iter()
+            .all(|value| *value == Goldilocks::ZERO)
+    );
+
+    let inner_mask_shape = MaskGroupShape {
+        shape: MaskCodeShape::new(
+            4,
+            main_whir_configuration.mask_queries,
+            SMALL_CHAIN_WHIR_MASK_LOG_INVERSE_RATE,
+        ),
+        width: whir_mask_material.inner_masks().len(),
+    };
+    let SmallChainCommittedMaskGroup {
+        shape: committed_inner_mask_shape,
+        messages: inner_mask_messages,
+        randomness: inner_mask_randomness,
+        commitment: inner_mask_commitment,
+        data: inner_mask_prover_data,
+    } = commit_small_chain_mask_group(
+        inner_mask_shape,
+        whir_mask_material
+            .inner_masks()
+            .iter()
+            .map(|mask| mask.to_vec())
+            .collect(),
+        50_000,
+        &whir_extension_commitment_scheme,
+        &mut whir_challenger,
+    );
+    let (main_source_commitment, main_source_prover_data) = main_whir_prover.commit_extension(
+        Poly::new(witness.clone()),
+        &mut whir_challenger,
+        &mut whir_random_source,
+    );
+    let outer_mask_shape = MaskGroupShape {
+        shape: MaskCodeShape::new(
+            8,
+            main_whir_configuration.mask_queries,
+            SMALL_CHAIN_WHIR_MASK_LOG_INVERSE_RATE,
+        ),
+        width: whir_mask_material.outer_masks().len(),
+    };
+    let SmallChainCommittedMaskGroup {
+        shape: committed_outer_mask_shape,
+        messages: outer_mask_messages,
+        randomness: outer_mask_randomness,
+        commitment: outer_mask_commitment,
+        data: outer_mask_prover_data,
+    } = commit_small_chain_mask_group(
+        outer_mask_shape,
+        whir_mask_material
+            .outer_masks()
+            .iter()
+            .map(|mask| mask.to_vec())
+            .collect(),
+        90_000,
+        &whir_extension_commitment_scheme,
+        &mut whir_challenger,
+    );
+    assert_eq!(committed_inner_mask_shape, inner_mask_shape);
+    assert_eq!(committed_outer_mask_shape, outer_mask_shape);
+
+    let pre_challenge_mask = compact_test_challenge(130_001);
+    let main_mask = compact_test_challenge(130_301);
+    let shared_mask_shape = MaskGroupShape {
+        shape: MaskCodeShape::new(
+            1,
+            pre_challenge_whir_configuration
+                .mask_queries
+                .checked_add(main_whir_configuration.mask_queries)
+                .expect("combined mask query count fits usize"),
+            SMALL_CHAIN_WHIR_MASK_LOG_INVERSE_RATE,
+        ),
+        width: 2,
+    };
+    let shared_mask_messages = vec![vec![pre_challenge_mask], vec![main_mask]];
+    let SmallChainCommittedMaskGroup {
+        shape: committed_shared_mask_shape,
+        messages: pre_challenge_shared_mask_messages,
+        randomness: pre_challenge_shared_mask_randomness,
+        commitment: shared_mask_commitment,
+        data: pre_challenge_shared_mask_prover_data,
+    } = commit_small_chain_mask_group(
+        shared_mask_shape,
+        shared_mask_messages.clone(),
+        130_600,
+        &whir_extension_commitment_scheme,
+        &mut whir_challenger,
+    );
+    let SmallChainCommittedMaskGroup {
+        shape: replayed_shared_mask_shape,
+        messages: main_shared_mask_messages,
+        randomness: main_shared_mask_randomness,
+        commitment: replayed_shared_mask_commitment,
+        data: main_shared_mask_prover_data,
+    } = build_small_chain_mask_group(
+        shared_mask_shape,
+        shared_mask_messages,
+        130_600,
+        &whir_extension_commitment_scheme,
+    );
+    assert_eq!(committed_shared_mask_shape, shared_mask_shape);
+    assert_eq!(replayed_shared_mask_shape, shared_mask_shape);
+    assert_eq!(replayed_shared_mask_commitment, shared_mask_commitment);
+
+    let cross_epoch_point = (0..pre_challenge_variable_count)
+        .map(|_| whir_challenger.sample_algebra_element())
+        .collect::<Vec<CompactChallengeField>>();
+    assert_eq!(
+        cross_epoch_point.len(),
+        usize::try_from(cross_epoch_copy.point_coordinate_count())
+            .expect("cross-epoch point length fits usize")
+    );
+    let cross_epoch_covector = small_chain_multilinear_equality_covector(&cross_epoch_point);
+    assert_eq!(
+        cross_epoch_covector.len(),
+        pre_challenge_source_element_count
+    );
+    let copied_source_evaluation = pre_challenge_source_values
+        .iter()
+        .copied()
+        .map(CompactChallengeField::from)
+        .zip(cross_epoch_covector.iter().copied())
+        .map(|(source_value, coefficient)| source_value * coefficient)
+        .sum::<CompactChallengeField>();
+    let masked_pre_challenge_evaluation = copied_source_evaluation + pre_challenge_mask;
+    let masked_main_evaluation = copied_source_evaluation + main_mask;
+    let mask_difference = pre_challenge_mask - main_mask;
+    assert_eq!(
+        masked_pre_challenge_evaluation - masked_main_evaluation - mask_difference,
+        CompactChallengeField::ZERO
+    );
+    for value in [
+        masked_pre_challenge_evaluation,
+        masked_main_evaluation,
+        mask_difference,
+    ] {
+        whir_challenger.observe_algebra_element(value);
+    }
+
     let mut lookup_challenge_bytes = Vec::with_capacity(40);
     for coordinate in lookup_challenge.canonical_coordinates() {
         lookup_challenge_bytes.extend_from_slice(&coordinate.to_le_bytes());
@@ -1801,99 +2183,71 @@ fn production_small_chain_reconciles_authenticated_cfw_transcript_and_structured
     };
     assert_eq!(production_combined_relation, direct_combined_relation);
 
-    assert!(witness_length.is_power_of_two());
-    let whir_variable_count = witness_length.ilog2() as usize;
-    let whir_configuration = small_chain_whir_configuration(whir_variable_count);
-    assert_eq!(whir_configuration.n_rounds(), 3);
-    assert_eq!(whir_configuration.folding_schedule, [3, 4, 4, 4]);
-    assert_eq!(whir_configuration.final_sumcheck_rounds, 4);
+    assert!(pre_challenge_whir_configuration.check_pow_bits());
+    assert!(main_whir_configuration.check_pow_bits());
+    observe_small_chain_canonical_cfw_bytes(&mut whir_challenger, &canonical_proof_bytes);
+
+    let pre_challenge_source_covector = cross_epoch_covector.clone();
+    let pre_challenge_whir_proof = pre_challenge_whir_prover
+        .prove_base_source_relation(
+            pre_challenge_source_prover_data,
+            vec![masked_pre_challenge_evaluation],
+            |_| {
+                Ok(CombinedRelationProverInput {
+                    source_covector: Poly::new(pre_challenge_source_covector),
+                    target: masked_pre_challenge_evaluation,
+                    precommitted_mask_groups: vec![PrecommittedMaskProverGroup {
+                        shape: shared_mask_shape,
+                        messages: pre_challenge_shared_mask_messages,
+                        randomness: pre_challenge_shared_mask_randomness,
+                        covectors: vec![
+                            vec![CompactChallengeField::ONE],
+                            vec![CompactChallengeField::ZERO],
+                        ],
+                        data: pre_challenge_shared_mask_prover_data,
+                    }],
+                })
+            },
+            &mut whir_challenger,
+            &mut whir_random_source,
+        )
+        .expect("the reduced base-field pre-challenge relation enters hiding WHIR");
     assert_eq!(
-        whir_configuration.params.security_level,
-        SMALL_CHAIN_WHIR_SECURITY_LEVEL
+        pre_challenge_whir_proof.evals,
+        vec![masked_pre_challenge_evaluation]
     );
-    assert!(whir_configuration.check_pow_bits());
-    let whir_commitment_scheme = small_chain_commitment_scheme();
-    let whir_extension_commitment_scheme =
-        SmallChainExtensionCommitmentScheme::new(whir_commitment_scheme.clone());
-    let whir_discrete_fourier_transform = Radix2DFTSmallBatch::<Goldilocks>::default();
-    let whir_prover = HidingWhirProver::new(
-        &whir_configuration,
-        &whir_discrete_fourier_transform,
-        &whir_commitment_scheme,
+    assert_eq!(
+        pre_challenge_whir_proof.rounds.len(),
+        pre_challenge_whir_configuration.n_rounds()
     );
-    let whir_transcript_binding = crate::hashing::hash_framed_parts_512(
-        "sealed-lattice/test/production-small-chain-whir-prefix/v1",
-        &[&canonical_public_input_bytes, &canonical_proof_bytes],
+    assert_eq!(
+        pre_challenge_whir_proof.sumchecks.len(),
+        pre_challenge_whir_configuration.n_rounds() + 1
     );
-    let mut whir_challenger = small_chain_whir_challenger(whir_transcript_binding);
-    let mut whir_random_source = SmallRng::seed_from_u64(0x5e_a1_ed_1a_77_1c_e);
-    let inner_mask_shape = MaskGroupShape {
-        shape: MaskCodeShape::new(
-            4,
-            whir_configuration.mask_queries,
-            SMALL_CHAIN_WHIR_MASK_LOG_INVERSE_RATE,
-        ),
-        width: whir_mask_material.inner_masks().len(),
-    };
-    let SmallChainCommittedMaskGroup {
-        shape: committed_inner_mask_shape,
-        messages: inner_mask_messages,
-        randomness: inner_mask_randomness,
-        commitment: inner_mask_commitment,
-        data: inner_mask_prover_data,
-    } = commit_small_chain_mask_group(
-        inner_mask_shape,
-        whir_mask_material
-            .inner_masks()
-            .iter()
-            .map(|mask| mask.to_vec())
-            .collect(),
-        50_000,
-        &whir_extension_commitment_scheme,
-        &mut whir_challenger,
-    );
-    let (source_commitment, source_prover_data) = whir_prover.commit_extension(
-        Poly::new(witness.clone()),
-        &mut whir_challenger,
-        &mut whir_random_source,
-    );
-    let outer_mask_shape = MaskGroupShape {
-        shape: MaskCodeShape::new(
-            8,
-            whir_configuration.mask_queries,
-            SMALL_CHAIN_WHIR_MASK_LOG_INVERSE_RATE,
-        ),
-        width: whir_mask_material.outer_masks().len(),
-    };
-    let SmallChainCommittedMaskGroup {
-        shape: committed_outer_mask_shape,
-        messages: outer_mask_messages,
-        randomness: outer_mask_randomness,
-        commitment: outer_mask_commitment,
-        data: outer_mask_prover_data,
-    } = commit_small_chain_mask_group(
-        outer_mask_shape,
-        whir_mask_material
-            .outer_masks()
-            .iter()
-            .map(|mask| mask.to_vec())
-            .collect(),
-        90_000,
-        &whir_extension_commitment_scheme,
-        &mut whir_challenger,
-    );
-    assert_eq!(committed_inner_mask_shape, inner_mask_shape);
-    assert_eq!(committed_outer_mask_shape, outer_mask_shape);
+
     let whir_prover_claim_batch = verified_claim_batch.clone();
-    let expected_relation_claim_count = cfw_geometry.generalized_committed_relation_claim_count();
-    let whir_proof = whir_prover
+    let main_cross_epoch_point = cross_epoch_point.clone();
+    let expected_relation_claim_count = cfw_geometry
+        .generalized_committed_relation_claim_count()
+        .checked_add(2)
+        .expect("cross-epoch relation claim count fits usize");
+    let main_whir_proof = main_whir_prover
         .prove_extension_relation(
-            source_prover_data,
-            Vec::new(),
+            main_source_prover_data,
+            vec![masked_main_evaluation, mask_difference],
             |whir_batching_challenge| {
                 let production_combination = whir_prover_claim_batch
-                    .begin_combining_with_preceding_opening_claims(&[], whir_batching_challenge)
-                    .expect("WHIR batching challenge starts the production transpose");
+                    .begin_combining_with_masked_cross_epoch_claims(
+                        CompactCfwMaskedCrossEpochClaims::new(
+                            main_cross_epoch_point,
+                            copied_main_source_element_count,
+                            masked_pre_challenge_evaluation,
+                            masked_main_evaluation,
+                            mask_difference,
+                        ),
+                        whir_batching_challenge,
+                    )
+                    .expect("WHIR batching challenge starts the masked cross-epoch transpose");
                 let mut production_handoff =
                     CompactStructuredWitnessCovectorHandoff::from_production_row_source(
                         &row_source,
@@ -1921,10 +2275,49 @@ fn production_small_chain_reconciles_authenticated_cfw_transcript_and_structured
                     outer_mask_covectors,
                     relation_claim_count,
                 ) = combined_relation.into_parts();
-                assert!(preceding_mask_covectors.is_empty());
+                assert_eq!(preceding_mask_covectors.len(), shared_mask_shape.width);
                 assert_eq!(relation_claim_count, expected_relation_claim_count);
                 assert_eq!(inner_mask_covectors.len(), inner_mask_shape.width);
                 assert_eq!(outer_mask_covectors.len(), outer_mask_shape.width);
+                let evaluated_relation = source_covector
+                    .iter()
+                    .zip(&witness)
+                    .map(|(coefficient, value)| *coefficient * *value)
+                    .sum::<CompactChallengeField>()
+                    + preceding_mask_covectors
+                        .iter()
+                        .zip(&main_shared_mask_messages)
+                        .map(|(covector, message)| {
+                            covector
+                                .iter()
+                                .zip(message)
+                                .map(|(coefficient, value)| *coefficient * *value)
+                                .sum::<CompactChallengeField>()
+                        })
+                        .sum::<CompactChallengeField>()
+                    + inner_mask_covectors
+                        .iter()
+                        .zip(&inner_mask_messages)
+                        .map(|(covector, message)| {
+                            covector
+                                .iter()
+                                .zip(message)
+                                .map(|(coefficient, value)| *coefficient * *value)
+                                .sum::<CompactChallengeField>()
+                        })
+                        .sum::<CompactChallengeField>()
+                    + outer_mask_covectors
+                        .iter()
+                        .zip(&outer_mask_messages)
+                        .map(|(covector, message)| {
+                            covector
+                                .iter()
+                                .zip(message)
+                                .map(|(coefficient, value)| *coefficient * *value)
+                                .sum::<CompactChallengeField>()
+                        })
+                        .sum::<CompactChallengeField>();
+                assert_eq!(evaluated_relation, target);
                 Ok(CombinedRelationProverInput {
                     source_covector: Poly::new(source_covector),
                     target,
@@ -1943,64 +2336,142 @@ fn production_small_chain_reconciles_authenticated_cfw_transcript_and_structured
                             covectors: outer_mask_covectors,
                             data: outer_mask_prover_data,
                         },
+                        PrecommittedMaskProverGroup {
+                            shape: shared_mask_shape,
+                            messages: main_shared_mask_messages,
+                            randomness: main_shared_mask_randomness,
+                            covectors: preceding_mask_covectors,
+                            data: main_shared_mask_prover_data,
+                        },
                     ],
                 })
             },
             &mut whir_challenger,
             &mut whir_random_source,
         )
-        .expect("the reduced production-family CFW relation enters hiding WHIR");
-    assert!(whir_proof.evals.is_empty());
-    assert_eq!(whir_proof.rounds.len(), whir_configuration.n_rounds());
+        .expect("the reduced masked cross-epoch CFW relation enters hiding WHIR");
     assert_eq!(
-        whir_proof.sumchecks.len(),
-        whir_configuration.n_rounds() + 1
+        main_whir_proof.evals,
+        vec![masked_main_evaluation, mask_difference]
+    );
+    assert_eq!(
+        main_whir_proof.rounds.len(),
+        main_whir_configuration.n_rounds()
+    );
+    assert_eq!(
+        main_whir_proof.sumchecks.len(),
+        main_whir_configuration.n_rounds() + 1
     );
     let whir_execution = SmallChainWhirExecution {
-        configuration: whir_configuration,
+        pre_challenge_configuration: pre_challenge_whir_configuration,
+        main_configuration: main_whir_configuration,
         commitment_scheme: whir_commitment_scheme,
         transcript_binding: whir_transcript_binding,
-        source_commitment,
+        canonical_cfw_proof_bytes: canonical_proof_bytes.clone(),
+        pre_challenge_source_commitment,
+        main_source_commitment,
         inner_mask_shape,
         inner_mask_commitment,
         outer_mask_shape,
         outer_mask_commitment,
+        shared_mask_shape,
+        shared_mask_commitment,
+        copied_main_source_element_count,
+        cross_epoch_point,
         expected_relation_claim_count,
-        proof: whir_proof,
+        pre_challenge_proof: pre_challenge_whir_proof,
+        main_proof: main_whir_proof,
     };
     whir_execution
         .verify(
-            &whir_execution.proof,
+            &whir_execution.pre_challenge_proof,
+            &whir_execution.main_proof,
             &verified_claim_batch,
             &resident_matrices,
             SmallChainWhirVerificationMutation::None,
         )
         .expect("fresh verifier accepts the CFW-bound WHIR proof");
     for mutation in [
-        SmallChainWhirVerificationMutation::Target,
-        SmallChainWhirVerificationMutation::SourceCovector,
+        SmallChainWhirVerificationMutation::PreChallengeTarget,
+        SmallChainWhirVerificationMutation::PreChallengeSourceCovector,
+        SmallChainWhirVerificationMutation::MainTarget,
+        SmallChainWhirVerificationMutation::MainSourceCovector,
         SmallChainWhirVerificationMutation::InnerMaskCovector,
+        SmallChainWhirVerificationMutation::SharedMaskCovector,
         SmallChainWhirVerificationMutation::GroupChronology,
     ] {
         assert!(whir_execution
             .verify(
-                &whir_execution.proof,
+                &whir_execution.pre_challenge_proof,
+                &whir_execution.main_proof,
                 &verified_claim_batch,
                 &resident_matrices,
                 mutation,
             )
             .is_err());
     }
-    let mut mutated_whir_proof = whir_execution.proof.clone();
-    mutated_whir_proof.base_case.masked_claim += CompactChallengeField::ONE;
+    let mut mutated_pre_challenge_proof = whir_execution.pre_challenge_proof.clone();
+    mutated_pre_challenge_proof.base_case.masked_claim += CompactChallengeField::ONE;
     assert!(whir_execution
         .verify(
-            &mutated_whir_proof,
+            &mutated_pre_challenge_proof,
+            &whir_execution.main_proof,
             &verified_claim_batch,
             &resident_matrices,
             SmallChainWhirVerificationMutation::None,
         )
         .is_err());
+    let mut mutated_main_proof = whir_execution.main_proof.clone();
+    mutated_main_proof.base_case.masked_claim += CompactChallengeField::ONE;
+    assert!(whir_execution
+        .verify(
+            &whir_execution.pre_challenge_proof,
+            &mutated_main_proof,
+            &verified_claim_batch,
+            &resident_matrices,
+            SmallChainWhirVerificationMutation::None,
+        )
+        .is_err());
+    let mut mutated_pre_challenge_opening = whir_execution.pre_challenge_proof.clone();
+    let mut mutated_main_opening = whir_execution.main_proof.clone();
+    mutated_pre_challenge_opening.evals[0] += CompactChallengeField::ONE;
+    mutated_main_opening.evals[0] += CompactChallengeField::ONE;
+    assert!(whir_execution
+        .verify(
+            &mutated_pre_challenge_opening,
+            &mutated_main_opening,
+            &verified_claim_batch,
+            &resident_matrices,
+            SmallChainWhirVerificationMutation::None,
+        )
+        .is_err());
+    let mut mutated_main_openings = whir_execution.main_proof.clone();
+    mutated_main_openings.evals[0] += CompactChallengeField::ONE;
+    mutated_main_openings.evals[1] -= CompactChallengeField::ONE;
+    assert!(whir_execution
+        .verify(
+            &whir_execution.pre_challenge_proof,
+            &mutated_main_openings,
+            &verified_claim_batch,
+            &resident_matrices,
+            SmallChainWhirVerificationMutation::None,
+        )
+        .is_err());
+    let mut missing_pre_challenge_opening = whir_execution.pre_challenge_proof.clone();
+    missing_pre_challenge_opening.evals.clear();
+    assert!(matches!(
+        whir_execution.verify(
+            &missing_pre_challenge_opening,
+            &whir_execution.main_proof,
+            &verified_claim_batch,
+            &resident_matrices,
+            SmallChainWhirVerificationMutation::None,
+        ),
+        Err(ZkVerifierError::EvalCountMismatch {
+            expected: 1,
+            actual: 0
+        })
+    ));
 
     decoded_round_polynomials[0][0] += CompactChallengeField::ONE;
     let mutated_cfw_transcript = CompactCfwTranscript::new(
