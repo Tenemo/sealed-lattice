@@ -23,7 +23,7 @@ use super::{
 };
 use crate::bgv::proof_suite::compact_proof_wire::{
     COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH, CompactProofResponseWireGeometry,
-    CompactProofWireError,
+    CompactProofWireError, VARIABLE_RESPONSE_COUNT_BYTE_LENGTH,
 };
 #[cfg(test)]
 use crate::bgv::proof_suite::compact_response_merkle::CompactResponseQuerySchedule;
@@ -47,6 +47,7 @@ pub(super) enum ResponseComponentRole {
     CfwInnerMasks,
     MainSource,
     CfwOuterMasks,
+    CrossEpochMasks,
     CrossEpochOpeningEvaluations,
     CfwAuxiliaryTarget,
     CfwSumcheckPolynomial {
@@ -103,12 +104,20 @@ pub(super) struct ResponseComponentLedger {
     pub(super) role: ResponseComponentRole,
     pub(super) first_leaf_ordinal: u64,
     pub(super) leaf_count: u64,
+    pub(super) minimum_queried_leaf_count: u64,
     pub(super) queried_leaf_count: u64,
     pub(super) query_selection: CompactResponseQuerySelection,
     pub(super) value_byte_length_per_leaf: u64,
 }
 
 impl ResponseComponentLedger {
+    fn minimum_queried_value_byte_length(&self) -> Result<u64, CompactStaticCatalogError> {
+        checked_product(&[
+            self.minimum_queried_leaf_count,
+            self.value_byte_length_per_leaf,
+        ])
+    }
+
     fn queried_value_byte_length(&self) -> Result<u64, CompactStaticCatalogError> {
         checked_product(&[self.queried_leaf_count, self.value_byte_length_per_leaf])
     }
@@ -122,7 +131,9 @@ pub(super) struct ResponseVectorLedger {
     pub(super) components: Vec<ResponseComponentLedger>,
     pub(super) meaningful_leaf_count: u64,
     pub(super) merkle_leaf_count: u64,
+    pub(super) minimum_queried_leaf_count: u64,
     pub(super) queried_leaf_count: u64,
+    minimum_queried_value_byte_length: u64,
     queried_value_byte_length: u64,
     fiat_shamir_round_salt_byte_length: u64,
     transported_leaf_salt_byte_length: u64,
@@ -177,19 +188,23 @@ impl ResponseVectorLedger {
             || self.meaningful_leaf_count == 0
             || self.merkle_leaf_count < self.meaningful_leaf_count
             || !self.merkle_leaf_count.is_power_of_two()
-            || self.queried_leaf_count == 0
+            || self.minimum_queried_leaf_count == 0
+            || self.minimum_queried_leaf_count > self.queried_leaf_count
             || self.queried_leaf_count > self.meaningful_leaf_count
         {
             return Err(CompactStaticCatalogError::InvalidGeometry);
         }
 
         let mut expected_first_leaf_ordinal = 0_u64;
+        let mut minimum_queried_leaf_count = 0_u64;
         let mut queried_leaf_count = 0_u64;
+        let mut minimum_queried_value_byte_length = 0_u64;
         let mut queried_value_byte_length = 0_u64;
         let mut saw_padding = false;
         for component in &self.components {
             if component.first_leaf_ordinal != expected_first_leaf_ordinal
                 || component.leaf_count == 0
+                || component.minimum_queried_leaf_count > component.queried_leaf_count
                 || component.queried_leaf_count > component.leaf_count
                 || (saw_padding && component.role != ResponseComponentRole::Padding)
             {
@@ -197,12 +212,16 @@ impl ResponseVectorLedger {
             }
             match component.query_selection {
                 CompactResponseQuerySelection::Unqueried => {
-                    if component.queried_leaf_count != 0 {
+                    if component.minimum_queried_leaf_count != 0
+                        || component.queried_leaf_count != 0
+                    {
                         return Err(CompactStaticCatalogError::InvalidGeometry);
                     }
                 }
                 CompactResponseQuerySelection::EveryLeaf => {
-                    if component.queried_leaf_count != component.leaf_count {
+                    if component.minimum_queried_leaf_count != component.leaf_count
+                        || component.queried_leaf_count != component.leaf_count
+                    {
                         return Err(CompactStaticCatalogError::InvalidGeometry);
                     }
                 }
@@ -210,9 +229,24 @@ impl ResponseVectorLedger {
                     logical_verifier_move_ordinal,
                     ..
                 } => {
-                    if component.queried_leaf_count == 0
+                    if component.minimum_queried_leaf_count == 0
+                        || component.minimum_queried_leaf_count != component.queried_leaf_count
                         || component.queried_leaf_count == component.leaf_count
                         || logical_verifier_move_ordinal < self.ordinal
+                    {
+                        return Err(CompactStaticCatalogError::InvalidGeometry);
+                    }
+                }
+                CompactResponseQuerySelection::VerifierMessageDistinctGroupUnion {
+                    first_logical_verifier_move_ordinal,
+                    second_logical_verifier_move_ordinal,
+                    ..
+                } => {
+                    if component.minimum_queried_leaf_count == 0
+                        || first_logical_verifier_move_ordinal < self.ordinal
+                        || second_logical_verifier_move_ordinal < self.ordinal
+                        || first_logical_verifier_move_ordinal
+                            >= second_logical_verifier_move_ordinal
                     {
                         return Err(CompactStaticCatalogError::InvalidGeometry);
                     }
@@ -221,6 +255,7 @@ impl ResponseVectorLedger {
             if component.role == ResponseComponentRole::Padding {
                 saw_padding = true;
                 if component.query_selection != CompactResponseQuerySelection::Unqueried
+                    || component.minimum_queried_leaf_count != 0
                     || component.queried_leaf_count != 0
                     || component.value_byte_length_per_leaf != 0
                 {
@@ -231,7 +266,15 @@ impl ResponseVectorLedger {
             }
             expected_first_leaf_ordinal =
                 checked_add(expected_first_leaf_ordinal, component.leaf_count)?;
+            minimum_queried_leaf_count = checked_add(
+                minimum_queried_leaf_count,
+                component.minimum_queried_leaf_count,
+            )?;
             queried_leaf_count = checked_add(queried_leaf_count, component.queried_leaf_count)?;
+            minimum_queried_value_byte_length = checked_add(
+                minimum_queried_value_byte_length,
+                component.minimum_queried_value_byte_length()?,
+            )?;
             queried_value_byte_length = checked_add(
                 queried_value_byte_length,
                 component.queried_value_byte_length()?,
@@ -239,7 +282,9 @@ impl ResponseVectorLedger {
         }
 
         if expected_first_leaf_ordinal != self.merkle_leaf_count
+            || minimum_queried_leaf_count != self.minimum_queried_leaf_count
             || queried_leaf_count != self.queried_leaf_count
+            || minimum_queried_value_byte_length != self.minimum_queried_value_byte_length
             || queried_value_byte_length != self.queried_value_byte_length
             || self.fiat_shamir_round_salt_byte_length
                 != u64::try_from(COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH)
@@ -247,10 +292,15 @@ impl ResponseVectorLedger {
             || self.transported_leaf_salt_byte_length
                 != checked_product(&[self.queried_leaf_count, PRIVATE_LEAF_SALT_BYTE_LENGTH])?
             || self.maximum_authentication_frontier_byte_length
-                != maximum_frontier_byte_length(self.merkle_leaf_count, self.queried_leaf_count)?
-            || self.maximum_opening_parent_hash_count
-                != maximum_frontier_parent_hash_count(
+                != maximum_frontier_byte_length_over_query_range(
                     self.merkle_leaf_count,
+                    self.minimum_queried_leaf_count,
+                    self.queried_leaf_count,
+                )?
+            || self.maximum_opening_parent_hash_count
+                != maximum_frontier_parent_hash_count_over_query_range(
+                    self.merkle_leaf_count,
+                    self.minimum_queried_leaf_count,
                     self.queried_leaf_count,
                 )?
         {
@@ -263,6 +313,12 @@ impl ResponseVectorLedger {
         [
             MERKLE_DIGEST_BYTE_LENGTH,
             self.fiat_shamir_round_salt_byte_length,
+            if self.minimum_queried_leaf_count != self.queried_leaf_count {
+                u64::try_from(VARIABLE_RESPONSE_COUNT_BYTE_LENGTH)
+                    .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?
+            } else {
+                0
+            },
             self.queried_value_byte_length,
             self.transported_leaf_salt_byte_length,
             self.maximum_authentication_frontier_byte_length,
@@ -275,30 +331,44 @@ impl ResponseVectorLedger {
         &self,
         verifier_message_geometry: crate::bgv::proof_suite::fixed_uniform_verifier_message::FixedUniformVerifierMessageGeometry,
     ) -> Result<CompactProofResponseWireGeometry, CompactStaticCatalogError> {
-        let mut queried_base_field_element_count = 0_u64;
-        let mut queried_extension_field_element_count = 0_u64;
+        let mut minimum_queried_base_field_element_count = 0_u64;
+        let mut maximum_queried_base_field_element_count = 0_u64;
+        let mut minimum_queried_extension_field_element_count = 0_u64;
+        let mut maximum_queried_extension_field_element_count = 0_u64;
         for component in self
             .components
             .iter()
             .filter(|component| component.role != ResponseComponentRole::Padding)
         {
-            let (element_byte_length, accumulated_element_count) =
-                if component.role == ResponseComponentRole::PreChallengeSource {
-                    (
-                        BASE_FIELD_ELEMENT_BYTE_LENGTH,
-                        &mut queried_base_field_element_count,
-                    )
-                } else {
-                    (
-                        EXTENSION_FIELD_ELEMENT_BYTE_LENGTH,
-                        &mut queried_extension_field_element_count,
-                    )
-                };
+            let (
+                element_byte_length,
+                accumulated_minimum_element_count,
+                accumulated_maximum_element_count,
+            ) = if component.role == ResponseComponentRole::PreChallengeSource {
+                (
+                    BASE_FIELD_ELEMENT_BYTE_LENGTH,
+                    &mut minimum_queried_base_field_element_count,
+                    &mut maximum_queried_base_field_element_count,
+                )
+            } else {
+                (
+                    EXTENSION_FIELD_ELEMENT_BYTE_LENGTH,
+                    &mut minimum_queried_extension_field_element_count,
+                    &mut maximum_queried_extension_field_element_count,
+                )
+            };
             if component.value_byte_length_per_leaf % element_byte_length != 0 {
                 return Err(CompactStaticCatalogError::InvalidGeometry);
             }
-            *accumulated_element_count = checked_add(
-                *accumulated_element_count,
+            *accumulated_minimum_element_count = checked_add(
+                *accumulated_minimum_element_count,
+                checked_product(&[
+                    component.minimum_queried_leaf_count,
+                    component.value_byte_length_per_leaf / element_byte_length,
+                ])?,
+            )?;
+            *accumulated_maximum_element_count = checked_add(
+                *accumulated_maximum_element_count,
                 checked_product(&[
                     component.queried_leaf_count,
                     component.value_byte_length_per_leaf / element_byte_length,
@@ -307,14 +377,24 @@ impl ResponseVectorLedger {
         }
         if checked_add(
             checked_product(&[
-                queried_base_field_element_count,
+                minimum_queried_base_field_element_count,
                 BASE_FIELD_ELEMENT_BYTE_LENGTH,
             ])?,
             checked_product(&[
-                queried_extension_field_element_count,
+                minimum_queried_extension_field_element_count,
                 EXTENSION_FIELD_ELEMENT_BYTE_LENGTH,
             ])?,
-        )? != self.queried_value_byte_length
+        )? != self.minimum_queried_value_byte_length
+            || checked_add(
+                checked_product(&[
+                    maximum_queried_base_field_element_count,
+                    BASE_FIELD_ELEMENT_BYTE_LENGTH,
+                ])?,
+                checked_product(&[
+                    maximum_queried_extension_field_element_count,
+                    EXTENSION_FIELD_ELEMENT_BYTE_LENGTH,
+                ])?,
+            )? != self.queried_value_byte_length
         {
             return Err(CompactStaticCatalogError::InvalidGeometry);
         }
@@ -326,10 +406,13 @@ impl ResponseVectorLedger {
         if frontier_digest_byte_length % MERKLE_DIGEST_BYTE_LENGTH != 0 {
             return Err(CompactStaticCatalogError::InvalidGeometry);
         }
-        CompactProofResponseWireGeometry::new(
+        CompactProofResponseWireGeometry::new_with_count_ranges(
             self.ordinal,
-            queried_base_field_element_count,
-            queried_extension_field_element_count,
+            minimum_queried_base_field_element_count,
+            maximum_queried_base_field_element_count,
+            minimum_queried_extension_field_element_count,
+            maximum_queried_extension_field_element_count,
+            self.minimum_queried_leaf_count,
             self.queried_leaf_count,
             frontier_digest_byte_length / MERKLE_DIGEST_BYTE_LENGTH,
             verifier_message_geometry,
@@ -358,14 +441,17 @@ impl ResponseVectorLedger {
                 if component.value_byte_length_per_leaf % element_byte_length != 0 {
                     return Err(CompactStaticCatalogError::InvalidGeometry);
                 }
-                Ok(CompactResponseComponentGeometry::new(
-                    component.first_leaf_ordinal,
-                    component.leaf_count,
-                    component.queried_leaf_count,
-                    component.query_selection,
-                    value_kind,
-                    component.value_byte_length_per_leaf / element_byte_length,
-                ))
+                Ok(
+                    CompactResponseComponentGeometry::new_with_query_count_range(
+                        component.first_leaf_ordinal,
+                        component.leaf_count,
+                        component.minimum_queried_leaf_count,
+                        component.queried_leaf_count,
+                        component.query_selection,
+                        value_kind,
+                        component.value_byte_length_per_leaf / element_byte_length,
+                    ),
+                )
             })
             .collect::<Result<Vec<_>, _>>()?;
         let geometry = CompactResponseMerkleGeometry::new(self.ordinal, components)
@@ -382,7 +468,9 @@ impl ResponseVectorLedger {
 struct ResponseVectorBuilder {
     components: Vec<ResponseComponentLedger>,
     meaningful_leaf_count: u64,
+    minimum_queried_leaf_count: u64,
     queried_leaf_count: u64,
+    minimum_queried_value_byte_length: u64,
     queried_value_byte_length: u64,
 }
 
@@ -391,7 +479,9 @@ impl ResponseVectorBuilder {
         Self {
             components: Vec::new(),
             meaningful_leaf_count: 0,
+            minimum_queried_leaf_count: 0,
             queried_leaf_count: 0,
+            minimum_queried_value_byte_length: 0,
             queried_value_byte_length: 0,
         }
     }
@@ -403,9 +493,27 @@ impl ResponseVectorBuilder {
         queried_leaf_count: u64,
         value_byte_length_per_leaf: u64,
     ) -> Result<(), CompactStaticCatalogError> {
+        self.push_with_query_count_range(
+            role,
+            leaf_count,
+            queried_leaf_count,
+            queried_leaf_count,
+            value_byte_length_per_leaf,
+        )
+    }
+
+    fn push_with_query_count_range(
+        &mut self,
+        role: ResponseComponentRole,
+        leaf_count: u64,
+        minimum_queried_leaf_count: u64,
+        maximum_queried_leaf_count: u64,
+        value_byte_length_per_leaf: u64,
+    ) -> Result<(), CompactStaticCatalogError> {
         if role == ResponseComponentRole::Padding
             || leaf_count == 0
-            || queried_leaf_count > leaf_count
+            || minimum_queried_leaf_count > maximum_queried_leaf_count
+            || maximum_queried_leaf_count > leaf_count
             || value_byte_length_per_leaf == 0
         {
             return Err(CompactStaticCatalogError::InvalidGeometry);
@@ -414,8 +522,9 @@ impl ResponseVectorBuilder {
             role,
             first_leaf_ordinal: self.meaningful_leaf_count,
             leaf_count,
-            queried_leaf_count,
-            query_selection: if queried_leaf_count == leaf_count {
+            minimum_queried_leaf_count,
+            queried_leaf_count: maximum_queried_leaf_count,
+            query_selection: if minimum_queried_leaf_count == leaf_count {
                 CompactResponseQuerySelection::EveryLeaf
             } else {
                 CompactResponseQuerySelection::Unqueried
@@ -423,10 +532,16 @@ impl ResponseVectorBuilder {
             value_byte_length_per_leaf,
         });
         self.meaningful_leaf_count = checked_add(self.meaningful_leaf_count, leaf_count)?;
-        self.queried_leaf_count = checked_add(self.queried_leaf_count, queried_leaf_count)?;
+        self.minimum_queried_leaf_count =
+            checked_add(self.minimum_queried_leaf_count, minimum_queried_leaf_count)?;
+        self.queried_leaf_count = checked_add(self.queried_leaf_count, maximum_queried_leaf_count)?;
+        self.minimum_queried_value_byte_length = checked_add(
+            self.minimum_queried_value_byte_length,
+            checked_product(&[minimum_queried_leaf_count, value_byte_length_per_leaf])?,
+        )?;
         self.queried_value_byte_length = checked_add(
             self.queried_value_byte_length,
-            checked_product(&[queried_leaf_count, value_byte_length_per_leaf])?,
+            checked_product(&[maximum_queried_leaf_count, value_byte_length_per_leaf])?,
         )?;
         Ok(())
     }
@@ -435,7 +550,7 @@ impl ResponseVectorBuilder {
         mut self,
         verifier_move: &VerifierMove,
     ) -> Result<ResponseVectorLedger, CompactStaticCatalogError> {
-        if self.meaningful_leaf_count == 0 || self.queried_leaf_count == 0 {
+        if self.meaningful_leaf_count == 0 || self.minimum_queried_leaf_count == 0 {
             return Err(CompactStaticCatalogError::InvalidGeometry);
         }
         let merkle_leaf_count = self
@@ -447,6 +562,7 @@ impl ResponseVectorBuilder {
                 role: ResponseComponentRole::Padding,
                 first_leaf_ordinal: self.meaningful_leaf_count,
                 leaf_count: merkle_leaf_count - self.meaningful_leaf_count,
+                minimum_queried_leaf_count: 0,
                 queried_leaf_count: 0,
                 query_selection: CompactResponseQuerySelection::Unqueried,
                 value_byte_length_per_leaf: 0,
@@ -462,7 +578,9 @@ impl ResponseVectorBuilder {
             components: self.components,
             meaningful_leaf_count: self.meaningful_leaf_count,
             merkle_leaf_count,
+            minimum_queried_leaf_count: self.minimum_queried_leaf_count,
             queried_leaf_count: self.queried_leaf_count,
+            minimum_queried_value_byte_length: self.minimum_queried_value_byte_length,
             queried_value_byte_length: self.queried_value_byte_length,
             fiat_shamir_round_salt_byte_length: u64::try_from(
                 COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH,
@@ -472,12 +590,15 @@ impl ResponseVectorBuilder {
                 self.queried_leaf_count,
                 PRIVATE_LEAF_SALT_BYTE_LENGTH,
             ])?,
-            maximum_authentication_frontier_byte_length: maximum_frontier_byte_length(
+            maximum_authentication_frontier_byte_length:
+                maximum_frontier_byte_length_over_query_range(
+                    merkle_leaf_count,
+                    self.minimum_queried_leaf_count,
+                    self.queried_leaf_count,
+                )?,
+            maximum_opening_parent_hash_count: maximum_frontier_parent_hash_count_over_query_range(
                 merkle_leaf_count,
-                self.queried_leaf_count,
-            )?,
-            maximum_opening_parent_hash_count: maximum_frontier_parent_hash_count(
-                merkle_leaf_count,
+                self.minimum_queried_leaf_count,
                 self.queried_leaf_count,
             )?,
         };
@@ -489,6 +610,7 @@ impl ResponseVectorBuilder {
 pub(super) struct PackingResponseCommitmentCatalog {
     responses: Vec<ResponseVectorLedger>,
     bcs_response_root_count: u64,
+    minimum_proof_oracle_query_count: u64,
     proof_oracle_query_count: u64,
     maximum_proof_oracle_length: u64,
     maximum_leaf_value_byte_length: u64,
@@ -529,6 +651,10 @@ impl PackingResponseCommitmentCatalog {
 
     pub(super) const fn proof_oracle_query_count(&self) -> u64 {
         self.proof_oracle_query_count
+    }
+
+    pub(super) const fn minimum_proof_oracle_query_count(&self) -> u64 {
+        self.minimum_proof_oracle_query_count
     }
 
     pub(super) const fn maximum_proof_oracle_length(&self) -> u64 {
@@ -839,11 +965,42 @@ fn response_query_schedule_byte_length(
     ])
 }
 
+fn maximum_frontier_byte_length_over_query_range(
+    leaf_count: u64,
+    minimum_query_count: u64,
+    maximum_query_count: u64,
+) -> Result<u64, CompactStaticCatalogError> {
+    if minimum_query_count == 0 || minimum_query_count > maximum_query_count {
+        return Err(CompactStaticCatalogError::InvalidGeometry);
+    }
+    (minimum_query_count..=maximum_query_count).try_fold(0_u64, |maximum, query_count| {
+        maximum_frontier_byte_length(leaf_count, query_count).map(|current| maximum.max(current))
+    })
+}
+
+fn maximum_frontier_parent_hash_count_over_query_range(
+    leaf_count: u64,
+    minimum_query_count: u64,
+    maximum_query_count: u64,
+) -> Result<u64, CompactStaticCatalogError> {
+    if minimum_query_count == 0 || minimum_query_count > maximum_query_count {
+        return Err(CompactStaticCatalogError::InvalidGeometry);
+    }
+    (minimum_query_count..=maximum_query_count).try_fold(0_u64, |maximum, query_count| {
+        maximum_frontier_parent_hash_count(leaf_count, query_count)
+            .map(|current| maximum.max(current))
+    })
+}
+
 fn derive_catalog_fields(
     responses: Vec<ResponseVectorLedger>,
 ) -> Result<PackingResponseCommitmentCatalog, CompactStaticCatalogError> {
     let bcs_response_root_count = u64::try_from(responses.len())
         .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?;
+    let minimum_proof_oracle_query_count =
+        responses.iter().try_fold(0_u64, |count, response| {
+            checked_add(count, response.minimum_queried_leaf_count)
+        })?;
     let proof_oracle_query_count = responses.iter().try_fold(0_u64, |count, response| {
         checked_add(count, response.queried_leaf_count)
     })?;
@@ -881,6 +1038,7 @@ fn derive_catalog_fields(
     Ok(PackingResponseCommitmentCatalog {
         responses,
         bcs_response_root_count,
+        minimum_proof_oracle_query_count,
         proof_oracle_query_count,
         maximum_proof_oracle_length,
         maximum_leaf_value_byte_length,
@@ -918,7 +1076,8 @@ fn append_response_components(
                 ResponseComponentRole::CfwOuterMasks,
                 mask_group(main_whir, MaskGroupRole::CfwOuter)?,
                 main_whir.mask_query_count,
-            )
+            )?;
+            append_shared_cross_epoch_mask_oracle(builder, pre_challenge_whir, main_whir)
         }
         [VerifierMoveRole::CfwInitialRandomness] => {
             append_extension_scalars(
@@ -1062,6 +1221,47 @@ fn append_mask_oracle(
         group.domain_size,
         query_count,
         checked_product(&[group.width, EXTENSION_FIELD_ELEMENT_BYTE_LENGTH])?,
+    )
+}
+
+fn append_shared_cross_epoch_mask_oracle(
+    builder: &mut ResponseVectorBuilder,
+    pre_challenge_whir: &WhirStaticLedger,
+    main_whir: &WhirStaticLedger,
+) -> Result<(), CompactStaticCatalogError> {
+    let pre_challenge_group = mask_group(pre_challenge_whir, MaskGroupRole::CrossEpochOpening)?;
+    let main_group = mask_group(main_whir, MaskGroupRole::CrossEpochOpening)?;
+    if (
+        pre_challenge_group.width,
+        pre_challenge_group.domain_size,
+        pre_challenge_group.message_length,
+        pre_challenge_group.randomness_length,
+    ) != (
+        main_group.width,
+        main_group.domain_size,
+        main_group.message_length,
+        main_group.randomness_length,
+    ) {
+        return Err(CompactStaticCatalogError::InvalidGeometry);
+    }
+    let combined_query_count = checked_add(
+        pre_challenge_whir.mask_query_count,
+        main_whir.mask_query_count,
+    )?;
+    let minimum_union_count = combined_query_count
+        .saturating_sub(pre_challenge_group.domain_size)
+        .max(pre_challenge_whir.mask_query_count)
+        .max(main_whir.mask_query_count);
+    let maximum_union_count = combined_query_count.min(pre_challenge_group.domain_size);
+    builder.push_with_query_count_range(
+        ResponseComponentRole::CrossEpochMasks,
+        pre_challenge_group.domain_size,
+        minimum_union_count,
+        maximum_union_count,
+        checked_product(&[
+            pre_challenge_group.width,
+            EXTENSION_FIELD_ELEMENT_BYTE_LENGTH,
+        ])?,
     )
 }
 
@@ -1248,6 +1448,43 @@ fn query_selection_for_component(
             },
             final_mask_query_group_ordinal(main_whir, MaskGroupRole::CfwOuter)?,
         )?,
+        ResponseComponentRole::CrossEpochMasks => {
+            let CompactResponseQuerySelection::VerifierMessageDistinctGroup {
+                logical_verifier_move_ordinal: first_logical_verifier_move_ordinal,
+                distinct_query_group_ordinal: first_distinct_query_group_ordinal,
+            } = query_selection_for_verifier_role(
+                chronology,
+                VerifierMoveRole::WhirFinalQueries {
+                    epoch: TranscriptEpoch::PreChallenge,
+                },
+                final_mask_query_group_ordinal(
+                    pre_challenge_whir,
+                    MaskGroupRole::CrossEpochOpening,
+                )?,
+            )?
+            else {
+                return Err(CompactStaticCatalogError::InvalidGeometry);
+            };
+            let CompactResponseQuerySelection::VerifierMessageDistinctGroup {
+                logical_verifier_move_ordinal: second_logical_verifier_move_ordinal,
+                distinct_query_group_ordinal: second_distinct_query_group_ordinal,
+            } = query_selection_for_verifier_role(
+                chronology,
+                VerifierMoveRole::WhirFinalQueries {
+                    epoch: TranscriptEpoch::Main,
+                },
+                final_mask_query_group_ordinal(main_whir, MaskGroupRole::CrossEpochOpening)?,
+            )?
+            else {
+                return Err(CompactStaticCatalogError::InvalidGeometry);
+            };
+            CompactResponseQuerySelection::VerifierMessageDistinctGroupUnion {
+                first_logical_verifier_move_ordinal,
+                first_distinct_query_group_ordinal,
+                second_logical_verifier_move_ordinal,
+                second_distinct_query_group_ordinal,
+            }
+        }
         ResponseComponentRole::WhirSumcheckMask {
             epoch,
             batch_ordinal,
@@ -1413,12 +1650,12 @@ mod tests {
             .expect("compact public-key static packing ledger");
         let expected_response_counts = [82, 80, 78, 76];
         let expected_maximum_lengths = [262_144, 524_288, 1_048_576, 2_097_152];
-        let expected_proof_oracle_query_counts = [78_512, 77_978, 76_770, 76_554];
+        let expected_proof_oracle_query_counts = [79_310, 78_776, 77_568, 77_352];
         let expected_maximum_opening_byte_lengths =
-            [26_094_856, 25_161_344, 24_443_272, 24_482_576];
+            [26_567_284, 25_684_844, 25_017_844, 25_108_220];
         let expected_committed_leaf_counts = [639_270, 1_065_250, 1_917_214, 3_621_146];
         let expected_commitment_parent_hash_counts = [639_188, 1_065_170, 1_917_136, 3_621_070];
-        let expected_maximum_opening_parent_hash_counts = [163_571, 167_123, 169_641, 173_611];
+        let expected_maximum_opening_parent_hash_counts = [169_157, 173_507, 176_823, 181_591];
 
         for (factor_ordinal, factor) in catalog.factor_catalogs.iter().enumerate() {
             let expected_response_count = expected_response_counts[factor_ordinal];
@@ -1432,6 +1669,9 @@ mod tests {
                 expected_maximum_length
             );
             assert_eq!(responses.proof_oracle_query_count, expected_query_count);
+            assert!(
+                responses.minimum_proof_oracle_query_count < responses.proof_oracle_query_count
+            );
             assert_eq!(
                 responses.maximum_opening_byte_length,
                 expected_maximum_opening_byte_lengths[factor_ordinal]
@@ -1496,6 +1736,10 @@ mod tests {
                 assert_eq!(
                     wire_geometry.queried_leaf_count(),
                     response.queried_leaf_count
+                );
+                assert_eq!(
+                    wire_geometry.minimum_queried_leaf_count(),
+                    response.minimum_queried_leaf_count
                 );
                 assert_eq!(
                     wire_geometry.maximum_frontier_node_count(),
@@ -1575,6 +1819,14 @@ mod tests {
                     merkle_geometry.queried_leaf_count(),
                     tree_geometry.queried_leaf_count
                 );
+                assert_eq!(
+                    merkle_geometry.minimum_queried_leaf_count(),
+                    wire_geometry.minimum_queried_leaf_count()
+                );
+                assert_eq!(
+                    merkle_geometry.maximum_queried_leaf_count(),
+                    wire_geometry.maximum_queried_leaf_count()
+                );
                 merkle_geometry
                     .validate_wire_geometry(wire_geometry)
                     .expect("Merkle and wire response shapes agree");
@@ -1644,9 +1896,9 @@ mod tests {
                     usize::try_from(merkle_geometry.response_ordinal()).unwrap(),
                     response_ordinal
                 );
-                assert_eq!(
-                    u64::try_from(schedule.as_slice().len()).unwrap(),
-                    response.queried_leaf_count
+                assert!(
+                    (response.minimum_queried_leaf_count..=response.queried_leaf_count)
+                        .contains(&u64::try_from(schedule.as_slice().len()).unwrap())
                 );
                 assert!(schedule.as_slice().windows(2).all(|pair| pair[0] < pair[1]));
                 let schedule_heap_byte_length = schedule
@@ -1656,14 +1908,20 @@ mod tests {
                     schedule_heap_byte_length,
                     response_query_schedule_byte_length(response.queried_leaf_count).unwrap()
                 );
-                total_queried_leaf_count =
-                    checked_add(total_queried_leaf_count, response.queried_leaf_count).unwrap();
+                total_queried_leaf_count = checked_add(
+                    total_queried_leaf_count,
+                    u64::try_from(schedule.as_slice().len()).unwrap(),
+                )
+                .unwrap();
                 maximum_schedule_heap_byte_length =
                     maximum_schedule_heap_byte_length.max(schedule_heap_byte_length);
             }
-            assert_eq!(
-                total_queried_leaf_count,
-                factor.response_commitments.proof_oracle_query_count
+            assert!(
+                (factor
+                    .response_commitments
+                    .minimum_proof_oracle_query_count()
+                    ..=factor.response_commitments.proof_oracle_query_count)
+                    .contains(&total_queried_leaf_count)
             );
             assert_eq!(
                 maximum_schedule_heap_byte_length,
@@ -1715,6 +1973,64 @@ mod tests {
             .expect("three cross-epoch disclosures");
         assert_eq!(cross_epoch_openings.leaf_count, 3);
         assert_eq!(cross_epoch_openings.queried_leaf_count, 3);
+    }
+
+    #[test]
+    fn response_catalog_owns_one_shared_cross_epoch_oracle_and_both_query_groups() {
+        let catalog = CompactPublicKeyStaticCatalog::derive()
+            .expect("compact public-key static packing ledger");
+        for factor in &catalog.factor_catalogs {
+            let cross_epoch_response = factor
+                .response_commitments
+                .responses
+                .iter()
+                .find(|response| {
+                    response.verifier_move_roles == [VerifierMoveRole::CrossEpochPoint]
+                })
+                .expect("one response precedes the cross-epoch point");
+            let shared_component = cross_epoch_response
+                .components
+                .iter()
+                .find(|component| component.role == ResponseComponentRole::CrossEpochMasks)
+                .expect("shared cross-epoch mask rows have one response-vector owner");
+            let shared_group =
+                mask_group(&factor.pre_challenge_whir, MaskGroupRole::CrossEpochOpening)
+                    .expect("pre-challenge shared mask group");
+            assert_eq!(shared_component.leaf_count, shared_group.domain_size);
+            assert_eq!(shared_component.minimum_queried_leaf_count, 399);
+            assert_eq!(shared_component.queried_leaf_count, 798);
+            assert_eq!(
+                shared_component.value_byte_length_per_leaf,
+                2 * EXTENSION_FIELD_ELEMENT_BYTE_LENGTH
+            );
+            let CompactResponseQuerySelection::VerifierMessageDistinctGroupUnion {
+                first_logical_verifier_move_ordinal,
+                second_logical_verifier_move_ordinal,
+                ..
+            } = shared_component.query_selection
+            else {
+                panic!("shared cross-epoch rows must use the two final-query groups")
+            };
+            assert!(first_logical_verifier_move_ordinal < second_logical_verifier_move_ordinal);
+
+            let wire_geometries = factor
+                .response_commitments
+                .production_wire_geometries(&factor.uniform_verifier_randomness)
+                .expect("production response wire geometries");
+            let wire_geometry = &wire_geometries
+                [usize::try_from(cross_epoch_response.ordinal).expect("response ordinal")];
+            assert!(wire_geometry.has_variable_counts());
+            assert_eq!(
+                wire_geometry.maximum_queried_leaf_count()
+                    - wire_geometry.minimum_queried_leaf_count(),
+                399
+            );
+            assert_eq!(
+                wire_geometry.maximum_queried_extension_field_element_count()
+                    - wire_geometry.minimum_queried_extension_field_element_count(),
+                798
+            );
+        }
     }
 
     #[test]

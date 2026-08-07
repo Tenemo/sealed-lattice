@@ -575,11 +575,11 @@ mod tests {
             .expect("compact public-key static packing ledger");
         let expected_logical_round_counts = [82, 80, 78, 76];
         let expected_maximum_proof_oracle_lengths = [262_144, 524_288, 1_048_576, 2_097_152];
-        let expected_proof_oracle_query_counts = [78_512, 77_978, 76_770, 76_554];
+        let expected_proof_oracle_query_counts = [79_310, 78_776, 77_568, 77_352];
         let expected_maximum_verifier_merkle_hash_query_counts =
-            [242_083, 245_101, 246_411, 250_165];
+            [248_467, 252_283, 254_391, 258_943];
         let expected_abstract_bcs_verifier_oracle_query_counts =
-            [242_165, 245_181, 246_489, 250_241];
+            [248_549, 252_363, 254_469, 259_019];
         let expected_maximum_leaf_value_byte_lengths = [5_120, 2_760, 2_760, 2_760];
 
         for (factor_ordinal, factor) in catalog.factor_catalogs.iter().enumerate() {

@@ -14,15 +14,20 @@ now has a production-derived structured relation and independent interpreter,
 two commitment epochs, all CFW inner and outer masks, code-switch and WHIR
 static catalogs, canonical proof and public-input codecs, one salted Merkle
 commitment per logical response, and complete deterministic test-message query
-schedules. These are static development owners, not an accepted proof path.
+schedules. The factor-one relaxed extractor, construction-level interactive
+masking correspondence, emitted-byte consumer map, and conditional CDHZ/QROM
+composition are independently checked. The shared two-epoch mask oracle is
+owned once by the canonical response catalog; its two later verifier-message
+groups open their sorted unique union through bounded canonical response counts.
+These are static development owners, not an accepted proof path.
 
 The current packing-factor proof, provisional WASM-peak, and scratch triples
-are `(26,436,090, 384,911,816, 640,811,508)`,
-`(25,518,898, 417,464,816, 693,240,308)`,
-`(24,815,706, 483,692,008, 798,097,908)`, and
-`(24,871,730, 617,926,352, 1,080,840,728)` for factors one, two, four, and
+are `(26,927,670, 385,505,540, 640,811,508)`,
+`(26,064,742, 418,112,804, 693,240,308)`,
+`(25,415,814, 484,445,268, 798,097,908)`, and
+`(25,526,102, 618,845,620, 1,082,414,368)` for factors one, two, four, and
 eight. Factors one, two, and four remain below every absolute byte bound.
-Factor eight exceeds the scratch bound by `7,098,904` bytes under the complete
+Factor eight exceeds the scratch bound by `8,672,544` bytes under the complete
 retained-tree lifecycle and is not a static default. No factor is selected.
 The retained lifecycle keeps at most ten response trees and peaks at
 `52,952,832`, `105,381,632`, `210,239,232`, or `419,954,432` bytes. Its
@@ -31,15 +36,18 @@ commitment, authenticated salt replay, and response-value replay remain
 unimplemented. That alternative is deferred rather than treated as a way to
 rescue factor eight.
 
-The static numerical failure ledger is not yet the relaxed round-by-round
-knowledge theorem required by CDHZ. Exact knowledge states, deterministic
-extractors, intermediate relaxed relations, CFW/WHIR composition hypotheses,
-and emitted-proof correspondence remain open. The 316 schedules derived from
-complete deterministic fixed verifier messages are test-state evidence, not
-live prover transcript driving. Authenticated restart, selected-size CFW and
-transpose execution, WHIR invocation, transported-proof verification, and
-release-WASM browser evidence also remain open. After those static gates pass,
-factor one is the first selected-size execution target; factors two and four
+The relaxed round-by-round theorem, construction masking correspondence,
+canonical emitted-byte map, and conditional noninteractive soundness owner are
+closed for this standalone geometry. The 316 schedules derived from complete
+deterministic fixed verifier messages are still test-state evidence, not live
+prover transcript driving. A reduced production-family chain verifies
+transported CFW bytes and sequential in-memory hiding-WHIR proofs, but it still
+uses a constant provider, deterministic development coins, a separate WHIR
+challenger, and no canonical transported WHIR sections. Production authority,
+one canonical transcript, authenticated restart, selected-size CFW and
+transpose execution, WHIR transport, and release-WASM browser evidence remain
+open. After those gates pass, factor one is the first selected-size execution
+target; factors two and four
 are measured only if verification or transport tradeoffs require them. The
 row-code vectors and historical factor-eight root measurement do not transfer
 to this construction and cannot freeze the suite.

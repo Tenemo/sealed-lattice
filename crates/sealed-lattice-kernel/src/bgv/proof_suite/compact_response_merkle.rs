@@ -45,13 +45,20 @@ pub(crate) enum CompactResponseQuerySelection {
         logical_verifier_move_ordinal: u32,
         distinct_query_group_ordinal: u32,
     },
+    VerifierMessageDistinctGroupUnion {
+        first_logical_verifier_move_ordinal: u32,
+        first_distinct_query_group_ordinal: u32,
+        second_logical_verifier_move_ordinal: u32,
+        second_distinct_query_group_ordinal: u32,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CompactResponseComponentGeometry {
     first_leaf_ordinal: u64,
     leaf_count: u64,
-    queried_leaf_count: u64,
+    minimum_queried_leaf_count: u64,
+    maximum_queried_leaf_count: u64,
     query_selection: CompactResponseQuerySelection,
     value_kind: CompactResponseLeafValueKind,
     field_element_count_per_leaf: u64,
@@ -66,10 +73,31 @@ impl CompactResponseComponentGeometry {
         value_kind: CompactResponseLeafValueKind,
         field_element_count_per_leaf: u64,
     ) -> Self {
-        Self {
+        Self::new_with_query_count_range(
             first_leaf_ordinal,
             leaf_count,
             queried_leaf_count,
+            queried_leaf_count,
+            query_selection,
+            value_kind,
+            field_element_count_per_leaf,
+        )
+    }
+
+    pub(crate) const fn new_with_query_count_range(
+        first_leaf_ordinal: u64,
+        leaf_count: u64,
+        minimum_queried_leaf_count: u64,
+        maximum_queried_leaf_count: u64,
+        query_selection: CompactResponseQuerySelection,
+        value_kind: CompactResponseLeafValueKind,
+        field_element_count_per_leaf: u64,
+    ) -> Self {
+        Self {
+            first_leaf_ordinal,
+            leaf_count,
+            minimum_queried_leaf_count,
+            maximum_queried_leaf_count,
             query_selection,
             value_kind,
             field_element_count_per_leaf,
@@ -83,7 +111,8 @@ pub(crate) struct CompactResponseMerkleGeometry {
     vector_commitment_oracle_identifier: u32,
     components: Vec<CompactResponseComponentGeometry>,
     merkle_leaf_count: u64,
-    queried_leaf_count: u64,
+    minimum_queried_leaf_count: u64,
+    maximum_queried_leaf_count: u64,
 }
 
 impl CompactResponseMerkleGeometry {
@@ -95,24 +124,30 @@ impl CompactResponseMerkleGeometry {
             return Err(CompactResponseMerkleError::InvalidGeometry);
         }
         let mut expected_first_leaf_ordinal = 0_u64;
-        let mut queried_leaf_count = 0_u64;
+        let mut minimum_queried_leaf_count = 0_u64;
+        let mut maximum_queried_leaf_count = 0_u64;
         let mut saw_padding = false;
         for component in &components {
             if component.first_leaf_ordinal != expected_first_leaf_ordinal
                 || component.leaf_count == 0
-                || component.queried_leaf_count > component.leaf_count
+                || component.minimum_queried_leaf_count > component.maximum_queried_leaf_count
+                || component.maximum_queried_leaf_count > component.leaf_count
                 || (saw_padding && component.value_kind != CompactResponseLeafValueKind::Padding)
             {
                 return Err(CompactResponseMerkleError::InvalidGeometry);
             }
             match component.query_selection {
                 CompactResponseQuerySelection::Unqueried => {
-                    if component.queried_leaf_count != 0 {
+                    if component.minimum_queried_leaf_count != 0
+                        || component.maximum_queried_leaf_count != 0
+                    {
                         return Err(CompactResponseMerkleError::InvalidGeometry);
                     }
                 }
                 CompactResponseQuerySelection::EveryLeaf => {
-                    if component.queried_leaf_count != component.leaf_count {
+                    if component.minimum_queried_leaf_count != component.leaf_count
+                        || component.maximum_queried_leaf_count != component.leaf_count
+                    {
                         return Err(CompactResponseMerkleError::InvalidGeometry);
                     }
                 }
@@ -120,9 +155,25 @@ impl CompactResponseMerkleGeometry {
                     logical_verifier_move_ordinal,
                     ..
                 } => {
-                    if component.queried_leaf_count == 0
-                        || component.queried_leaf_count == component.leaf_count
+                    if component.minimum_queried_leaf_count == 0
+                        || component.minimum_queried_leaf_count
+                            != component.maximum_queried_leaf_count
+                        || component.maximum_queried_leaf_count == component.leaf_count
                         || logical_verifier_move_ordinal < response_ordinal
+                    {
+                        return Err(CompactResponseMerkleError::InvalidGeometry);
+                    }
+                }
+                CompactResponseQuerySelection::VerifierMessageDistinctGroupUnion {
+                    first_logical_verifier_move_ordinal,
+                    second_logical_verifier_move_ordinal,
+                    ..
+                } => {
+                    if component.minimum_queried_leaf_count == 0
+                        || first_logical_verifier_move_ordinal < response_ordinal
+                        || second_logical_verifier_move_ordinal < response_ordinal
+                        || first_logical_verifier_move_ordinal
+                            >= second_logical_verifier_move_ordinal
                     {
                         return Err(CompactResponseMerkleError::InvalidGeometry);
                     }
@@ -138,7 +189,8 @@ impl CompactResponseMerkleGeometry {
                 CompactResponseLeafValueKind::Padding => {
                     saw_padding = true;
                     if component.query_selection != CompactResponseQuerySelection::Unqueried
-                        || component.queried_leaf_count != 0
+                        || component.minimum_queried_leaf_count != 0
+                        || component.maximum_queried_leaf_count != 0
                         || component.field_element_count_per_leaf != 0
                     {
                         return Err(CompactResponseMerkleError::InvalidGeometry);
@@ -148,13 +200,16 @@ impl CompactResponseMerkleGeometry {
             expected_first_leaf_ordinal = expected_first_leaf_ordinal
                 .checked_add(component.leaf_count)
                 .ok_or(CompactResponseMerkleError::CountOverflow)?;
-            queried_leaf_count = queried_leaf_count
-                .checked_add(component.queried_leaf_count)
+            minimum_queried_leaf_count = minimum_queried_leaf_count
+                .checked_add(component.minimum_queried_leaf_count)
+                .ok_or(CompactResponseMerkleError::CountOverflow)?;
+            maximum_queried_leaf_count = maximum_queried_leaf_count
+                .checked_add(component.maximum_queried_leaf_count)
                 .ok_or(CompactResponseMerkleError::CountOverflow)?;
         }
         if expected_first_leaf_ordinal == 0
             || !expected_first_leaf_ordinal.is_power_of_two()
-            || queried_leaf_count == 0
+            || minimum_queried_leaf_count == 0
         {
             return Err(CompactResponseMerkleError::InvalidGeometry);
         }
@@ -166,7 +221,8 @@ impl CompactResponseMerkleGeometry {
             .map_err(|_| CompactResponseMerkleError::CountOverflow)?,
             components,
             merkle_leaf_count: expected_first_leaf_ordinal,
-            queried_leaf_count,
+            minimum_queried_leaf_count,
+            maximum_queried_leaf_count,
         })
     }
 
@@ -183,43 +239,84 @@ impl CompactResponseMerkleGeometry {
     }
 
     pub(crate) const fn queried_leaf_count(&self) -> u64 {
-        self.queried_leaf_count
+        self.maximum_queried_leaf_count
+    }
+
+    pub(crate) const fn minimum_queried_leaf_count(&self) -> u64 {
+        self.minimum_queried_leaf_count
+    }
+
+    pub(crate) const fn maximum_queried_leaf_count(&self) -> u64 {
+        self.maximum_queried_leaf_count
     }
 
     pub(crate) fn validate_wire_geometry(
         &self,
         wire_geometry: &CompactProofResponseWireGeometry,
     ) -> Result<(), CompactResponseMerkleError> {
-        let (expected_base_field_element_count, expected_extension_field_element_count) =
-            self.components.iter().try_fold(
-                (0_u64, 0_u64),
-                |(base_count, extension_count), component| {
-                    let queried_element_count = component
-                        .queried_leaf_count
-                        .checked_mul(component.field_element_count_per_leaf)
-                        .ok_or(CompactResponseMerkleError::CountOverflow)?;
-                    match component.value_kind {
-                        CompactResponseLeafValueKind::BaseField => Ok((
-                            base_count
-                                .checked_add(queried_element_count)
-                                .ok_or(CompactResponseMerkleError::CountOverflow)?,
-                            extension_count,
-                        )),
-                        CompactResponseLeafValueKind::ExtensionField => Ok((
-                            base_count,
-                            extension_count
-                                .checked_add(queried_element_count)
-                                .ok_or(CompactResponseMerkleError::CountOverflow)?,
-                        )),
-                        CompactResponseLeafValueKind::Padding => Ok((base_count, extension_count)),
-                    }
-                },
-            )?;
+        let (
+            expected_minimum_base_field_element_count,
+            expected_maximum_base_field_element_count,
+            expected_minimum_extension_field_element_count,
+            expected_maximum_extension_field_element_count,
+        ) = self.components.iter().try_fold(
+            (0_u64, 0_u64, 0_u64, 0_u64),
+            |(
+                minimum_base_count,
+                maximum_base_count,
+                minimum_extension_count,
+                maximum_extension_count,
+            ),
+             component| {
+                let minimum_queried_element_count = component
+                    .minimum_queried_leaf_count
+                    .checked_mul(component.field_element_count_per_leaf)
+                    .ok_or(CompactResponseMerkleError::CountOverflow)?;
+                let maximum_queried_element_count = component
+                    .maximum_queried_leaf_count
+                    .checked_mul(component.field_element_count_per_leaf)
+                    .ok_or(CompactResponseMerkleError::CountOverflow)?;
+                match component.value_kind {
+                    CompactResponseLeafValueKind::BaseField => Ok((
+                        minimum_base_count
+                            .checked_add(minimum_queried_element_count)
+                            .ok_or(CompactResponseMerkleError::CountOverflow)?,
+                        maximum_base_count
+                            .checked_add(maximum_queried_element_count)
+                            .ok_or(CompactResponseMerkleError::CountOverflow)?,
+                        minimum_extension_count,
+                        maximum_extension_count,
+                    )),
+                    CompactResponseLeafValueKind::ExtensionField => Ok((
+                        minimum_base_count,
+                        maximum_base_count,
+                        minimum_extension_count
+                            .checked_add(minimum_queried_element_count)
+                            .ok_or(CompactResponseMerkleError::CountOverflow)?,
+                        maximum_extension_count
+                            .checked_add(maximum_queried_element_count)
+                            .ok_or(CompactResponseMerkleError::CountOverflow)?,
+                    )),
+                    CompactResponseLeafValueKind::Padding => Ok((
+                        minimum_base_count,
+                        maximum_base_count,
+                        minimum_extension_count,
+                        maximum_extension_count,
+                    )),
+                }
+            },
+        )?;
         if wire_geometry.ordinal() != self.response_ordinal
-            || wire_geometry.queried_leaf_count() != self.queried_leaf_count
-            || wire_geometry.queried_base_field_element_count() != expected_base_field_element_count
-            || wire_geometry.queried_extension_field_element_count()
-                != expected_extension_field_element_count
+            || wire_geometry.minimum_queried_leaf_count() != self.minimum_queried_leaf_count
+            || wire_geometry.maximum_queried_leaf_count() != self.maximum_queried_leaf_count
+            || wire_geometry.minimum_queried_base_field_element_count()
+                != expected_minimum_base_field_element_count
+            || wire_geometry.maximum_queried_base_field_element_count()
+                != expected_maximum_base_field_element_count
+            || wire_geometry.minimum_queried_extension_field_element_count()
+                != expected_minimum_extension_field_element_count
+            || wire_geometry.maximum_queried_extension_field_element_count()
+                != expected_maximum_extension_field_element_count
         {
             return Err(CompactResponseMerkleError::WireGeometryMismatch);
         }
@@ -256,7 +353,10 @@ impl CompactResponseMerkleGeometry {
         &self,
         query_leaf_ordinals: &[u64],
     ) -> Result<(), CompactResponseMerkleError> {
-        if u64::try_from(query_leaf_ordinals.len()).ok() != Some(self.queried_leaf_count)
+        let observed_total_count = u64::try_from(query_leaf_ordinals.len())
+            .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
+        if !(self.minimum_queried_leaf_count..=self.maximum_queried_leaf_count)
+            .contains(&observed_total_count)
             || query_leaf_ordinals
                 .windows(2)
                 .any(|pair| pair[0] >= pair[1])
@@ -283,7 +383,10 @@ impl CompactResponseMerkleGeometry {
             .components
             .iter()
             .zip(observed_component_query_counts)
-            .any(|(component, observed)| component.queried_leaf_count != observed)
+            .any(|(component, observed)| {
+                !(component.minimum_queried_leaf_count..=component.maximum_queried_leaf_count)
+                    .contains(&observed)
+            })
         {
             return Err(CompactResponseMerkleError::InvalidOpeningIndices);
         }
@@ -299,26 +402,57 @@ impl CompactResponseMerkleGeometry {
             self.response_ordinal,
         )?)?;
         for component in &self.components {
-            let CompactResponseQuerySelection::VerifierMessageDistinctGroup {
-                logical_verifier_move_ordinal,
-                distinct_query_group_ordinal,
-            } = component.query_selection
-            else {
-                continue;
-            };
-            let source_wire_geometry =
-                wire_geometry_for_logical_move(wire_geometries, logical_verifier_move_ordinal)?;
-            let group_index = usize::try_from(distinct_query_group_ordinal)
-                .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
-            let group = source_wire_geometry
-                .verifier_message_geometry()
-                .distinct_query_groups()
-                .get(group_index)
-                .ok_or(CompactResponseMerkleError::InvalidOpeningIndices)?;
-            if group.domain_cardinality() != component.leaf_count
-                || group.query_count() != component.queried_leaf_count
-            {
-                return Err(CompactResponseMerkleError::InvalidOpeningIndices);
+            match component.query_selection {
+                CompactResponseQuerySelection::VerifierMessageDistinctGroup {
+                    logical_verifier_move_ordinal,
+                    distinct_query_group_ordinal,
+                } => {
+                    let (domain_cardinality, query_count) = query_group_shape(
+                        wire_geometries,
+                        logical_verifier_move_ordinal,
+                        distinct_query_group_ordinal,
+                    )?;
+                    if domain_cardinality != component.leaf_count
+                        || query_count != component.minimum_queried_leaf_count
+                        || query_count != component.maximum_queried_leaf_count
+                    {
+                        return Err(CompactResponseMerkleError::InvalidOpeningIndices);
+                    }
+                }
+                CompactResponseQuerySelection::VerifierMessageDistinctGroupUnion {
+                    first_logical_verifier_move_ordinal,
+                    first_distinct_query_group_ordinal,
+                    second_logical_verifier_move_ordinal,
+                    second_distinct_query_group_ordinal,
+                } => {
+                    let (first_domain_cardinality, first_query_count) = query_group_shape(
+                        wire_geometries,
+                        first_logical_verifier_move_ordinal,
+                        first_distinct_query_group_ordinal,
+                    )?;
+                    let (second_domain_cardinality, second_query_count) = query_group_shape(
+                        wire_geometries,
+                        second_logical_verifier_move_ordinal,
+                        second_distinct_query_group_ordinal,
+                    )?;
+                    let combined_query_count = first_query_count
+                        .checked_add(second_query_count)
+                        .ok_or(CompactResponseMerkleError::CountOverflow)?;
+                    let minimum_union_count = combined_query_count
+                        .saturating_sub(component.leaf_count)
+                        .max(first_query_count)
+                        .max(second_query_count);
+                    let maximum_union_count = combined_query_count.min(component.leaf_count);
+                    if first_domain_cardinality != component.leaf_count
+                        || second_domain_cardinality != component.leaf_count
+                        || component.minimum_queried_leaf_count != minimum_union_count
+                        || component.maximum_queried_leaf_count != maximum_union_count
+                    {
+                        return Err(CompactResponseMerkleError::InvalidOpeningIndices);
+                    }
+                }
+                CompactResponseQuerySelection::Unqueried
+                | CompactResponseQuerySelection::EveryLeaf => {}
             }
         }
         Ok(())
@@ -332,6 +466,13 @@ impl CompactResponseMerkleGeometry {
                     logical_verifier_move_ordinal,
                     ..
                 } => Some(logical_verifier_move_ordinal),
+                CompactResponseQuerySelection::VerifierMessageDistinctGroupUnion {
+                    first_logical_verifier_move_ordinal,
+                    second_logical_verifier_move_ordinal,
+                    ..
+                } => Some(
+                    first_logical_verifier_move_ordinal.max(second_logical_verifier_move_ordinal),
+                ),
                 CompactResponseQuerySelection::Unqueried
                 | CompactResponseQuerySelection::EveryLeaf => None,
             })
@@ -343,6 +484,7 @@ impl CompactResponseMerkleGeometry {
             matches!(
                 component.query_selection,
                 CompactResponseQuerySelection::VerifierMessageDistinctGroup { .. }
+                    | CompactResponseQuerySelection::VerifierMessageDistinctGroupUnion { .. }
             )
         })
     }
@@ -361,6 +503,23 @@ fn wire_geometry_for_logical_move(
         return Err(CompactResponseMerkleError::InvalidOpeningIndices);
     }
     Ok(wire_geometry)
+}
+
+fn query_group_shape(
+    wire_geometries: &[CompactProofResponseWireGeometry],
+    logical_verifier_move_ordinal: u32,
+    distinct_query_group_ordinal: u32,
+) -> Result<(u64, u64), CompactResponseMerkleError> {
+    let source_wire_geometry =
+        wire_geometry_for_logical_move(wire_geometries, logical_verifier_move_ordinal)?;
+    let group_index = usize::try_from(distinct_query_group_ordinal)
+        .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
+    let group = source_wire_geometry
+        .verifier_message_geometry()
+        .distinct_query_groups()
+        .get(group_index)
+        .ok_or(CompactResponseMerkleError::InvalidOpeningIndices)?;
+    Ok((group.domain_cardinality(), group.query_count()))
 }
 
 /// Canonical global response-leaf coordinates selected by the complete decoded
@@ -409,22 +568,35 @@ impl CompactResponseQuerySchedule {
             }
             Self::validate_geometry(merkle_geometry, wire_geometries)?;
             for component in &merkle_geometry.components {
-                let CompactResponseQuerySelection::VerifierMessageDistinctGroup {
-                    logical_verifier_move_ordinal,
-                    distinct_query_group_ordinal,
-                } = component.query_selection
-                else {
-                    continue;
-                };
-                let move_index = usize::try_from(logical_verifier_move_ordinal)
-                    .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
-                let group_index = usize::try_from(distinct_query_group_ordinal)
-                    .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
-                let referenced = referenced_query_groups
-                    .get_mut(move_index)
-                    .and_then(|groups| groups.get_mut(group_index))
-                    .ok_or(CompactResponseMerkleError::InvalidOpeningIndices)?;
-                *referenced = true;
+                match component.query_selection {
+                    CompactResponseQuerySelection::VerifierMessageDistinctGroup {
+                        logical_verifier_move_ordinal,
+                        distinct_query_group_ordinal,
+                    } => mark_query_group_referenced(
+                        &mut referenced_query_groups,
+                        logical_verifier_move_ordinal,
+                        distinct_query_group_ordinal,
+                    )?,
+                    CompactResponseQuerySelection::VerifierMessageDistinctGroupUnion {
+                        first_logical_verifier_move_ordinal,
+                        first_distinct_query_group_ordinal,
+                        second_logical_verifier_move_ordinal,
+                        second_distinct_query_group_ordinal,
+                    } => {
+                        mark_query_group_referenced(
+                            &mut referenced_query_groups,
+                            first_logical_verifier_move_ordinal,
+                            first_distinct_query_group_ordinal,
+                        )?;
+                        mark_query_group_referenced(
+                            &mut referenced_query_groups,
+                            second_logical_verifier_move_ordinal,
+                            second_distinct_query_group_ordinal,
+                        )?;
+                    }
+                    CompactResponseQuerySelection::Unqueried
+                    | CompactResponseQuerySelection::EveryLeaf => {}
+                }
             }
         }
         if referenced_query_groups
@@ -467,13 +639,14 @@ impl CompactResponseQuerySchedule {
             }
         }
 
-        let queried_leaf_count = usize::try_from(merkle_geometry.queried_leaf_count)
-            .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
+        let maximum_queried_leaf_count =
+            usize::try_from(merkle_geometry.maximum_queried_leaf_count)
+                .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
         let mut leaf_ordinals = Vec::new();
         leaf_ordinals
-            .try_reserve_exact(queried_leaf_count)
+            .try_reserve_exact(maximum_queried_leaf_count)
             .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
-        if leaf_ordinals.capacity() != queried_leaf_count {
+        if leaf_ordinals.capacity() != maximum_queried_leaf_count {
             return Err(CompactResponseMerkleError::CountOverflow);
         }
 
@@ -490,36 +663,45 @@ impl CompactResponseQuerySchedule {
                 continue;
             }
 
-            let CompactResponseQuerySelection::VerifierMessageDistinctGroup {
-                logical_verifier_move_ordinal,
-                distinct_query_group_ordinal,
-            } = component.query_selection
-            else {
-                return Err(CompactResponseMerkleError::InvalidGeometry);
-            };
-            let move_index = usize::try_from(logical_verifier_move_ordinal)
-                .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
-            let group_index = usize::try_from(distinct_query_group_ordinal)
-                .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
-            let decoded_group = verifier_messages
-                .get(move_index)
-                .and_then(|message| message.distinct_query_groups().get(group_index))
-                .ok_or(CompactResponseMerkleError::InvalidOpeningIndices)?;
-            if u64::try_from(decoded_group.len()).ok() != Some(component.queried_leaf_count)
-                || decoded_group.windows(2).any(|pair| pair[0] >= pair[1])
-                || decoded_group
-                    .last()
-                    .is_some_and(|ordinal| *ordinal >= component.leaf_count)
-            {
-                return Err(CompactResponseMerkleError::InvalidOpeningIndices);
-            }
-            for component_leaf_ordinal in decoded_group {
-                leaf_ordinals.push(
-                    component
-                        .first_leaf_ordinal
-                        .checked_add(*component_leaf_ordinal)
-                        .ok_or(CompactResponseMerkleError::CountOverflow)?,
-                );
+            match component.query_selection {
+                CompactResponseQuerySelection::VerifierMessageDistinctGroup {
+                    logical_verifier_move_ordinal,
+                    distinct_query_group_ordinal,
+                } => {
+                    let decoded_group = decoded_query_group(
+                        verifier_messages,
+                        logical_verifier_move_ordinal,
+                        distinct_query_group_ordinal,
+                    )?;
+                    append_component_query_group(&mut leaf_ordinals, component, decoded_group)?;
+                }
+                CompactResponseQuerySelection::VerifierMessageDistinctGroupUnion {
+                    first_logical_verifier_move_ordinal,
+                    first_distinct_query_group_ordinal,
+                    second_logical_verifier_move_ordinal,
+                    second_distinct_query_group_ordinal,
+                } => {
+                    let first_group = decoded_query_group(
+                        verifier_messages,
+                        first_logical_verifier_move_ordinal,
+                        first_distinct_query_group_ordinal,
+                    )?;
+                    let second_group = decoded_query_group(
+                        verifier_messages,
+                        second_logical_verifier_move_ordinal,
+                        second_distinct_query_group_ordinal,
+                    )?;
+                    append_component_query_union(
+                        &mut leaf_ordinals,
+                        component,
+                        first_group,
+                        second_group,
+                    )?;
+                }
+                CompactResponseQuerySelection::Unqueried
+                | CompactResponseQuerySelection::EveryLeaf => {
+                    return Err(CompactResponseMerkleError::InvalidGeometry);
+                }
             }
         }
         merkle_geometry.validate_query_leaf_ordinals(&leaf_ordinals)?;
@@ -540,6 +722,129 @@ impl CompactResponseQuerySchedule {
             })
             .ok_or(CompactResponseMerkleError::CountOverflow)
     }
+}
+
+fn decoded_query_group(
+    verifier_messages: &[DecodedFixedUniformVerifierMessage],
+    logical_verifier_move_ordinal: u32,
+    distinct_query_group_ordinal: u32,
+) -> Result<&[u64], CompactResponseMerkleError> {
+    let move_index = usize::try_from(logical_verifier_move_ordinal)
+        .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
+    let group_index = usize::try_from(distinct_query_group_ordinal)
+        .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
+    verifier_messages
+        .get(move_index)
+        .and_then(|message| message.distinct_query_groups().get(group_index))
+        .map(Vec::as_slice)
+        .ok_or(CompactResponseMerkleError::InvalidOpeningIndices)
+}
+
+fn append_component_query_group(
+    leaf_ordinals: &mut Vec<u64>,
+    component: &CompactResponseComponentGeometry,
+    decoded_group: &[u64],
+) -> Result<(), CompactResponseMerkleError> {
+    if u64::try_from(decoded_group.len()).ok() != Some(component.minimum_queried_leaf_count)
+        || component.minimum_queried_leaf_count != component.maximum_queried_leaf_count
+        || decoded_group.windows(2).any(|pair| pair[0] >= pair[1])
+        || decoded_group
+            .last()
+            .is_some_and(|ordinal| *ordinal >= component.leaf_count)
+    {
+        return Err(CompactResponseMerkleError::InvalidOpeningIndices);
+    }
+    for component_leaf_ordinal in decoded_group {
+        leaf_ordinals.push(
+            component
+                .first_leaf_ordinal
+                .checked_add(*component_leaf_ordinal)
+                .ok_or(CompactResponseMerkleError::CountOverflow)?,
+        );
+    }
+    Ok(())
+}
+
+fn append_component_query_union(
+    leaf_ordinals: &mut Vec<u64>,
+    component: &CompactResponseComponentGeometry,
+    first_group: &[u64],
+    second_group: &[u64],
+) -> Result<(), CompactResponseMerkleError> {
+    if first_group.windows(2).any(|pair| pair[0] >= pair[1])
+        || second_group.windows(2).any(|pair| pair[0] >= pair[1])
+        || first_group
+            .last()
+            .is_some_and(|ordinal| *ordinal >= component.leaf_count)
+        || second_group
+            .last()
+            .is_some_and(|ordinal| *ordinal >= component.leaf_count)
+    {
+        return Err(CompactResponseMerkleError::InvalidOpeningIndices);
+    }
+    let union_start = leaf_ordinals.len();
+    let mut first_offset = 0_usize;
+    let mut second_offset = 0_usize;
+    while first_offset < first_group.len() || second_offset < second_group.len() {
+        let next_component_leaf_ordinal = match (
+            first_group.get(first_offset),
+            second_group.get(second_offset),
+        ) {
+            (Some(first), Some(second)) if first < second => {
+                first_offset += 1;
+                *first
+            }
+            (Some(first), Some(second)) if second < first => {
+                second_offset += 1;
+                *second
+            }
+            (Some(first), Some(_)) => {
+                first_offset += 1;
+                second_offset += 1;
+                *first
+            }
+            (Some(first), None) => {
+                first_offset += 1;
+                *first
+            }
+            (None, Some(second)) => {
+                second_offset += 1;
+                *second
+            }
+            (None, None) => break,
+        };
+        leaf_ordinals.push(
+            component
+                .first_leaf_ordinal
+                .checked_add(next_component_leaf_ordinal)
+                .ok_or(CompactResponseMerkleError::CountOverflow)?,
+        );
+    }
+    let union_count = u64::try_from(leaf_ordinals.len() - union_start)
+        .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
+    if !(component.minimum_queried_leaf_count..=component.maximum_queried_leaf_count)
+        .contains(&union_count)
+    {
+        return Err(CompactResponseMerkleError::InvalidOpeningIndices);
+    }
+    Ok(())
+}
+
+fn mark_query_group_referenced(
+    referenced_query_groups: &mut [Vec<bool>],
+    logical_verifier_move_ordinal: u32,
+    distinct_query_group_ordinal: u32,
+) -> Result<(), CompactResponseMerkleError> {
+    let move_index = usize::try_from(logical_verifier_move_ordinal)
+        .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
+    let group_index = usize::try_from(distinct_query_group_ordinal)
+        .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
+    let referenced = referenced_query_groups
+        .get_mut(move_index)
+        .and_then(|groups| groups.get_mut(group_index))
+        .ok_or(CompactResponseMerkleError::InvalidOpeningIndices)?;
+    *referenced = true;
+    Ok(())
 }
 
 #[derive(Clone, Copy)]
@@ -1178,7 +1483,9 @@ pub(crate) fn verify_decoded_compact_response_opening(
 ) -> Result<(), CompactResponseMerkleError> {
     merkle_geometry.validate_wire_geometry(wire_geometry)?;
     merkle_geometry.validate_query_leaf_ordinals(query_leaf_ordinals)?;
-    if decoded_response.ordinal() != merkle_geometry.response_ordinal {
+    if decoded_response.ordinal() != merkle_geometry.response_ordinal
+        || decoded_response.queried_leaf_count() != query_leaf_ordinals.len()
+    {
         return Err(CompactResponseMerkleError::WireGeometryMismatch);
     }
 
@@ -1256,10 +1563,8 @@ pub(crate) fn verify_decoded_compact_response_opening(
         };
         opened_leaf_digests.push((leaf_ordinal, digest));
     }
-    if u64::try_from(base_field_value_offset).ok()
-        != Some(wire_geometry.queried_base_field_element_count())
-        || u64::try_from(extension_field_value_offset).ok()
-            != Some(wire_geometry.queried_extension_field_element_count())
+    if base_field_value_offset != decoded_response.queried_base_field_element_count()
+        || extension_field_value_offset != decoded_response.queried_extension_field_element_count()
     {
         return Err(CompactResponseMerkleError::WireGeometryMismatch);
     }
@@ -1370,15 +1675,16 @@ fn map_wire_error(_: CompactProofWireError) -> CompactResponseMerkleError {
 mod tests {
     use super::super::compact_proof_wire::{
         COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH, CompactProofResponseWireInput,
-        CompactProofWireGeometry, CompactProofWireInput, decode_compact_proof_wire,
-        encode_compact_proof_wire,
+        CompactProofWireGeometry, CompactProofWireInput, PROOF_FIXED_HEADER_BYTE_LENGTH,
+        decode_compact_proof_wire, encode_compact_proof_wire,
     };
     use super::super::fixed_uniform_verifier_message::{
         FixedUniformDistinctQueryGeometry, FixedUniformVerifierMessageGeometry,
-        derive_fixed_uniform_verifier_message,
+        decode_fixed_uniform_verifier_message, derive_fixed_uniform_verifier_message,
     };
     use super::super::merkle::maximum_minimal_frontier_node_count;
     use super::*;
+    use crate::bgv::proof_suite::PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT;
 
     #[derive(Clone)]
     enum OwnedLeafValue {
@@ -1541,6 +1847,202 @@ mod tests {
             ],
         )
         .expect("small verifier-message geometry")
+    }
+
+    fn query_only_message(
+        geometry: &FixedUniformVerifierMessageGeometry,
+        accepted_queries: &[u64],
+    ) -> DecodedFixedUniformVerifierMessage {
+        let mut bytes = vec![0_u8; geometry.exact_message_byte_length().unwrap()];
+        let candidate_slot_byte_length =
+            usize::try_from(PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT)
+                .unwrap()
+                .checked_mul(size_of::<u64>())
+                .unwrap();
+        for (query_ordinal, accepted_query) in accepted_queries.iter().enumerate() {
+            let offset = query_ordinal
+                .checked_mul(candidate_slot_byte_length)
+                .unwrap();
+            bytes[offset..offset + size_of::<u64>()].copy_from_slice(&accepted_query.to_le_bytes());
+        }
+        decode_fixed_uniform_verifier_message(geometry, &bytes)
+            .expect("fixed query candidates decode")
+    }
+
+    #[test]
+    fn shared_component_uses_the_unique_union_and_variable_wire_counts() {
+        let no_query_message_geometry =
+            FixedUniformVerifierMessageGeometry::new(1, 0, 0, Vec::new())
+                .expect("first message has one fixed challenge");
+        let query_message_geometry = FixedUniformVerifierMessageGeometry::new(
+            0,
+            0,
+            0,
+            vec![FixedUniformDistinctQueryGeometry::new(8, 3)],
+        )
+        .expect("later message has one query group");
+        let shared_merkle_geometry = CompactResponseMerkleGeometry::new(
+            0,
+            vec![
+                CompactResponseComponentGeometry::new_with_query_count_range(
+                    0,
+                    8,
+                    3,
+                    6,
+                    CompactResponseQuerySelection::VerifierMessageDistinctGroupUnion {
+                        first_logical_verifier_move_ordinal: 1,
+                        first_distinct_query_group_ordinal: 0,
+                        second_logical_verifier_move_ordinal: 2,
+                        second_distinct_query_group_ordinal: 0,
+                    },
+                    CompactResponseLeafValueKind::ExtensionField,
+                    1,
+                ),
+            ],
+        )
+        .expect("one shared response component");
+        let deterministic_merkle_geometry = |response_ordinal| {
+            CompactResponseMerkleGeometry::new(
+                response_ordinal,
+                vec![CompactResponseComponentGeometry::new(
+                    0,
+                    1,
+                    1,
+                    CompactResponseQuerySelection::EveryLeaf,
+                    CompactResponseLeafValueKind::ExtensionField,
+                    1,
+                )],
+            )
+            .expect("one deterministic response leaf")
+        };
+        let maximum_frontier_node_count = (3..=6)
+            .map(|opening_count| {
+                maximum_minimal_frontier_node_count(8, opening_count)
+                    .expect("shared frontier maximum")
+            })
+            .max()
+            .and_then(|count| u64::try_from(count).ok())
+            .unwrap();
+        let wire_geometries = vec![
+            CompactProofResponseWireGeometry::new_with_count_ranges(
+                0,
+                0,
+                0,
+                3,
+                6,
+                3,
+                6,
+                maximum_frontier_node_count,
+                no_query_message_geometry.clone(),
+            )
+            .expect("variable shared response wire"),
+            CompactProofResponseWireGeometry::new(1, 0, 1, 1, 0, query_message_geometry.clone())
+                .expect("first query-message response wire"),
+            CompactProofResponseWireGeometry::new(2, 0, 1, 1, 0, query_message_geometry.clone())
+                .expect("second query-message response wire"),
+        ];
+        let merkle_geometries = vec![
+            shared_merkle_geometry.clone(),
+            deterministic_merkle_geometry(1),
+            deterministic_merkle_geometry(2),
+        ];
+        CompactResponseQuerySchedule::validate_registry(&merkle_geometries, &wire_geometries)
+            .expect("both shared query sources are owned exactly");
+
+        let verifier_messages = vec![
+            derive_fixed_uniform_verifier_message(
+                Hash512::from_bytes([0x21; Hash512::BYTE_LENGTH]),
+                0,
+                &no_query_message_geometry,
+            )
+            .expect("first verifier message"),
+            query_only_message(&query_message_geometry, &[1, 3, 5]),
+            query_only_message(&query_message_geometry, &[3, 4, 5]),
+        ];
+        let schedule = CompactResponseQuerySchedule::derive(
+            &shared_merkle_geometry,
+            &wire_geometries,
+            &verifier_messages,
+        )
+        .expect("shared query union");
+        assert_eq!(schedule.as_slice(), [1, 3, 4, 5]);
+
+        let values = (0_u64..8)
+            .map(|value| OwnedLeafValue::ExtensionField(vec![extension(41 + value)]))
+            .collect::<Vec<_>>();
+        let salts = leaf_salts();
+        let tree = build_tree(&shared_merkle_geometry, &values, &salts);
+        let root = tree.last().unwrap()[0];
+        let opened_values = schedule
+            .as_slice()
+            .iter()
+            .map(
+                |leaf_ordinal| match &values[usize::try_from(*leaf_ordinal).unwrap()] {
+                    OwnedLeafValue::ExtensionField(values) => values[0],
+                    _ => unreachable!(),
+                },
+            )
+            .collect::<Vec<_>>();
+        let opened_salts = schedule
+            .as_slice()
+            .iter()
+            .map(|leaf_ordinal| salts[usize::try_from(*leaf_ordinal).unwrap()])
+            .collect::<Vec<_>>();
+        let proof_geometry =
+            CompactProofWireGeometry::new(1, vec![wire_geometries[0].clone()]).unwrap();
+        let proof_bytes = encode_compact_proof_wire(
+            &proof_geometry,
+            &CompactProofWireInput::new(vec![CompactProofResponseWireInput::new(
+                root,
+                [0x45; COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH],
+                Vec::new(),
+                opened_values,
+                opened_salts,
+                frontier(&tree, schedule.as_slice()),
+            )]),
+        )
+        .expect("variable shared opening encodes");
+        let decoded =
+            decode_compact_proof_wire(&proof_geometry, &proof_bytes, proof_bytes.len()).unwrap();
+        assert_eq!(
+            decoded.responses()[0].queried_extension_field_element_count(),
+            4
+        );
+        assert_eq!(decoded.responses()[0].queried_leaf_count(), 4);
+        assert_eq!(
+            verify_decoded_compact_response_opening(
+                &shared_merkle_geometry,
+                &wire_geometries[0],
+                &decoded.responses()[0],
+                &proof_bytes,
+                schedule.as_slice(),
+            ),
+            Ok(())
+        );
+
+        let count_offset = PROOF_FIXED_HEADER_BYTE_LENGTH
+            + size_of::<u32>()
+            + Hash512::BYTE_LENGTH
+            + COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH;
+        let mut oversized_count = proof_bytes.clone();
+        oversized_count[count_offset + size_of::<u32>()..count_offset + 2 * size_of::<u32>()]
+            .copy_from_slice(&7_u32.to_le_bytes());
+        assert_eq!(
+            decode_compact_proof_wire(&proof_geometry, &oversized_count, oversized_count.len()),
+            Err(CompactProofWireError::InvalidGeometry)
+        );
+
+        let wrong_schedule = [1, 3, 5];
+        assert_eq!(
+            verify_decoded_compact_response_opening(
+                &shared_merkle_geometry,
+                &wire_geometries[0],
+                &decoded.responses()[0],
+                &proof_bytes,
+                &wrong_schedule,
+            ),
+            Err(CompactResponseMerkleError::WireGeometryMismatch)
+        );
     }
 
     #[test]
@@ -2077,7 +2579,7 @@ mod tests {
             Err(CompactResponseMerkleError::InvalidGeometry)
         );
         let mut queried_padding = valid_components.clone();
-        queried_padding[2].queried_leaf_count = 1;
+        queried_padding[2].maximum_queried_leaf_count = 1;
         assert_eq!(
             CompactResponseMerkleGeometry::new(0, queried_padding),
             Err(CompactResponseMerkleError::InvalidGeometry)

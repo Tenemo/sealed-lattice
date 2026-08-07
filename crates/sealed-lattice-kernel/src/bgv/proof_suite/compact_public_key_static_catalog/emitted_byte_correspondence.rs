@@ -149,6 +149,7 @@ struct ResponseComponentByteCorrespondence {
     component_ordinal: u32,
     first_leaf_ordinal: u64,
     leaf_count: u64,
+    minimum_queried_leaf_count: u64,
     queried_leaf_count: u64,
     query_selection: CompactResponseQuerySelection,
     field_kind: ComponentFieldKind,
@@ -156,7 +157,7 @@ struct ResponseComponentByteCorrespondence {
     value_region_consumers: Vec<CanonicalRegionConsumer>,
     leaf_salt_region: Option<CanonicalByteRegion>,
     leaf_salt_region_consumers: Vec<CanonicalRegionConsumer>,
-    consumer_move_ordinal: Option<u32>,
+    consumer_move_ordinals: Vec<u32>,
     consumer_roles: Vec<VerifierMoveRole>,
 }
 
@@ -172,6 +173,10 @@ struct ResponseMaximumByteCorrespondence {
     root_region_consumers: Vec<CanonicalRegionConsumer>,
     round_salt_region: CanonicalByteRegion,
     round_salt_region_consumers: Vec<CanonicalRegionConsumer>,
+    variable_base_field_count_region: Option<CanonicalByteRegion>,
+    variable_extension_field_count_region: Option<CanonicalByteRegion>,
+    variable_leaf_count_region: Option<CanonicalByteRegion>,
+    variable_count_region_consumers: Vec<CanonicalRegionConsumer>,
     components: Vec<ResponseComponentByteCorrespondence>,
     frontier_dictionary_count_region: CanonicalByteRegion,
     frontier_node_count_region: CanonicalByteRegion,
@@ -350,13 +355,28 @@ impl PackingEmittedByteCorrespondence {
             .responses()
             .iter()
             .flat_map(|response| &response.components)
-            .filter_map(|component| match component.query_selection {
+            .flat_map(|component| match component.query_selection {
                 CompactResponseQuerySelection::VerifierMessageDistinctGroup {
                     logical_verifier_move_ordinal,
                     distinct_query_group_ordinal,
-                } => Some((logical_verifier_move_ordinal, distinct_query_group_ordinal)),
+                } => vec![(logical_verifier_move_ordinal, distinct_query_group_ordinal)],
+                CompactResponseQuerySelection::VerifierMessageDistinctGroupUnion {
+                    first_logical_verifier_move_ordinal,
+                    first_distinct_query_group_ordinal,
+                    second_logical_verifier_move_ordinal,
+                    second_distinct_query_group_ordinal,
+                } => vec![
+                    (
+                        first_logical_verifier_move_ordinal,
+                        first_distinct_query_group_ordinal,
+                    ),
+                    (
+                        second_logical_verifier_move_ordinal,
+                        second_distinct_query_group_ordinal,
+                    ),
+                ],
                 CompactResponseQuerySelection::Unqueried
-                | CompactResponseQuerySelection::EveryLeaf => None,
+                | CompactResponseQuerySelection::EveryLeaf => Vec::new(),
             })
             .collect::<BTreeSet<_>>();
         let distinct_referenced_query_group_count =
@@ -615,6 +635,28 @@ fn derive_response_layout(
         u64::try_from(COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH)
             .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
     )?;
+    let (
+        variable_base_field_count_region,
+        variable_extension_field_count_region,
+        variable_leaf_count_region,
+    ) = if wire_geometry.has_variable_counts() {
+        (
+            Some(CanonicalByteRegion::append(
+                &mut relative_cursor,
+                CANONICAL_COUNT_BYTE_LENGTH,
+            )?),
+            Some(CanonicalByteRegion::append(
+                &mut relative_cursor,
+                CANONICAL_COUNT_BYTE_LENGTH,
+            )?),
+            Some(CanonicalByteRegion::append(
+                &mut relative_cursor,
+                CANONICAL_COUNT_BYTE_LENGTH,
+            )?),
+        )
+    } else {
+        (None, None, None)
+    };
 
     let base_value_byte_length = checked_product(&[
         wire_geometry.queried_base_field_element_count(),
@@ -657,7 +699,7 @@ fn derive_response_layout(
                 checked_product(&[component.queried_leaf_count, PRIVATE_LEAF_SALT_BYTE_LENGTH])?,
             )?)
         };
-        let (consumer_move_ordinal, consumer_roles) =
+        let (consumer_move_ordinals, consumer_roles) =
             component_consumer(chronology, response.ordinal, component.query_selection)?;
         component_rows.push(ResponseComponentByteCorrespondence {
             role: component.role,
@@ -666,6 +708,7 @@ fn derive_response_layout(
                 .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
             first_leaf_ordinal: component.first_leaf_ordinal,
             leaf_count: component.leaf_count,
+            minimum_queried_leaf_count: component.minimum_queried_leaf_count,
             queried_leaf_count: component.queried_leaf_count,
             query_selection: component.query_selection,
             field_kind,
@@ -687,7 +730,7 @@ fn derive_response_layout(
                     CanonicalRegionConsumer::ResponseMerkleVerifier,
                 ]
             },
-            consumer_move_ordinal,
+            consumer_move_ordinals,
             consumer_roles,
         });
     }
@@ -756,6 +799,17 @@ fn derive_response_layout(
             CanonicalRegionConsumer::CanonicalDecoder,
             CanonicalRegionConsumer::FiatShamirPrefix,
         ],
+        variable_base_field_count_region,
+        variable_extension_field_count_region,
+        variable_leaf_count_region,
+        variable_count_region_consumers: if wire_geometry.has_variable_counts() {
+            vec![
+                CanonicalRegionConsumer::CanonicalDecoder,
+                CanonicalRegionConsumer::ResponseMerkleVerifier,
+            ]
+        } else {
+            Vec::new()
+        },
         components: component_rows,
         frontier_dictionary_count_region,
         frontier_node_count_region,
@@ -792,7 +846,8 @@ const fn proof_section(role: ResponseComponentRole) -> ProofSection {
     match role {
         ResponseComponentRole::PreChallengeSource => ProofSection::PreChallengeWhir,
         ResponseComponentRole::MainSource => ProofSection::StructuredTransposeSource,
-        ResponseComponentRole::CrossEpochOpeningEvaluations
+        ResponseComponentRole::CrossEpochMasks
+        | ResponseComponentRole::CrossEpochOpeningEvaluations
         | ResponseComponentRole::CfwFinalValues => ProofSection::CfwToWhirHandoff,
         ResponseComponentRole::CfwInnerMasks
         | ResponseComponentRole::CfwOuterMasks
@@ -887,15 +942,50 @@ fn component_consumer(
     chronology: &PackingTranscriptChronology,
     response_ordinal: u32,
     query_selection: CompactResponseQuerySelection,
-) -> Result<(Option<u32>, Vec<VerifierMoveRole>), CompactStaticCatalogError> {
-    let logical_move_ordinal = match query_selection {
-        CompactResponseQuerySelection::Unqueried => return Ok((None, Vec::new())),
-        CompactResponseQuerySelection::EveryLeaf => response_ordinal,
+) -> Result<(Vec<u32>, Vec<VerifierMoveRole>), CompactStaticCatalogError> {
+    match query_selection {
+        CompactResponseQuerySelection::Unqueried => Ok((Vec::new(), Vec::new())),
+        CompactResponseQuerySelection::EveryLeaf => {
+            let verifier_move = chronology
+                .verifier_moves()
+                .get(
+                    usize::try_from(response_ordinal)
+                        .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+                )
+                .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
+            Ok((vec![response_ordinal], verifier_move.roles().to_vec()))
+        }
         CompactResponseQuerySelection::VerifierMessageDistinctGroup {
             logical_verifier_move_ordinal,
             ..
-        } => logical_verifier_move_ordinal,
-    };
+        } => Ok((
+            vec![logical_verifier_move_ordinal],
+            vec![query_consumer_role(
+                chronology,
+                logical_verifier_move_ordinal,
+            )?],
+        )),
+        CompactResponseQuerySelection::VerifierMessageDistinctGroupUnion {
+            first_logical_verifier_move_ordinal,
+            second_logical_verifier_move_ordinal,
+            ..
+        } => Ok((
+            vec![
+                first_logical_verifier_move_ordinal,
+                second_logical_verifier_move_ordinal,
+            ],
+            vec![
+                query_consumer_role(chronology, first_logical_verifier_move_ordinal)?,
+                query_consumer_role(chronology, second_logical_verifier_move_ordinal)?,
+            ],
+        )),
+    }
+}
+
+fn query_consumer_role(
+    chronology: &PackingTranscriptChronology,
+    logical_move_ordinal: u32,
+) -> Result<VerifierMoveRole, CompactStaticCatalogError> {
     let verifier_move = chronology
         .verifier_moves()
         .get(
@@ -903,29 +993,20 @@ fn component_consumer(
                 .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
         )
         .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
-    let consumer_roles = match query_selection {
-        CompactResponseQuerySelection::VerifierMessageDistinctGroup { .. } => {
-            let roles = verifier_move
-                .roles()
-                .iter()
-                .copied()
-                .filter(|role| {
-                    matches!(
-                        role,
-                        VerifierMoveRole::WhirRoundQueryAndCombination { .. }
-                            | VerifierMoveRole::WhirFinalQueries { .. }
-                    )
-                })
-                .collect::<Vec<_>>();
-            if roles.len() != 1 {
-                return Err(CompactStaticCatalogError::InvalidGeometry);
-            }
-            roles
-        }
-        CompactResponseQuerySelection::EveryLeaf => verifier_move.roles().to_vec(),
-        CompactResponseQuerySelection::Unqueried => unreachable!(),
-    };
-    Ok((Some(logical_move_ordinal), consumer_roles))
+    let mut roles = verifier_move.roles().iter().copied().filter(|role| {
+        matches!(
+            role,
+            VerifierMoveRole::WhirRoundQueryAndCombination { .. }
+                | VerifierMoveRole::WhirFinalQueries { .. }
+        )
+    });
+    let role = roles
+        .next()
+        .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
+    if roles.next().is_some() {
+        return Err(CompactStaticCatalogError::InvalidGeometry);
+    }
+    Ok(role)
 }
 
 fn derive_verifier_message_correspondence(
@@ -1443,7 +1524,7 @@ mod tests {
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
         let expected_response_counts = [82, 80, 78, 76];
-        let expected_proof_byte_lengths = [26_436_090, 25_518_898, 24_815_706, 24_871_730];
+        let expected_proof_byte_lengths = [26_927_670, 26_064_742, 25_415_814, 25_526_102];
         let expected_hash_query_counts = [181_604, 183_360, 179_548, 183_288];
         for (factor_ordinal, factor) in catalog.factor_catalogs.iter().enumerate() {
             let correspondence = &factor.emitted_byte_correspondence;
@@ -1488,6 +1569,35 @@ mod tests {
                                 == !component.leaf_salt_region_consumers.is_empty()
                     })
             }));
+            let variable_responses = correspondence
+                .response_layouts
+                .iter()
+                .filter(|response| response.variable_leaf_count_region.is_some())
+                .collect::<Vec<_>>();
+            assert_eq!(variable_responses.len(), 1);
+            let variable_response = variable_responses[0];
+            assert!(variable_response.variable_base_field_count_region.is_some());
+            assert!(
+                variable_response
+                    .variable_extension_field_count_region
+                    .is_some()
+            );
+            assert_eq!(
+                variable_response.variable_count_region_consumers,
+                [
+                    CanonicalRegionConsumer::CanonicalDecoder,
+                    CanonicalRegionConsumer::ResponseMerkleVerifier,
+                ]
+            );
+            let shared_component = variable_response
+                .components
+                .iter()
+                .find(|component| component.role == ResponseComponentRole::CrossEpochMasks)
+                .expect("shared cross-epoch component byte owner");
+            assert_eq!(shared_component.minimum_queried_leaf_count, 399);
+            assert_eq!(shared_component.queried_leaf_count, 798);
+            assert_eq!(shared_component.consumer_move_ordinals.len(), 2);
+            assert_eq!(shared_component.consumer_roles.len(), 2);
             assert!(correspondence.public_input_regions.iter().all(|region| {
                 region
                     .consumers
@@ -1772,15 +1882,11 @@ mod tests {
         let component = correspondence.response_layouts[0]
             .components
             .iter_mut()
-            .find(|component| component.consumer_move_ordinal.is_some())
+            .find(|component| !component.consumer_move_ordinals.is_empty())
             .expect("the first response has a queried component");
-        component.consumer_move_ordinal = Some(
-            component
-                .consumer_move_ordinal
-                .expect("queried component consumer")
-                .checked_add(1)
-                .expect("small consumer ordinal"),
-        );
+        component.consumer_move_ordinals[0] = component.consumer_move_ordinals[0]
+            .checked_add(1)
+            .expect("small consumer ordinal");
         assert_eq!(
             correspondence.check(
                 &factor.transcript_chronology,

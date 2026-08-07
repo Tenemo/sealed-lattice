@@ -287,10 +287,10 @@ commitment-oracle identifiers; each response carries one independent 64-byte
 Fiat-Shamir round salt separately from its 128-byte secret-leaf salts. The
 canonical transcript streams the complete public-input bytes plus every
 identifier, response root, and round salt through the current response before
-deriving its fixed verifier message. The proof-query counts are `78,512`,
-`77,978`, `76,770`, and `76,554`; maximum proof-oracle lengths are `2^18`,
+deriving its fixed verifier message. The maximum proof-query counts are `79,310`,
+`78,776`, `77,568`, and `77,352`; maximum proof-oracle lengths are `2^18`,
 `2^19`, `2^20`, and `2^21`; and the abstract logical-round-plus-Merkle query
-counts are `242,165`, `245,181`, `246,489`, and `250,241`.
+counts are `248,549`, `252,363`, `254,469`, and `259,019`.
 
 The exact conditional Theorem 6.10 arithmetic still uses `2^80 - 1`
 adversarial queries, work bound equal to that query bound, and the current
@@ -345,11 +345,10 @@ bytes. The owner therefore does not complete the production-shaped chain.
 
 The canonical proof encoder can append one logical response at a time in
 verifier-owned order and release that response before accepting the next. It
-produces the same bytes as the batch encoder,
-refuses incomplete or extra response sequences and globally duplicated leaf
-salts, and gives exact
-target-independent owned-heap payloads of `37,532,090`, `36,567,730`,
-`35,741,722`, and `35,785,778` bytes. Those totals include the proof vector,
+produces the same bytes as the batch encoder, refuses incomplete or extra
+response sequences and globally duplicated leaf salts, and gives exact
+target-independent owned-heap payloads of `38,125,814`, `37,215,718`,
+`36,494,982`, and `36,705,046` bytes. Those totals include the proof vector,
 the global salt registry, and the maximum transient sorted frontier dictionary.
 The hostile decoder uses the same bounded salt and frontier accounting. A
 canonical response-Merkle core now derives each commitment-oracle identifier
@@ -358,7 +357,11 @@ component and leaf coordinates, field kind and count, canonical value bytes,
 and fresh 128-byte salt; its parents bind the response, level, child coordinate,
 and ordered child digests. The decoded-wire verifier derives the unique minimal
 frontier from sorted query indices, enforces the exact per-component query
-census, and recomputes the root. A mixed base-field, extension-field, and
+census, and recomputes the root. The shared cross-epoch mask oracle occurs once
+in its committed response. Its two later fixed verifier-message groups select
+one sorted unique union, so the response carries bounded canonical base,
+extension, and leaf counts and the opening verifier requires the exact derived
+union rather than a maximum-size duplicate. A mixed base-field, extension-field, and
 padding fixture refuses root, value, salt, frontier, query-position, response,
 type, count, and geometry mutations, while an all-factor owner reconciles every
 production Merkle schema with the independently derived response and wire
@@ -573,20 +576,20 @@ maximum wire and static resource vectors:
 
 | Packing factor | Proof bytes | Public-input bytes | Transport bytes | Provisional WASM payload peak bytes | Scratch bytes | Base-coordinate butterflies |
 | -------------: | ----------: | -----------------: | --------------: | ----------------------------------: | ------------: | --------------------------: |
-|              1 |  26,436,090 |         15,991,062 |      42,427,152 |                         384,911,816 |   640,811,508 |                 916,598,784 |
-|              2 |  25,518,898 |         15,991,062 |      41,509,960 |                         417,464,816 |   693,240,308 |                 972,341,248 |
-|              4 |  24,815,706 |         15,991,062 |      40,806,768 |                         483,692,008 |   798,097,908 |               1,041,354,752 |
-|              8 |  24,871,730 |         15,991,062 |      40,862,792 |                         617,926,352 | 1,080,840,728 |               1,131,831,296 |
+|              1 |  26,927,670 |         15,991,062 |      42,918,732 |                         385,505,540 |   640,811,508 |                 916,598,784 |
+|              2 |  26,064,742 |         15,991,062 |      42,055,804 |                         418,112,804 |   693,240,308 |                 972,341,248 |
+|              4 |  25,415,814 |         15,991,062 |      41,406,876 |                         484,445,268 |   798,097,908 |               1,041,354,752 |
+|              8 |  25,526,102 |         15,991,062 |      41,517,164 |                         618,845,620 | 1,082,414,368 |               1,131,831,296 |
 
 The WHIR-internal commitment peaks remain `75,497,456`, `109,051,888`,
 `176,160,752`, and `310,378,480` bytes. The complete committed-leaf counts,
 including every logical outer response tree, are `1,032,486`, `1,736,994`,
 `3,150,110`, and `5,968,154`. The corresponding complete commitment-leaf,
 commitment-parent, and verifier-opened leaf-plus-parent hash-query triples are
-`(27,590,950, 1,032,359, 503,917)`,
-`(28,827,938, 1,736,869, 469,545)`,
-`(31,383,838, 3,149,987, 446,339)`, and
-`(36,356,378, 5,968,033, 443,601)`. Every proper-subset response component now
+`(27,590,950, 1,032,359, 510,301)`,
+`(28,827,938, 1,736,869, 476,727)`,
+`(31,383,838, 3,149,987, 454,319)`, and
+`(36,356,378, 5,968,033, 452,379)`. Every proper-subset response component now
 names the exact later verifier move and distinct-query group that selects it.
 The production registry covers every query group, permits the intended shared
 groups, refuses premature or unused sources, and follows WHIR's active-source
@@ -608,7 +611,7 @@ MiB digest chunks and 534, 628, 826, or 1,232 external-memory transactions.
 Trees are deleted after 65, 63, 61, or 59 distinct verifier moves, with at most
 ten deletions after one move. The exact maximum writer heaps are `1,050,944`,
 `1,051,072`, `1,051,200`, and `1,051,328` bytes; the maximum scanner heaps are
-`1,308,080`, `1,334,560`, `1,374,320`, and `1,393,920` bytes. The current
+`1,308,080`, `1,334,560`, `1,438,080`, and `1,597,360` bytes. The current
 response value, salt, frontier, and explicit query-schedule inputs dominate both
 at `9,703,024`, `9,665,952`, `9,610,288`, and `9,582,848` bytes and are included in the
 provisional WASM peaks above. A browser-compatible transaction driver writes,
@@ -696,8 +699,8 @@ selection rather than hidden transcript overhead.
 All four current canonical-payload vectors are below the 671,088,640-byte WASM
 hard bound and the 268,435,456-byte proof-allocation bound. Factors one, two,
 and four are also below the 1,073,741,824-byte scratch bound. Factor eight has
-`53,162,288` bytes of provisional WASM margin but exceeds the scratch bound by
-`7,098,904` bytes under the complete retained-tree lifecycle, so it is not an
+`52,243,020` bytes of provisional WASM margin but exceeds the scratch bound by
+`8,672,544` bytes under the complete retained-tree lifecycle, so it is not an
 eligible static default. Factor four remains under every byte bound, but these
 vectors still cannot select it: the compact loader and materializer
 are connected only to the standalone production-derived development authority,

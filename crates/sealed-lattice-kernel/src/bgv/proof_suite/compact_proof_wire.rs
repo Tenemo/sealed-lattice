@@ -28,6 +28,7 @@ const MERKLE_DIGEST_BYTE_LENGTH: usize = Hash512::BYTE_LENGTH;
 /// This public round salt is independent of the 128-byte secret-leaf salt.
 pub(crate) const COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH: usize = Hash512::BYTE_LENGTH;
 pub(crate) const FRONTIER_DICTIONARY_REFERENCE_BYTE_LENGTH: usize = size_of::<u32>();
+pub(crate) const VARIABLE_RESPONSE_COUNT_BYTE_LENGTH: usize = 3 * size_of::<u32>();
 pub(crate) const PROOF_FIXED_HEADER_BYTE_LENGTH: usize =
     COMPACT_PROOF_WIRE_MAGIC.len() + size_of::<u16>() + size_of::<u32>();
 pub(crate) const PUBLIC_INPUT_BINDING_COUNT: usize = 4;
@@ -40,9 +41,12 @@ pub(crate) const PUBLIC_INPUT_FIXED_HEADER_BYTE_LENGTH: usize = COMPACT_PUBLIC_I
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CompactProofResponseWireGeometry {
     ordinal: u32,
-    queried_base_field_element_count: u64,
-    queried_extension_field_element_count: u64,
-    queried_leaf_count: u64,
+    minimum_queried_base_field_element_count: u64,
+    maximum_queried_base_field_element_count: u64,
+    minimum_queried_extension_field_element_count: u64,
+    maximum_queried_extension_field_element_count: u64,
+    minimum_queried_leaf_count: u64,
+    maximum_queried_leaf_count: u64,
     maximum_frontier_node_count: u64,
     verifier_message_geometry: FixedUniformVerifierMessageGeometry,
 }
@@ -56,11 +60,39 @@ impl CompactProofResponseWireGeometry {
         maximum_frontier_node_count: u64,
         verifier_message_geometry: FixedUniformVerifierMessageGeometry,
     ) -> Result<Self, CompactProofWireError> {
-        let geometry = Self {
+        Self::new_with_count_ranges(
             ordinal,
             queried_base_field_element_count,
+            queried_base_field_element_count,
+            queried_extension_field_element_count,
             queried_extension_field_element_count,
             queried_leaf_count,
+            queried_leaf_count,
+            maximum_frontier_node_count,
+            verifier_message_geometry,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_with_count_ranges(
+        ordinal: u32,
+        minimum_queried_base_field_element_count: u64,
+        maximum_queried_base_field_element_count: u64,
+        minimum_queried_extension_field_element_count: u64,
+        maximum_queried_extension_field_element_count: u64,
+        minimum_queried_leaf_count: u64,
+        maximum_queried_leaf_count: u64,
+        maximum_frontier_node_count: u64,
+        verifier_message_geometry: FixedUniformVerifierMessageGeometry,
+    ) -> Result<Self, CompactProofWireError> {
+        let geometry = Self {
+            ordinal,
+            minimum_queried_base_field_element_count,
+            maximum_queried_base_field_element_count,
+            minimum_queried_extension_field_element_count,
+            maximum_queried_extension_field_element_count,
+            minimum_queried_leaf_count,
+            maximum_queried_leaf_count,
             maximum_frontier_node_count,
             verifier_message_geometry,
         };
@@ -73,15 +105,47 @@ impl CompactProofResponseWireGeometry {
     }
 
     pub(crate) const fn queried_base_field_element_count(&self) -> u64 {
-        self.queried_base_field_element_count
+        self.maximum_queried_base_field_element_count
     }
 
     pub(crate) const fn queried_extension_field_element_count(&self) -> u64 {
-        self.queried_extension_field_element_count
+        self.maximum_queried_extension_field_element_count
     }
 
     pub(crate) const fn queried_leaf_count(&self) -> u64 {
-        self.queried_leaf_count
+        self.maximum_queried_leaf_count
+    }
+
+    pub(crate) const fn minimum_queried_base_field_element_count(&self) -> u64 {
+        self.minimum_queried_base_field_element_count
+    }
+
+    pub(crate) const fn maximum_queried_base_field_element_count(&self) -> u64 {
+        self.maximum_queried_base_field_element_count
+    }
+
+    pub(crate) const fn minimum_queried_extension_field_element_count(&self) -> u64 {
+        self.minimum_queried_extension_field_element_count
+    }
+
+    pub(crate) const fn maximum_queried_extension_field_element_count(&self) -> u64 {
+        self.maximum_queried_extension_field_element_count
+    }
+
+    pub(crate) const fn minimum_queried_leaf_count(&self) -> u64 {
+        self.minimum_queried_leaf_count
+    }
+
+    pub(crate) const fn maximum_queried_leaf_count(&self) -> u64 {
+        self.maximum_queried_leaf_count
+    }
+
+    pub(crate) const fn has_variable_counts(&self) -> bool {
+        self.minimum_queried_base_field_element_count
+            != self.maximum_queried_base_field_element_count
+            || self.minimum_queried_extension_field_element_count
+                != self.maximum_queried_extension_field_element_count
+            || self.minimum_queried_leaf_count != self.maximum_queried_leaf_count
     }
 
     pub(crate) const fn maximum_frontier_node_count(&self) -> u64 {
@@ -93,10 +157,15 @@ impl CompactProofResponseWireGeometry {
     }
 
     fn validate(&self) -> Result<(), CompactProofWireError> {
-        if self.queried_leaf_count() == 0
+        if self.minimum_queried_leaf_count == 0
+            || self.minimum_queried_leaf_count > self.maximum_queried_leaf_count
+            || self.minimum_queried_base_field_element_count
+                > self.maximum_queried_base_field_element_count
+            || self.minimum_queried_extension_field_element_count
+                > self.maximum_queried_extension_field_element_count
             || self
-                .queried_base_field_element_count()
-                .checked_add(self.queried_extension_field_element_count())
+                .maximum_queried_base_field_element_count
+                .checked_add(self.maximum_queried_extension_field_element_count)
                 .ok_or(CompactProofWireError::LengthOverflow)?
                 == 0
             || self
@@ -112,16 +181,16 @@ impl CompactProofResponseWireGeometry {
     pub(crate) fn maximum_canonical_byte_length(&self) -> Result<usize, CompactProofWireError> {
         self.validate()?;
         let base_value_byte_length = checked_usize_product(&[
-            checked_usize(self.queried_base_field_element_count())?,
+            checked_usize(self.maximum_queried_base_field_element_count)?,
             size_of::<u64>(),
         ])?;
         let extension_value_byte_length = checked_usize_product(&[
-            checked_usize(self.queried_extension_field_element_count())?,
+            checked_usize(self.maximum_queried_extension_field_element_count)?,
             PROOF_CHALLENGE_EXTENSION_DEGREE,
             size_of::<u64>(),
         ])?;
         let salt_byte_length = checked_usize_product(&[
-            checked_usize(self.queried_leaf_count())?,
+            checked_usize(self.maximum_queried_leaf_count)?,
             COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH,
         ])?;
         let maximum_frontier_node_count = checked_usize(self.maximum_frontier_node_count())?;
@@ -129,6 +198,11 @@ impl CompactProofResponseWireGeometry {
             size_of::<u32>(),
             MERKLE_DIGEST_BYTE_LENGTH,
             COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH,
+            if self.has_variable_counts() {
+                VARIABLE_RESPONSE_COUNT_BYTE_LENGTH
+            } else {
+                0
+            },
             base_value_byte_length,
             extension_value_byte_length,
             salt_byte_length,
@@ -370,6 +444,19 @@ impl<'geometry> CompactProofWireAssembler<'geometry> {
         self.canonical.extend_from_slice(&response.root);
         self.canonical
             .extend_from_slice(&response.fiat_shamir_round_salt);
+        if response_geometry.has_variable_counts() {
+            for count in [
+                response.base_field_values.len(),
+                response.extension_field_values.len(),
+                response.leaf_salts.len(),
+            ] {
+                self.canonical.extend_from_slice(
+                    &u32::try_from(count)
+                        .map_err(|_| CompactProofWireError::LengthOverflow)?
+                        .to_le_bytes(),
+                );
+            }
+        }
         for value in &response.base_field_values {
             self.canonical
                 .extend_from_slice(&value.canonical().to_le_bytes());
@@ -444,6 +531,9 @@ impl<'geometry> CompactProofWireAssembler<'geometry> {
 pub(crate) struct DecodedCompactProofResponse {
     ordinal: u32,
     root: [u8; MERKLE_DIGEST_BYTE_LENGTH],
+    queried_base_field_element_count: usize,
+    queried_extension_field_element_count: usize,
+    queried_leaf_count: usize,
     fiat_shamir_round_salt_bytes: Range<usize>,
     base_field_value_bytes: Range<usize>,
     extension_field_value_bytes: Range<usize>,
@@ -461,6 +551,18 @@ impl DecodedCompactProofResponse {
 
     pub(crate) const fn root(&self) -> [u8; MERKLE_DIGEST_BYTE_LENGTH] {
         self.root
+    }
+
+    pub(crate) const fn queried_base_field_element_count(&self) -> usize {
+        self.queried_base_field_element_count
+    }
+
+    pub(crate) const fn queried_extension_field_element_count(&self) -> usize {
+        self.queried_extension_field_element_count
+    }
+
+    pub(crate) const fn queried_leaf_count(&self) -> usize {
+        self.queried_leaf_count
     }
 
     pub(crate) fn fiat_shamir_round_salt(
@@ -782,16 +884,38 @@ pub(crate) fn decode_compact_proof_wire(
         let fiat_shamir_round_salt_bytes =
             reader.take_range(COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH)?;
 
-        let base_field_value_bytes = reader.read_canonical_base_field_values(checked_usize(
-            response_geometry.queried_base_field_element_count,
-        )?)?;
-        let extension_field_value_bytes = reader.read_canonical_extension_field_values(
-            checked_usize(response_geometry.queried_extension_field_element_count)?,
+        let (
+            queried_base_field_element_count,
+            queried_extension_field_element_count,
+            queried_leaf_count,
+        ) = if response_geometry.has_variable_counts() {
+            (
+                usize::try_from(reader.read_u32()?)
+                    .map_err(|_| CompactProofWireError::LengthOverflow)?,
+                usize::try_from(reader.read_u32()?)
+                    .map_err(|_| CompactProofWireError::LengthOverflow)?,
+                usize::try_from(reader.read_u32()?)
+                    .map_err(|_| CompactProofWireError::LengthOverflow)?,
+            )
+        } else {
+            (
+                checked_usize(response_geometry.maximum_queried_base_field_element_count)?,
+                checked_usize(response_geometry.maximum_queried_extension_field_element_count)?,
+                checked_usize(response_geometry.maximum_queried_leaf_count)?,
+            )
+        };
+        validate_response_counts(
+            response_geometry,
+            queried_base_field_element_count,
+            queried_extension_field_element_count,
+            queried_leaf_count,
         )?;
-        let leaf_salt_bytes = reader.read_leaf_salts(
-            checked_usize(response_geometry.queried_leaf_count)?,
-            &mut accepted_leaf_salts,
-        )?;
+        let base_field_value_bytes =
+            reader.read_canonical_base_field_values(queried_base_field_element_count)?;
+        let extension_field_value_bytes =
+            reader.read_canonical_extension_field_values(queried_extension_field_element_count)?;
+        let leaf_salt_bytes =
+            reader.read_leaf_salts(queried_leaf_count, &mut accepted_leaf_salts)?;
 
         let frontier_dictionary_count = usize::try_from(reader.read_u32()?)
             .map_err(|_| CompactProofWireError::LengthOverflow)?;
@@ -820,6 +944,9 @@ pub(crate) fn decode_compact_proof_wire(
         decoded_responses.push(DecodedCompactProofResponse {
             ordinal,
             root,
+            queried_base_field_element_count,
+            queried_extension_field_element_count,
+            queried_leaf_count,
             fiat_shamir_round_salt_bytes,
             base_field_value_bytes,
             extension_field_value_bytes,
@@ -922,11 +1049,39 @@ fn validate_response_input(
     geometry: &CompactProofResponseWireGeometry,
     response: &CompactProofResponseWireInput,
 ) -> Result<(), CompactProofWireError> {
-    if response.base_field_values.len() != checked_usize(geometry.queried_base_field_element_count)?
-        || response.extension_field_values.len()
-            != checked_usize(geometry.queried_extension_field_element_count)?
-        || response.leaf_salts.len() != checked_usize(geometry.queried_leaf_count)?
-        || response.frontier.len() > checked_usize(geometry.maximum_frontier_node_count)?
+    validate_response_counts(
+        geometry,
+        response.base_field_values.len(),
+        response.extension_field_values.len(),
+        response.leaf_salts.len(),
+    )?;
+    if response.frontier.len() > checked_usize(geometry.maximum_frontier_node_count)? {
+        return Err(CompactProofWireError::InvalidGeometry);
+    }
+    Ok(())
+}
+
+fn validate_response_counts(
+    geometry: &CompactProofResponseWireGeometry,
+    queried_base_field_element_count: usize,
+    queried_extension_field_element_count: usize,
+    queried_leaf_count: usize,
+) -> Result<(), CompactProofWireError> {
+    let queried_base_field_element_count = u64::try_from(queried_base_field_element_count)
+        .map_err(|_| CompactProofWireError::LengthOverflow)?;
+    let queried_extension_field_element_count =
+        u64::try_from(queried_extension_field_element_count)
+            .map_err(|_| CompactProofWireError::LengthOverflow)?;
+    let queried_leaf_count =
+        u64::try_from(queried_leaf_count).map_err(|_| CompactProofWireError::LengthOverflow)?;
+    if !(geometry.minimum_queried_base_field_element_count
+        ..=geometry.maximum_queried_base_field_element_count)
+        .contains(&queried_base_field_element_count)
+        || !(geometry.minimum_queried_extension_field_element_count
+            ..=geometry.maximum_queried_extension_field_element_count)
+            .contains(&queried_extension_field_element_count)
+        || !(geometry.minimum_queried_leaf_count..=geometry.maximum_queried_leaf_count)
+            .contains(&queried_leaf_count)
     {
         return Err(CompactProofWireError::InvalidGeometry);
     }
