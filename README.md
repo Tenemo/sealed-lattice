@@ -324,32 +324,37 @@ commitment, and compares resident and external round polynomials, retained
 tree bytes, transcript messages, and final values. A fresh path decodes the
 transported public-input and proof bytes, verifies every opening and the CFW
 transcript, and matches the pollable structured transpose to the independent
-direct claim combination coefficient for coefficient. Its separate test-only
-hiding-WHIR transcript commits the base-field quotient-and-multiplicity source
-with canonical zero padding before lookup materialization. It then commits the
-actual CFW inner masks, compact witness, outer masks, and one shared two-lane
-cross-epoch mask root before sampling the 18-coordinate copy point. The owner
-checks every copied coefficient, proves the masked pre-challenge base-source
-relation, reuses the same mask root in the main relation, and builds the
-production structured transpose from main WHIR's own batching challenge. A
-fresh sequential verifier accepts both three-round proofs and rejects changed
-pre-challenge and main targets, source and mask covectors, commitment order,
-cross-epoch openings, and either base-case value. The owner uses ring degree
-2,048, a zero-centered valid assignment, a constant test provider,
+direct claim combination coefficient for coefficient at main WHIR's actual
+batching challenge. Its test-only commitment construction commits the
+base-field quotient-and-multiplicity source with canonical zero padding before
+lookup materialization. It then commits the actual CFW inner masks, compact
+witness, outer masks, and one shared two-lane cross-epoch mask root. The exact
+canonical pre-challenge root encoding is hashed into the first outer response
+before lookup; the other four root encodings are hashed into the assignment and
+mask response before the outer compact transcript samples the 18-coordinate
+copy point. The three masked cross-epoch claims enter the following response
+before the initial CFW challenge. After canonical CFW encoding, a
+domain-separated handoff hashes the canonical public input, exact CFW bytes,
+and all five root sections before sequential WHIR proving. The owner checks
+every copied coefficient, proves the masked pre-challenge base-source relation,
+and reuses the same mask root in the main relation. A fresh path rederives every
+outer message, verifies both root bindings and CFW, reconstructs the same
+handoff from transported bytes, and then verifies both three-round WHIR proofs.
+It rejects changed targets, source and mask covectors, cross-epoch openings,
+either base-case value, or any root-section substitution. The owner uses ring
+degree 2,048, a zero-centered valid assignment, a constant test provider,
 deterministic test salts and coins, disclosed CFW masks in the outer CFW-only
-wire, and reduced first folds. A test-only canonical envelope now assigns the
-outer CFW proof, five external roots, pre-challenge WHIR proof, and main WHIR
-proof to eight fixed ordered sections. WHIR vector lengths come only from the
-verifier configuration, field limbs are canonical, and query coordinates remain
+wire, and reduced first folds. A test-only canonical envelope assigns the outer
+CFW proof, five external roots, pre-challenge WHIR proof, and main WHIR proof to
+eight fixed ordered sections. WHIR vector lengths come only from verifier
+configuration, field limbs are canonical, and query coordinates remain
 Fiat-Shamir-derived rather than producer-supplied. A fresh decoder reproduces
-the envelope byte for byte, rechecks the embedded CFW openings and messages,
-and sequentially verifies both WHIR proofs using only decoded roots and proof
-objects. It refuses wrong framing, duplicate or reordered sections, empty or
-oversized sections, truncation, trailing bytes, noncanonical fields, missing or
-unused WHIR bytes, and structural or semantic mutations across the CFW, every
-external root, and both WHIR sections. The pre-challenge source root, copy
-point, CFW challenges, and WHIR messages are still not driven by one canonical
-production transcript. The owner therefore does not complete the
+the envelope byte for byte and refuses wrong framing, duplicate or reordered
+sections, empty and oversized sections, truncation, trailing bytes,
+noncanonical fields, missing or unused WHIR bytes, and structural or semantic
+mutations across every section. The source provider, commitment construction,
+proof coins, WHIR challenger, and CFW mask transport remain test-only rather
+than production runtime owners. The owner therefore does not complete the
 production-shaped chain.
 
 The canonical proof encoder can append one logical response at a time in
@@ -816,11 +821,13 @@ additionally reaches verified CFW claims and the production structured
 transpose with resident/external and retained-tree byte parity. Its test-only
 WHIR chronology now proves and freshly verifies the pre-challenge base-source
 relation and the main CFW relation through three rounds each, with one shared
-cross-epoch mask root and the exact copied witness prefix. Its fixed-order
-canonical envelope transports the embedded CFW proof, every external root, and
-both WHIR proofs through a fresh decoder and verifier with section-wide hostile
-coverage. It is not a production-authority, unified canonical-transcript,
-selected-size, or zero-knowledge owner.
+cross-epoch mask root and the exact copied witness prefix. Canonical root-section
+digests enter the outer transcript before their dependent challenges, and the
+exact public-input, CFW, and root-section bytes initialize the sequential WHIR
+handoff. Its fixed-order canonical envelope transports the embedded CFW proof,
+every external root, and both WHIR proofs through a fresh decoder and verifier
+with section-wide hostile coverage. It is not a production-authority,
+production-transcript, selected-size, or zero-knowledge owner.
 
 The static gate remains closed because current generation does not select the
 compact profile or exercise it through a retained live authority, because row-

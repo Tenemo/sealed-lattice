@@ -7,8 +7,8 @@ use p3_symmetric::MerkleCap;
 use p3_whir::{BaseCaseZkProof, BlindedMask, MaskOpeningPair, QueryOpening, ZkRoundProof};
 
 use super::{
-    CompactChallengeField, MaskGroupShape, SmallChainCommitment, SmallChainWhirConfiguration,
-    SmallChainWhirProof, SMALL_CHAIN_HASH_OUTPUT_WORD_LENGTH,
+    CompactChallengeField, MaskGroupShape, SMALL_CHAIN_HASH_OUTPUT_WORD_LENGTH,
+    SmallChainCommitment, SmallChainWhirConfiguration, SmallChainWhirProof,
 };
 use crate::bgv::proof_suite::{
     MAXIMUM_COMMON_PROOF_BYTE_LENGTH, PROOF_BASE_FIELD_MODULUS, PROOF_CHALLENGE_EXTENSION_DEGREE,
@@ -134,11 +134,11 @@ pub(super) fn encode_small_chain_canonical_proof(
         main_whir_proof,
     )?;
     let commitment_sections = [
-        encode_commitment(&commitments.pre_challenge_source)?,
-        encode_commitment(&commitments.inner_masks)?,
-        encode_commitment(&commitments.main_source)?,
-        encode_commitment(&commitments.outer_masks)?,
-        encode_commitment(&commitments.shared_masks)?,
+        encode_small_chain_commitment(&commitments.pre_challenge_source)?,
+        encode_small_chain_commitment(&commitments.inner_masks)?,
+        encode_small_chain_commitment(&commitments.main_source)?,
+        encode_small_chain_commitment(&commitments.outer_masks)?,
+        encode_small_chain_commitment(&commitments.shared_masks)?,
     ];
 
     let payloads: [&[u8]; SMALL_CHAIN_CANONICAL_SECTION_COUNT as usize] = [
@@ -409,7 +409,7 @@ fn final_mask_group_shapes(
     shapes
 }
 
-fn encode_commitment(
+pub(super) fn encode_small_chain_commitment(
     commitment: &SmallChainCommitment,
 ) -> Result<Vec<u8>, SmallChainCanonicalTransportError> {
     let mut writer = SmallChainCanonicalWriter::new();

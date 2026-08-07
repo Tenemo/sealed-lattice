@@ -79,20 +79,26 @@ ceremony simulation, fixed-SHAKE justification, and quantum-random-oracle zero
 knowledge remain explicit refusals. A reduced production-family owner now
 reaches freshly verified CFW claims and the pollable production structured
 transpose with resident/external polynomial, retained-tree, transcript-message,
-and canonical-byte parity. A separate test-only hiding-WHIR transcript commits
-the base-field quotient-and-multiplicity source before lookup materialization,
-then the actual CFW inner masks, main source, outer masks, and one shared two-
-lane cross-epoch mask root before the copy point. It proves and freshly verifies
-the pre-challenge base-source relation and the main CFW relation sequentially,
-with exact prefix correspondence and hostile relation, commitment-order,
-opening, and base-case mutations. It uses a constant test provider, a zero-
-centered valid assignment, deterministic test salts and coins, disclosed CFW
-masks in the outer CFW-only wire, and reduced first folds. Both WHIR proofs
-now cross a test-only canonical envelope with the outer CFW proof and all five
-external roots. A fresh decoder derives proof shape from verifier
-configuration, reproduces the exact bytes, and sequentially verifies from the
-decoded sections. Hostile framing, field, external-root, internal-root, CFW,
-and WHIR-section mutations are rejected. A separate bounded checkpoint cursor
+and canonical-byte parity. A test-only commitment construction commits the
+base-field quotient-and-multiplicity source before lookup materialization, then
+the actual CFW inner masks, main source, outer masks, and one shared two-lane
+cross-epoch mask root. Canonical root-section digests enter the first two outer
+responses before the dependent lookup and copy-point challenges, and the three
+masked cross-epoch claims enter the next response before the initial CFW
+challenge. The actual main-WHIR batching challenge drives both the direct and
+pollable structured transpose. A domain-separated handoff then hashes the
+canonical public input, exact outer CFW bytes, and all five root sections before
+sequential WHIR proving. A fresh path reconstructs those bindings from
+transported bytes, rederives every outer message, rechecks CFW, and verifies the
+pre-challenge base-source and main CFW relations sequentially. It rejects
+hostile relation, root-substitution, opening, and base-case mutations. The owner
+uses a constant test provider, a zero-centered valid assignment, deterministic
+test salts and coins, disclosed CFW masks in the outer CFW-only wire, and
+reduced first folds. Both WHIR proofs cross a test-only canonical envelope with
+the outer CFW proof and all five external roots. A fresh decoder derives proof
+shape from verifier configuration, reproduces the exact bytes, and refuses
+hostile framing, field, external-root, internal-root, CFW, and WHIR-section
+mutations. A separate bounded checkpoint cursor
 now reconstructs the compact transcript from canonical public-input bytes,
 verifier-owned geometry, and ordered roots and salts, and the wire assembler
 can reconstruct a contiguous canonical response prefix with the accepted-salt
@@ -104,9 +110,9 @@ live transactions or a later checkpoint can proceed. Focused hostile coverage
 refuses omitted and reordered deletion state, changed payload, and a substituted
 trailer digest. The compact transcript and response assembler are not connected
 to that host owner: later-query response sections can still lag transcript
-progress, and response-value custody is absent. Production authority, one
-canonical transcript spanning the pre-challenge source, copy point, CFW, and
-WHIR, production transport integration, compact durable execution, and measured
+progress, and response-value custody is absent. The provider, commitment
+construction, proof coins, WHIR challenger, and CFW mask transport remain
+test-only; production authority, compact durable execution, and measured
 browser evidence are absent, so proof generation remains refused.
 
 ## Open security issues

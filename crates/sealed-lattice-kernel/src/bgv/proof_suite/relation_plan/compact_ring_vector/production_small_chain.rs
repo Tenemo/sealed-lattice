@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use p3_challenger::{CanObserve, FieldChallenger, HashChallenger, SerializingChallenger64};
+use p3_challenger::{CanObserve, HashChallenger, SerializingChallenger64};
 use p3_commit::{ExtensionMmcs, Mmcs};
 use p3_dft::Radix2DFTSmallBatch;
 use p3_field::{PrimeCharacteristicRing, PrimeField64};
@@ -15,10 +15,10 @@ use p3_whir::pcs::zk::{
     PrecommittedMaskVerifierGroup, ZkVerifierError, ZkWhirConfig, ZkWhirProof,
 };
 use p3_whir::{FoldingFactor, ProtocolParameters, SecurityAssumption, ZkParameters};
-use rand::{rngs::SmallRng, SeedableRng};
+use rand::{SeedableRng, rngs::SmallRng};
 use sha3::{
-    digest::{ExtendableOutput, Update, XofReader},
     Shake256,
+    digest::{ExtendableOutput, Update, XofReader},
 };
 use zeroize::Zeroizing;
 
@@ -27,8 +27,8 @@ use super::super::authenticated_assignment::{
     CompactAuthenticatedAssignmentPoll, CompactLookupInverseMaterializationPoll,
 };
 use super::super::{
-    derive_compact_public_key_relation_catalog, selected_input_and_context,
     CompactPublicKeyRelationCatalog, CompactRingVectorReference, CompactStructuredLinearTerm,
+    derive_compact_public_key_relation_catalog, selected_input_and_context,
 };
 use super::*;
 use crate::bgv::proof_suite::prover::{
@@ -39,37 +39,40 @@ use crate::bgv::proof_suite::prover::{
     ProvidedCommonProofSourcePolynomial,
 };
 use crate::bgv::proof_suite::relation_plan::{
-    compile_public_key_share_relation_with_source_layout, RelationPlanVariant,
+    RelationPlanVariant, compile_public_key_share_relation_with_source_layout,
 };
 use crate::bgv::proof_suite::{
+    COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, PROOF_BASE_FIELD_MODULUS,
+    PROOF_CHALLENGE_EXTENSION_DEGREE, ProofBaseFieldElement, ProofChallengeExtensionElement,
     compact_cfw::{
-        compact_challenge_from_production, compact_challenge_to_production,
-        verify_compact_cfw_transcript, CompactCfwClaimBatch, CompactCfwError, CompactCfwGeometry,
+        COMPACT_CFW_MATRIX_COUNT, CompactCfwClaimBatch, CompactCfwError, CompactCfwGeometry,
         CompactCfwMaskMaterial, CompactCfwMaskedCrossEpochClaims, CompactCfwMatrixRole,
         CompactCfwR1csMatrices, CompactCfwTranscript, CompactChallengeField,
-        PreparedCompactCfwProver, COMPACT_CFW_MATRIX_COUNT,
+        PreparedCompactCfwProver, compact_challenge_from_production,
+        compact_challenge_to_production, verify_compact_cfw_transcript,
     },
     compact_cfw_external_prover::{CompactCfwExternalProverState, CompactCfwExternalRowSource},
     compact_proof_wire::{
-        decode_compact_proof_wire, decode_compact_public_input, encode_compact_proof_wire,
-        encode_compact_public_input, CompactProofResponseWireGeometry,
-        CompactProofResponseWireInput, CompactProofWireGeometry, CompactProofWireInput,
-        CompactPublicInputBindings, CompactPublicInputWireGeometry,
-        COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH, PROOF_FIXED_HEADER_BYTE_LENGTH,
+        COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH, CompactProofResponseWireGeometry,
+        CompactProofResponseWireInput, CompactProofWireError, CompactProofWireGeometry,
+        CompactProofWireInput, CompactPublicInputBindings, CompactPublicInputWireGeometry,
+        DecodedCompactProofWire, PROOF_FIXED_HEADER_BYTE_LENGTH, decode_compact_proof_wire,
+        decode_compact_public_input, encode_compact_proof_wire, encode_compact_public_input,
     },
     compact_response_merkle::{
-        verify_decoded_compact_response_opening, CompactResponseComponentGeometry,
-        CompactResponseLeafValue, CompactResponseLeafValueKind, CompactResponseMerkleGeometry,
+        CompactResponseComponentGeometry, CompactResponseLeafValue, CompactResponseLeafValueKind,
+        CompactResponseMerkleError, CompactResponseMerkleGeometry,
         CompactResponsePostorderMerkleWriter, CompactResponseQuerySelection,
+        verify_decoded_compact_response_opening,
     },
-    compact_transcript::{derive_compact_fiat_shamir_verifier_message, CompactProverTranscript},
+    compact_transcript::{
+        CompactProverTranscript, CompactTranscriptError,
+        derive_compact_fiat_shamir_verifier_message,
+    },
     external_memory::tests::TestStorage,
     fixed_uniform_verifier_message::{
         DecodedFixedUniformVerifierMessage, FixedUniformVerifierMessageGeometry,
     },
-    ProofBaseFieldElement, ProofChallengeExtensionElement,
-    COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, PROOF_BASE_FIELD_MODULUS,
-    PROOF_CHALLENGE_EXTENSION_DEGREE,
 };
 use crate::foundation::{Hash512, ProofApplicationSlotCeilings};
 
@@ -77,9 +80,10 @@ use crate::foundation::{Hash512, ProofApplicationSlotCeilings};
 mod production_small_chain_canonical_transport;
 
 use production_small_chain_canonical_transport::{
-    decode_small_chain_canonical_proof, encode_small_chain_canonical_proof,
-    small_chain_canonical_section_payload_range, DecodedSmallChainCanonicalProof,
-    SmallChainCanonicalSection, SmallChainCanonicalTransportError, SmallChainExternalCommitments,
+    DecodedSmallChainCanonicalProof, SmallChainCanonicalSection, SmallChainCanonicalTransportError,
+    SmallChainExternalCommitments, decode_small_chain_canonical_proof,
+    encode_small_chain_canonical_proof, encode_small_chain_commitment,
+    small_chain_canonical_section_payload_range,
 };
 
 const SMALL_CHAIN_RING_DEGREE: u64 = 2_048;
@@ -90,6 +94,13 @@ const SMALL_CHAIN_WHIR_SECURITY_LEVEL: usize = 267;
 const SMALL_CHAIN_WHIR_MAIN_LOG_INVERSE_RATE: usize = 2;
 const SMALL_CHAIN_WHIR_MASK_LOG_INVERSE_RATE: usize = 2;
 const SMALL_CHAIN_WHIR_SUMCHECK_MASK_MESSAGE_LENGTH: usize = 3;
+const SMALL_CHAIN_DIGEST_BASE_FIELD_ELEMENT_COUNT: usize = Hash512::BYTE_LENGTH / size_of::<u32>();
+const SMALL_CHAIN_PRE_CHALLENGE_COMMITMENT_BINDING_DOMAIN: &str =
+    "sealed-lattice/compact-small-chain/pre-challenge-commitment-binding/v1";
+const SMALL_CHAIN_POST_LOOKUP_COMMITMENT_BINDING_DOMAIN: &str =
+    "sealed-lattice/compact-small-chain/post-lookup-commitment-binding/v1";
+const SMALL_CHAIN_WHIR_HANDOFF_BINDING_DOMAIN: &str =
+    "sealed-lattice/compact-small-chain/whir-handoff-binding/v1";
 
 #[derive(Clone, Copy, Debug)]
 struct SmallChainByteHasher;
@@ -294,23 +305,48 @@ fn small_chain_multilinear_equality_covector(
         .to_vec()
 }
 
-fn observe_small_chain_canonical_cfw_bytes(
-    challenger: &mut SmallChainChallenger,
-    canonical_proof_bytes: &[u8],
-) {
-    let digest = crate::hashing::hash_framed_parts_512(
-        "sealed-lattice/test/production-small-chain-canonical-cfw/v1",
-        &[canonical_proof_bytes],
-    );
-    for digest_word in digest.chunks_exact(size_of::<u64>()) {
-        challenger.observe_algebra_element(CompactChallengeField::from(Goldilocks::from_u64(
-            u64::from_le_bytes(
-                digest_word
-                    .try_into()
-                    .expect("one canonical CFW digest word has eight bytes"),
-            ),
-        )));
-    }
+fn small_chain_commitment_binding(
+    domain: &str,
+    commitments: &[&SmallChainCommitment],
+) -> Result<[u8; Hash512::BYTE_LENGTH], SmallChainCanonicalTransportError> {
+    let canonical_commitments = commitments
+        .iter()
+        .map(|commitment| encode_small_chain_commitment(commitment))
+        .collect::<Result<Vec<_>, _>>()?;
+    let canonical_commitment_slices = canonical_commitments
+        .iter()
+        .map(Vec::as_slice)
+        .collect::<Vec<_>>();
+    Ok(crate::hashing::hash_framed_parts_512(
+        domain,
+        &canonical_commitment_slices,
+    ))
+}
+
+fn small_chain_whir_handoff_binding(
+    canonical_public_input_bytes: &[u8],
+    canonical_cfw_proof_bytes: &[u8],
+    commitments: &SmallChainExternalCommitments,
+) -> Result<[u8; Hash512::BYTE_LENGTH], SmallChainCanonicalTransportError> {
+    let canonical_commitments = [
+        encode_small_chain_commitment(&commitments.pre_challenge_source)?,
+        encode_small_chain_commitment(&commitments.inner_masks)?,
+        encode_small_chain_commitment(&commitments.main_source)?,
+        encode_small_chain_commitment(&commitments.outer_masks)?,
+        encode_small_chain_commitment(&commitments.shared_masks)?,
+    ];
+    Ok(crate::hashing::hash_framed_parts_512(
+        SMALL_CHAIN_WHIR_HANDOFF_BINDING_DOMAIN,
+        &[
+            canonical_public_input_bytes,
+            canonical_cfw_proof_bytes,
+            &canonical_commitments[0],
+            &canonical_commitments[1],
+            &canonical_commitments[2],
+            &canonical_commitments[3],
+            &canonical_commitments[4],
+        ],
+    ))
 }
 
 fn deterministic_extension_vector(element_count: usize, seed: u64) -> Vec<CompactChallengeField> {
@@ -332,14 +368,99 @@ enum SmallChainWhirVerificationMutation {
     MainSourceCovector,
     InnerMaskCovector,
     SharedMaskCovector,
-    GroupChronology,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum SmallChainCommitmentBindingError {
+    CanonicalTransport(SmallChainCanonicalTransportError),
+    NonCanonicalDigestLimb,
+    ProofWire(CompactProofWireError),
+    WrongBinding,
+}
+
+impl From<SmallChainCanonicalTransportError> for SmallChainCommitmentBindingError {
+    fn from(error: SmallChainCanonicalTransportError) -> Self {
+        Self::CanonicalTransport(error)
+    }
+}
+
+impl From<CompactProofWireError> for SmallChainCommitmentBindingError {
+    fn from(error: CompactProofWireError) -> Self {
+        Self::ProofWire(error)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum SmallChainWhirVerificationError {
+    CrossEpochClaimMismatch,
+    Whir(ZkVerifierError),
+    WrongCrossEpochPoint,
+}
+
+impl From<ZkVerifierError> for SmallChainWhirVerificationError {
+    fn from(error: ZkVerifierError) -> Self {
+        Self::Whir(error)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum SmallChainFreshVerificationError {
+    CanonicalTransport(SmallChainCanonicalTransportError),
+    CommitmentBinding(SmallChainCommitmentBindingError),
+    CompactCfw(CompactCfwError),
+    CompactTranscript(CompactTranscriptError),
+    ProofWire(CompactProofWireError),
+    ResponseMerkle(CompactResponseMerkleError),
+    Whir(SmallChainWhirVerificationError),
+    WrongTranscriptShape,
+}
+
+impl From<SmallChainCanonicalTransportError> for SmallChainFreshVerificationError {
+    fn from(error: SmallChainCanonicalTransportError) -> Self {
+        Self::CanonicalTransport(error)
+    }
+}
+
+impl From<SmallChainCommitmentBindingError> for SmallChainFreshVerificationError {
+    fn from(error: SmallChainCommitmentBindingError) -> Self {
+        Self::CommitmentBinding(error)
+    }
+}
+
+impl From<CompactCfwError> for SmallChainFreshVerificationError {
+    fn from(error: CompactCfwError) -> Self {
+        Self::CompactCfw(error)
+    }
+}
+
+impl From<CompactTranscriptError> for SmallChainFreshVerificationError {
+    fn from(error: CompactTranscriptError) -> Self {
+        Self::CompactTranscript(error)
+    }
+}
+
+impl From<CompactProofWireError> for SmallChainFreshVerificationError {
+    fn from(error: CompactProofWireError) -> Self {
+        Self::ProofWire(error)
+    }
+}
+
+impl From<CompactResponseMerkleError> for SmallChainFreshVerificationError {
+    fn from(error: CompactResponseMerkleError) -> Self {
+        Self::ResponseMerkle(error)
+    }
+}
+
+impl From<SmallChainWhirVerificationError> for SmallChainFreshVerificationError {
+    fn from(error: SmallChainWhirVerificationError) -> Self {
+        Self::Whir(error)
+    }
 }
 
 struct SmallChainWhirExecution {
     pre_challenge_configuration: SmallChainWhirConfiguration,
     main_configuration: SmallChainWhirConfiguration,
     commitment_scheme: SmallChainCommitmentScheme,
-    transcript_binding: [u8; Hash512::BYTE_LENGTH],
     inner_mask_shape: MaskGroupShape,
     outer_mask_shape: MaskGroupShape,
     shared_mask_shape: MaskGroupShape,
@@ -351,55 +472,45 @@ struct SmallChainWhirExecution {
 impl SmallChainWhirExecution {
     fn verify(
         &self,
+        transcript_binding: [u8; Hash512::BYTE_LENGTH],
         commitments: &SmallChainExternalCommitments,
-        canonical_cfw_proof_bytes: &[u8],
+        cross_epoch_point: &[CompactChallengeField],
+        expected_cross_epoch_claims: [CompactChallengeField; 3],
         pre_challenge_proof: &SmallChainWhirProof,
         main_proof: &SmallChainWhirProof,
         claim_batch: &CompactCfwClaimBatch,
         matrices: &impl CompactCfwR1csMatrices,
         mutation: SmallChainWhirVerificationMutation,
-    ) -> Result<(), ZkVerifierError> {
-        let mut challenger = small_chain_whir_challenger(self.transcript_binding);
-        challenger.observe(commitments.pre_challenge_source.clone());
-        if matches!(
-            mutation,
-            SmallChainWhirVerificationMutation::GroupChronology
-        ) {
-            challenger.observe(commitments.outer_masks.clone());
-            challenger.observe(commitments.main_source.clone());
-            challenger.observe(commitments.inner_masks.clone());
-        } else {
-            challenger.observe(commitments.inner_masks.clone());
-            challenger.observe(commitments.main_source.clone());
-            challenger.observe(commitments.outer_masks.clone());
+    ) -> Result<(), SmallChainWhirVerificationError> {
+        if cross_epoch_point.len() != self.cross_epoch_variable_count {
+            return Err(SmallChainWhirVerificationError::WrongCrossEpochPoint);
         }
-        challenger.observe(commitments.shared_masks.clone());
-        let sampled_cross_epoch_point = (0..self.cross_epoch_variable_count)
-            .map(|_| challenger.sample_algebra_element())
-            .collect::<Vec<CompactChallengeField>>();
         let [masked_pre_challenge_evaluation] = pre_challenge_proof.evals.as_slice() else {
             return Err(ZkVerifierError::EvalCountMismatch {
                 expected: 1,
                 actual: pre_challenge_proof.evals.len(),
-            });
+            }
+            .into());
         };
         let [masked_main_evaluation, mask_difference] = main_proof.evals.as_slice() else {
             return Err(ZkVerifierError::EvalCountMismatch {
                 expected: 2,
                 actual: main_proof.evals.len(),
-            });
+            }
+            .into());
         };
         let masked_pre_challenge_evaluation = *masked_pre_challenge_evaluation;
         let masked_main_evaluation = *masked_main_evaluation;
         let mask_difference = *mask_difference;
-        for value in [
+        if [
             masked_pre_challenge_evaluation,
             masked_main_evaluation,
             mask_difference,
-        ] {
-            challenger.observe_algebra_element(value);
+        ] != expected_cross_epoch_claims
+        {
+            return Err(SmallChainWhirVerificationError::CrossEpochClaimMismatch);
         }
-        observe_small_chain_canonical_cfw_bytes(&mut challenger, canonical_cfw_proof_bytes);
+        let mut challenger = small_chain_whir_challenger(transcript_binding);
 
         let pre_challenge_verifier =
             HidingWhirVerifier::new(&self.pre_challenge_configuration, &self.commitment_scheme);
@@ -410,7 +521,7 @@ impl SmallChainWhirExecution {
             1,
             |_, revealed_values| {
                 let mut source_covector =
-                    small_chain_multilinear_equality_covector(&sampled_cross_epoch_point);
+                    small_chain_multilinear_equality_covector(cross_epoch_point);
                 let mut target = revealed_values[0];
                 let mut shared_mask_covectors = vec![
                     vec![CompactChallengeField::ONE],
@@ -429,8 +540,7 @@ impl SmallChainWhirExecution {
                     SmallChainWhirVerificationMutation::None
                     | SmallChainWhirVerificationMutation::MainTarget
                     | SmallChainWhirVerificationMutation::MainSourceCovector
-                    | SmallChainWhirVerificationMutation::InnerMaskCovector
-                    | SmallChainWhirVerificationMutation::GroupChronology => {}
+                    | SmallChainWhirVerificationMutation::InnerMaskCovector => {}
                 }
                 Ok(CombinedRelationVerifierInput {
                     source_covector: Poly::new(source_covector),
@@ -459,7 +569,7 @@ impl SmallChainWhirExecution {
                     .clone()
                     .begin_combining_with_masked_cross_epoch_claims(
                         CompactCfwMaskedCrossEpochClaims::new(
-                            sampled_cross_epoch_point,
+                            cross_epoch_point.to_vec(),
                             self.copied_main_source_element_count,
                             masked_pre_challenge_evaluation,
                             revealed_values[0],
@@ -492,8 +602,7 @@ impl SmallChainWhirExecution {
                 match mutation {
                     SmallChainWhirVerificationMutation::None
                     | SmallChainWhirVerificationMutation::PreChallengeTarget
-                    | SmallChainWhirVerificationMutation::PreChallengeSourceCovector
-                    | SmallChainWhirVerificationMutation::GroupChronology => {}
+                    | SmallChainWhirVerificationMutation::PreChallengeSourceCovector => {}
                     SmallChainWhirVerificationMutation::MainTarget => {
                         target += CompactChallengeField::ONE;
                     }
@@ -530,7 +639,8 @@ impl SmallChainWhirExecution {
                 })
             },
             &mut challenger,
-        )
+        )?;
+        Ok(())
     }
 }
 
@@ -695,6 +805,71 @@ fn digest_base_field_elements(digest: [u8; Hash512::BYTE_LENGTH]) -> Vec<ProofBa
         .collect()
 }
 
+fn decoded_response_digest(
+    decoded_proof: &DecodedCompactProofWire,
+    canonical_proof_bytes: &[u8],
+    response_ordinal: usize,
+    first_value_ordinal: usize,
+) -> Result<[u8; Hash512::BYTE_LENGTH], SmallChainCommitmentBindingError> {
+    let response = decoded_proof.responses().get(response_ordinal).ok_or(
+        SmallChainCommitmentBindingError::ProofWire(CompactProofWireError::WrongResponseCount),
+    )?;
+    let mut digest = [0_u8; Hash512::BYTE_LENGTH];
+    for digest_limb_ordinal in 0..SMALL_CHAIN_DIGEST_BASE_FIELD_ELEMENT_COUNT {
+        let value_ordinal = first_value_ordinal.checked_add(digest_limb_ordinal).ok_or(
+            SmallChainCommitmentBindingError::ProofWire(CompactProofWireError::LengthOverflow),
+        )?;
+        let digest_limb = u32::try_from(
+            response
+                .base_field_value(canonical_proof_bytes, value_ordinal)?
+                .canonical(),
+        )
+        .map_err(|_| SmallChainCommitmentBindingError::NonCanonicalDigestLimb)?;
+        let first_byte = digest_limb_ordinal * size_of::<u32>();
+        digest[first_byte..first_byte + size_of::<u32>()]
+            .copy_from_slice(&digest_limb.to_le_bytes());
+    }
+    Ok(digest)
+}
+
+fn verify_small_chain_commitment_bindings(
+    decoded_proof: &DecodedCompactProofWire,
+    canonical_proof_bytes: &[u8],
+    commitments: &SmallChainExternalCommitments,
+) -> Result<(), SmallChainCommitmentBindingError> {
+    let expected_pre_challenge_binding = small_chain_commitment_binding(
+        SMALL_CHAIN_PRE_CHALLENGE_COMMITMENT_BINDING_DOMAIN,
+        &[&commitments.pre_challenge_source],
+    )?;
+    let expected_post_lookup_binding = small_chain_commitment_binding(
+        SMALL_CHAIN_POST_LOOKUP_COMMITMENT_BINDING_DOMAIN,
+        &[
+            &commitments.inner_masks,
+            &commitments.main_source,
+            &commitments.outer_masks,
+            &commitments.shared_masks,
+        ],
+    )?;
+    let decoded_pre_challenge_binding = decoded_response_digest(
+        decoded_proof,
+        canonical_proof_bytes,
+        0,
+        SMALL_CHAIN_DIGEST_BASE_FIELD_ELEMENT_COUNT,
+    )?;
+    let decoded_post_lookup_binding = decoded_response_digest(
+        decoded_proof,
+        canonical_proof_bytes,
+        1,
+        SMALL_CHAIN_DIGEST_BASE_FIELD_ELEMENT_COUNT,
+    )?;
+    if decoded_pre_challenge_binding != expected_pre_challenge_binding
+        || decoded_post_lookup_binding != expected_post_lookup_binding
+    {
+        return Err(SmallChainCommitmentBindingError::WrongBinding);
+    }
+    Ok(())
+}
+
 fn compact_challenges(message: &DecodedFixedUniformVerifierMessage) -> Vec<CompactChallengeField> {
     message
         .extension_elements()
@@ -704,11 +879,15 @@ fn compact_challenges(message: &DecodedFixedUniformVerifierMessage) -> Vec<Compa
         .collect()
 }
 
-fn small_chain_proof_wire_geometry(cfw_geometry: CompactCfwGeometry) -> CompactProofWireGeometry {
+fn small_chain_proof_wire_geometry(
+    cfw_geometry: CompactCfwGeometry,
+    cross_epoch_variable_count: usize,
+) -> CompactProofWireGeometry {
     let mut responses = Vec::new();
     responses.push(response_wire_geometry(
         0,
-        16,
+        2 * u64::try_from(SMALL_CHAIN_DIGEST_BASE_FIELD_ELEMENT_COUNT)
+            .expect("small-chain digest field-element count fits u64"),
         0,
         1,
         FixedUniformVerifierMessageGeometry::new(1, PROOF_BASE_FIELD_MODULUS, 0, Vec::new())
@@ -721,9 +900,23 @@ fn small_chain_proof_wire_geometry(cfw_geometry: CompactCfwGeometry) -> CompactP
             .expect("outer mask element count fits u64");
     responses.push(response_wire_geometry(
         1,
-        16,
+        2 * u64::try_from(SMALL_CHAIN_DIGEST_BASE_FIELD_ELEMENT_COUNT)
+            .expect("small-chain digest field-element count fits u64"),
         committed_mask_element_count,
         2,
+        FixedUniformVerifierMessageGeometry::new(
+            u64::try_from(cross_epoch_variable_count).expect("cross-epoch point length fits u64"),
+            0,
+            0,
+            Vec::new(),
+        )
+        .expect("cross-epoch point verifier message geometry"),
+    ));
+    responses.push(response_wire_geometry(
+        2,
+        0,
+        3,
+        1,
         FixedUniformVerifierMessageGeometry::new(
             u64::try_from(cfw_geometry.sumcheck_round_count() + 1)
                 .expect("CFW initial challenge count fits u64"),
@@ -735,7 +928,7 @@ fn small_chain_proof_wire_geometry(cfw_geometry: CompactCfwGeometry) -> CompactP
     ));
     for round_ordinal in 0..cfw_geometry.sumcheck_round_count() {
         let response_ordinal =
-            u32::try_from(round_ordinal + 2).expect("CFW response ordinal fits u32");
+            u32::try_from(round_ordinal + 3).expect("CFW response ordinal fits u32");
         responses.push(response_wire_geometry(
             response_ordinal,
             0,
@@ -745,7 +938,7 @@ fn small_chain_proof_wire_geometry(cfw_geometry: CompactCfwGeometry) -> CompactP
                 .expect("CFW round verifier message geometry"),
         ));
     }
-    let final_response_ordinal = u32::try_from(cfw_geometry.sumcheck_round_count() + 2)
+    let final_response_ordinal = u32::try_from(cfw_geometry.sumcheck_round_count() + 3)
         .expect("CFW final response ordinal fits u32");
     responses.push(response_wire_geometry(
         final_response_ordinal,
@@ -753,7 +946,7 @@ fn small_chain_proof_wire_geometry(cfw_geometry: CompactCfwGeometry) -> CompactP
         u64::try_from(cfw_geometry.outer_mask_count() + COMPACT_CFW_MATRIX_COUNT)
             .expect("CFW final message count fits u64"),
         1,
-        FixedUniformVerifierMessageGeometry::new(2, 0, 0, Vec::new())
+        FixedUniformVerifierMessageGeometry::new(1, 0, 0, Vec::new())
             .expect("CFW final verifier message geometry"),
     ));
     CompactProofWireGeometry::new(1, responses).expect("small-chain proof wire geometry")
@@ -1456,7 +1649,11 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
     )
     .expect("small-chain CFW geometry derives");
     assert_eq!(cfw_geometry.sumcheck_round_count(), 20);
-    let proof_wire_geometry = small_chain_proof_wire_geometry(cfw_geometry);
+    let proof_wire_geometry = small_chain_proof_wire_geometry(
+        cfw_geometry,
+        usize::try_from(cross_epoch_copy.point_coordinate_count())
+            .expect("cross-epoch point length fits usize"),
+    );
     let public_input_wire_geometry = CompactPublicInputWireGeometry::new(
         1,
         relation.public_input_ring_vector_count(),
@@ -1547,16 +1744,16 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         &whir_discrete_fourier_transform,
         &whir_commitment_scheme,
     );
-    let whir_transcript_binding = crate::hashing::hash_framed_parts_512(
-        "sealed-lattice/test/production-small-chain-whir-outer-prefix/v1",
+    let commitment_construction_binding = crate::hashing::hash_framed_parts_512(
+        "sealed-lattice/test/production-small-chain-commitment-construction/v1",
         &[&canonical_public_input_bytes, &source_replay_binding],
     );
-    let mut whir_challenger = small_chain_whir_challenger(whir_transcript_binding);
+    let mut commitment_challenger = small_chain_whir_challenger(commitment_construction_binding);
     let mut whir_random_source = SmallRng::seed_from_u64(0x5e_a1_ed_1a_77_1c_e);
     let (pre_challenge_source_commitment, pre_challenge_source_prover_data) =
         pre_challenge_whir_prover.commit(
             Poly::new(pre_challenge_source_values.clone()),
-            &mut whir_challenger,
+            &mut commitment_challenger,
             &mut whir_random_source,
         );
 
@@ -1568,12 +1765,14 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
     .expect("small-chain compact transcript starts");
     let mut built_responses = Vec::with_capacity(proof_wire_geometry.responses().len());
     let mut prover_verifier_messages = Vec::with_capacity(proof_wire_geometry.responses().len());
-    let source_response = build_response(
-        0,
-        vec![OwnedResponseLeaf::Base(digest_base_field_elements(
-            source_replay_binding,
-        ))],
-    );
+    let pre_challenge_commitment_binding = small_chain_commitment_binding(
+        SMALL_CHAIN_PRE_CHALLENGE_COMMITMENT_BINDING_DOMAIN,
+        &[&pre_challenge_source_commitment],
+    )
+    .expect("pre-challenge source commitment has one canonical binding");
+    let mut source_response_values = digest_base_field_elements(source_replay_binding);
+    source_response_values.extend(digest_base_field_elements(pre_challenge_commitment_binding));
+    let source_response = build_response(0, vec![OwnedResponseLeaf::Base(source_response_values)]);
     prover_transcript
         .record_response_commitment(source_response.root, source_response.fiat_shamir_round_salt)
         .expect("authenticated source response enters the transcript");
@@ -1583,9 +1782,11 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
     let [lookup_challenge] = lookup_message.extension_elements() else {
         panic!("lookup transcript move must contain one extension challenge")
     };
-    assert!(lookup_challenge.canonical_coordinates()[1..]
-        .iter()
-        .any(|coordinate| *coordinate != 0));
+    assert!(
+        lookup_challenge.canonical_coordinates()[1..]
+            .iter()
+            .any(|coordinate| *coordinate != 0)
+    );
     let lookup_challenge = *lookup_challenge;
     prover_verifier_messages.push(lookup_message);
     built_responses.push(source_response);
@@ -1723,11 +1924,11 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
             .collect(),
         50_000,
         &whir_extension_commitment_scheme,
-        &mut whir_challenger,
+        &mut commitment_challenger,
     );
     let (main_source_commitment, main_source_prover_data) = main_whir_prover.commit_extension(
         Poly::new(witness.clone()),
-        &mut whir_challenger,
+        &mut commitment_challenger,
         &mut whir_random_source,
     );
     let outer_mask_shape = MaskGroupShape {
@@ -1753,7 +1954,7 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
             .collect(),
         90_000,
         &whir_extension_commitment_scheme,
-        &mut whir_challenger,
+        &mut commitment_challenger,
     );
     assert_eq!(committed_inner_mask_shape, inner_mask_shape);
     assert_eq!(committed_outer_mask_shape, outer_mask_shape);
@@ -1783,7 +1984,7 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         shared_mask_messages.clone(),
         130_600,
         &whir_extension_commitment_scheme,
-        &mut whir_challenger,
+        &mut commitment_challenger,
     );
     let SmallChainCommittedMaskGroup {
         shape: replayed_shared_mask_shape,
@@ -1801,41 +2002,23 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
     assert_eq!(replayed_shared_mask_shape, shared_mask_shape);
     assert_eq!(replayed_shared_mask_commitment, shared_mask_commitment);
 
-    let cross_epoch_point = (0..pre_challenge_variable_count)
-        .map(|_| whir_challenger.sample_algebra_element())
-        .collect::<Vec<CompactChallengeField>>();
-    assert_eq!(
-        cross_epoch_point.len(),
-        usize::try_from(cross_epoch_copy.point_coordinate_count())
-            .expect("cross-epoch point length fits usize")
-    );
-    let cross_epoch_covector = small_chain_multilinear_equality_covector(&cross_epoch_point);
-    assert_eq!(
-        cross_epoch_covector.len(),
-        pre_challenge_source_element_count
-    );
-    let copied_source_evaluation = pre_challenge_source_values
-        .iter()
-        .copied()
-        .map(CompactChallengeField::from)
-        .zip(cross_epoch_covector.iter().copied())
-        .map(|(source_value, coefficient)| source_value * coefficient)
-        .sum::<CompactChallengeField>();
-    let masked_pre_challenge_evaluation = copied_source_evaluation + pre_challenge_mask;
-    let masked_main_evaluation = copied_source_evaluation + main_mask;
-    let mask_difference = pre_challenge_mask - main_mask;
-    assert_eq!(
-        masked_pre_challenge_evaluation - masked_main_evaluation - mask_difference,
-        CompactChallengeField::ZERO
-    );
-    for value in [
-        masked_pre_challenge_evaluation,
-        masked_main_evaluation,
-        mask_difference,
-    ] {
-        whir_challenger.observe_algebra_element(value);
-    }
-
+    let external_commitments = SmallChainExternalCommitments {
+        pre_challenge_source: pre_challenge_source_commitment,
+        inner_masks: inner_mask_commitment,
+        main_source: main_source_commitment,
+        outer_masks: outer_mask_commitment,
+        shared_masks: shared_mask_commitment,
+    };
+    let post_lookup_commitment_binding = small_chain_commitment_binding(
+        SMALL_CHAIN_POST_LOOKUP_COMMITMENT_BINDING_DOMAIN,
+        &[
+            &external_commitments.inner_masks,
+            &external_commitments.main_source,
+            &external_commitments.outer_masks,
+            &external_commitments.shared_masks,
+        ],
+    )
+    .expect("post-lookup commitments have one canonical binding");
     let mut lookup_challenge_bytes = Vec::with_capacity(40);
     for coordinate in lookup_challenge.canonical_coordinates() {
         lookup_challenge_bytes.extend_from_slice(&coordinate.to_le_bytes());
@@ -1869,19 +2052,74 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
             );
         }
     }
+    let mut mask_response_base_values = digest_base_field_elements(assignment_commitment);
+    mask_response_base_values.extend(digest_base_field_elements(post_lookup_commitment_binding));
     let mask_response = build_response(
         1,
         vec![
-            OwnedResponseLeaf::Base(digest_base_field_elements(assignment_commitment)),
+            OwnedResponseLeaf::Base(mask_response_base_values),
             OwnedResponseLeaf::Extension(committed_mask_values),
         ],
     );
     prover_transcript
         .record_response_commitment(mask_response.root, mask_response.fiat_shamir_round_salt)
-        .expect("assignment and masks enter the transcript before CFW challenges");
+        .expect("assignment, masks, and post-lookup roots enter the transcript");
+    let cross_epoch_message = prover_transcript
+        .derive_verifier_message()
+        .expect("the cross-epoch point derives after every source commitment");
+    let cross_epoch_point = compact_challenges(&cross_epoch_message);
+    assert_eq!(
+        cross_epoch_point.len(),
+        usize::try_from(cross_epoch_copy.point_coordinate_count())
+            .expect("cross-epoch point length fits usize")
+    );
+    prover_verifier_messages.push(cross_epoch_message);
+    built_responses.push(mask_response);
+
+    let cross_epoch_covector = small_chain_multilinear_equality_covector(&cross_epoch_point);
+    assert_eq!(
+        cross_epoch_covector.len(),
+        pre_challenge_source_element_count
+    );
+    let copied_source_evaluation = pre_challenge_source_values
+        .iter()
+        .copied()
+        .map(CompactChallengeField::from)
+        .zip(cross_epoch_covector.iter().copied())
+        .map(|(source_value, coefficient)| source_value * coefficient)
+        .sum::<CompactChallengeField>();
+    let masked_pre_challenge_evaluation = copied_source_evaluation + pre_challenge_mask;
+    let masked_main_evaluation = copied_source_evaluation + main_mask;
+    let mask_difference = pre_challenge_mask - main_mask;
+    assert_eq!(
+        masked_pre_challenge_evaluation - masked_main_evaluation - mask_difference,
+        CompactChallengeField::ZERO
+    );
+    let cross_epoch_response = build_response(
+        2,
+        vec![OwnedResponseLeaf::Extension(
+            [
+                masked_pre_challenge_evaluation,
+                masked_main_evaluation,
+                mask_difference,
+            ]
+            .into_iter()
+            .map(|value| {
+                compact_challenge_to_production(value)
+                    .expect("cross-epoch claim uses production field coordinates")
+            })
+            .collect(),
+        )],
+    );
+    prover_transcript
+        .record_response_commitment(
+            cross_epoch_response.root,
+            cross_epoch_response.fiat_shamir_round_salt,
+        )
+        .expect("masked cross-epoch claims enter the transcript before CFW challenges");
     let initial_cfw_message = prover_transcript
         .derive_verifier_message()
-        .expect("initial CFW challenges derive from the assignment and mask commitment");
+        .expect("initial CFW challenges derive after the masked cross-epoch claims");
     let initial_cfw_challenges = compact_challenges(&initial_cfw_message);
     let constraint_combining_challenge = *initial_cfw_challenges
         .first()
@@ -1889,7 +2127,7 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
     let equality_point = initial_cfw_challenges[1..].to_vec();
     assert_eq!(equality_point.len(), cfw_geometry.sumcheck_round_count());
     prover_verifier_messages.push(initial_cfw_message);
-    built_responses.push(mask_response);
+    built_responses.push(cross_epoch_response);
     let mut resident_prover = prepared_resident
         .begin(constraint_combining_challenge, equality_point.clone())
         .expect("resident CFW begins");
@@ -1921,7 +2159,7 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         resident_round_polynomials.push(resident_round_polynomial);
         external_round_polynomials.push(external_round_polynomial);
         let round_response_ordinal =
-            u32::try_from(round_ordinal + 2).expect("CFW round response ordinal fits u32");
+            u32::try_from(round_ordinal + 3).expect("CFW round response ordinal fits u32");
         let round_response = build_response(
             round_response_ordinal,
             vec![OwnedResponseLeaf::Extension(
@@ -2009,7 +2247,7 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         cfw_geometry.outer_mask_count() + COMPACT_CFW_MATRIX_COUNT
     );
     let final_response_ordinal =
-        u32::try_from(cfw_geometry.sumcheck_round_count() + 2).expect("final ordinal fits u32");
+        u32::try_from(cfw_geometry.sumcheck_round_count() + 3).expect("final ordinal fits u32");
     let final_response = build_response(
         final_response_ordinal,
         vec![OwnedResponseLeaf::Extension(final_response_values.clone())],
@@ -2046,11 +2284,10 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         .derive_verifier_message()
         .expect("post-CFW challenges derive from the final response");
     let final_challenges = compact_challenges(&final_verifier_message);
-    let [joint_constraint_challenge, batching_challenge] = final_challenges.as_slice() else {
-        panic!("post-CFW message must contain two challenges")
+    let [joint_constraint_challenge] = final_challenges.as_slice() else {
+        panic!("post-CFW message must contain one joint-constraint challenge")
     };
     let joint_constraint_challenge = *joint_constraint_challenge;
-    let batching_challenge = *batching_challenge;
     prover_verifier_messages.push(final_verifier_message);
     built_responses.push(final_response);
     prover_transcript
@@ -2078,6 +2315,13 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         canonical_proof_bytes.len(),
     )
     .expect("fresh small-chain proof decoder accepts transported bytes");
+    verify_small_chain_commitment_bindings(
+        &decoded_proof,
+        &canonical_proof_bytes,
+        &external_commitments,
+    )
+    .expect("outer CFW responses bind every canonical WHIR commitment section");
+    let mut fresh_verifier_messages = Vec::with_capacity(decoded_proof.responses().len());
     for (response_ordinal, ((built_response, wire_geometry), decoded_response)) in built_responses
         .iter()
         .zip(proof_wire_geometry.responses())
@@ -2107,6 +2351,7 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
             verifier_message, prover_verifier_messages[response_ordinal],
             "transcript message mismatch at response {response_ordinal}"
         );
+        fresh_verifier_messages.push(verifier_message);
     }
 
     let mut fresh_public_input = Vec::with_capacity(witness_length);
@@ -2123,6 +2368,56 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
     fresh_public_input.resize(witness_length, CompactChallengeField::ZERO);
     assert_eq!(fresh_public_input, public_input);
 
+    let fresh_cross_epoch_point = compact_challenges(&fresh_verifier_messages[1]);
+    assert_eq!(fresh_cross_epoch_point, cross_epoch_point);
+    let fresh_initial_cfw_challenges = compact_challenges(&fresh_verifier_messages[2]);
+    let fresh_constraint_combining_challenge = *fresh_initial_cfw_challenges
+        .first()
+        .expect("fresh initial CFW message includes the combining challenge");
+    let fresh_equality_point = fresh_initial_cfw_challenges[1..].to_vec();
+    assert_eq!(
+        fresh_constraint_combining_challenge,
+        constraint_combining_challenge
+    );
+    assert_eq!(fresh_equality_point, equality_point);
+    let fresh_round_challenges = (0..cfw_geometry.sumcheck_round_count())
+        .map(|round_ordinal| {
+            let challenges = compact_challenges(&fresh_verifier_messages[round_ordinal + 3]);
+            let [challenge] = challenges.as_slice() else {
+                panic!("fresh CFW round message must contain one challenge")
+            };
+            *challenge
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(fresh_round_challenges, round_challenges);
+    let fresh_final_challenges = compact_challenges(
+        fresh_verifier_messages
+            .last()
+            .expect("fresh final CFW message exists"),
+    );
+    let [fresh_joint_constraint_challenge] = fresh_final_challenges.as_slice() else {
+        panic!("fresh post-CFW message must contain one joint-constraint challenge")
+    };
+    let fresh_joint_constraint_challenge = *fresh_joint_constraint_challenge;
+    assert_eq!(fresh_joint_constraint_challenge, joint_constraint_challenge);
+
+    let decoded_cross_epoch_response = &decoded_proof.responses()[2];
+    let decoded_cross_epoch_claims = core::array::from_fn(|claim_ordinal| {
+        compact_challenge_from_production(
+            decoded_cross_epoch_response
+                .extension_field_value(&canonical_proof_bytes, claim_ordinal)
+                .expect("transported cross-epoch claim decodes"),
+        )
+    });
+    assert_eq!(
+        decoded_cross_epoch_claims,
+        [
+            masked_pre_challenge_evaluation,
+            masked_main_evaluation,
+            mask_difference,
+        ]
+    );
+
     let decoded_mask_response = &decoded_proof.responses()[1];
     let decoded_auxiliary_target = compact_challenge_from_production(
         decoded_mask_response
@@ -2132,7 +2427,7 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
     assert_eq!(decoded_auxiliary_target, auxiliary_target);
     let mut decoded_round_polynomials = Vec::with_capacity(cfw_geometry.sumcheck_round_count());
     for round_ordinal in 0..cfw_geometry.sumcheck_round_count() {
-        let decoded_response = &decoded_proof.responses()[round_ordinal + 2];
+        let decoded_response = &decoded_proof.responses()[round_ordinal + 3];
         let mut polynomial = [CompactChallengeField::ZERO; 8];
         for (coefficient_ordinal, coefficient) in polynomial.iter_mut().enumerate() {
             *coefficient = compact_challenge_from_production(
@@ -2177,43 +2472,22 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         &resident_matrices,
         &fresh_public_input,
         &fresh_cfw_transcript,
-        constraint_combining_challenge,
-        &equality_point,
-        &round_challenges,
-        joint_constraint_challenge,
+        fresh_constraint_combining_challenge,
+        &fresh_equality_point,
+        &fresh_round_challenges,
+        fresh_joint_constraint_challenge,
     )
     .expect("fresh verifier accepts the transported CFW transcript");
 
-    let direct_combined_relation = verified_claim_batch
-        .clone()
-        .combine_with_preceding_opening_claims(&resident_matrices, &[], batching_challenge)
-        .expect("independent direct transpose combines the verified CFW claims");
-    let production_combination = verified_claim_batch
-        .clone()
-        .begin_combining_with_preceding_opening_claims(&[], batching_challenge)
-        .expect("production structured transpose begins from verified CFW claims");
-    let mut production_handoff =
-        CompactStructuredWitnessCovectorHandoff::from_production_row_source(
-            &row_source,
-            production_combination,
-        )
-        .expect("production structured transpose connects to the row source");
-    let production_combined_relation = loop {
-        match production_handoff
-            .advance(8_192)
-            .expect("production structured transpose advances")
-        {
-            CompactStructuredWitnessCovectorHandoffPoll::StepCompleted { .. } => {}
-            CompactStructuredWitnessCovectorHandoffPoll::Complete(combined_relation) => {
-                break combined_relation;
-            }
-        }
-    };
-    assert_eq!(production_combined_relation, direct_combined_relation);
-
     assert!(pre_challenge_whir_configuration.check_pow_bits());
     assert!(main_whir_configuration.check_pow_bits());
-    observe_small_chain_canonical_cfw_bytes(&mut whir_challenger, &canonical_proof_bytes);
+    let whir_handoff_binding = small_chain_whir_handoff_binding(
+        &canonical_public_input_bytes,
+        &canonical_proof_bytes,
+        &external_commitments,
+    )
+    .expect("the exact outer bytes and commitment sections have one WHIR handoff binding");
+    let mut whir_challenger = small_chain_whir_challenger(whir_handoff_binding);
 
     let pre_challenge_source_covector = cross_epoch_covector.clone();
     let pre_challenge_whir_proof = pre_challenge_whir_prover
@@ -2264,15 +2538,37 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
             main_source_prover_data,
             vec![masked_main_evaluation, mask_difference],
             |whir_batching_challenge| {
+                let masked_cross_epoch_claims = || {
+                    CompactCfwMaskedCrossEpochClaims::new(
+                        main_cross_epoch_point.clone(),
+                        copied_main_source_element_count,
+                        masked_pre_challenge_evaluation,
+                        masked_main_evaluation,
+                        mask_difference,
+                    )
+                };
+                let direct_combination = whir_prover_claim_batch
+                    .clone()
+                    .begin_combining_with_masked_cross_epoch_claims(
+                        masked_cross_epoch_claims(),
+                        whir_batching_challenge,
+                    )
+                    .expect("WHIR batching challenge starts the direct masked relation");
+                let (direct_continuation, mut direct_source_covector) =
+                    direct_combination.into_parts();
+                resident_matrices
+                    .accumulate_weighted_witness_covector_at_row_point(
+                        direct_continuation.row_point(),
+                        direct_continuation.matrix_role_weights(),
+                        &mut direct_source_covector,
+                    )
+                    .expect("resident matrices accumulate the WHIR-bound direct covector");
+                let direct_combined_relation = direct_continuation
+                    .finish_after_matrix_accumulation(direct_source_covector)
+                    .expect("resident matrices finish the WHIR-bound direct relation");
                 let production_combination = whir_prover_claim_batch
                     .begin_combining_with_masked_cross_epoch_claims(
-                        CompactCfwMaskedCrossEpochClaims::new(
-                            main_cross_epoch_point,
-                            copied_main_source_element_count,
-                            masked_pre_challenge_evaluation,
-                            masked_main_evaluation,
-                            mask_difference,
-                        ),
+                        masked_cross_epoch_claims(),
                         whir_batching_challenge,
                     )
                     .expect("WHIR batching challenge starts the masked cross-epoch transpose");
@@ -2295,6 +2591,7 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
                         }
                     }
                 };
+                assert_eq!(combined_relation, direct_combined_relation);
                 let (
                     source_covector,
                     target,
@@ -2390,13 +2687,6 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         main_whir_proof.sumchecks.len(),
         main_whir_configuration.n_rounds() + 1
     );
-    let external_commitments = SmallChainExternalCommitments {
-        pre_challenge_source: pre_challenge_source_commitment,
-        inner_masks: inner_mask_commitment,
-        main_source: main_source_commitment,
-        outer_masks: outer_mask_commitment,
-        shared_masks: shared_mask_commitment,
-    };
     let canonical_small_chain_proof_bytes = encode_small_chain_canonical_proof(
         &pre_challenge_whir_configuration,
         &main_whir_configuration,
@@ -2480,16 +2770,10 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         );
     }
 
-    let fresh_whir_transcript_binding = crate::hashing::hash_framed_parts_512(
-        "sealed-lattice/test/production-small-chain-whir-outer-prefix/v1",
-        &[&canonical_public_input_bytes, &source_replay_binding],
-    );
-    assert_eq!(fresh_whir_transcript_binding, whir_transcript_binding);
     let whir_execution = SmallChainWhirExecution {
         pre_challenge_configuration: pre_challenge_whir_configuration,
         main_configuration: main_whir_configuration,
         commitment_scheme: whir_commitment_scheme,
-        transcript_binding: fresh_whir_transcript_binding,
         inner_mask_shape,
         outer_mask_shape,
         shared_mask_shape,
@@ -2524,17 +2808,193 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
             canonical,
         )
     };
-    let verify_transported_small_chain = |transported: &DecodedSmallChainCanonicalProof| {
-        whir_execution.verify(
-            &transported.commitments,
-            &transported.canonical_cfw_proof_bytes,
-            &transported.pre_challenge_whir_proof,
-            &transported.main_whir_proof,
-            &verified_claim_batch,
-            &resident_matrices,
-            SmallChainWhirVerificationMutation::None,
-        )
-    };
+    let verify_transported_small_chain =
+        |transported: &DecodedSmallChainCanonicalProof|
+         -> Result<(), SmallChainFreshVerificationError> {
+            let transported_cfw_proof = decode_compact_proof_wire(
+                &proof_wire_geometry,
+                &transported.canonical_cfw_proof_bytes,
+                transported.canonical_cfw_proof_bytes.len(),
+            )?;
+            verify_small_chain_commitment_bindings(
+                &transported_cfw_proof,
+                &transported.canonical_cfw_proof_bytes,
+                &transported.commitments,
+            )?;
+            let mut transported_verifier_messages =
+                Vec::with_capacity(transported_cfw_proof.responses().len());
+            for (response_ordinal, ((built_response, wire_geometry), decoded_response)) in
+                built_responses
+                    .iter()
+                    .zip(proof_wire_geometry.responses())
+                    .zip(transported_cfw_proof.responses())
+                    .enumerate()
+            {
+                verify_decoded_compact_response_opening(
+                    &built_response.merkle_geometry,
+                    wire_geometry,
+                    decoded_response,
+                    &transported.canonical_cfw_proof_bytes,
+                    &built_response.query_leaf_ordinals,
+                )?;
+                transported_verifier_messages.push(
+                    derive_compact_fiat_shamir_verifier_message(
+                        &proof_wire_geometry,
+                        &transported_cfw_proof,
+                        &transported.canonical_cfw_proof_bytes,
+                        &decoded_public_input,
+                        &canonical_public_input_bytes,
+                        u32::try_from(response_ordinal)
+                            .expect("transported response ordinal fits u32"),
+                    )?,
+                );
+            }
+
+            let cross_epoch_point = transported_verifier_messages
+                .get(1)
+                .map(compact_challenges)
+                .ok_or(SmallChainFreshVerificationError::WrongTranscriptShape)?;
+            let initial_cfw_challenges = transported_verifier_messages
+                .get(2)
+                .map(compact_challenges)
+                .ok_or(SmallChainFreshVerificationError::WrongTranscriptShape)?;
+            let (constraint_combining_challenge, equality_point) = initial_cfw_challenges
+                .split_first()
+                .ok_or(SmallChainFreshVerificationError::WrongTranscriptShape)?;
+            if equality_point.len() != cfw_geometry.sumcheck_round_count() {
+                return Err(SmallChainFreshVerificationError::WrongTranscriptShape);
+            }
+            let final_challenges = transported_verifier_messages
+                .last()
+                .map(compact_challenges)
+                .ok_or(SmallChainFreshVerificationError::WrongTranscriptShape)?;
+            let [joint_constraint_challenge] = final_challenges.as_slice() else {
+                return Err(SmallChainFreshVerificationError::WrongTranscriptShape);
+            };
+            let round_challenges = (0..cfw_geometry.sumcheck_round_count())
+                .map(|round_ordinal| {
+                    let challenges = transported_verifier_messages
+                        .get(round_ordinal + 3)
+                        .map(compact_challenges)
+                        .ok_or(SmallChainFreshVerificationError::WrongTranscriptShape)?;
+                    let [challenge] = challenges.as_slice() else {
+                        return Err(SmallChainFreshVerificationError::WrongTranscriptShape);
+                    };
+                    Ok(*challenge)
+                })
+                .collect::<Result<Vec<_>, SmallChainFreshVerificationError>>()?;
+
+            let mask_response = transported_cfw_proof
+                .responses()
+                .get(1)
+                .ok_or(SmallChainFreshVerificationError::WrongTranscriptShape)?;
+            let auxiliary_target = compact_challenge_from_production(
+                mask_response.extension_field_value(
+                    &transported.canonical_cfw_proof_bytes,
+                    0,
+                )?,
+            );
+            let cross_epoch_response = transported_cfw_proof
+                .responses()
+                .get(2)
+                .ok_or(SmallChainFreshVerificationError::WrongTranscriptShape)?;
+            let cross_epoch_claims = (0..3)
+                .map(|claim_ordinal| {
+                    cross_epoch_response
+                        .extension_field_value(
+                            &transported.canonical_cfw_proof_bytes,
+                            claim_ordinal,
+                        )
+                        .map(compact_challenge_from_production)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let [masked_pre_challenge_evaluation, masked_main_evaluation, mask_difference] =
+                cross_epoch_claims
+                    .try_into()
+                    .map_err(|_| SmallChainFreshVerificationError::WrongTranscriptShape)?;
+            let round_polynomials = (0..cfw_geometry.sumcheck_round_count())
+                .map(|round_ordinal| {
+                    let response = transported_cfw_proof
+                        .responses()
+                        .get(round_ordinal + 3)
+                        .ok_or(SmallChainFreshVerificationError::WrongTranscriptShape)?;
+                    (0..8)
+                        .map(|coefficient_ordinal| {
+                            response
+                                .extension_field_value(
+                                    &transported.canonical_cfw_proof_bytes,
+                                    coefficient_ordinal,
+                                )
+                                .map(compact_challenge_from_production)
+                        })
+                        .collect::<Result<Vec<_>, _>>()?
+                        .try_into()
+                        .map_err(|_| SmallChainFreshVerificationError::WrongTranscriptShape)
+                })
+                .collect::<Result<Vec<[CompactChallengeField; 8]>, _>>()?;
+            let final_response = transported_cfw_proof
+                .responses()
+                .last()
+                .ok_or(SmallChainFreshVerificationError::WrongTranscriptShape)?;
+            let outer_evaluations = (0..cfw_geometry.outer_mask_count())
+                .map(|evaluation_ordinal| {
+                    final_response
+                        .extension_field_value(
+                            &transported.canonical_cfw_proof_bytes,
+                            evaluation_ordinal,
+                        )
+                        .map(compact_challenge_from_production)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let final_values = (0..COMPACT_CFW_MATRIX_COUNT)
+                .map(|matrix_ordinal| {
+                    final_response
+                        .extension_field_value(
+                            &transported.canonical_cfw_proof_bytes,
+                            cfw_geometry.outer_mask_count() + matrix_ordinal,
+                        )
+                        .map(compact_challenge_from_production)
+                })
+                .collect::<Result<Vec<_>, _>>()?
+                .try_into()
+                .map_err(|_| SmallChainFreshVerificationError::WrongTranscriptShape)?;
+            let cfw_transcript = CompactCfwTranscript::new(
+                auxiliary_target,
+                round_polynomials,
+                outer_evaluations,
+                final_values,
+            );
+            let claim_batch = verify_compact_cfw_transcript(
+                &resident_matrices,
+                &fresh_public_input,
+                &cfw_transcript,
+                *constraint_combining_challenge,
+                equality_point,
+                &round_challenges,
+                *joint_constraint_challenge,
+            )?;
+            let whir_handoff_binding = small_chain_whir_handoff_binding(
+                &canonical_public_input_bytes,
+                &transported.canonical_cfw_proof_bytes,
+                &transported.commitments,
+            )?;
+            whir_execution.verify(
+                whir_handoff_binding,
+                &transported.commitments,
+                &cross_epoch_point,
+                [
+                    masked_pre_challenge_evaluation,
+                    masked_main_evaluation,
+                    mask_difference,
+                ],
+                &transported.pre_challenge_whir_proof,
+                &transported.main_whir_proof,
+                &claim_batch,
+                &resident_matrices,
+                SmallChainWhirVerificationMutation::None,
+            )?;
+            Ok(())
+        };
     verify_transported_small_chain(&decoded_small_chain_proof)
         .expect("fresh verifier accepts the CFW-bound WHIR proof");
     for mutation in [
@@ -2544,94 +3004,141 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         SmallChainWhirVerificationMutation::MainSourceCovector,
         SmallChainWhirVerificationMutation::InnerMaskCovector,
         SmallChainWhirVerificationMutation::SharedMaskCovector,
-        SmallChainWhirVerificationMutation::GroupChronology,
     ] {
-        assert!(whir_execution
-            .verify(
-                &decoded_small_chain_proof.commitments,
-                &decoded_small_chain_proof.canonical_cfw_proof_bytes,
-                &decoded_small_chain_proof.pre_challenge_whir_proof,
-                &decoded_small_chain_proof.main_whir_proof,
-                &verified_claim_batch,
-                &resident_matrices,
-                mutation,
-            )
-            .is_err());
+        assert!(
+            whir_execution
+                .verify(
+                    whir_handoff_binding,
+                    &decoded_small_chain_proof.commitments,
+                    &cross_epoch_point,
+                    [
+                        masked_pre_challenge_evaluation,
+                        masked_main_evaluation,
+                        mask_difference,
+                    ],
+                    &decoded_small_chain_proof.pre_challenge_whir_proof,
+                    &decoded_small_chain_proof.main_whir_proof,
+                    &verified_claim_batch,
+                    &resident_matrices,
+                    mutation,
+                )
+                .is_err()
+        );
     }
     let mut mutated_pre_challenge_proof =
         decoded_small_chain_proof.pre_challenge_whir_proof.clone();
     mutated_pre_challenge_proof.base_case.masked_claim += CompactChallengeField::ONE;
-    assert!(whir_execution
-        .verify(
-            &decoded_small_chain_proof.commitments,
-            &decoded_small_chain_proof.canonical_cfw_proof_bytes,
-            &mutated_pre_challenge_proof,
-            &decoded_small_chain_proof.main_whir_proof,
-            &verified_claim_batch,
-            &resident_matrices,
-            SmallChainWhirVerificationMutation::None,
-        )
-        .is_err());
+    assert!(
+        whir_execution
+            .verify(
+                whir_handoff_binding,
+                &decoded_small_chain_proof.commitments,
+                &cross_epoch_point,
+                [
+                    masked_pre_challenge_evaluation,
+                    masked_main_evaluation,
+                    mask_difference,
+                ],
+                &mutated_pre_challenge_proof,
+                &decoded_small_chain_proof.main_whir_proof,
+                &verified_claim_batch,
+                &resident_matrices,
+                SmallChainWhirVerificationMutation::None,
+            )
+            .is_err()
+    );
     let mut mutated_main_proof = decoded_small_chain_proof.main_whir_proof.clone();
     mutated_main_proof.base_case.masked_claim += CompactChallengeField::ONE;
-    assert!(whir_execution
-        .verify(
-            &decoded_small_chain_proof.commitments,
-            &decoded_small_chain_proof.canonical_cfw_proof_bytes,
-            &decoded_small_chain_proof.pre_challenge_whir_proof,
-            &mutated_main_proof,
-            &verified_claim_batch,
-            &resident_matrices,
-            SmallChainWhirVerificationMutation::None,
-        )
-        .is_err());
+    assert!(
+        whir_execution
+            .verify(
+                whir_handoff_binding,
+                &decoded_small_chain_proof.commitments,
+                &cross_epoch_point,
+                [
+                    masked_pre_challenge_evaluation,
+                    masked_main_evaluation,
+                    mask_difference,
+                ],
+                &decoded_small_chain_proof.pre_challenge_whir_proof,
+                &mutated_main_proof,
+                &verified_claim_batch,
+                &resident_matrices,
+                SmallChainWhirVerificationMutation::None,
+            )
+            .is_err()
+    );
     let mut mutated_pre_challenge_opening =
         decoded_small_chain_proof.pre_challenge_whir_proof.clone();
     let mut mutated_main_opening = decoded_small_chain_proof.main_whir_proof.clone();
     mutated_pre_challenge_opening.evals[0] += CompactChallengeField::ONE;
     mutated_main_opening.evals[0] += CompactChallengeField::ONE;
-    assert!(whir_execution
-        .verify(
-            &decoded_small_chain_proof.commitments,
-            &decoded_small_chain_proof.canonical_cfw_proof_bytes,
-            &mutated_pre_challenge_opening,
-            &mutated_main_opening,
-            &verified_claim_batch,
-            &resident_matrices,
-            SmallChainWhirVerificationMutation::None,
-        )
-        .is_err());
+    assert!(
+        whir_execution
+            .verify(
+                whir_handoff_binding,
+                &decoded_small_chain_proof.commitments,
+                &cross_epoch_point,
+                [
+                    masked_pre_challenge_evaluation,
+                    masked_main_evaluation,
+                    mask_difference,
+                ],
+                &mutated_pre_challenge_opening,
+                &mutated_main_opening,
+                &verified_claim_batch,
+                &resident_matrices,
+                SmallChainWhirVerificationMutation::None,
+            )
+            .is_err()
+    );
     let mut mutated_main_openings = decoded_small_chain_proof.main_whir_proof.clone();
     mutated_main_openings.evals[0] += CompactChallengeField::ONE;
     mutated_main_openings.evals[1] -= CompactChallengeField::ONE;
-    assert!(whir_execution
-        .verify(
-            &decoded_small_chain_proof.commitments,
-            &decoded_small_chain_proof.canonical_cfw_proof_bytes,
-            &decoded_small_chain_proof.pre_challenge_whir_proof,
-            &mutated_main_openings,
-            &verified_claim_batch,
-            &resident_matrices,
-            SmallChainWhirVerificationMutation::None,
-        )
-        .is_err());
+    assert!(
+        whir_execution
+            .verify(
+                whir_handoff_binding,
+                &decoded_small_chain_proof.commitments,
+                &cross_epoch_point,
+                [
+                    masked_pre_challenge_evaluation,
+                    masked_main_evaluation,
+                    mask_difference,
+                ],
+                &decoded_small_chain_proof.pre_challenge_whir_proof,
+                &mutated_main_openings,
+                &verified_claim_batch,
+                &resident_matrices,
+                SmallChainWhirVerificationMutation::None,
+            )
+            .is_err()
+    );
     let mut missing_pre_challenge_opening =
         decoded_small_chain_proof.pre_challenge_whir_proof.clone();
     missing_pre_challenge_opening.evals.clear();
     assert!(matches!(
         whir_execution.verify(
+            whir_handoff_binding,
             &decoded_small_chain_proof.commitments,
-            &decoded_small_chain_proof.canonical_cfw_proof_bytes,
+            &cross_epoch_point,
+            [
+                masked_pre_challenge_evaluation,
+                masked_main_evaluation,
+                mask_difference,
+            ],
             &missing_pre_challenge_opening,
             &decoded_small_chain_proof.main_whir_proof,
             &verified_claim_batch,
             &resident_matrices,
             SmallChainWhirVerificationMutation::None,
         ),
-        Err(ZkVerifierError::EvalCountMismatch {
-            expected: 1,
-            actual: 0
-        })
+        Err(SmallChainWhirVerificationError::Whir(
+            ZkVerifierError::EvalCountMismatch {
+                expected: 1,
+                actual: 0
+            }
+        ))
     ));
 
     let mut noncanonical_pre_challenge_proof =
@@ -2788,7 +3295,12 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         mutated_commitment[payload_range.start] ^= 1;
         let decoded_mutated_commitment = decode_transported_small_chain(&mutated_commitment)
             .expect("a hash-root mutation remains structurally canonical");
-        assert!(verify_transported_small_chain(&decoded_mutated_commitment).is_err());
+        assert_eq!(
+            verify_transported_small_chain(&decoded_mutated_commitment),
+            Err(SmallChainFreshVerificationError::CommitmentBinding(
+                SmallChainCommitmentBindingError::WrongBinding,
+            ))
+        );
     }
 
     let extension_field_byte_length = PROOF_CHALLENGE_EXTENSION_DEGREE * size_of::<u64>();
@@ -2840,14 +3352,16 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         decoded_mutated_outer_cfw.canonical_cfw_proof_bytes.len(),
     )
     .expect("the embedded CFW decoder accepts the mutated root bytes");
-    assert!(verify_decoded_compact_response_opening(
-        &built_responses[0].merkle_geometry,
-        &proof_wire_geometry.responses()[0],
-        &mutated_outer_cfw_proof.responses()[0],
-        &decoded_mutated_outer_cfw.canonical_cfw_proof_bytes,
-        &built_responses[0].query_leaf_ordinals,
-    )
-    .is_err());
+    assert!(
+        verify_decoded_compact_response_opening(
+            &built_responses[0].merkle_geometry,
+            &proof_wire_geometry.responses()[0],
+            &mutated_outer_cfw_proof.responses()[0],
+            &decoded_mutated_outer_cfw.canonical_cfw_proof_bytes,
+            &built_responses[0].query_leaf_ordinals,
+        )
+        .is_err()
+    );
     assert!(verify_transported_small_chain(&decoded_mutated_outer_cfw).is_err());
 
     decoded_round_polynomials[0][0] += CompactChallengeField::ONE;
@@ -2857,39 +3371,47 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         resident_finish.outer_evaluations().to_vec(),
         resident_finish.final_values(),
     );
-    assert!(verify_compact_cfw_transcript(
-        &resident_matrices,
-        &fresh_public_input,
-        &mutated_cfw_transcript,
-        constraint_combining_challenge,
-        &equality_point,
-        &round_challenges,
-        joint_constraint_challenge,
-    )
-    .is_err());
+    assert!(
+        verify_compact_cfw_transcript(
+            &resident_matrices,
+            &fresh_public_input,
+            &mutated_cfw_transcript,
+            constraint_combining_challenge,
+            &equality_point,
+            &round_challenges,
+            joint_constraint_challenge,
+        )
+        .is_err()
+    );
 
-    assert!(decode_compact_proof_wire(
-        &proof_wire_geometry,
-        &canonical_proof_bytes[..canonical_proof_bytes.len() - 1],
-        canonical_proof_bytes.len() - 1,
-    )
-    .is_err());
+    assert!(
+        decode_compact_proof_wire(
+            &proof_wire_geometry,
+            &canonical_proof_bytes[..canonical_proof_bytes.len() - 1],
+            canonical_proof_bytes.len() - 1,
+        )
+        .is_err()
+    );
     let mut trailing_proof_bytes = canonical_proof_bytes.clone();
     trailing_proof_bytes.push(0);
-    assert!(decode_compact_proof_wire(
-        &proof_wire_geometry,
-        &trailing_proof_bytes,
-        trailing_proof_bytes.len(),
-    )
-    .is_err());
+    assert!(
+        decode_compact_proof_wire(
+            &proof_wire_geometry,
+            &trailing_proof_bytes,
+            trailing_proof_bytes.len(),
+        )
+        .is_err()
+    );
     let mut wrong_public_input_binding = canonical_public_input_bytes.clone();
     wrong_public_input_binding[10] ^= 1;
-    assert!(decode_compact_public_input(
-        public_input_wire_geometry,
-        public_input_bindings,
-        &wrong_public_input_binding,
-    )
-    .is_err());
+    assert!(
+        decode_compact_public_input(
+            public_input_wire_geometry,
+            public_input_bindings,
+            &wrong_public_input_binding,
+        )
+        .is_err()
+    );
 }
 
 fn compact_test_challenge(seed: u64) -> CompactChallengeField {
