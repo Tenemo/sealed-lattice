@@ -77,12 +77,12 @@ use crate::bgv::proof_suite::{
     compact_response_merkle::{
         CompactResponseComponentGeometry, CompactResponseLeafValue, CompactResponseLeafValueKind,
         CompactResponseMerkleError, CompactResponseMerkleGeometry,
-        CompactResponsePostorderMerkleWriter, CompactResponseQuerySchedule,
-        CompactResponseQuerySelection, expected_postorder_tree_byte_length,
-        verify_decoded_compact_response_opening,
+        CompactResponsePostorderMerkleWriter, CompactResponseQuerySelection,
+        expected_postorder_tree_byte_length, verify_decoded_compact_response_opening,
     },
     compact_response_tree_external::{
-        CompactResponseTreeExternalMemoryDriver, CompactResponseTreeExternalMemoryGeometry,
+        CompactResponseTreeExternalMemoryGeometry, CompactResponseTreeRetentionDriver,
+        CompactResponseTreeRetentionPoll,
     },
     compact_transcript::{
         CompactProverTranscript, CompactTranscriptError,
@@ -1015,11 +1015,11 @@ fn small_chain_response_merkle_geometries(
 }
 
 struct SmallChainResponseExecutionContext<'execution, 'geometry> {
-    proof_wire_geometry: &'geometry CompactProofWireGeometry,
     prover_transcript: &'execution mut CompactProverTranscript<'geometry>,
     verifier_messages: &'execution mut Vec<DecodedFixedUniformVerifierMessage>,
     proof_wire_assembler: &'execution mut CompactProofWireAssembler<'geometry>,
     checkpoint_schedule: &'execution CompactResponseCheckpointSchedule,
+    response_tree_retention_driver: &'execution mut CompactResponseTreeRetentionDriver<'geometry>,
     response_tree_storage: &'execution mut TestStorage,
 }
 
@@ -1030,11 +1030,11 @@ fn build_commit_open_and_checkpoint_response(
     execution_context: SmallChainResponseExecutionContext<'_, '_>,
 ) -> (BuiltResponse, CommonProofGenerationCheckpointBoundary) {
     let SmallChainResponseExecutionContext {
-        proof_wire_geometry,
         prover_transcript,
         verifier_messages,
         proof_wire_assembler,
         checkpoint_schedule,
+        response_tree_retention_driver,
         response_tree_storage,
     } = execution_context;
     assert!(!leaves.is_empty());
@@ -1083,23 +1083,24 @@ fn build_commit_open_and_checkpoint_response(
         .expect("small-chain retained response tree finishes");
     assert_eq!(retained_tree_bytes.last_chunk::<64>(), Some(&root));
 
-    let mut external_tree_driver = CompactResponseTreeExternalMemoryDriver::new(merkle_geometry)
-        .expect("small-chain external response tree starts");
-    external_tree_driver
-        .begin_object(response_tree_storage)
+    response_tree_retention_driver
+        .begin_next_response(response_tree_storage)
         .expect("small-chain external response object begins");
     for (leaf, leaf_salt) in leaves.iter().zip(&leaf_salts) {
-        external_tree_driver
-            .absorb_leaf(leaf.borrowed(), leaf_salt)
+        response_tree_retention_driver
+            .absorb_next_response_leaf(leaf.borrowed(), leaf_salt)
             .expect("small-chain external response tree accepts a canonical leaf");
-        while external_tree_driver.pending_tree_chunk().is_some() {
-            external_tree_driver
+        while response_tree_retention_driver
+            .pending_tree_chunk()
+            .is_some()
+        {
+            response_tree_retention_driver
                 .append_pending_tree_chunk(response_tree_storage)
                 .expect("small-chain external response tree chunk commits");
         }
     }
-    let external_root = external_tree_driver
-        .seal_tree(response_tree_storage)
+    let external_root = response_tree_retention_driver
+        .seal_next_response(response_tree_storage)
         .expect("small-chain external response tree seals");
     assert_eq!(external_root, root);
     let response_object = ProofExternalMemoryObject::new(response_ordinal);
@@ -1118,22 +1119,22 @@ fn build_commit_open_and_checkpoint_response(
             .derive_verifier_message()
             .expect("small-chain verifier message derives from the live response prefix"),
     );
-    let query_schedule = CompactResponseQuerySchedule::derive_at_last_query_boundary(
-        merkle_geometry,
-        proof_wire_geometry.responses(),
-        verifier_messages,
-    )
-    .expect("small-chain response schedule derives at its live last query boundary");
-    external_tree_driver
-        .begin_frontier_scan(&query_schedule)
-        .expect("small-chain external response frontier scan starts");
-    while !external_tree_driver
-        .read_next_tree_chunk(response_tree_storage)
-        .expect("small-chain external response tree chunk reads")
-    {}
-    let external_tree_output = external_tree_driver
-        .finish_frontier_scan(response_tree_storage)
-        .expect("small-chain external response tree deletes after its last query");
+    let mut external_tree_output = None;
+    loop {
+        match response_tree_retention_driver
+            .advance_verifier_move(verifier_messages, response_tree_storage)
+            .expect("small-chain retained response move advances")
+        {
+            CompactResponseTreeRetentionPoll::StorageTransactionCompleted => {}
+            CompactResponseTreeRetentionPoll::OpeningReady(output) => {
+                assert_eq!(output.response_ordinal(), response_ordinal);
+                assert!(external_tree_output.replace(output).is_none());
+            }
+            CompactResponseTreeRetentionPoll::VerifierMoveComplete => break,
+        }
+    }
+    let external_tree_output =
+        external_tree_output.expect("small-chain response opens once at its live last-query move");
     let external_memory_geometry =
         CompactResponseTreeExternalMemoryGeometry::derive(merkle_geometry)
             .expect("small-chain external response tree geometry derives");
@@ -1169,7 +1170,7 @@ fn build_commit_open_and_checkpoint_response(
             OwnedResponseLeaf::Extension(values) => extension_field_values.extend(values),
         }
     }
-    let query_leaf_ordinals = query_schedule.as_slice().to_vec();
+    let query_leaf_ordinals = external_tree_output.query_leaf_ordinals().to_vec();
     let external_tree_usage = external_tree_output.usage();
     let wire_input = CompactProofResponseWireInput::new(
         external_root,
@@ -3000,6 +3001,11 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
     .expect("small-chain response checkpoint schedule derives");
     let mut proof_wire_assembler = CompactProofWireAssembler::new(&proof_wire_geometry)
         .expect("small-chain incremental proof assembler starts");
+    let mut response_tree_retention_driver = CompactResponseTreeRetentionDriver::new(
+        &response_merkle_geometries,
+        proof_wire_geometry.responses(),
+    )
+    .expect("small-chain retained response-tree coordinator starts");
     let mut response_tree_storage = TestStorage::default();
     let mut built_responses = Vec::with_capacity(proof_wire_geometry.responses().len());
     let mut prover_verifier_messages = Vec::with_capacity(proof_wire_geometry.responses().len());
@@ -3016,11 +3022,11 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         &response_merkle_geometries[0],
         vec![OwnedResponseLeaf::Base(source_response_values)],
         SmallChainResponseExecutionContext {
-            proof_wire_geometry: &proof_wire_geometry,
             prover_transcript: &mut prover_transcript,
             verifier_messages: &mut prover_verifier_messages,
             proof_wire_assembler: &mut proof_wire_assembler,
             checkpoint_schedule: &checkpoint_schedule,
+            response_tree_retention_driver: &mut response_tree_retention_driver,
             response_tree_storage: &mut response_tree_storage,
         },
     );
@@ -3378,11 +3384,11 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
             OwnedResponseLeaf::Extension(committed_mask_values),
         ],
         SmallChainResponseExecutionContext {
-            proof_wire_geometry: &proof_wire_geometry,
             prover_transcript: &mut prover_transcript,
             verifier_messages: &mut prover_verifier_messages,
             proof_wire_assembler: &mut proof_wire_assembler,
             checkpoint_schedule: &checkpoint_schedule,
+            response_tree_retention_driver: &mut response_tree_retention_driver,
             response_tree_storage: &mut response_tree_storage,
         },
     );
@@ -3436,11 +3442,11 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
                 .collect(),
             )],
             SmallChainResponseExecutionContext {
-                proof_wire_geometry: &proof_wire_geometry,
                 prover_transcript: &mut prover_transcript,
                 verifier_messages: &mut prover_verifier_messages,
                 proof_wire_assembler: &mut proof_wire_assembler,
                 checkpoint_schedule: &checkpoint_schedule,
+                response_tree_retention_driver: &mut response_tree_retention_driver,
                 response_tree_storage: &mut response_tree_storage,
             },
         );
@@ -3505,11 +3511,11 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
                     .collect(),
             )],
             SmallChainResponseExecutionContext {
-                proof_wire_geometry: &proof_wire_geometry,
                 prover_transcript: &mut prover_transcript,
                 verifier_messages: &mut prover_verifier_messages,
                 proof_wire_assembler: &mut proof_wire_assembler,
                 checkpoint_schedule: &checkpoint_schedule,
+                response_tree_retention_driver: &mut response_tree_retention_driver,
                 response_tree_storage: &mut response_tree_storage,
             },
         );
@@ -3580,11 +3586,11 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
             .expect("final response Merkle geometry exists"),
         vec![OwnedResponseLeaf::Extension(final_response_values.clone())],
         SmallChainResponseExecutionContext {
-            proof_wire_geometry: &proof_wire_geometry,
             prover_transcript: &mut prover_transcript,
             verifier_messages: &mut prover_verifier_messages,
             proof_wire_assembler: &mut proof_wire_assembler,
             checkpoint_schedule: &checkpoint_schedule,
+            response_tree_retention_driver: &mut response_tree_retention_driver,
             response_tree_storage: &mut response_tree_storage,
         },
     );
@@ -3666,6 +3672,27 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
     );
     assert_eq!(
         response_tree_storage.deleted_object_count(),
+        built_responses.len()
+    );
+    let retained_response_tree_usage = response_tree_retention_driver
+        .finish()
+        .expect("small-chain retained response-tree coordinator finishes");
+    assert_eq!(
+        retained_response_tree_usage.total_written_byte_length(),
+        expected_response_tree_byte_length
+    );
+    assert_eq!(
+        retained_response_tree_usage.total_read_byte_length(),
+        expected_response_tree_byte_length
+    );
+    assert_eq!(retained_response_tree_usage.peak_stored_byte_length(), 192);
+    assert_eq!(
+        retained_response_tree_usage.transaction_count(),
+        expected_response_tree_transaction_count
+    );
+    assert_eq!(
+        usize::try_from(retained_response_tree_usage.deleted_object_count())
+            .expect("small-chain deleted response count fits usize"),
         built_responses.len()
     );
     for (response_ordinal, (built_response, checkpoint_boundary)) in built_responses

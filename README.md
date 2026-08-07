@@ -323,15 +323,17 @@ path from a deterministic common secret, eta-two error, public setup seed,
 public-key-share equation, and lattice-anchor construction. It stores each
 1,024-coefficient polynomial as one canonical 8,192-byte authenticated object,
 for 1,654,784 external bytes in total, and drives every object through the
-authenticated-provider contract. For all 24 reduced responses, the existing
-transactional external-tree driver now writes and seals the exact postorder
+authenticated-provider contract. For all 24 reduced responses, the
+transactional retention coordinator now writes and seals the exact postorder
 tree before its root enters the transcript. The stored bytes match a separate
-resident writer byte for byte; the opening schedule derives at the
-live last-query prefix; and the driver scans and deletes the tree before the
-next response. The slice writes and reads 1,664 bytes through 120 committed
-transactions and 24 last-use deletions. Its incremental proof bytes equal the
+resident writer byte for byte; the opening schedule derives at the exact live
+last-query prefix; and the coordinator scans and deletes the tree before that
+verifier move completes. The slice writes and reads 1,664 bytes through 120
+committed transactions and 24 last-use deletions, with a 192-byte peak. A
+separate delayed-use owner keeps earlier trees across later moves and deletes
+multiple due trees in response order. Incremental proof bytes equal the
 monolithic encoder, and every response yields the common canonical checkpoint
-boundary. It also compares resident and external CFW round polynomials,
+boundary. The slice also compares resident and external CFW round polynomials,
 transcript messages, and final values. A fresh path decodes the transported
 public-input and proof bytes, verifies every opening and the CFW
 transcript, and matches the pollable structured transpose to the independent
@@ -659,9 +661,19 @@ ten deletions after one move. The exact maximum writer heaps are `1,050,944`,
 response value, salt, frontier, and explicit query-schedule inputs dominate both
 at `9,703,024`, `9,665,952`, `9,610,288`, and `9,582,848` bytes and are included in the
 provisional WASM peaks above. A browser-compatible transaction driver writes,
-seals, scans, and deletes the canonical postorder object and advances only
+seals, scans, and deletes one canonical postorder object and advances only
 after exact committed-transaction replay; focused small-tree owners cover both
-direct storage and recorder/replay boundaries. A bounded canonical transcript
+direct storage and recorder/replay boundaries. A registry-level retention
+coordinator now applies that driver in verifier chronology: it commits each
+tree before the same-ordinal verifier message, derives an opening only from the
+exact last-query prefix, keeps earlier trees across intervening moves, emits
+multiple due openings in response order, deletes each due object before the
+move completes, and cancels live objects idempotently. Its delayed
+three-response owner retains two simultaneous objects, opens in order
+`1, 0, 2`, and
+reconciles 320 bytes written and read, a 256-byte retained-storage peak, 15
+transactions, and three deletions. This is kernel lifecycle evidence, not an
+authenticated generation-host restart. A bounded canonical transcript
 cursor now binds the public-input bytes, complete verifier-owned wire geometry,
 and every ordered response root and round salt at a post-verifier-move boundary;
 restore recomputes every preceding verifier message instead of serializing an
@@ -690,9 +702,12 @@ reconstructed digest matches at `resume-complete`. Focused host coverage accepts
 successive checkpoints after the live set changes and refuses an incomplete
 replay, reversed deletion order, changed payload, substituted state digest, and
 transactions outside the replay phase, including incomplete live objects and
-unsealed deletion. The reduced production-shaped chain now connects this tree
-driver, the live-prefix schedule, incremental proof assembler, and common
-checkpoint boundary for all 24 of its responses. This remains small-geometry
+unsealed deletion. The reduced production-shaped chain now connects the
+registry-level retention coordinator, live-prefix schedules, incremental proof
+assembler, and common checkpoint boundary for all 24 responses. It reconciles
+1,664 bytes written and read through 120 transactions and 24 last-use
+deletions. Every tree reaches last use in its own verifier move, so the maximum
+concurrently retained tree bytes are 192. This remains small-geometry
 development evidence: the boundary is not published or resumed by the
 authenticated generation host, its private-randomness cursor and external-
 object deletion state are not joined into one host checkpoint, and selected-
@@ -861,10 +876,14 @@ and conditional complete-inventory bounds. A live small Merkle response derives
 its schedule from the canonical transcript and freshly verifies transported
 bytes with hostile mutations. The reduced production-family integration owner
 additionally reaches verified CFW claims and the production structured
-transpose. Its 24 response roots come from transactional external trees whose
-stored bytes match the resident writer exactly; live-prefix scans delete every
-tree at last use, and incremental proof bytes and common checkpoint boundaries
-match the canonical transcript chronology. Its
+transpose. Its 24 response roots come from a transactional retention
+coordinator whose stored tree bytes match the resident writer exactly. Scans
+from live prefixes delete every tree at last use, aggregate usage reconciles 1,664
+bytes written and read through 120 transactions with a 192-byte peak, and
+incremental proof bytes and common checkpoint boundaries match the canonical
+transcript chronology. A separate delayed-use owner covers concurrent retained
+trees and response-order deletion when multiple trees reach last use at one
+verifier move. Its
 authenticated source owner derives nonzero public-key and anchor coefficients
 through the shared production equations, serves 202 canonical coefficient
 objects totaling 1,654,784 bytes, and refuses truncation, mutation, and equal-
