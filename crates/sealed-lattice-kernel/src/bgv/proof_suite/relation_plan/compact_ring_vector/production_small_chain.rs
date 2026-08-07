@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, convert::Infallible, rc::Rc};
 
 use p3_challenger::{CanObserve, HashChallenger, SerializingChallenger64};
 use p3_commit::{ExtensionMmcs, Mmcs};
@@ -15,11 +15,12 @@ use p3_whir::pcs::zk::{
     PrecommittedMaskVerifierGroup, ZkVerifierError, ZkWhirConfig, ZkWhirProof,
 };
 use p3_whir::{FoldingFactor, ProtocolParameters, SecurityAssumption, ZkParameters};
-use rand::{SeedableRng, rngs::SmallRng};
+use rand::{TryCryptoRng, TryRng};
 use sha3::{
     Shake256,
     digest::{ExtendableOutput, Update, XofReader},
 };
+use tiny_keccak::Kmac;
 use zeroize::Zeroizing;
 
 use super::super::authenticated_assignment::{
@@ -32,10 +33,13 @@ use super::super::{
 };
 use super::*;
 use crate::bgv::proof_suite::prover::{
-    CommonProofAuthenticatedSourceReadRequest, CommonProofProverError, CommonProofSourcePolynomial,
+    CheckpointableCommonProofPrivateCoinSource, CommonProofAuthenticatedSourceReadRequest,
+    CommonProofPrivateCoinCoordinate, CommonProofPrivateCoinCoordinateCapacity,
+    CommonProofPrivateCoinSource, CommonProofProverError, CommonProofSourcePolynomial,
     CommonProofSourcePolynomialProvider, CommonProofSourcePolynomialProviderPoll,
     CommonProofSourcePolynomialReplayIdentity, CommonProofSourcePolynomialRequest,
     CommonProofSourcePolynomialRequestContext, CommonProofSourceProviderMemoryAccounting,
+    PrivateRandomnessCommonProofCoinError, PrivateRandomnessCommonProofCoinSource,
     ProvidedCommonProofSourcePolynomial,
 };
 use crate::bgv::proof_suite::relation_plan::{
@@ -45,11 +49,12 @@ use crate::bgv::proof_suite::{
     COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, PROOF_BASE_FIELD_MODULUS,
     PROOF_CHALLENGE_EXTENSION_DEGREE, ProofBaseFieldElement, ProofChallengeExtensionElement,
     compact_cfw::{
-        COMPACT_CFW_MATRIX_COUNT, CompactCfwClaimBatch, CompactCfwError, CompactCfwGeometry,
-        CompactCfwMaskMaterial, CompactCfwMaskedCrossEpochClaims, CompactCfwMatrixRole,
-        CompactCfwR1csMatrices, CompactCfwTranscript, CompactChallengeField,
-        PreparedCompactCfwProver, compact_challenge_from_production,
-        compact_challenge_to_production, verify_compact_cfw_transcript,
+        COMPACT_CFW_MATRIX_COUNT, COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH, CompactCfwClaimBatch,
+        CompactCfwError, CompactCfwGeometry, CompactCfwMaskMaterial,
+        CompactCfwMaskedCrossEpochClaims, CompactCfwMatrixRole, CompactCfwR1csMatrices,
+        CompactCfwTranscript, CompactChallengeField, PreparedCompactCfwProver,
+        compact_challenge_from_production, compact_challenge_to_production,
+        verify_compact_cfw_transcript,
     },
     compact_cfw_external_prover::{CompactCfwExternalProverState, CompactCfwExternalRowSource},
     compact_proof_wire::{
@@ -74,7 +79,11 @@ use crate::bgv::proof_suite::{
         DecodedFixedUniformVerifierMessage, FixedUniformVerifierMessageGeometry,
     },
 };
-use crate::foundation::{Hash512, ProofApplicationSlotCeilings};
+use crate::foundation::{
+    ACTION_RANDOMNESS_ROOT_BYTE_LENGTH, ActionRandomnessDerivationInput, ActionRandomnessRoot,
+    Hash512, ParticipantIdentity, PersistentProofCoinInput, ProofApplicationSlot,
+    ProofApplicationSlotCeilings, SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+};
 
 #[path = "production_small_chain_canonical_transport.rs"]
 mod production_small_chain_canonical_transport;
@@ -101,6 +110,22 @@ const SMALL_CHAIN_POST_LOOKUP_COMMITMENT_BINDING_DOMAIN: &str =
     "sealed-lattice/compact-small-chain/post-lookup-commitment-binding/v1";
 const SMALL_CHAIN_WHIR_HANDOFF_BINDING_DOMAIN: &str =
     "sealed-lattice/compact-small-chain/whir-handoff-binding/v1";
+const SMALL_CHAIN_PRIVATE_RANDOM_SEED_BYTE_LENGTH: usize = 64;
+const SMALL_CHAIN_PRIVATE_RANDOM_SEED_BASE_ELEMENT_COUNT: usize =
+    SMALL_CHAIN_PRIVATE_RANDOM_SEED_BYTE_LENGTH / size_of::<u64>();
+const SMALL_CHAIN_WHIR_RANDOM_BLOCK_BYTE_LENGTH: usize = 64;
+const SMALL_CHAIN_WHIR_RANDOM_CUSTOMIZATION: &[u8] =
+    b"sealed-lattice/compact-small-chain/whir-private-randomness/v1";
+const SMALL_CHAIN_PRIVATE_LEAF_SALT_CUSTOMIZATION: &[u8] =
+    b"sealed-lattice/compact-small-chain/private-leaf-salt/v1";
+const SMALL_CHAIN_FIAT_SHAMIR_ROUND_SALT_CUSTOMIZATION: &[u8] =
+    b"sealed-lattice/compact-small-chain/fiat-shamir-round-salt/v1";
+const SMALL_CHAIN_PRIVATE_COIN_BINDING_DOMAIN: &str =
+    "sealed-lattice/compact-small-chain/private-coin-binding/v1";
+const SMALL_CHAIN_PRIVATE_COIN_STATEMENT_DOMAIN: &str =
+    "sealed-lattice/compact-small-chain/private-coin-statement/v1";
+const SMALL_CHAIN_PRIVATE_RANDOMNESS_CURSOR_MAGIC: [u8; 8] = *b"SLCPRND1";
+const SMALL_CHAIN_PRIVATE_RANDOMNESS_CURSOR_VERSION: u16 = 1;
 
 #[derive(Clone, Copy, Debug)]
 struct SmallChainByteHasher;
@@ -233,6 +258,245 @@ fn small_chain_whir_challenger(
     ))
 }
 
+fn fill_small_chain_kmac(
+    key: &[u8],
+    customization: &[u8],
+    framed_parts: &[&[u8]],
+    destination: &mut [u8],
+) {
+    let mut kmac = Kmac::v256(key, customization);
+    for part in framed_parts {
+        tiny_keccak::Hasher::update(&mut kmac, &(part.len() as u64).to_le_bytes());
+        tiny_keccak::Hasher::update(&mut kmac, part);
+    }
+    tiny_keccak::Hasher::finalize(kmac, destination);
+}
+
+struct SmallChainKmacRandomSource {
+    private_seed: Zeroizing<[u8; SMALL_CHAIN_PRIVATE_RANDOM_SEED_BYTE_LENGTH]>,
+    next_block_ordinal: u64,
+    buffered_block: Zeroizing<[u8; SMALL_CHAIN_WHIR_RANDOM_BLOCK_BYTE_LENGTH]>,
+    next_buffered_byte_ordinal: usize,
+}
+
+impl SmallChainKmacRandomSource {
+    fn new(private_seed: Zeroizing<[u8; SMALL_CHAIN_PRIVATE_RANDOM_SEED_BYTE_LENGTH]>) -> Self {
+        Self {
+            private_seed,
+            next_block_ordinal: 0,
+            buffered_block: Zeroizing::new([0_u8; SMALL_CHAIN_WHIR_RANDOM_BLOCK_BYTE_LENGTH]),
+            next_buffered_byte_ordinal: SMALL_CHAIN_WHIR_RANDOM_BLOCK_BYTE_LENGTH,
+        }
+    }
+
+    fn refill(&mut self) {
+        let block_ordinal = self.next_block_ordinal;
+        self.next_block_ordinal = self
+            .next_block_ordinal
+            .checked_add(1)
+            .expect("the reduced WHIR random stream cannot exhaust its block ordinal");
+        fill_small_chain_kmac(
+            self.private_seed.as_ref(),
+            SMALL_CHAIN_WHIR_RANDOM_CUSTOMIZATION,
+            &[&block_ordinal.to_le_bytes()],
+            self.buffered_block.as_mut(),
+        );
+        self.next_buffered_byte_ordinal = 0;
+    }
+
+    fn fill(&mut self, mut destination: &mut [u8]) {
+        while !destination.is_empty() {
+            if self.next_buffered_byte_ordinal == SMALL_CHAIN_WHIR_RANDOM_BLOCK_BYTE_LENGTH {
+                self.refill();
+            }
+            let available_byte_count =
+                SMALL_CHAIN_WHIR_RANDOM_BLOCK_BYTE_LENGTH - self.next_buffered_byte_ordinal;
+            let copied_byte_count = available_byte_count.min(destination.len());
+            let buffered_end = self.next_buffered_byte_ordinal + copied_byte_count;
+            destination[..copied_byte_count].copy_from_slice(
+                &self.buffered_block[self.next_buffered_byte_ordinal..buffered_end],
+            );
+            self.next_buffered_byte_ordinal = buffered_end;
+            destination = &mut destination[copied_byte_count..];
+        }
+    }
+
+    fn canonical_cursor_bytes(&self) -> [u8; 12] {
+        let mut encoded = [0_u8; 12];
+        encoded[..8].copy_from_slice(&self.next_block_ordinal.to_le_bytes());
+        encoded[8..].copy_from_slice(
+            &u32::try_from(self.next_buffered_byte_ordinal)
+                .expect("the WHIR buffered-byte ordinal fits u32")
+                .to_le_bytes(),
+        );
+        encoded
+    }
+}
+
+impl TryRng for SmallChainKmacRandomSource {
+    type Error = Infallible;
+
+    fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+        let mut bytes = [0_u8; size_of::<u32>()];
+        self.fill(&mut bytes);
+        Ok(u32::from_le_bytes(bytes))
+    }
+
+    fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+        let mut bytes = [0_u8; size_of::<u64>()];
+        self.fill(&mut bytes);
+        Ok(u64::from_le_bytes(bytes))
+    }
+
+    fn try_fill_bytes(&mut self, destination: &mut [u8]) -> Result<(), Self::Error> {
+        self.fill(destination);
+        Ok(())
+    }
+}
+
+impl TryCryptoRng for SmallChainKmacRandomSource {}
+
+struct SmallChainAttemptPrivateRandomness {
+    private_coins: PrivateRandomnessCommonProofCoinSource,
+    response_salt_seed: Zeroizing<[u8; SMALL_CHAIN_PRIVATE_RANDOM_SEED_BYTE_LENGTH]>,
+    whir_random_source: SmallChainKmacRandomSource,
+}
+
+impl SmallChainAttemptPrivateRandomness {
+    fn new(
+        mut private_coins: PrivateRandomnessCommonProofCoinSource,
+    ) -> Result<Self, PrivateRandomnessCommonProofCoinError> {
+        let whir_random_seed = sample_small_chain_private_seed(&mut private_coins)?;
+        let response_salt_seed = sample_small_chain_private_seed(&mut private_coins)?;
+        Ok(Self {
+            private_coins,
+            response_salt_seed,
+            whir_random_source: SmallChainKmacRandomSource::new(whir_random_seed),
+        })
+    }
+
+    fn sample_extension_element(
+        &mut self,
+    ) -> Result<CompactChallengeField, PrivateRandomnessCommonProofCoinError> {
+        let mut coordinates = [0_u64; PROOF_CHALLENGE_EXTENSION_DEGREE];
+        for coordinate in &mut coordinates {
+            *coordinate = self.private_coins.sample_modulo(
+                CommonProofPrivateCoinCoordinate::hiding_argument(),
+                PROOF_BASE_FIELD_MODULUS,
+                SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+            )?;
+        }
+        Ok(compact_challenge_from_production(
+            ProofChallengeExtensionElement::from_canonical_coordinates(coordinates)
+                .expect("production-private samples are canonical base-field coordinates"),
+        ))
+    }
+
+    fn sample_extension_vector(
+        &mut self,
+        element_count: usize,
+    ) -> Result<Vec<CompactChallengeField>, PrivateRandomnessCommonProofCoinError> {
+        (0..element_count)
+            .map(|_| self.sample_extension_element())
+            .collect()
+    }
+
+    fn private_leaf_salt(
+        &self,
+        response_ordinal: u32,
+        leaf_count: usize,
+        leaf_ordinal: usize,
+        leaf: &OwnedResponseLeaf,
+    ) -> [u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH] {
+        let value_kind = match leaf {
+            OwnedResponseLeaf::Base(_) => [0_u8],
+            OwnedResponseLeaf::Extension(_) => [1_u8],
+        };
+        let leaf_count = u64::try_from(leaf_count)
+            .expect("the reduced response leaf count fits u64")
+            .to_le_bytes();
+        let leaf_ordinal = u64::try_from(leaf_ordinal)
+            .expect("the reduced response leaf ordinal fits u64")
+            .to_le_bytes();
+        let field_element_count = leaf.field_element_count().to_le_bytes();
+        let mut salt = [0_u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH];
+        fill_small_chain_kmac(
+            self.response_salt_seed.as_ref(),
+            SMALL_CHAIN_PRIVATE_LEAF_SALT_CUSTOMIZATION,
+            &[
+                &response_ordinal.to_le_bytes(),
+                &leaf_count,
+                &leaf_ordinal,
+                &value_kind,
+                &field_element_count,
+            ],
+            &mut salt,
+        );
+        salt
+    }
+
+    fn fiat_shamir_round_salt(
+        &self,
+        response_ordinal: u32,
+    ) -> [u8; COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH] {
+        let mut salt = [0_u8; COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH];
+        fill_small_chain_kmac(
+            self.response_salt_seed.as_ref(),
+            SMALL_CHAIN_FIAT_SHAMIR_ROUND_SALT_CUSTOMIZATION,
+            &[&response_ordinal.to_le_bytes()],
+            &mut salt,
+        );
+        salt
+    }
+
+    fn canonical_randomness_cursor_bytes(&self) -> Vec<u8> {
+        let private_coin_cursor_manifest = self
+            .private_coins
+            .checkpoint_cursor_manifest()
+            .expect("small-chain private-coin cursors encode canonically");
+        let whir_cursor = self.whir_random_source.canonical_cursor_bytes();
+        let mut encoded = Vec::with_capacity(
+            SMALL_CHAIN_PRIVATE_RANDOMNESS_CURSOR_MAGIC.len()
+                + size_of::<u16>()
+                + size_of::<u32>()
+                + private_coin_cursor_manifest.len()
+                + whir_cursor.len(),
+        );
+        encoded.extend_from_slice(&SMALL_CHAIN_PRIVATE_RANDOMNESS_CURSOR_MAGIC);
+        encoded.extend_from_slice(&SMALL_CHAIN_PRIVATE_RANDOMNESS_CURSOR_VERSION.to_le_bytes());
+        encoded.extend_from_slice(
+            &u32::try_from(private_coin_cursor_manifest.len())
+                .expect("the private-coin cursor manifest length fits u32")
+                .to_le_bytes(),
+        );
+        encoded.extend_from_slice(&private_coin_cursor_manifest);
+        encoded.extend_from_slice(&whir_cursor);
+        encoded
+    }
+}
+
+fn sample_small_chain_private_seed(
+    private_coins: &mut PrivateRandomnessCommonProofCoinSource,
+) -> Result<
+    Zeroizing<[u8; SMALL_CHAIN_PRIVATE_RANDOM_SEED_BYTE_LENGTH]>,
+    PrivateRandomnessCommonProofCoinError,
+> {
+    let mut seed = Zeroizing::new([0_u8; SMALL_CHAIN_PRIVATE_RANDOM_SEED_BYTE_LENGTH]);
+    for destination in seed.chunks_exact_mut(size_of::<u64>()) {
+        let value = private_coins.sample_modulo(
+            CommonProofPrivateCoinCoordinate::hiding_argument(),
+            PROOF_BASE_FIELD_MODULUS,
+            SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+        )?;
+        destination.copy_from_slice(&value.to_le_bytes());
+    }
+    debug_assert_eq!(
+        seed.len() / size_of::<u64>(),
+        SMALL_CHAIN_PRIVATE_RANDOM_SEED_BASE_ELEMENT_COUNT
+    );
+    Ok(seed)
+}
+
 fn small_chain_commitment_scheme() -> SmallChainCommitmentScheme {
     SmallChainCommitmentScheme::new(
         SmallChainGoldilocksLeafHasher,
@@ -252,32 +516,32 @@ struct SmallChainCommittedMaskGroup {
 fn commit_small_chain_mask_group(
     shape: MaskGroupShape,
     messages: Vec<Vec<CompactChallengeField>>,
-    randomness_seed: u64,
+    private_randomness: &mut SmallChainAttemptPrivateRandomness,
     commitment_scheme: &SmallChainExtensionCommitmentScheme,
     challenger: &mut SmallChainChallenger,
-) -> SmallChainCommittedMaskGroup {
+) -> Result<SmallChainCommittedMaskGroup, PrivateRandomnessCommonProofCoinError> {
+    let randomness = (0..shape.width)
+        .map(|_| private_randomness.sample_extension_vector(shape.shape.randomness_len))
+        .collect::<Result<Vec<_>, _>>()?;
     let committed_group =
-        build_small_chain_mask_group(shape, messages, randomness_seed, commitment_scheme);
+        build_small_chain_mask_group(shape, messages, randomness, commitment_scheme);
     challenger.observe(committed_group.commitment.clone());
-    committed_group
+    Ok(committed_group)
 }
 
 fn build_small_chain_mask_group(
     shape: MaskGroupShape,
     messages: Vec<Vec<CompactChallengeField>>,
-    randomness_seed: u64,
+    randomness: Vec<Vec<CompactChallengeField>>,
     commitment_scheme: &SmallChainExtensionCommitmentScheme,
 ) -> SmallChainCommittedMaskGroup {
     assert_eq!(messages.len(), shape.width);
-    let randomness = (0..shape.width)
-        .map(|message_ordinal| {
-            deterministic_extension_vector(
-                shape.shape.randomness_len,
-                randomness_seed
-                    + u64::try_from(message_ordinal).expect("mask ordinal fits u64") * 10_000,
-            )
-        })
-        .collect::<Vec<_>>();
+    assert_eq!(randomness.len(), shape.width);
+    assert!(
+        randomness
+            .iter()
+            .all(|values| values.len() == shape.shape.randomness_len)
+    );
     let codewords = messages
         .iter()
         .zip(&randomness)
@@ -347,16 +611,6 @@ fn small_chain_whir_handoff_binding(
             &canonical_commitments[4],
         ],
     ))
-}
-
-fn deterministic_extension_vector(element_count: usize, seed: u64) -> Vec<CompactChallengeField> {
-    (0..element_count)
-        .map(|element_ordinal| {
-            compact_test_challenge(
-                seed + u64::try_from(element_ordinal).expect("element ordinal fits u64") * 17,
-            )
-        })
-        .collect()
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -701,7 +955,11 @@ fn response_wire_geometry(
     .expect("small-chain response wire geometry is valid")
 }
 
-fn build_response(response_ordinal: u32, leaves: Vec<OwnedResponseLeaf>) -> BuiltResponse {
+fn build_response(
+    private_randomness: &SmallChainAttemptPrivateRandomness,
+    response_ordinal: u32,
+    leaves: Vec<OwnedResponseLeaf>,
+) -> BuiltResponse {
     assert!(!leaves.is_empty());
     assert!(leaves.len().is_power_of_two());
     let components = leaves
@@ -720,8 +978,12 @@ fn build_response(response_ordinal: u32, leaves: Vec<OwnedResponseLeaf>) -> Buil
         .collect::<Vec<_>>();
     let merkle_geometry = CompactResponseMerkleGeometry::new(response_ordinal, components)
         .expect("small-chain response Merkle geometry is valid");
-    let leaf_salts = (0..leaves.len())
-        .map(|leaf_ordinal| small_chain_leaf_salt(response_ordinal, leaf_ordinal))
+    let leaf_salts = leaves
+        .iter()
+        .enumerate()
+        .map(|(leaf_ordinal, leaf)| {
+            private_randomness.private_leaf_salt(response_ordinal, leaves.len(), leaf_ordinal, leaf)
+        })
         .collect::<Vec<_>>();
     let mut writer = CompactResponsePostorderMerkleWriter::new(&merkle_geometry)
         .expect("small-chain retained tree writer starts");
@@ -749,7 +1011,7 @@ fn build_response(response_ordinal: u32, leaves: Vec<OwnedResponseLeaf>) -> Buil
             OwnedResponseLeaf::Extension(values) => extension_field_values.extend(values),
         }
     }
-    let fiat_shamir_round_salt = small_chain_round_salt(response_ordinal);
+    let fiat_shamir_round_salt = private_randomness.fiat_shamir_round_salt(response_ordinal);
     let query_leaf_ordinals = (0..leaf_salts.len())
         .map(|ordinal| u64::try_from(ordinal).expect("query ordinal fits u64"))
         .collect();
@@ -769,28 +1031,6 @@ fn build_response(response_ordinal: u32, leaves: Vec<OwnedResponseLeaf>) -> Buil
         query_leaf_ordinals,
         retained_tree_bytes,
     }
-}
-
-fn small_chain_leaf_salt(
-    response_ordinal: u32,
-    leaf_ordinal: usize,
-) -> [u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH] {
-    let mut salt = [0xa5_u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH];
-    salt[..4].copy_from_slice(&response_ordinal.to_le_bytes());
-    salt[4..12].copy_from_slice(
-        &u64::try_from(leaf_ordinal)
-            .expect("leaf ordinal fits u64")
-            .to_le_bytes(),
-    );
-    salt
-}
-
-fn small_chain_round_salt(
-    response_ordinal: u32,
-) -> [u8; COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH] {
-    let mut salt = [0x5a_u8; COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH];
-    salt[..4].copy_from_slice(&response_ordinal.to_le_bytes());
-    salt
 }
 
 fn digest_base_field_elements(digest: [u8; Hash512::BYTE_LENGTH]) -> Vec<ProofBaseFieldElement> {
@@ -1538,6 +1778,171 @@ fn request_context(
     )
 }
 
+fn small_chain_attempt_private_randomness(
+    relation_plan_variant: &RelationPlanVariant,
+    canonical_public_input_bytes: &[u8],
+    source_replay_binding: [u8; Hash512::BYTE_LENGTH],
+    attempt_revision: u8,
+) -> SmallChainAttemptPrivateRandomness {
+    let suite_identifier = Hash512::from_bytes([0x21; Hash512::BYTE_LENGTH]);
+    let ceremony_context_hash = Hash512::from_bytes([0x22; Hash512::BYTE_LENGTH]);
+    let mut action_context_bytes = [0x23; Hash512::BYTE_LENGTH];
+    action_context_bytes[Hash512::BYTE_LENGTH - 1] = attempt_revision;
+    let action_context_hash = Hash512::from_bytes(action_context_bytes);
+    let participant_identity = ParticipantIdentity::from_bytes([0x24; Hash512::BYTE_LENGTH]);
+    let mut action_root_bytes = [0x5a; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH];
+    action_root_bytes[ACTION_RANDOMNESS_ROOT_BYTE_LENGTH - 1] = attempt_revision;
+    let action_private_randomness = Rc::new(
+        ActionRandomnessRoot::from_injected_bytes(Zeroizing::new(action_root_bytes))
+            .derive(ActionRandomnessDerivationInput::new(
+                suite_identifier,
+                ceremony_context_hash,
+                action_context_hash,
+                participant_identity,
+            ))
+            .expect("the reduced chain action-private randomness derives"),
+    );
+    let application_slot = ProofApplicationSlot::new(
+        suite_identifier,
+        ceremony_context_hash,
+        action_context_hash,
+        ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+        Some(0),
+        None,
+        None,
+    )
+    .expect("the reduced public-key application slot is canonical");
+    let application_statement_hash = Hash512::from_bytes(crate::hashing::hash_framed_parts_512(
+        SMALL_CHAIN_PRIVATE_COIN_STATEMENT_DOMAIN,
+        &[canonical_public_input_bytes],
+    ));
+    let proof_coin_input =
+        PersistentProofCoinInput::new(application_slot, application_statement_hash)
+            .expect("the reduced public-key proof coin input is canonical");
+    let mut witness_binding = action_private_randomness
+        .begin_persistent_proof_witness_coin_binding(&proof_coin_input)
+        .expect("the reduced public-key witness binding starts");
+    witness_binding
+        .absorb_canonical_bytes(canonical_public_input_bytes)
+        .expect("the reduced canonical public input enters the witness binding");
+    witness_binding
+        .absorb_canonical_bytes(&source_replay_binding)
+        .expect("the authenticated source replay binding enters the witness binding");
+    let attempt_identifier = witness_binding
+        .finish()
+        .expect("the reduced public-key attempt identifier derives");
+    let relation_plan_variant_hash = relation_plan_variant
+        .canonical_hash()
+        .expect("the reduced relation variant hashes canonically");
+    let derivation_binding_hash = Hash512::from_bytes(crate::hashing::hash_framed_parts_512(
+        SMALL_CHAIN_PRIVATE_COIN_BINDING_DOMAIN,
+        &[
+            canonical_public_input_bytes,
+            &source_replay_binding,
+            &relation_plan_variant_hash,
+        ],
+    ));
+    let coordinate_capacity =
+        CommonProofPrivateCoinCoordinateCapacity::from_relation_plan_variant(relation_plan_variant)
+            .expect("the reduced relation private-coin capacity derives");
+    let private_coins = PrivateRandomnessCommonProofCoinSource::new(
+        action_private_randomness,
+        ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+        derivation_binding_hash,
+        attempt_identifier,
+        coordinate_capacity,
+    )
+    .expect("the reduced production-private coin source starts");
+    SmallChainAttemptPrivateRandomness::new(private_coins)
+        .expect("the reduced construction-private seeds derive")
+}
+
+#[test]
+fn production_small_chain_private_randomness_binds_attempt_geometry_and_live_cursor() {
+    let (_, relation_plan_variant, _) = reduced_relation();
+    let canonical_public_input_bytes = b"canonical reduced public-key input fixture";
+    let source_replay_binding = [0x71_u8; Hash512::BYTE_LENGTH];
+    let mut first = small_chain_attempt_private_randomness(
+        &relation_plan_variant,
+        canonical_public_input_bytes,
+        source_replay_binding,
+        1,
+    );
+    let mut replayed = small_chain_attempt_private_randomness(
+        &relation_plan_variant,
+        canonical_public_input_bytes,
+        source_replay_binding,
+        1,
+    );
+    let mut changed_attempt = small_chain_attempt_private_randomness(
+        &relation_plan_variant,
+        canonical_public_input_bytes,
+        source_replay_binding,
+        2,
+    );
+
+    let initial_cursor = first.canonical_randomness_cursor_bytes();
+    assert_eq!(initial_cursor, replayed.canonical_randomness_cursor_bytes());
+    assert_ne!(
+        initial_cursor,
+        changed_attempt.canonical_randomness_cursor_bytes()
+    );
+
+    let first_extension = first
+        .sample_extension_element()
+        .expect("the first production-private extension element samples");
+    let replayed_extension = replayed
+        .sample_extension_element()
+        .expect("the replayed production-private extension element samples");
+    let changed_extension = changed_attempt
+        .sample_extension_element()
+        .expect("the changed-attempt extension element samples");
+    assert_eq!(first_extension, replayed_extension);
+    assert_ne!(first_extension, changed_extension);
+    assert_ne!(initial_cursor, first.canonical_randomness_cursor_bytes());
+
+    let leaf = OwnedResponseLeaf::Base(vec![
+        ProofBaseFieldElement::from_canonical(7).expect("seven is canonical"),
+        ProofBaseFieldElement::from_canonical(11).expect("eleven is canonical"),
+    ]);
+    let baseline_leaf_salt = first.private_leaf_salt(3, 2, 0, &leaf);
+    assert_eq!(
+        baseline_leaf_salt,
+        replayed.private_leaf_salt(3, 2, 0, &leaf)
+    );
+    assert_ne!(baseline_leaf_salt, first.private_leaf_salt(4, 2, 0, &leaf));
+    assert_ne!(baseline_leaf_salt, first.private_leaf_salt(3, 2, 1, &leaf));
+    assert_ne!(
+        baseline_leaf_salt,
+        changed_attempt.private_leaf_salt(3, 2, 0, &leaf)
+    );
+    assert_ne!(
+        baseline_leaf_salt[..COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH],
+        first.fiat_shamir_round_salt(3)
+    );
+
+    let cursor_before_whir = first.canonical_randomness_cursor_bytes();
+    let mut first_whir_bytes = [0_u8; 97];
+    let mut replayed_whir_bytes = [0_u8; 97];
+    first
+        .whir_random_source
+        .try_fill_bytes(&mut first_whir_bytes)
+        .expect("the infallible private WHIR stream fills bytes");
+    replayed
+        .whir_random_source
+        .try_fill_bytes(&mut replayed_whir_bytes)
+        .expect("the replayed private WHIR stream fills bytes");
+    assert_eq!(first_whir_bytes, replayed_whir_bytes);
+    assert_ne!(
+        cursor_before_whir,
+        first.canonical_randomness_cursor_bytes()
+    );
+    assert_eq!(
+        first.canonical_randomness_cursor_bytes(),
+        replayed.canonical_randomness_cursor_bytes()
+    );
+}
+
 fn replace_small_chain_canonical_section_payload(
     canonical: &[u8],
     section: SmallChainCanonicalSection,
@@ -1686,6 +2091,12 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         &canonical_public_input_bytes,
     )
     .expect("fresh small-chain public-input decoder accepts transported bytes");
+    let mut private_randomness = small_chain_attempt_private_randomness(
+        &relation_plan_variant,
+        &canonical_public_input_bytes,
+        source_replay_binding,
+        1,
+    );
 
     let copied_main_source_element_count = usize::try_from(cross_epoch_copy.copied_element_count())
         .expect("reduced copied source length fits usize");
@@ -1749,12 +2160,11 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         &[&canonical_public_input_bytes, &source_replay_binding],
     );
     let mut commitment_challenger = small_chain_whir_challenger(commitment_construction_binding);
-    let mut whir_random_source = SmallRng::seed_from_u64(0x5e_a1_ed_1a_77_1c_e);
     let (pre_challenge_source_commitment, pre_challenge_source_prover_data) =
         pre_challenge_whir_prover.commit(
             Poly::new(pre_challenge_source_values.clone()),
             &mut commitment_challenger,
-            &mut whir_random_source,
+            &mut private_randomness.whir_random_source,
         );
 
     let mut prover_transcript = CompactProverTranscript::new(
@@ -1772,7 +2182,11 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
     .expect("pre-challenge source commitment has one canonical binding");
     let mut source_response_values = digest_base_field_elements(source_replay_binding);
     source_response_values.extend(digest_base_field_elements(pre_challenge_commitment_binding));
-    let source_response = build_response(0, vec![OwnedResponseLeaf::Base(source_response_values)]);
+    let source_response = build_response(
+        &private_randomness,
+        0,
+        vec![OwnedResponseLeaf::Base(source_response_values)],
+    );
     prover_transcript
         .record_response_commitment(source_response.root, source_response.fiat_shamir_round_salt)
         .expect("authenticated source response enters the transcript");
@@ -1872,12 +2286,27 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         .collect::<Vec<_>>();
     let resident_matrices = ProductionRowSourceResidentMatrices::new(&row_source, &public_input)
         .expect("resident matrix view binds the structured row source");
-    let mut mask_seed = 10_000_u64;
+    let cfw_private_extension_element_count = cfw_geometry
+        .inner_mask_count()
+        .checked_mul(2)
+        .and_then(|count| {
+            cfw_geometry
+                .outer_mask_count()
+                .checked_mul(COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH)
+                .and_then(|outer_count| count.checked_add(outer_count))
+        })
+        .expect("the reduced CFW private sample count fits usize");
+    let cfw_private_extension_elements = private_randomness
+        .sample_extension_vector(cfw_private_extension_element_count)
+        .expect("small-chain CFW masks derive from production-private coins");
+    let mut cfw_private_extension_elements = cfw_private_extension_elements.into_iter();
     let mask_material = CompactCfwMaskMaterial::sample(cfw_geometry, || {
-        mask_seed += 29;
-        compact_test_challenge(mask_seed)
+        cfw_private_extension_elements
+            .next()
+            .expect("the pre-sampled CFW mask stream is complete")
     })
     .expect("small-chain CFW masks derive");
+    assert!(cfw_private_extension_elements.next().is_none());
     let whir_mask_material = mask_material.clone();
     let prepared_resident = PreparedCompactCfwProver::prepare(
         &resident_matrices,
@@ -1922,14 +2351,15 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
             .iter()
             .map(|mask| mask.to_vec())
             .collect(),
-        50_000,
+        &mut private_randomness,
         &whir_extension_commitment_scheme,
         &mut commitment_challenger,
-    );
+    )
+    .expect("inner mask commitment randomness derives from production-private coins");
     let (main_source_commitment, main_source_prover_data) = main_whir_prover.commit_extension(
         Poly::new(witness.clone()),
         &mut commitment_challenger,
-        &mut whir_random_source,
+        &mut private_randomness.whir_random_source,
     );
     let outer_mask_shape = MaskGroupShape {
         shape: MaskCodeShape::new(
@@ -1952,15 +2382,20 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
             .iter()
             .map(|mask| mask.to_vec())
             .collect(),
-        90_000,
+        &mut private_randomness,
         &whir_extension_commitment_scheme,
         &mut commitment_challenger,
-    );
+    )
+    .expect("outer mask commitment randomness derives from production-private coins");
     assert_eq!(committed_inner_mask_shape, inner_mask_shape);
     assert_eq!(committed_outer_mask_shape, outer_mask_shape);
 
-    let pre_challenge_mask = compact_test_challenge(130_001);
-    let main_mask = compact_test_challenge(130_301);
+    let pre_challenge_mask = private_randomness
+        .sample_extension_element()
+        .expect("the pre-challenge cross-epoch mask derives from production-private coins");
+    let main_mask = private_randomness
+        .sample_extension_element()
+        .expect("the main cross-epoch mask derives from production-private coins");
     let shared_mask_shape = MaskGroupShape {
         shape: MaskCodeShape::new(
             1,
@@ -1982,10 +2417,11 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
     } = commit_small_chain_mask_group(
         shared_mask_shape,
         shared_mask_messages.clone(),
-        130_600,
+        &mut private_randomness,
         &whir_extension_commitment_scheme,
         &mut commitment_challenger,
-    );
+    )
+    .expect("shared mask commitment randomness derives from production-private coins");
     let SmallChainCommittedMaskGroup {
         shape: replayed_shared_mask_shape,
         messages: main_shared_mask_messages,
@@ -1995,7 +2431,7 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
     } = build_small_chain_mask_group(
         shared_mask_shape,
         shared_mask_messages,
-        130_600,
+        pre_challenge_shared_mask_randomness.clone(),
         &whir_extension_commitment_scheme,
     );
     assert_eq!(committed_shared_mask_shape, shared_mask_shape);
@@ -2055,6 +2491,7 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
     let mut mask_response_base_values = digest_base_field_elements(assignment_commitment);
     mask_response_base_values.extend(digest_base_field_elements(post_lookup_commitment_binding));
     let mask_response = build_response(
+        &private_randomness,
         1,
         vec![
             OwnedResponseLeaf::Base(mask_response_base_values),
@@ -2096,6 +2533,7 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         CompactChallengeField::ZERO
     );
     let cross_epoch_response = build_response(
+        &private_randomness,
         2,
         vec![OwnedResponseLeaf::Extension(
             [
@@ -2161,6 +2599,7 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         let round_response_ordinal =
             u32::try_from(round_ordinal + 3).expect("CFW round response ordinal fits u32");
         let round_response = build_response(
+            &private_randomness,
             round_response_ordinal,
             vec![OwnedResponseLeaf::Extension(
                 resident_round_polynomial
@@ -2173,6 +2612,7 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
             )],
         );
         let external_round_response = build_response(
+            &private_randomness,
             round_response_ordinal,
             vec![OwnedResponseLeaf::Extension(
                 external_round_polynomial
@@ -2249,6 +2689,7 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
     let final_response_ordinal =
         u32::try_from(cfw_geometry.sumcheck_round_count() + 3).expect("final ordinal fits u32");
     let final_response = build_response(
+        &private_randomness,
         final_response_ordinal,
         vec![OwnedResponseLeaf::Extension(final_response_values.clone())],
     );
@@ -2265,6 +2706,7 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         .collect::<Vec<_>>();
     assert_eq!(external_final_response_values, final_response_values);
     let external_final_response = build_response(
+        &private_randomness,
         final_response_ordinal,
         vec![OwnedResponseLeaf::Extension(external_final_response_values)],
     );
@@ -2511,7 +2953,7 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
                 })
             },
             &mut whir_challenger,
-            &mut whir_random_source,
+            &mut private_randomness.whir_random_source,
         )
         .expect("the reduced base-field pre-challenge relation enters hiding WHIR");
     assert_eq!(
@@ -2672,7 +3114,7 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
                 })
             },
             &mut whir_challenger,
-            &mut whir_random_source,
+            &mut private_randomness.whir_random_source,
         )
         .expect("the reduced masked cross-epoch CFW relation enters hiding WHIR");
     assert_eq!(
@@ -3412,17 +3854,4 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         )
         .is_err()
     );
-}
-
-fn compact_test_challenge(seed: u64) -> CompactChallengeField {
-    compact_challenge_from_production(
-        ProofChallengeExtensionElement::from_canonical_coordinates([
-            seed,
-            seed + 1,
-            seed + 2,
-            seed + 3,
-            seed + 4,
-        ])
-        .expect("small-chain challenge coordinates are canonical"),
-    )
 }

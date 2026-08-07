@@ -92,9 +92,16 @@ sequential WHIR proving. A fresh path reconstructs those bindings from
 transported bytes, rederives every outer message, rechecks CFW, and verifies the
 pre-challenge base-source and main CFW relations sequentially. It rejects
 hostile relation, root-substitution, opening, and base-case mutations. The owner
-uses a constant test provider, a zero-centered valid assignment, deterministic
-test salts and coins, disclosed CFW masks in the outer CFW-only wire, and
-reduced first folds. Both WHIR proofs cross a test-only canonical envelope with
+uses a constant test provider, a zero-centered valid assignment, disclosed CFW
+masks in the outer CFW-only wire, and reduced first folds. A fixed test action
+root now drives the production action-private KMAC coin source. The hiding
+coordinate supplies the CFW and WHIR mask samples and independent WHIR and
+response-salt seeds; leaf and round salts are domain-separated, and the
+canonical randomness cursor combines the private-coin manifest with the live
+WHIR block and buffered-byte position. Focused coverage checks replay parity,
+attempt and geometry separation, and cursor movement. This does not supply live
+browser entropy or authenticate that cursor at resume. Both WHIR proofs cross a
+test-only canonical envelope with
 the outer CFW proof and all five external roots. A fresh decoder derives proof
 shape from verifier configuration, reproduces the exact bytes, and refuses
 hostile framing, field, external-root, internal-root, CFW, and WHIR-section
@@ -118,10 +125,11 @@ frontiers through the canonical-prefix contribution to the common checkpoint
 digest. Focused restore coverage includes a header-only prefix and a ready
 later response blocked by an earlier section. The generation host does not yet
 publish or resume this compact boundary, and selected-size response-value and
-private-randomness custody is absent. The provider, commitment
-construction, proof coins, WHIR challenger, and CFW mask transport remain
-test-only; production authority, compact durable execution, and measured
-browser evidence are absent, so proof generation remains refused.
+private-randomness custody is absent. The provider, commitment construction,
+WHIR challenger, CFW mask transport, and host custody of the small-chain
+randomness cursor remain test-only; production authority, compact durable
+execution, and measured browser evidence are absent, so proof generation
+remains refused.
 
 ## Open security issues
 

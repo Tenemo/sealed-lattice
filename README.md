@@ -343,8 +343,16 @@ handoff from transported bytes, and then verifies both three-round WHIR proofs.
 It rejects changed targets, source and mask covectors, cross-epoch openings,
 either base-case value, or any root-section substitution. The owner uses ring
 degree 2,048, a zero-centered valid assignment, a constant test provider,
-deterministic test salts and coins, disclosed CFW masks in the outer CFW-only
-wire, and reduced first folds. A test-only canonical envelope assigns the outer
+disclosed CFW masks in the outer CFW-only wire, and reduced first folds. Its
+fixed test action root now enters the production action-private KMAC custody:
+the hiding coordinate supplies every CFW and WHIR mask sample plus independent
+WHIR and response-salt seeds, leaf salts bind the complete response-leaf
+geometry, round salts use a separate KMAC domain, and the canonical randomness
+cursor combines the private-coin manifest with the live WHIR block and buffered-
+byte position. A focused owner checks replay parity, attempt separation,
+geometry separation, and cursor movement. This is production private-coin
+machinery driven by a deterministic test root, not browser entropy or an
+authenticated resume integration. A test-only canonical envelope assigns the outer
 CFW proof, five external roots, pre-challenge WHIR proof, and main WHIR proof to
 eight fixed ordered sections. WHIR vector lengths come only from verifier
 configuration, field limbs are canonical, and query coordinates remain
@@ -353,9 +361,9 @@ the envelope byte for byte and refuses wrong framing, duplicate or reordered
 sections, empty and oversized sections, truncation, trailing bytes,
 noncanonical fields, missing or unused WHIR bytes, and structural or semantic
 mutations across every section. The source provider, commitment construction,
-proof coins, WHIR challenger, and CFW mask transport remain test-only rather
-than production runtime owners. The owner therefore does not complete the
-production-shaped chain.
+WHIR challenger, CFW mask transport, and host custody of the canonical
+randomness cursor remain test-only rather than production runtime owners. The
+owner therefore does not complete the production-shaped chain.
 
 The canonical proof encoder can append one logical response at a time in
 verifier-owned order and release that response before accepting the next. It
@@ -838,7 +846,11 @@ exact public-input, CFW, and root-section bytes initialize the sequential WHIR
 handoff. Its fixed-order canonical envelope transports the embedded CFW proof,
 every external root, and both WHIR proofs through a fresh decoder and verifier
 with section-wide hostile coverage. It is not a production-authority,
-production-transcript, selected-size, or zero-knowledge owner.
+production-transcript, authenticated-resume, selected-size, or zero-knowledge
+owner. Its masks and salts now use the production action-private KMAC coin
+source under a fixed test root, and its canonical cursor includes both the
+private-coin manifest and live WHIR byte position; neither is yet connected to
+the production generation host.
 
 The static gate remains closed because current generation does not select the
 compact profile or exercise it through a retained live authority, because row-

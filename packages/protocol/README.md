@@ -46,7 +46,11 @@ canonical envelope containing the CFW section, five external roots, and both
 WHIR sections. A fresh decoder derives every WHIR shape from verifier
 configuration, re-encodes the exact bytes, and rejects hostile framing, field,
 root, and proof-section mutations. The chain still uses a constant provider,
-deterministic development coins, and a separate WHIR challenger. Production
+and a separate WHIR challenger. Its fixed test action root now drives the
+production action-private KMAC coin source for CFW and WHIR masks, domain-
+separated response salts, and WHIR randomness. A canonical cursor combines the
+private-coin manifest with the live WHIR block and buffered-byte position, but
+the generation host does not yet authenticate or resume it. Production
 authority, one canonical production transcript, authenticated restart,
 selected-size CFW and transpose execution, production transport integration,
 and release-WASM browser evidence remain open. After those gates pass, factor
