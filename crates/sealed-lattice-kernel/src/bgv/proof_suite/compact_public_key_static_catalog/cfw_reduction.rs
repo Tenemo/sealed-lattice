@@ -6,8 +6,9 @@
 
 use crate::bgv::proof_suite::compact_cfw::{
     COMPACT_CFW_INNER_ENDPOINT_CLAIM_COUNT, COMPACT_CFW_INNER_MASK_APPLICATION_MULTIPLIER,
-    COMPACT_CFW_INNER_MASK_MESSAGE_LENGTH, COMPACT_CFW_MATRIX_COUNT,
-    COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH, CompactCfwError, CompactCfwGeometry,
+    COMPACT_CFW_INNER_MASK_MESSAGE_LENGTH, COMPACT_CFW_LAST_ROUND_EXCLUDED_ELEMENT_COUNT,
+    COMPACT_CFW_MATRIX_COUNT, COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH, CompactCfwError,
+    CompactCfwGeometry,
 };
 use crate::bgv::proof_suite::relation_plan::CompactPublicKeyRelationCatalog;
 
@@ -25,7 +26,6 @@ const GLOBAL_COMMITTED_RELATION_CLAIM_COUNT: u64 = 1;
 const FINAL_VALUE_COUNT: u64 = COMPACT_CFW_MATRIX_COUNT as u64;
 const AUXILIARY_TARGET_COUNT: u64 = 1;
 const JOINT_CONSTRAINT_SOUNDNESS_NUMERATOR: u64 = 2;
-const LAST_ROUND_EXCLUDED_ELEMENT_COUNT: u64 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum R1csMatrixRole {
@@ -225,7 +225,7 @@ impl CfwReductionCatalog {
             per_round_extension_element_count,
             sumcheck_round_count,
             joint_constraint_extension_element_count,
-            last_round_excluded_element_count: LAST_ROUND_EXCLUDED_ELEMENT_COUNT,
+            last_round_excluded_element_count: COMPACT_CFW_LAST_ROUND_EXCLUDED_ELEMENT_COUNT,
             total_extension_element_count: verifier_randomness_total,
         };
 
@@ -247,8 +247,12 @@ impl CfwReductionCatalog {
                 5,
             )?,
             // The initial verifier message samples one combining scalar and
-            // the complete equality point. The concrete bad-transition
-            // polynomial has total degree at most `1 + sumcheck_round_count`.
+            // the complete equality point. If the auxiliary target is wrong,
+            // the affine combining-scalar identity has at most one root. If
+            // the target is correct but the R1CS witness is false, zero
+            // combining randomness or a root of the multilinear constraint
+            // identity can make the post-challenge state true. The uniform
+            // root bound is therefore `1 + sumcheck_round_count`.
             initial_consistency_soundness_numerator: u64::from(sumcheck_round_count)
                 .checked_add(1)
                 .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?,
@@ -430,7 +434,7 @@ impl CfwReductionCatalog {
                 .joint_constraint_extension_element_count
                 != 1
             || self.verifier_randomness.last_round_excluded_element_count
-                != LAST_ROUND_EXCLUDED_ELEMENT_COUNT
+                != COMPACT_CFW_LAST_ROUND_EXCLUDED_ELEMENT_COUNT
             || self.verifier_randomness.total_extension_element_count
                 != expected_verifier_randomness_total
             || self.honest_verifier_simulator_oracle_count

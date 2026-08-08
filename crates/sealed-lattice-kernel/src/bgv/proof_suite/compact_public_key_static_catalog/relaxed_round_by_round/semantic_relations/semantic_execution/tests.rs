@@ -37,13 +37,36 @@ fn factor_one_schedule_binds_all_82_moves_to_executable_semantic_owners() {
         schedule.move_at(81).unwrap().owner(),
         SemanticVerifierMoveOwner::MainWhirFinalQueries
     );
-    for (expected_ordinal, descriptor) in schedule.moves().iter().enumerate() {
+    for ((expected_ordinal, descriptor), transition) in schedule
+        .moves()
+        .iter()
+        .enumerate()
+        .zip(&catalog.transitions)
+    {
         assert_eq!(
             usize::try_from(descriptor.verifier_move_ordinal()).unwrap(),
             expected_ordinal
         );
         assert!(descriptor.preceding_prover_response_ordinal() > 0);
         assert!(descriptor.preceding_commitment_count() > 0);
+        assert_eq!(
+            descriptor.extraction_field_operation_bound(),
+            transition.extraction_field_operation_bound
+        );
+        assert_eq!(descriptor.extraction_error(), &transition.extraction_error);
+        assert_eq!(
+            descriptor.extraction_non_field_operation_bound(),
+            transition.extraction_non_field_operation_bound
+        );
+        assert_eq!(
+            descriptor.extraction_operation_bound(),
+            transition.extraction_operation_bound
+        );
+        assert_eq!(
+            descriptor.extraction_operation_bound(),
+            descriptor.extraction_field_operation_bound()
+                + descriptor.extraction_non_field_operation_bound()
+        );
         assert!(matches!(
             descriptor.challenge_space(),
             ExactChallengeSpace::ExtensionVector { .. }
@@ -139,6 +162,37 @@ fn factor_one_schedule_refuses_changed_move_count_and_challenge_distribution() {
     split_combined_move.transitions[26].roles = vec![VerifierMoveRole::CfwJointConstraint];
     assert_eq!(
         SemanticFactorOneSchedule::from_catalog(&split_combined_move),
+        Err(SemanticExecutionError::InvalidFactorOneSchedule)
+    );
+}
+
+#[test]
+fn factor_one_schedule_refuses_reordered_whir_semantic_owners() {
+    let mut catalog = factor_one_catalog();
+    let folding_positions = catalog
+        .transitions
+        .iter()
+        .enumerate()
+        .filter_map(|(position, transition)| match transition.roles.as_slice() {
+            [
+                VerifierMoveRole::WhirFolding {
+                    epoch: TranscriptEpoch::PreChallenge,
+                    batch_ordinal: 0,
+                    round_ordinal: 0 | 1,
+                },
+            ] => Some(position),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let [first, second] = folding_positions.as_slice() else {
+        panic!("the first pre-challenge batch must have two folding moves")
+    };
+    let first_roles = catalog.transitions[*first].roles.clone();
+    catalog.transitions[*first].roles = catalog.transitions[*second].roles.clone();
+    catalog.transitions[*second].roles = first_roles;
+
+    assert_eq!(
+        SemanticFactorOneSchedule::from_catalog(&catalog),
         Err(SemanticExecutionError::InvalidFactorOneSchedule)
     );
 }

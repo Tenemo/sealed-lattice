@@ -825,6 +825,8 @@ fn code_switch_bad_transition_derives_exact_query_escape() {
         semantic_whir_code_switch_bad_transition(&statement, &prefix, &fixture.output_witness)
             .unwrap(),
         Some(SemanticWhirCodeSwitchBadTransition::QueryEscape {
+            domain_size: 16,
+            selected_decoding_error_count: 4,
             differing_row_count: 5,
             query_positions: vec![1, 6],
         })

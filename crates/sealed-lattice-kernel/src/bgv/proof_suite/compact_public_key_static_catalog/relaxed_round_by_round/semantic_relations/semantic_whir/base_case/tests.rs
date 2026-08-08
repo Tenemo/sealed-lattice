@@ -707,6 +707,8 @@ fn base_final_bad_transition_derives_exact_distinct_query_escape() {
         semantic_whir_base_final_bad_transition(&fixture.statement, &changed_full_prefix).unwrap(),
         Some(vec![SemanticWhirBaseQueryEscape {
             role: SemanticWhirBaseOracleRole::Source,
+            domain_size: 8,
+            selected_decoding_error_count: 2,
             differing_row_count: 3,
             query_positions: vec![0, 4],
         }])

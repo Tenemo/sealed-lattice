@@ -23,8 +23,10 @@ mod base_case;
 mod opening_batching;
 
 pub(super) use base_case::{
-    SemanticWhirBaseCombinationBadTransition, SemanticWhirBaseKnowledgeWitness,
-    SemanticWhirBasePrefix, SemanticWhirBaseQueryEscape, SemanticWhirBaseStatement,
+    SemanticWhirBaseCombinationBadTransition, SemanticWhirBaseFreshMessage,
+    SemanticWhirBaseKnowledgeWitness, SemanticWhirBaseOracleRole,
+    SemanticWhirBasePreCombinationWitness, SemanticWhirBasePrefix, SemanticWhirBaseQueryChallenges,
+    SemanticWhirBaseQueryEscape, SemanticWhirBaseStatement,
     semantic_whir_base_combination_bad_transition, semantic_whir_base_combination_errbr,
     semantic_whir_base_final_bad_transition, semantic_whir_base_final_errbr,
     semantic_whir_base_kstate,
@@ -64,7 +66,45 @@ pub(super) fn semantic_whir_opening_batching_boundaries(
     Ok((input, output))
 }
 
-#[derive(Clone, Debug)]
+pub(super) fn semantic_whir_opening_input_pair(
+    statement: &SemanticWhirOpeningBatchingStatement,
+) -> (
+    &GeneralizedCommittedRelation,
+    &SemanticGeneralizedRelationInstance,
+) {
+    (&statement.input_relation, &statement.input_instance)
+}
+
+pub(super) fn semantic_whir_opening_output_pair(
+    statement: &SemanticWhirOpeningBatchingStatement,
+    prefix: &SemanticWhirOpeningBatchingPrefix,
+) -> Result<
+    (
+        GeneralizedCommittedRelation,
+        SemanticGeneralizedRelationInstance,
+    ),
+    SemanticWhirError,
+> {
+    let challenge = prefix
+        .batching_challenge
+        .ok_or(SemanticWhirError::MalformedPrefix)?;
+    opening_batching::batched_relation_and_instance(statement, challenge)
+}
+
+pub(super) fn semantic_whir_base_input_witness(
+    witness: &SemanticWhirBaseKnowledgeWitness,
+) -> Option<&SemanticGeneralizedRelationWitness> {
+    match witness {
+        SemanticWhirBaseKnowledgeWitness::Input(input)
+        | SemanticWhirBaseKnowledgeWitness::PreCombination(
+            SemanticWhirBasePreCombinationWitness { input, .. },
+        ) => Some(input),
+        SemanticWhirBaseKnowledgeWitness::Blinded(_)
+        | SemanticWhirBaseKnowledgeWitness::Terminal => None,
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct SemanticWhirMaskedSumcheckStatement {
     input_relation: GeneralizedCommittedRelation,
     input_instance: SemanticGeneralizedRelationInstance,
@@ -149,6 +189,42 @@ impl SemanticWhirMaskedSumcheckStatement {
             _ => Err(SemanticWhirError::InvalidGeometry),
         }
     }
+}
+
+pub(super) fn semantic_whir_masked_sumcheck_input_pair(
+    statement: &SemanticWhirMaskedSumcheckStatement,
+) -> (
+    &GeneralizedCommittedRelation,
+    &SemanticGeneralizedRelationInstance,
+) {
+    (&statement.input_relation, &statement.input_instance)
+}
+
+pub(super) fn semantic_whir_masked_sumcheck_output_pair(
+    statement: &SemanticWhirMaskedSumcheckStatement,
+    prefix: &SemanticWhirMaskedSumcheckPrefix,
+) -> Result<
+    (
+        GeneralizedCommittedRelation,
+        SemanticGeneralizedRelationInstance,
+    ),
+    SemanticWhirError,
+> {
+    validate_prefix(statement, prefix)?;
+    let combining_challenge = prefix
+        .combining_challenge
+        .ok_or(SemanticWhirError::MalformedPrefix)?;
+    if prefix.round_challenges.len() != statement.folding_factor
+        || prefix.round_wires.len() != statement.folding_factor
+    {
+        return Err(SemanticWhirError::MalformedPrefix);
+    }
+    relation_after_challenges(
+        statement,
+        prefix,
+        combining_challenge,
+        statement.folding_factor,
+    )
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -501,7 +577,7 @@ pub(super) fn semantic_whir_masked_sumcheck_bad_transition(
     }))
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct SemanticWhirCodeSwitchStatement {
     input_relation: GeneralizedCommittedRelation,
     input_instance: SemanticGeneralizedRelationInstance,
@@ -585,6 +661,45 @@ impl SemanticWhirCodeSwitchStatement {
     }
 }
 
+pub(super) fn semantic_whir_code_switch_input_pair(
+    statement: &SemanticWhirCodeSwitchStatement,
+) -> (
+    &GeneralizedCommittedRelation,
+    &SemanticGeneralizedRelationInstance,
+) {
+    (&statement.input_relation, &statement.input_instance)
+}
+
+pub(super) fn semantic_whir_code_switch_output_pair(
+    statement: &SemanticWhirCodeSwitchStatement,
+    prefix: &SemanticWhirCodeSwitchPrefix,
+) -> Result<
+    (
+        GeneralizedCommittedRelation,
+        SemanticGeneralizedRelationInstance,
+    ),
+    SemanticWhirError,
+> {
+    validate_code_switch_prefix(statement, prefix)?;
+    let query_positions = prefix
+        .query_positions
+        .as_deref()
+        .ok_or(SemanticWhirError::MalformedPrefix)?;
+    let combination_challenge = prefix
+        .combination_challenge
+        .ok_or(SemanticWhirError::MalformedPrefix)?;
+    code_switch_output_relation_and_instance(statement, query_positions, combination_challenge)
+}
+
+pub(super) fn semantic_whir_base_input_pair(
+    statement: &SemanticWhirBaseStatement,
+) -> (
+    &GeneralizedCommittedRelation,
+    &SemanticGeneralizedRelationInstance,
+) {
+    (&statement.input_relation, &statement.input_instance)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct SemanticWhirCodeSwitchPrefix {
     pub(super) query_positions: Option<Vec<usize>>,
@@ -594,6 +709,8 @@ pub(super) struct SemanticWhirCodeSwitchPrefix {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum SemanticWhirCodeSwitchBadTransition {
     QueryEscape {
+        domain_size: usize,
+        selected_decoding_error_count: usize,
         differing_row_count: usize,
         query_positions: Vec<usize>,
     },
@@ -693,6 +810,7 @@ pub(super) fn semantic_whir_code_switch_bad_transition(
             .source
             .coefficient_columns(source_relation)?,
     )?;
+    let source_geometry = semantic_code_geometry(source_relation)?;
     let differing_row_count = canonical_rows
         .iter()
         .zip(&statement.input_instance.source.received_rows)
@@ -701,11 +819,12 @@ pub(super) fn semantic_whir_code_switch_bad_transition(
     let sampled_rows_all_agree = query_positions.iter().all(|position| {
         canonical_rows[*position] == statement.input_instance.source.received_rows[*position]
     });
-    if differing_row_count
-        > semantic_code_geometry(source_relation)?.selected_decoding_error_count()
+    if differing_row_count > source_geometry.selected_decoding_error_count()
         && sampled_rows_all_agree
     {
         return Ok(Some(SemanticWhirCodeSwitchBadTransition::QueryEscape {
+            domain_size: source_geometry.block_length(),
+            selected_decoding_error_count: source_geometry.selected_decoding_error_count(),
             differing_row_count,
             query_positions: query_positions.clone(),
         }));
@@ -1345,13 +1464,14 @@ fn reconstruct_binary_mca_components(
     if combined_received_rows != combined_instance.received_rows {
         return Err(SemanticWhirError::InconsistentBadTransition);
     }
-    let canonical_post_rows = encode_canonical_interleaved_reed_solomon(
+    let canonical_post_encoding = encode_canonical_interleaved_reed_solomon_with_operation_count(
         geometry,
         &post_challenge_witness.coefficient_columns(relation)?,
     )?;
+    let canonical_post_rows = canonical_post_encoding.rows();
     let agreement_positions = combined_received_rows
         .iter()
-        .zip(&canonical_post_rows)
+        .zip(canonical_post_rows)
         .enumerate()
         .filter_map(|(position, (combined, canonical))| (combined == canonical).then_some(position))
         .collect::<Vec<_>>();
@@ -1424,8 +1544,10 @@ fn reconstruct_binary_mca_components(
     Ok(SemanticWhirBinaryMcaReconstruction::Witness {
         first,
         second,
-        field_operation_count: first_field_operation_count
-            .checked_add(second_field_operation_count)
+        field_operation_count: canonical_post_encoding
+            .field_operation_count()
+            .checked_add(first_field_operation_count)
+            .and_then(|count| count.checked_add(second_field_operation_count))
             .ok_or(SemanticWhirError::ArithmeticOverflow)?,
     })
 }

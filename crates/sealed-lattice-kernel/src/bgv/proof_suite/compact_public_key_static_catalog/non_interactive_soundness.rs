@@ -70,7 +70,7 @@ struct ConditionalCdhzStateRestorationArithmetic {
     verifier_randomness_term: ExactProbability,
     conditional_composed_round_by_round_term: ExactProbability,
     conditional_composed_verifier_randomness_term: ExactProbability,
-    extraction_field_operation_scale_without_hidden_constant: BigUint,
+    extraction_operation_scale_without_theorem_hidden_constant: BigUint,
     theorem_extraction_time_has_hidden_constant: bool,
 }
 
@@ -272,9 +272,9 @@ impl ConditionalCdhzStateRestorationArithmetic {
             round_by_round_term.scale(&BigUint::from(CDHZ_COMPOSITION_STATE_MULTIPLIER))?;
         let conditional_composed_verifier_randomness_term =
             verifier_randomness_term.scale(&BigUint::from(CDHZ_COMPOSITION_STATE_MULTIPLIER))?;
-        let extraction_field_operation_scale_without_hidden_constant =
+        let extraction_operation_scale_without_theorem_hidden_constant =
             BigUint::from(logical_round_count)
-                * BigUint::from(relaxed_round_by_round.total_extraction_field_operation_bound())
+                * BigUint::from(relaxed_round_by_round.maximum_extraction_operation_bound())
                 + BigUint::from(FIAT_SHAMIR_ROUND_SALT_BIT_LENGTH);
 
         Ok(Self {
@@ -287,7 +287,7 @@ impl ConditionalCdhzStateRestorationArithmetic {
             verifier_randomness_term,
             conditional_composed_round_by_round_term,
             conditional_composed_verifier_randomness_term,
-            extraction_field_operation_scale_without_hidden_constant,
+            extraction_operation_scale_without_theorem_hidden_constant,
             theorem_extraction_time_has_hidden_constant: true,
         })
     }
@@ -476,7 +476,7 @@ impl PackingNonInteractiveSoundness {
             per_proof_adaptive_qrom_soundness_bound
                 .scale(&BigUint::from(selected_inventory_physical_proof_count))?;
         let total_extraction_work_scale_without_hidden_constant = &conditional_state_restoration
-            .extraction_field_operation_scale_without_hidden_constant
+            .extraction_operation_scale_without_theorem_hidden_constant
             + &conditional_cdhz_merkle.extraction_work_scale_without_hidden_constant;
         let per_proof_binary_security_level =
             conservative_binary_security_level(&per_proof_adaptive_qrom_soundness_bound);
@@ -581,6 +581,15 @@ mod tests {
         let expected_abstract_bcs_verifier_oracle_query_counts =
             [248_549, 252_363, 254_469, 259_019];
         let expected_maximum_leaf_value_byte_lengths = [5_120, 2_760, 2_760, 2_760];
+        let expected_per_proof_binary_security_levels = [99, 99, 99, 99];
+        let expected_public_key_share_binary_security_levels = [96, 95, 95, 96];
+        let expected_selected_inventory_conditional_binary_security_levels = [92, 92, 92, 92];
+        let expected_maximum_extraction_field_operation_bounds = [
+            432_349_246_225_014_321,
+            1_729_402_637_674_205_615,
+            6_917_569_611_939_171_917,
+            27_670_197_101_919_521_947,
+        ];
 
         for (factor_ordinal, factor) in catalog.factor_catalogs.iter().enumerate() {
             let expected_logical_round_count = expected_logical_round_counts[factor_ordinal];
@@ -595,11 +604,23 @@ mod tests {
             let expected_maximum_leaf_value_byte_length =
                 expected_maximum_leaf_value_byte_lengths[factor_ordinal];
             let ledger = &factor.non_interactive_soundness;
-            assert_eq!(ledger.per_proof_binary_security_level, 98);
-            assert_eq!(ledger.public_key_share_binary_security_level, 95);
+            assert_eq!(
+                ledger.per_proof_binary_security_level,
+                expected_per_proof_binary_security_levels[factor_ordinal]
+            );
+            assert_eq!(
+                ledger.public_key_share_binary_security_level,
+                expected_public_key_share_binary_security_levels[factor_ordinal]
+            );
             assert_eq!(
                 ledger.selected_inventory_conditional_binary_security_level,
-                92
+                expected_selected_inventory_conditional_binary_security_levels[factor_ordinal]
+            );
+            assert_eq!(
+                factor
+                    .relaxed_round_by_round
+                    .maximum_extraction_field_operation_bound(),
+                expected_maximum_extraction_field_operation_bounds[factor_ordinal]
             );
             assert_eq!(ledger.bcs_response_root_count, expected_logical_round_count);
             assert_eq!(
@@ -716,14 +737,26 @@ mod tests {
             assert!(
                 ledger
                     .conditional_state_restoration
-                    .extraction_field_operation_scale_without_hidden_constant
+                    .extraction_operation_scale_without_theorem_hidden_constant
                     > BigUint::one()
+            );
+            assert_eq!(
+                ledger
+                    .conditional_state_restoration
+                    .extraction_operation_scale_without_theorem_hidden_constant,
+                BigUint::from(expected_logical_round_count)
+                    * BigUint::from(
+                        factor
+                            .relaxed_round_by_round
+                            .maximum_extraction_operation_bound(),
+                    )
+                    + BigUint::from(FIAT_SHAMIR_ROUND_SALT_BIT_LENGTH)
             );
             assert_eq!(
                 ledger.total_extraction_work_scale_without_hidden_constant,
                 &ledger
                     .conditional_state_restoration
-                    .extraction_field_operation_scale_without_hidden_constant
+                    .extraction_operation_scale_without_theorem_hidden_constant
                     + &ledger
                         .conditional_cdhz_merkle
                         .extraction_work_scale_without_hidden_constant

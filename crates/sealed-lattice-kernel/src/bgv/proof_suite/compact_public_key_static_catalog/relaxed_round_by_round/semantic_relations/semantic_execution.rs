@@ -8,7 +8,7 @@
 //! A role label by itself never produces an accepting result.
 
 use super::super::{
-    CROSS_EPOCH_POINT_COORDINATE_COUNT, CodeRole, ExactChallengeSpace,
+    CROSS_EPOCH_POINT_COORDINATE_COUNT, CodeRole, ExactChallengeSpace, ExactProbability,
     GOLDILOCKS_BASE_FIELD_MODULUS, RelaxedRoundByRoundCatalog, TranscriptEpoch, UniqueDecodingCode,
     VerifierMoveRole, WHIR_ROUND_COUNT,
 };
@@ -23,6 +23,7 @@ use super::semantic_composition::{
     semantic_pre_whir_final_and_main_opening_errbr,
     semantic_pre_whir_final_and_main_opening_kstate,
 };
+use super::semantic_error_bounds::derive_bad_transition_certificate_events;
 use super::semantic_outer::{
     SemanticOuterError, SemanticProductionOuterBadTransition, SemanticProductionOuterPrefix,
     SemanticProductionOuterStatement, SemanticProductionOuterWitness,
@@ -34,13 +35,13 @@ use super::semantic_whir::{
     SemanticWhirBaseKnowledgeWitness, SemanticWhirBasePrefix, SemanticWhirBaseQueryEscape,
     SemanticWhirBaseStatement, SemanticWhirCodeSwitchBadTransition, SemanticWhirCodeSwitchPrefix,
     SemanticWhirCodeSwitchStatement, SemanticWhirError, SemanticWhirMaskedSumcheckPrefix,
-    SemanticWhirMaskedSumcheckStatement, SemanticWhirOpeningBatchingStatement,
-    semantic_whir_base_combination_bad_transition, semantic_whir_base_combination_errbr,
-    semantic_whir_base_final_bad_transition, semantic_whir_base_final_errbr,
-    semantic_whir_base_kstate, semantic_whir_code_switch_bad_transition,
-    semantic_whir_code_switch_errbr, semantic_whir_code_switch_kstate,
-    semantic_whir_masked_sumcheck_bad_transition, semantic_whir_masked_sumcheck_errbr,
-    semantic_whir_masked_sumcheck_kstate,
+    SemanticWhirMaskedSumcheckStatement, SemanticWhirOpeningBatchingPrefix,
+    SemanticWhirOpeningBatchingStatement, semantic_whir_base_combination_bad_transition,
+    semantic_whir_base_combination_errbr, semantic_whir_base_final_bad_transition,
+    semantic_whir_base_final_errbr, semantic_whir_base_kstate,
+    semantic_whir_code_switch_bad_transition, semantic_whir_code_switch_errbr,
+    semantic_whir_code_switch_kstate, semantic_whir_masked_sumcheck_bad_transition,
+    semantic_whir_masked_sumcheck_errbr, semantic_whir_masked_sumcheck_kstate,
 };
 use super::*;
 
@@ -151,6 +152,10 @@ pub(super) struct SemanticFactorOneMoveDescriptor {
     preceding_prover_response_ordinal: u32,
     preceding_commitment_count: u64,
     challenge_space: ExactChallengeSpace,
+    extraction_error: ExactProbability,
+    extraction_field_operation_bound: u128,
+    extraction_non_field_operation_bound: u128,
+    extraction_operation_bound: u128,
 }
 
 impl SemanticFactorOneMoveDescriptor {
@@ -174,6 +179,22 @@ impl SemanticFactorOneMoveDescriptor {
         &self.challenge_space
     }
 
+    pub(super) const fn extraction_error(&self) -> &ExactProbability {
+        &self.extraction_error
+    }
+
+    pub(super) const fn extraction_field_operation_bound(&self) -> u128 {
+        self.extraction_field_operation_bound
+    }
+
+    pub(super) const fn extraction_non_field_operation_bound(&self) -> u128 {
+        self.extraction_non_field_operation_bound
+    }
+
+    pub(super) const fn extraction_operation_bound(&self) -> u128 {
+        self.extraction_operation_bound
+    }
+
     #[cfg(test)]
     pub(super) fn for_focused_test(owner: SemanticVerifierMoveOwner) -> Self {
         Self {
@@ -185,7 +206,30 @@ impl SemanticFactorOneMoveDescriptor {
                 element_count: 1,
                 excluded_element_count: 0,
             },
+            extraction_error: ExactProbability::new(1_u8.into(), 1_u8.into())
+                .expect("one is an exact probability"),
+            extraction_field_operation_bound: u128::MAX,
+            extraction_non_field_operation_bound: u128::MAX,
+            extraction_operation_bound: u128::MAX,
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_field_operation_bound_for_focused_test(
+        mut self,
+        extraction_field_operation_bound: u128,
+    ) -> Self {
+        self.extraction_field_operation_bound = extraction_field_operation_bound;
+        self
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_extraction_error_for_focused_test(
+        mut self,
+        extraction_error: ExactProbability,
+    ) -> Self {
+        self.extraction_error = extraction_error;
+        self
     }
 }
 
@@ -210,6 +254,10 @@ impl SemanticFactorOneSchedule {
                 .ok_or(SemanticExecutionError::InvalidFactorOneSchedule)?;
             if usize::try_from(transition.verifier_move_ordinal).ok() != Some(expected_ordinal)
                 || !challenge_space_matches_owner(owner, &transition.challenge_space, catalog)
+                || transition
+                    .extraction_field_operation_bound
+                    .checked_add(transition.extraction_non_field_operation_bound)
+                    != Some(transition.extraction_operation_bound)
             {
                 return Err(SemanticExecutionError::InvalidFactorOneSchedule);
             }
@@ -219,10 +267,15 @@ impl SemanticFactorOneSchedule {
                 preceding_prover_response_ordinal: transition.preceding_prover_response_ordinal,
                 preceding_commitment_count: transition.preceding_commitment_count,
                 challenge_space: transition.challenge_space.clone(),
+                extraction_error: transition.extraction_error.clone(),
+                extraction_field_operation_bound: transition.extraction_field_operation_bound,
+                extraction_non_field_operation_bound: transition
+                    .extraction_non_field_operation_bound,
+                extraction_operation_bound: transition.extraction_operation_bound,
             });
         }
         let schedule = Self { moves };
-        schedule.check_owner_multiplicities()?;
+        schedule.check_owner_chronology(catalog)?;
         Ok(schedule)
     }
 
@@ -243,45 +296,23 @@ impl SemanticFactorOneSchedule {
             .ok_or(SemanticExecutionError::InvalidFactorOneSchedule)
     }
 
-    fn check_owner_multiplicities(&self) -> Result<(), SemanticExecutionError> {
-        let cfw_round_ordinals = self
+    fn check_owner_chronology(
+        &self,
+        catalog: &RelaxedRoundByRoundCatalog,
+    ) -> Result<(), SemanticExecutionError> {
+        let expected_owners = expected_factor_one_owner_chronology(catalog)?;
+        let actual_owners = self
             .moves
             .iter()
-            .filter_map(|descriptor| match descriptor.owner {
-                SemanticVerifierMoveOwner::CfwSumcheckRound { round_ordinal } => {
-                    Some(round_ordinal)
-                }
-                _ => None,
-            })
+            .map(|descriptor| descriptor.owner)
             .collect::<Vec<_>>();
-        let folding_move_count = self
-            .moves
-            .iter()
-            .filter(|descriptor| {
-                matches!(
-                    descriptor.owner,
-                    SemanticVerifierMoveOwner::WhirFolding { .. }
-                )
-            })
-            .count();
-        let count = |owner: SemanticVerifierMoveOwner| {
-            self.moves
+        if actual_owners != expected_owners
+            || expected_owners.len() != FACTOR_ONE_VERIFIER_MOVE_COUNT
+            || expected_owners
                 .iter()
-                .filter(|descriptor| descriptor.owner == owner)
+                .filter(|owner| matches!(owner, SemanticVerifierMoveOwner::WhirFolding { .. }))
                 .count()
-        };
-        let expected_cfw_round_ordinals =
-            (0..u32::try_from(FACTOR_ONE_CFW_SUMCHECK_ROUND_COUNT)
-                .map_err(|_| SemanticExecutionError::ArithmeticOverflow)?)
-                .collect::<Vec<_>>();
-        if cfw_round_ordinals != expected_cfw_round_ordinals
-            || folding_move_count != FACTOR_ONE_WHIR_FOLDING_MOVE_COUNT
-            || count(SemanticVerifierMoveOwner::LookupChallenge) != 1
-            || count(SemanticVerifierMoveOwner::CrossEpochPoint) != 1
-            || count(SemanticVerifierMoveOwner::CfwInitialRandomness) != 1
-            || count(SemanticVerifierMoveOwner::CfwJointAndPreWhirOpening) != 1
-            || count(SemanticVerifierMoveOwner::PreWhirFinalAndMainWhirOpening) != 1
-            || count(SemanticVerifierMoveOwner::MainWhirFinalQueries) != 1
+                != FACTOR_ONE_WHIR_FOLDING_MOVE_COUNT
             || self.moves.windows(2).any(|moves| {
                 moves[0].preceding_prover_response_ordinal
                     > moves[1].preceding_prover_response_ordinal
@@ -292,6 +323,82 @@ impl SemanticFactorOneSchedule {
         }
         Ok(())
     }
+}
+
+fn expected_factor_one_owner_chronology(
+    catalog: &RelaxedRoundByRoundCatalog,
+) -> Result<Vec<SemanticVerifierMoveOwner>, SemanticExecutionError> {
+    let mut owners = Vec::with_capacity(FACTOR_ONE_VERIFIER_MOVE_COUNT);
+    owners.push(SemanticVerifierMoveOwner::LookupChallenge);
+    owners.push(SemanticVerifierMoveOwner::CrossEpochPoint);
+    owners.push(SemanticVerifierMoveOwner::CfwInitialRandomness);
+    for round_ordinal in 0..catalog.cfw.sumcheck_round_count {
+        owners.push(SemanticVerifierMoveOwner::CfwSumcheckRound { round_ordinal });
+    }
+    owners.push(SemanticVerifierMoveOwner::CfwJointAndPreWhirOpening);
+    append_expected_whir_owner_chronology(&mut owners, catalog, TranscriptEpoch::PreChallenge)?;
+    owners.push(SemanticVerifierMoveOwner::PreWhirFinalAndMainWhirOpening);
+    append_expected_whir_owner_chronology(&mut owners, catalog, TranscriptEpoch::Main)?;
+    owners.push(SemanticVerifierMoveOwner::MainWhirFinalQueries);
+    Ok(owners)
+}
+
+fn append_expected_whir_owner_chronology(
+    owners: &mut Vec<SemanticVerifierMoveOwner>,
+    catalog: &RelaxedRoundByRoundCatalog,
+    epoch: TranscriptEpoch,
+) -> Result<(), SemanticExecutionError> {
+    let mut accounted_folding_moves = 0_usize;
+    for batch_ordinal in 0..=WHIR_ROUND_COUNT {
+        let batch_ordinal =
+            u8::try_from(batch_ordinal).map_err(|_| SemanticExecutionError::ArithmeticOverflow)?;
+        owners.push(SemanticVerifierMoveOwner::WhirMaskedSumcheckCombination {
+            epoch,
+            batch_ordinal,
+        });
+        let mut round_ordinals = catalog
+            .whir_mca_bounds
+            .iter()
+            .filter(|bound| bound.epoch == epoch && bound.batch_ordinal == batch_ordinal)
+            .map(|bound| bound.round_ordinal)
+            .collect::<Vec<_>>();
+        round_ordinals.sort_unstable();
+        if round_ordinals.is_empty()
+            || round_ordinals
+                .iter()
+                .copied()
+                .enumerate()
+                .any(|(expected, actual)| usize::from(actual) != expected)
+        {
+            return Err(SemanticExecutionError::InvalidFactorOneSchedule);
+        }
+        accounted_folding_moves = accounted_folding_moves
+            .checked_add(round_ordinals.len())
+            .ok_or(SemanticExecutionError::ArithmeticOverflow)?;
+        owners.extend(round_ordinals.into_iter().map(|round_ordinal| {
+            SemanticVerifierMoveOwner::WhirFolding {
+                epoch,
+                batch_ordinal,
+                round_ordinal,
+            }
+        }));
+        if usize::from(batch_ordinal) < WHIR_ROUND_COUNT {
+            owners.push(SemanticVerifierMoveOwner::WhirCodeSwitch {
+                epoch,
+                round_ordinal: batch_ordinal,
+            });
+        }
+    }
+    let expected_folding_moves = catalog
+        .whir_mca_bounds
+        .iter()
+        .filter(|bound| bound.epoch == epoch)
+        .count();
+    if accounted_folding_moves != expected_folding_moves {
+        return Err(SemanticExecutionError::InvalidFactorOneSchedule);
+    }
+    owners.push(SemanticVerifierMoveOwner::WhirBaseCombination { epoch });
+    Ok(())
 }
 
 fn challenge_space_matches_owner(
@@ -737,7 +844,130 @@ pub(super) fn semantic_factor_one_errbr<Matrices: CompactCfwR1csMatrices>(
         }
         _ => return Err(SemanticExecutionError::MismatchedMoveData),
     };
+    if extraction.field_operation_count > descriptor.extraction_field_operation_bound {
+        return Err(SemanticExecutionError::ExtractionWorkBoundExceeded);
+    }
     Ok(extraction)
+}
+
+/// Removes exactly the current verifier message from an extended prefix.
+///
+/// This is the transcript operation used by the construction-wide relaxed
+/// experiment. It preserves every preceding prover message and every earlier
+/// verifier challenge; it never rebuilds a prefix from a role label.
+pub(super) fn semantic_factor_one_preceding_prefix(
+    descriptor: &SemanticFactorOneMoveDescriptor,
+    extended_prefix: &SemanticVerifierMovePrefix,
+) -> Result<SemanticVerifierMovePrefix, SemanticExecutionError> {
+    validate_prefix_stage(descriptor.owner, extended_prefix, true)?;
+    let preceding_prefix = match (descriptor.owner, extended_prefix) {
+        (
+            SemanticVerifierMoveOwner::LookupChallenge,
+            SemanticVerifierMovePrefix::ProductionOuter(
+                SemanticProductionOuterPrefix::LookupChallengeSampled {
+                    pre_challenge_source,
+                    ..
+                },
+            ),
+        ) => SemanticVerifierMovePrefix::ProductionOuter(
+            SemanticProductionOuterPrefix::PreChallengeSourceCommitted {
+                pre_challenge_source: pre_challenge_source.clone(),
+            },
+        ),
+        (
+            SemanticVerifierMoveOwner::CrossEpochPoint,
+            SemanticVerifierMovePrefix::ProductionOuter(
+                SemanticProductionOuterPrefix::CrossEpochPointSampled {
+                    commitments,
+                    lookup_challenge,
+                    ..
+                },
+            ),
+        ) => SemanticVerifierMovePrefix::ProductionOuter(
+            SemanticProductionOuterPrefix::PostLookupCommitments {
+                commitments: commitments.clone(),
+                lookup_challenge: *lookup_challenge,
+            },
+        ),
+        (
+            SemanticVerifierMoveOwner::CfwInitialRandomness
+            | SemanticVerifierMoveOwner::CfwSumcheckRound { .. },
+            SemanticVerifierMovePrefix::Cfw(prefix),
+        ) => SemanticVerifierMovePrefix::Cfw(semantic_cfw_preceding_prefix(prefix)?),
+        (
+            SemanticVerifierMoveOwner::CfwJointAndPreWhirOpening,
+            SemanticVerifierMovePrefix::CfwAndPreWhirOpening(prefix),
+        ) => {
+            let mut cfw = semantic_cfw_preceding_prefix(&prefix.cfw)?;
+            cfw.joint_constraint_challenge = None;
+            SemanticVerifierMovePrefix::CfwAndPreWhirOpening(SemanticCfwAndPreWhirOpeningPrefix {
+                cfw,
+                pre_challenge_opening: SemanticWhirOpeningBatchingPrefix {
+                    batching_challenge: None,
+                },
+            })
+        }
+        (
+            SemanticVerifierMoveOwner::WhirMaskedSumcheckCombination { .. },
+            SemanticVerifierMovePrefix::WhirMaskedSumcheck(prefix),
+        ) => {
+            let mut prefix = prefix.clone();
+            prefix.combining_challenge = None;
+            SemanticVerifierMovePrefix::WhirMaskedSumcheck(prefix)
+        }
+        (
+            SemanticVerifierMoveOwner::WhirFolding { .. },
+            SemanticVerifierMovePrefix::WhirMaskedSumcheck(prefix),
+        ) => {
+            let mut prefix = prefix.clone();
+            prefix
+                .round_challenges
+                .pop()
+                .ok_or(SemanticExecutionError::MalformedPrefix)?;
+            SemanticVerifierMovePrefix::WhirMaskedSumcheck(prefix)
+        }
+        (
+            SemanticVerifierMoveOwner::WhirCodeSwitch { .. },
+            SemanticVerifierMovePrefix::WhirCodeSwitch(prefix),
+        ) => {
+            let mut prefix = prefix.clone();
+            prefix.query_positions = None;
+            prefix.combination_challenge = None;
+            SemanticVerifierMovePrefix::WhirCodeSwitch(prefix)
+        }
+        (
+            SemanticVerifierMoveOwner::WhirBaseCombination { .. },
+            SemanticVerifierMovePrefix::WhirBase(prefix),
+        ) => {
+            let mut prefix = prefix.clone();
+            prefix.combination_challenge = None;
+            SemanticVerifierMovePrefix::WhirBase(prefix)
+        }
+        (
+            SemanticVerifierMoveOwner::PreWhirFinalAndMainWhirOpening,
+            SemanticVerifierMovePrefix::PreWhirFinalAndMainWhirOpening(prefix),
+        ) => {
+            let mut prefix = prefix.clone();
+            prefix.pre_challenge_base.query_challenges = None;
+            prefix.main_opening.batching_challenge = None;
+            SemanticVerifierMovePrefix::PreWhirFinalAndMainWhirOpening(prefix)
+        }
+        (
+            SemanticVerifierMoveOwner::MainWhirFinalQueries,
+            SemanticVerifierMovePrefix::WhirBase(prefix),
+        ) => {
+            let mut prefix = prefix.clone();
+            prefix.query_challenges = None;
+            SemanticVerifierMovePrefix::WhirBase(prefix)
+        }
+        _ => return Err(SemanticExecutionError::MismatchedMoveData),
+    };
+    if validate_prefix_stage(descriptor.owner, &preceding_prefix, false)?
+        != SemanticPrefixStage::PrecedingProverPrefix
+    {
+        return Err(SemanticExecutionError::MalformedPrefix);
+    }
+    Ok(preceding_prefix)
 }
 
 pub(super) fn semantic_factor_one_bad_transition<Matrices: CompactCfwR1csMatrices>(
@@ -828,7 +1058,29 @@ pub(super) fn semantic_factor_one_bad_transition<Matrices: CompactCfwR1csMatrice
         }
         _ => return Err(SemanticExecutionError::MismatchedMoveData),
     };
+    if let Some(certificate) = &bad_transition {
+        validate_bad_transition_certificate_bound(descriptor, certificate)?;
+    }
     Ok(bad_transition)
+}
+
+pub(super) fn validate_bad_transition_certificate_bound(
+    descriptor: &SemanticFactorOneMoveDescriptor,
+    certificate: &SemanticVerifierMoveBadTransition,
+) -> Result<(), SemanticExecutionError> {
+    let events = derive_bad_transition_certificate_events(descriptor, certificate)
+        .map_err(|_| SemanticExecutionError::InvalidBadTransitionCertificate)?;
+    let total_probability = events
+        .iter()
+        .try_fold(
+            ExactProbability::zero(),
+            |accumulated_probability, event| accumulated_probability.add(&event.probability),
+        )
+        .map_err(|_| SemanticExecutionError::InvalidBadTransitionCertificate)?;
+    if total_probability.is_greater_than(descriptor.extraction_error()) {
+        return Err(SemanticExecutionError::BadTransitionProbabilityBoundExceeded);
+    }
+    Ok(())
 }
 
 fn validate_statement_owner<Matrices: CompactCfwR1csMatrices>(
@@ -877,12 +1129,12 @@ fn validate_statement_owner<Matrices: CompactCfwR1csMatrices>(
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SemanticPrefixStage {
+pub(super) enum SemanticPrefixStage {
     PrecedingProverPrefix,
     ExtendedVerifierPrefix,
 }
 
-fn validate_prefix_stage(
+pub(super) fn validate_prefix_stage(
     owner: SemanticVerifierMoveOwner,
     prefix: &SemanticVerifierMovePrefix,
     require_extended: bool,
@@ -1073,8 +1325,11 @@ fn whir_folding_prefix_stage(
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum SemanticExecutionError {
     ArithmeticOverflow,
+    BadTransitionProbabilityBoundExceeded,
     Cfw(SemanticCfwError),
     Composition(SemanticCompositionError),
+    ExtractionWorkBoundExceeded,
+    InvalidBadTransitionCertificate,
     InvalidFactorOneSchedule,
     MalformedPrefix,
     MismatchedMoveData,

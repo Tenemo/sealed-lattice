@@ -265,11 +265,20 @@ the exact CFW input, intermediate, and output relation shapes; the
 semantic initial-transition bound `24 / |F|` for one combining scalar and the
 23-coordinate equality point; 22 ordinary `8 / |F|` sumcheck rows; the final
 `8 / (|F| - 2)` row; the joint `2 / |F|` zero-evader row; and every odd-
-characteristic, mask-length, list-size-one, and sequential-composition
-hypothesis used from CFW Theorem 11.3. Each Reed-Solomon code uses its full
-message-plus-hiding dimension, the strict integer radius
-`floor((N - K - 1) / 2)`, an executable canonical Berlekamp-Welch decoder, and
-a provisional correction-work ceiling for that decoder. Focused owners recover
+characteristic, mask-length, list-size-one, correction, queryless-IOR, and
+sequential-composition condition used by the executable CFW reduction. CFW
+Theorem 11.3 instead prints `(ell_out + 1) / |F| = 9 / |F|` for the first
+coordinate at the production outer-mask message length. That value does not
+cover the executable initial identity: zero combining randomness contributes
+one root and the 23-coordinate multilinear constraint identity contributes at
+most 23 more. The published coordinate is retained only as paper
+correspondence and cannot replace the operative `24 / |F|` bound. Exact
+citation-level correspondence to CFW Theorem 11.3 therefore remains refused;
+the executable semantic theorem uses the direct bad-transition proof instead.
+Each Reed-Solomon code uses its full message-plus-hiding dimension, the strict
+integer radius `floor((N - K - 1) / 2)`, an executable canonical Berlekamp-Welch
+decoder, and a provisional correction-work ceiling for that decoder. Focused
+owners recover
 zero, one, and the maximum permitted number of shared row errors, reject excess
 and malformed oracles, recompute concrete R1CS rows through verifier-owned
 matrices, and check decoded source and mask messages against every public
@@ -286,9 +295,13 @@ the committed row-code domain carried by the batch, including internal folds;
 it is not charged on an uncommitted scalar layer. An executable owner derives
 every factor-one bad-event family from the semantic relation, code, and
 challenge geometry and requires all 82 per-move totals and their maximum to
-equal the independently constructed numerical ledger. This is not yet the
-complete bad-transition theorem, so the maximum remains only a conditional
-CDHZ input; it is at most `2^-266`.
+equal the independently constructed numerical ledger. Every concrete `ERRBR`
+bad-transition certificate is also reinterpreted as those exact event families,
+summed, and refused if it exceeds the error bound carried by its owning move.
+The direct semantic proof therefore establishes the maximum per-move
+extraction error at no more than `2^-266` without using the printed CFW first
+coordinate. Later CDHZ composition remains conditional on the masking,
+emitted-byte, Merkle, and complete-proof owners.
 
 The CFW slice now has an executable knowledge-state predicate over a canonical
 statement, verifier-owned matrices and public input, committed source and mask
@@ -300,8 +313,11 @@ evaluated separately by the bad-transition experiment, while `ERRBR` remains a
 deterministic polynomial-time algorithm. The canonical decoder now owns its
 field-operation ceiling, including evaluation-point generation, system
 construction, deterministic row reduction, monic division, and both executable
-re-encodings. It refuses substituted witnesses, masks, targets, round
-polynomials, final values, and malformed chronology. The production matrix
+re-encodings. The construction dispatcher validates only the active move's
+canonical bindings instead of replaying completed histories inside `ERRBR`; a
+hostile-history regression requires the full `KState` to refuse while the local
+extraction remains unchanged. It refuses substituted witnesses, masks, targets,
+round polynomials, final values, and malformed chronology. The production matrix
 adapter evaluates each candidate witness instead of replaying cached honest
 rows. Semantic WHIR owners execute opening batching, masked sumcheck, code
 switching, folding, and both terminal base relations. The exact CFW cross-epoch
@@ -314,15 +330,51 @@ WHIR, and two atomic composition owners; focused fixtures exercise every
 dispatcher branch. The construction-wide catalog structurally derives both
 implicit tuple dimensions as zero: its input RR1CS instance is explicit, every
 code oracle is a prover message, and both terminal output relations are
-trivial. This is still not the complete relaxed theorem. There is no single
-construction-wide prefix object that proves the empty-transcript, every prover-
-prefix, and full-transcript properties over one canonical execution; the
-adjacent extracted-witness transitions and every full-chronology bad-transition
-implication have not been proved together. The historical extraction-work
-ledger still understates executable outer, generalized-WHIR, and terminal
-decoding or re-encoding paths even though the decoder-local ceiling is now
-derived by the canonical implementation, so it is not an accepted
-construction-wide extraction-time bound. The binary WHIR folding and base-combination owners
+trivial. A construction-wide semantic prefix projection now retains the
+completed outer prefix, atomic CFW/pre-opening handoff, completed WHIR
+histories, and pre-final/main-opening handoff. It replays the actual opening,
+masked-sumcheck, code-switch, and terminal relation-and-instance pairs and
+refuses reordered or truncated histories and substituted cross-handoff
+challenges. Completed verifier decisions are also sticky across component
+boundaries: later pre-challenge states re-run the completed CFW verifier, and
+later main-WHIR states re-run both that CFW verifier and the completed
+pre-challenge terminal verifier. A rejected completed transcript therefore
+cannot become a true knowledge state solely through the next prover message.
+Reduced fixtures now traverse the empty state, both outer verifier moves,
+every reduced CFW verifier move, every WHIR combination, fold, code switch,
+and base combination in both epochs, both atomic handoffs, and the final
+terminal state. Each verifier move must extract its exact adjacent predecessor;
+every adjacent prover boundary evaluates the same witness on both sides and
+keeps a commitment-breaking witness false. The fixture's deliberate
+cross-epoch point collision derives the concrete nonzero-difference
+certificate and its exact five-coordinate error numerator. Hostile completed-
+CFW and pre-challenge-terminal histories remain false in all later states.
+The generic construction semantics are now joined to the checked 82-move
+production owner schedule. Their exact-successor predicate covers the initial
+message and every adjacent prover-message shape, while the verifier dispatcher
+executes local `KState`, deterministic `ERRBR`, predecessor reconstruction,
+and concrete bad-transition derivation for every owner. Reduced geometry
+exercises every generic branch and both complete epoch histories without
+claiming a production-size proof run. This closes the executable Definition
+3.5/3.6 owner and the operative direct initial-transition proof. It does not
+repair the published `9 / |F|` claim, which remains recorded but unused. The
+historical extraction-work ledger has now been replaced by a source-level
+field/word-RAM bound that includes the executable outer, generalized-WHIR,
+code-switch, base, and terminal decoder, encoder, and erasure-correction paths.
+Its independently named terms cover field-operation bookkeeping, the four-
+operation-per-oracle and 60-pass element audit, and straight-line control work.
+For factor one it derives a
+`214,588,832`-element semantic capacity and separates the maximum one-call
+`432,349,246,225,014,321` field-operation subledger from the conservative
+`442,725,628,354,153,629,696` non-field word-operation ceiling. Their exact
+sum is the `443,157,977,600,378,644,017` local deterministic `etRRBR` ceiling;
+the complete 82-move diagnostic is `2,206,663,587,245,278,458,394` operations,
+including `2,152,842,506,562,617,882` field operations. The live dispatcher
+enforces each move's measured field-operation ceiling, and the static owner
+reconstructs each non-field term from the audited constants. CDHZ Theorem 6.10
+also retains its outer `O(k * etRRBR + s)` constant, so these integer ceilings
+are not wall-clock bounds and do not complete the later noninteractive
+composition. The binary WHIR folding and base-combination owners
 derive concrete MCA certificates, while the lookup and cross-epoch owners
 execute their own `KState`, `ERRBR`, and bad-transition certificates.
 The separate construction owner records useful
@@ -345,18 +397,24 @@ deriving its fixed verifier message. The maximum proof-query counts are `79,310`
 `2^19`, `2^20`, and `2^21`; and the abstract logical-round-plus-Merkle query
 counts are `248,549`, `252,363`, `254,469`, and `259,019`.
 
-The exact conditional Theorem 6.10 arithmetic still uses `2^80 - 1`
+The conditional Theorem 6.10 arithmetic still uses `2^80 - 1`
 adversarial queries, work bound equal to that query bound, and the current
-uniform fixed-bit verifier messages. The exact five positive terms give a
-conservative 98-bit adaptive-QROM bound per standalone proof, 95 bits after the
-exact ten-public-key-proof union, and 92 bits under the conditional
-103-physical-proof inventory union. The last figure is a conservative
+uniform fixed-bit verifier messages. Public status deliberately retains the
+conservative 98-bit adaptive-QROM, 95-bit ten-public-key-proof-union, and 92-bit
+103-physical-proof-inventory figures while the theorem is open. The current
+uncapped calculator returns 99 bits per proof, 96/95/95/96 bits for the
+factor-one/two/four/eight ten-proof unions, and 92 bits for each conditional
+inventory union. None is a security result before the semantic, masking, and
+emitted-byte gates close. The last figure is a conservative
 multiplicity check, not permission for later packet families to inherit this
 standalone geometry. It remains above the 80-bit complete-partition rejection
 threshold. Classical soundness uses the same upper bound because classical
 adversaries are contained in the modeled quantum-random-oracle adversaries.
-The extraction-time owner records the exact scale inside the theorems' stated
-big-O bounds; it does not invent a hidden constant. Fixed, domain-separated
+The extraction-time owner now substitutes the maximum deterministic cost of one
+`ERRBR` call for `etRRBR` before multiplying by the logical round count; the
+aggregate 82-move diagnostic is not multiplied again. The substitution covers
+the field and source-audited non-field operation ledgers but does not invent the
+outer theorem's hidden constant. Fixed, domain-separated
 SHAKE256 remains an explicit ideal 512-bit quantum-random-oracle assumption,
 not a proved concrete random oracle. The 2025 quantum sponge-indifferentiability
 theorem does not change that status: at the declared `2^80` adversarial-query
@@ -964,13 +1022,15 @@ derived task, poll, work, host-control, and full-replay ledgers plus a small
 dense-matrix correspondence owner. The canonical postorder response-tree writer
 and frontier scanner now have independent byte-order correspondence, hostile
 framing coverage, production constructor coverage, and exact per-factor heap
-ledgers. The factor-one relaxed-theorem catalog enumerates all 82 transition
-labels, 15 relation identities, full-dimension code shapes, correction radii,
-list-size bounds, CFW errors, WHIR MCA terms, challenge dependencies, and an
-incomplete extraction-work ledger. Its CFW slice executes the canonical
+ledgers. The factor-one executable relaxed theorem binds all 82 transitions,
+15 relation identities, full-dimension code shapes, correction radii, list-size
+bounds, CFW errors, WHIR MCA terms, challenge dependencies, and every
+executable code operation. It derives the maximum deterministic cost of one
+extractor call and the aggregate backward-pass diagnostic; the outer CDHZ
+constant remains explicit. Its CFW slice executes the canonical
 decoder, semantic knowledge-state predicate, and deterministic extractor over
-every CFW message prefix. Its WHIR components execute their semantic relations, the exact
-cross-epoch mask witness enters the main WHIR input, and all 15 adjacent
+every CFW message prefix. Its WHIR components execute their semantic relations,
+the exact cross-epoch mask witness enters the main WHIR input, and all 15 adjacent
 relation-and-instance pairs compose exactly in both epochs. The catalog also
 fixes both construction-wide implicit tuple dimensions to zero. Binary WHIR MCA
 certificates execute. The lookup and cross-epoch transition owners decode their
@@ -978,14 +1038,21 @@ bound committed-code instances, derive the declared quotient/multiplicity,
 copied-prefix, and two-lane mask views from those witnesses, and reject
 committed-witness substitution. The production-layout adapter and checked
 82-move semantic dispatcher are implemented, and focused fixtures exercise
-each dispatch branch. The full theorem remains open because those local owners
-are not yet composed into one canonical construction-wide prefix state with
-the empty-, prover-prefix-, and full-transcript properties, adjacent extracted-
-witness transitions, a complete extraction-time bound, and every global bad-
-transition implication. The emitted-byte owner maps static canonical
-regions and fixed-message candidates to verifier
-consumers and records conditional 98-, 95-, and 92-bit per-proof, public-key-
-union, and complete-inventory arithmetic under the ideal-QRO assumption. A live
+each dispatch branch. A construction-wide semantic prefix projection now
+retains all completed phase histories, replays the exact WHIR relation pairs,
+and refuses chronology truncation, reordering, and cross-handoff challenge
+substitution. It also re-verifies completed CFW and pre-challenge terminal
+transcripts before a later component state can hold. The generic construction
+owner proves the empty-transcript, every prover-prefix and verifier-prefix, and
+full-transcript properties together for all 82 moves, every adjacent extracted-
+witness transition, and every global bad-transition implication. Its direct
+initial lemma and independently decomposed field/word-RAM audit complete the
+semantic theorem. The emitted-byte owner maps static canonical regions and
+fixed-message candidates to verifier consumers. Public status retains
+conditional 98-, 95-, and 92-bit per-proof,
+public-key-union, and complete-inventory reporting under the ideal-QRO
+assumption; the uncapped factor calculators currently return 99 bits per proof,
+96/95/95/96 bits for the ten-proof union, and 92 bits for the inventory. A live
 small Merkle response derives
 its schedule from the canonical transcript and freshly verifies transported
 bytes with hostile mutations. The reduced production-family integration owner
@@ -1040,11 +1107,17 @@ code instances, derive the declared quotient/multiplicity, copied-prefix, and
 two-lane mask views from those witnesses, and reject committed-witness
 substitution. The production-layout adapter and checked 82-move semantic
 dispatcher now bind every verifier move to an executable local `KState`,
-`ERRBR`, and bad-transition owner. What remains absent is one canonical
-construction-wide prefix state proving the empty-, prover-prefix-, and full-
-transcript properties, every adjacent extracted-witness transition, the exact
-extraction-time bound, and all bad-transition implications across a single
-complete chronology. The masking catalog does not
+`ERRBR`, and bad-transition owner. A construction-wide semantic prefix
+projection now retains every completed phase, replays the exact WHIR relation
+pairs, and refuses truncated, reordered, or cross-handoff-substituted
+chronology. It also makes completed CFW and pre-challenge terminal rejection
+sticky across later prover messages. What remains absent is a proof of the
+empty-, every prover- and
+verifier-prefix-, and full-transcript properties together for all 82 moves,
+every adjacent extracted-witness transition, independent construction-wide
+coverage of the local deterministic extraction bound, and all bad-transition
+implications across a single complete chronology. The
+masking catalog does not
 independently derive every production coefficient-to-view map, the conditional
 entropy after each prior disclosure, the exact ideal-uniform simulator, or the
 deployed KMAC256 quantum-
@@ -1055,13 +1128,13 @@ decoder, response commitments, fixed-bit challenge decoder, static query
 censuses, and transcript-prefix work ledger are bounded development evidence
 only.
 
-The immediate work order is to close the semantic relaxed extractor first,
-then construction-level masking, then the emitted-byte map on one production-
-shaped small chain, and then the authenticated browser-custody lifecycle. Each
+The immediate work order is construction-level masking, then the emitted-byte
+map on one production-shaped small chain, and then the authenticated browser-
+custody lifecycle. The completed semantic theorem remains an input. Each
 owner receives only focused checks; neither a prover nor the complete test graph
-runs while these gates remain open. The lifecycle owner must connect the reduced
-production-equation source path to the ceremony generation host's live source
-authority and browser-rooted attempt custody, drive the pre-challenge, cross-
+runs while the remaining gates are open. The lifecycle owner must connect the
+reduced production-equation source path to the ceremony generation host's live
+source authority and browser-rooted attempt custody, drive the pre-challenge, cross-
 epoch, CFW, and WHIR messages through one canonical production transcript, and
 require that production verifier path to consume the existing canonical section
 model. Only that complete small-geometry chain can authorize selected-size
@@ -1638,7 +1711,7 @@ Not yet:
   complete concrete QROM composition, emitted proof bytes, or complete-proof
   browser result. Its public-key development slice now has the
   complete structured relation, mask and code-switch catalogs, exact compact
-  CFW algebra and claim batching, the factor-one relaxed-theorem catalog,
+  CFW algebra and claim batching, the factor-one executable relaxed theorem,
   construction-level interactive masking catalog, a
   bounded static CFW lifecycle, one canonical
   Merkle response per logical round, canonical proof and public-input codecs,

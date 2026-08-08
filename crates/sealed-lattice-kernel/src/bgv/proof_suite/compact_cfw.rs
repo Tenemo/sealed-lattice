@@ -41,6 +41,11 @@ pub(crate) const COMPACT_CFW_MATRIX_COUNT: usize = 3;
 pub(crate) const COMPACT_CFW_INNER_ENDPOINT_CLAIM_COUNT: usize = 2;
 pub(crate) const COMPACT_CFW_INNER_MASK_APPLICATION_MULTIPLIER: u64 = 2;
 pub(crate) const COMPACT_CFW_ZERO_EVADER_EXPONENTS: [u32; COMPACT_CFW_MATRIX_COUNT] = [0, 1, 2];
+pub(crate) const COMPACT_CFW_LAST_ROUND_EXCLUDED_ELEMENT_COUNT: u64 = 2;
+
+pub(crate) fn compact_cfw_final_challenge_is_allowed(challenge: CompactChallengeField) -> bool {
+    challenge != CompactChallengeField::ZERO && challenge != CompactChallengeField::ONE
+}
 
 pub(crate) fn compact_cfw_zero_evader_weights(
     challenge: CompactChallengeField,
@@ -828,7 +833,7 @@ impl CompactCfwScalarProverState {
             .take()
             .ok_or(CompactCfwError::WrongProverPhase)?;
         if self.round_ordinal + 1 == self.geometry.sumcheck_round_count()
-            && (challenge == CompactChallengeField::ZERO || challenge == CompactChallengeField::ONE)
+            && !compact_cfw_final_challenge_is_allowed(challenge)
         {
             self.pending_round_polynomial = Some(polynomial);
             return Err(CompactCfwError::InvalidFinalChallenge);
@@ -1592,9 +1597,10 @@ pub(crate) fn verify_compact_cfw_transcript(
     {
         return Err(CompactCfwError::InvalidGeometry);
     }
-    if sumcheck_point.last().is_none_or(|challenge| {
-        *challenge == CompactChallengeField::ZERO || *challenge == CompactChallengeField::ONE
-    }) {
+    if sumcheck_point
+        .last()
+        .is_none_or(|challenge| !compact_cfw_final_challenge_is_allowed(*challenge))
+    {
         return Err(CompactCfwError::InvalidFinalChallenge);
     }
 

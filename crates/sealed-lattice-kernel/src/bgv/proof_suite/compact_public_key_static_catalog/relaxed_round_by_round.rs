@@ -29,12 +29,53 @@ use super::{
     WHIR_PROTOCOL_SECURITY_LEVEL, WHIR_ROUND_COUNT, WhirStaticLedger, checked_add, checked_product,
 };
 use crate::bgv::proof_suite::compact_cfw::{
-    COMPACT_CFW_INNER_MASK_MESSAGE_LENGTH, COMPACT_CFW_MATRIX_COUNT,
-    COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH, COMPACT_CFW_ZERO_EVADER_EXPONENTS,
+    COMPACT_CFW_INNER_MASK_MESSAGE_LENGTH, COMPACT_CFW_LAST_ROUND_EXCLUDED_ELEMENT_COUNT,
+    COMPACT_CFW_MATRIX_COUNT, COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH,
+    COMPACT_CFW_ZERO_EVADER_EXPONENTS,
 };
 use crate::bgv::proof_suite::relation_plan::CompactPublicKeyRelationCatalog;
 
 mod semantic_relations;
+
+/// Maximum canonical code operations applied to one committed oracle by one
+/// executable `ERRBR` call. WHIR base reconstruction attains this bound with
+/// two encodings followed by two erasure corrections.
+const MAXIMUM_CODE_OPERATIONS_PER_ORACLE: usize = 4;
+
+/// Source-level non-arithmetic passes inside one canonical code operation.
+const MAXIMUM_CODE_ELEMENT_PASSES_PER_OPERATION: u128 = 10;
+
+/// Source-level semantic algebra, shape-validation, and witness-projection
+/// passes outside the canonical code implementation.
+const MAXIMUM_SEMANTIC_ELEMENT_PASSES: u128 = 12;
+
+/// Construction-wide local projection and predecessor-reassembly passes. The
+/// history-independent extractor does not replay completed histories.
+const MAXIMUM_CONSTRUCTION_ELEMENT_PASSES: u128 = 8;
+
+/// Fixed-width word operations charged to one visited extension element in
+/// the declared unit-cost field/word-RAM model.
+const MAXIMUM_WORD_OPERATIONS_PER_ELEMENT_PASS: u128 = 16;
+
+/// The source audit gives every counted field operation a separate, deliberately
+/// loose word-bookkeeping allowance. This covers loop progress, indexing,
+/// checked-counter updates, result placement, and error propagation around the
+/// arithmetic primitive; the field operation itself is counted independently.
+const MAXIMUM_WORD_BOOKKEEPING_PER_FIELD_OPERATION: u128 = 1_024;
+
+/// Fixed straight-line validation and branch work in one local extractor.
+const MAXIMUM_STRAIGHT_LINE_WORD_OPERATIONS: u128 = 1_024;
+
+/// One footprint element receives a full 1024-word allowance. The independently
+/// enumerated executable paths require at most sixty passes and sixteen word
+/// operations per pass, so this retains 64 words of slack per element while
+/// keeping the previous conservative arithmetic unchanged.
+const MAXIMUM_WORD_OPERATIONS_PER_SEMANTIC_ELEMENT: u128 = 1_024;
+
+const MAXIMUM_AUDITED_ELEMENT_PASSES: u128 = (MAXIMUM_CODE_OPERATIONS_PER_ORACLE as u128)
+    * MAXIMUM_CODE_ELEMENT_PASSES_PER_OPERATION
+    + MAXIMUM_SEMANTIC_ELEMENT_PASSES
+    + MAXIMUM_CONSTRUCTION_ELEMENT_PASSES;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CodeRole {
@@ -314,24 +355,43 @@ struct PrefixKnowledgeState {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum ExtractorStep {
-    /// Preserve the already extracted witness while only the public relaxed
-    /// relation changes.
-    CarryWitness,
     /// Return the failure symbol on the theorem's explicitly charged bad
     /// challenge set and preserve the extracted witness otherwise.
     ReturnBottomUnderErrorBound,
-    /// Decode each named physical code with its canonical Berlekamp-Welch
-    /// correction algorithm and strict integer radius.
-    CorrectCodes(Vec<CodeRole>),
-    /// Re-encode the uniquely decoded folded message in the next canonical
-    /// two-adic Reed-Solomon domain.
-    ReencodeCodeSwitch {
-        epoch: TranscriptEpoch,
-        next_batch_ordinal: u8,
-    },
-    /// Return the failure symbol when a terminal query check fails and the
-    /// final decoded witness otherwise.
-    EmitDecodedWitness,
+    /// Execute one canonical code operation at the exact interleaving width
+    /// used by the semantic extractor. A folded WHIR relation retains its
+    /// physical message length and domain while its logical width decreases,
+    /// so the width is part of the operation rather than inferred from the
+    /// commitment's initial catalog row.
+    CodeOperation(ExtractorCodeOperation),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ExtractorCodeOperationKind {
+    Decode,
+    Encode,
+    /// Run the selected deterministic erasure corrector on the largest
+    /// possible agreement set. The semantic extractor may use a smaller
+    /// challenge-selected set; the full-domain count is its exact uniform
+    /// ceiling and is attained when every combined row agrees.
+    ErasureCorrect,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ExtractorCodeOperation {
+    kind: ExtractorCodeOperationKind,
+    role: CodeRole,
+    interleaving_width: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ExtractorDeterministicWorkBound {
+    field_operation_bound: u128,
+    field_bookkeeping_word_operation_bound: u128,
+    semantic_element_word_operation_bound: u128,
+    straight_line_word_operation_bound: u128,
+    non_field_operation_bound: u128,
+    total_operation_bound: u128,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -345,6 +405,8 @@ struct KnowledgeTransition {
     output_relation: PrefixKnowledgeState,
     extractor_steps: Vec<ExtractorStep>,
     extraction_field_operation_bound: u128,
+    extraction_non_field_operation_bound: u128,
+    extraction_operation_bound: u128,
     extraction_error: ExactProbability,
 }
 
@@ -372,16 +434,62 @@ struct SequentialCompositionBoundary {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct CfwTheoremInstantiation {
+struct CfwCodeCorrectionInstantiation {
+    role: CodeRole,
+    message_length: u64,
+    encoding_randomness_length: u64,
+    dimension: u64,
+    block_length: u64,
+    base_alphabet_extension_width: u64,
+    repeated_encoding_count: u64,
+    interleaved_width: u64,
+    selected_decoding_error_count: u64,
+    maximum_bad_agreement_count: u64,
+    list_size_bound: u64,
+    correction_algorithm: DeterministicCorrectionAlgorithm,
+    correction_field_operation_bound: u128,
+}
+
+impl CfwCodeCorrectionInstantiation {
+    fn from_selected_code(
+        code: &UniqueDecodingCode,
+        base_alphabet_extension_width: u64,
+        repeated_encoding_count: u64,
+    ) -> Result<Self, CompactStaticCatalogError> {
+        if base_alphabet_extension_width == 0
+            || repeated_encoding_count == 0
+            || code.interleaving_width
+                != checked_product(&[base_alphabet_extension_width, repeated_encoding_count])?
+        {
+            return Err(CompactStaticCatalogError::InvalidGeometry);
+        }
+        Ok(Self {
+            role: code.role,
+            message_length: code.message_length,
+            encoding_randomness_length: code.hiding_randomness_length,
+            dimension: code.dimension,
+            block_length: code.block_length,
+            base_alphabet_extension_width,
+            repeated_encoding_count,
+            interleaved_width: code.interleaving_width,
+            selected_decoding_error_count: code.selected_decoding_error_count,
+            maximum_bad_agreement_count: code.maximum_bad_agreement_count,
+            list_size_bound: code.list_size_bound,
+            correction_algorithm: code.correction_algorithm,
+            correction_field_operation_bound: code.correction_field_operation_bound,
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CfwRoundByRoundInstantiation {
     relation_length: u64,
     r1cs_public_input_length: u64,
     base_field_characteristic: u64,
     extension_degree: u64,
-    main_code: CodeRole,
-    inner_mask_code: CodeRole,
-    outer_mask_code: CodeRole,
-    inner_mask_message_length: u64,
-    outer_mask_message_length: u64,
+    main_code: CfwCodeCorrectionInstantiation,
+    inner_mask_code: CfwCodeCorrectionInstantiation,
+    outer_mask_code: CfwCodeCorrectionInstantiation,
     initial_randomness_element_count: u32,
     per_round_randomness_element_count: u32,
     sumcheck_round_count: u32,
@@ -389,12 +497,25 @@ struct CfwTheoremInstantiation {
     last_round_excluded_element_count: u64,
     query_count: u64,
     zero_evader_exponents: [u32; COMPACT_CFW_MATRIX_COUNT],
-    initial_consistency_error: ExactProbability,
+    zero_evader_output_coordinate_count: u64,
+    zero_evader_maximum_root_count: u64,
+    theorem_list_size_multiplier: u64,
+    /// The first coordinate printed by CFW Theorem 11.3.
+    ///
+    /// For the production outer-mask message length this is `9 / |F|`. It is
+    /// retained as paper correspondence only and is not used by the executable
+    /// relaxation because it does not cover the complete equality-point
+    /// challenge below.
+    theorem_initial_consistency_error: ExactProbability,
+    /// Uniform bound derived from the executable CDHZ bad-transition
+    /// certificate: one combining-scalar root plus the 23-coordinate
+    /// multilinear constraint identity, namely `24 / |F|`.
+    semantic_initial_consistency_error: ExactProbability,
     sumcheck_round_errors: Vec<ExactProbability>,
     joint_zero_evader_error: ExactProbability,
-    main_list_size_bound: u64,
-    interleaved_inner_list_size_bound: u64,
-    interleaved_outer_list_size_bound: u64,
+    initial_extraction_field_operation_bound: u128,
+    per_sumcheck_extraction_field_operation_bound: u128,
+    joint_extraction_field_operation_bound: u128,
     total_extraction_field_operation_bound: u128,
 }
 
@@ -411,7 +532,7 @@ struct WhirMcaTransitionBound {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct RelaxedRoundByRoundCatalog {
-    cfw: CfwTheoremInstantiation,
+    cfw: CfwRoundByRoundInstantiation,
     codes: Vec<UniqueDecodingCode>,
     whir_mca_bounds: Vec<WhirMcaTransitionBound>,
     transitions: Vec<KnowledgeTransition>,
@@ -423,7 +544,25 @@ pub(super) struct RelaxedRoundByRoundCatalog {
     /// code oracle is selected as an output implicit-instance string.
     output_implicit_instance_tuple_size: u64,
     maximum_per_move_extraction_error: ExactProbability,
+    /// Uniform `etRRBR` field-operation ceiling for one invocation of
+    /// `ERRBR`, as required by CDHZ Definition 3.6.
+    maximum_extraction_field_operation_bound: u128,
+    /// Maximum non-field word-RAM work in one history-independent `ERRBR`
+    /// call, including canonical code bookkeeping, semantic algebra, shape
+    /// validation, witness projection, and predecessor reassembly.
+    maximum_extraction_non_field_operation_bound: u128,
+    /// Complete uniform `etRRBR` ceiling in the source-audited deterministic
+    /// word-RAM model.
+    maximum_extraction_operation_bound: u128,
+    /// Aggregate diagnostic work across one backward pass over all verifier
+    /// moves. This is not substituted for `etRRBR`.
     total_extraction_field_operation_bound: u128,
+    total_extraction_non_field_operation_bound: u128,
+    total_extraction_operation_bound: u128,
+    /// Maximum number of extension elements reachable by one local extractor
+    /// before applying the audited pass multiplier. Derived only from the
+    /// canonical code geometries, never supplied by the prover.
+    extraction_semantic_element_capacity: u128,
 }
 
 impl RelaxedRoundByRoundCatalog {
@@ -484,21 +623,53 @@ impl RelaxedRoundByRoundCatalog {
         let cfw_main_code = code_by_role(&codes, CodeRole::CfwMain)?;
         let cfw_inner_code = code_by_role(&codes, CodeRole::CfwInnerMasks)?;
         let cfw_outer_code = code_by_role(&codes, CodeRole::CfwOuterMasks)?;
+        let cfw_main_code_instantiation = CfwCodeCorrectionInstantiation::from_selected_code(
+            cfw_main_code,
+            cfw_main_code.interleaving_width,
+            1,
+        )?;
+        let cfw_inner_code_instantiation = CfwCodeCorrectionInstantiation::from_selected_code(
+            cfw_inner_code,
+            1,
+            cfw_reduction.inner_mask_count(),
+        )?;
+        let cfw_outer_code_instantiation = CfwCodeCorrectionInstantiation::from_selected_code(
+            cfw_outer_code,
+            1,
+            cfw_reduction.outer_mask_count(),
+        )?;
+        let cfw_theorem_list_size_multiplier = checked_product(&[
+            cfw_main_code_instantiation.list_size_bound,
+            cfw_inner_code_instantiation.list_size_bound,
+            cfw_outer_code_instantiation.list_size_bound,
+        ])?;
         let cfw_mask_correction_field_operation_bound = cfw_inner_code
             .correction_field_operation_bound
             .checked_add(cfw_outer_code.correction_field_operation_bound)
             .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
-        let cfw_total_extraction_field_operation_bound = cfw_main_code
+        let cfw_initial_extraction_field_operation_bound = cfw_main_code
             .correction_field_operation_bound
             .checked_add(cfw_mask_correction_field_operation_bound)
-            .and_then(|bound| {
-                bound.checked_add(
-                    u128::from(cfw_reduction.sumcheck_round_count())
-                        .checked_mul(cfw_mask_correction_field_operation_bound)?,
-                )
-            })
             .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
-        let initial_consistency_error = ExactProbability::new(
+        let cfw_total_extraction_field_operation_bound =
+            cfw_initial_extraction_field_operation_bound
+                .checked_add(
+                    u128::from(cfw_reduction.sumcheck_round_count())
+                        .checked_mul(cfw_mask_correction_field_operation_bound)
+                        .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?,
+                )
+                .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+        let theorem_initial_consistency_error = ExactProbability::new(
+            BigUint::from(
+                cfw_outer_code_instantiation
+                    .message_length
+                    .checked_add(1)
+                    .and_then(|numerator| numerator.checked_mul(cfw_theorem_list_size_multiplier))
+                    .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?,
+            ),
+            extension_field_order.clone(),
+        )?;
+        let semantic_initial_consistency_error = ExactProbability::new(
             BigUint::from(cfw_reduction.initial_consistency_soundness_numerator()),
             extension_field_order.clone(),
         )?;
@@ -514,25 +685,33 @@ impl RelaxedRoundByRoundCatalog {
                     extension_field_order.clone()
                 };
                 ExactProbability::new(
-                    BigUint::from(cfw_reduction.per_round_soundness_numerator()),
+                    BigUint::from(
+                        cfw_reduction
+                            .per_round_soundness_numerator()
+                            .checked_mul(cfw_theorem_list_size_multiplier)
+                            .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?,
+                    ),
                     denominator,
                 )
             })
             .collect::<Result<Vec<_>, CompactStaticCatalogError>>()?;
         let joint_zero_evader_error = ExactProbability::new(
-            BigUint::from(cfw_reduction.joint_constraint_soundness_numerator()),
+            BigUint::from(
+                cfw_reduction
+                    .joint_constraint_soundness_numerator()
+                    .checked_mul(cfw_theorem_list_size_multiplier)
+                    .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?,
+            ),
             extension_field_order.clone(),
         )?;
-        let cfw = CfwTheoremInstantiation {
+        let cfw = CfwRoundByRoundInstantiation {
             relation_length: relation.padded_witness_element_count(),
             r1cs_public_input_length: relation.padded_witness_element_count(),
             base_field_characteristic: GOLDILOCKS_BASE_FIELD_MODULUS,
             extension_degree: QUINTIC_EXTENSION_DEGREE,
-            main_code: cfw_main_code.role,
-            inner_mask_code: cfw_inner_code.role,
-            outer_mask_code: cfw_outer_code.role,
-            inner_mask_message_length: cfw_reduction.inner_mask_message_length(),
-            outer_mask_message_length: cfw_reduction.outer_mask_message_length(),
+            main_code: cfw_main_code_instantiation,
+            inner_mask_code: cfw_inner_code_instantiation,
+            outer_mask_code: cfw_outer_code_instantiation,
             initial_randomness_element_count: cfw_reduction.initial_randomness_element_count(),
             per_round_randomness_element_count: cfw_reduction.per_round_randomness_element_count(),
             sumcheck_round_count: cfw_reduction.sumcheck_round_count(),
@@ -541,12 +720,23 @@ impl RelaxedRoundByRoundCatalog {
             last_round_excluded_element_count: cfw_reduction.last_round_excluded_element_count(),
             query_count: 0,
             zero_evader_exponents: COMPACT_CFW_ZERO_EVADER_EXPONENTS,
-            initial_consistency_error,
+            zero_evader_output_coordinate_count: u64::try_from(COMPACT_CFW_MATRIX_COUNT)
+                .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+            zero_evader_maximum_root_count: u64::from(
+                COMPACT_CFW_ZERO_EVADER_EXPONENTS
+                    .into_iter()
+                    .max()
+                    .ok_or(CompactStaticCatalogError::InvalidGeometry)?,
+            ),
+            theorem_list_size_multiplier: cfw_theorem_list_size_multiplier,
+            theorem_initial_consistency_error,
+            semantic_initial_consistency_error,
             sumcheck_round_errors,
             joint_zero_evader_error,
-            main_list_size_bound: cfw_main_code.list_size_bound,
-            interleaved_inner_list_size_bound: cfw_inner_code.list_size_bound,
-            interleaved_outer_list_size_bound: cfw_outer_code.list_size_bound,
+            initial_extraction_field_operation_bound: cfw_initial_extraction_field_operation_bound,
+            per_sumcheck_extraction_field_operation_bound:
+                cfw_mask_correction_field_operation_bound,
+            joint_extraction_field_operation_bound: 0,
             total_extraction_field_operation_bound: cfw_total_extraction_field_operation_bound,
         };
 
@@ -565,8 +755,14 @@ impl RelaxedRoundByRoundCatalog {
         if chronology.verifier_moves().len() != move_failures.len() {
             return Err(CompactStaticCatalogError::InvalidGeometry);
         }
+        let extraction_semantic_element_capacity = extractor_semantic_element_capacity(&codes)?;
         let mut transitions = Vec::with_capacity(chronology.verifier_moves().len());
+        let mut maximum_extraction_field_operation_bound = 0_u128;
+        let mut maximum_extraction_non_field_operation_bound = 0_u128;
+        let mut maximum_extraction_operation_bound = 0_u128;
         let mut total_extraction_field_operation_bound = 0_u128;
+        let mut total_extraction_non_field_operation_bound = 0_u128;
+        let mut total_extraction_operation_bound = 0_u128;
         let mut maximum_per_move_extraction_error = ExactProbability::zero();
         for (verifier_move, move_failure) in
             chronology.verifier_moves().iter().zip(move_failures.iter())
@@ -592,15 +788,35 @@ impl RelaxedRoundByRoundCatalog {
             if extractor_steps.is_empty() {
                 return Err(CompactStaticCatalogError::InvalidGeometry);
             }
+            if !extractor_steps_fit_source_audit(&extractor_steps) {
+                return Err(CompactStaticCatalogError::InvalidGeometry);
+            }
             let extraction_field_operation_bound =
                 extractor_steps.iter().try_fold(0_u128, |bound, step| {
                     bound
                         .checked_add(extractor_step_bound(step, &codes)?)
                         .ok_or(CompactStaticCatalogError::ArithmeticOverflow)
                 })?;
+            let extraction_work_bound = extractor_deterministic_work_bound(
+                extraction_field_operation_bound,
+                extraction_semantic_element_capacity,
+            )?;
             total_extraction_field_operation_bound = total_extraction_field_operation_bound
                 .checked_add(extraction_field_operation_bound)
                 .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+            total_extraction_non_field_operation_bound = total_extraction_non_field_operation_bound
+                .checked_add(extraction_work_bound.non_field_operation_bound)
+                .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+            total_extraction_operation_bound = total_extraction_operation_bound
+                .checked_add(extraction_work_bound.total_operation_bound)
+                .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+            maximum_extraction_field_operation_bound =
+                maximum_extraction_field_operation_bound.max(extraction_field_operation_bound);
+            maximum_extraction_non_field_operation_bound =
+                maximum_extraction_non_field_operation_bound
+                    .max(extraction_work_bound.non_field_operation_bound);
+            maximum_extraction_operation_bound =
+                maximum_extraction_operation_bound.max(extraction_work_bound.total_operation_bound);
             let extraction_error = derive_independent_transition_error(
                 verifier_move.roles(),
                 relation,
@@ -624,6 +840,9 @@ impl RelaxedRoundByRoundCatalog {
                 output_relation: current_state.clone(),
                 extractor_steps,
                 extraction_field_operation_bound,
+                extraction_non_field_operation_bound: extraction_work_bound
+                    .non_field_operation_bound,
+                extraction_operation_bound: extraction_work_bound.total_operation_bound,
                 extraction_error,
             });
         }
@@ -637,7 +856,13 @@ impl RelaxedRoundByRoundCatalog {
             input_implicit_instance_tuple_size: 0,
             output_implicit_instance_tuple_size: 0,
             maximum_per_move_extraction_error,
+            maximum_extraction_field_operation_bound,
+            maximum_extraction_non_field_operation_bound,
+            maximum_extraction_operation_bound,
             total_extraction_field_operation_bound,
+            total_extraction_non_field_operation_bound,
+            total_extraction_operation_bound,
+            extraction_semantic_element_capacity,
         };
         catalog.check(
             relation,
@@ -663,6 +888,67 @@ impl RelaxedRoundByRoundCatalog {
         interactive_soundness: &PackingInteractiveSoundness,
     ) -> Result<(), CompactStaticCatalogError> {
         cfw_reduction.check(relation)?;
+        let expected_main_code = code_by_role(&self.codes, CodeRole::CfwMain)?;
+        let expected_inner_mask_code = code_by_role(&self.codes, CodeRole::CfwInnerMasks)?;
+        let expected_outer_mask_code = code_by_role(&self.codes, CodeRole::CfwOuterMasks)?;
+        let expected_main_code_instantiation = CfwCodeCorrectionInstantiation::from_selected_code(
+            expected_main_code,
+            expected_main_code.interleaving_width,
+            1,
+        )?;
+        let expected_inner_mask_code_instantiation =
+            CfwCodeCorrectionInstantiation::from_selected_code(
+                expected_inner_mask_code,
+                1,
+                checked_product(&[
+                    u64::try_from(COMPACT_CFW_MATRIX_COUNT)
+                        .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+                    u64::from(cfw_reduction.sumcheck_round_count()),
+                ])?,
+            )?;
+        let expected_outer_mask_code_instantiation =
+            CfwCodeCorrectionInstantiation::from_selected_code(
+                expected_outer_mask_code,
+                1,
+                u64::from(cfw_reduction.sumcheck_round_count()),
+            )?;
+        let expected_theorem_list_size_multiplier = checked_product(&[
+            expected_main_code_instantiation.list_size_bound,
+            expected_inner_mask_code_instantiation.list_size_bound,
+            expected_outer_mask_code_instantiation.list_size_bound,
+        ])?;
+        let expected_mask_correction_field_operation_bound = expected_inner_mask_code
+            .correction_field_operation_bound
+            .checked_add(expected_outer_mask_code.correction_field_operation_bound)
+            .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+        let expected_initial_extraction_field_operation_bound = expected_main_code
+            .correction_field_operation_bound
+            .checked_add(expected_mask_correction_field_operation_bound)
+            .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+        let expected_total_extraction_field_operation_bound =
+            expected_initial_extraction_field_operation_bound
+                .checked_add(
+                    u128::from(cfw_reduction.sumcheck_round_count())
+                        .checked_mul(expected_mask_correction_field_operation_bound)
+                        .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?,
+                )
+                .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+        let expected_theorem_initial_consistency_error = ExactProbability::new(
+            BigUint::from(
+                expected_outer_mask_code_instantiation
+                    .message_length
+                    .checked_add(1)
+                    .and_then(|numerator| {
+                        numerator.checked_mul(expected_theorem_list_size_multiplier)
+                    })
+                    .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?,
+            ),
+            extension_field_order(),
+        )?;
+        let expected_semantic_initial_consistency_error = ExactProbability::new(
+            BigUint::from(cfw_reduction.initial_consistency_soundness_numerator()),
+            extension_field_order(),
+        )?;
         if self.cfw.relation_length != relation.padded_witness_element_count()
             || self.cfw.r1cs_public_input_length != relation.padded_witness_element_count()
             || !self.cfw.relation_length.is_power_of_two()
@@ -670,14 +956,20 @@ impl RelaxedRoundByRoundCatalog {
             || self.cfw.base_field_characteristic != GOLDILOCKS_BASE_FIELD_MODULUS
             || self.cfw.base_field_characteristic % 2 != 1
             || self.cfw.extension_degree != QUINTIC_EXTENSION_DEGREE
-            || self.cfw.inner_mask_message_length
+            || self.cfw.main_code != expected_main_code_instantiation
+            || self.cfw.inner_mask_code != expected_inner_mask_code_instantiation
+            || self.cfw.outer_mask_code != expected_outer_mask_code_instantiation
+            || self.cfw.inner_mask_code.message_length
                 != u64::try_from(COMPACT_CFW_INNER_MASK_MESSAGE_LENGTH)
                     .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?
-            || self.cfw.outer_mask_message_length
+            || self.cfw.outer_mask_code.message_length
                 != u64::try_from(COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH)
                     .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?
-            || self.cfw.outer_mask_message_length < 2 * self.cfw.inner_mask_message_length
-            || self.cfw.inner_mask_message_length < 4
+            || self.cfw.outer_mask_code.message_length < 2 * self.cfw.inner_mask_code.message_length
+            || self.cfw.inner_mask_code.message_length < 4
+            || self.cfw.main_code.encoding_randomness_length == 0
+            || self.cfw.inner_mask_code.encoding_randomness_length == 0
+            || self.cfw.outer_mask_code.encoding_randomness_length == 0
             || self.cfw.initial_randomness_element_count
                 != cfw_reduction.initial_randomness_element_count()
             || self.cfw.per_round_randomness_element_count
@@ -687,25 +979,48 @@ impl RelaxedRoundByRoundCatalog {
                 != cfw_reduction.joint_constraint_randomness_element_count()
             || self.cfw.last_round_excluded_element_count
                 != cfw_reduction.last_round_excluded_element_count()
+            || self.cfw.last_round_excluded_element_count
+                != COMPACT_CFW_LAST_ROUND_EXCLUDED_ELEMENT_COUNT
             || self.cfw.query_count != 0
             || self.cfw.zero_evader_exponents != [0, 1, 2]
-            || self.cfw.initial_consistency_error
-                != ExactProbability::new(
-                    BigUint::from(cfw_reduction.initial_consistency_soundness_numerator()),
-                    extension_field_order(),
-                )?
+            || self.cfw.zero_evader_output_coordinate_count
+                != u64::try_from(COMPACT_CFW_MATRIX_COUNT)
+                    .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?
+            || self.cfw.zero_evader_maximum_root_count
+                != u64::from(
+                    COMPACT_CFW_ZERO_EVADER_EXPONENTS
+                        .into_iter()
+                        .max()
+                        .ok_or(CompactStaticCatalogError::InvalidGeometry)?,
+                )
+            || self.cfw.theorem_list_size_multiplier != expected_theorem_list_size_multiplier
+            || self.cfw.theorem_initial_consistency_error
+                != expected_theorem_initial_consistency_error
+            || self.cfw.semantic_initial_consistency_error
+                != expected_semantic_initial_consistency_error
             || self.cfw.sumcheck_round_errors.len()
                 != usize::try_from(cfw_reduction.sumcheck_round_count())
                     .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?
             || self.cfw.joint_zero_evader_error
                 != ExactProbability::new(
-                    BigUint::from(cfw_reduction.joint_constraint_soundness_numerator()),
+                    BigUint::from(
+                        cfw_reduction
+                            .joint_constraint_soundness_numerator()
+                            .checked_mul(expected_theorem_list_size_multiplier)
+                            .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?,
+                    ),
                     extension_field_order(),
                 )?
-            || self.cfw.main_list_size_bound != 1
-            || self.cfw.interleaved_inner_list_size_bound != 1
-            || self.cfw.interleaved_outer_list_size_bound != 1
-            || self.cfw.total_extraction_field_operation_bound == 0
+            || self.cfw.main_code.list_size_bound != 1
+            || self.cfw.inner_mask_code.list_size_bound != 1
+            || self.cfw.outer_mask_code.list_size_bound != 1
+            || self.cfw.initial_extraction_field_operation_bound
+                != expected_initial_extraction_field_operation_bound
+            || self.cfw.per_sumcheck_extraction_field_operation_bound
+                != expected_mask_correction_field_operation_bound
+            || self.cfw.joint_extraction_field_operation_bound != 0
+            || self.cfw.total_extraction_field_operation_bound
+                != expected_total_extraction_field_operation_bound
         {
             return Err(CompactStaticCatalogError::InvalidGeometry);
         }
@@ -723,13 +1038,19 @@ impl RelaxedRoundByRoundCatalog {
             };
             if error
                 != &ExactProbability::new(
-                    BigUint::from(cfw_reduction.per_round_soundness_numerator()),
+                    BigUint::from(
+                        cfw_reduction
+                            .per_round_soundness_numerator()
+                            .checked_mul(expected_theorem_list_size_multiplier)
+                            .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?,
+                    ),
                     denominator,
                 )?
             {
                 return Err(CompactStaticCatalogError::InvalidGeometry);
             }
         }
+        check_cfw_challenge_chronology(&self.cfw, chronology)?;
         for code in &self.codes {
             code.check()?;
             let required_query_security = match code.role {
@@ -779,7 +1100,14 @@ impl RelaxedRoundByRoundCatalog {
             pre_challenge_whir,
             whir_input_relation(main_whir)?,
         )?;
+        let interpreted_extraction_semantic_element_capacity =
+            extractor_semantic_element_capacity(&self.codes)?;
         let mut interpreted_total_extraction_field_operation_bound = 0_u128;
+        let mut interpreted_total_extraction_non_field_operation_bound = 0_u128;
+        let mut interpreted_total_extraction_operation_bound = 0_u128;
+        let mut interpreted_maximum_extraction_field_operation_bound = 0_u128;
+        let mut interpreted_maximum_extraction_non_field_operation_bound = 0_u128;
+        let mut interpreted_maximum_extraction_operation_bound = 0_u128;
         let mut interpreted_cfw_extraction_field_operation_bound = 0_u128;
         let mut interpreted_maximum_error = ExactProbability::zero();
         for (transition_ordinal, transition) in self.transitions.iter().enumerate() {
@@ -806,6 +1134,10 @@ impl RelaxedRoundByRoundCatalog {
                             .checked_add(extractor_step_bound(step, &self.codes)?)
                             .ok_or(CompactStaticCatalogError::ArithmeticOverflow)
                     })?;
+            let interpreted_extraction_work_bound = extractor_deterministic_work_bound(
+                interpreted_extraction_field_operation_bound,
+                interpreted_extraction_semantic_element_capacity,
+            )?;
             let independently_derived_extraction_error = derive_independent_transition_error(
                 verifier_move.roles(),
                 relation,
@@ -830,8 +1162,13 @@ impl RelaxedRoundByRoundCatalog {
                 || transition.input_relation != interpreted_input_relation
                 || transition.output_relation != interpreted_state
                 || transition.extractor_steps != interpreted_extractor_steps
+                || !extractor_steps_fit_source_audit(&transition.extractor_steps)
                 || transition.extraction_field_operation_bound
                     != interpreted_extraction_field_operation_bound
+                || transition.extraction_non_field_operation_bound
+                    != interpreted_extraction_work_bound.non_field_operation_bound
+                || transition.extraction_operation_bound
+                    != interpreted_extraction_work_bound.total_operation_bound
                 || transition.extraction_error != independently_derived_extraction_error
                 || transition.extraction_error != *move_failure.probability()
                 || (transition.extraction_error != ExactProbability::zero()
@@ -848,6 +1185,23 @@ impl RelaxedRoundByRoundCatalog {
                 interpreted_total_extraction_field_operation_bound
                     .checked_add(interpreted_extraction_field_operation_bound)
                     .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+            interpreted_total_extraction_non_field_operation_bound =
+                interpreted_total_extraction_non_field_operation_bound
+                    .checked_add(interpreted_extraction_work_bound.non_field_operation_bound)
+                    .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+            interpreted_total_extraction_operation_bound =
+                interpreted_total_extraction_operation_bound
+                    .checked_add(interpreted_extraction_work_bound.total_operation_bound)
+                    .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+            interpreted_maximum_extraction_field_operation_bound =
+                interpreted_maximum_extraction_field_operation_bound
+                    .max(interpreted_extraction_field_operation_bound);
+            interpreted_maximum_extraction_non_field_operation_bound =
+                interpreted_maximum_extraction_non_field_operation_bound
+                    .max(interpreted_extraction_work_bound.non_field_operation_bound);
+            interpreted_maximum_extraction_operation_bound =
+                interpreted_maximum_extraction_operation_bound
+                    .max(interpreted_extraction_work_bound.total_operation_bound);
             if transition.roles.iter().any(is_cfw_role) {
                 interpreted_cfw_extraction_field_operation_bound =
                     interpreted_cfw_extraction_field_operation_bound
@@ -878,8 +1232,21 @@ impl RelaxedRoundByRoundCatalog {
                 .is_at_most_inverse_power_of_two(INTERACTIVE_VERIFIER_MOVE_SECURITY_LEVEL as usize)
             || self.cfw.total_extraction_field_operation_bound
                 != interpreted_cfw_extraction_field_operation_bound
+            || self.maximum_extraction_field_operation_bound
+                != interpreted_maximum_extraction_field_operation_bound
+            || self.maximum_extraction_field_operation_bound == 0
+            || self.maximum_extraction_non_field_operation_bound
+                != interpreted_maximum_extraction_non_field_operation_bound
+            || self.maximum_extraction_operation_bound
+                != interpreted_maximum_extraction_operation_bound
             || self.total_extraction_field_operation_bound
                 != interpreted_total_extraction_field_operation_bound
+            || self.total_extraction_non_field_operation_bound
+                != interpreted_total_extraction_non_field_operation_bound
+            || self.total_extraction_operation_bound != interpreted_total_extraction_operation_bound
+            || self.extraction_semantic_element_capacity
+                != interpreted_extraction_semantic_element_capacity
+            || self.extraction_semantic_element_capacity == 0
         {
             return Err(CompactStaticCatalogError::InvalidGeometry);
         }
@@ -897,8 +1264,12 @@ impl RelaxedRoundByRoundCatalog {
         &self.maximum_per_move_extraction_error
     }
 
-    pub(super) const fn total_extraction_field_operation_bound(&self) -> u128 {
-        self.total_extraction_field_operation_bound
+    pub(super) const fn maximum_extraction_field_operation_bound(&self) -> u128 {
+        self.maximum_extraction_field_operation_bound
+    }
+
+    pub(super) const fn maximum_extraction_operation_bound(&self) -> u128 {
+        self.maximum_extraction_operation_bound
     }
 
     pub(super) fn check_factor_one_semantic_error_theorem(
@@ -934,8 +1305,8 @@ impl RelaxedRoundByRoundCatalog {
 
 // Recompute each magnitude from operative code, challenge, and relation
 // parameters without consulting the numerical event ledger. Equality with the
-// ledger is a consistency check only; these formulas do not replace the
-// still-open semantic bad-transition implications.
+// ledger is a consistency check only; executable bad-transition certificates
+// and their owning move bounds are checked separately by `semantic_relations`.
 #[allow(clippy::too_many_arguments)]
 fn derive_independent_transition_error(
     roles: &[VerifierMoveRole],
@@ -1118,23 +1489,99 @@ fn is_cfw_role(role: &VerifierMoveRole) -> bool {
     )
 }
 
+fn check_cfw_challenge_chronology(
+    cfw: &CfwRoundByRoundInstantiation,
+    chronology: &PackingTranscriptChronology,
+) -> Result<(), CompactStaticCatalogError> {
+    let cfw_moves = chronology
+        .verifier_moves()
+        .iter()
+        .filter(|verifier_move| verifier_move.roles().iter().any(is_cfw_role))
+        .collect::<Vec<_>>();
+    let expected_move_count = usize::try_from(cfw.sumcheck_round_count)
+        .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?
+        .checked_add(2)
+        .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+    if cfw_moves.len() != expected_move_count {
+        return Err(CompactStaticCatalogError::InvalidGeometry);
+    }
+
+    let initial_move = cfw_moves
+        .first()
+        .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
+    if initial_move.roles() != [VerifierMoveRole::CfwInitialRandomness]
+        || initial_move.challenge_space()
+            != &(ExactChallengeSpace::ExtensionVector {
+                element_count: cfw.initial_randomness_element_count,
+                excluded_element_count: 0,
+            })
+    {
+        return Err(CompactStaticCatalogError::InvalidGeometry);
+    }
+
+    for round_ordinal in 0..cfw.sumcheck_round_count {
+        let move_index = usize::try_from(round_ordinal)
+            .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?
+            .checked_add(1)
+            .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+        let round_move = cfw_moves
+            .get(move_index)
+            .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
+        let excluded_element_count = if round_ordinal + 1 == cfw.sumcheck_round_count {
+            cfw.last_round_excluded_element_count
+        } else {
+            0
+        };
+        if round_move.roles() != [VerifierMoveRole::CfwSumcheckRound { round_ordinal }]
+            || round_move.challenge_space()
+                != &(ExactChallengeSpace::ExtensionVector {
+                    element_count: cfw.per_round_randomness_element_count,
+                    excluded_element_count,
+                })
+        {
+            return Err(CompactStaticCatalogError::InvalidGeometry);
+        }
+    }
+
+    let joint_move = cfw_moves
+        .last()
+        .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
+    if joint_move.roles()
+        != [
+            VerifierMoveRole::CfwJointConstraint,
+            VerifierMoveRole::WhirOpeningBatching {
+                epoch: TranscriptEpoch::PreChallenge,
+            },
+        ]
+        || joint_move.challenge_space()
+            != &(ExactChallengeSpace::ExtensionVector {
+                element_count: cfw
+                    .joint_constraint_randomness_element_count
+                    .checked_add(1)
+                    .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?,
+                excluded_element_count: 0,
+            })
+    {
+        return Err(CompactStaticCatalogError::InvalidGeometry);
+    }
+    Ok(())
+}
+
 fn extractor_step_charges_failure(step: &ExtractorStep) -> bool {
     matches!(
         step,
-        ExtractorStep::ReturnBottomUnderErrorBound
-            | ExtractorStep::CorrectCodes(_)
-            | ExtractorStep::EmitDecodedWitness
+        ExtractorStep::ReturnBottomUnderErrorBound | ExtractorStep::CodeOperation(_)
     )
 }
 
 fn check_cfw_transition_error(
     transition: &KnowledgeTransition,
-    cfw: &CfwTheoremInstantiation,
+    cfw: &CfwRoundByRoundInstantiation,
 ) -> Result<(), CompactStaticCatalogError> {
     for role in &transition.roles {
         match role {
             VerifierMoveRole::CfwInitialRandomness => {
-                if transition.extraction_error != cfw.initial_consistency_error {
+                if transition.extraction_error != cfw.semantic_initial_consistency_error {
                     return Err(CompactStaticCatalogError::InvalidGeometry);
                 }
             }
@@ -1723,7 +2170,15 @@ fn apply_role(
             }
             state.outer = OuterRelaxedRelation::LookupIdentityBound;
             extractor_steps.push(ExtractorStep::ReturnBottomUnderErrorBound);
-            extractor_steps.push(ExtractorStep::CarryWitness);
+            append_code_operation(
+                extractor_steps,
+                ExtractorCodeOperationKind::Decode,
+                CodeRole::WhirSource {
+                    epoch: TranscriptEpoch::PreChallenge,
+                    batch_ordinal: 0,
+                },
+                pre_challenge_whir.oracle_widths[0],
+            );
         }
         VerifierMoveRole::CrossEpochPoint => {
             if state.outer != OuterRelaxedRelation::LookupIdentityBound {
@@ -1731,18 +2186,55 @@ fn apply_role(
             }
             state.outer = OuterRelaxedRelation::CrossEpochEqualityBound;
             extractor_steps.push(ExtractorStep::ReturnBottomUnderErrorBound);
-            extractor_steps.push(ExtractorStep::CarryWitness);
+            append_code_operation(
+                extractor_steps,
+                ExtractorCodeOperationKind::Decode,
+                CodeRole::WhirSource {
+                    epoch: TranscriptEpoch::PreChallenge,
+                    batch_ordinal: 0,
+                },
+                pre_challenge_whir.oracle_widths[0],
+            );
+            append_code_operation(
+                extractor_steps,
+                ExtractorCodeOperationKind::Decode,
+                CodeRole::CfwMain,
+                main_whir.oracle_widths[0],
+            );
+            let shared_mask_group_ordinal =
+                mask_group_ordinal(pre_challenge_whir, MaskGroupRole::CrossEpochOpening)?;
+            let shared_mask_group = pre_challenge_whir
+                .mask_groups_in_commitment_order()
+                .nth(shared_mask_group_ordinal)
+                .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
+            append_code_operation(
+                extractor_steps,
+                ExtractorCodeOperationKind::Decode,
+                CodeRole::WhirMask {
+                    epoch: TranscriptEpoch::PreChallenge,
+                    group_ordinal: u8::try_from(shared_mask_group_ordinal)
+                        .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+                },
+                shared_mask_group.width,
+            );
         }
         VerifierMoveRole::CfwInitialRandomness => {
             if !matches!(state.cfw, CfwRelaxedRelation::InputR1cs { .. }) {
                 return Err(CompactStaticCatalogError::InvalidGeometry);
             }
             state.cfw = CfwRelaxedRelation::InitialMaskedClaim;
-            extractor_steps.push(ExtractorStep::CorrectCodes(vec![
+            for role in [
                 CodeRole::CfwMain,
                 CodeRole::CfwInnerMasks,
                 CodeRole::CfwOuterMasks,
-            ]));
+            ] {
+                append_code_operation(
+                    extractor_steps,
+                    ExtractorCodeOperationKind::Decode,
+                    role,
+                    code_interleaving_width_for_role(role, pre_challenge_whir, main_whir)?,
+                );
+            }
         }
         VerifierMoveRole::CfwSumcheckRound { round_ordinal } => {
             let expected_previous = if round_ordinal == 0 {
@@ -1759,10 +2251,14 @@ fn apply_role(
             state.cfw = CfwRelaxedRelation::FoldedClaim {
                 completed_round_count: round_ordinal + 1,
             };
-            extractor_steps.push(ExtractorStep::CorrectCodes(vec![
-                CodeRole::CfwInnerMasks,
-                CodeRole::CfwOuterMasks,
-            ]));
+            for role in [CodeRole::CfwInnerMasks, CodeRole::CfwOuterMasks] {
+                append_code_operation(
+                    extractor_steps,
+                    ExtractorCodeOperationKind::Decode,
+                    role,
+                    code_interleaving_width_for_role(role, pre_challenge_whir, main_whir)?,
+                );
+            }
         }
         VerifierMoveRole::CfwJointConstraint => {
             if state.cfw
@@ -1793,6 +2289,7 @@ fn apply_role(
             epoch,
             batch_ordinal,
         } => {
+            let whir = whir_for_epoch(epoch, pre_challenge_whir, main_whir);
             let whir_state = whir_state_mut(state, epoch);
             let valid_previous = if batch_ordinal == 0 {
                 *whir_state == WhirRelaxedRelation::OpeningBatched
@@ -1807,7 +2304,15 @@ fn apply_role(
             }
             *whir_state = WhirRelaxedRelation::MaskedSumcheck { batch_ordinal };
             extractor_steps.push(ExtractorStep::ReturnBottomUnderErrorBound);
-            extractor_steps.push(ExtractorStep::CarryWitness);
+            append_whir_generalized_code_operations(
+                extractor_steps,
+                ExtractorCodeOperationKind::Decode,
+                epoch,
+                batch_ordinal,
+                whir.oracle_widths[usize::from(batch_ordinal)],
+                whir.external_mask_groups.len() + 2 * usize::from(batch_ordinal),
+                whir,
+            )?;
         }
         VerifierMoveRole::WhirFolding {
             epoch,
@@ -1834,10 +2339,18 @@ fn apply_role(
                 batch_ordinal,
                 completed_round_count: round_ordinal + 1,
             };
-            extractor_steps.push(ExtractorStep::CorrectCodes(vec![CodeRole::WhirSource {
+            let preceding_source_width = whir.oracle_widths[usize::from(batch_ordinal)]
+                .checked_shr(u32::from(round_ordinal))
+                .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+            append_whir_generalized_code_operations(
+                extractor_steps,
+                ExtractorCodeOperationKind::Decode,
                 epoch,
                 batch_ordinal,
-            }]));
+                preceding_source_width,
+                whir.external_mask_groups.len() + 2 * usize::from(batch_ordinal) + 1,
+                whir,
+            )?;
         }
         VerifierMoveRole::WhirRoundQueryAndCombination {
             epoch,
@@ -1860,10 +2373,15 @@ fn apply_role(
                 completed_round_ordinal: round_ordinal + 1,
             };
             extractor_steps.push(ExtractorStep::ReturnBottomUnderErrorBound);
-            extractor_steps.push(ExtractorStep::ReencodeCodeSwitch {
-                epoch,
-                next_batch_ordinal: round_ordinal + 1,
-            });
+            append_code_operation(
+                extractor_steps,
+                ExtractorCodeOperationKind::Encode,
+                CodeRole::WhirSource {
+                    epoch,
+                    batch_ordinal: round_ordinal,
+                },
+                1,
+            );
         }
         VerifierMoveRole::WhirBaseCombination { epoch } => {
             let whir = whir_for_epoch(epoch, pre_challenge_whir, main_whir);
@@ -1879,27 +2397,56 @@ fn apply_role(
                 return Err(CompactStaticCatalogError::InvalidGeometry);
             }
             *whir_state = WhirRelaxedRelation::BaseCombined;
-            let mut roles = vec![CodeRole::WhirSource {
-                epoch,
-                batch_ordinal: u8::try_from(WHIR_ROUND_COUNT)
-                    .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
-            }];
-            for group_ordinal in 0..whir.mask_groups_in_commitment_order().count() {
-                roles.push(CodeRole::WhirMask {
+            let final_batch_ordinal = u8::try_from(WHIR_ROUND_COUNT)
+                .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?;
+            let mut roles_and_widths = vec![(
+                CodeRole::WhirSource {
                     epoch,
-                    group_ordinal: u8::try_from(group_ordinal)
-                        .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
-                });
+                    batch_ordinal: final_batch_ordinal,
+                },
+                1,
+            )];
+            for (group_ordinal, group) in whir.mask_groups_in_commitment_order().enumerate() {
+                roles_and_widths.push((
+                    CodeRole::WhirMask {
+                        epoch,
+                        group_ordinal: u8::try_from(group_ordinal)
+                            .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+                    },
+                    group.width,
+                ));
             }
-            extractor_steps.push(ExtractorStep::CorrectCodes(roles));
+            // The executable base extractor first re-encodes every blinded
+            // oracle. Its pair reconstruction then re-encodes the same
+            // canonical post word and erasure-corrects both committed sides.
+            for (role, width) in roles_and_widths {
+                for kind in [
+                    ExtractorCodeOperationKind::Encode,
+                    ExtractorCodeOperationKind::Encode,
+                    ExtractorCodeOperationKind::ErasureCorrect,
+                    ExtractorCodeOperationKind::ErasureCorrect,
+                ] {
+                    append_code_operation(extractor_steps, kind, role, width);
+                }
+            }
         }
         VerifierMoveRole::WhirFinalQueries { epoch } => {
+            let whir = whir_for_epoch(epoch, pre_challenge_whir, main_whir);
             let whir_state = whir_state_mut(state, epoch);
             if *whir_state != WhirRelaxedRelation::BaseCombined {
                 return Err(CompactStaticCatalogError::InvalidGeometry);
             }
             *whir_state = WhirRelaxedRelation::OutputTrivial;
-            extractor_steps.push(ExtractorStep::EmitDecodedWitness);
+            append_whir_generalized_code_operations(
+                extractor_steps,
+                ExtractorCodeOperationKind::Encode,
+                epoch,
+                u8::try_from(WHIR_ROUND_COUNT)
+                    .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+                1,
+                whir.mask_groups_in_commitment_order().count(),
+                whir,
+            )?;
         }
     }
     Ok(())
@@ -1926,34 +2473,244 @@ fn whir_for_epoch<'a>(
     }
 }
 
+fn append_code_operation(
+    extractor_steps: &mut Vec<ExtractorStep>,
+    kind: ExtractorCodeOperationKind,
+    role: CodeRole,
+    interleaving_width: u64,
+) {
+    extractor_steps.push(ExtractorStep::CodeOperation(ExtractorCodeOperation {
+        kind,
+        role,
+        interleaving_width,
+    }));
+}
+
+fn append_whir_generalized_code_operations(
+    extractor_steps: &mut Vec<ExtractorStep>,
+    kind: ExtractorCodeOperationKind,
+    epoch: TranscriptEpoch,
+    batch_ordinal: u8,
+    source_interleaving_width: u64,
+    included_mask_group_count: usize,
+    whir: &WhirStaticLedger,
+) -> Result<(), CompactStaticCatalogError> {
+    if usize::from(batch_ordinal) >= WHIR_FOLD_BATCH_COUNT
+        || source_interleaving_width == 0
+        || included_mask_group_count > whir.mask_groups_in_commitment_order().count()
+    {
+        return Err(CompactStaticCatalogError::InvalidGeometry);
+    }
+    append_code_operation(
+        extractor_steps,
+        kind,
+        CodeRole::WhirSource {
+            epoch,
+            batch_ordinal,
+        },
+        source_interleaving_width,
+    );
+    for (group_ordinal, group) in whir
+        .mask_groups_in_commitment_order()
+        .take(included_mask_group_count)
+        .enumerate()
+    {
+        append_code_operation(
+            extractor_steps,
+            kind,
+            CodeRole::WhirMask {
+                epoch,
+                group_ordinal: u8::try_from(group_ordinal)
+                    .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+            },
+            group.width,
+        );
+    }
+    Ok(())
+}
+
+fn mask_group_ordinal(
+    whir: &WhirStaticLedger,
+    role: MaskGroupRole,
+) -> Result<usize, CompactStaticCatalogError> {
+    let mut matches = whir
+        .mask_groups_in_commitment_order()
+        .enumerate()
+        .filter_map(|(ordinal, group)| (group.role == role).then_some(ordinal));
+    let ordinal = matches
+        .next()
+        .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
+    if matches.next().is_some() {
+        return Err(CompactStaticCatalogError::InvalidGeometry);
+    }
+    Ok(ordinal)
+}
+
+fn code_interleaving_width_for_role(
+    role: CodeRole,
+    pre_challenge_whir: &WhirStaticLedger,
+    main_whir: &WhirStaticLedger,
+) -> Result<u64, CompactStaticCatalogError> {
+    match role {
+        CodeRole::CfwMain => Ok(main_whir.oracle_widths[0]),
+        CodeRole::CfwInnerMasks => main_whir
+            .mask_groups_in_commitment_order()
+            .find(|group| group.role == MaskGroupRole::CfwInner)
+            .map(|group| group.width)
+            .ok_or(CompactStaticCatalogError::InvalidGeometry),
+        CodeRole::CfwOuterMasks => main_whir
+            .mask_groups_in_commitment_order()
+            .find(|group| group.role == MaskGroupRole::CfwOuter)
+            .map(|group| group.width)
+            .ok_or(CompactStaticCatalogError::InvalidGeometry),
+        CodeRole::WhirSource {
+            epoch,
+            batch_ordinal,
+        } => whir_for_epoch(epoch, pre_challenge_whir, main_whir)
+            .oracle_widths
+            .get(usize::from(batch_ordinal))
+            .copied()
+            .ok_or(CompactStaticCatalogError::InvalidGeometry),
+        CodeRole::WhirMask {
+            epoch,
+            group_ordinal,
+        } => whir_for_epoch(epoch, pre_challenge_whir, main_whir)
+            .mask_groups_in_commitment_order()
+            .nth(usize::from(group_ordinal))
+            .map(|group| group.width)
+            .ok_or(CompactStaticCatalogError::InvalidGeometry),
+    }
+}
+
 fn extractor_step_bound(
     step: &ExtractorStep,
     codes: &[UniqueDecodingCode],
 ) -> Result<u128, CompactStaticCatalogError> {
     match step {
-        ExtractorStep::CarryWitness
-        | ExtractorStep::ReturnBottomUnderErrorBound
-        | ExtractorStep::EmitDecodedWitness => Ok(0),
-        ExtractorStep::CorrectCodes(roles) => roles.iter().try_fold(0_u128, |sum, role| {
-            sum.checked_add(code_by_role(codes, *role)?.correction_field_operation_bound)
-                .ok_or(CompactStaticCatalogError::ArithmeticOverflow)
-        }),
-        ExtractorStep::ReencodeCodeSwitch {
-            epoch,
-            next_batch_ordinal,
-        } => {
-            let code = code_by_role(
-                codes,
-                CodeRole::WhirSource {
-                    epoch: *epoch,
-                    batch_ordinal: *next_batch_ordinal,
-                },
-            )?;
-            u128::from(code.interleaving_width)
-                .checked_mul(u128::from(code.block_length))
-                .and_then(|count| count.checked_mul(u128::from(code.dimension)))
-                .ok_or(CompactStaticCatalogError::ArithmeticOverflow)
+        ExtractorStep::ReturnBottomUnderErrorBound => Ok(0),
+        ExtractorStep::CodeOperation(operation) => {
+            let code = code_by_role(codes, operation.role)?;
+            let geometry = CanonicalReedSolomonGeometry::new(
+                usize::try_from(code.message_length)
+                    .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+                usize::try_from(code.hiding_randomness_length)
+                    .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+                usize::try_from(code.block_length)
+                    .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+                usize::try_from(operation.interleaving_width)
+                    .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+            )
+            .map_err(|_| CompactStaticCatalogError::InvalidGeometry)?;
+            match operation.kind {
+                ExtractorCodeOperationKind::Decode => geometry
+                    .decoding_field_operation_bound()
+                    .map_err(map_canonical_code_error),
+                ExtractorCodeOperationKind::Encode => geometry
+                    .encoding_field_operation_count()
+                    .map_err(map_canonical_code_error),
+                ExtractorCodeOperationKind::ErasureCorrect => geometry
+                    .erasure_correction_field_operation_bound(geometry.block_length())
+                    .map_err(map_canonical_code_error),
+            }
         }
+    }
+}
+
+fn extractor_semantic_element_capacity(
+    codes: &[UniqueDecodingCode],
+) -> Result<u128, CompactStaticCatalogError> {
+    let canonical_code_element_capacity = codes.iter().try_fold(
+        0_u128,
+        |capacity, code| -> Result<_, CompactStaticCatalogError> {
+            let interleaving_width = u128::from(code.interleaving_width);
+            let committed_instance_element_count = u128::from(code.block_length)
+                .checked_mul(interleaving_width)
+                .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+            let witness_element_count = u128::from(code.dimension)
+                .checked_mul(interleaving_width)
+                .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+            capacity
+                .checked_add(committed_instance_element_count)
+                .and_then(|count| count.checked_add(witness_element_count))
+                .ok_or(CompactStaticCatalogError::ArithmeticOverflow)
+        },
+    )?;
+    if canonical_code_element_capacity == 0 {
+        return Err(CompactStaticCatalogError::InvalidGeometry);
+    }
+    // At most four simultaneous representations are reachable on a local
+    // path: the borrowed statement/prefix, the post witness, canonical code
+    // workspace/output, and the predecessor witness. Completed histories are
+    // not replayed or copied by `ERRBR`.
+    canonical_code_element_capacity
+        .checked_mul(4)
+        .ok_or(CompactStaticCatalogError::ArithmeticOverflow)
+}
+
+fn extractor_deterministic_work_bound(
+    field_operation_bound: u128,
+    semantic_element_capacity: u128,
+) -> Result<ExtractorDeterministicWorkBound, CompactStaticCatalogError> {
+    if semantic_element_capacity == 0
+        || MAXIMUM_AUDITED_ELEMENT_PASSES
+            .checked_mul(MAXIMUM_WORD_OPERATIONS_PER_ELEMENT_PASS)
+            .is_none_or(|audited_word_operations| {
+                audited_word_operations > MAXIMUM_WORD_OPERATIONS_PER_SEMANTIC_ELEMENT
+            })
+    {
+        return Err(CompactStaticCatalogError::InvalidGeometry);
+    }
+    let field_bookkeeping_word_operation_bound = field_operation_bound
+        .checked_mul(MAXIMUM_WORD_BOOKKEEPING_PER_FIELD_OPERATION)
+        .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+    let semantic_element_word_operation_bound = semantic_element_capacity
+        .checked_mul(MAXIMUM_WORD_OPERATIONS_PER_SEMANTIC_ELEMENT)
+        .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+    let straight_line_word_operation_bound = MAXIMUM_STRAIGHT_LINE_WORD_OPERATIONS;
+    let non_field_operation_bound = field_bookkeeping_word_operation_bound
+        .checked_add(semantic_element_word_operation_bound)
+        .and_then(|bound| bound.checked_add(straight_line_word_operation_bound))
+        .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+    let total_operation_bound = field_operation_bound
+        .checked_add(non_field_operation_bound)
+        .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+    Ok(ExtractorDeterministicWorkBound {
+        field_operation_bound,
+        field_bookkeeping_word_operation_bound,
+        semantic_element_word_operation_bound,
+        straight_line_word_operation_bound,
+        non_field_operation_bound,
+        total_operation_bound,
+    })
+}
+
+fn extractor_steps_fit_source_audit(steps: &[ExtractorStep]) -> bool {
+    let mut operation_counts_by_role = Vec::<(CodeRole, usize)>::new();
+    for operation in steps.iter().filter_map(|step| match step {
+        ExtractorStep::CodeOperation(operation) => Some(operation),
+        ExtractorStep::ReturnBottomUnderErrorBound => None,
+    }) {
+        if let Some((_, count)) = operation_counts_by_role
+            .iter_mut()
+            .find(|(role, _)| *role == operation.role)
+        {
+            *count += 1;
+            if *count > MAXIMUM_CODE_OPERATIONS_PER_ORACLE {
+                return false;
+            }
+        } else {
+            operation_counts_by_role.push((operation.role, 1));
+        }
+    }
+    true
+}
+
+fn map_canonical_code_error(error: CanonicalReedSolomonError) -> CompactStaticCatalogError {
+    match error {
+        CanonicalReedSolomonError::ArithmeticOverflow => {
+            CompactStaticCatalogError::ArithmeticOverflow
+        }
+        _ => CompactStaticCatalogError::InvalidGeometry,
     }
 }
 
@@ -2083,14 +2840,60 @@ mod tests {
         assert_eq!(theorem.cfw.relation_length, 4_194_304);
         assert_eq!(theorem.cfw.r1cs_public_input_length, 4_194_304);
         assert_eq!(theorem.cfw.sumcheck_round_count, 23);
-        assert_eq!(theorem.cfw.inner_mask_message_length, 4);
-        assert_eq!(theorem.cfw.outer_mask_message_length, 8);
+        assert_eq!(theorem.cfw.main_code.role, CodeRole::CfwMain);
+        assert_eq!(theorem.cfw.main_code.repeated_encoding_count, 1);
+        assert_eq!(theorem.cfw.inner_mask_code.message_length, 4);
+        assert_eq!(theorem.cfw.inner_mask_code.repeated_encoding_count, 69);
+        assert_eq!(theorem.cfw.inner_mask_code.base_alphabet_extension_width, 1);
+        assert_eq!(theorem.cfw.outer_mask_code.message_length, 8);
+        assert_eq!(theorem.cfw.outer_mask_code.repeated_encoding_count, 23);
+        assert_eq!(theorem.cfw.outer_mask_code.base_alphabet_extension_width, 1);
+        for code in [
+            &theorem.cfw.main_code,
+            &theorem.cfw.inner_mask_code,
+            &theorem.cfw.outer_mask_code,
+        ] {
+            assert_eq!(
+                code.dimension,
+                code.message_length + code.encoding_randomness_length
+            );
+            assert_eq!(
+                code.interleaved_width,
+                code.base_alphabet_extension_width * code.repeated_encoding_count
+            );
+            assert_eq!(
+                code.selected_decoding_error_count,
+                (code.block_length - code.dimension - 1) / 2
+            );
+            assert_eq!(
+                code.maximum_bad_agreement_count,
+                code.block_length - code.selected_decoding_error_count - 1
+            );
+            assert_eq!(
+                code.correction_algorithm,
+                DeterministicCorrectionAlgorithm::CanonicalBerlekampWelch
+            );
+            assert!(code.correction_field_operation_bound > 0);
+        }
         assert_eq!(theorem.cfw.zero_evader_exponents, [0, 1, 2]);
+        assert_eq!(theorem.cfw.zero_evader_output_coordinate_count, 3);
+        assert_eq!(theorem.cfw.zero_evader_maximum_root_count, 2);
+        assert_eq!(theorem.cfw.theorem_list_size_multiplier, 1);
         let field_order = extension_field_order();
         assert_eq!(
-            theorem.cfw.initial_consistency_error,
+            theorem.cfw.theorem_initial_consistency_error,
+            ExactProbability::new(BigUint::from(9_u8), field_order.clone())
+                .expect("stated CFW theorem initial error")
+        );
+        assert_eq!(
+            theorem.cfw.semantic_initial_consistency_error,
             ExactProbability::new(BigUint::from(24_u8), field_order.clone())
-                .expect("initial CFW error")
+                .expect("semantic initial CFW error")
+        );
+        assert_ne!(
+            theorem.cfw.theorem_initial_consistency_error,
+            theorem.cfw.semantic_initial_consistency_error,
+            "the tighter published coordinate cannot replace the executable semantic bound"
         );
         assert_eq!(theorem.cfw.sumcheck_round_errors.len(), 23);
         assert!(theorem.cfw.sumcheck_round_errors[..22].iter().all(|error| {
@@ -2113,9 +2916,16 @@ mod tests {
             ExactProbability::new(BigUint::from(2_u8), field_order.clone())
                 .expect("quadratic zero-evader error")
         );
-        assert_eq!(theorem.cfw.main_list_size_bound, 1);
-        assert_eq!(theorem.cfw.interleaved_inner_list_size_bound, 1);
-        assert_eq!(theorem.cfw.interleaved_outer_list_size_bound, 1);
+        assert_eq!(theorem.cfw.main_code.list_size_bound, 1);
+        assert_eq!(theorem.cfw.inner_mask_code.list_size_bound, 1);
+        assert_eq!(theorem.cfw.outer_mask_code.list_size_bound, 1);
+        assert_eq!(theorem.cfw.joint_extraction_field_operation_bound, 0);
+        assert_eq!(
+            theorem.cfw.total_extraction_field_operation_bound,
+            theorem.cfw.initial_extraction_field_operation_bound
+                + u128::from(theorem.cfw.sumcheck_round_count)
+                    * theorem.cfw.per_sumcheck_extraction_field_operation_bound
+        );
         assert_eq!(theorem.input_implicit_instance_tuple_size, 0);
         assert_eq!(theorem.output_implicit_instance_tuple_size, 0);
         assert_eq!(theorem.whir_mca_bounds.len(), 37);
@@ -2139,7 +2949,236 @@ mod tests {
                 .maximum_per_move_extraction_error()
                 .is_at_most_inverse_power_of_two(266)
         );
-        assert!(theorem.total_extraction_field_operation_bound > 0);
+        assert_eq!(
+            theorem.total_extraction_field_operation_bound,
+            2_152_842_506_562_617_882
+        );
+        assert_eq!(
+            theorem.maximum_extraction_field_operation_bound,
+            432_349_246_225_014_321
+        );
+        assert_eq!(theorem.extraction_semantic_element_capacity, 214_588_832);
+        assert_eq!(
+            theorem.maximum_extraction_non_field_operation_bound,
+            442_725_628_354_153_629_696
+        );
+        assert_eq!(
+            theorem.maximum_extraction_operation_bound,
+            443_157_977_600_378_644_017
+        );
+        assert_eq!(
+            theorem.total_extraction_non_field_operation_bound,
+            2_204_510_744_738_715_840_512
+        );
+        assert_eq!(
+            theorem.total_extraction_operation_bound,
+            2_206_663_587_245_278_458_394
+        );
+        assert_eq!(
+            theorem.maximum_extraction_operation_bound,
+            theorem.maximum_extraction_field_operation_bound
+                + theorem.maximum_extraction_non_field_operation_bound
+        );
+        assert_eq!(
+            theorem.total_extraction_operation_bound,
+            theorem.total_extraction_field_operation_bound
+                + theorem.total_extraction_non_field_operation_bound
+        );
+        assert!(
+            theorem.maximum_extraction_non_field_operation_bound
+                > theorem.maximum_extraction_field_operation_bound
+        );
+        assert_eq!(MAXIMUM_AUDITED_ELEMENT_PASSES, 60);
+        assert_eq!(
+            MAXIMUM_AUDITED_ELEMENT_PASSES * MAXIMUM_WORD_OPERATIONS_PER_ELEMENT_PASS,
+            960
+        );
+        assert!(
+            MAXIMUM_AUDITED_ELEMENT_PASSES * MAXIMUM_WORD_OPERATIONS_PER_ELEMENT_PASS
+                <= MAXIMUM_WORD_OPERATIONS_PER_SEMANTIC_ELEMENT
+        );
+        assert!(theorem.transitions.iter().all(|transition| {
+            extractor_deterministic_work_bound(
+                transition.extraction_field_operation_bound,
+                theorem.extraction_semantic_element_capacity,
+            )
+            .is_ok_and(|bound| {
+                bound.field_operation_bound == transition.extraction_field_operation_bound
+                    && bound.field_bookkeeping_word_operation_bound
+                        == transition.extraction_field_operation_bound
+                            * MAXIMUM_WORD_BOOKKEEPING_PER_FIELD_OPERATION
+                    && bound.semantic_element_word_operation_bound
+                        == theorem.extraction_semantic_element_capacity
+                            * MAXIMUM_WORD_OPERATIONS_PER_SEMANTIC_ELEMENT
+                    && bound.straight_line_word_operation_bound
+                        == MAXIMUM_STRAIGHT_LINE_WORD_OPERATIONS
+                    && transition.extraction_non_field_operation_bound
+                        == bound.non_field_operation_bound
+                    && transition.extraction_operation_bound == bound.total_operation_bound
+            })
+        }));
+        let code_operations = |transition: &KnowledgeTransition| {
+            transition
+                .extractor_steps
+                .iter()
+                .filter_map(|step| match step {
+                    ExtractorStep::CodeOperation(operation) => Some(*operation),
+                    ExtractorStep::ReturnBottomUnderErrorBound => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let lookup_operations = code_operations(&theorem.transitions[0]);
+        assert_eq!(lookup_operations.len(), 1);
+        assert_eq!(
+            lookup_operations[0].kind,
+            ExtractorCodeOperationKind::Decode
+        );
+        assert_eq!(
+            lookup_operations[0].role,
+            CodeRole::WhirSource {
+                epoch: TranscriptEpoch::PreChallenge,
+                batch_ordinal: 0,
+            }
+        );
+        let unaudited_lookup_path = (0..=MAXIMUM_CODE_OPERATIONS_PER_ORACLE)
+            .map(|_| ExtractorStep::CodeOperation(lookup_operations[0]))
+            .collect::<Vec<_>>();
+        assert!(!extractor_steps_fit_source_audit(&unaudited_lookup_path));
+        let cross_epoch_operations = code_operations(&theorem.transitions[1]);
+        assert_eq!(cross_epoch_operations.len(), 3);
+        assert!(
+            cross_epoch_operations
+                .iter()
+                .all(|operation| operation.kind == ExtractorCodeOperationKind::Decode)
+        );
+        for transition in &theorem.transitions {
+            match transition.roles.as_slice() {
+                [
+                    VerifierMoveRole::WhirMaskedSumcheckCombination {
+                        epoch,
+                        batch_ordinal,
+                    },
+                ] => {
+                    let whir = whir_for_epoch(
+                        *epoch,
+                        &factor_one.pre_challenge_whir,
+                        &factor_one.main_whir,
+                    );
+                    let operations = code_operations(transition);
+                    assert_eq!(
+                        operations.len(),
+                        1 + whir.external_mask_groups.len() + 2 * usize::from(*batch_ordinal)
+                    );
+                    assert!(
+                        operations
+                            .iter()
+                            .all(|operation| operation.kind == ExtractorCodeOperationKind::Decode)
+                    );
+                }
+                [
+                    VerifierMoveRole::WhirFolding {
+                        epoch,
+                        batch_ordinal,
+                        round_ordinal,
+                    },
+                ] => {
+                    let whir = whir_for_epoch(
+                        *epoch,
+                        &factor_one.pre_challenge_whir,
+                        &factor_one.main_whir,
+                    );
+                    let operations = code_operations(transition);
+                    assert_eq!(
+                        operations.len(),
+                        2 + whir.external_mask_groups.len() + 2 * usize::from(*batch_ordinal)
+                    );
+                    assert_eq!(
+                        operations[0].interleaving_width,
+                        whir.oracle_widths[usize::from(*batch_ordinal)]
+                            >> u32::from(*round_ordinal)
+                    );
+                    assert!(
+                        operations
+                            .iter()
+                            .all(|operation| operation.kind == ExtractorCodeOperationKind::Decode)
+                    );
+                }
+                [
+                    VerifierMoveRole::WhirRoundQueryAndCombination {
+                        epoch,
+                        round_ordinal,
+                    },
+                ] => {
+                    assert_eq!(
+                        code_operations(transition),
+                        vec![ExtractorCodeOperation {
+                            kind: ExtractorCodeOperationKind::Encode,
+                            role: CodeRole::WhirSource {
+                                epoch: *epoch,
+                                batch_ordinal: *round_ordinal,
+                            },
+                            interleaving_width: 1,
+                        }]
+                    );
+                }
+                [VerifierMoveRole::WhirBaseCombination { epoch }] => {
+                    let whir = whir_for_epoch(
+                        *epoch,
+                        &factor_one.pre_challenge_whir,
+                        &factor_one.main_whir,
+                    );
+                    let operations = code_operations(transition);
+                    assert_eq!(
+                        operations.len(),
+                        4 * (1 + whir.mask_groups_in_commitment_order().count())
+                    );
+                    assert!(operations.chunks_exact(4).all(|operations| {
+                        operations[0].kind == ExtractorCodeOperationKind::Encode
+                            && operations[1].kind == ExtractorCodeOperationKind::Encode
+                            && operations[2].kind == ExtractorCodeOperationKind::ErasureCorrect
+                            && operations[3].kind == ExtractorCodeOperationKind::ErasureCorrect
+                    }));
+                }
+                [VerifierMoveRole::WhirFinalQueries { epoch }] => {
+                    let whir = whir_for_epoch(
+                        *epoch,
+                        &factor_one.pre_challenge_whir,
+                        &factor_one.main_whir,
+                    );
+                    let operations = code_operations(transition);
+                    assert_eq!(
+                        operations.len(),
+                        1 + whir.mask_groups_in_commitment_order().count()
+                    );
+                    assert!(
+                        operations
+                            .iter()
+                            .all(|operation| operation.kind == ExtractorCodeOperationKind::Encode)
+                    );
+                }
+                [
+                    VerifierMoveRole::WhirFinalQueries {
+                        epoch: TranscriptEpoch::PreChallenge,
+                    },
+                    VerifierMoveRole::WhirOpeningBatching {
+                        epoch: TranscriptEpoch::Main,
+                    },
+                ] => {
+                    let whir = &factor_one.pre_challenge_whir;
+                    let operations = code_operations(transition);
+                    assert_eq!(
+                        operations.len(),
+                        1 + whir.mask_groups_in_commitment_order().count()
+                    );
+                    assert!(
+                        operations
+                            .iter()
+                            .all(|operation| operation.kind == ExtractorCodeOperationKind::Encode)
+                    );
+                }
+                _ => {}
+            }
+        }
         assert!(theorem.transitions.iter().all(|transition| {
             !transition.extractor_steps.is_empty()
                 && transition.preceding_commitment_count > 0
@@ -2452,9 +3491,25 @@ mod tests {
         );
 
         let mut changed_extractor = factor_one.relaxed_round_by_round.clone();
-        changed_extractor.transitions[2].extractor_steps = vec![ExtractorStep::CarryWitness];
+        changed_extractor.transitions[2].extractor_steps =
+            vec![ExtractorStep::ReturnBottomUnderErrorBound];
         assert_eq!(
             changed_extractor.check(
+                &relation,
+                &catalog.cfw_reduction,
+                &catalog.cfw_to_whir_handoff,
+                &factor_one.pre_challenge_whir,
+                &factor_one.main_whir,
+                &factor_one.transcript_chronology,
+                &factor_one.interactive_soundness,
+            ),
+            Err(CompactStaticCatalogError::InvalidGeometry)
+        );
+
+        let mut changed_extraction_work = factor_one.relaxed_round_by_round.clone();
+        changed_extraction_work.transitions[0].extraction_operation_bound += 1;
+        assert_eq!(
+            changed_extraction_work.check(
                 &relation,
                 &catalog.cfw_reduction,
                 &catalog.cfw_to_whir_handoff,
@@ -2506,6 +3561,67 @@ mod tests {
                 &factor_one.pre_challenge_whir,
                 &factor_one.main_whir,
                 &factor_one.transcript_chronology,
+                &factor_one.interactive_soundness,
+            ),
+            Err(CompactStaticCatalogError::InvalidGeometry)
+        );
+
+        let mut changed_cfw_repetition = factor_one.relaxed_round_by_round.clone();
+        changed_cfw_repetition
+            .cfw
+            .inner_mask_code
+            .repeated_encoding_count -= 1;
+        assert_eq!(
+            changed_cfw_repetition.check(
+                &relation,
+                &catalog.cfw_reduction,
+                &catalog.cfw_to_whir_handoff,
+                &factor_one.pre_challenge_whir,
+                &factor_one.main_whir,
+                &factor_one.transcript_chronology,
+                &factor_one.interactive_soundness,
+            ),
+            Err(CompactStaticCatalogError::InvalidGeometry)
+        );
+
+        let mut substituted_theorem_error = factor_one.relaxed_round_by_round.clone();
+        substituted_theorem_error
+            .cfw
+            .theorem_initial_consistency_error = substituted_theorem_error
+            .cfw
+            .semantic_initial_consistency_error
+            .clone();
+        assert_eq!(
+            substituted_theorem_error.check(
+                &relation,
+                &catalog.cfw_reduction,
+                &catalog.cfw_to_whir_handoff,
+                &factor_one.pre_challenge_whir,
+                &factor_one.main_whir,
+                &factor_one.transcript_chronology,
+                &factor_one.interactive_soundness,
+            ),
+            Err(CompactStaticCatalogError::InvalidGeometry)
+        );
+
+        let mut changed_cfw_challenge_space = factor_one.transcript_chronology.clone();
+        let cfw_initial_move = changed_cfw_challenge_space
+            .verifier_moves
+            .iter_mut()
+            .find(|verifier_move| verifier_move.roles() == [VerifierMoveRole::CfwInitialRandomness])
+            .expect("CFW initial verifier move");
+        cfw_initial_move.challenge_space = ExactChallengeSpace::ExtensionVector {
+            element_count: catalog.cfw_reduction.initial_randomness_element_count() - 1,
+            excluded_element_count: 0,
+        };
+        assert_eq!(
+            factor_one.relaxed_round_by_round.check(
+                &relation,
+                &catalog.cfw_reduction,
+                &catalog.cfw_to_whir_handoff,
+                &factor_one.pre_challenge_whir,
+                &factor_one.main_whir,
+                &changed_cfw_challenge_space,
                 &factor_one.interactive_soundness,
             ),
             Err(CompactStaticCatalogError::InvalidGeometry)

@@ -27,6 +27,7 @@ use crate::bgv::proof_suite::compact_public_key_static_catalog::canonical_reed_s
 use p3_field::PrimeCharacteristicRing;
 
 mod semantic_composition;
+mod semantic_construction;
 mod semantic_error_bounds;
 mod semantic_execution;
 mod semantic_outer;
@@ -579,8 +580,11 @@ pub(super) enum SemanticCfwBadTransition {
 }
 
 impl SemanticCfwBadTransition {
-    /// Numerator of the polynomial-identity bound proved by this concrete
-    /// bad-transition certificate.
+    /// Uniform polynomial-identity numerator for this certificate family.
+    ///
+    /// The initial family uses the complete combining-scalar and multilinear
+    /// equality-point degree even when a particular auxiliary-target mismatch
+    /// would admit the tighter one-root bound.
     pub(super) fn polynomial_identity_numerator(&self) -> Option<u64> {
         match self {
             Self::InitialConsistencyRoot { equality_point, .. } => {

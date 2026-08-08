@@ -1,7 +1,8 @@
 use super::super::semantic_execution::{
-    SemanticFactorOneMoveDescriptor, SemanticKnowledgeWitness, SemanticUnusedCfwMatrices,
-    SemanticVerifierMoveOwner, SemanticVerifierMovePrefix, SemanticVerifierMoveStatement,
-    semantic_factor_one_bad_transition, semantic_factor_one_errbr, semantic_factor_one_kstate,
+    SemanticExecutionError, SemanticFactorOneMoveDescriptor, SemanticKnowledgeWitness,
+    SemanticUnusedCfwMatrices, SemanticVerifierMoveOwner, SemanticVerifierMovePrefix,
+    SemanticVerifierMoveStatement, semantic_factor_one_bad_transition, semantic_factor_one_errbr,
+    semantic_factor_one_kstate,
 };
 use super::*;
 
@@ -576,6 +577,23 @@ fn production_outer_kstate_uses_one_witness_across_every_actual_prefix() {
     assert_eq!(
         dispatcher_lookup_extraction.field_operation_count,
         lookup_extraction.field_operation_count
+    );
+    let insufficient_work_bound = lookup_descriptor
+        .clone()
+        .with_field_operation_bound_for_focused_test(
+            dispatcher_lookup_extraction
+                .field_operation_count
+                .checked_sub(1)
+                .expect("lookup extraction performs field work"),
+        );
+    assert_eq!(
+        semantic_factor_one_errbr(
+            &insufficient_work_bound,
+            &dispatcher_statement,
+            &dispatcher_lookup_extended,
+            &dispatcher_witness,
+        ),
+        Err(SemanticExecutionError::ExtractionWorkBoundExceeded)
     );
     assert_eq!(
         semantic_factor_one_bad_transition(

@@ -35,14 +35,36 @@ move dispatcher bind each verifier move to a concrete local `KState`,
 deterministic `ERRBR`, and bad-transition owner. The semantic error owner uses
 the strict `N - t - 1` bad-word agreement ceiling, charges WHIR MCA on each
 committed batch row domain, and requires every per-move total to match the
-independent ledger. Closure still lacks one canonical construction-wide prefix
-state with the empty-, prover-prefix-, and full-transcript properties, every
-adjacent extracted-witness transition, the exact extraction-time bound, and all
-bad-transition implications over one chronology; the broader ledger still
-omits executable outer, generalized-WHIR, and terminal decoder or re-encoder
-work. Independently derived
-production coefficient-to-view matrices, an exact ideal-uniform simulator and
-deployed KMAC quantum-PRF hybrid, and one complete emitted production proof
+independent ledger. Every concrete bad-transition certificate is mapped back
+to those event families and refused if its union exceeds the exact owning-move
+bound. A construction-wide semantic prefix projection now retains
+the completed outer, atomic handoff, and WHIR histories, replays exact
+relation-and-instance pairs, and refuses truncated, reordered, or cross-
+handoff-substituted chronology. It recomputes completed CFW and pre-challenge
+terminal verifier acceptance at later component boundaries, preventing a
+rejected history from becoming accepted through the next prover message.
+Reduced construction coverage now traverses both outer moves, every reduced
+CFW move, every WHIR combination, fold, code switch, and base combination in
+both epochs, both atomic handoffs, and terminal acceptance. It requires exact
+adjacent extraction and same-witness continuity across every reduced prover
+boundary, including hostile false-state preservation and the fixture's
+concrete cross-epoch bad-transition certificate. The generic construction owner
+now implements the empty-transcript, every prover-prefix and verifier-prefix,
+adjacent-witness, bad-transition, and full-transcript obligations and is joined
+to the checked 82-move schedule. Reduced fixtures exercise every generic owner
+without claiming a production-size proof. CFW Theorem 11.3 prints `9 / |F|` for the
+first coordinate at the production outer-mask message length, while the
+executable combining-scalar and 23-coordinate equality-point identity requires
+`24 / |F|`. Exact citation-level correspondence remains refused, but the
+semantic theorem derives and uses the operative bound directly. Its source-
+level field/word-RAM owner exposes field bookkeeping, the four-operation-per-
+oracle and 60-pass element audit, and straight-line control work. It derives a
+`214,588,832`-element semantic capacity, a
+`443,157,977,600,378,644,017` maximum deterministic `etRRBR` ceiling, and a
+`2,206,663,587,245,278,458,394` aggregate diagnostic. CDHZ retains its outer
+asymptotic constant. Independently derived production coefficient-to-view
+matrices, an exact ideal-uniform simulator and deployed KMAC quantum-PRF hybrid,
+and one complete emitted production proof
 also remain absent. The shared two-epoch mask oracle is
 owned once by the canonical response catalog; its two later verifier-message
 groups open their sorted unique union through bounded canonical response counts.
@@ -71,7 +93,10 @@ rescue factor eight.
 
 The relaxed round-by-round, construction masking, canonical emitted-byte, and
 noninteractive soundness catalogs remain conditional for this standalone
-geometry. Their 98/95/92-bit arithmetic is not a theorem result until the
+geometry. Public status retains conservative 98/95/92-bit reporting; the
+uncapped factor calculators currently return 99 bits per proof,
+96/95/95/96 bits for the factor-one/two/four/eight ten-proof unions, and 92
+bits for every conditional inventory union. None is a theorem result until the
 semantic extractor, exact masking correspondence, and complete emitted proof
 derive. CMS19 and BCS16 could compile exact ideal-uniform statistical HVZK and
 salted-Merkle privacy into single-proof malicious-verifier statistical zero

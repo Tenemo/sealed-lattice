@@ -52,8 +52,8 @@ pub(in super::super) struct SemanticWhirOpeningBatchingPrefix {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in super::super) struct SemanticWhirOpeningBatchingBadTransition {
-    pub(super) coefficients: Vec<ProofChallengeExtensionElement>,
-    pub(super) challenge: ProofChallengeExtensionElement,
+    pub(in super::super) coefficients: Vec<ProofChallengeExtensionElement>,
+    pub(in super::super) challenge: ProofChallengeExtensionElement,
 }
 
 pub(in super::super) fn semantic_whir_opening_batching_kstate(

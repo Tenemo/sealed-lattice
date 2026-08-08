@@ -74,7 +74,7 @@ impl SemanticProductionOuterLayout {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn new(
+    pub(super) fn new(
         source_first_element: usize,
         source_element_count: usize,
         multiplicity_first_element: usize,
@@ -170,6 +170,18 @@ impl SemanticProductionOuterStatement {
             main_source_relation,
             shared_mask_relation,
         })
+    }
+
+    pub(super) const fn pre_challenge_source_relation(&self) -> &CommittedCodeRelation {
+        &self.pre_challenge_source_relation
+    }
+
+    pub(super) const fn main_source_relation(&self) -> &CommittedCodeRelation {
+        &self.main_source_relation
+    }
+
+    pub(super) const fn shared_mask_relation(&self) -> &CommittedMaskCodeRelation {
+        &self.shared_mask_relation
     }
 }
 

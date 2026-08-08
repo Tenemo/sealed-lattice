@@ -11,6 +11,7 @@
 
 use num_bigint::BigUint;
 use num_traits::One;
+use p3_field::PrimeCharacteristicRing;
 
 use super::cfw_reduction::CfwReductionCatalog;
 use super::lifecycle::PackingQuerySamplingLifecycle;
@@ -22,6 +23,9 @@ use super::{
     MaskGroupRole, MaskGroupStaticLedger, PRIVATE_LEAF_SALT_BYTE_LENGTH, QUINTIC_EXTENSION_DEGREE,
     SUMCHECK_MASK_MESSAGE_LENGTH, WHIR_FOLD_BATCH_COUNT, WHIR_ROUND_COUNT, WhirStaticLedger,
     checked_add, checked_product,
+};
+use crate::bgv::proof_suite::compact_cfw::{
+    COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH, CompactChallengeField,
 };
 use crate::bgv::proof_suite::zero_knowledge::construction_masking_matrix_rank;
 use crate::foundation::{
@@ -112,9 +116,11 @@ enum ConditionalAffineRank {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AffineRankVerification {
     ExactMatrixRank,
-    CfwOuterBlockTriangular {
+    CfwOuterAffineChain {
         round_count: u32,
         coefficients_per_round: u64,
+        transmitted_auxiliary_coordinate_count: u64,
+        transmitted_outer_evaluation_count: u64,
     },
     CfwTerminalSuffixMinor {
         matrix_count: u64,
@@ -152,6 +158,315 @@ struct ConditionalAffineViewRow {
     private_coordinate_count: u64,
     conditional_rank: ConditionalAffineRank,
     verification: AffineRankVerification,
+}
+
+/// Exact outer-mask coefficient map for the production CFW transcript.
+///
+/// Rows are the auxiliary target followed by every round-polynomial
+/// coefficient in chronological order. Columns are every independent outer
+/// mask coefficient in mask-major order. The map is derived without calling
+/// the production accumulator; the differential test below compares every
+/// column with [`crate::bgv::proof_suite::compact_cfw::CompactCfwScalarProverState`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CfwOuterCoefficientToViewMatrix {
+    round_challenges: Vec<CompactChallengeField>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CfwOuterViewCoordinate {
+    AuxiliaryTarget,
+    RoundPolynomialCoefficient {
+        round_ordinal: usize,
+        coefficient_ordinal: usize,
+    },
+    OuterEvaluation {
+        mask_round_ordinal: usize,
+    },
+}
+
+#[cfg(test)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CfwOuterVerifierView {
+    auxiliary_target: CompactChallengeField,
+    round_polynomials: Vec<[CompactChallengeField; COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH]>,
+    outer_evaluations: Vec<CompactChallengeField>,
+}
+
+impl CfwOuterCoefficientToViewMatrix {
+    fn derive(
+        round_challenges: Vec<CompactChallengeField>,
+    ) -> Result<Self, CompactStaticCatalogError> {
+        if round_challenges.is_empty() {
+            return Err(CompactStaticCatalogError::InvalidGeometry);
+        }
+        Ok(Self { round_challenges })
+    }
+
+    fn round_count(&self) -> usize {
+        self.round_challenges.len()
+    }
+
+    fn row_count(&self) -> Result<usize, CompactStaticCatalogError> {
+        self.round_count()
+            .checked_mul(COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH)
+            .and_then(|count| count.checked_add(self.round_count()))
+            .and_then(|count| count.checked_add(1))
+            .ok_or(CompactStaticCatalogError::ArithmeticOverflow)
+    }
+
+    fn column_count(&self) -> Result<usize, CompactStaticCatalogError> {
+        self.round_count()
+            .checked_mul(COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH)
+            .ok_or(CompactStaticCatalogError::ArithmeticOverflow)
+    }
+
+    fn coefficient(
+        &self,
+        view_coordinate: CfwOuterViewCoordinate,
+        mask_round_ordinal: usize,
+        mask_coefficient_ordinal: usize,
+    ) -> Result<CompactChallengeField, CompactStaticCatalogError> {
+        if mask_round_ordinal >= self.round_count()
+            || mask_coefficient_ordinal >= COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH
+        {
+            return Err(CompactStaticCatalogError::InvalidGeometry);
+        }
+        let endpoint_coefficient = if mask_coefficient_ordinal == 0 {
+            CompactChallengeField::TWO
+        } else {
+            CompactChallengeField::ONE
+        };
+        match view_coordinate {
+            CfwOuterViewCoordinate::AuxiliaryTarget => {
+                let endpoint_multiplicity = CompactChallengeField::TWO.exp_u64(
+                    u64::try_from(self.round_count() - 1)
+                        .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+                );
+                Ok(endpoint_multiplicity * endpoint_coefficient)
+            }
+            CfwOuterViewCoordinate::RoundPolynomialCoefficient {
+                round_ordinal,
+                coefficient_ordinal,
+            } => {
+                if round_ordinal >= self.round_count()
+                    || coefficient_ordinal >= COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH
+                {
+                    return Err(CompactStaticCatalogError::InvalidGeometry);
+                }
+                let suffix_scale = CompactChallengeField::TWO.exp_u64(
+                    u64::try_from(self.round_count() - round_ordinal - 1)
+                        .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+                );
+                if mask_round_ordinal < round_ordinal {
+                    if coefficient_ordinal != 0 {
+                        return Ok(CompactChallengeField::ZERO);
+                    }
+                    return Ok(suffix_scale
+                        * self.round_challenges[mask_round_ordinal].exp_u64(
+                            u64::try_from(mask_coefficient_ordinal)
+                                .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+                        ));
+                }
+                if mask_round_ordinal == round_ordinal {
+                    return Ok(if mask_coefficient_ordinal == coefficient_ordinal {
+                        suffix_scale
+                    } else {
+                        CompactChallengeField::ZERO
+                    });
+                }
+                if coefficient_ordinal != 0 {
+                    return Ok(CompactChallengeField::ZERO);
+                }
+                let future_scale = CompactChallengeField::TWO.exp_u64(
+                    u64::try_from(self.round_count() - round_ordinal - 2)
+                        .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+                );
+                Ok(future_scale * endpoint_coefficient)
+            }
+            CfwOuterViewCoordinate::OuterEvaluation {
+                mask_round_ordinal: evaluation_mask_round_ordinal,
+            } => {
+                if evaluation_mask_round_ordinal >= self.round_count() {
+                    return Err(CompactStaticCatalogError::InvalidGeometry);
+                }
+                Ok(if mask_round_ordinal == evaluation_mask_round_ordinal {
+                    self.round_challenges[evaluation_mask_round_ordinal].exp_u64(
+                        u64::try_from(mask_coefficient_ordinal)
+                            .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+                    )
+                } else {
+                    CompactChallengeField::ZERO
+                })
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn apply(
+        &self,
+        outer_masks: &[[CompactChallengeField; COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH]],
+    ) -> Result<CfwOuterVerifierView, CompactStaticCatalogError> {
+        if outer_masks.len() != self.round_count() {
+            return Err(CompactStaticCatalogError::InvalidGeometry);
+        }
+        let evaluate_row = |view_coordinate| -> Result<CompactChallengeField, _> {
+            let mut value = CompactChallengeField::ZERO;
+            for (mask_round_ordinal, mask) in outer_masks.iter().enumerate() {
+                for (mask_coefficient_ordinal, mask_coefficient) in mask.iter().copied().enumerate()
+                {
+                    value += self.coefficient(
+                        view_coordinate,
+                        mask_round_ordinal,
+                        mask_coefficient_ordinal,
+                    )? * mask_coefficient;
+                }
+            }
+            Ok(value)
+        };
+        let auxiliary_target = evaluate_row(CfwOuterViewCoordinate::AuxiliaryTarget)?;
+        let mut round_polynomials = Vec::new();
+        round_polynomials
+            .try_reserve_exact(self.round_count())
+            .map_err(|_| CompactStaticCatalogError::InvalidGeometry)?;
+        for round_ordinal in 0..self.round_count() {
+            let mut polynomial =
+                [CompactChallengeField::ZERO; COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH];
+            for (coefficient_ordinal, coefficient) in polynomial.iter_mut().enumerate() {
+                *coefficient = evaluate_row(CfwOuterViewCoordinate::RoundPolynomialCoefficient {
+                    round_ordinal,
+                    coefficient_ordinal,
+                })?;
+            }
+            round_polynomials.push(polynomial);
+        }
+        let mut outer_evaluations = Vec::new();
+        outer_evaluations
+            .try_reserve_exact(self.round_count())
+            .map_err(|_| CompactStaticCatalogError::InvalidGeometry)?;
+        for mask_round_ordinal in 0..self.round_count() {
+            outer_evaluations.push(evaluate_row(CfwOuterViewCoordinate::OuterEvaluation {
+                mask_round_ordinal,
+            })?);
+        }
+        Ok(CfwOuterVerifierView {
+            auxiliary_target,
+            round_polynomials,
+            outer_evaluations,
+        })
+    }
+
+    /// Checks the exact rank proof for every challenge vector.
+    ///
+    /// The seven nonconstant rows of each round expose seven disjoint pivots.
+    /// After eliminating those columns, each outer-evaluation row has a unit
+    /// pivot on its own mask's constant coordinate. Those `8 * round_count`
+    /// pivots cover every column. The auxiliary row is the endpoint sum of
+    /// round zero, so it adds no rank.
+    fn check_exact_rank_certificate(&self) -> Result<(u64, u64), CompactStaticCatalogError> {
+        let expected_row_count = self.row_count()?;
+        let expected_column_count = self.column_count()?;
+        if expected_row_count
+            != expected_column_count
+                .checked_add(self.round_count())
+                .and_then(|count| count.checked_add(1))
+                .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?
+        {
+            return Err(CompactStaticCatalogError::InvalidGeometry);
+        }
+        for round_ordinal in 0..self.round_count() {
+            let suffix_scale = CompactChallengeField::TWO.exp_u64(
+                u64::try_from(self.round_count() - round_ordinal - 1)
+                    .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+            );
+            if suffix_scale == CompactChallengeField::ZERO {
+                return Err(CompactStaticCatalogError::InvalidGeometry);
+            }
+            for output_coefficient_ordinal in 1..COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH {
+                let output = CfwOuterViewCoordinate::RoundPolynomialCoefficient {
+                    round_ordinal,
+                    coefficient_ordinal: output_coefficient_ordinal,
+                };
+                for mask_round_ordinal in 0..self.round_count() {
+                    for mask_coefficient_ordinal in 0..COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH {
+                        let expected = if mask_round_ordinal == round_ordinal
+                            && mask_coefficient_ordinal == output_coefficient_ordinal
+                        {
+                            suffix_scale
+                        } else {
+                            CompactChallengeField::ZERO
+                        };
+                        if self.coefficient(output, mask_round_ordinal, mask_coefficient_ordinal)?
+                            != expected
+                        {
+                            return Err(CompactStaticCatalogError::InvalidGeometry);
+                        }
+                    }
+                }
+            }
+            let constant_output = CfwOuterViewCoordinate::RoundPolynomialCoefficient {
+                round_ordinal,
+                coefficient_ordinal: 0,
+            };
+            for mask_round_ordinal in 0..self.round_count() {
+                if self.coefficient(constant_output, mask_round_ordinal, 0)? != suffix_scale {
+                    return Err(CompactStaticCatalogError::InvalidGeometry);
+                }
+            }
+        }
+        for evaluation_mask_round_ordinal in 0..self.round_count() {
+            let evaluation = CfwOuterViewCoordinate::OuterEvaluation {
+                mask_round_ordinal: evaluation_mask_round_ordinal,
+            };
+            for mask_round_ordinal in 0..self.round_count() {
+                let expected_constant_coefficient =
+                    if mask_round_ordinal == evaluation_mask_round_ordinal {
+                        CompactChallengeField::ONE
+                    } else {
+                        CompactChallengeField::ZERO
+                    };
+                if self.coefficient(evaluation, mask_round_ordinal, 0)?
+                    != expected_constant_coefficient
+                {
+                    return Err(CompactStaticCatalogError::InvalidGeometry);
+                }
+            }
+        }
+        for mask_round_ordinal in 0..self.round_count() {
+            for mask_coefficient_ordinal in 0..COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH {
+                let mut endpoint_sum_coefficient = self.coefficient(
+                    CfwOuterViewCoordinate::RoundPolynomialCoefficient {
+                        round_ordinal: 0,
+                        coefficient_ordinal: 0,
+                    },
+                    mask_round_ordinal,
+                    mask_coefficient_ordinal,
+                )? * CompactChallengeField::TWO;
+                for coefficient_ordinal in 1..COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH {
+                    endpoint_sum_coefficient += self.coefficient(
+                        CfwOuterViewCoordinate::RoundPolynomialCoefficient {
+                            round_ordinal: 0,
+                            coefficient_ordinal,
+                        },
+                        mask_round_ordinal,
+                        mask_coefficient_ordinal,
+                    )?;
+                }
+                if self.coefficient(
+                    CfwOuterViewCoordinate::AuxiliaryTarget,
+                    mask_round_ordinal,
+                    mask_coefficient_ordinal,
+                )? != endpoint_sum_coefficient
+                {
+                    return Err(CompactStaticCatalogError::InvalidGeometry);
+                }
+            }
+        }
+        let round_count = u64::try_from(self.round_count())
+            .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?;
+        let coefficients_per_round = u64::try_from(COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH)
+            .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?;
+        Ok((checked_product(&[round_count, coefficients_per_round])?, 0))
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -559,9 +874,11 @@ fn derive_affine_views(
                 rank: cfw_outer_private_coordinate_count,
                 residual_entropy_dimension: 0,
             },
-            verification: AffineRankVerification::CfwOuterBlockTriangular {
+            verification: AffineRankVerification::CfwOuterAffineChain {
                 round_count: cfw_reduction.sumcheck_round_count(),
                 coefficients_per_round: cfw_reduction.outer_mask_message_length(),
+                transmitted_auxiliary_coordinate_count: 1,
+                transmitted_outer_evaluation_count: cfw_reduction.outer_mask_count(),
             },
         },
         ConditionalAffineViewRow {
@@ -1407,14 +1724,25 @@ fn check_cross_epoch_disclosure_rank() -> Result<(), CompactStaticCatalogError> 
 fn check_cfw_rank_geometry(
     cfw_reduction: &CfwReductionCatalog,
 ) -> Result<(), CompactStaticCatalogError> {
-    let outer_rank = checked_product(&[
-        u64::from(cfw_reduction.sumcheck_round_count()),
-        cfw_reduction.outer_mask_message_length(),
-    ])?;
+    let round_count = usize::try_from(cfw_reduction.sumcheck_round_count())
+        .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?;
+    let matrix = CfwOuterCoefficientToViewMatrix::derive(
+        (0..round_count)
+            .map(|round_ordinal| {
+                let challenge = u64::try_from(round_ordinal)
+                    .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?
+                    .checked_add(2)
+                    .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+                Ok(CompactChallengeField::from_u64(challenge))
+            })
+            .collect::<Result<Vec<_>, CompactStaticCatalogError>>()?,
+    )?;
+    let (outer_rank, outer_residual_entropy_dimension) = matrix.check_exact_rank_certificate()?;
     let expected_outer_rank = checked_product(&[
         cfw_reduction.outer_mask_count(),
         cfw_reduction.outer_mask_message_length(),
     ])?;
+    let expected_outer_residual_entropy_dimension = 0;
     let final_challenge = 2_u64;
     let first_terminal_coefficient = modular_product(
         2,
@@ -1458,6 +1786,7 @@ fn check_cfw_rank_geometry(
         || cfw_reduction.outer_mask_message_length() != 8
         || cfw_reduction.last_round_excluded_element_count() != 2
         || outer_rank != expected_outer_rank
+        || outer_residual_entropy_dimension != expected_outer_residual_entropy_dimension
         || terminal_rank
             != usize::try_from(CFW_TERMINAL_VALUE_COUNT)
                 .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?
@@ -1836,10 +2165,63 @@ fn has_duplicate(values: &[u64]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bgv::proof_suite::compact_cfw::{
+        COMPACT_CFW_INNER_MASK_MESSAGE_LENGTH, COMPACT_CFW_MATRIX_COUNT, CompactCfwError,
+        CompactCfwGeometry, CompactCfwMaskMaterial, CompactCfwScalarProverState,
+    };
     use crate::bgv::proof_suite::compact_public_key_static_catalog::CompactPublicKeyStaticCatalog;
 
+    fn production_cfw_outer_view(
+        outer_masks: Vec<[CompactChallengeField; COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH]>,
+        round_challenges: &[CompactChallengeField],
+    ) -> Result<CfwOuterVerifierView, CompactCfwError> {
+        let geometry = CompactCfwGeometry::derive(4)?;
+        if round_challenges.len() != geometry.sumcheck_round_count() {
+            return Err(CompactCfwError::InvalidGeometry);
+        }
+        let inner_masks = vec![
+            [CompactChallengeField::ZERO; COMPACT_CFW_INNER_MASK_MESSAGE_LENGTH];
+            geometry.inner_mask_count()
+        ];
+        let mask_material =
+            CompactCfwMaskMaterial::from_canonical_messages(geometry, inner_masks, outer_masks)?;
+        let equality_point = vec![
+            CompactChallengeField::from_u64(17),
+            CompactChallengeField::from_u64(19),
+            CompactChallengeField::from_u64(23),
+        ];
+        let mut state = CompactCfwScalarProverState::begin(
+            geometry,
+            mask_material,
+            CompactChallengeField::from_u64(29),
+            equality_point,
+        )?;
+        let auxiliary_target = state.auxiliary_target();
+        let mut round_polynomials = Vec::with_capacity(geometry.sumcheck_round_count());
+        for (round_ordinal, &round_challenge) in round_challenges.iter().enumerate() {
+            let mut accumulator = state.round_accumulator()?;
+            let suffix_count = 1_usize << (geometry.sumcheck_round_count() - round_ordinal - 1);
+            for _ in 0..suffix_count {
+                accumulator.absorb_next_row_pair(
+                    [CompactChallengeField::ZERO; COMPACT_CFW_MATRIX_COUNT],
+                    [CompactChallengeField::ZERO; COMPACT_CFW_MATRIX_COUNT],
+                )?;
+            }
+            let round_polynomial = accumulator.finish()?;
+            state.accept_round_polynomial(round_polynomial)?;
+            state.bind_round_challenge(round_challenge)?;
+            round_polynomials.push(round_polynomial);
+        }
+        let finish = state.finish([CompactChallengeField::ZERO; COMPACT_CFW_MATRIX_COUNT])?;
+        Ok(CfwOuterVerifierView {
+            auxiliary_target,
+            round_polynomials,
+            outer_evaluations: finish.outer_evaluations().to_vec(),
+        })
+    }
+
     #[test]
-    fn factor_one_closes_the_interactive_construction_masking_correspondence() {
+    fn factor_one_reconciles_the_current_masking_catalog_without_closing_the_gate() {
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
         let factor_one = &catalog.factor_catalogs[0];
@@ -1868,6 +2250,106 @@ mod tests {
             46
         );
         assert_eq!(masking.privacy_refusals, privacy_refusals());
+    }
+
+    #[test]
+    fn cfw_outer_matrix_matches_every_production_coordinate_and_chronology_barrier() {
+        let round_challenges = vec![
+            CompactChallengeField::from_u64(3),
+            CompactChallengeField::from_u64(5),
+            CompactChallengeField::from_u64(7),
+        ];
+        let matrix = CfwOuterCoefficientToViewMatrix::derive(round_challenges.clone())
+            .expect("three-round CFW outer-mask matrix");
+        assert_eq!(matrix.check_exact_rank_certificate(), Ok((24, 0)));
+
+        let round_count = round_challenges.len();
+        let zero_masks = || {
+            vec![[CompactChallengeField::ZERO; COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH]; round_count]
+        };
+        for column_ordinal in 0..matrix.column_count().expect("matrix column count") {
+            let mut basis_masks = zero_masks();
+            basis_masks[column_ordinal / COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH]
+                [column_ordinal % COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH] =
+                CompactChallengeField::ONE;
+            let expected = matrix
+                .apply(&basis_masks)
+                .expect("independent matrix application");
+            let actual = production_cfw_outer_view(basis_masks, &round_challenges)
+                .expect("production CFW outer-mask execution");
+            assert_eq!(actual, expected, "outer-mask basis column {column_ordinal}");
+        }
+
+        let dense_masks = (0..round_count)
+            .map(|mask_round_ordinal| {
+                core::array::from_fn(|mask_coefficient_ordinal| {
+                    CompactChallengeField::from_u64(
+                        31 + u64::try_from(
+                            mask_round_ordinal * COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH
+                                + mask_coefficient_ordinal,
+                        )
+                        .expect("the small dense fixture index fits u64"),
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        let expected_dense = matrix
+            .apply(&dense_masks)
+            .expect("independent dense matrix application");
+        let actual_dense = production_cfw_outer_view(dense_masks.clone(), &round_challenges)
+            .expect("production dense outer-mask execution");
+        assert_eq!(actual_dense, expected_dense);
+
+        for round_ordinal in 0..round_count {
+            let mut future_mutated_challenges = round_challenges.clone();
+            for challenge in &mut future_mutated_challenges[round_ordinal..] {
+                *challenge += CompactChallengeField::from_u64(101);
+            }
+            let future_mutated_matrix =
+                CfwOuterCoefficientToViewMatrix::derive(future_mutated_challenges)
+                    .expect("future-mutated CFW matrix");
+            for coefficient_ordinal in 0..COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH {
+                let view_coordinate = CfwOuterViewCoordinate::RoundPolynomialCoefficient {
+                    round_ordinal,
+                    coefficient_ordinal,
+                };
+                for mask_round_ordinal in 0..round_count {
+                    for mask_coefficient_ordinal in 0..COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH {
+                        assert_eq!(
+                            matrix
+                                .coefficient(
+                                    view_coordinate,
+                                    mask_round_ordinal,
+                                    mask_coefficient_ordinal,
+                                )
+                                .expect("original matrix coefficient"),
+                            future_mutated_matrix
+                                .coefficient(
+                                    view_coordinate,
+                                    mask_round_ordinal,
+                                    mask_coefficient_ordinal,
+                                )
+                                .expect("future-mutated matrix coefficient"),
+                            "round {round_ordinal} depended on an unavailable challenge",
+                        );
+                    }
+                }
+            }
+        }
+
+        let reordered_matrix = CfwOuterCoefficientToViewMatrix::derive(vec![
+            round_challenges[1],
+            round_challenges[0],
+            round_challenges[2],
+        ])
+        .expect("reordered-challenge CFW matrix");
+        assert_ne!(
+            reordered_matrix
+                .apply(&dense_masks)
+                .expect("reordered matrix application")
+                .round_polynomials,
+            actual_dense.round_polynomials,
+        );
     }
 
     #[test]

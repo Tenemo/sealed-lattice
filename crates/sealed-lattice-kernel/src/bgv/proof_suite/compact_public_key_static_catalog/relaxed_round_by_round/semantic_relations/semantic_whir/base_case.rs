@@ -7,7 +7,7 @@
 
 use super::*;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(in super::super) struct SemanticWhirBaseStatement {
     pub(super) input_relation: GeneralizedCommittedRelation,
     pub(super) input_instance: SemanticGeneralizedRelationInstance,
@@ -67,15 +67,15 @@ impl SemanticWhirBaseStatement {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in super::super) struct SemanticWhirBaseFreshMessage {
-    pub(super) source: SemanticCommittedCodeInstance,
-    pub(super) masks: Vec<SemanticCommittedCodeInstance>,
-    pub(super) masked_claim: ProofChallengeExtensionElement,
+    pub(in super::super) source: SemanticCommittedCodeInstance,
+    pub(in super::super) masks: Vec<SemanticCommittedCodeInstance>,
+    pub(in super::super) masked_claim: ProofChallengeExtensionElement,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in super::super) struct SemanticWhirBaseQueryChallenges {
-    pub(super) source_positions: Vec<usize>,
-    pub(super) mask_group_positions: Vec<Vec<usize>>,
+    pub(in super::super) source_positions: Vec<usize>,
+    pub(in super::super) mask_group_positions: Vec<Vec<usize>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -88,8 +88,8 @@ pub(in super::super) struct SemanticWhirBasePrefix {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in super::super) struct SemanticWhirBasePreCombinationWitness {
-    pub(super) input: SemanticGeneralizedRelationWitness,
-    pub(super) fresh: SemanticGeneralizedRelationWitness,
+    pub(in super::super) input: SemanticGeneralizedRelationWitness,
+    pub(in super::super) fresh: SemanticGeneralizedRelationWitness,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -120,9 +120,11 @@ pub(in super::super) enum SemanticWhirBaseCombinationBadTransition {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in super::super) struct SemanticWhirBaseQueryEscape {
-    pub(super) role: SemanticWhirBaseOracleRole,
-    pub(super) differing_row_count: usize,
-    pub(super) query_positions: Vec<usize>,
+    pub(in super::super) role: SemanticWhirBaseOracleRole,
+    pub(in super::super) domain_size: usize,
+    pub(in super::super) selected_decoding_error_count: usize,
+    pub(in super::super) differing_row_count: usize,
+    pub(in super::super) query_positions: Vec<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -754,13 +756,14 @@ fn append_query_escape(
     if combined.received_rows.len() != canonical.received_rows.len() {
         return Err(SemanticWhirError::InvalidGeometry);
     }
+    let geometry = semantic_code_geometry(relation)?;
     let differing_row_count = combined
         .received_rows
         .iter()
         .zip(&canonical.received_rows)
         .filter(|(combined, canonical)| combined != canonical)
         .count();
-    if differing_row_count <= semantic_code_geometry(relation)?.selected_decoding_error_count() {
+    if differing_row_count <= geometry.selected_decoding_error_count() {
         return Ok(());
     }
     if query_positions
@@ -771,6 +774,8 @@ fn append_query_escape(
     }
     escapes.push(SemanticWhirBaseQueryEscape {
         role,
+        domain_size: geometry.block_length(),
+        selected_decoding_error_count: geometry.selected_decoding_error_count(),
         differing_row_count,
         query_positions: query_positions.to_vec(),
     });
