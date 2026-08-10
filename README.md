@@ -18,7 +18,10 @@ quorum weight, proof bypass, finality power, or decryption authority.
 
 ## How it works
 
-The protocol is designed around a public transcript and participant-side verification:
+The protocol target is a public transcript and participant-side verification.
+The steps below describe the intended complete participant flow; they are not
+currently connected into an accepted vote or exposed as a complete public
+ceremony API:
 
 1. A poll configuration and externally anchored participant roster define the ceremony and its threshold.
 2. Participants contribute verifiable secret-sharing material and collectively derive the public and evaluation keys. No single participant holds the complete decryption key.
@@ -28,10 +31,11 @@ The protocol is designed around a public transcript and participant-side verific
 6. A finality quorum authorizes exactly one target result.
 7. After finality, any reconstruction threshold of valid target-bound shares reveals only that approved result.
 
-The only public result is the ordered list of the selected `topCount`
-option identifiers; choosing all options yields a full ranking. Exact sums,
-margins, individual scores, aggregate shares, comparison bits, ranks, and
-intermediate evaluator values are not public outputs.
+For a completed accepted vote under a frozen suite, the intended public result
+is limited to the ordered list of the selected `topCount` option identifiers;
+choosing all options yields a full ranking. Exact sums, margins, individual
+scores, aggregate shares, comparison bits, ranks, and intermediate evaluator
+values are not intended public outputs.
 
 The protocol-family boundary is `3 <= n <= 20` participants and
 `2 <= optionCount <= 20` options. The sole implementation and evidence target
@@ -71,11 +75,33 @@ they are not trusted to prove, verify, tally, finalize, or decrypt.
 ## Prototype status
 
 The kernel's selected source profile and deterministic compilers now target
-`n = 10`, `optionCount = 10`. The suite remains unavailable until its
-parameters, proof construction, theorem records, vectors, resource ledgers,
-and runtime evidence are regenerated and frozen together. Historical figures
-below retain their stated scope; only figures explicitly labeled exact-ten and
-bound to one recorded build describe the current target.
+`n = 10`, `optionCount = 10`. That target has two independent completion
+statuses:
+
+- Cryptographic implementation is incomplete. No exact-ten suite is frozen,
+  the complete participant browser/WebAssembly path is not connected, ballot-
+  validity and target-release proving still use the rejected row-code/WHIR
+  backend, the compact successor remains feature-gated development code, and
+  no accepted vote or complete public ceremony API exists.
+- Supported-phone qualification is incomplete. Once canonical scalar-capable
+  WebAssembly bytes exist, those same bytes must complete every participant
+  operation on each supported physical phone and browser profile, with retained
+  time, peak-memory, persistent-storage, checkpoint, restart-traffic, and lost-
+  work evidence. Native, Node.js, desktop-browser, and emulated runs cannot
+  satisfy this status.
+
+Phone planning-target overages do not invalidate otherwise accepted
+cryptographic bytes. Orders-of-magnitude variance requires redesign and blocks
+a supported-phone claim. Historical figures below retain their stated scope;
+only figures explicitly labeled exact-ten and bound to one recorded build
+describe the current target.
+
+Supported-phone library evidence is still not the final connected-product
+demonstration. After the separate host application exists, ten roster members,
+including the organizer, must complete one end-to-end ceremony using only their
+mobile devices and untrusted relay services within an afternoon, on the same
+qualified library bytes. That later rehearsal is outside this library's
+current implementation status.
 
 ### Current proof-backend decision
 
@@ -124,6 +150,31 @@ derive their maximum uninterrupted foreground segment, maximum lost work,
 restart traffic, and storage transactions. A visibility or freeze callback
 cannot be the only checkpoint trigger.
 
+Current checkpoint and cancellation coverage is not ceremony-wide:
+
+- Ballot creation reaches common-proof checkpoints only after synchronous
+  encryption and proof preparation.
+- Aggregation checkpoints candidate selection and deterministic recomputation,
+  not in-progress ciphertext multiplication.
+- Evaluator replay can cancel and yield between external key reads but has no
+  authenticated durable checkpoint.
+- Target-share generation reaches common-proof checkpoints only after
+  synchronous paired-partial preparation.
+- Threshold reconstruction is synchronous and has no cancellation, yield, or
+  checkpoint interface.
+
+Generic common-proof custody does not qualify these uncovered phases.
+
+The current IndexedDB adapter requests strict transaction durability and the
+current repair path requires an exclusive Web Lock. The production host does
+not yet request and recheck persistent storage, admit a build-linked operation
+against the observed quota, or qualify eviction and storage-pressure behavior.
+Strict transaction durability is crash-write protection, not origin-eviction
+protection. An internally consistent older local snapshot can still
+authenticate; continuation must reconcile it with accepted transcript objects
+and quorum-backed state rather than treating local authentication as rollback
+resistance.
+
 The evaluation-hiding lattice-PCS direction is no longer an implementation
 candidate. Its papers provide useful classical interactive extraction and
 hiding components, but not the exact post-quantum state-restoration extractor
@@ -144,9 +195,14 @@ terms can only worsen it. A successor needs roughly a 255-bit uniform raw
 round-by-round ceiling before those remaining terms are allocated. This is a
 parameter failure of the incumbent construction, not a defect in the theorem.
 
+The compact successor modules discussed below are compiled only for tests or
+primitive-measurement evidence. The default kernel does not include them. They
+are development evidence, not the active ballot-validity or target-release
+proof path.
+
 The active investigation is therefore a compact ring-vector compiler over the
 existing physical BGV RNS limbs, followed by a salted SHAKE256 Merkle BCS of a
-constrained Reed-Solomon proof. The preferred test-only field strategy is one
+constrained Reed-Solomon proof. The preferred development-only field strategy is one
 CFW/WHIR execution over the existing irreducibility-checked quintic Goldilocks
 extension. Its code symbols are represented by five base-field coordinates and
 its transform domain and twiddles remain in the Goldilocks subfield. This is a
@@ -257,7 +313,7 @@ claims for each of 69 inner masks, one for each of 23 outer masks, and two
 explicit cross-epoch openings. Its exact batching error is therefore
 `163 / |F|`; the pre-challenge epoch has one claim and zero batching error.
 These are exact rational checks for the generated interactive catalog. They are
-not used as a substitute for the relaxed extraction theorem.
+not used as a substitute for the move-by-move extraction analysis.
 
 The factor-one chronology now has a checked prefix-relation descriptor and
 extractor-step transition for all 82 verifier moves. The catalog instantiates
@@ -274,7 +330,7 @@ one root and the 23-coordinate multilinear constraint identity contributes at
 most 23 more. The published coordinate is retained only as paper
 correspondence and cannot replace the operative `24 / |F|` bound. Exact
 citation-level correspondence to CFW Theorem 11.3 therefore remains refused;
-the executable semantic theorem uses the direct bad-transition proof instead.
+the executable semantic owner uses the direct bad-transition bound instead.
 Each Reed-Solomon code uses its full message-plus-hiding dimension, the strict
 integer radius `floor((N - K - 1) / 2)`, an executable canonical Berlekamp-Welch
 decoder, and a provisional correction-work ceiling for that decoder. Focused
@@ -298,10 +354,11 @@ challenge geometry and requires all 82 per-move totals and their maximum to
 equal the independently constructed numerical ledger. Every concrete `ERRBR`
 bad-transition certificate is also reinterpreted as those exact event families,
 summed, and refused if it exceeds the error bound carried by its owning move.
-The direct semantic proof therefore establishes the maximum per-move
-extraction error at no more than `2^-266` without using the printed CFW first
-coordinate. Later CDHZ composition remains conditional on the masking,
-emitted-byte, Merkle, and complete-proof owners.
+For the feature-gated factor-one standalone slice, the executable semantic
+owner therefore derives a maximum per-move extraction-error bound of no more
+than `2^-266` without using the printed CFW first coordinate. This closes a
+source-level development checklist only. Later CDHZ composition remains
+conditional on the masking, emitted-byte, Merkle, and complete-proof owners.
 
 The CFW slice now has an executable knowledge-state predicate over a canonical
 statement, verifier-owned matrices and public input, committed source and mask
@@ -355,8 +412,9 @@ message and every adjacent prover-message shape, while the verifier dispatcher
 executes local `KState`, deterministic `ERRBR`, predecessor reconstruction,
 and concrete bad-transition derivation for every owner. Reduced geometry
 exercises every generic branch and both complete epoch histories without
-claiming a production-size proof run. This closes the executable Definition
-3.5/3.6 owner and the operative direct initial-transition proof. It does not
+claiming a production-size proof run. For this feature-gated standalone slice,
+this closes the executable Definition 3.5/3.6 development owner and records the
+operative direct initial-transition bound. It does not
 repair the published `9 / |F|` claim, which remains recorded but unused. The
 historical extraction-work ledger has now been replaced by a source-level
 field/word-RAM bound that includes the executable outer, generalized-WHIR,
@@ -401,11 +459,13 @@ The conditional Theorem 6.10 arithmetic still uses `2^80 - 1`
 adversarial queries, work bound equal to that query bound, and the current
 uniform fixed-bit verifier messages. Public status deliberately retains the
 conservative 98-bit adaptive-QROM, 95-bit ten-public-key-proof-union, and 92-bit
-103-physical-proof-inventory figures while the theorem is open. The current
+103-physical-proof-inventory figures while the noninteractive composition is
+open. The current
 uncapped calculator returns 99 bits per proof, 96/95/95/96 bits for the
 factor-one/two/four/eight ten-proof unions, and 92 bits for each conditional
-inventory union. None is a security result before the semantic, masking, and
-emitted-byte gates close. The last figure is a conservative
+inventory union. None is a security result before the masking, emitted-byte,
+and complete-proof gates close; the source-level semantic-owner checklist does
+not satisfy those gates by itself. The last figure is a conservative
 multiplicity check, not permission for later packet families to inherit this
 standalone geometry. It remains above the 80-bit complete-partition rejection
 threshold. Classical soundness uses the same upper bound because classical
@@ -564,33 +624,30 @@ It also checks the theorem-proof
 normalization that applies each inner mask with a factor of two. This is an
 in-memory reference execution.
 
-The construction-level masking catalog records the
-production source, carried-mask, fresh-mirror, code-switch, fold, quotient,
-sumcheck, explicit-point, and terminal views. It checks the three-by-two cross-
-epoch disclosure map at rank two, all 184 outer-CFW mask coordinates, the rank-
-three terminal suffix over 138 residual inner-mask coordinates, and the
-challenge-independent sumcheck minor of rank `2k + 1` with residual dimension
-`k - 1` for every production width `k` in `3..7`. Distinct nonzero generalized
-Vandermonde rows give exact source and mask-query ranks. The shared cross-epoch
-root is conditioned on the union of its two adaptive 399-query groups, so
-overlap reduces only the incremental rank and never exceeds the 798 hiding
-coordinates per lane. Eight source roots, 17 distinct carried-mask roots, two
-fresh-source roots, and 18 fresh mirrors produce 45 commitments. Their 26
-original and 20 fresh-counterpart opening batches give 46 verifier opening
-batches, including two openings of the one shared original root. Every root is
-placed before its dependent challenge. Production verification recomputes each
-canonical root from values, salts, and its minimal frontier; the interactive
-simulator consumes the exact public claims and abstract oracle queries. The
-deployed and quantum KMAC256 hybrids start from a fresh 512-bit browser-CSPRNG
-action root and separately charge root guessing, bounded rejection-sampler
-exhaustion, and 1,024-bit leaf-salt collisions. Canonical emitted multiproof
-regions now have exact verifier consumers. Emitted Merkle-root and frontier
-programming, full-family and complete-ceremony simulation, fixed-SHAKE
-justification, and QROM zero knowledge remain explicit refusals. Several
-coefficient-to-view identities are still catalog labels rather than
-independently generated matrices from the production compiler and verifier, so
-this is not yet an exact ideal-uniform statistical-HVZK simulator. Deployment
-additionally relies on a computational browser-CSPRNG/KMAC quantum-PRF hybrid.
+The construction-level masking catalog records the production source, carried-
+mask, fresh-mirror, code-switch, fold, quotient, sumcheck, explicit-point, and
+terminal view families. It derives a static topology of 45 commitments and 46
+opening batches. Its independently executable algebra checks are narrower: a
+fixed three-by-two cross-epoch disclosure map, a terminal-rank check at the
+fixed development challenge value, three synthetic sumcheck vectors, and one
+three-round CFW outer coefficient map derived independently and differential-
+tested. Other coordinate identities, rank claims, and production-width counts
+remain catalog expectations rather than independently generated production
+matrices. The test-only compact verifier owners recompute canonical roots from
+values, salts, and minimal frontiers. The simulator owner currently records
+input rows only; it is not an adaptive interactive simulator.
+
+The masking catalog models a future deployment that starts from a fresh 512-bit
+browser-CSPRNG action root and separately charges root guessing, bounded
+rejection-sampler exhaustion, and 1,024-bit leaf-salt collisions. The emitted-
+byte owner maps fixed and bounded static regions and maximum proof regions;
+frontier-dependent regions remain parameterized until a live production proof
+provides their bytes. Emitted Merkle-root and frontier programming, full-family
+and complete-ceremony simulation, fixed-SHAKE justification, and QROM zero
+knowledge remain explicit refusals. The missing independently generated
+coefficient-to-view matrices also prevent an exact ideal-uniform statistical-
+HVZK simulator. Deployment additionally relies on a computational browser-
+CSPRNG/KMAC quantum-PRF hybrid.
 CMS19 and BCS16 give a later route from exact statistical HVZK and salted-Merkle
 privacy to single-proof malicious-verifier statistical zero knowledge in the
 explicitly programmable random-oracle model. That route still needs the exact
@@ -648,12 +705,16 @@ focused owner reconciles every poll and work subtotal, compares boundary and
 interior rows from every structured relation against the independent expanded
 interpreter, compares the complete lookup-log row against its direct reciprocal
 expansion, and detects a cached-product mutation. That pure row-source owner
-uses deterministic assignment authority. A separate guarded native owner now
-uses a standalone, nonserializable development authority derived from the same
+uses deterministic assignment authority. A separate guarded native owner uses
+a standalone, nonserializable development authority derived from the same
 authenticated production inputs and production common-secret, anchor, and
 public-key constructors. The authority deliberately contains no VSS,
 relinearization, Galois, ceremony-output, or global-registry capability. It
-served the exact 202-column compact profile, materialized all lookup inverses,
+was exercised by the retained historical dirty-worktree run
+`2026-08-06T06-43-27.865Z-test-rust-kernel-heavy` at source baseline
+`50f38f9b70f4b4860652b8916cd15960e33e65b9`. Its summary records exit code zero
+and `164,074` milliseconds, while the focused test body reports 159.01 seconds.
+That run served the exact 202-column compact profile, materialized all lookup inverses,
 prepared the structured row source, checked every relation and constraint
 segment boundary, and advanced one 16,384-row CFW poll. After authority
 construction, those phases took `1,255`, `12,414`, `363`, `561`, `0`, and `20`
@@ -663,8 +724,10 @@ authority-inclusive loading/post-finish persistent resident byte counts were
 `17,749,844` and `17,225,556`, with `4,837,360` loading-transient bytes and a
 `131,072`-byte maximum returned polynomial. The guarded native process tree
 reached `147,382,272` resident bytes and `163,553,280` peak job memory. These
-are native diagnostic measurements, not release-WASM or mobile-browser
-evidence. The preparation state is pollable but not durably restartable: it
+are claim-scoped historical native one-poll diagnostic measurements, not
+current-source, selected-size response-phase, complete-proof, release-WASM,
+browser, or supported-phone evidence. The preparation state is pollable but not
+durably restartable: it
 writes no authenticated cache record, and the honest interruption bound is
 full preparation replay.
 
@@ -1022,7 +1085,8 @@ derived task, poll, work, host-control, and full-replay ledgers plus a small
 dense-matrix correspondence owner. The canonical postorder response-tree writer
 and frontier scanner now have independent byte-order correspondence, hostile
 framing coverage, production constructor coverage, and exact per-factor heap
-ledgers. The factor-one executable relaxed theorem binds all 82 transitions,
+ledgers. The feature-gated factor-one source-level semantic owner binds all 82
+transitions,
 15 relation identities, full-dimension code shapes, correction radii, list-size
 bounds, CFW errors, WHIR MCA terms, challenge dependencies, and every
 executable code operation. It derives the maximum deterministic cost of one
@@ -1043,11 +1107,12 @@ retains all completed phase histories, replays the exact WHIR relation pairs,
 and refuses chronology truncation, reordering, and cross-handoff challenge
 substitution. It also re-verifies completed CFW and pre-challenge terminal
 transcripts before a later component state can hold. The generic construction
-owner proves the empty-transcript, every prover-prefix and verifier-prefix, and
+owner checks the empty-transcript, every prover-prefix and verifier-prefix, and
 full-transcript properties together for all 82 moves, every adjacent extracted-
 witness transition, and every global bad-transition implication. Its direct
 initial lemma and independently decomposed field/word-RAM audit complete the
-semantic theorem. The emitted-byte owner maps static canonical regions and
+source-level semantic-owner checklist for this test-only slice. The emitted-byte
+owner maps static canonical regions and
 fixed-message candidates to verifier consumers. Public status retains
 conditional 98-, 95-, and 92-bit per-proof,
 public-key-union, and complete-inventory reporting under the ideal-QRO
@@ -1090,55 +1155,42 @@ compact generation state, browser-custody external-memory join, and compact
 deterministic replay remain absent.
 
 The static gate remains closed because current generation does not select the
-compact profile or exercise it through a retained live authority, because row-
-source preparation has no authenticated cache recovery, and because the
-selected-size CFW and CFW-to-transpose execution, selected-size transpose
-execution, unified production transcript, live production-authority
-integration, durable proof and verifier lifecycle, and independently measured
-resources for the fixed bytes remain incomplete. The relaxed extraction,
-construction-level masking, and emitted-byte owners also remain incomplete.
-The CFW semantic predicate and deterministic extractor now execute across every
-CFW message prefix. The WHIR semantic components, exact CFW cross-epoch witness
-handoff, all 15 adjacent relation-and-instance equalities, and zero
-construction-wide input- and output-implicit tuple dimensions also execute.
-Binary WHIR folding and base-combination MCA certificates now execute. The
-lookup and cross-epoch semantic transition owners decode their bound committed-
-code instances, derive the declared quotient/multiplicity, copied-prefix, and
-two-lane mask views from those witnesses, and reject committed-witness
-substitution. The production-layout adapter and checked 82-move semantic
-dispatcher now bind every verifier move to an executable local `KState`,
-`ERRBR`, and bad-transition owner. A construction-wide semantic prefix
-projection now retains every completed phase, replays the exact WHIR relation
-pairs, and refuses truncated, reordered, or cross-handoff-substituted
-chronology. It also makes completed CFW and pre-challenge terminal rejection
-sticky across later prover messages. What remains absent is a proof of the
-empty-, every prover- and
-verifier-prefix-, and full-transcript properties together for all 82 moves,
-every adjacent extracted-witness transition, independent construction-wide
-coverage of the local deterministic extraction bound, and all bad-transition
-implications across a single complete chronology. The
-masking catalog does not
-independently derive every production coefficient-to-view map, the conditional
-entropy after each prior disclosure, the exact ideal-uniform simulator, or the
-deployed KMAC256 quantum-
-PRF hybrid. The emitted-byte catalog and reduced hostile envelope do not yet
-supply the complete production-shaped small-chain map or instantiate soundness
-against one complete production proof. The existing canonical codecs, hostile
-decoder, response commitments, fixed-bit challenge decoder, static query
-censuses, and transcript-prefix work ledger are bounded development evidence
-only.
+compact profile or exercise it through a retained live authority, row-source
+preparation has no authenticated cache recovery, and selected-size CFW,
+CFW-to-transpose, transpose, and WHIR execution remain incomplete. One unified
+production transcript, live production authority, durable proof and verifier
+lifecycle, and independently measured resources for the fixed bytes are also
+absent.
 
-The immediate work order is construction-level masking, then the emitted-byte
-map on one production-shaped small chain, and then the authenticated browser-
-custody lifecycle. The completed semantic theorem remains an input. Each
-owner receives only focused checks; neither a prover nor the complete test graph
-runs while the remaining gates are open. The lifecycle owner must connect the
-reduced production-equation source path to the ceremony generation host's live
-source authority and browser-rooted attempt custody, drive the pre-challenge, cross-
-epoch, CFW, and WHIR messages through one canonical production transcript, and
-require that production verifier path to consume the existing canonical section
-model. Only that complete small-geometry chain can authorize selected-size
-diagnostics.
+The feature-gated factor-one standalone public-key slice has executable owners
+covering its 82-move semantic chronology and recorded local per-move error
+bound. That completes this source-level development checklist only. It is not
+exact citation-level correspondence to the printed CFW first-coordinate
+theorem, a formal proof of the implementation, noninteractive or CDHZ
+soundness, production masking, emitted-byte correspondence, zero knowledge,
+any production packet, or an accepted generated proof. The masking catalog
+does not independently derive every production coefficient-to-view map, the
+conditional entropy after each prior disclosure, the exact ideal-uniform
+simulator, or the deployed KMAC256 quantum-PRF hybrid. The emitted-byte catalog
+and reduced hostile envelope do not yet supply the complete production-shaped
+small-chain map or instantiate soundness against one complete production proof.
+The existing canonical codecs, hostile decoder, response commitments, fixed-bit
+challenge decoder, static query censuses, and transcript-prefix work ledger
+remain bounded development evidence only.
+
+The immediate work order is exact construction-level masking and the deployed
+KMAC hybrid, followed by static emitted-byte instrumentation and explicit
+premise gates. Next, a non-test production-shaped small chain must connect the
+real source authority, action randomness, canonical transcript, response
+values, CFW, structured transpose, both WHIR epochs, retained trees, proof
+assembler, hostile verifier, and authenticated browser custody. The decoded
+actual-byte consumer and hash graph, hostile corpus, salted-Merkle privacy, and
+finite collision-free programmable-oracle map are instantiated from that live
+chain before the CDHZ/Merkle/QROM arithmetic may become operative. The
+completed source-level semantic-owner checklist for the test-only slice remains
+an input. Each open owner receives only focused checks; neither a selected-size
+prover nor the complete test graph runs while these gates remain open. Only the
+complete small-geometry chain can authorize selected-size diagnostics.
 
 Factors one, two, and four remain eligible engineering comparators
 for the same standalone relation and security target. Factor eight is retained
@@ -1156,23 +1208,30 @@ packet follows only after both focused slices pass. External references remain
 research and differential-test inputs, not licensed reusable code or theorem
 authority.
 
-Works today:
+Works today, at component scope:
 
 - The public package validates poll input and creates or verifies canonical
   foundation objects.
 - The Rust/WebAssembly kernel recomputes their encodings, hashes, roots, roster
   formulas, and contexts.
-- Browser-local custody, authenticated records, checkpoints, and fixed-roster
-  state witnessing have focused desktop-browser coverage.
-- Ballot encryption, aggregation, encrypted evaluation, and target release have
-  focused component tests.
-- All production proof-family preparation sites now use the streaming row-code
-  and explicit-point WHIR construction. The old operative FRI body has been
-  removed, and the successor has production-owned masked proof assembly,
-  incremental canonical verification, bounded-storage primitives, and focused
-  development tests. This describes the live code path, not a selected mobile
-  backend; the measurements above reject its proving schedule pending
-  replacement by the compact ring-vector successor.
+- Internal Rust/WebAssembly components implement real BGV ballot encryption,
+  positive ballot-proof verification, roster-ordered positive-ballot
+  aggregation, encrypted evaluator replay, fixed-roster state witnessing,
+  seven-member finality verification, paired target partial generation and
+  verification, and threshold-four reconstruction.
+- Browser-local custody, authenticated records, common-proof checkpoints, and
+  fixed-roster state witnessing have focused desktop-browser coverage. This is
+  not ceremony-wide checkpoint coverage.
+- These components do not form an accepted vote. The default production-wired
+  ballot-validity and target-release proof-family preparation sites use the
+  rejected streaming row-code/WHIR construction.
+- The old operative FRI body has been removed. The retained row-code path has
+  masked proof assembly, incremental canonical verification, bounded-storage
+  primitives, and focused development tests, but its proving schedule is
+  operationally rejected.
+- The compact ring-vector successor is test- and measurement-gated. It has no
+  production packet compiler or production generated-proof verifier and cannot
+  replace those default calls.
 - The live 64-way same-secret geometry and full-coordinate, inverse-rate-four
   aggregate-wide mask have production-derived static plans. The canonical
   transport sections and selected resource owner now independently reconcile a
@@ -1711,7 +1770,8 @@ Not yet:
   complete concrete QROM composition, emitted proof bytes, or complete-proof
   browser result. Its public-key development slice now has the
   complete structured relation, mask and code-switch catalogs, exact compact
-  CFW algebra and claim batching, the factor-one executable relaxed theorem,
+  CFW algebra and claim batching, the feature-gated factor-one source-level
+  semantic owner,
   construction-level interactive masking catalog, a
   bounded static CFW lifecycle, one canonical
   Merkle response per logical round, canonical proof and public-input codecs,
@@ -1721,6 +1781,17 @@ Not yet:
   masking, extractor, transcript, and QROM records do not transfer. The
   candidate cannot select or activate a suite until these obligations close
   for emitted replacement bytes.
+- Candidate-list production, transport, and complete-view authentication exist
+  as internal components, but no participant-facing runtime mints and hands
+  verifier-owned complete candidate-view authority to aggregation. Aggregation
+  accepts a caller-supplied candidate-view root for TypeScript custody, while
+  Rust aggregation consumes no authenticated candidate view. Candidate
+  selection and aggregation therefore are not an accepted participant path.
+- Finality verification enforces the selected seven-member quorum and its
+  replay, signature, state, and output bindings. No participant runtime produces
+  the canonical finality statement, signed carriers, or assembled certificate.
+  Finality therefore cannot yet be produced by the complete participant
+  workflow.
 - The exact-ten source and schema conversion now binds the selected foundation
   profile, manifests, actions, suite records, 45 unordered pairs, and ten
   `topCount` evaluator streams while retaining deterministic structural
@@ -1779,12 +1850,25 @@ Not yet:
   framing or per-participant traffic. The former `2,024,248,558`-byte
   twenty-option subtotal is superseded and is not a lower bound for the current
   profile.
+- Common-proof checkpoint custody is not ceremony-wide. Ballot preparation,
+  aggregation multiplication, evaluator execution, target-partial preparation,
+  and threshold reconstruction do not all have authenticated deterministic
+  restart boundaries. Cancellation or cooperative yielding without durable
+  resume does not satisfy this requirement.
 - No full-width exact proof has completed on the current implementation, and no
   release WebAssembly proof has been generated and freshly verified across the
   desktop browsers. Recent guarded native attempts ended before proof emission,
   so their observed memory is diagnostic rather than completion evidence.
-- The last complete routine workspace graph passed at checkpoint `52470766`.
-  Its 725.5-second run covered the workspace build, type checking, package
+- The newest retained complete routine run is
+  `2026-08-02T13-16-27.252Z-check`. It took `724,934` milliseconds and passed
+  its included lanes, but its summary records a dirty worktree and no browser
+  lane. It is historical dirty-worktree evidence, not commit or current-source
+  verification. The newest retained clean routine run is
+  `2026-08-01T11-38-38.115Z-check`; it also has no browser lane. The newest
+  retained complete desktop-browser graph is
+  `2026-07-26T17-00-42.815Z-check-desktop`, which also records a dirty worktree. No
+  retained `test:browser:proof-evidence` summary exists. The August 2 routine
+  run covered the workspace build, type checking, package
   smoke, lint, unused-
   code analysis, Node tests, Rust formatting and Clippy, process-memory-guard
   self-tests, and all 975 ordinary Rust inventory entries. The
@@ -1798,11 +1882,12 @@ Not yet:
   pass focused owners. At that checkpoint, the exact-ten collective-setup
   evidence was regenerated from a guarded Rust production-authority export and
   its canonical Node and independent Rust authority checks passed. The tracked
-  record is now source-stale against the compact-pivot worktree and its proof
+  record is now source-stale against the compact-successor source and its proof
   imports remain row-code-specific; it must be regenerated only after the
-  successor authority stabilizes. There is no complete current-HEAD routine rerun.
-  The current worktree passes warnings-denied compile-only checks for the
-  ordinary, primitive-measurement, and theorem feature sets. The selected-output
+  successor authority stabilizes. There is no complete routine rerun for the
+  current source. Separate retained compile-only records pass warnings-denied
+  checks for the ordinary, primitive-measurement, and theorem feature sets. The
+  selected-output
   DFT is feature-scoped to tests and primitive measurements and is not a
   production generation path. A focused aggregate-threshold nonlinear-simulator
   owner eventually passed after an earlier exact failure, while the setup-family
@@ -1813,7 +1898,7 @@ Not yet:
   additionally produced one run without a summary and one 349-symbol linker
   failure before the final focused pass; they are runner-lifecycle diagnostics,
   not cryptographic or memory evidence.
-  In the 2026-08-02 PR run for current head `f8d767b2`, the
+  In the 2026-08-02 PR run for the then-reviewed head `f8d767b2`, the
   change classifier and fast Rust job passed, but the combined static, Node,
   and browser job failed ten tests because the committed collective-setup
   evidence no longer matches the production-derived `sourceAuthority`. The
@@ -1829,11 +1914,16 @@ Not yet:
   interrupted scheduling or termination diagnostic, not an out-of-memory
   result. Long theorem, heavy-kernel, full-width, and manual browser proof lanes
   remain separately guarded.
-- No exact `n = 10`, `optionCount = 10` suite is frozen, no complete accepted
-  vote runs end to end, and ballot, evaluator, and target-release operations are
-  not public APIs.
-- No physical-phone profile is qualified. Desktop-browser, Node.js, native, and
-  fixture-backed runs are development evidence only.
+- No exact `n = 10`, `optionCount = 10` suite is frozen and no complete accepted
+  vote runs end to end.
+- The published SDK exposes foundation validation and canonical foundation
+  objects only. Collective setup, VSS and key material, ballot creation and
+  verification, complete candidate-view selection, aggregation, evaluator
+  replay, finality, state, and target release remain internal APIs.
+- Cryptographic implementation and supported-phone qualification are both
+  incomplete and are reported independently. No physical-phone profile is
+  qualified; desktop-browser, Node.js, native, emulated, and fixture-backed runs
+  are development evidence only.
 
 ## Install
 

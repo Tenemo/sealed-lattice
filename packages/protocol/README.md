@@ -7,18 +7,22 @@ These helpers validate their documented inputs and recompute local bindings, but
 The implemented row-code/WHIR proof body is operationally rejected as the
 mobile proving direction. The lattice-PCS replacement is also rejected because
 its available extractor and opening lifecycle do not close this protocol's
-post-quantum browser path. A test-only compact Goldilocks ring-vector candidate
+post-quantum browser path. A test- or measurement-feature-gated compact
+Goldilocks ring-vector candidate
 preserves the complete production family inventory and keeps accepted BGV
 objects in their existing RNS representation. The standalone public-key slice
 now has a production-derived structured relation and independent interpreter,
 two commitment epochs, all CFW inner and outer masks, code-switch and WHIR
 static catalogs, canonical proof and public-input codecs, one salted Merkle
 commitment per logical response, and complete live-prefix query schedules for
-every production packing geometry. The factor-one relaxed-theorem, interactive
-masking, emitted-byte consumer, and conditional CDHZ/QROM modules remain
-incomplete development owners. The CFW theorem slice now executes canonical
-correction, a semantic `KState`, and deterministic `ERRBR` for every CFW
-message prefix and separates encoding randomness from the ordered distinct-
+every production packing geometry. The factor-one executable semantic owner is
+complete only as a source-level, feature/test-gated standalone development
+owner over reduced fixtures and the checked 82-move schedule; it is not
+production-size execution or noninteractive proof closure. Interactive
+masking, emitted-byte correspondence, and conditional CDHZ/QROM composition
+remain incomplete development owners. The CFW theorem slice now executes
+canonical correction, a semantic `KState`, and deterministic `ERRBR` for every
+CFW message prefix and separates encoding randomness from the ordered distinct-
 query count. `ERRBR` does not call the potentially inefficient `KState`; the
 bad-transition experiment evaluates it separately. Canonical Reed-Solomon code
 owns the decoder-local field-operation ceiling, including evaluation-point
@@ -56,16 +60,17 @@ without claiming a production-size proof. CFW Theorem 11.3 prints `9 / |F|` for 
 first coordinate at the production outer-mask message length, while the
 executable combining-scalar and 23-coordinate equality-point identity requires
 `24 / |F|`. Exact citation-level correspondence remains refused, but the
-semantic theorem derives and uses the operative bound directly. Its source-
+semantic owner derives and uses the operative bound directly. Its source-
 level field/word-RAM owner exposes field bookkeeping, the four-operation-per-
 oracle and 60-pass element audit, and straight-line control work. It derives a
 `214,588,832`-element semantic capacity, a
 `443,157,977,600,378,644,017` maximum deterministic `etRRBR` ceiling, and a
 `2,206,663,587,245,278,458,394` aggregate diagnostic. CDHZ retains its outer
-asymptotic constant. Independently derived production coefficient-to-view
-matrices, an exact ideal-uniform simulator and deployed KMAC quantum-PRF hybrid,
-and one complete emitted production proof
-also remain absent. The shared two-epoch mask oracle is
+asymptotic constant. One limited three-round CFW outer coefficient-to-view map
+is independently derived and differential-tested; the complete production map
+set, an exact ideal-uniform simulator and deployed KMAC quantum-PRF hybrid, and
+one complete emitted production proof remain absent. The shared two-epoch mask
+oracle is
 owned once by the canonical response catalog; its two later verifier-message
 groups open their sorted unique union through bounded canonical response counts.
 These are static development owners, not an accepted proof path.
@@ -91,14 +96,15 @@ commitment, authenticated salt replay, and response-value replay remain
 unimplemented. That alternative is deferred rather than treated as a way to
 rescue factor eight.
 
-The relaxed round-by-round, construction masking, canonical emitted-byte, and
-noninteractive soundness catalogs remain conditional for this standalone
-geometry. Public status retains conservative 98/95/92-bit reporting; the
+The construction masking, canonical emitted-byte, and noninteractive soundness
+catalogs remain conditional for this standalone geometry. Public status retains
+conservative 98/95/92-bit reporting; the
 uncapped factor calculators currently return 99 bits per proof,
 96/95/95/96 bits for the factor-one/two/four/eight ten-proof unions, and 92
-bits for every conditional inventory union. None is a theorem result until the
-semantic extractor, exact masking correspondence, and complete emitted proof
-derive. CMS19 and BCS16 could compile exact ideal-uniform statistical HVZK and
+bits for every conditional inventory union. None is a final noninteractive
+theorem result until the exact masking correspondence and one complete emitted
+proof derive; the completed semantic owner remains an input. CMS19 and BCS16
+could compile exact ideal-uniform statistical HVZK and
 salted-Merkle privacy into single-proof malicious-verifier statistical zero
 knowledge in the explicitly programmable random-oracle model. The required BCS
 privacy error, collision-free programming domains, root/frontier programming
@@ -195,6 +201,10 @@ relation, and relinearization round two.
 Enrollment, identity vetting, invite links, organizer orchestration, user interface, and visit cadence belong to the host application rather than this cryptographic library. A host-side organizer has no distinct cryptographic role or authority.
 
 Browser-local storage authentication and atomicity support honest-client integrity and recovery from interrupted writes. They are not quorum authority, rollback-resistant recency, or target-release authorization. Shared state, finality, and release decisions must be derived from accepted protocol objects and the applicable fixed-roster quorum.
+
+The IndexedDB and Web Lock paths are groundwork only. Persistent-storage
+admission, quota and eviction handling, external recency, and physical-phone
+qualification remain open.
 
 Browser lifecycle may suspend or terminate the owning proof worker without a
 usable final callback. Checkpoint-enabled operations therefore publish only at
