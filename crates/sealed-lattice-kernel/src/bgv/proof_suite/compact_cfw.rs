@@ -10,6 +10,12 @@ use p3_field::extension::BinomialExtensionField;
 use p3_field::{BasedVectorSpace, PrimeCharacteristicRing, PrimeField64};
 use p3_goldilocks::Goldilocks;
 
+pub(crate) use super::compact_cfw_geometry::{
+    COMPACT_CFW_INNER_ENDPOINT_CLAIM_COUNT, COMPACT_CFW_INNER_MASK_APPLICATION_MULTIPLIER,
+    COMPACT_CFW_INNER_MASK_MESSAGE_LENGTH, COMPACT_CFW_LAST_ROUND_EXCLUDED_ELEMENT_COUNT,
+    COMPACT_CFW_MATRIX_COUNT, COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH,
+    COMPACT_CFW_ZERO_EVADER_EXPONENTS, CompactCfwGeometry, CompactCfwGeometryError,
+};
 use super::field::{PROOF_CHALLENGE_EXTENSION_DEGREE, ProofChallengeExtensionElement};
 
 pub(crate) type CompactChallengeField = BinomialExtensionField<Goldilocks, 5>;
@@ -34,14 +40,6 @@ pub(crate) fn compact_challenge_to_production(
     ProofChallengeExtensionElement::from_canonical_coordinates(coordinates)
         .map_err(|_| CompactCfwError::IncompatibleChallengeField)
 }
-
-pub(crate) const COMPACT_CFW_INNER_MASK_MESSAGE_LENGTH: usize = 4;
-pub(crate) const COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH: usize = 8;
-pub(crate) const COMPACT_CFW_MATRIX_COUNT: usize = 3;
-pub(crate) const COMPACT_CFW_INNER_ENDPOINT_CLAIM_COUNT: usize = 2;
-pub(crate) const COMPACT_CFW_INNER_MASK_APPLICATION_MULTIPLIER: u64 = 2;
-pub(crate) const COMPACT_CFW_ZERO_EVADER_EXPONENTS: [u32; COMPACT_CFW_MATRIX_COUNT] = [0, 1, 2];
-pub(crate) const COMPACT_CFW_LAST_ROUND_EXCLUDED_ELEMENT_COUNT: u64 = 2;
 
 pub(crate) fn compact_cfw_final_challenge_is_allowed(challenge: CompactChallengeField) -> bool {
     challenge != CompactChallengeField::ZERO && challenge != CompactChallengeField::ONE
@@ -76,73 +74,6 @@ impl CompactCfwMatrixRole {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct CompactCfwGeometry {
-    witness_length: usize,
-    r1cs_row_count: usize,
-    sumcheck_round_count: usize,
-    inner_mask_count: usize,
-    outer_mask_count: usize,
-    generalized_committed_relation_claim_count: usize,
-}
-
-impl CompactCfwGeometry {
-    pub(crate) fn derive(witness_length: usize) -> Result<Self, CompactCfwError> {
-        if witness_length == 0 || !witness_length.is_power_of_two() {
-            return Err(CompactCfwError::InvalidGeometry);
-        }
-        let r1cs_row_count = witness_length
-            .checked_mul(2)
-            .ok_or(CompactCfwError::CountOverflow)?;
-        let sumcheck_round_count =
-            usize::try_from(r1cs_row_count.ilog2()).map_err(|_| CompactCfwError::CountOverflow)?;
-        let inner_mask_count = sumcheck_round_count
-            .checked_mul(COMPACT_CFW_MATRIX_COUNT)
-            .ok_or(CompactCfwError::CountOverflow)?;
-        let outer_mask_count = sumcheck_round_count;
-        let generalized_committed_relation_claim_count = 1_usize
-            .checked_add(
-                inner_mask_count
-                    .checked_mul(COMPACT_CFW_INNER_ENDPOINT_CLAIM_COUNT)
-                    .ok_or(CompactCfwError::CountOverflow)?,
-            )
-            .and_then(|count| count.checked_add(outer_mask_count))
-            .ok_or(CompactCfwError::CountOverflow)?;
-        Ok(Self {
-            witness_length,
-            r1cs_row_count,
-            sumcheck_round_count,
-            inner_mask_count,
-            outer_mask_count,
-            generalized_committed_relation_claim_count,
-        })
-    }
-
-    pub(crate) const fn witness_length(self) -> usize {
-        self.witness_length
-    }
-
-    pub(crate) const fn r1cs_row_count(self) -> usize {
-        self.r1cs_row_count
-    }
-
-    pub(crate) const fn sumcheck_round_count(self) -> usize {
-        self.sumcheck_round_count
-    }
-
-    pub(crate) const fn inner_mask_count(self) -> usize {
-        self.inner_mask_count
-    }
-
-    pub(crate) const fn outer_mask_count(self) -> usize {
-        self.outer_mask_count
-    }
-
-    pub(crate) const fn generalized_committed_relation_claim_count(self) -> usize {
-        self.generalized_committed_relation_claim_count
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum CompactCfwError {
     InvalidGeometry,
@@ -156,6 +87,15 @@ pub(crate) enum CompactCfwError {
     FinalConsistency,
     InvalidFinalChallenge,
     InvalidClaimInput,
+}
+
+impl From<CompactCfwGeometryError> for CompactCfwError {
+    fn from(error: CompactCfwGeometryError) -> Self {
+        match error {
+            CompactCfwGeometryError::InvalidGeometry => Self::InvalidGeometry,
+            CompactCfwGeometryError::CountOverflow => Self::CountOverflow,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

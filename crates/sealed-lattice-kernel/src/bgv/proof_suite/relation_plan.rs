@@ -68,7 +68,6 @@ pub(crate) use model::{
     RelationRadixProductTermDescriptor, negacyclic_automorphism_semantics_match,
 };
 mod checking;
-#[cfg(test)]
 mod compact_ring_vector;
 mod expressions;
 
@@ -168,17 +167,11 @@ pub(crate) use committed_material_adapter::fused_vss_radix_51_source_provider_me
 pub(crate) use committed_material_adapter::selected_vss_source_provider_memory_accounting;
 #[cfg(test)]
 pub(crate) use compact_ring_vector::{
-    COMPACT_STRUCTURED_WITNESS_COVECTOR_ELEMENT_CHUNK_COUNT,
-    CompactAuthenticatedAssignmentMemoryGeometry, CompactLookupRelationGeometry,
-    CompactPublicKeyRelationCatalog, CompactStructuredR1csRowSourceGeometry,
-    CompactStructuredWitnessCovectorGeometry, CompactStructuredWitnessCovectorHostMemoryGeometry,
-    CompactStructuredWitnessCovectorLifecycleGeometry,
-    compact_authenticated_assignment_memory_geometry,
-    compact_public_key_assignment_prepared_source_control_byte_length,
-    compact_structured_r1cs_row_source_geometry, compact_structured_witness_covector_geometry,
-    compact_structured_witness_covector_host_memory_geometry,
-    compact_structured_witness_covector_lifecycle_geometry,
-    selected_compact_public_key_relation_catalog,
+    CompactLookupRelationGeometry, compact_structured_r1cs_row_source_geometry,
+    compact_structured_witness_covector_geometry,
+};
+pub(crate) use compact_ring_vector::{
+    CompactPublicKeyRelationCatalog, selected_compact_public_key_relation_catalog,
 };
 pub(crate) use galois_key_share_adapter::{
     GaloisKeyShareSourcePolynomialAdapter, galois_relation_tree_inputs,
@@ -225,8 +218,6 @@ pub(crate) use same_secret_anchor::{
     SameSecretSourceLayout, compile_same_secret_relation_plan,
     compile_same_secret_relation_with_source_layout,
 };
-#[cfg(test)]
-pub(crate) use setup_key_relation_adapter::compact_public_key_assignment_source_provider_memory_accounting;
 #[cfg(test)]
 pub(crate) use setup_key_relation_adapter::same_secret_source_provider_memory_accounting;
 pub(crate) use setup_key_relation_adapter::{

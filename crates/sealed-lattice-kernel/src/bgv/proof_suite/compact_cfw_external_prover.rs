@@ -11,11 +11,10 @@
 use zeroize::{Zeroize, Zeroizing};
 
 use super::compact_cfw::{
-    COMPACT_CFW_INNER_MASK_MESSAGE_LENGTH, COMPACT_CFW_MATRIX_COUNT,
-    COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH, CompactCfwError, CompactCfwGeometry,
-    CompactCfwMaskMaterial, CompactCfwProverFinish, CompactCfwRoundAccumulator,
-    CompactCfwScalarProverState, CompactChallengeField, compact_cfw_fold_row_pair,
-    compact_challenge_from_production, compact_challenge_to_production,
+    COMPACT_CFW_MATRIX_COUNT, COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH, CompactCfwError,
+    CompactCfwGeometry, CompactCfwGeometryError, CompactCfwMaskMaterial, CompactCfwProverFinish,
+    CompactCfwRoundAccumulator, CompactCfwScalarProverState, CompactChallengeField,
+    compact_cfw_fold_row_pair, compact_challenge_from_production, compact_challenge_to_production,
 };
 use super::compact_cfw_external::{CompactCfwExternalPlanError, CompactCfwExternalStorageCatalog};
 use super::external_memory::{
@@ -57,6 +56,12 @@ pub(crate) enum CompactCfwExternalProverSetupError {
 impl From<CompactCfwError> for CompactCfwExternalProverSetupError {
     fn from(error: CompactCfwError) -> Self {
         Self::Cfw(error)
+    }
+}
+
+impl From<CompactCfwGeometryError> for CompactCfwExternalProverSetupError {
+    fn from(error: CompactCfwGeometryError) -> Self {
+        Self::Cfw(error.into())
     }
 }
 
@@ -139,161 +144,6 @@ enum CompactCfwExternalProverPhase {
     LaterRoundCompletingStep,
     FinalCleanup,
     Complete,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct CompactCfwExternalProverMemoryGeometry {
-    state_inline_byte_length: u64,
-    runtime_index_heap_byte_length: u64,
-    executor_heap_byte_length: u64,
-    inner_mask_heap_byte_length: u64,
-    outer_mask_heap_byte_length: u64,
-    equality_point_heap_byte_length: u64,
-    round_challenge_heap_byte_length: u64,
-    maximum_accumulator_suffix_heap_byte_length: u64,
-    work_chunk_heap_byte_length: u64,
-    maximum_encoded_chunk_byte_length: u64,
-    resident_owned_byte_length: u64,
-    maximum_kernel_live_byte_length: u64,
-}
-
-impl CompactCfwExternalProverMemoryGeometry {
-    pub(crate) fn derive(
-        geometry: CompactCfwGeometry,
-    ) -> Result<Self, CompactCfwExternalProverSetupError> {
-        let catalog = CompactCfwExternalStorageCatalog::derive(geometry)?;
-        let state_inline_byte_length =
-            u64::try_from(core::mem::size_of::<CompactCfwExternalProverState>())
-                .map_err(|_| CompactCfwError::CountOverflow)?;
-        let runtime_index_heap_byte_length =
-            catalog.runtime_index_resident_owned_payload_byte_length()?;
-        let executor_heap_byte_length = catalog.executor_resident_owned_payload_byte_length();
-        let challenge_element_byte_length =
-            u64::try_from(core::mem::size_of::<CompactChallengeField>())
-                .map_err(|_| CompactCfwError::CountOverflow)?;
-        let production_element_byte_length =
-            u64::try_from(core::mem::size_of::<ProofChallengeExtensionElement>())
-                .map_err(|_| CompactCfwError::CountOverflow)?;
-        if challenge_element_byte_length != EXTENSION_FIELD_ELEMENT_BYTE_LENGTH as u64
-            || production_element_byte_length != EXTENSION_FIELD_ELEMENT_BYTE_LENGTH as u64
-        {
-            return Err(CompactCfwError::IncompatibleChallengeField.into());
-        }
-        let inner_mask_heap_byte_length = checked_memory_product(&[
-            u64::try_from(geometry.inner_mask_count())
-                .map_err(|_| CompactCfwError::CountOverflow)?,
-            u64::try_from(COMPACT_CFW_INNER_MASK_MESSAGE_LENGTH)
-                .map_err(|_| CompactCfwError::CountOverflow)?,
-            challenge_element_byte_length,
-        ])?;
-        let outer_mask_heap_byte_length = checked_memory_product(&[
-            u64::try_from(geometry.outer_mask_count())
-                .map_err(|_| CompactCfwError::CountOverflow)?,
-            u64::try_from(COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH)
-                .map_err(|_| CompactCfwError::CountOverflow)?,
-            challenge_element_byte_length,
-        ])?;
-        let round_count = u64::try_from(geometry.sumcheck_round_count())
-            .map_err(|_| CompactCfwError::CountOverflow)?;
-        let equality_point_heap_byte_length =
-            checked_memory_product(&[round_count, challenge_element_byte_length])?;
-        let round_challenge_heap_byte_length = equality_point_heap_byte_length;
-        let maximum_accumulator_suffix_heap_byte_length = checked_memory_product(&[
-            round_count
-                .checked_sub(1)
-                .ok_or(CompactCfwError::InvalidGeometry)?,
-            challenge_element_byte_length,
-        ])?;
-        let maximum_encoded_chunk_byte_length = u64::from(catalog.maximum_chunk_byte_length());
-        let maximum_chunk_element_count = maximum_encoded_chunk_byte_length
-            .checked_div(production_element_byte_length)
-            .filter(|count| *count != 0)
-            .ok_or(CompactCfwError::InvalidGeometry)?;
-        let work_chunk_heap_byte_length = checked_memory_product(&[
-            COMPACT_CFW_MATRIX_COUNT as u64,
-            maximum_chunk_element_count,
-            production_element_byte_length,
-        ])?;
-        let resident_owned_byte_length = [
-            state_inline_byte_length,
-            runtime_index_heap_byte_length,
-            executor_heap_byte_length,
-            inner_mask_heap_byte_length,
-            outer_mask_heap_byte_length,
-            equality_point_heap_byte_length,
-            round_challenge_heap_byte_length,
-            maximum_accumulator_suffix_heap_byte_length,
-            work_chunk_heap_byte_length,
-        ]
-        .into_iter()
-        .try_fold(0_u64, checked_memory_add)?;
-        let maximum_kernel_live_byte_length = checked_memory_add(
-            resident_owned_byte_length,
-            maximum_encoded_chunk_byte_length,
-        )?;
-        Ok(Self {
-            state_inline_byte_length,
-            runtime_index_heap_byte_length,
-            executor_heap_byte_length,
-            inner_mask_heap_byte_length,
-            outer_mask_heap_byte_length,
-            equality_point_heap_byte_length,
-            round_challenge_heap_byte_length,
-            maximum_accumulator_suffix_heap_byte_length,
-            work_chunk_heap_byte_length,
-            maximum_encoded_chunk_byte_length,
-            resident_owned_byte_length,
-            maximum_kernel_live_byte_length,
-        })
-    }
-
-    pub(crate) const fn state_inline_byte_length(self) -> u64 {
-        self.state_inline_byte_length
-    }
-
-    pub(crate) const fn runtime_index_heap_byte_length(self) -> u64 {
-        self.runtime_index_heap_byte_length
-    }
-
-    pub(crate) const fn executor_heap_byte_length(self) -> u64 {
-        self.executor_heap_byte_length
-    }
-
-    pub(crate) const fn inner_mask_heap_byte_length(self) -> u64 {
-        self.inner_mask_heap_byte_length
-    }
-
-    pub(crate) const fn outer_mask_heap_byte_length(self) -> u64 {
-        self.outer_mask_heap_byte_length
-    }
-
-    pub(crate) const fn equality_point_heap_byte_length(self) -> u64 {
-        self.equality_point_heap_byte_length
-    }
-
-    pub(crate) const fn round_challenge_heap_byte_length(self) -> u64 {
-        self.round_challenge_heap_byte_length
-    }
-
-    pub(crate) const fn maximum_accumulator_suffix_heap_byte_length(self) -> u64 {
-        self.maximum_accumulator_suffix_heap_byte_length
-    }
-
-    pub(crate) const fn work_chunk_heap_byte_length(self) -> u64 {
-        self.work_chunk_heap_byte_length
-    }
-
-    pub(crate) const fn maximum_encoded_chunk_byte_length(self) -> u64 {
-        self.maximum_encoded_chunk_byte_length
-    }
-
-    pub(crate) const fn resident_owned_byte_length(self) -> u64 {
-        self.resident_owned_byte_length
-    }
-
-    pub(crate) const fn maximum_kernel_live_byte_length(self) -> u64 {
-        self.maximum_kernel_live_byte_length
-    }
 }
 
 pub(crate) struct CompactCfwExternalProverState {
@@ -977,19 +827,6 @@ impl CompactCfwExternalProverState {
             chunk.clear();
         }
     }
-}
-
-fn checked_memory_add(left: u64, right: u64) -> Result<u64, CompactCfwError> {
-    left.checked_add(right)
-        .ok_or(CompactCfwError::CountOverflow)
-}
-
-fn checked_memory_product(factors: &[u64]) -> Result<u64, CompactCfwError> {
-    factors.iter().copied().try_fold(1_u64, |product, factor| {
-        product
-            .checked_mul(factor)
-            .ok_or(CompactCfwError::CountOverflow)
-    })
 }
 
 fn distinct_work_chunks(

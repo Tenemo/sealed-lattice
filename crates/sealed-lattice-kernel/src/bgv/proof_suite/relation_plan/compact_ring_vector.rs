@@ -9,14 +9,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::bgv::parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE};
-use crate::bgv::setup::{SetupGenerationKeyRelationSource, SetupKeyRelationProofFamily};
 use crate::foundation::ProofApplicationSlotCeilings;
+use crate::hashing::StreamingHash512;
 
+#[cfg(test)]
 use super::super::{CommonProofProverError, CommonProofRelationPlanCapability};
+#[cfg(test)]
+use crate::bgv::setup::{SetupGenerationKeyRelationSource, SetupKeyRelationProofFamily};
 
-use super::expressions::{checked_resident_payload_add, resident_vec_storage_byte_length};
 use super::key_relation::{
-    MODULAR_QUOTIENT_MAXIMUM, MODULAR_QUOTIENT_MINIMUM, MODULAR_QUOTIENT_VALUE_COUNT,
+    MODULAR_QUOTIENT_ENCODING_OFFSET, MODULAR_QUOTIENT_VALUE_COUNT,
     PublicKeyShareRelationPlanInput, SplitIntegerVector,
 };
 use super::public_key_share::{
@@ -31,26 +33,58 @@ const GOLDILOCKS_BASE_FIELD_MODULUS: u64 = 0xffff_ffff_0000_0001;
 const QUINTIC_EXTENSION_DEGREE: u32 = 5;
 const PUBLIC_KEY_SHARE_PRODUCT_COUNT: u64 = 23;
 const ANCHOR_PRODUCT_COUNT: u64 = 9;
+const MODULAR_QUOTIENT_MINIMUM: i64 = -(MODULAR_QUOTIENT_ENCODING_OFFSET as i64);
+const MODULAR_QUOTIENT_MAXIMUM: i64 =
+    (MODULAR_QUOTIENT_VALUE_COUNT - MODULAR_QUOTIENT_ENCODING_OFFSET - 1) as i64;
+const COMPACT_RELATION_SCHEMA_DIGEST_DOMAIN: &str =
+    "sealed-lattice/compact-public-key-relation-schema/v1";
+const COMPACT_RELATION_SCHEMA_FIXED_PART_COUNT: u64 = 20;
+
+const RELATION_PLAN_VARIANT_HASH_FIELD_TAG: u16 = 0x0001;
+const RING_DEGREE_FIELD_TAG: u16 = 0x0002;
+const EXTENSION_DEGREE_FIELD_TAG: u16 = 0x0003;
+const STRUCTURED_PUBLIC_RING_PRODUCT_COUNT_FIELD_TAG: u16 = 0x0004;
+const ORDERED_RELATIONS_FIELD_TAG: u16 = 0x0005;
+const ORDERED_QUOTIENT_INTERVALS_FIELD_TAG: u16 = 0x0006;
+const ORDERED_PUBLIC_VECTORS_FIELD_TAG: u16 = 0x0007;
+const ORDERED_PRIVATE_SMALL_VECTORS_FIELD_TAG: u16 = 0x0008;
+const ORDERED_WITNESS_SEGMENTS_FIELD_TAG: u16 = 0x0009;
+const ORDERED_CONSTRAINT_SEGMENTS_FIELD_TAG: u16 = 0x000a;
+const PUBLIC_INPUT_RING_VECTOR_COUNT_FIELD_TAG: u16 = 0x000b;
+const WITNESS_RING_VECTOR_COUNT_FIELD_TAG: u16 = 0x000c;
+const PADDED_PUBLIC_INPUT_ELEMENT_COUNT_FIELD_TAG: u16 = 0x000d;
+const PADDED_WITNESS_ELEMENT_COUNT_FIELD_TAG: u16 = 0x000e;
+const OPERATIVE_CONSTRAINT_COUNT_FIELD_TAG: u16 = 0x000f;
+const PADDED_CONSTRAINT_COUNT_FIELD_TAG: u16 = 0x0010;
+const QUOTIENT_LOOKUP_TABLE_VALUE_COUNT_FIELD_TAG: u16 = 0x0011;
+const QUOTIENT_LOOKUP_TABLE_RING_VECTOR_COUNT_FIELD_TAG: u16 = 0x0012;
+const LOOKUP_SOUNDNESS_NUMERATOR_FIELD_TAG: u16 = 0x0013;
+const LOOKUP_CHALLENGE_EXCLUDES_BASE_SUBFIELD_FIELD_TAG: u16 = 0x0014;
+
+const STRUCTURED_RELATION_RECORD_TAG: u16 = 0x0101;
+const DIRECT_TERM_RECORD_TAG: u16 = 0x0111;
+const NEGACYCLIC_PUBLIC_PRODUCT_TERM_RECORD_TAG: u16 = 0x0112;
+const MODULUS_QUOTIENT_TERM_RECORD_TAG: u16 = 0x0113;
+const QUOTIENT_INTERVAL_RECORD_TAG: u16 = 0x0201;
+const PUBLIC_VECTOR_RECORD_TAG: u16 = 0x0301;
+const PRIVATE_SMALL_VECTOR_RECORD_TAG: u16 = 0x0401;
+const WITNESS_SEGMENT_RECORD_TAG: u16 = 0x0501;
+const CONSTRAINT_SEGMENT_RECORD_TAG: u16 = 0x0601;
 
 mod authenticated_assignment;
 mod structured_r1cs;
 
+#[cfg(test)]
 use super::setup_key_relation_adapter::SetupKeyRelationSourcePolynomialAdapter;
+use authenticated_assignment::validate_compact_authenticated_assignment;
+#[cfg(test)]
 use authenticated_assignment::{
     CompactAuthenticatedAssignmentCatalog, CompactAuthenticatedAssignmentCursor,
     CompactPublicKeyBaseAssignment,
 };
-pub(crate) use authenticated_assignment::{
-    CompactAuthenticatedAssignmentMemoryGeometry, compact_authenticated_assignment_memory_geometry,
-};
+#[cfg(test)]
 pub(crate) use structured_r1cs::{
-    COMPACT_STRUCTURED_WITNESS_COVECTOR_ELEMENT_CHUNK_COUNT,
-    CompactStructuredR1csRowSourceGeometry, CompactStructuredWitnessCovectorGeometry,
-    CompactStructuredWitnessCovectorHostMemoryGeometry,
-    CompactStructuredWitnessCovectorLifecycleGeometry, compact_structured_r1cs_row_source_geometry,
-    compact_structured_witness_covector_geometry,
-    compact_structured_witness_covector_host_memory_geometry,
-    compact_structured_witness_covector_lifecycle_geometry,
+    compact_structured_r1cs_row_source_geometry, compact_structured_witness_covector_geometry,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -63,6 +97,12 @@ impl From<SplitIntegerVector> for CompactRingVectorReference {
         Self {
             column_ordinals: value.halves,
         }
+    }
+}
+
+impl CompactRingVectorReference {
+    pub(crate) const fn column_ordinals(self) -> [u32; 2] {
+        self.column_ordinals
     }
 }
 
@@ -156,6 +196,7 @@ pub(crate) struct CompactWitnessSegment {
 /// a parallel layout or accepting an inverse vector unrelated to the committed
 /// main witness.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg(test)]
 pub(crate) struct CompactLookupRelationGeometry {
     source_first_element: u64,
     source_element_count: u64,
@@ -169,6 +210,7 @@ pub(crate) struct CompactLookupRelationGeometry {
     challenge_excludes_base_subfield: bool,
 }
 
+#[cfg(test)]
 impl CompactLookupRelationGeometry {
     fn derive(catalog: &CompactPublicKeyRelationCatalog) -> Result<Self, RelationPlanError> {
         let quotient_segment =
@@ -390,7 +432,7 @@ pub(crate) struct CompactR1csConstraintSegment {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CompactPublicKeyRelationCatalog {
-    relation_plan_hash: [u8; 64],
+    relation_plan_variant_hash: [u8; 64],
     ring_degree: u64,
     extension_degree: u32,
     structured_public_ring_product_count: u64,
@@ -413,14 +455,16 @@ pub(crate) struct CompactPublicKeyRelationCatalog {
 }
 
 impl CompactPublicKeyRelationCatalog {
-    pub(crate) const fn relation_plan_hash(&self) -> [u8; 64] {
-        self.relation_plan_hash
+    #[cfg(test)]
+    pub(crate) const fn relation_plan_variant_hash(&self) -> [u8; 64] {
+        self.relation_plan_variant_hash
     }
 
     pub(crate) const fn ring_degree(&self) -> u64 {
         self.ring_degree
     }
 
+    #[cfg(test)]
     pub(crate) const fn extension_degree(&self) -> u32 {
         self.extension_degree
     }
@@ -429,6 +473,7 @@ impl CompactPublicKeyRelationCatalog {
         self.public_input_ring_vector_count
     }
 
+    #[cfg(test)]
     pub(crate) const fn witness_ring_vector_count(&self) -> u64 {
         self.witness_ring_vector_count
     }
@@ -437,10 +482,12 @@ impl CompactPublicKeyRelationCatalog {
         self.padded_witness_element_count
     }
 
+    #[cfg(test)]
     pub(crate) const fn operative_constraint_count(&self) -> u64 {
         self.operative_constraint_count
     }
 
+    #[cfg(test)]
     pub(crate) const fn padded_constraint_count(&self) -> u64 {
         self.padded_constraint_count
     }
@@ -449,22 +496,27 @@ impl CompactPublicKeyRelationCatalog {
         self.ordered_quotient_intervals.len() as u64
     }
 
+    #[cfg(test)]
     pub(crate) const fn shifted_ternary_vector_count(&self) -> u64 {
         self.ordered_private_small_vectors.len().saturating_sub(1) as u64
     }
 
+    #[cfg(test)]
     pub(crate) const fn quotient_lookup_table_ring_vector_count(&self) -> u64 {
         self.quotient_lookup_table_ring_vector_count
     }
 
+    #[cfg(test)]
     pub(crate) const fn structured_public_ring_product_count(&self) -> u64 {
         self.structured_public_ring_product_count
     }
 
+    #[cfg(test)]
     pub(crate) const fn quotient_lookup_table_value_count(&self) -> u64 {
         self.quotient_lookup_table_value_count
     }
 
+    #[cfg(test)]
     pub(crate) fn public_key_share_relation_count(&self) -> usize {
         self.ordered_relations
             .iter()
@@ -472,6 +524,7 @@ impl CompactPublicKeyRelationCatalog {
             .count()
     }
 
+    #[cfg(test)]
     pub(crate) fn ordinary_anchor_relation_count(&self) -> usize {
         self.ordered_relations
             .iter()
@@ -479,6 +532,7 @@ impl CompactPublicKeyRelationCatalog {
             .count()
     }
 
+    #[cfg(test)]
     pub(crate) fn final_anchor_relation_count(&self) -> usize {
         self.ordered_relations
             .iter()
@@ -486,31 +540,298 @@ impl CompactPublicKeyRelationCatalog {
             .count()
     }
 
-    pub(crate) fn shifted_eta_two_vector_count(&self) -> usize {
-        self.ordered_private_small_vectors
-            .iter()
-            .filter(|descriptor| descriptor.kind == CompactSmallVectorKind::ShiftedEtaTwo)
-            .count()
-    }
-
-    pub(crate) fn distinct_public_product_vector_count(&self) -> usize {
-        self.ordered_relations
-            .iter()
-            .flat_map(|relation| &relation.ordered_terms)
-            .filter_map(|term| match term {
-                CompactStructuredLinearTerm::NegacyclicPublicProduct { public_vector, .. } => {
-                    Some(*public_vector)
-                }
-                _ => None,
-            })
-            .collect::<BTreeSet<_>>()
-            .len()
-    }
-
+    #[cfg(test)]
     pub(crate) const fn lookup_soundness_numerator(&self) -> u64 {
         self.lookup_soundness_numerator
     }
 
+    /// Hashes the complete ordered relation schema without accepting any
+    /// producer-supplied digest or status. Every integer payload uses its
+    /// fixed-width little-endian representation, and every field, record, and
+    /// closed enum variant is identified by an explicit tag.
+    pub(crate) fn canonical_schema_digest(&self) -> Result<[u8; 64], RelationPlanError> {
+        let mut digest = CompactRelationSchemaDigestWriter::new(
+            compact_relation_schema_digest_part_count(self)?,
+        );
+
+        digest.absorb_tagged(
+            RELATION_PLAN_VARIANT_HASH_FIELD_TAG,
+            &[&self.relation_plan_variant_hash],
+        )?;
+        digest.absorb_u64(RING_DEGREE_FIELD_TAG, self.ring_degree)?;
+        digest.absorb_u32(EXTENSION_DEGREE_FIELD_TAG, self.extension_degree)?;
+        digest.absorb_u64(
+            STRUCTURED_PUBLIC_RING_PRODUCT_COUNT_FIELD_TAG,
+            self.structured_public_ring_product_count,
+        )?;
+
+        digest.absorb_u64(
+            ORDERED_RELATIONS_FIELD_TAG,
+            canonical_collection_length(self.ordered_relations.len())?,
+        )?;
+        for (relation_ordinal, relation) in self.ordered_relations.iter().enumerate() {
+            let relation_ordinal = canonical_collection_length(relation_ordinal)?;
+            let relation_ordinal_bytes = relation_ordinal.to_le_bytes();
+            let family_bytes = compact_relation_family_tag(relation.family).to_le_bytes();
+            let data_modulus_index_bytes = relation.data_modulus_index.to_le_bytes();
+            let modulus_bytes = relation.modulus.to_le_bytes();
+            let term_count_bytes =
+                canonical_collection_length(relation.ordered_terms.len())?.to_le_bytes();
+            digest.absorb_tagged(
+                STRUCTURED_RELATION_RECORD_TAG,
+                &[
+                    &relation_ordinal_bytes,
+                    &family_bytes,
+                    &data_modulus_index_bytes,
+                    &modulus_bytes,
+                    &term_count_bytes,
+                ],
+            )?;
+
+            for (term_ordinal, term) in relation.ordered_terms.iter().enumerate() {
+                let term_ordinal_bytes = canonical_collection_length(term_ordinal)?.to_le_bytes();
+                match term {
+                    CompactStructuredLinearTerm::Direct {
+                        vector,
+                        centered_offset,
+                        integer_coefficient,
+                    } => {
+                        let columns = vector.column_ordinals();
+                        let first_column_bytes = columns[0].to_le_bytes();
+                        let second_column_bytes = columns[1].to_le_bytes();
+                        let centered_offset_bytes = centered_offset.to_le_bytes();
+                        let coefficient_bytes = integer_coefficient.to_le_bytes();
+                        digest.absorb_tagged(
+                            DIRECT_TERM_RECORD_TAG,
+                            &[
+                                &relation_ordinal_bytes,
+                                &term_ordinal_bytes,
+                                &first_column_bytes,
+                                &second_column_bytes,
+                                &centered_offset_bytes,
+                                &coefficient_bytes,
+                            ],
+                        )?;
+                    }
+                    CompactStructuredLinearTerm::NegacyclicPublicProduct {
+                        public_vector,
+                        private_vector,
+                        private_centered_offset,
+                        integer_coefficient,
+                    } => {
+                        let public_columns = public_vector.column_ordinals();
+                        let private_columns = private_vector.column_ordinals();
+                        let public_first_column_bytes = public_columns[0].to_le_bytes();
+                        let public_second_column_bytes = public_columns[1].to_le_bytes();
+                        let private_first_column_bytes = private_columns[0].to_le_bytes();
+                        let private_second_column_bytes = private_columns[1].to_le_bytes();
+                        let private_centered_offset_bytes = private_centered_offset.to_le_bytes();
+                        let coefficient_bytes = integer_coefficient.to_le_bytes();
+                        digest.absorb_tagged(
+                            NEGACYCLIC_PUBLIC_PRODUCT_TERM_RECORD_TAG,
+                            &[
+                                &relation_ordinal_bytes,
+                                &term_ordinal_bytes,
+                                &public_first_column_bytes,
+                                &public_second_column_bytes,
+                                &private_first_column_bytes,
+                                &private_second_column_bytes,
+                                &private_centered_offset_bytes,
+                                &coefficient_bytes,
+                            ],
+                        )?;
+                    }
+                    CompactStructuredLinearTerm::ModulusQuotient {
+                        quotient_vector,
+                        modulus,
+                        integer_coefficient,
+                    } => {
+                        let columns = quotient_vector.column_ordinals();
+                        let first_column_bytes = columns[0].to_le_bytes();
+                        let second_column_bytes = columns[1].to_le_bytes();
+                        let modulus_bytes = modulus.to_le_bytes();
+                        let coefficient_bytes = integer_coefficient.to_le_bytes();
+                        digest.absorb_tagged(
+                            MODULUS_QUOTIENT_TERM_RECORD_TAG,
+                            &[
+                                &relation_ordinal_bytes,
+                                &term_ordinal_bytes,
+                                &first_column_bytes,
+                                &second_column_bytes,
+                                &modulus_bytes,
+                                &coefficient_bytes,
+                            ],
+                        )?;
+                    }
+                }
+            }
+        }
+
+        digest.absorb_u64(
+            ORDERED_QUOTIENT_INTERVALS_FIELD_TAG,
+            canonical_collection_length(self.ordered_quotient_intervals.len())?,
+        )?;
+        for (interval_ordinal, interval) in self.ordered_quotient_intervals.iter().enumerate() {
+            let interval_ordinal_bytes =
+                canonical_collection_length(interval_ordinal)?.to_le_bytes();
+            let family_bytes = compact_relation_family_tag(interval.family).to_le_bytes();
+            let data_modulus_index_bytes = interval.data_modulus_index.to_le_bytes();
+            let modulus_bytes = interval.modulus.to_le_bytes();
+            let numerator_minimum_bytes = interval.numerator_minimum.to_le_bytes();
+            let numerator_maximum_bytes = interval.numerator_maximum.to_le_bytes();
+            let quotient_minimum_bytes = interval.quotient_minimum.to_le_bytes();
+            let quotient_maximum_bytes = interval.quotient_maximum.to_le_bytes();
+            let codec_minimum_bytes = interval.codec_minimum.to_le_bytes();
+            let codec_maximum_bytes = interval.codec_maximum.to_le_bytes();
+            let residual_minimum_bytes = interval.residual_minimum.to_le_bytes();
+            let residual_maximum_bytes = interval.residual_maximum.to_le_bytes();
+            digest.absorb_tagged(
+                QUOTIENT_INTERVAL_RECORD_TAG,
+                &[
+                    &interval_ordinal_bytes,
+                    &family_bytes,
+                    &data_modulus_index_bytes,
+                    &modulus_bytes,
+                    &numerator_minimum_bytes,
+                    &numerator_maximum_bytes,
+                    &quotient_minimum_bytes,
+                    &quotient_maximum_bytes,
+                    &codec_minimum_bytes,
+                    &codec_maximum_bytes,
+                    &residual_minimum_bytes,
+                    &residual_maximum_bytes,
+                ],
+            )?;
+        }
+
+        digest.absorb_u64(
+            ORDERED_PUBLIC_VECTORS_FIELD_TAG,
+            canonical_collection_length(self.ordered_public_vectors.len())?,
+        )?;
+        for (vector_ordinal, vector) in self.ordered_public_vectors.iter().enumerate() {
+            let vector_ordinal_bytes = canonical_collection_length(vector_ordinal)?.to_le_bytes();
+            let columns = vector.column_ordinals();
+            let first_column_bytes = columns[0].to_le_bytes();
+            let second_column_bytes = columns[1].to_le_bytes();
+            digest.absorb_tagged(
+                PUBLIC_VECTOR_RECORD_TAG,
+                &[
+                    &vector_ordinal_bytes,
+                    &first_column_bytes,
+                    &second_column_bytes,
+                ],
+            )?;
+        }
+
+        digest.absorb_u64(
+            ORDERED_PRIVATE_SMALL_VECTORS_FIELD_TAG,
+            canonical_collection_length(self.ordered_private_small_vectors.len())?,
+        )?;
+        for (vector_ordinal, descriptor) in self.ordered_private_small_vectors.iter().enumerate() {
+            let vector_ordinal_bytes = canonical_collection_length(vector_ordinal)?.to_le_bytes();
+            let columns = descriptor.vector.column_ordinals();
+            let first_column_bytes = columns[0].to_le_bytes();
+            let second_column_bytes = columns[1].to_le_bytes();
+            let kind_bytes = compact_small_vector_kind_tag(descriptor.kind).to_le_bytes();
+            let centered_offset_bytes = descriptor.centered_offset.to_le_bytes();
+            digest.absorb_tagged(
+                PRIVATE_SMALL_VECTOR_RECORD_TAG,
+                &[
+                    &vector_ordinal_bytes,
+                    &first_column_bytes,
+                    &second_column_bytes,
+                    &kind_bytes,
+                    &centered_offset_bytes,
+                ],
+            )?;
+        }
+
+        digest.absorb_u64(
+            ORDERED_WITNESS_SEGMENTS_FIELD_TAG,
+            canonical_collection_length(self.ordered_witness_segments.len())?,
+        )?;
+        for (segment_ordinal, segment) in self.ordered_witness_segments.iter().enumerate() {
+            let segment_ordinal_bytes = canonical_collection_length(segment_ordinal)?.to_le_bytes();
+            let kind_bytes = compact_witness_segment_kind_tag(segment.kind).to_le_bytes();
+            let first_element_bytes = segment.first_element.to_le_bytes();
+            let ring_vector_count_bytes = segment.ring_vector_count.to_le_bytes();
+            let element_count_bytes = segment.element_count.to_le_bytes();
+            digest.absorb_tagged(
+                WITNESS_SEGMENT_RECORD_TAG,
+                &[
+                    &segment_ordinal_bytes,
+                    &kind_bytes,
+                    &first_element_bytes,
+                    &ring_vector_count_bytes,
+                    &element_count_bytes,
+                ],
+            )?;
+        }
+
+        digest.absorb_u64(
+            ORDERED_CONSTRAINT_SEGMENTS_FIELD_TAG,
+            canonical_collection_length(self.ordered_constraint_segments.len())?,
+        )?;
+        for (segment_ordinal, segment) in self.ordered_constraint_segments.iter().enumerate() {
+            let segment_ordinal_bytes = canonical_collection_length(segment_ordinal)?.to_le_bytes();
+            let kind_bytes = compact_constraint_kind_tag(segment.kind).to_le_bytes();
+            let first_row_bytes = segment.first_row.to_le_bytes();
+            let row_count_bytes = segment.row_count.to_le_bytes();
+            digest.absorb_tagged(
+                CONSTRAINT_SEGMENT_RECORD_TAG,
+                &[
+                    &segment_ordinal_bytes,
+                    &kind_bytes,
+                    &first_row_bytes,
+                    &row_count_bytes,
+                ],
+            )?;
+        }
+
+        digest.absorb_u64(
+            PUBLIC_INPUT_RING_VECTOR_COUNT_FIELD_TAG,
+            self.public_input_ring_vector_count,
+        )?;
+        digest.absorb_u64(
+            WITNESS_RING_VECTOR_COUNT_FIELD_TAG,
+            self.witness_ring_vector_count,
+        )?;
+        digest.absorb_u64(
+            PADDED_PUBLIC_INPUT_ELEMENT_COUNT_FIELD_TAG,
+            self.padded_public_input_element_count,
+        )?;
+        digest.absorb_u64(
+            PADDED_WITNESS_ELEMENT_COUNT_FIELD_TAG,
+            self.padded_witness_element_count,
+        )?;
+        digest.absorb_u64(
+            OPERATIVE_CONSTRAINT_COUNT_FIELD_TAG,
+            self.operative_constraint_count,
+        )?;
+        digest.absorb_u64(
+            PADDED_CONSTRAINT_COUNT_FIELD_TAG,
+            self.padded_constraint_count,
+        )?;
+        digest.absorb_u64(
+            QUOTIENT_LOOKUP_TABLE_VALUE_COUNT_FIELD_TAG,
+            self.quotient_lookup_table_value_count,
+        )?;
+        digest.absorb_u64(
+            QUOTIENT_LOOKUP_TABLE_RING_VECTOR_COUNT_FIELD_TAG,
+            self.quotient_lookup_table_ring_vector_count,
+        )?;
+        digest.absorb_u64(
+            LOOKUP_SOUNDNESS_NUMERATOR_FIELD_TAG,
+            self.lookup_soundness_numerator,
+        )?;
+        digest.absorb_bool(
+            LOOKUP_CHALLENGE_EXCLUDES_BASE_SUBFIELD_FIELD_TAG,
+            self.lookup_challenge_excludes_base_subfield,
+        )?;
+        digest.finalize()
+    }
+
+    #[cfg(test)]
     pub(crate) fn lookup_relation_geometry(
         &self,
     ) -> Result<CompactLookupRelationGeometry, RelationPlanError> {
@@ -521,35 +842,6 @@ impl CompactPublicKeyRelationCatalog {
         &self,
     ) -> Result<CompactCrossEpochCopyGeometry, RelationPlanError> {
         CompactCrossEpochCopyGeometry::derive(self)
-    }
-
-    pub(crate) fn resident_owned_byte_length(&self) -> Result<u64, RelationPlanError> {
-        let inline_byte_length = u64::try_from(core::mem::size_of::<Self>())
-            .map_err(|_| RelationPlanError::CountOverflow)?;
-        checked_resident_payload_add(inline_byte_length, self.resident_owned_heap_byte_length()?)
-    }
-
-    pub(crate) fn resident_owned_heap_byte_length(&self) -> Result<u64, RelationPlanError> {
-        let direct_heap_byte_length = [
-            resident_vec_storage_byte_length(&self.ordered_relations)?,
-            resident_vec_storage_byte_length(&self.ordered_quotient_intervals)?,
-            resident_vec_storage_byte_length(&self.ordered_public_vectors)?,
-            resident_vec_storage_byte_length(&self.ordered_private_small_vectors)?,
-            resident_vec_storage_byte_length(&self.ordered_witness_segments)?,
-            resident_vec_storage_byte_length(&self.ordered_constraint_segments)?,
-        ]
-        .into_iter()
-        .try_fold(0_u64, checked_resident_payload_add)?;
-        let nested_term_byte_length =
-            self.ordered_relations
-                .iter()
-                .try_fold(0_u64, |total, relation| {
-                    checked_resident_payload_add(
-                        total,
-                        resident_vec_storage_byte_length(&relation.ordered_terms)?,
-                    )
-                })?;
-        checked_resident_payload_add(direct_heap_byte_length, nested_term_byte_length)
     }
 
     pub(crate) fn maximum_residual_interval_width(&self) -> Result<u64, RelationPlanError> {
@@ -573,9 +865,8 @@ impl CompactPublicKeyRelationCatalog {
         input: &PublicKeyShareRelationPlanInput,
         context: &RelationPlanCheckContext,
         variant: &RelationPlanVariant,
-        source_layout: &PublicKeyShareSourceLayout,
     ) -> Result<(), RelationPlanError> {
-        if self.relation_plan_hash != variant.canonical_hash()?
+        if self.relation_plan_variant_hash != variant.canonical_hash()?
             || self.ring_degree != input.ring_degree
             || self.ring_degree
                 != u64::try_from(POLYNOMIAL_DEGREE).map_err(|_| RelationPlanError::CountOverflow)?
@@ -593,11 +884,6 @@ impl CompactPublicKeyRelationCatalog {
             return Err(RelationPlanError::InvalidConstraint);
         }
 
-        let expected = derive_compact_public_key_relation_catalog(input, variant, source_layout)?;
-        if &expected != self {
-            return Err(RelationPlanError::InvalidConstraint);
-        }
-
         check_contiguous_witness_segments(
             &self.ordered_witness_segments,
             self.padded_witness_element_count,
@@ -608,8 +894,8 @@ impl CompactPublicKeyRelationCatalog {
         )?;
         check_public_vectors_are_canonical(variant, &self.ordered_public_vectors)?;
         check_private_vectors_are_prover_owned(variant, &self.ordered_private_small_vectors)?;
-        CompactAuthenticatedAssignmentCatalog::derive(self, variant)?;
-        structured_r1cs::CompactStructuredR1csCatalog::derive(self)?.check(self)?;
+        validate_compact_authenticated_assignment(self, variant)?;
+        structured_r1cs::CompactStructuredR1csCatalog::derive(self)?;
         self.cross_epoch_copy_geometry()?;
         if self.padded_public_input_element_count != self.padded_witness_element_count
             || self.padded_constraint_count != 2 * self.padded_witness_element_count
@@ -619,6 +905,147 @@ impl CompactPublicKeyRelationCatalog {
             return Err(RelationPlanError::NoWrapBoundViolated);
         }
         Ok(())
+    }
+}
+
+struct CompactRelationSchemaDigestWriter {
+    hasher: StreamingHash512,
+    expected_part_count: u64,
+    absorbed_part_count: u64,
+}
+
+impl CompactRelationSchemaDigestWriter {
+    fn new(expected_part_count: u64) -> Self {
+        Self {
+            hasher: StreamingHash512::new(
+                COMPACT_RELATION_SCHEMA_DIGEST_DOMAIN,
+                expected_part_count,
+            ),
+            expected_part_count,
+            absorbed_part_count: 0,
+        }
+    }
+
+    fn absorb_tagged(
+        &mut self,
+        tag: u16,
+        payload_chunks: &[&[u8]],
+    ) -> Result<(), RelationPlanError> {
+        if self.absorbed_part_count >= self.expected_part_count {
+            return Err(RelationPlanError::InvalidConstraint);
+        }
+        let part_byte_length = payload_chunks.iter().try_fold(2_u64, |total, chunk| {
+            total
+                .checked_add(
+                    u64::try_from(chunk.len()).map_err(|_| RelationPlanError::CountOverflow)?,
+                )
+                .ok_or(RelationPlanError::CountOverflow)
+        })?;
+        self.hasher.begin_part(part_byte_length);
+        self.hasher.absorb_raw(&tag.to_le_bytes());
+        for chunk in payload_chunks {
+            self.hasher.absorb_raw(chunk);
+        }
+        self.absorbed_part_count = self
+            .absorbed_part_count
+            .checked_add(1)
+            .ok_or(RelationPlanError::CountOverflow)?;
+        Ok(())
+    }
+
+    fn absorb_u64(&mut self, tag: u16, value: u64) -> Result<(), RelationPlanError> {
+        self.absorb_tagged(tag, &[&value.to_le_bytes()])
+    }
+
+    fn absorb_u32(&mut self, tag: u16, value: u32) -> Result<(), RelationPlanError> {
+        self.absorb_tagged(tag, &[&value.to_le_bytes()])
+    }
+
+    fn absorb_bool(&mut self, tag: u16, value: bool) -> Result<(), RelationPlanError> {
+        self.absorb_tagged(tag, &[&[u8::from(value)]])
+    }
+
+    fn finalize(self) -> Result<[u8; 64], RelationPlanError> {
+        if self.absorbed_part_count != self.expected_part_count {
+            return Err(RelationPlanError::InvalidConstraint);
+        }
+        Ok(self.hasher.finalize())
+    }
+}
+
+fn compact_relation_schema_digest_part_count(
+    catalog: &CompactPublicKeyRelationCatalog,
+) -> Result<u64, RelationPlanError> {
+    let relation_and_term_count =
+        catalog
+            .ordered_relations
+            .iter()
+            .try_fold(0_u64, |total, relation| {
+                total
+                    .checked_add(1)
+                    .and_then(|count| {
+                        count.checked_add(u64::try_from(relation.ordered_terms.len()).ok()?)
+                    })
+                    .ok_or(RelationPlanError::CountOverflow)
+            })?;
+    [
+        relation_and_term_count,
+        canonical_collection_length(catalog.ordered_quotient_intervals.len())?,
+        canonical_collection_length(catalog.ordered_public_vectors.len())?,
+        canonical_collection_length(catalog.ordered_private_small_vectors.len())?,
+        canonical_collection_length(catalog.ordered_witness_segments.len())?,
+        canonical_collection_length(catalog.ordered_constraint_segments.len())?,
+    ]
+    .into_iter()
+    .try_fold(COMPACT_RELATION_SCHEMA_FIXED_PART_COUNT, |total, count| {
+        total
+            .checked_add(count)
+            .ok_or(RelationPlanError::CountOverflow)
+    })
+}
+
+fn canonical_collection_length(length: usize) -> Result<u64, RelationPlanError> {
+    u64::try_from(length).map_err(|_| RelationPlanError::CountOverflow)
+}
+
+const fn compact_relation_family_tag(family: CompactPublicKeyRelationFamily) -> u16 {
+    match family {
+        CompactPublicKeyRelationFamily::PublicKeyShare => 0x0001,
+        CompactPublicKeyRelationFamily::OrdinaryAnchor => 0x0002,
+        CompactPublicKeyRelationFamily::FinalAnchor => 0x0003,
+    }
+}
+
+const fn compact_small_vector_kind_tag(kind: CompactSmallVectorKind) -> u16 {
+    match kind {
+        CompactSmallVectorKind::ShiftedTernary => 0x0001,
+        CompactSmallVectorKind::ShiftedEtaTwo => 0x0002,
+    }
+}
+
+const fn compact_witness_segment_kind_tag(kind: CompactWitnessSegmentKind) -> u16 {
+    match kind {
+        CompactWitnessSegmentKind::ModularQuotients => 0x0001,
+        CompactWitnessSegmentKind::LookupMultiplicities => 0x0002,
+        CompactWitnessSegmentKind::ShiftedTernaryValues => 0x0003,
+        CompactWitnessSegmentKind::ShiftedEtaTwoValues => 0x0004,
+        CompactWitnessSegmentKind::SmallSetProducts => 0x0005,
+        CompactWitnessSegmentKind::LookupInverses => 0x0006,
+    }
+}
+
+const fn compact_constraint_kind_tag(kind: CompactR1csConstraintKind) -> u16 {
+    match kind {
+        CompactR1csConstraintKind::ExactIntegerLift => 0x0001,
+        CompactR1csConstraintKind::LookupInverse => 0x0002,
+        CompactR1csConstraintKind::TernaryFirstProduct => 0x0003,
+        CompactR1csConstraintKind::TernaryTerminalProduct => 0x0004,
+        CompactR1csConstraintKind::EtaTwoFirstProduct => 0x0005,
+        CompactR1csConstraintKind::EtaTwoSecondProduct => 0x0006,
+        CompactR1csConstraintKind::EtaTwoThirdProduct => 0x0007,
+        CompactR1csConstraintKind::EtaTwoTerminalProduct => 0x0008,
+        CompactR1csConstraintKind::LookupLogDerivativeEquality => 0x0009,
+        CompactR1csConstraintKind::ZeroPadding => 0x000a,
     }
 }
 
@@ -641,7 +1068,7 @@ pub(crate) fn selected_compact_public_key_relation_catalog()
     let variant = compiled.relation_plan.select_variant(None, None)?;
     let catalog =
         derive_compact_public_key_relation_catalog(&input, variant, &compiled.source_layout)?;
-    catalog.check(&input, &context, variant, &compiled.source_layout)?;
+    catalog.check(&input, &context, variant)?;
     Ok(catalog)
 }
 
@@ -650,6 +1077,7 @@ pub(crate) fn selected_compact_public_key_relation_catalog()
 /// This is a pre-proof development boundary. It binds the compact relation and
 /// exact 202-column request to the retained setup authority, but it neither
 /// selects a packing factor nor authorizes or emits proof bytes.
+#[cfg(test)]
 pub(crate) struct PreparedCompactPublicKeyAssignmentSources {
     pub(crate) relation_plan_variant: RelationPlanVariant,
     pub(crate) relation: CompactPublicKeyRelationCatalog,
@@ -657,11 +1085,13 @@ pub(crate) struct PreparedCompactPublicKeyAssignmentSources {
     pub(crate) source_polynomials: SetupKeyRelationSourcePolynomialAdapter,
 }
 
+#[cfg(test)]
 pub(crate) struct PreparedCompactPublicKeyBaseAssignment {
     pub(crate) relation: CompactPublicKeyRelationCatalog,
     pub(crate) base_assignment: CompactPublicKeyBaseAssignment,
 }
 
+#[cfg(test)]
 impl PreparedCompactPublicKeyAssignmentSources {
     pub(crate) fn finish_source_loading(
         self,
@@ -680,12 +1110,7 @@ impl PreparedCompactPublicKeyAssignmentSources {
         if relation_plan_variant != *expected_relation_plan_variant {
             return Err(CommonProofProverError::InvalidInput);
         }
-        relation.check(
-            &input,
-            &relation_context,
-            &relation_plan_variant,
-            &compiled.source_layout,
-        )?;
+        relation.check(&input, &relation_context, &relation_plan_variant)?;
         let base_assignment = assignment_cursor.finish(&relation, &relation_plan_variant)?;
         source_polynomials.finish_compact_public_key_assignment_sources()?;
         drop((relation_plan_variant, relation_context));
@@ -696,39 +1121,7 @@ impl PreparedCompactPublicKeyAssignmentSources {
     }
 }
 
-pub(crate) fn compact_public_key_assignment_prepared_source_control_byte_length(
-    relation: &CompactPublicKeyRelationCatalog,
-    relation_plan_variant: &RelationPlanVariant,
-) -> Result<u64, CommonProofProverError> {
-    let assignment_catalog =
-        CompactAuthenticatedAssignmentCatalog::derive(relation, relation_plan_variant)?;
-    let prepared_inline_byte_length = u64::try_from(core::mem::size_of::<
-        PreparedCompactPublicKeyAssignmentSources,
-    >())
-    .map_err(|_| CommonProofProverError::CountOverflow)?
-    .checked_sub(
-        u64::try_from(core::mem::size_of::<SetupKeyRelationSourcePolynomialAdapter>())
-            .map_err(|_| CommonProofProverError::CountOverflow)?,
-    )
-    .ok_or(CommonProofProverError::CountOverflow)?;
-    [
-        prepared_inline_byte_length,
-        relation
-            .resident_owned_heap_byte_length()
-            .map_err(CommonProofProverError::Relation)?,
-        relation_plan_variant
-            .resident_owned_payload_byte_length()
-            .map_err(CommonProofProverError::Relation)?,
-        assignment_catalog.resident_owned_heap_byte_length()?,
-    ]
-    .into_iter()
-    .try_fold(0_u64, |total, byte_length| {
-        total
-            .checked_add(byte_length)
-            .ok_or(CommonProofProverError::CountOverflow)
-    })
-}
-
+#[cfg(test)]
 pub(crate) fn prepare_compact_public_key_assignment_sources(
     source: &SetupGenerationKeyRelationSource<'_, '_>,
     relation_plan: CommonProofRelationPlanCapability,
@@ -752,12 +1145,7 @@ pub(crate) fn prepare_compact_public_key_assignment_sources(
         &relation_plan_variant,
         &compiled.source_layout,
     )?;
-    relation.check(
-        &input,
-        &relation_context,
-        &relation_plan_variant,
-        &compiled.source_layout,
-    )?;
+    relation.check(&input, &relation_context, &relation_plan_variant)?;
     let source_polynomials =
         SetupKeyRelationSourcePolynomialAdapter::new_compact_public_key_assignment(
             source,
@@ -782,6 +1170,7 @@ pub(crate) fn prepare_compact_public_key_assignment_sources(
     })
 }
 
+#[cfg(test)]
 pub(super) fn compact_public_key_authenticated_source_column_ordinals(
     input: &PublicKeyShareRelationPlanInput,
     variant: &RelationPlanVariant,
@@ -1185,7 +1574,7 @@ pub(crate) fn derive_compact_public_key_relation_catalog(
         .ok_or(RelationPlanError::CountOverflow)?;
 
     Ok(CompactPublicKeyRelationCatalog {
-        relation_plan_hash: variant.canonical_hash()?,
+        relation_plan_variant_hash: variant.canonical_hash()?,
         ring_degree,
         extension_degree: QUINTIC_EXTENSION_DEGREE,
         structured_public_ring_product_count: relations
@@ -1300,6 +1689,7 @@ fn witness_segments(
     Ok((segments, first_element))
 }
 
+#[cfg(test)]
 fn unique_witness_segment(
     catalog: &CompactPublicKeyRelationCatalog,
     kind: CompactWitnessSegmentKind,
@@ -1518,7 +1908,7 @@ mod tests {
             derive_compact_public_key_relation_catalog(&input, variant, &compiled.source_layout)
                 .expect("compact public-key catalog");
         catalog
-            .check(&input, &context, variant, &compiled.source_layout)
+            .check(&input, &context, variant)
             .expect("independently checked compact public-key catalog");
         let interpreter_certificate =
             checked_relation_compiler_interpreter_semantics(variant, &context)
@@ -1573,6 +1963,45 @@ mod tests {
     }
 
     #[test]
+    fn compact_public_key_relation_schema_digest_binds_nested_fields() {
+        let (input, _context, compiled) = selected_compilation().expect("selected compilation");
+        let variant = compiled
+            .relation_plan
+            .select_variant(None, None)
+            .expect("selected variant");
+        let catalog =
+            derive_compact_public_key_relation_catalog(&input, variant, &compiled.source_layout)
+                .expect("compact public-key catalog");
+        let digest = catalog
+            .canonical_schema_digest()
+            .expect("canonical schema digest");
+        let mut changed_term = catalog.clone();
+        let CompactStructuredLinearTerm::Direct {
+            integer_coefficient,
+            ..
+        } = &mut changed_term.ordered_relations[0].ordered_terms[0]
+        else {
+            panic!("the first structured term is direct")
+        };
+        *integer_coefficient += 1;
+        assert_ne!(
+            digest,
+            changed_term
+                .canonical_schema_digest()
+                .expect("mutated term schema digest")
+        );
+
+        let mut changed_scalar = catalog.clone();
+        changed_scalar.padded_constraint_count += 1;
+        assert_ne!(
+            digest,
+            changed_scalar
+                .canonical_schema_digest()
+                .expect("mutated scalar schema digest")
+        );
+    }
+
+    #[test]
     fn compact_public_key_relation_catalog_rejects_mutated_authority_and_geometry() {
         let (input, context, compiled) = selected_compilation().expect("selected compilation");
         let variant = compiled
@@ -1584,51 +2013,30 @@ mod tests {
                 .expect("compact public-key catalog");
 
         let mut wrong_hash = catalog.clone();
-        wrong_hash.relation_plan_hash[0] ^= 1;
+        wrong_hash.relation_plan_variant_hash[0] ^= 1;
         assert_eq!(
-            wrong_hash.check(&input, &context, variant, &compiled.source_layout),
+            wrong_hash.check(&input, &context, variant),
             Err(RelationPlanError::InvalidConstraint)
         );
 
         let mut wrong_extension_boundary = catalog.clone();
         wrong_extension_boundary.extension_degree = 1;
         assert_eq!(
-            wrong_extension_boundary.check(&input, &context, variant, &compiled.source_layout,),
-            Err(RelationPlanError::InvalidConstraint)
-        );
-
-        let mut wrong_interval = catalog.clone();
-        wrong_interval.ordered_quotient_intervals[0].quotient_maximum -= 1;
-        assert_eq!(
-            wrong_interval.check(&input, &context, variant, &compiled.source_layout),
+            wrong_extension_boundary.check(&input, &context, variant),
             Err(RelationPlanError::InvalidConstraint)
         );
 
         let mut overlapping_witness = catalog.clone();
         overlapping_witness.ordered_witness_segments[1].first_element -= 1;
         assert_eq!(
-            overlapping_witness.check(&input, &context, variant, &compiled.source_layout),
+            overlapping_witness.check(&input, &context, variant),
             Err(RelationPlanError::InvalidConstraint)
         );
 
         let mut missing_constraint = catalog.clone();
         missing_constraint.ordered_constraint_segments[0].row_count -= 1;
         assert_eq!(
-            missing_constraint.check(&input, &context, variant, &compiled.source_layout),
-            Err(RelationPlanError::InvalidConstraint)
-        );
-
-        let mut changed_term_sign = catalog.clone();
-        let CompactStructuredLinearTerm::NegacyclicPublicProduct {
-            integer_coefficient,
-            ..
-        } = &mut changed_term_sign.ordered_relations[0].ordered_terms[1]
-        else {
-            panic!("the first public-key relation owns its structured product")
-        };
-        *integer_coefficient = -*integer_coefficient;
-        assert_eq!(
-            changed_term_sign.check(&input, &context, variant, &compiled.source_layout),
+            missing_constraint.check(&input, &context, variant),
             Err(RelationPlanError::InvalidConstraint)
         );
     }

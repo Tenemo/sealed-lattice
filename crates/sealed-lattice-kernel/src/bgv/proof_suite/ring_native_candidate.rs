@@ -469,7 +469,7 @@ fn compact_public_key_packet_inventory() -> CompactPublicKeyPacketInventory {
     );
 
     CompactPublicKeyPacketInventory {
-        relation_plan_hash: compact_relation_catalog.relation_plan_hash(),
+        relation_plan_hash: compact_relation_catalog.relation_plan_variant_hash(),
         ring_degree,
         data_limb_count,
         anchor_count,

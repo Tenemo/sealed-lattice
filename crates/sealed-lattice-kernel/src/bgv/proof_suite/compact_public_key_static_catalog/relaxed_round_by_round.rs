@@ -1898,7 +1898,7 @@ fn initial_prefix_knowledge_state(
     Ok(PrefixKnowledgeState {
         outer: OuterRelaxedRelation::Unbound,
         cfw: CfwRelaxedRelation::InputR1cs {
-            relation_plan_hash: relation.relation_plan_hash(),
+            relation_plan_hash: relation.relation_plan_variant_hash(),
             witness_element_count: relation.padded_witness_element_count(),
             operative_constraint_count: relation.operative_constraint_count(),
         },
@@ -2832,7 +2832,7 @@ mod tests {
     fn factor_one_instantiates_every_relaxed_transition_and_extractor() {
         let catalog =
             CompactPublicKeyStaticCatalog::derive().expect("compact public-key static catalog");
-        let factor_one = &catalog.factor_catalogs[0];
+        let factor_one = &catalog.selected;
         let theorem = &factor_one.relaxed_round_by_round;
 
         assert_eq!(theorem.transitions.len(), 82);
@@ -3375,7 +3375,7 @@ mod tests {
     fn factor_one_source_codes_include_hiding_rows_in_distance_and_queries() {
         let catalog =
             CompactPublicKeyStaticCatalog::derive().expect("compact public-key static catalog");
-        let theorem = &catalog.factor_catalogs[0].relaxed_round_by_round;
+        let theorem = &catalog.selected.relaxed_round_by_round;
         let source_codes = theorem
             .codes
             .iter()
@@ -3425,7 +3425,7 @@ mod tests {
                 .expect("selected compact public-key relation");
         let catalog =
             CompactPublicKeyStaticCatalog::derive().expect("compact public-key static catalog");
-        let factor_one = &catalog.factor_catalogs[0];
+        let factor_one = &catalog.selected;
 
         let mut changed_boundary = factor_one.relaxed_round_by_round.clone();
         changed_boundary.composition_boundaries[0]

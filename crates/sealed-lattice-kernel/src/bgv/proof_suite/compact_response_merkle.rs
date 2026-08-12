@@ -11,22 +11,28 @@
 //! The selected-size response-value source, external-memory transaction driver,
 //! and authenticated restart record remain separate implementation owners.
 
-use super::compact_proof_wire::{
-    CompactProofResponseWireGeometry, CompactProofWireError, DecodedCompactProofResponse,
-};
+use super::compact_proof_wire::CompactProofResponseWireGeometry;
+#[cfg(test)]
+use super::compact_proof_wire::{CompactProofWireError, DecodedCompactProofResponse};
 use super::compact_transcript::compact_vector_commitment_oracle_identifier;
+#[cfg(test)]
 use super::fixed_uniform_verifier_message::DecodedFixedUniformVerifierMessage;
+use super::merkle::maximum_minimal_frontier_node_count;
+#[cfg(test)]
 use super::merkle::minimal_frontier_coordinates;
+#[cfg(test)]
 use super::{
     COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, PROOF_CHALLENGE_EXTENSION_DEGREE,
     ProofBaseFieldElement, ProofChallengeExtensionElement,
 };
+#[cfg(test)]
 use crate::foundation::{CanonicalItem, Hash512, hash_foundation_tuple_512};
 
 pub(crate) const COMPACT_RESPONSE_LEAF_HASH_DOMAIN: &str =
     "sealed-lattice/common-proof/compact-response/leaf/v1";
 pub(crate) const COMPACT_RESPONSE_MERKLE_NODE_HASH_DOMAIN: &str =
     "sealed-lattice/common-proof/compact-response/merkle-node/v1";
+#[cfg(test)]
 pub(crate) const COMPACT_RESPONSE_TREE_STORAGE_CHUNK_BYTE_LENGTH: usize = 1_048_576;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -103,12 +109,39 @@ impl CompactResponseComponentGeometry {
             field_element_count_per_leaf,
         }
     }
+
+    pub(crate) const fn first_leaf_ordinal(&self) -> u64 {
+        self.first_leaf_ordinal
+    }
+
+    pub(crate) const fn leaf_count(&self) -> u64 {
+        self.leaf_count
+    }
+
+    pub(crate) const fn minimum_queried_leaf_count(&self) -> u64 {
+        self.minimum_queried_leaf_count
+    }
+
+    pub(crate) const fn maximum_queried_leaf_count(&self) -> u64 {
+        self.maximum_queried_leaf_count
+    }
+
+    pub(crate) const fn query_selection(&self) -> CompactResponseQuerySelection {
+        self.query_selection
+    }
+
+    pub(crate) const fn value_kind(&self) -> CompactResponseLeafValueKind {
+        self.value_kind
+    }
+
+    pub(crate) const fn field_element_count_per_leaf(&self) -> u64 {
+        self.field_element_count_per_leaf
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CompactResponseMerkleGeometry {
     response_ordinal: u32,
-    vector_commitment_oracle_identifier: u32,
     components: Vec<CompactResponseComponentGeometry>,
     merkle_leaf_count: u64,
     minimum_queried_leaf_count: u64,
@@ -213,12 +246,10 @@ impl CompactResponseMerkleGeometry {
         {
             return Err(CompactResponseMerkleError::InvalidGeometry);
         }
+        compact_vector_commitment_oracle_identifier(response_ordinal)
+            .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
         Ok(Self {
             response_ordinal,
-            vector_commitment_oracle_identifier: compact_vector_commitment_oracle_identifier(
-                response_ordinal,
-            )
-            .map_err(|_| CompactResponseMerkleError::CountOverflow)?,
             components,
             merkle_leaf_count: expected_first_leaf_ordinal,
             minimum_queried_leaf_count,
@@ -230,30 +261,63 @@ impl CompactResponseMerkleGeometry {
         self.response_ordinal
     }
 
+    #[cfg(test)]
     pub(crate) const fn vector_commitment_oracle_identifier(&self) -> u32 {
-        self.vector_commitment_oracle_identifier
+        self.response_ordinal + 1
     }
 
+    #[cfg(test)]
     pub(crate) const fn merkle_leaf_count(&self) -> u64 {
         self.merkle_leaf_count
     }
 
+    #[cfg(test)]
     pub(crate) const fn queried_leaf_count(&self) -> u64 {
         self.maximum_queried_leaf_count
     }
 
+    #[cfg(test)]
     pub(crate) const fn minimum_queried_leaf_count(&self) -> u64 {
         self.minimum_queried_leaf_count
     }
 
+    #[cfg(test)]
     pub(crate) const fn maximum_queried_leaf_count(&self) -> u64 {
         self.maximum_queried_leaf_count
+    }
+
+    pub(crate) fn components(&self) -> &[CompactResponseComponentGeometry] {
+        &self.components
     }
 
     pub(crate) fn validate_wire_geometry(
         &self,
         wire_geometry: &CompactProofResponseWireGeometry,
     ) -> Result<(), CompactResponseMerkleError> {
+        let leaf_count = usize::try_from(self.merkle_leaf_count)
+            .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
+        let minimum_queried_leaf_count = usize::try_from(self.minimum_queried_leaf_count)
+            .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
+        let maximum_queried_leaf_count = usize::try_from(self.maximum_queried_leaf_count)
+            .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
+        // The exact frontier bound is unimodal in the opening count. It grows
+        // up to the [leaf_count / 4, leaf_count / 2] plateau, then shrinks, so
+        // one in-range maximizer suffices without iterating an attacker-sized
+        // decoded interval.
+        let plateau_start = (leaf_count / 4).max(1);
+        let plateau_end = leaf_count / 2;
+        let maximizing_opening_count = if maximum_queried_leaf_count < plateau_start {
+            maximum_queried_leaf_count
+        } else if minimum_queried_leaf_count > plateau_end {
+            minimum_queried_leaf_count
+        } else {
+            minimum_queried_leaf_count.max(plateau_start)
+        };
+        let expected_maximum_frontier_node_count = u64::try_from(
+            maximum_minimal_frontier_node_count(leaf_count, maximizing_opening_count)
+                .map_err(|_| CompactResponseMerkleError::CountOverflow)?,
+        )
+        .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
         let (
             expected_minimum_base_field_element_count,
             expected_maximum_base_field_element_count,
@@ -317,12 +381,14 @@ impl CompactResponseMerkleGeometry {
                 != expected_minimum_extension_field_element_count
             || wire_geometry.maximum_queried_extension_field_element_count()
                 != expected_maximum_extension_field_element_count
+            || wire_geometry.maximum_frontier_node_count() != expected_maximum_frontier_node_count
         {
             return Err(CompactResponseMerkleError::WireGeometryMismatch);
         }
         Ok(())
     }
 
+    #[cfg(test)]
     fn leaf_descriptor(
         &self,
         leaf_ordinal: u64,
@@ -349,6 +415,7 @@ impl CompactResponseMerkleGeometry {
         Err(CompactResponseMerkleError::InvalidGeometry)
     }
 
+    #[cfg(test)]
     fn validate_query_leaf_ordinals(
         &self,
         query_leaf_ordinals: &[u64],
@@ -478,16 +545,6 @@ impl CompactResponseMerkleGeometry {
             })
             .fold(self.response_ordinal, u32::max)
     }
-
-    pub(crate) fn has_verifier_message_queries(&self) -> bool {
-        self.components.iter().any(|component| {
-            matches!(
-                component.query_selection,
-                CompactResponseQuerySelection::VerifierMessageDistinctGroup { .. }
-                    | CompactResponseQuerySelection::VerifierMessageDistinctGroupUnion { .. }
-            )
-        })
-    }
 }
 
 fn wire_geometry_for_logical_move(
@@ -527,6 +584,7 @@ fn query_group_shape(
 /// every proper subset names its verifier move and distinct-query group.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CompactResponseQuerySchedule {
+    #[cfg(test)]
     leaf_ordinals: Vec<u64>,
 }
 
@@ -609,6 +667,7 @@ impl CompactResponseQuerySchedule {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn derive(
         merkle_geometry: &CompactResponseMerkleGeometry,
         wire_geometries: &[CompactProofResponseWireGeometry],
@@ -626,6 +685,7 @@ impl CompactResponseQuerySchedule {
     /// message exists. The prefix must end at that move: accepting an earlier
     /// prefix would permit premature opening, while accepting a later prefix
     /// would delay last-use deletion and checkpoint publication.
+    #[cfg(test)]
     pub(crate) fn derive_at_last_query_boundary(
         merkle_geometry: &CompactResponseMerkleGeometry,
         wire_geometries: &[CompactProofResponseWireGeometry],
@@ -651,6 +711,7 @@ impl CompactResponseQuerySchedule {
         Self::derive_from_validated_messages(merkle_geometry, verifier_message_prefix)
     }
 
+    #[cfg(test)]
     fn derive_from_validated_messages(
         merkle_geometry: &CompactResponseMerkleGeometry,
         verifier_messages: &[DecodedFixedUniformVerifierMessage],
@@ -724,10 +785,12 @@ impl CompactResponseQuerySchedule {
         Ok(Self { leaf_ordinals })
     }
 
+    #[cfg(test)]
     pub(crate) fn as_slice(&self) -> &[u64] {
         &self.leaf_ordinals
     }
 
+    #[cfg(test)]
     pub(crate) fn owned_heap_byte_length(&self) -> Result<u64, CompactResponseMerkleError> {
         u64::try_from(self.leaf_ordinals.capacity())
             .ok()
@@ -740,6 +803,7 @@ impl CompactResponseQuerySchedule {
     }
 }
 
+#[cfg(test)]
 fn validate_decoded_verifier_message_prefix(
     wire_geometries: &[CompactProofResponseWireGeometry],
     verifier_messages: &[DecodedFixedUniformVerifierMessage],
@@ -769,6 +833,7 @@ fn validate_decoded_verifier_message_prefix(
     Ok(())
 }
 
+#[cfg(test)]
 fn decoded_query_group(
     verifier_messages: &[DecodedFixedUniformVerifierMessage],
     logical_verifier_move_ordinal: u32,
@@ -785,6 +850,7 @@ fn decoded_query_group(
         .ok_or(CompactResponseMerkleError::InvalidOpeningIndices)
 }
 
+#[cfg(test)]
 fn append_component_query_group(
     leaf_ordinals: &mut Vec<u64>,
     component: &CompactResponseComponentGeometry,
@@ -810,6 +876,7 @@ fn append_component_query_group(
     Ok(())
 }
 
+#[cfg(test)]
 fn append_component_query_union(
     leaf_ordinals: &mut Vec<u64>,
     component: &CompactResponseComponentGeometry,
@@ -892,6 +959,7 @@ fn mark_query_group_referenced(
     Ok(())
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy)]
 pub(crate) enum CompactResponseLeafValue<'value> {
     BaseField(&'value [ProofBaseFieldElement]),
@@ -899,6 +967,7 @@ pub(crate) enum CompactResponseLeafValue<'value> {
     Padding,
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct CompactResponseLeafDescriptor {
     component_ordinal: u32,
@@ -912,123 +981,32 @@ struct CompactResponseLeafDescriptor {
 pub(crate) enum CompactResponseMerkleError {
     InvalidGeometry,
     CountOverflow,
+    #[cfg(test)]
     CanonicalEncoding,
     WireGeometryMismatch,
     InvalidOpeningIndices,
+    #[cfg(test)]
     WrongLeafValueKind,
+    #[cfg(test)]
     WrongLeafValueCount,
+    #[cfg(test)]
     WrongFrontierLength,
+    #[cfg(test)]
     IncompleteFrontier,
+    #[cfg(test)]
     RootMismatch,
+    #[cfg(test)]
     InvalidWireValue,
+    #[cfg(test)]
     OutputChunkPending,
+    #[cfg(test)]
     OutputChunkUnavailable,
+    #[cfg(test)]
     WriterIncomplete,
+    #[cfg(test)]
     WrongTreeChunk,
+    #[cfg(test)]
     ScannerIncomplete,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct CompactResponsePostorderWriterHeapGeometry {
-    output_chunk_byte_length: u64,
-    pending_left_digest_byte_length: u64,
-    pending_emitted_digest_byte_length: u64,
-    maximum_owned_heap_byte_length: u64,
-}
-
-impl CompactResponsePostorderWriterHeapGeometry {
-    pub(crate) fn derive(
-        geometry: &CompactResponseMerkleGeometry,
-    ) -> Result<Self, CompactResponseMerkleError> {
-        let tree_depth = u64::from(geometry.merkle_leaf_count.trailing_zeros());
-        let digest_byte_length = u64::try_from(Hash512::BYTE_LENGTH)
-            .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
-        let output_chunk_byte_length =
-            u64::try_from(COMPACT_RESPONSE_TREE_STORAGE_CHUNK_BYTE_LENGTH)
-                .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
-        let pending_left_digest_byte_length = tree_depth
-            .checked_mul(digest_byte_length)
-            .ok_or(CompactResponseMerkleError::CountOverflow)?;
-        let pending_emitted_digest_byte_length = tree_depth
-            .checked_add(1)
-            .and_then(|count| count.checked_mul(digest_byte_length))
-            .ok_or(CompactResponseMerkleError::CountOverflow)?;
-        let maximum_owned_heap_byte_length = output_chunk_byte_length
-            .checked_add(pending_left_digest_byte_length)
-            .and_then(|length| length.checked_add(pending_emitted_digest_byte_length))
-            .ok_or(CompactResponseMerkleError::CountOverflow)?;
-        Ok(Self {
-            output_chunk_byte_length,
-            pending_left_digest_byte_length,
-            pending_emitted_digest_byte_length,
-            maximum_owned_heap_byte_length,
-        })
-    }
-
-    pub(crate) const fn output_chunk_byte_length(self) -> u64 {
-        self.output_chunk_byte_length
-    }
-
-    pub(crate) const fn pending_left_digest_byte_length(self) -> u64 {
-        self.pending_left_digest_byte_length
-    }
-
-    pub(crate) const fn pending_emitted_digest_byte_length(self) -> u64 {
-        self.pending_emitted_digest_byte_length
-    }
-
-    pub(crate) const fn maximum_owned_heap_byte_length(self) -> u64 {
-        self.maximum_owned_heap_byte_length
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct CompactResponseFrontierScannerHeapGeometry {
-    scan_target_byte_length: u64,
-    frontier_digest_byte_length: u64,
-    maximum_owned_heap_byte_length: u64,
-}
-
-impl CompactResponseFrontierScannerHeapGeometry {
-    pub(crate) fn derive(
-        maximum_frontier_node_count: u64,
-    ) -> Result<Self, CompactResponseMerkleError> {
-        let scan_target_element_byte_length = 2_u64
-            .checked_mul(
-                u64::try_from(size_of::<u64>())
-                    .map_err(|_| CompactResponseMerkleError::CountOverflow)?,
-            )
-            .ok_or(CompactResponseMerkleError::CountOverflow)?;
-        let scan_target_byte_length = maximum_frontier_node_count
-            .checked_mul(scan_target_element_byte_length)
-            .ok_or(CompactResponseMerkleError::CountOverflow)?;
-        let frontier_digest_byte_length = maximum_frontier_node_count
-            .checked_mul(
-                u64::try_from(Hash512::BYTE_LENGTH)
-                    .map_err(|_| CompactResponseMerkleError::CountOverflow)?,
-            )
-            .ok_or(CompactResponseMerkleError::CountOverflow)?;
-        let maximum_owned_heap_byte_length = scan_target_byte_length
-            .checked_add(frontier_digest_byte_length)
-            .ok_or(CompactResponseMerkleError::CountOverflow)?;
-        Ok(Self {
-            scan_target_byte_length,
-            frontier_digest_byte_length,
-            maximum_owned_heap_byte_length,
-        })
-    }
-
-    pub(crate) const fn scan_target_byte_length(self) -> u64 {
-        self.scan_target_byte_length
-    }
-
-    pub(crate) const fn frontier_digest_byte_length(self) -> u64 {
-        self.frontier_digest_byte_length
-    }
-
-    pub(crate) const fn maximum_owned_heap_byte_length(self) -> u64 {
-        self.maximum_owned_heap_byte_length
-    }
 }
 
 /// Streams one complete response tree in canonical postorder.
@@ -1036,6 +1014,7 @@ impl CompactResponseFrontierScannerHeapGeometry {
 /// A full output chunk must be durably appended before another leaf is
 /// accepted. `acknowledge_output_chunk` is therefore called only after the
 /// surrounding external-memory transaction has committed successfully.
+#[cfg(test)]
 pub(crate) struct CompactResponsePostorderMerkleWriter<'geometry> {
     geometry: &'geometry CompactResponseMerkleGeometry,
     pending_left_digests: Vec<[u8; Hash512::BYTE_LENGTH]>,
@@ -1049,6 +1028,7 @@ pub(crate) struct CompactResponsePostorderMerkleWriter<'geometry> {
     root: Option<[u8; Hash512::BYTE_LENGTH]>,
 }
 
+#[cfg(test)]
 impl<'geometry> CompactResponsePostorderMerkleWriter<'geometry> {
     pub(crate) fn new(
         geometry: &'geometry CompactResponseMerkleGeometry,
@@ -1220,12 +1200,14 @@ impl<'geometry> CompactResponsePostorderMerkleWriter<'geometry> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg(test)]
 struct CompactResponseFrontierScanTarget {
     postorder_digest_ordinal: u64,
     canonical_frontier_ordinal: u64,
 }
 
 /// Extracts a canonical minimal frontier from sequential postorder tree bytes.
+#[cfg(test)]
 pub(crate) struct CompactResponsePostorderFrontierScanner {
     targets: Vec<CompactResponseFrontierScanTarget>,
     frontier: Vec<[u8; Hash512::BYTE_LENGTH]>,
@@ -1235,6 +1217,7 @@ pub(crate) struct CompactResponsePostorderFrontierScanner {
     input_chunk_byte_length: usize,
 }
 
+#[cfg(test)]
 impl CompactResponsePostorderFrontierScanner {
     pub(crate) fn new(
         geometry: &CompactResponseMerkleGeometry,
@@ -1381,6 +1364,7 @@ impl CompactResponsePostorderFrontierScanner {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn expected_postorder_tree_byte_length(
     geometry: &CompactResponseMerkleGeometry,
 ) -> Result<u64, CompactResponseMerkleError> {
@@ -1394,6 +1378,7 @@ pub(crate) fn expected_postorder_tree_byte_length(
         .ok_or(CompactResponseMerkleError::CountOverflow)
 }
 
+#[cfg(test)]
 fn compact_response_postorder_digest_ordinal(
     geometry: &CompactResponseMerkleGeometry,
     level: u32,
@@ -1411,6 +1396,7 @@ fn compact_response_postorder_digest_ordinal(
         .ok_or(CompactResponseMerkleError::CountOverflow)
 }
 
+#[cfg(test)]
 pub(crate) fn compact_response_leaf_digest(
     geometry: &CompactResponseMerkleGeometry,
     leaf_ordinal: u64,
@@ -1466,7 +1452,7 @@ pub(crate) fn compact_response_leaf_digest(
         COMPACT_RESPONSE_LEAF_HASH_DOMAIN,
         &[
             CanonicalItem::unsigned32(geometry.response_ordinal),
-            CanonicalItem::unsigned32(geometry.vector_commitment_oracle_identifier),
+            CanonicalItem::unsigned32(geometry.vector_commitment_oracle_identifier()),
             CanonicalItem::unsigned32(descriptor.component_ordinal),
             CanonicalItem::unsigned64(descriptor.component_leaf_ordinal),
             CanonicalItem::unsigned64(descriptor.leaf_ordinal),
@@ -1482,6 +1468,7 @@ pub(crate) fn compact_response_leaf_digest(
     .map_err(|_| CompactResponseMerkleError::CanonicalEncoding)
 }
 
+#[cfg(test)]
 pub(crate) fn compact_response_merkle_parent_digest(
     geometry: &CompactResponseMerkleGeometry,
     parent_level: u32,
@@ -1508,7 +1495,7 @@ pub(crate) fn compact_response_merkle_parent_digest(
         COMPACT_RESPONSE_MERKLE_NODE_HASH_DOMAIN,
         &[
             CanonicalItem::unsigned32(geometry.response_ordinal),
-            CanonicalItem::unsigned32(geometry.vector_commitment_oracle_identifier),
+            CanonicalItem::unsigned32(geometry.vector_commitment_oracle_identifier()),
             CanonicalItem::unsigned32(parent_level),
             CanonicalItem::unsigned64(left_child_ordinal),
             CanonicalItem::hash512(left_child_digest),
@@ -1519,6 +1506,7 @@ pub(crate) fn compact_response_merkle_parent_digest(
     .map_err(|_| CompactResponseMerkleError::CanonicalEncoding)
 }
 
+#[cfg(test)]
 pub(crate) fn verify_decoded_compact_response_opening(
     merkle_geometry: &CompactResponseMerkleGeometry,
     wire_geometry: &CompactProofResponseWireGeometry,
@@ -1633,6 +1621,7 @@ pub(crate) fn verify_decoded_compact_response_opening(
     )
 }
 
+#[cfg(test)]
 fn reconstruct_compact_response_root(
     geometry: &CompactResponseMerkleGeometry,
     opened_leaf_digests: &[(u64, [u8; Hash512::BYTE_LENGTH])],
@@ -1712,6 +1701,7 @@ fn reconstruct_compact_response_root(
     Ok(())
 }
 
+#[cfg(test)]
 fn map_wire_error(_: CompactProofWireError) -> CompactResponseMerkleError {
     CompactResponseMerkleError::InvalidWireValue
 }
@@ -2034,7 +2024,7 @@ mod tests {
             .map(|leaf_ordinal| salts[usize::try_from(*leaf_ordinal).unwrap()])
             .collect::<Vec<_>>();
         let proof_geometry =
-            CompactProofWireGeometry::new(1, vec![wire_geometries[0].clone()]).unwrap();
+            CompactProofWireGeometry::new(vec![wire_geometries[0].clone()]).unwrap();
         let proof_bytes = encode_compact_proof_wire(
             &proof_geometry,
             &CompactProofWireInput::new(vec![CompactProofResponseWireInput::new(
@@ -2047,8 +2037,7 @@ mod tests {
             )]),
         )
         .expect("variable shared opening encodes");
-        let decoded =
-            decode_compact_proof_wire(&proof_geometry, &proof_bytes, proof_bytes.len()).unwrap();
+        let decoded = decode_compact_proof_wire(&proof_geometry, &proof_bytes).unwrap();
         assert_eq!(
             decoded.responses()[0].queried_extension_field_element_count(),
             4
@@ -2073,7 +2062,7 @@ mod tests {
         oversized_count[count_offset + size_of::<u32>()..count_offset + 2 * size_of::<u32>()]
             .copy_from_slice(&7_u32.to_le_bytes());
         assert_eq!(
-            decode_compact_proof_wire(&proof_geometry, &oversized_count, oversized_count.len()),
+            decode_compact_proof_wire(&proof_geometry, &oversized_count),
             Err(CompactProofWireError::InvalidGeometry)
         );
 
@@ -2277,8 +2266,7 @@ mod tests {
             verifier_message_geometry(),
         )
         .unwrap();
-        let proof_geometry =
-            CompactProofWireGeometry::new(1, vec![response_wire_geometry]).unwrap();
+        let proof_geometry = CompactProofWireGeometry::new(vec![response_wire_geometry]).unwrap();
         let proof_input = CompactProofWireInput::new(vec![CompactProofResponseWireInput::new(
             root,
             [0x51; COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH],
@@ -2297,12 +2285,7 @@ mod tests {
         let query_leaf_ordinals = [0, 2, 4];
         let (wire_geometry, canonical_proof_bytes) =
             encoded_opening(&geometry, &query_leaf_ordinals, false, false, false, false);
-        let decoded = decode_compact_proof_wire(
-            &wire_geometry,
-            &canonical_proof_bytes,
-            canonical_proof_bytes.len(),
-        )
-        .unwrap();
+        let decoded = decode_compact_proof_wire(&wire_geometry, &canonical_proof_bytes).unwrap();
         assert_eq!(
             verify_decoded_compact_response_opening(
                 &geometry,
@@ -2328,12 +2311,8 @@ mod tests {
                 salt_mutation,
                 frontier_mutation,
             );
-            let mutated = decode_compact_proof_wire(
-                &mutated_wire_geometry,
-                &mutated_bytes,
-                mutated_bytes.len(),
-            )
-            .unwrap();
+            let mutated =
+                decode_compact_proof_wire(&mutated_wire_geometry, &mutated_bytes).unwrap();
             assert_eq!(
                 verify_decoded_compact_response_opening(
                     &geometry,
@@ -2583,35 +2562,6 @@ mod tests {
             incomplete_writer.finish(),
             Err(CompactResponseMerkleError::WriterIncomplete)
         );
-    }
-
-    #[test]
-    fn production_postorder_writer_heap_geometry_is_exact() {
-        let geometry = response_geometry();
-        let heap = CompactResponsePostorderWriterHeapGeometry::derive(&geometry).unwrap();
-        assert_eq!(heap.output_chunk_byte_length(), 1_048_576);
-        assert_eq!(heap.pending_left_digest_byte_length(), 192);
-        assert_eq!(heap.pending_emitted_digest_byte_length(), 256);
-        assert_eq!(heap.maximum_owned_heap_byte_length(), 1_049_024);
-        let scanner_heap = CompactResponseFrontierScannerHeapGeometry::derive(4).unwrap();
-        assert_eq!(scanner_heap.scan_target_byte_length(), 64);
-        assert_eq!(scanner_heap.frontier_digest_byte_length(), 256);
-        assert_eq!(scanner_heap.maximum_owned_heap_byte_length(), 320);
-
-        let production_writer = CompactResponsePostorderMerkleWriter::new(&geometry).unwrap();
-        assert_eq!(
-            production_writer.output_chunk_byte_length,
-            COMPACT_RESPONSE_TREE_STORAGE_CHUNK_BYTE_LENGTH
-        );
-        assert!(production_writer.output_chunk().is_none());
-
-        let production_scanner =
-            CompactResponsePostorderFrontierScanner::new(&geometry, &[0, 2, 4]).unwrap();
-        assert_eq!(
-            production_scanner.input_chunk_byte_length,
-            COMPACT_RESPONSE_TREE_STORAGE_CHUNK_BYTE_LENGTH
-        );
-        assert_eq!(production_scanner.consumed_tree_byte_length, 0);
     }
 
     #[test]

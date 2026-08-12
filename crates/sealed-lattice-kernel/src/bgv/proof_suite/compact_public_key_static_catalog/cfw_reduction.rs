@@ -7,8 +7,8 @@
 use crate::bgv::proof_suite::compact_cfw::{
     COMPACT_CFW_INNER_ENDPOINT_CLAIM_COUNT, COMPACT_CFW_INNER_MASK_APPLICATION_MULTIPLIER,
     COMPACT_CFW_INNER_MASK_MESSAGE_LENGTH, COMPACT_CFW_LAST_ROUND_EXCLUDED_ELEMENT_COUNT,
-    COMPACT_CFW_MATRIX_COUNT, COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH, CompactCfwError,
-    CompactCfwGeometry,
+    COMPACT_CFW_MATRIX_COUNT, COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH, CompactCfwGeometry,
+    CompactCfwGeometryError,
 };
 use crate::bgv::proof_suite::relation_plan::CompactPublicKeyRelationCatalog;
 
@@ -559,7 +559,7 @@ fn production_cfw_geometry(
     let witness_length = usize::try_from(relation_variable_count)
         .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?;
     CompactCfwGeometry::derive(witness_length).map_err(|error| match error {
-        CompactCfwError::CountOverflow => CompactStaticCatalogError::ArithmeticOverflow,
+        CompactCfwGeometryError::CountOverflow => CompactStaticCatalogError::ArithmeticOverflow,
         _ => CompactStaticCatalogError::InvalidGeometry,
     })
 }

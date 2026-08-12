@@ -28,12 +28,8 @@ use crate::bgv::proof_suite::compact_proof_wire::{
 #[cfg(test)]
 use crate::bgv::proof_suite::compact_response_merkle::CompactResponseQuerySchedule;
 use crate::bgv::proof_suite::compact_response_merkle::{
-    CompactResponseComponentGeometry, CompactResponseFrontierScannerHeapGeometry,
-    CompactResponseLeafValueKind, CompactResponseMerkleError, CompactResponseMerkleGeometry,
-    CompactResponsePostorderWriterHeapGeometry, CompactResponseQuerySelection,
-};
-use crate::bgv::proof_suite::compact_response_tree_external::{
-    CompactResponseTreeExternalMemoryGeometry, CompactResponseTreeExternalMemorySetupError,
+    CompactResponseComponentGeometry, CompactResponseLeafValueKind, CompactResponseMerkleError,
+    CompactResponseMerkleGeometry, CompactResponseQuerySelection,
 };
 use crate::bgv::proof_suite::compact_transcript::compact_vector_commitment_oracle_identifier;
 
@@ -97,6 +93,71 @@ pub(super) enum ResponseComponentRole {
         group_ordinal: u8,
     },
     Padding,
+}
+
+impl ResponseComponentRole {
+    pub(super) const fn contract_coordinates(self) -> (u8, u8, u8, u32) {
+        use ResponseComponentRole::*;
+
+        match self {
+            PreChallengeSource => (1, 0, 0, 0),
+            CfwInnerMasks => (2, 0, 0, 0),
+            MainSource => (3, 0, 0, 0),
+            CfwOuterMasks => (4, 0, 0, 0),
+            CrossEpochMasks => (5, 0, 0, 0),
+            CrossEpochOpeningEvaluations => (6, 0, 0, 0),
+            CfwAuxiliaryTarget => (7, 0, 0, 0),
+            CfwSumcheckPolynomial { round_ordinal } => (8, 0, 0, round_ordinal),
+            CfwOuterEvaluations => (9, 0, 0, 0),
+            CfwFinalValues => (10, 0, 0, 0),
+            WhirSumcheckMask {
+                epoch,
+                batch_ordinal,
+            } => (11, contract_epoch(epoch), batch_ordinal, 0),
+            WhirSumcheckAuxiliaryTarget {
+                epoch,
+                batch_ordinal,
+            } => (12, contract_epoch(epoch), batch_ordinal, 0),
+            WhirSumcheckWire {
+                epoch,
+                batch_ordinal,
+                round_ordinal,
+            } => (
+                13,
+                contract_epoch(epoch),
+                batch_ordinal,
+                round_ordinal as u32,
+            ),
+            WhirNextSource {
+                epoch,
+                round_ordinal,
+            } => (14, contract_epoch(epoch), 0, round_ordinal as u32),
+            WhirCodeSwitchMask {
+                epoch,
+                round_ordinal,
+            } => (15, contract_epoch(epoch), 0, round_ordinal as u32),
+            WhirFreshSourceMask { epoch } => (16, contract_epoch(epoch), 0, 0),
+            WhirFreshMaskGroup {
+                epoch,
+                group_ordinal,
+            } => (17, contract_epoch(epoch), group_ordinal, 0),
+            WhirBaseMaskedClaim { epoch } => (18, contract_epoch(epoch), 0, 0),
+            WhirBlindedSourceMessage { epoch } => (19, contract_epoch(epoch), 0, 0),
+            WhirBlindedSourceRandomness { epoch } => (20, contract_epoch(epoch), 0, 0),
+            WhirBlindedMaskGroup {
+                epoch,
+                group_ordinal,
+            } => (21, contract_epoch(epoch), group_ordinal, 0),
+            Padding => (22, 0, 0, 0),
+        }
+    }
+}
+
+const fn contract_epoch(epoch: TranscriptEpoch) -> u8 {
+    match epoch {
+        TranscriptEpoch::PreChallenge => 1,
+        TranscriptEpoch::Main => 2,
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -641,7 +702,7 @@ impl PackingResponseCommitmentCatalog {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let catalog = derive_catalog_fields(responses)?;
-        catalog.check(chronology, pre_challenge_whir, main_whir, cfw_reduction)?;
+        catalog.check(chronology)?;
         Ok(catalog)
     }
 
@@ -713,143 +774,12 @@ impl PackingResponseCommitmentCatalog {
             .collect()
     }
 
-    pub(super) fn maximum_postorder_writer_heap_geometry(
-        &self,
-    ) -> Result<CompactResponsePostorderWriterHeapGeometry, CompactStaticCatalogError> {
-        self.production_merkle_geometries()?
-            .iter()
-            .map(|geometry| {
-                CompactResponsePostorderWriterHeapGeometry::derive(geometry)
-                    .map_err(map_response_merkle_error)
-            })
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .max_by_key(|geometry| geometry.maximum_owned_heap_byte_length())
-            .ok_or(CompactStaticCatalogError::InvalidGeometry)
-    }
-
-    pub(super) fn maximum_frontier_scanner_heap_geometry(
-        &self,
-    ) -> Result<CompactResponseFrontierScannerHeapGeometry, CompactStaticCatalogError> {
-        let maximum_frontier_node_count = self
-            .response_tree_geometries()?
-            .iter()
-            .map(|geometry| geometry.maximum_frontier_node_count)
-            .max()
-            .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
-        CompactResponseFrontierScannerHeapGeometry::derive(maximum_frontier_node_count)
-            .map_err(map_response_merkle_error)
-    }
-
-    pub(super) fn maximum_external_memory_geometry(
-        &self,
-    ) -> Result<CompactResponseTreeExternalMemoryGeometry, CompactStaticCatalogError> {
-        self.production_merkle_geometries()?
-            .iter()
-            .map(|geometry| {
-                CompactResponseTreeExternalMemoryGeometry::derive(geometry)
-                    .map_err(map_response_tree_setup_error)
-            })
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .max_by_key(|geometry| geometry.tree_byte_length())
-            .ok_or(CompactStaticCatalogError::InvalidGeometry)
-    }
-
     pub(super) fn maximum_response_query_schedule_heap_byte_length(
         &self,
     ) -> Result<u64, CompactStaticCatalogError> {
         self.responses
             .iter()
             .map(|response| response_query_schedule_byte_length(response.queried_leaf_count))
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .max()
-            .ok_or(CompactStaticCatalogError::InvalidGeometry)
-    }
-
-    pub(super) fn maximum_response_input_heap_payload_byte_length(
-        &self,
-    ) -> Result<u64, CompactStaticCatalogError> {
-        self.responses
-            .iter()
-            .map(|response| {
-                let frontier_digest_byte_length = response
-                    .maximum_authentication_frontier_byte_length
-                    .checked_sub(MERKLE_FRONTIER_COUNT_BYTE_LENGTH)
-                    .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
-                checked_add(
-                    response.queried_value_byte_length,
-                    checked_add(
-                        response.transported_leaf_salt_byte_length,
-                        checked_add(
-                            frontier_digest_byte_length,
-                            response_query_schedule_byte_length(response.queried_leaf_count)?,
-                        )?,
-                    )?,
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .max()
-            .ok_or(CompactStaticCatalogError::InvalidGeometry)
-    }
-
-    pub(super) fn maximum_response_tree_kernel_heap_byte_length(
-        &self,
-    ) -> Result<u64, CompactStaticCatalogError> {
-        let merkle_geometries = self.production_merkle_geometries()?;
-        if merkle_geometries.len() != self.responses.len() {
-            return Err(CompactStaticCatalogError::InvalidGeometry);
-        }
-        merkle_geometries
-            .iter()
-            .zip(&self.responses)
-            .map(|(merkle_geometry, response)| {
-                let external_memory_geometry =
-                    CompactResponseTreeExternalMemoryGeometry::derive(merkle_geometry)
-                        .map_err(map_response_tree_setup_error)?;
-                let control_byte_length = checked_add(
-                    external_memory_geometry.driver_inline_byte_length(),
-                    external_memory_geometry.executor_owned_heap_byte_length(),
-                )?;
-                let query_schedule_byte_length =
-                    response_query_schedule_byte_length(response.queried_leaf_count)?;
-                let writer_live_byte_length = checked_add(
-                    control_byte_length,
-                    CompactResponsePostorderWriterHeapGeometry::derive(merkle_geometry)
-                        .map_err(map_response_merkle_error)?
-                        .maximum_owned_heap_byte_length(),
-                )?;
-                let frontier_digest_byte_length = response
-                    .maximum_authentication_frontier_byte_length
-                    .checked_sub(MERKLE_FRONTIER_COUNT_BYTE_LENGTH)
-                    .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
-                let maximum_frontier_node_count = frontier_digest_byte_length
-                    .checked_div(MERKLE_DIGEST_BYTE_LENGTH)
-                    .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
-                let scanner_live_byte_length = checked_add(
-                    control_byte_length,
-                    checked_add(
-                        CompactResponseFrontierScannerHeapGeometry::derive(
-                            maximum_frontier_node_count,
-                        )
-                        .map_err(map_response_merkle_error)?
-                        .maximum_owned_heap_byte_length(),
-                        query_schedule_byte_length,
-                    )?,
-                )?;
-                let response_input_live_byte_length = checked_add(
-                    response.queried_value_byte_length,
-                    checked_add(
-                        response.transported_leaf_salt_byte_length,
-                        checked_add(frontier_digest_byte_length, query_schedule_byte_length)?,
-                    )?,
-                )?;
-                Ok(writer_live_byte_length
-                    .max(scanner_live_byte_length)
-                    .max(response_input_live_byte_length))
-            })
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
             .max()
@@ -892,26 +822,8 @@ impl PackingResponseCommitmentCatalog {
     fn check(
         &self,
         chronology: &PackingTranscriptChronology,
-        pre_challenge_whir: &WhirStaticLedger,
-        main_whir: &WhirStaticLedger,
-        cfw_reduction: &CfwReductionCatalog,
     ) -> Result<(), CompactStaticCatalogError> {
-        let expected_responses = chronology
-            .verifier_moves
-            .iter()
-            .map(|verifier_move| {
-                ResponseVectorLedger::derive(
-                    verifier_move,
-                    chronology,
-                    pre_challenge_whir,
-                    main_whir,
-                    cfw_reduction,
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let expected = derive_catalog_fields(expected_responses)?;
-        if self != &expected
-            || self.responses.is_empty()
+        if self.responses.is_empty()
             || !self.responses.windows(2).all(|pair| {
                 pair[0].vector_commitment_oracle_identifier
                     < pair[1].vector_commitment_oracle_identifier
@@ -939,19 +851,6 @@ fn map_response_merkle_error(error: CompactResponseMerkleError) -> CompactStatic
     match error {
         CompactResponseMerkleError::CountOverflow => CompactStaticCatalogError::ArithmeticOverflow,
         _ => CompactStaticCatalogError::InvalidGeometry,
-    }
-}
-
-fn map_response_tree_setup_error(
-    error: CompactResponseTreeExternalMemorySetupError,
-) -> CompactStaticCatalogError {
-    match error {
-        CompactResponseTreeExternalMemorySetupError::Merkle(error) => {
-            map_response_merkle_error(error)
-        }
-        CompactResponseTreeExternalMemorySetupError::ExternalMemory(_) => {
-            CompactStaticCatalogError::InvalidGeometry
-        }
     }
 }
 
@@ -1649,61 +1548,37 @@ mod tests {
     use crate::foundation::Hash512;
 
     #[test]
-    fn every_logical_response_has_one_complete_disjoint_merkle_vector() {
+    fn factor_one_responses_have_complete_disjoint_merkle_vectors() {
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
-        let expected_response_counts = [82, 80, 78, 76];
-        let expected_maximum_lengths = [262_144, 524_288, 1_048_576, 2_097_152];
-        let expected_proof_oracle_query_counts = [79_310, 78_776, 77_568, 77_352];
-        let expected_maximum_opening_byte_lengths =
-            [26_567_284, 25_684_844, 25_017_844, 25_108_220];
-        let expected_committed_leaf_counts = [639_270, 1_065_250, 1_917_214, 3_621_146];
-        let expected_commitment_parent_hash_counts = [639_188, 1_065_170, 1_917_136, 3_621_070];
-        let expected_maximum_opening_parent_hash_counts = [169_157, 173_507, 176_823, 181_591];
-
-        for (factor_ordinal, factor) in catalog.factor_catalogs.iter().enumerate() {
-            let expected_response_count = expected_response_counts[factor_ordinal];
-            let expected_maximum_length = expected_maximum_lengths[factor_ordinal];
-            let expected_query_count = expected_proof_oracle_query_counts[factor_ordinal];
-            let responses = &factor.response_commitments;
-            assert_eq!(responses.bcs_response_root_count, expected_response_count);
-            assert_eq!(responses.responses.len(), expected_response_count as usize);
+        let factor = &catalog.selected;
+        let expected_response_count = 82;
+        let expected_maximum_length = 262_144;
+        let expected_query_count = 79_310;
+        let responses = &factor.response_commitments;
+        assert_eq!(responses.bcs_response_root_count, expected_response_count);
+        assert_eq!(responses.responses.len(), expected_response_count as usize);
+        assert_eq!(
+            responses.maximum_proof_oracle_length,
+            expected_maximum_length
+        );
+        assert_eq!(responses.proof_oracle_query_count, expected_query_count);
+        assert!(responses.minimum_proof_oracle_query_count < responses.proof_oracle_query_count);
+        assert_eq!(responses.maximum_opening_byte_length, 26_567_284);
+        assert_eq!(responses.committed_leaf_count, 639_270);
+        assert_eq!(responses.commitment_parent_hash_count, 639_188);
+        assert_eq!(responses.maximum_opening_parent_hash_count, 169_157);
+        for (response_ordinal, response) in responses.responses.iter().enumerate() {
+            assert_eq!(response.ordinal as usize, response_ordinal);
             assert_eq!(
-                responses.maximum_proof_oracle_length,
-                expected_maximum_length
-            );
-            assert_eq!(responses.proof_oracle_query_count, expected_query_count);
-            assert!(
-                responses.minimum_proof_oracle_query_count < responses.proof_oracle_query_count
-            );
-            assert_eq!(
-                responses.maximum_opening_byte_length,
-                expected_maximum_opening_byte_lengths[factor_ordinal]
+                response.vector_commitment_oracle_identifier as usize,
+                response_ordinal + 1
             );
             assert_eq!(
-                responses.committed_leaf_count,
-                expected_committed_leaf_counts[factor_ordinal]
+                response.fiat_shamir_round_salt_byte_length,
+                COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH as u64
             );
-            assert_eq!(
-                responses.commitment_parent_hash_count,
-                expected_commitment_parent_hash_counts[factor_ordinal]
-            );
-            assert_eq!(
-                responses.maximum_opening_parent_hash_count,
-                expected_maximum_opening_parent_hash_counts[factor_ordinal]
-            );
-            for (response_ordinal, response) in responses.responses.iter().enumerate() {
-                assert_eq!(response.ordinal as usize, response_ordinal);
-                assert_eq!(
-                    response.vector_commitment_oracle_identifier as usize,
-                    response_ordinal + 1
-                );
-                assert_eq!(
-                    response.fiat_shamir_round_salt_byte_length,
-                    COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH as u64
-                );
-                response.check().expect("complete response vector");
-            }
+            response.check().expect("complete response vector");
         }
     }
 
@@ -1712,68 +1587,67 @@ mod tests {
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
 
-        for factor in &catalog.factor_catalogs {
-            let wire_geometries = factor
-                .response_commitments
-                .production_wire_geometries(&factor.uniform_verifier_randomness)
-                .expect("production response wire geometries");
-            assert_eq!(
-                wire_geometries.len(),
-                factor.response_commitments.responses.len()
-            );
-            assert_eq!(
-                wire_geometries
-                    .iter()
-                    .map(CompactProofResponseWireGeometry::queried_leaf_count)
-                    .sum::<u64>(),
-                factor.response_commitments.proof_oracle_query_count
-            );
-
-            for (response_ordinal, (response, wire_geometry)) in factor
-                .response_commitments
-                .responses
+        let factor = &catalog.selected;
+        let wire_geometries = factor
+            .response_commitments
+            .production_wire_geometries(&factor.uniform_verifier_randomness)
+            .expect("production response wire geometries");
+        assert_eq!(
+            wire_geometries.len(),
+            factor.response_commitments.responses.len()
+        );
+        assert_eq!(
+            wire_geometries
                 .iter()
-                .zip(&wire_geometries)
-                .enumerate()
-            {
-                assert_eq!(wire_geometry.ordinal() as usize, response_ordinal);
-                assert_eq!(
-                    wire_geometry.queried_leaf_count(),
-                    response.queried_leaf_count
-                );
-                assert_eq!(
-                    wire_geometry.minimum_queried_leaf_count(),
-                    response.minimum_queried_leaf_count
-                );
-                assert_eq!(
-                    wire_geometry.maximum_frontier_node_count(),
-                    (response.maximum_authentication_frontier_byte_length
-                        - MERKLE_FRONTIER_COUNT_BYTE_LENGTH)
-                        / MERKLE_DIGEST_BYTE_LENGTH
-                );
-                if response_ordinal == 0 {
-                    assert!(wire_geometry.queried_base_field_element_count() > 0);
-                    assert_eq!(wire_geometry.queried_extension_field_element_count(), 0);
-                } else {
-                    assert_eq!(wire_geometry.queried_base_field_element_count(), 0);
-                    assert!(wire_geometry.queried_extension_field_element_count() > 0);
-                }
-                assert_eq!(
-                    wire_geometry.verifier_message_geometry(),
-                    &factor
-                        .uniform_verifier_randomness
-                        .fixed_message_geometry(response_ordinal)
-                        .expect("fixed verifier-message geometry")
-                );
+                .map(CompactProofResponseWireGeometry::queried_leaf_count)
+                .sum::<u64>(),
+            factor.response_commitments.proof_oracle_query_count
+        );
+
+        for (response_ordinal, (response, wire_geometry)) in factor
+            .response_commitments
+            .responses
+            .iter()
+            .zip(&wire_geometries)
+            .enumerate()
+        {
+            assert_eq!(wire_geometry.ordinal() as usize, response_ordinal);
+            assert_eq!(
+                wire_geometry.queried_leaf_count(),
+                response.queried_leaf_count
+            );
+            assert_eq!(
+                wire_geometry.minimum_queried_leaf_count(),
+                response.minimum_queried_leaf_count
+            );
+            assert_eq!(
+                wire_geometry.maximum_frontier_node_count(),
+                (response.maximum_authentication_frontier_byte_length
+                    - MERKLE_FRONTIER_COUNT_BYTE_LENGTH)
+                    / MERKLE_DIGEST_BYTE_LENGTH
+            );
+            if response_ordinal == 0 {
+                assert!(wire_geometry.queried_base_field_element_count() > 0);
+                assert_eq!(wire_geometry.queried_extension_field_element_count(), 0);
+            } else {
+                assert_eq!(wire_geometry.queried_base_field_element_count(), 0);
+                assert!(wire_geometry.queried_extension_field_element_count() > 0);
             }
+            assert_eq!(
+                wire_geometry.verifier_message_geometry(),
+                &factor
+                    .uniform_verifier_randomness
+                    .fixed_message_geometry(response_ordinal)
+                    .expect("fixed verifier-message geometry")
+            );
         }
 
-        let factor_eight = &catalog.factor_catalogs[3];
-        let mut malformed_response = factor_eight.response_commitments.responses[0].clone();
+        let factor_one = &catalog.selected;
+        let mut malformed_response = factor_one.response_commitments.responses[0].clone();
         malformed_response.components[0].value_byte_length_per_leaf += 1;
         assert_eq!(
             malformed_response.production_wire_geometry(
-                factor_eight
+                factor_one
                     .uniform_verifier_randomness
                     .fixed_message_geometry(0)
                     .expect("first fixed verifier-message geometry"),
@@ -1787,61 +1661,53 @@ mod tests {
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
 
-        for factor in &catalog.factor_catalogs {
-            let merkle_geometries = factor
-                .response_commitments
-                .production_merkle_geometries()
-                .expect("production response Merkle geometries");
-            let tree_geometries = factor
-                .response_commitments
-                .response_tree_geometries()
-                .expect("response tree geometries");
-            let wire_geometries = factor
-                .response_commitments
-                .production_wire_geometries(&factor.uniform_verifier_randomness)
-                .expect("production response wire geometries");
-            assert_eq!(merkle_geometries.len(), tree_geometries.len());
-            assert_eq!(merkle_geometries.len(), wire_geometries.len());
-            CompactResponseQuerySchedule::validate_registry(&merkle_geometries, &wire_geometries)
-                .expect("every fixed verifier-message query group has an explicit response source");
+        let factor = &catalog.selected;
+        let merkle_geometries = factor
+            .response_commitments
+            .production_merkle_geometries()
+            .expect("production response Merkle geometries");
+        let tree_geometries = factor
+            .response_commitments
+            .response_tree_geometries()
+            .expect("response tree geometries");
+        let wire_geometries = factor
+            .response_commitments
+            .production_wire_geometries(&factor.uniform_verifier_randomness)
+            .expect("production response wire geometries");
+        assert_eq!(merkle_geometries.len(), tree_geometries.len());
+        assert_eq!(merkle_geometries.len(), wire_geometries.len());
+        CompactResponseQuerySchedule::validate_registry(&merkle_geometries, &wire_geometries)
+            .expect("every fixed verifier-message query group has an explicit response source");
 
-            for ((merkle_geometry, tree_geometry), wire_geometry) in merkle_geometries
-                .iter()
-                .zip(&tree_geometries)
-                .zip(&wire_geometries)
-            {
-                assert_eq!(merkle_geometry.response_ordinal(), tree_geometry.ordinal);
-                assert_eq!(
-                    merkle_geometry.vector_commitment_oracle_identifier(),
-                    compact_vector_commitment_oracle_identifier(tree_geometry.ordinal).unwrap()
-                );
-                assert_eq!(
-                    merkle_geometry.merkle_leaf_count(),
-                    tree_geometry.merkle_leaf_count
-                );
-                assert_eq!(
-                    merkle_geometry.queried_leaf_count(),
-                    tree_geometry.queried_leaf_count
-                );
-                assert_eq!(
-                    merkle_geometry.minimum_queried_leaf_count(),
-                    wire_geometry.minimum_queried_leaf_count()
-                );
-                assert_eq!(
-                    merkle_geometry.maximum_queried_leaf_count(),
-                    wire_geometry.maximum_queried_leaf_count()
-                );
-                merkle_geometry
-                    .validate_wire_geometry(wire_geometry)
-                    .expect("Merkle and wire response shapes agree");
-                let external_memory_geometry =
-                    CompactResponseTreeExternalMemoryGeometry::derive(merkle_geometry)
-                        .expect("response tree external-memory geometry");
-                assert_eq!(
-                    external_memory_geometry.tree_byte_length(),
-                    (2 * tree_geometry.merkle_leaf_count - 1) * MERKLE_DIGEST_BYTE_LENGTH
-                );
-            }
+        for ((merkle_geometry, tree_geometry), wire_geometry) in merkle_geometries
+            .iter()
+            .zip(&tree_geometries)
+            .zip(&wire_geometries)
+        {
+            assert_eq!(merkle_geometry.response_ordinal(), tree_geometry.ordinal);
+            assert_eq!(
+                merkle_geometry.vector_commitment_oracle_identifier(),
+                compact_vector_commitment_oracle_identifier(tree_geometry.ordinal).unwrap()
+            );
+            assert_eq!(
+                merkle_geometry.merkle_leaf_count(),
+                tree_geometry.merkle_leaf_count
+            );
+            assert_eq!(
+                merkle_geometry.queried_leaf_count(),
+                tree_geometry.queried_leaf_count
+            );
+            assert_eq!(
+                merkle_geometry.minimum_queried_leaf_count(),
+                wire_geometry.minimum_queried_leaf_count()
+            );
+            assert_eq!(
+                merkle_geometry.maximum_queried_leaf_count(),
+                wire_geometry.maximum_queried_leaf_count()
+            );
+            merkle_geometry
+                .validate_wire_geometry(wire_geometry)
+                .expect("Merkle and wire response shapes agree");
         }
     }
 
@@ -1851,182 +1717,176 @@ mod tests {
             .expect("compact public-key static packing ledger");
         let mut complete_response_schedule_count = 0_usize;
 
-        for factor in &catalog.factor_catalogs {
-            let wire_geometries = factor
-                .response_commitments
-                .production_wire_geometries(&factor.uniform_verifier_randomness)
-                .expect("production response wire geometries");
-            let merkle_geometries = factor
-                .response_commitments
-                .production_merkle_geometries()
-                .expect("production response Merkle geometries");
-            CompactResponseQuerySchedule::validate_registry(&merkle_geometries, &wire_geometries)
-                .expect("complete production response query registry");
-            let public_input_bindings = CompactPublicInputBindings::new(
-                Hash512::from_bytes([0x21_u8; Hash512::BYTE_LENGTH]),
-                Hash512::from_bytes([0x22_u8; Hash512::BYTE_LENGTH]),
-                Hash512::from_bytes([0x23_u8; Hash512::BYTE_LENGTH]),
-                Hash512::from_bytes(catalog.relation_plan_hash),
-            );
-            let public_input_values =
-                vec![
-                    ProofBaseFieldElement::ZERO;
-                    usize::try_from(factor.public_input_wire_geometry.field_element_count())
-                        .expect("production public-input count fits usize")
-                ];
-            let canonical_public_input_bytes = encode_compact_public_input(
-                factor.public_input_wire_geometry,
-                public_input_bindings,
-                &public_input_values,
-            )
-            .expect("production public input encodes canonically");
-            drop(public_input_values);
-            let decoded_public_input = decode_compact_public_input(
-                factor.public_input_wire_geometry,
-                public_input_bindings,
-                &canonical_public_input_bytes,
-            )
-            .expect("production public input decodes canonically");
-            let mut transcript = CompactProverTranscript::new(
-                &factor.proof_wire_geometry,
-                &decoded_public_input,
-                &canonical_public_input_bytes,
-            )
-            .expect("production transcript starts");
-            let mut verifier_messages = Vec::with_capacity(wire_geometries.len());
-            for response_ordinal in 0..wire_geometries.len() {
-                let response_ordinal =
-                    u32::try_from(response_ordinal).expect("production response ordinal fits u32");
-                let mut response_root = [0x41_u8; Hash512::BYTE_LENGTH];
-                response_root[..8].copy_from_slice(&factor.packing_factor.to_le_bytes());
-                response_root[8..12].copy_from_slice(&response_ordinal.to_le_bytes());
-                let mut fiat_shamir_round_salt =
-                    [0x51_u8; COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH];
-                fiat_shamir_round_salt[..8].copy_from_slice(&factor.packing_factor.to_le_bytes());
-                fiat_shamir_round_salt[8..12].copy_from_slice(&response_ordinal.to_le_bytes());
-                transcript
-                    .record_response_commitment(response_root, fiat_shamir_round_salt)
-                    .expect("production response commitment enters the transcript");
-                verifier_messages.push(
-                    transcript
-                        .derive_verifier_message()
-                        .expect("production verifier message derives from the live prefix"),
-                );
-            }
+        let factor = &catalog.selected;
+        let wire_geometries = factor
+            .response_commitments
+            .production_wire_geometries(&factor.uniform_verifier_randomness)
+            .expect("production response wire geometries");
+        let merkle_geometries = factor
+            .response_commitments
+            .production_merkle_geometries()
+            .expect("production response Merkle geometries");
+        CompactResponseQuerySchedule::validate_registry(&merkle_geometries, &wire_geometries)
+            .expect("complete production response query registry");
+        let public_input_bindings = CompactPublicInputBindings::new(
+            Hash512::from_bytes([0x21_u8; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes([0x22_u8; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes([0x23_u8; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes(catalog.relation_plan_hash),
+        );
+        let public_input_values =
+            vec![
+                ProofBaseFieldElement::ZERO;
+                usize::try_from(factor.public_input_wire_geometry.field_element_count())
+                    .expect("production public-input count fits usize")
+            ];
+        let canonical_public_input_bytes = encode_compact_public_input(
+            factor.public_input_wire_geometry,
+            public_input_bindings,
+            &public_input_values,
+        )
+        .expect("production public input encodes canonically");
+        drop(public_input_values);
+        let decoded_public_input = decode_compact_public_input(
+            factor.public_input_wire_geometry,
+            public_input_bindings,
+            &canonical_public_input_bytes,
+        )
+        .expect("production public input decodes canonically");
+        let mut transcript = CompactProverTranscript::new(
+            &factor.proof_wire_geometry,
+            &decoded_public_input,
+            &canonical_public_input_bytes,
+        )
+        .expect("production transcript starts");
+        let mut verifier_messages = Vec::with_capacity(wire_geometries.len());
+        for response_ordinal in 0..wire_geometries.len() {
+            let response_ordinal =
+                u32::try_from(response_ordinal).expect("production response ordinal fits u32");
+            let mut response_root = [0x41_u8; Hash512::BYTE_LENGTH];
+            response_root[8..12].copy_from_slice(&response_ordinal.to_le_bytes());
+            let mut fiat_shamir_round_salt = [0x51_u8; COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH];
+            fiat_shamir_round_salt[8..12].copy_from_slice(&response_ordinal.to_le_bytes());
             transcript
-                .finish()
-                .expect("production transcript consumes every response");
-            assert_eq!(
-                verifier_messages.len(),
-                factor.uniform_verifier_randomness.move_count()
+                .record_response_commitment(response_root, fiat_shamir_round_salt)
+                .expect("production response commitment enters the transcript");
+            verifier_messages.push(
+                transcript
+                    .derive_verifier_message()
+                    .expect("production verifier message derives from the live prefix"),
             );
+        }
+        transcript
+            .finish()
+            .expect("production transcript consumes every response");
+        assert_eq!(
+            verifier_messages.len(),
+            factor.uniform_verifier_randomness.move_count()
+        );
 
-            let mut total_queried_leaf_count = 0_u64;
-            let mut maximum_schedule_heap_byte_length = 0_u64;
-            for (response_ordinal, (merkle_geometry, response)) in merkle_geometries
-                .iter()
-                .zip(&factor.response_commitments.responses)
-                .enumerate()
-            {
-                let schedule = CompactResponseQuerySchedule::derive(
+        let mut total_queried_leaf_count = 0_u64;
+        let mut maximum_schedule_heap_byte_length = 0_u64;
+        for (response_ordinal, (merkle_geometry, response)) in merkle_geometries
+            .iter()
+            .zip(&factor.response_commitments.responses)
+            .enumerate()
+        {
+            let schedule = CompactResponseQuerySchedule::derive(
+                merkle_geometry,
+                &wire_geometries,
+                &verifier_messages,
+            )
+            .expect("one production response query schedule");
+            let last_query_message_count = usize::try_from(
+                merkle_geometry
+                    .last_query_verifier_move_ordinal()
+                    .checked_add(1)
+                    .expect("last-query message count fits u32"),
+            )
+            .expect("last-query message count fits usize");
+            let live_schedule = CompactResponseQuerySchedule::derive_at_last_query_boundary(
+                merkle_geometry,
+                &wire_geometries,
+                &verifier_messages[..last_query_message_count],
+            )
+            .expect("live last-query prefix derives the exact schedule");
+            assert_eq!(live_schedule, schedule);
+            assert_eq!(
+                CompactResponseQuerySchedule::derive_at_last_query_boundary(
                     merkle_geometry,
                     &wire_geometries,
-                    &verifier_messages,
-                )
-                .expect("one production response query schedule");
-                let last_query_message_count = usize::try_from(
-                    merkle_geometry
-                        .last_query_verifier_move_ordinal()
-                        .checked_add(1)
-                        .expect("last-query message count fits u32"),
-                )
-                .expect("last-query message count fits usize");
-                let live_schedule = CompactResponseQuerySchedule::derive_at_last_query_boundary(
-                    merkle_geometry,
-                    &wire_geometries,
-                    &verifier_messages[..last_query_message_count],
-                )
-                .expect("live last-query prefix derives the exact schedule");
-                assert_eq!(live_schedule, schedule);
-                assert_eq!(
-                    CompactResponseQuerySchedule::derive_at_last_query_boundary(
-                        merkle_geometry,
-                        &wire_geometries,
-                        &verifier_messages[..last_query_message_count - 1],
-                    ),
-                    Err(CompactResponseMerkleError::InvalidOpeningIndices)
-                );
-                let mut delayed_message_prefix =
-                    verifier_messages[..last_query_message_count].to_vec();
-                delayed_message_prefix
-                    .push(verifier_messages[last_query_message_count - 1].clone());
-                assert_eq!(
-                    CompactResponseQuerySchedule::derive_at_last_query_boundary(
-                        merkle_geometry,
-                        &wire_geometries,
-                        &delayed_message_prefix,
-                    ),
-                    Err(CompactResponseMerkleError::InvalidOpeningIndices)
-                );
-                assert_eq!(
-                    usize::try_from(merkle_geometry.response_ordinal()).unwrap(),
-                    response_ordinal
-                );
-                assert!(
-                    (response.minimum_queried_leaf_count..=response.queried_leaf_count)
-                        .contains(&u64::try_from(schedule.as_slice().len()).unwrap())
-                );
-                assert!(schedule.as_slice().windows(2).all(|pair| pair[0] < pair[1]));
-                let schedule_heap_byte_length = schedule
-                    .owned_heap_byte_length()
-                    .expect("exact query-schedule heap");
-                assert_eq!(
-                    schedule_heap_byte_length,
-                    response_query_schedule_byte_length(response.queried_leaf_count).unwrap()
-                );
-                total_queried_leaf_count = checked_add(
-                    total_queried_leaf_count,
-                    u64::try_from(schedule.as_slice().len()).unwrap(),
-                )
-                .unwrap();
-                maximum_schedule_heap_byte_length =
-                    maximum_schedule_heap_byte_length.max(schedule_heap_byte_length);
-                complete_response_schedule_count += 1;
-            }
-            assert!(
-                (factor
-                    .response_commitments
-                    .minimum_proof_oracle_query_count()
-                    ..=factor.response_commitments.proof_oracle_query_count)
-                    .contains(&total_queried_leaf_count)
-            );
-            assert_eq!(
-                maximum_schedule_heap_byte_length,
-                factor
-                    .response_commitments
-                    .maximum_response_query_schedule_heap_byte_length()
-                    .unwrap()
-            );
-
-            let mut truncated_message_registry = verifier_messages;
-            truncated_message_registry.pop();
-            assert_eq!(
-                CompactResponseQuerySchedule::derive(
-                    &merkle_geometries[0],
-                    &wire_geometries,
-                    &truncated_message_registry,
+                    &verifier_messages[..last_query_message_count - 1],
                 ),
                 Err(CompactResponseMerkleError::InvalidOpeningIndices)
             );
+            let mut delayed_message_prefix = verifier_messages[..last_query_message_count].to_vec();
+            delayed_message_prefix.push(verifier_messages[last_query_message_count - 1].clone());
+            assert_eq!(
+                CompactResponseQuerySchedule::derive_at_last_query_boundary(
+                    merkle_geometry,
+                    &wire_geometries,
+                    &delayed_message_prefix,
+                ),
+                Err(CompactResponseMerkleError::InvalidOpeningIndices)
+            );
+            assert_eq!(
+                usize::try_from(merkle_geometry.response_ordinal()).unwrap(),
+                response_ordinal
+            );
+            assert!(
+                (response.minimum_queried_leaf_count..=response.queried_leaf_count)
+                    .contains(&u64::try_from(schedule.as_slice().len()).unwrap())
+            );
+            assert!(schedule.as_slice().windows(2).all(|pair| pair[0] < pair[1]));
+            let schedule_heap_byte_length = schedule
+                .owned_heap_byte_length()
+                .expect("exact query-schedule heap");
+            assert_eq!(
+                schedule_heap_byte_length,
+                response_query_schedule_byte_length(response.queried_leaf_count).unwrap()
+            );
+            total_queried_leaf_count = checked_add(
+                total_queried_leaf_count,
+                u64::try_from(schedule.as_slice().len()).unwrap(),
+            )
+            .unwrap();
+            maximum_schedule_heap_byte_length =
+                maximum_schedule_heap_byte_length.max(schedule_heap_byte_length);
+            complete_response_schedule_count += 1;
         }
-        assert_eq!(complete_response_schedule_count, 316);
+        assert!(
+            (factor
+                .response_commitments
+                .minimum_proof_oracle_query_count()
+                ..=factor.response_commitments.proof_oracle_query_count)
+                .contains(&total_queried_leaf_count)
+        );
+        assert_eq!(
+            maximum_schedule_heap_byte_length,
+            factor
+                .response_commitments
+                .maximum_response_query_schedule_heap_byte_length()
+                .unwrap()
+        );
+
+        let mut truncated_message_registry = verifier_messages;
+        truncated_message_registry.pop();
+        assert_eq!(
+            CompactResponseQuerySchedule::derive(
+                &merkle_geometries[0],
+                &wire_geometries,
+                &truncated_message_registry,
+            ),
+            Err(CompactResponseMerkleError::InvalidOpeningIndices)
+        );
+        assert_eq!(complete_response_schedule_count, 82);
     }
 
     #[test]
     fn response_catalog_owns_the_cfw_scalar_messages_without_a_status_field() {
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
-        let responses = &catalog.factor_catalogs[3].response_commitments.responses;
+        let responses = &catalog.selected.response_commitments.responses;
 
         let cfw_scalar_leaf_count = responses
             .iter()
@@ -2057,65 +1917,60 @@ mod tests {
     fn response_catalog_owns_one_shared_cross_epoch_oracle_and_both_query_groups() {
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
-        for factor in &catalog.factor_catalogs {
-            let cross_epoch_response = factor
-                .response_commitments
-                .responses
-                .iter()
-                .find(|response| {
-                    response.verifier_move_roles == [VerifierMoveRole::CrossEpochPoint]
-                })
-                .expect("one response precedes the cross-epoch point");
-            let shared_component = cross_epoch_response
-                .components
-                .iter()
-                .find(|component| component.role == ResponseComponentRole::CrossEpochMasks)
-                .expect("shared cross-epoch mask rows have one response-vector owner");
-            let shared_group =
-                mask_group(&factor.pre_challenge_whir, MaskGroupRole::CrossEpochOpening)
-                    .expect("pre-challenge shared mask group");
-            assert_eq!(shared_component.leaf_count, shared_group.domain_size);
-            assert_eq!(shared_component.minimum_queried_leaf_count, 399);
-            assert_eq!(shared_component.queried_leaf_count, 798);
-            assert_eq!(
-                shared_component.value_byte_length_per_leaf,
-                2 * EXTENSION_FIELD_ELEMENT_BYTE_LENGTH
-            );
-            let CompactResponseQuerySelection::VerifierMessageDistinctGroupUnion {
-                first_logical_verifier_move_ordinal,
-                second_logical_verifier_move_ordinal,
-                ..
-            } = shared_component.query_selection
-            else {
-                panic!("shared cross-epoch rows must use the two final-query groups")
-            };
-            assert!(first_logical_verifier_move_ordinal < second_logical_verifier_move_ordinal);
+        let factor = &catalog.selected;
+        let cross_epoch_response = factor
+            .response_commitments
+            .responses
+            .iter()
+            .find(|response| response.verifier_move_roles == [VerifierMoveRole::CrossEpochPoint])
+            .expect("one response precedes the cross-epoch point");
+        let shared_component = cross_epoch_response
+            .components
+            .iter()
+            .find(|component| component.role == ResponseComponentRole::CrossEpochMasks)
+            .expect("shared cross-epoch mask rows have one response-vector owner");
+        let shared_group = mask_group(&factor.pre_challenge_whir, MaskGroupRole::CrossEpochOpening)
+            .expect("pre-challenge shared mask group");
+        assert_eq!(shared_component.leaf_count, shared_group.domain_size);
+        assert_eq!(shared_component.minimum_queried_leaf_count, 399);
+        assert_eq!(shared_component.queried_leaf_count, 798);
+        assert_eq!(
+            shared_component.value_byte_length_per_leaf,
+            2 * EXTENSION_FIELD_ELEMENT_BYTE_LENGTH
+        );
+        let CompactResponseQuerySelection::VerifierMessageDistinctGroupUnion {
+            first_logical_verifier_move_ordinal,
+            second_logical_verifier_move_ordinal,
+            ..
+        } = shared_component.query_selection
+        else {
+            panic!("shared cross-epoch rows must use the two final-query groups")
+        };
+        assert!(first_logical_verifier_move_ordinal < second_logical_verifier_move_ordinal);
 
-            let wire_geometries = factor
-                .response_commitments
-                .production_wire_geometries(&factor.uniform_verifier_randomness)
-                .expect("production response wire geometries");
-            let wire_geometry = &wire_geometries
-                [usize::try_from(cross_epoch_response.ordinal).expect("response ordinal")];
-            assert!(wire_geometry.has_variable_counts());
-            assert_eq!(
-                wire_geometry.maximum_queried_leaf_count()
-                    - wire_geometry.minimum_queried_leaf_count(),
-                399
-            );
-            assert_eq!(
-                wire_geometry.maximum_queried_extension_field_element_count()
-                    - wire_geometry.minimum_queried_extension_field_element_count(),
-                798
-            );
-        }
+        let wire_geometries = factor
+            .response_commitments
+            .production_wire_geometries(&factor.uniform_verifier_randomness)
+            .expect("production response wire geometries");
+        let wire_geometry = &wire_geometries
+            [usize::try_from(cross_epoch_response.ordinal).expect("response ordinal")];
+        assert!(wire_geometry.has_variable_counts());
+        assert_eq!(
+            wire_geometry.maximum_queried_leaf_count() - wire_geometry.minimum_queried_leaf_count(),
+            399
+        );
+        assert_eq!(
+            wire_geometry.maximum_queried_extension_field_element_count()
+                - wire_geometry.minimum_queried_extension_field_element_count(),
+            798
+        );
     }
 
     #[test]
     fn response_catalog_refuses_overlap_padding_and_query_mutations() {
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
-        let response = &catalog.factor_catalogs[3].response_commitments.responses[1];
+        let response = &catalog.selected.response_commitments.responses[1];
 
         let mut overlapping = response.clone();
         overlapping.components[1].first_leaf_ordinal -= 1;
@@ -2149,53 +2004,51 @@ mod tests {
     fn scalar_only_responses_are_not_misclassified_as_empty_rounds() {
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
-        for factor in &catalog.factor_catalogs {
-            assert!(
-                factor
-                    .response_commitments
-                    .responses
-                    .iter()
-                    .all(|response| {
-                        response.meaningful_leaf_count > 0 && response.queried_leaf_count > 0
-                    })
-            );
-            assert!(
-                factor
-                    .response_commitments
-                    .responses
-                    .iter()
-                    .filter(|response| {
-                        response
-                            .verifier_move_roles
-                            .iter()
-                            .any(|role| matches!(role, VerifierMoveRole::CfwSumcheckRound { .. }))
-                    })
-                    .all(|response| {
-                        response.meaningful_leaf_count
+        let factor = &catalog.selected;
+        assert!(
+            factor
+                .response_commitments
+                .responses
+                .iter()
+                .all(|response| {
+                    response.meaningful_leaf_count > 0 && response.queried_leaf_count > 0
+                })
+        );
+        assert!(
+            factor
+                .response_commitments
+                .responses
+                .iter()
+                .filter(|response| {
+                    response
+                        .verifier_move_roles
+                        .iter()
+                        .any(|role| matches!(role, VerifierMoveRole::CfwSumcheckRound { .. }))
+                })
+                .all(|response| {
+                    response.meaningful_leaf_count
+                        == catalog
+                            .cfw_reduction
+                            .sumcheck_polynomial_element_count_per_round()
+                        && response.queried_leaf_count
                             == catalog
                                 .cfw_reduction
                                 .sumcheck_polynomial_element_count_per_round()
-                            && response.queried_leaf_count
-                                == catalog
-                                    .cfw_reduction
-                                    .sumcheck_polynomial_element_count_per_round()
-                    })
-            );
-        }
+                })
+        );
     }
 
     #[test]
     fn pre_challenge_source_rows_remain_base_field_symbols() {
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
-        for factor in &catalog.factor_catalogs {
-            let source = &factor.response_commitments.responses[0].components[0];
-            assert_eq!(source.role, ResponseComponentRole::PreChallengeSource);
-            assert_eq!(
-                source.value_byte_length_per_leaf,
-                factor.pre_challenge_whir.oracle_widths[0] * BASE_FIELD_ELEMENT_BYTE_LENGTH
-            );
-        }
+        let factor = &catalog.selected;
+        let source = &factor.response_commitments.responses[0].components[0];
+        assert_eq!(source.role, ResponseComponentRole::PreChallengeSource);
+        assert_eq!(
+            source.value_byte_length_per_leaf,
+            factor.pre_challenge_whir.oracle_widths[0] * BASE_FIELD_ELEMENT_BYTE_LENGTH
+        );
     }
 
     #[test]

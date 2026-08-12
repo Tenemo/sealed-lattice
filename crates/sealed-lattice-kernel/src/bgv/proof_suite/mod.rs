@@ -18,18 +18,17 @@ mod compact_cfw;
 mod compact_cfw_external;
 #[cfg(test)]
 mod compact_cfw_external_prover;
-#[cfg(test)]
+mod compact_cfw_geometry;
 mod compact_generation_checkpoint;
-#[cfg(test)]
+mod compact_proof_contract;
 mod compact_proof_wire;
 #[cfg(test)]
 mod compact_public_key_static_catalog;
-#[cfg(test)]
 mod compact_response_merkle;
 #[cfg(test)]
 mod compact_response_tree_external;
-#[cfg(test)]
 mod compact_transcript;
+mod compact_whir_geometry;
 mod component_material_stream;
 mod component_public_polynomial_runtime;
 mod decoder;
@@ -41,7 +40,6 @@ mod evaluator_source_material;
 mod external_memory;
 mod external_polynomial;
 mod field;
-#[cfg(test)]
 mod fixed_uniform_verifier_message;
 mod galois_key_share_runtime;
 mod galois_source_material;

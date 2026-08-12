@@ -4,10 +4,7 @@ use super::*;
 fn factor_one_catalog() -> super::super::super::RelaxedRoundByRoundCatalog {
     CompactPublicKeyStaticCatalog::derive()
         .expect("compact public-key static catalog derives")
-        .factor_catalogs
-        .into_iter()
-        .find(|factor| factor.packing_factor == 1)
-        .expect("factor one is present")
+        .selected
         .relaxed_round_by_round
 }
 

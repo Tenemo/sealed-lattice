@@ -31,7 +31,6 @@ pub(super) struct CfwToWhirHandoffCatalog {
     combined_relation_claim_count: u64,
     transition_live_extension_element_count: u64,
     retained_combined_relation_payload_byte_length: u64,
-    transition_payload_byte_length: u64,
 }
 
 impl CfwToWhirHandoffCatalog {
@@ -102,11 +101,6 @@ impl CfwToWhirHandoffCatalog {
             combined_relation_extension_element_count,
             EXTENSION_FIELD_ELEMENT_BYTE_LENGTH,
         ])?;
-        let transition_payload_byte_length = checked_product(&[
-            transition_live_extension_element_count,
-            EXTENSION_FIELD_ELEMENT_BYTE_LENGTH,
-        ])?;
-
         let catalog = Self {
             source_variable_count,
             preceding_opening_claim_count,
@@ -120,7 +114,6 @@ impl CfwToWhirHandoffCatalog {
             combined_relation_claim_count,
             transition_live_extension_element_count,
             retained_combined_relation_payload_byte_length,
-            transition_payload_byte_length,
         };
         catalog.check_runtime_correspondence(relation)?;
         Ok(catalog)
@@ -195,10 +188,6 @@ impl CfwToWhirHandoffCatalog {
     pub(super) const fn preceding_opening_claim_count(&self) -> u64 {
         self.preceding_opening_claim_count
     }
-
-    pub(super) const fn transition_payload_byte_length(&self) -> u64 {
-        self.transition_payload_byte_length
-    }
 }
 
 #[cfg(test)]
@@ -229,6 +218,5 @@ mod tests {
             catalog.retained_combined_relation_payload_byte_length,
             167_790_680
         );
-        assert_eq!(catalog.transition_payload_byte_length, 167_794_520);
     }
 }

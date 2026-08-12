@@ -8,16 +8,17 @@
 //! after the first accepted candidate, so stream evaluation and transported-
 //! byte decoding implement the same message geometry.
 
+#[cfg(test)]
 use std::collections::BTreeSet;
 
 use num_bigint::BigUint;
 use num_traits::One;
 
-use super::field::{
-    PROOF_BASE_FIELD_MODULUS, PROOF_CHALLENGE_EXTENSION_DEGREE, ProofBaseFieldElement,
-    ProofChallengeExtensionElement,
-};
+use super::field::{PROOF_BASE_FIELD_MODULUS, PROOF_CHALLENGE_EXTENSION_DEGREE};
+#[cfg(test)]
+use super::field::{ProofBaseFieldElement, ProofChallengeExtensionElement};
 use super::profile::PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT;
+#[cfg(test)]
 use crate::foundation::{
     CanonicalItem, FoundationTupleHash512BlockReader, Hash512, StreamingFoundationHashError,
     foundation_tuple_hash512_seeded_stream_query_count,
@@ -27,7 +28,7 @@ pub(crate) const FIXED_UNIFORM_VERIFIER_MESSAGE_SEED_DOMAIN: &str =
     "sealed-lattice/proof/fixed-uniform-verifier-message-seed/v1";
 pub(crate) const FIXED_UNIFORM_VERIFIER_MESSAGE_BLOCK_DOMAIN: &str =
     "sealed-lattice/proof/fixed-uniform-verifier-message-block/v1";
-const FIXED_UNIFORM_VERIFIER_MESSAGE_GEOMETRY_VERSION: u16 = 1;
+pub(crate) const FIXED_UNIFORM_VERIFIER_MESSAGE_GEOMETRY_VERSION: u16 = 1;
 const EXTENSION_CANDIDATE_BYTE_LENGTH: usize = 64;
 const BASE_OR_QUERY_CANDIDATE_BYTE_LENGTH: usize = std::mem::size_of::<u64>();
 
@@ -106,6 +107,7 @@ impl FixedUniformVerifierMessageGeometry {
         &self.distinct_query_groups
     }
 
+    #[cfg(test)]
     pub(crate) fn fixed_candidate_slot_count(
         &self,
     ) -> Result<u64, FixedUniformVerifierMessageError> {
@@ -163,6 +165,7 @@ impl FixedUniformVerifierMessageGeometry {
             .ok_or(FixedUniformVerifierMessageError::LengthOverflow)
     }
 
+    #[cfg(test)]
     pub(crate) fn concrete_hash_query_count(
         &self,
     ) -> Result<u64, FixedUniformVerifierMessageError> {
@@ -206,6 +209,7 @@ impl FixedUniformVerifierMessageGeometry {
         Ok(())
     }
 
+    #[cfg(test)]
     fn canonical_hash_prefix_items(
         &self,
         starting_transcript_state: Hash512,
@@ -258,6 +262,7 @@ impl FixedUniformVerifierMessageGeometry {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DecodedFixedUniformVerifierMessage {
     extension_elements: Vec<ProofChallengeExtensionElement>,
@@ -265,6 +270,7 @@ pub(crate) struct DecodedFixedUniformVerifierMessage {
     distinct_query_groups: Vec<Vec<u64>>,
 }
 
+#[cfg(test)]
 impl DecodedFixedUniformVerifierMessage {
     pub(crate) fn extension_elements(&self) -> &[ProofChallengeExtensionElement] {
         &self.extension_elements
@@ -283,14 +289,21 @@ impl DecodedFixedUniformVerifierMessage {
 pub(crate) enum FixedUniformVerifierMessageError {
     InvalidGeometry,
     LengthOverflow,
+    #[cfg(test)]
     TruncatedMessage,
+    #[cfg(test)]
     TrailingMessageBytes,
+    #[cfg(test)]
     FieldSamplingExhausted,
+    #[cfg(test)]
     DistinctQuerySamplingExhausted,
+    #[cfg(test)]
     InvalidFieldElement,
+    #[cfg(test)]
     FoundationHashSchedule,
 }
 
+#[cfg(test)]
 pub(crate) fn decode_fixed_uniform_verifier_message(
     geometry: &FixedUniformVerifierMessageGeometry,
     message_bytes: &[u8],
@@ -305,6 +318,7 @@ pub(crate) fn decode_fixed_uniform_verifier_message(
     decode_from_reader(geometry, SliceFixedMessageReader::new(message_bytes))
 }
 
+#[cfg(test)]
 pub(crate) fn derive_fixed_uniform_verifier_message(
     starting_transcript_state: Hash512,
     logical_verifier_move_ordinal: u32,
@@ -323,14 +337,17 @@ pub(crate) fn derive_fixed_uniform_verifier_message(
     decode_from_reader(geometry, FoundationFixedMessageReader(reader))
 }
 
+#[cfg(test)]
 trait FixedMessageReader: Sized {
     fn read(&mut self, output: &mut [u8]) -> Result<(), FixedUniformVerifierMessageError>;
     fn discard(&mut self, byte_length: usize) -> Result<(), FixedUniformVerifierMessageError>;
     fn finish(self) -> Result<(), FixedUniformVerifierMessageError>;
 }
 
+#[cfg(test)]
 struct FoundationFixedMessageReader(FoundationTupleHash512BlockReader);
 
+#[cfg(test)]
 impl FixedMessageReader for FoundationFixedMessageReader {
     fn read(&mut self, output: &mut [u8]) -> Result<(), FixedUniformVerifierMessageError> {
         self.0
@@ -349,11 +366,13 @@ impl FixedMessageReader for FoundationFixedMessageReader {
     }
 }
 
+#[cfg(test)]
 struct SliceFixedMessageReader<'message> {
     message_bytes: &'message [u8],
     offset: usize,
 }
 
+#[cfg(test)]
 impl<'message> SliceFixedMessageReader<'message> {
     const fn new(message_bytes: &'message [u8]) -> Self {
         Self {
@@ -363,6 +382,7 @@ impl<'message> SliceFixedMessageReader<'message> {
     }
 }
 
+#[cfg(test)]
 impl FixedMessageReader for SliceFixedMessageReader<'_> {
     fn read(&mut self, output: &mut [u8]) -> Result<(), FixedUniformVerifierMessageError> {
         let end = self
@@ -399,6 +419,7 @@ impl FixedMessageReader for SliceFixedMessageReader<'_> {
     }
 }
 
+#[cfg(test)]
 fn decode_from_reader<Reader: FixedMessageReader>(
     geometry: &FixedUniformVerifierMessageGeometry,
     mut reader: Reader,
@@ -452,6 +473,7 @@ fn decode_from_reader<Reader: FixedMessageReader>(
     })
 }
 
+#[cfg(test)]
 fn sample_extension_element<Reader: FixedMessageReader>(
     reader: &mut Reader,
     allowed_cardinality: &BigUint,
@@ -477,6 +499,7 @@ fn sample_extension_element<Reader: FixedMessageReader>(
     accepted_element.ok_or(FixedUniformVerifierMessageError::FieldSamplingExhausted)
 }
 
+#[cfg(test)]
 fn decode_extension_radix(
     mut encoded_element: BigUint,
 ) -> Result<ProofChallengeExtensionElement, FixedUniformVerifierMessageError> {
@@ -494,6 +517,7 @@ fn decode_extension_radix(
         .map_err(|_| FixedUniformVerifierMessageError::InvalidFieldElement)
 }
 
+#[cfg(test)]
 fn sample_base_field_element<Reader: FixedMessageReader>(
     reader: &mut Reader,
 ) -> Result<ProofBaseFieldElement, FixedUniformVerifierMessageError> {
@@ -517,6 +541,7 @@ fn sample_base_field_element<Reader: FixedMessageReader>(
     accepted_element.ok_or(FixedUniformVerifierMessageError::FieldSamplingExhausted)
 }
 
+#[cfg(test)]
 fn sample_distinct_query_group<Reader: FixedMessageReader>(
     reader: &mut Reader,
     geometry: FixedUniformDistinctQueryGeometry,
@@ -550,6 +575,7 @@ fn challenge_extension_cardinality() -> BigUint {
     BigUint::from(PROOF_BASE_FIELD_MODULUS).pow(PROOF_CHALLENGE_EXTENSION_DEGREE as u32)
 }
 
+#[cfg(test)]
 fn map_foundation_hash_schedule_error(
     _error: StreamingFoundationHashError,
 ) -> FixedUniformVerifierMessageError {

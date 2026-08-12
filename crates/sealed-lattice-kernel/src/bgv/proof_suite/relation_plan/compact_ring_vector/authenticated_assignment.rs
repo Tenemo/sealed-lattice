@@ -7,25 +7,33 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+#[cfg(test)]
 use zeroize::Zeroizing;
 
+#[cfg(test)]
 use crate::bgv::proof_suite::{
     ProofBaseFieldElement, ProofChallengeExtensionElement, ProofEvaluationDomain,
     prover::{
         CommonProofProverError, CommonProofSourcePolynomialProvider,
         CommonProofSourcePolynomialProviderPoll, CommonProofSourcePolynomialRequestContext,
-        base_trace_rows, requested_pre_challenge_source_column_ordinals, validate_source_column,
+        base_trace_rows, validate_source_column,
     },
+};
+use crate::bgv::proof_suite::{
+    prover::requested_pre_challenge_source_column_ordinals,
     relation_plan::{RelationColumnOrigin, RelationColumnValueType, RelationPlanVariant},
 };
+#[cfg(test)]
 use crate::hashing::StreamingHash512;
 
+#[cfg(test)]
 use super::super::key_relation::MODULAR_QUOTIENT_ENCODING_OFFSET;
 use super::{
     CompactPublicKeyRelationCatalog, CompactRingVectorReference, CompactSmallVectorKind,
     CompactStructuredLinearTerm, CompactWitnessSegmentKind, RelationPlanError,
 };
 
+#[cfg(test)]
 const COMPACT_AUTHENTICATED_ASSIGNMENT_BINDING_DOMAIN: &str =
     "sealed-lattice/compact-ring-vector/authenticated-assignment-binding/v1";
 
@@ -64,30 +72,37 @@ pub(crate) struct CompactAuthenticatedSourceHalf {
 }
 
 impl CompactAuthenticatedSourceHalf {
+    #[cfg(test)]
     const fn source_column_ordinal(self) -> u32 {
         self.source_column_ordinal
     }
 
+    #[cfg(test)]
     const fn source_degree_bound_exclusive(self) -> u64 {
         self.source_degree_bound_exclusive
     }
 
+    #[cfg(test)]
     const fn source_origin(self) -> CompactAuthenticatedSourceOrigin {
         self.source_origin
     }
 
+    #[cfg(test)]
     const fn role(self) -> CompactAuthenticatedSourceRole {
         self.role
     }
 
+    #[cfg(test)]
     const fn destination_storage(self) -> CompactAssignmentStorage {
         self.destination_storage
     }
 
+    #[cfg(test)]
     const fn destination_first_element(self) -> u64 {
         self.destination_first_element
     }
 
+    #[cfg(test)]
     const fn element_count(self) -> u64 {
         self.element_count
     }
@@ -100,7 +115,8 @@ enum CompactAuthenticatedSourceOrigin {
     Prover,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg(test)]
+#[derive(Clone, Debug)]
 pub(crate) struct CompactAuthenticatedAssignmentCatalog {
     relation_plan_hash: [u8; 64],
     trace_domain_size: u64,
@@ -109,169 +125,174 @@ pub(crate) struct CompactAuthenticatedAssignmentCatalog {
     ordered_source_halves: Vec<CompactAuthenticatedSourceHalf>,
 }
 
-impl CompactAuthenticatedAssignmentCatalog {
-    pub(crate) fn derive(
-        relation: &CompactPublicKeyRelationCatalog,
-        relation_plan_variant: &RelationPlanVariant,
-    ) -> Result<Self, RelationPlanError> {
-        let catalog = Self::derive_without_check(relation, relation_plan_variant)?;
-        catalog.check(relation, relation_plan_variant)?;
-        Ok(catalog)
+#[cfg(test)]
+type CompactAuthenticatedAssignmentDerivation = CompactAuthenticatedAssignmentCatalog;
+
+#[cfg(not(test))]
+type CompactAuthenticatedAssignmentDerivation = ();
+
+fn derive_compact_authenticated_assignment(
+    relation: &CompactPublicKeyRelationCatalog,
+    relation_plan_variant: &RelationPlanVariant,
+) -> Result<CompactAuthenticatedAssignmentDerivation, RelationPlanError> {
+    let relation_plan_hash = relation_plan_variant.canonical_hash()?;
+    let trace_domain_size = relation_plan_variant.trace_domain_size();
+    if relation.relation_plan_variant_hash != relation_plan_hash
+        || trace_domain_size
+            .checked_mul(2)
+            .is_none_or(|ring_degree| ring_degree != relation.ring_degree)
+    {
+        return Err(RelationPlanError::InvalidConstraint);
     }
 
-    fn derive_without_check(
-        relation: &CompactPublicKeyRelationCatalog,
-        relation_plan_variant: &RelationPlanVariant,
-    ) -> Result<Self, RelationPlanError> {
-        let relation_plan_hash = relation_plan_variant.canonical_hash()?;
-        let trace_domain_size = relation_plan_variant.trace_domain_size();
-        if relation.relation_plan_hash != relation_plan_hash
-            || trace_domain_size
-                .checked_mul(2)
-                .is_none_or(|ring_degree| ring_degree != relation.ring_degree)
-        {
-            return Err(RelationPlanError::InvalidConstraint);
-        }
+    let requested_source_columns =
+        requested_pre_challenge_source_column_ordinals(relation_plan_variant)
+            .map_err(|_| RelationPlanError::InvalidConstraint)?;
+    if requested_source_columns
+        .windows(2)
+        .any(|pair| pair[0] >= pair[1])
+    {
+        return Err(RelationPlanError::NonCanonicalOrder);
+    }
+    let requested_source_column_set = requested_source_columns
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
+    let mut source_halves_by_column = BTreeMap::new();
 
-        let requested_source_columns =
-            requested_pre_challenge_source_column_ordinals(relation_plan_variant)
-                .map_err(|_| RelationPlanError::InvalidConstraint)?;
-        if requested_source_columns
-            .windows(2)
-            .any(|pair| pair[0] >= pair[1])
-        {
-            return Err(RelationPlanError::NonCanonicalOrder);
-        }
-        let requested_source_column_set = requested_source_columns
-            .iter()
-            .copied()
-            .collect::<BTreeSet<_>>();
-        let mut source_halves_by_column = BTreeMap::new();
-
-        for (vector_ordinal, vector) in relation.ordered_public_vectors.iter().enumerate() {
-            let vector_ordinal =
-                u64::try_from(vector_ordinal).map_err(|_| RelationPlanError::CountOverflow)?;
-            insert_vector_halves(
-                relation_plan_variant,
-                &requested_source_column_set,
-                &mut source_halves_by_column,
-                *vector,
-                CompactVectorHalfDestination {
-                    storage: CompactAssignmentStorage::PublicInput,
-                    first_element: 1_u64
-                        .checked_add(
-                            vector_ordinal
-                                .checked_mul(relation.ring_degree)
-                                .ok_or(RelationPlanError::CountOverflow)?,
-                        )
-                        .ok_or(RelationPlanError::CountOverflow)?,
-                    element_count: trace_domain_size,
-                },
-                |half_ordinal| CompactAuthenticatedSourceRole::PublicInput {
-                    vector_ordinal,
-                    half_ordinal,
-                },
-            )?;
-        }
-
-        let mut next_ternary_vector_ordinal = 0_u64;
-        let mut next_eta_two_vector_ordinal = 0_u64;
-        for descriptor in &relation.ordered_private_small_vectors {
-            let (witness_segment_kind, vector_ordinal_within_kind) = match descriptor.kind {
-                CompactSmallVectorKind::ShiftedTernary => {
-                    let ordinal = next_ternary_vector_ordinal;
-                    next_ternary_vector_ordinal = next_ternary_vector_ordinal
-                        .checked_add(1)
-                        .ok_or(RelationPlanError::CountOverflow)?;
-                    (CompactWitnessSegmentKind::ShiftedTernaryValues, ordinal)
-                }
-                CompactSmallVectorKind::ShiftedEtaTwo => {
-                    let ordinal = next_eta_two_vector_ordinal;
-                    next_eta_two_vector_ordinal = next_eta_two_vector_ordinal
-                        .checked_add(1)
-                        .ok_or(RelationPlanError::CountOverflow)?;
-                    (CompactWitnessSegmentKind::ShiftedEtaTwoValues, ordinal)
-                }
-            };
-            let destination_first_element = witness_vector_first_element(
-                relation,
-                witness_segment_kind,
-                vector_ordinal_within_kind,
-            )?;
-            insert_vector_halves(
-                relation_plan_variant,
-                &requested_source_column_set,
-                &mut source_halves_by_column,
-                descriptor.vector,
-                CompactVectorHalfDestination {
-                    storage: CompactAssignmentStorage::Witness,
-                    first_element: destination_first_element,
-                    element_count: trace_domain_size,
-                },
-                |half_ordinal| CompactAuthenticatedSourceRole::ShiftedSmallValue {
-                    kind: descriptor.kind,
-                    vector_ordinal_within_kind,
-                    half_ordinal,
-                },
-            )?;
-        }
-
-        for (relation_ordinal, structured_relation) in relation.ordered_relations.iter().enumerate()
-        {
-            let quotient_vectors = structured_relation
-                .ordered_terms
-                .iter()
-                .filter_map(|term| match term {
-                    CompactStructuredLinearTerm::ModulusQuotient {
-                        quotient_vector, ..
-                    } => Some(*quotient_vector),
-                    _ => None,
-                })
-                .collect::<Vec<_>>();
-            let [quotient_vector] = quotient_vectors.as_slice() else {
-                return Err(RelationPlanError::InvalidConstraint);
-            };
-            let relation_ordinal =
-                u64::try_from(relation_ordinal).map_err(|_| RelationPlanError::CountOverflow)?;
-            let destination_first_element = witness_vector_first_element(
-                relation,
-                CompactWitnessSegmentKind::ModularQuotients,
-                relation_ordinal,
-            )?;
-            insert_vector_halves(
-                relation_plan_variant,
-                &requested_source_column_set,
-                &mut source_halves_by_column,
-                *quotient_vector,
-                CompactVectorHalfDestination {
-                    storage: CompactAssignmentStorage::Witness,
-                    first_element: destination_first_element,
-                    element_count: trace_domain_size,
-                },
-                |half_ordinal| CompactAuthenticatedSourceRole::ModularQuotient {
-                    relation_ordinal,
-                    half_ordinal,
-                },
-            )?;
-        }
-
-        check_destination_intervals(
-            source_halves_by_column.values().copied(),
-            relation.padded_public_input_element_count,
-            relation.padded_witness_element_count,
+    for (vector_ordinal, vector) in relation.ordered_public_vectors.iter().enumerate() {
+        let vector_ordinal =
+            u64::try_from(vector_ordinal).map_err(|_| RelationPlanError::CountOverflow)?;
+        insert_vector_halves(
+            relation_plan_variant,
+            &requested_source_column_set,
+            &mut source_halves_by_column,
+            *vector,
+            CompactVectorHalfDestination {
+                storage: CompactAssignmentStorage::PublicInput,
+                first_element: 1_u64
+                    .checked_add(
+                        vector_ordinal
+                            .checked_mul(relation.ring_degree)
+                            .ok_or(RelationPlanError::CountOverflow)?,
+                    )
+                    .ok_or(RelationPlanError::CountOverflow)?,
+                element_count: trace_domain_size,
+            },
+            |half_ordinal| CompactAuthenticatedSourceRole::PublicInput {
+                vector_ordinal,
+                half_ordinal,
+            },
         )?;
-        let mut ordered_source_halves = Vec::new();
-        ordered_source_halves
+    }
+
+    let mut next_ternary_vector_ordinal = 0_u64;
+    let mut next_eta_two_vector_ordinal = 0_u64;
+    for descriptor in &relation.ordered_private_small_vectors {
+        let (witness_segment_kind, vector_ordinal_within_kind) = match descriptor.kind {
+            CompactSmallVectorKind::ShiftedTernary => {
+                let ordinal = next_ternary_vector_ordinal;
+                next_ternary_vector_ordinal = next_ternary_vector_ordinal
+                    .checked_add(1)
+                    .ok_or(RelationPlanError::CountOverflow)?;
+                (CompactWitnessSegmentKind::ShiftedTernaryValues, ordinal)
+            }
+            CompactSmallVectorKind::ShiftedEtaTwo => {
+                let ordinal = next_eta_two_vector_ordinal;
+                next_eta_two_vector_ordinal = next_eta_two_vector_ordinal
+                    .checked_add(1)
+                    .ok_or(RelationPlanError::CountOverflow)?;
+                (CompactWitnessSegmentKind::ShiftedEtaTwoValues, ordinal)
+            }
+        };
+        let destination_first_element = witness_vector_first_element(
+            relation,
+            witness_segment_kind,
+            vector_ordinal_within_kind,
+        )?;
+        insert_vector_halves(
+            relation_plan_variant,
+            &requested_source_column_set,
+            &mut source_halves_by_column,
+            descriptor.vector,
+            CompactVectorHalfDestination {
+                storage: CompactAssignmentStorage::Witness,
+                first_element: destination_first_element,
+                element_count: trace_domain_size,
+            },
+            |half_ordinal| CompactAuthenticatedSourceRole::ShiftedSmallValue {
+                kind: descriptor.kind,
+                vector_ordinal_within_kind,
+                half_ordinal,
+            },
+        )?;
+    }
+
+    for (relation_ordinal, structured_relation) in relation.ordered_relations.iter().enumerate() {
+        let quotient_vectors = structured_relation
+            .ordered_terms
+            .iter()
+            .filter_map(|term| match term {
+                CompactStructuredLinearTerm::ModulusQuotient {
+                    quotient_vector, ..
+                } => Some(*quotient_vector),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let [quotient_vector] = quotient_vectors.as_slice() else {
+            return Err(RelationPlanError::InvalidConstraint);
+        };
+        let relation_ordinal =
+            u64::try_from(relation_ordinal).map_err(|_| RelationPlanError::CountOverflow)?;
+        let destination_first_element = witness_vector_first_element(
+            relation,
+            CompactWitnessSegmentKind::ModularQuotients,
+            relation_ordinal,
+        )?;
+        insert_vector_halves(
+            relation_plan_variant,
+            &requested_source_column_set,
+            &mut source_halves_by_column,
+            *quotient_vector,
+            CompactVectorHalfDestination {
+                storage: CompactAssignmentStorage::Witness,
+                first_element: destination_first_element,
+                element_count: trace_domain_size,
+            },
+            |half_ordinal| CompactAuthenticatedSourceRole::ModularQuotient {
+                relation_ordinal,
+                half_ordinal,
+            },
+        )?;
+    }
+
+    check_destination_intervals(
+        source_halves_by_column.values().copied(),
+        relation.padded_public_input_element_count,
+        relation.padded_witness_element_count,
+    )?;
+    #[cfg(test)]
+    let mut ordered_source_halves = {
+        let mut source_halves = Vec::new();
+        source_halves
             .try_reserve_exact(source_halves_by_column.len())
             .map_err(|_| RelationPlanError::CountOverflow)?;
-        for column_ordinal in &requested_source_columns {
-            if let Some(source_half) = source_halves_by_column.remove(column_ordinal) {
-                ordered_source_halves.push(source_half);
-            }
+        source_halves
+    };
+    #[cfg(test)]
+    for column_ordinal in &requested_source_columns {
+        if let Some(source_half) = source_halves_by_column.remove(column_ordinal) {
+            ordered_source_halves.push(source_half);
         }
-        if !source_halves_by_column.is_empty() {
-            return Err(RelationPlanError::InvalidConstraint);
-        }
+    }
+    #[cfg(not(test))]
+    source_halves_by_column
+        .retain(|column_ordinal, _| !requested_source_column_set.contains(column_ordinal));
+    if !source_halves_by_column.is_empty() {
+        return Err(RelationPlanError::InvalidConstraint);
+    }
+    #[cfg(test)]
+    {
         let requested_source_column_count = u64::try_from(requested_source_columns.len())
             .map_err(|_| RelationPlanError::CountOverflow)?;
         let used_source_column_count = u64::try_from(ordered_source_halves.len())
@@ -279,7 +300,7 @@ impl CompactAuthenticatedAssignmentCatalog {
         let ignored_source_column_count = requested_source_column_count
             .checked_sub(used_source_column_count)
             .ok_or(RelationPlanError::CountOverflow)?;
-        Ok(Self {
+        Ok(CompactAuthenticatedAssignmentCatalog {
             relation_plan_hash,
             trace_domain_size,
             requested_source_column_count,
@@ -288,15 +309,25 @@ impl CompactAuthenticatedAssignmentCatalog {
         })
     }
 
-    pub(crate) fn check(
-        &self,
+    #[cfg(not(test))]
+    Ok(())
+}
+
+pub(super) fn validate_compact_authenticated_assignment(
+    relation: &CompactPublicKeyRelationCatalog,
+    relation_plan_variant: &RelationPlanVariant,
+) -> Result<(), RelationPlanError> {
+    derive_compact_authenticated_assignment(relation, relation_plan_variant)?;
+    Ok(())
+}
+
+#[cfg(test)]
+impl CompactAuthenticatedAssignmentCatalog {
+    pub(crate) fn derive(
         relation: &CompactPublicKeyRelationCatalog,
         relation_plan_variant: &RelationPlanVariant,
-    ) -> Result<(), RelationPlanError> {
-        if self != &Self::derive_without_check(relation, relation_plan_variant)? {
-            return Err(RelationPlanError::InvalidConstraint);
-        }
-        Ok(())
+    ) -> Result<Self, RelationPlanError> {
+        derive_compact_authenticated_assignment(relation, relation_plan_variant)
     }
 
     pub(crate) fn source_column_ordinals(&self) -> Vec<u32> {
@@ -317,19 +348,9 @@ impl CompactAuthenticatedAssignmentCatalog {
     pub(crate) fn ordered_source_halves(&self) -> &[CompactAuthenticatedSourceHalf] {
         &self.ordered_source_halves
     }
-
-    pub(super) fn resident_owned_heap_byte_length(&self) -> Result<u64, CommonProofProverError> {
-        u64::try_from(self.ordered_source_halves.capacity())
-            .ok()
-            .and_then(|capacity| {
-                capacity.checked_mul(
-                    u64::try_from(core::mem::size_of::<CompactAuthenticatedSourceHalf>()).ok()?,
-                )
-            })
-            .ok_or(CommonProofProverError::CountOverflow)
-    }
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CompactAuthenticatedAssignmentMemoryGeometry {
     public_input_prefix_element_count: u64,
@@ -337,12 +358,9 @@ pub(crate) struct CompactAuthenticatedAssignmentMemoryGeometry {
     lookup_inverse_element_count: u64,
     padded_public_input_element_count: u64,
     padded_witness_element_count: u64,
-    base_assignment_payload_byte_length: u64,
-    completed_assignment_payload_byte_length: u64,
-    lookup_materializer_resident_owned_byte_length: u64,
-    completed_assignment_resident_owned_byte_length: u64,
 }
 
+#[cfg(test)]
 impl CompactAuthenticatedAssignmentMemoryGeometry {
     fn derive(relation: &CompactPublicKeyRelationCatalog) -> Result<Self, CommonProofProverError> {
         let public_input_prefix_element_count = relation
@@ -354,46 +372,12 @@ impl CompactAuthenticatedAssignmentMemoryGeometry {
             witness_segment(relation, CompactWitnessSegmentKind::LookupInverses)?;
         let base_witness_prefix_element_count = lookup_inverse_segment.first_element;
         let lookup_inverse_element_count = lookup_inverse_segment.element_count;
-        let base_field_element_byte_length =
-            u64::try_from(core::mem::size_of::<ProofBaseFieldElement>())
-                .map_err(|_| CommonProofProverError::CountOverflow)?;
-        let extension_element_byte_length =
-            u64::try_from(core::mem::size_of::<ProofChallengeExtensionElement>())
-                .map_err(|_| CommonProofProverError::CountOverflow)?;
-        let base_assignment_payload_byte_length = public_input_prefix_element_count
-            .checked_add(base_witness_prefix_element_count)
-            .and_then(|count| count.checked_mul(base_field_element_byte_length))
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        let completed_assignment_payload_byte_length = lookup_inverse_element_count
-            .checked_mul(extension_element_byte_length)
-            .and_then(|inverse_bytes| {
-                base_assignment_payload_byte_length.checked_add(inverse_bytes)
-            })
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        let lookup_materializer_resident_owned_byte_length =
-            completed_assignment_payload_byte_length
-                .checked_add(
-                    u64::try_from(core::mem::size_of::<CompactLookupInverseMaterializer>())
-                        .map_err(|_| CommonProofProverError::CountOverflow)?,
-                )
-                .ok_or(CommonProofProverError::CountOverflow)?;
-        let completed_assignment_resident_owned_byte_length =
-            completed_assignment_payload_byte_length
-                .checked_add(
-                    u64::try_from(core::mem::size_of::<CompactPublicKeyAssignment>())
-                        .map_err(|_| CommonProofProverError::CountOverflow)?,
-                )
-                .ok_or(CommonProofProverError::CountOverflow)?;
         let geometry = Self {
             public_input_prefix_element_count,
             base_witness_prefix_element_count,
             lookup_inverse_element_count,
             padded_public_input_element_count: relation.padded_public_input_element_count,
             padded_witness_element_count: relation.padded_witness_element_count,
-            base_assignment_payload_byte_length,
-            completed_assignment_payload_byte_length,
-            lookup_materializer_resident_owned_byte_length,
-            completed_assignment_resident_owned_byte_length,
         };
         if geometry.public_input_prefix_element_count > geometry.padded_public_input_element_count
             || geometry
@@ -425,35 +409,15 @@ impl CompactAuthenticatedAssignmentMemoryGeometry {
     pub(crate) const fn padded_witness_element_count(self) -> u64 {
         self.padded_witness_element_count
     }
-
-    pub(crate) const fn base_assignment_payload_byte_length(self) -> u64 {
-        self.base_assignment_payload_byte_length
-    }
-
-    pub(crate) const fn completed_assignment_payload_byte_length(self) -> u64 {
-        self.completed_assignment_payload_byte_length
-    }
-
-    pub(crate) const fn lookup_materializer_resident_owned_byte_length(self) -> u64 {
-        self.lookup_materializer_resident_owned_byte_length
-    }
-
-    pub(crate) const fn completed_assignment_resident_owned_byte_length(self) -> u64 {
-        self.completed_assignment_resident_owned_byte_length
-    }
 }
 
-pub(crate) fn compact_authenticated_assignment_memory_geometry(
-    relation: &CompactPublicKeyRelationCatalog,
-) -> Result<CompactAuthenticatedAssignmentMemoryGeometry, CommonProofProverError> {
-    CompactAuthenticatedAssignmentMemoryGeometry::derive(relation)
-}
-
+#[cfg(test)]
 struct CompactBaseAssignmentBuffers {
     public_input_prefix: Zeroizing<Vec<ProofBaseFieldElement>>,
     base_witness_prefix: Zeroizing<Vec<ProofBaseFieldElement>>,
 }
 
+#[cfg(test)]
 impl CompactBaseAssignmentBuffers {
     fn new(
         geometry: CompactAuthenticatedAssignmentMemoryGeometry,
@@ -470,12 +434,14 @@ impl CompactBaseAssignmentBuffers {
     }
 }
 
+#[cfg(test)]
 pub(crate) enum CompactAuthenticatedAssignmentPoll {
     AuthenticatedSourceReadRequired,
     SourceLoaded { column_ordinal: u32 },
     Complete,
 }
 
+#[cfg(test)]
 pub(crate) struct CompactAuthenticatedAssignmentCursor {
     catalog: CompactAuthenticatedAssignmentCatalog,
     geometry: CompactAuthenticatedAssignmentMemoryGeometry,
@@ -487,6 +453,7 @@ pub(crate) struct CompactAuthenticatedAssignmentCursor {
     completed_assignment: Option<CompactPublicKeyBaseAssignment>,
 }
 
+#[cfg(test)]
 impl CompactAuthenticatedAssignmentCursor {
     pub(crate) fn new(
         relation: &CompactPublicKeyRelationCatalog,
@@ -539,8 +506,10 @@ impl CompactAuthenticatedAssignmentCursor {
         relation_plan_variant: &RelationPlanVariant,
         source_provider: &mut dyn CommonProofSourcePolynomialProvider,
     ) -> Result<CompactAuthenticatedAssignmentPoll, CommonProofProverError> {
-        self.catalog.check(relation, relation_plan_variant)?;
-        if self.request_context.relation_plan_variant_hash() != self.catalog.relation_plan_hash {
+        if self.request_context.relation_plan_variant_hash() != self.catalog.relation_plan_hash
+            || relation.relation_plan_variant_hash != self.catalog.relation_plan_hash
+            || relation_plan_variant.canonical_hash()? != self.catalog.relation_plan_hash
+        {
             return Err(CommonProofProverError::InvalidInput);
         }
         let Some(source_half) = self
@@ -628,8 +597,9 @@ impl CompactAuthenticatedAssignmentCursor {
         relation: &CompactPublicKeyRelationCatalog,
         relation_plan_variant: &RelationPlanVariant,
     ) -> Result<CompactPublicKeyBaseAssignment, CommonProofProverError> {
-        self.catalog.check(relation, relation_plan_variant)?;
         if self.request_context.relation_plan_variant_hash() != self.catalog.relation_plan_hash
+            || relation.relation_plan_variant_hash != self.catalog.relation_plan_hash
+            || relation_plan_variant.canonical_hash()? != self.catalog.relation_plan_hash
             || self.next_source_index != self.catalog.ordered_source_halves.len()
             || self.source_identity_hasher.is_some()
             || self.buffers.is_some()
@@ -647,6 +617,7 @@ impl CompactAuthenticatedAssignmentCursor {
     }
 }
 
+#[cfg(test)]
 pub(crate) struct CompactPublicKeyBaseAssignment {
     geometry: CompactAuthenticatedAssignmentMemoryGeometry,
     source_replay_binding: [u8; 64],
@@ -654,6 +625,7 @@ pub(crate) struct CompactPublicKeyBaseAssignment {
     base_witness_prefix: Zeroizing<Vec<ProofBaseFieldElement>>,
 }
 
+#[cfg(test)]
 impl CompactPublicKeyBaseAssignment {
     pub(crate) const fn memory_geometry(&self) -> CompactAuthenticatedAssignmentMemoryGeometry {
         self.geometry
@@ -714,6 +686,7 @@ impl CompactPublicKeyBaseAssignment {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CompactLookupInverseMaterializationPhase {
     Forward {
@@ -730,12 +703,14 @@ enum CompactLookupInverseMaterializationPhase {
     Complete,
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CompactLookupInverseMaterializationPoll {
     ArithmeticStepCompleted { processed_element_count: u64 },
     Complete,
 }
 
+#[cfg(test)]
 pub(crate) struct CompactLookupInverseMaterializer {
     base_assignment: Option<CompactPublicKeyBaseAssignment>,
     lookup_challenge: ProofChallengeExtensionElement,
@@ -743,6 +718,7 @@ pub(crate) struct CompactLookupInverseMaterializer {
     phase: CompactLookupInverseMaterializationPhase,
 }
 
+#[cfg(test)]
 impl CompactLookupInverseMaterializer {
     pub(crate) fn advance(
         &mut self,
@@ -898,12 +874,14 @@ impl CompactLookupInverseMaterializer {
     }
 }
 
+#[cfg(test)]
 pub(crate) struct CompactPublicKeyAssignment {
     base_assignment: CompactPublicKeyBaseAssignment,
     lookup_challenge: ProofChallengeExtensionElement,
     lookup_inverses: Zeroizing<Vec<ProofChallengeExtensionElement>>,
 }
 
+#[cfg(test)]
 impl CompactPublicKeyAssignment {
     pub(crate) const fn memory_geometry(&self) -> CompactAuthenticatedAssignmentMemoryGeometry {
         self.base_assignment.geometry
@@ -980,6 +958,7 @@ impl CompactPublicKeyAssignment {
     }
 }
 
+#[cfg(test)]
 fn descriptor_origin(origin: &RelationColumnOrigin) -> CompactAuthenticatedSourceOrigin {
     match origin {
         RelationColumnOrigin::VerifierSequence { .. } => {
@@ -990,6 +969,7 @@ fn descriptor_origin(origin: &RelationColumnOrigin) -> CompactAuthenticatedSourc
     }
 }
 
+#[cfg(test)]
 fn witness_segment(
     relation: &CompactPublicKeyRelationCatalog,
     kind: CompactWitnessSegmentKind,
@@ -1002,6 +982,7 @@ fn witness_segment(
         .ok_or(CommonProofProverError::InvalidColumn)
 }
 
+#[cfg(test)]
 fn fallible_zero_base_vector(
     element_count: u64,
 ) -> Result<Zeroizing<Vec<ProofBaseFieldElement>>, CommonProofProverError> {
@@ -1015,6 +996,7 @@ fn fallible_zero_base_vector(
     Ok(Zeroizing::new(values))
 }
 
+#[cfg(test)]
 fn value_from_base_prefix(
     prefix: &[ProofBaseFieldElement],
     padded_element_count: u64,
@@ -1033,6 +1015,7 @@ fn value_from_base_prefix(
     Err(CommonProofProverError::InvalidColumn)
 }
 
+#[cfg(test)]
 fn store_source_rows(
     relation: &CompactPublicKeyRelationCatalog,
     source_half: CompactAuthenticatedSourceHalf,
@@ -1067,6 +1050,7 @@ fn store_source_rows(
     Ok(())
 }
 
+#[cfg(test)]
 fn store_modular_quotient_rows(
     relation: &CompactPublicKeyRelationCatalog,
     source_half: CompactAuthenticatedSourceHalf,
@@ -1107,6 +1091,7 @@ fn store_modular_quotient_rows(
     Ok(())
 }
 
+#[cfg(test)]
 fn store_shifted_small_rows(
     relation: &CompactPublicKeyRelationCatalog,
     source_half: CompactAuthenticatedSourceHalf,
@@ -1199,6 +1184,7 @@ fn store_shifted_small_rows(
     Ok(())
 }
 
+#[cfg(test)]
 fn store_small_product(
     relation: &CompactPublicKeyRelationCatalog,
     product_segment_first_element: u64,
@@ -1222,6 +1208,7 @@ fn store_small_product(
     Ok(())
 }
 
+#[cfg(test)]
 fn validate_lookup_challenge(
     lookup_challenge: ProofChallengeExtensionElement,
 ) -> Result<(), CommonProofProverError> {
@@ -1234,6 +1221,7 @@ fn validate_lookup_challenge(
     Ok(())
 }
 
+#[cfg(test)]
 fn lookup_denominator(
     base_assignment: &CompactPublicKeyBaseAssignment,
     lookup_challenge: ProofChallengeExtensionElement,
@@ -1628,7 +1616,7 @@ mod tests {
             ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
             [3_u8; 64],
             [4_u8; 64],
-            relation.relation_plan_hash(),
+            relation.relation_plan_variant_hash(),
             None,
             None,
         )
@@ -1663,6 +1651,26 @@ mod tests {
     fn compact_assignment_uses_only_its_exact_authenticated_source_halves() {
         let (relation, relation_plan_variant, catalog) = selected_assignment_catalog();
         let source_halves = catalog.ordered_source_halves();
+
+        let mut expected_source_columns = Vec::new();
+        for vector in &relation.ordered_public_vectors {
+            expected_source_columns.extend(vector.column_ordinals());
+        }
+        for descriptor in &relation.ordered_private_small_vectors {
+            expected_source_columns.extend(descriptor.vector.column_ordinals());
+        }
+        for structured_relation in &relation.ordered_relations {
+            for term in &structured_relation.ordered_terms {
+                if let CompactStructuredLinearTerm::ModulusQuotient {
+                    quotient_vector, ..
+                } = term
+                {
+                    expected_source_columns.extend(quotient_vector.column_ordinals());
+                }
+            }
+        }
+        expected_source_columns.sort_unstable();
+        assert_eq!(catalog.source_column_ordinals(), expected_source_columns);
 
         assert_eq!(catalog.requested_source_column_count(), 3_302);
         assert_eq!(source_halves.len(), 202);
@@ -1703,28 +1711,126 @@ mod tests {
                 .windows(2)
                 .all(|pair| { pair[0].source_column_ordinal < pair[1].source_column_ordinal })
         );
-        catalog
-            .check(&relation, &relation_plan_variant)
-            .expect("independent assignment mapping check");
-    }
 
-    #[test]
-    fn compact_assignment_mapping_refuses_source_and_destination_mutations() {
-        let (relation, relation_plan_variant, catalog) = selected_assignment_catalog();
+        let requested_source_columns =
+            requested_pre_challenge_source_column_ordinals(&relation_plan_variant)
+                .expect("requested source columns derive")
+                .into_iter()
+                .collect::<BTreeSet<_>>();
+        let trace_domain_size = relation_plan_variant.trace_domain_size();
+        for source_half in source_halves {
+            assert!(requested_source_columns.contains(&source_half.source_column_ordinal));
+            let descriptor = &relation_plan_variant.ordered_columns()
+                [usize::try_from(source_half.source_column_ordinal).expect("column ordinal fits")];
+            assert_eq!(
+                source_half.source_degree_bound_exclusive,
+                descriptor.source_degree_bound_exclusive()
+            );
+            assert!(matches!(
+                (source_half.source_origin, descriptor.origin()),
+                (
+                    CompactAuthenticatedSourceOrigin::VerifierSequence,
+                    RelationColumnOrigin::VerifierSequence { .. }
+                ) | (
+                    CompactAuthenticatedSourceOrigin::BoundTree,
+                    RelationColumnOrigin::BoundTree { .. }
+                ) | (
+                    CompactAuthenticatedSourceOrigin::Prover,
+                    RelationColumnOrigin::Prover
+                )
+            ));
 
-        let mut changed_source = catalog.clone();
-        changed_source.ordered_source_halves[0].source_column_ordinal = u32::MAX;
-        assert_eq!(
-            changed_source.check(&relation, &relation_plan_variant),
-            Err(RelationPlanError::InvalidConstraint),
-        );
-
-        let mut changed_destination = catalog;
-        changed_destination.ordered_source_halves[0].destination_first_element += 1;
-        assert_eq!(
-            changed_destination.check(&relation, &relation_plan_variant),
-            Err(RelationPlanError::InvalidConstraint),
-        );
+            let (vector, half_ordinal, destination_storage, destination_vector_first) =
+                match source_half.role {
+                    CompactAuthenticatedSourceRole::PublicInput {
+                        vector_ordinal,
+                        half_ordinal,
+                    } => (
+                        relation.ordered_public_vectors
+                            [usize::try_from(vector_ordinal).expect("vector ordinal fits")],
+                        half_ordinal,
+                        CompactAssignmentStorage::PublicInput,
+                        1 + vector_ordinal * relation.ring_degree,
+                    ),
+                    CompactAuthenticatedSourceRole::ModularQuotient {
+                        relation_ordinal,
+                        half_ordinal,
+                    } => {
+                        let structured_relation = &relation.ordered_relations
+                            [usize::try_from(relation_ordinal).expect("relation ordinal fits")];
+                        let quotient_vector = structured_relation
+                            .ordered_terms
+                            .iter()
+                            .find_map(|term| match term {
+                                CompactStructuredLinearTerm::ModulusQuotient {
+                                    quotient_vector,
+                                    ..
+                                } => Some(*quotient_vector),
+                                _ => None,
+                            })
+                            .expect("relation has a quotient vector");
+                        let segment = relation
+                            .ordered_witness_segments
+                            .iter()
+                            .find(|segment| {
+                                segment.kind == CompactWitnessSegmentKind::ModularQuotients
+                            })
+                            .expect("quotient segment exists");
+                        (
+                            quotient_vector,
+                            half_ordinal,
+                            CompactAssignmentStorage::Witness,
+                            segment.first_element + relation_ordinal * relation.ring_degree,
+                        )
+                    }
+                    CompactAuthenticatedSourceRole::ShiftedSmallValue {
+                        kind,
+                        vector_ordinal_within_kind,
+                        half_ordinal,
+                    } => {
+                        let descriptor = relation
+                            .ordered_private_small_vectors
+                            .iter()
+                            .filter(|descriptor| descriptor.kind == kind)
+                            .nth(
+                                usize::try_from(vector_ordinal_within_kind)
+                                    .expect("small-vector ordinal fits"),
+                            )
+                            .expect("small-vector descriptor exists");
+                        let segment_kind = match kind {
+                            CompactSmallVectorKind::ShiftedTernary => {
+                                CompactWitnessSegmentKind::ShiftedTernaryValues
+                            }
+                            CompactSmallVectorKind::ShiftedEtaTwo => {
+                                CompactWitnessSegmentKind::ShiftedEtaTwoValues
+                            }
+                        };
+                        let segment = relation
+                            .ordered_witness_segments
+                            .iter()
+                            .find(|segment| segment.kind == segment_kind)
+                            .expect("small-vector segment exists");
+                        (
+                            descriptor.vector,
+                            half_ordinal,
+                            CompactAssignmentStorage::Witness,
+                            segment.first_element
+                                + vector_ordinal_within_kind * relation.ring_degree,
+                        )
+                    }
+                };
+            assert!(half_ordinal < 2);
+            assert_eq!(
+                source_half.source_column_ordinal,
+                vector.column_ordinals()[usize::from(half_ordinal)]
+            );
+            assert_eq!(source_half.destination_storage, destination_storage);
+            assert_eq!(
+                source_half.destination_first_element,
+                destination_vector_first + u64::from(half_ordinal) * trace_domain_size
+            );
+            assert_eq!(source_half.element_count, trace_domain_size);
+        }
     }
 
     #[test]
@@ -1757,11 +1863,6 @@ mod tests {
         assert_eq!(geometry.public_input_prefix_element_count(), 1_998_849);
         assert_eq!(geometry.base_witness_prefix_element_count(), 1_867_776);
         assert_eq!(geometry.lookup_inverse_element_count(), 950_272);
-        assert_eq!(geometry.base_assignment_payload_byte_length(), 30_933_000);
-        assert_eq!(
-            geometry.completed_assignment_payload_byte_length(),
-            68_943_880,
-        );
 
         assert!(matches!(
             cursor

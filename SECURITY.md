@@ -58,12 +58,15 @@ and conservative action-composition catalog were removed after its corrected
 schedule changed derived oracle counts. They are not security inputs for the
 compact successor.
 
-The latest retained complete dirty-worktree graph passed the workspace build, package,
-Node, 1,218-entry ordinary Rust, and Chromium lane. The
-scalar WASM and SDK bytes reproduced at
-`91e5a2c5d26f9f98a7e0afa797948769c1a648f84622a78b115e7b86edc47524`, and all
-35 retained theorem-registry members passed under the serialized guard. Those
-results validate only that recorded dirty state. They predate the later
+The latest retained complete dirty-worktree graph passed the workspace build,
+package, Node, 1,218-entry ordinary Rust, and Chromium lane. Its scalar WASM and
+SDK bytes reproduced, and all 35 retained theorem-registry members passed under
+the serialized guard. That graph's artifact is superseded. The current scalar
+release WASM and SDK byte copy are byte-identical and have normalized loader SHA-256
+`9f7a6cb8d4182cffb5c4a62052d499d7f3892e1530f23526a87288c2511b84a8`.
+This is release-build and byte-copy development evidence only, not proof or
+physical-phone qualification. The retained results validate only that recorded
+dirty state. They predate the later
 collective-setup record and current documentation changes and are neither
 current-workspace nor clean commit-bound evidence. The desktop graph used
 Node.js `22.22.2`, below the declared
@@ -73,13 +76,55 @@ proof-plan owners; it does not supply compact masking or a compact proof. No
 manual browser proof-evidence result exists because there is no production
 compact proof to run.
 
-The compact CFW/WHIR semantic, prover, transport, and hostile-verifier
-workbench is compiled only for tests. The `primitive-measurement-evidence`
-feature contains only bounded measurement owners and the operative ring-native
-arithmetic they measure. Neither scope enters the default participant build.
-They currently cover a standalone public-key-share development slice; no
-compact packing factor is selected, and no participant-facing API exposes a
-complete compact prover or verifier.
+The compact typed version-three factor-one contract decoder and its statement,
+relation, transcript-domain, CFW, WHIR, wire, Merkle, response, and checkpoint
+geometry and schema owners are compiled in the default kernel. The compact proof
+and public-input codecs, fixed-width verifier-message decoder and derivation,
+Fiat-Shamir transcript, salted-Merkle opening verifier, and response-checkpoint
+runtime remain test-only because no production verifier consumes them. The
+contract validates the exact target; statement-schema identifier, field count, and layout
+digest; the 128-draw per-output Fiat-Shamir ceiling; both canonical wire magics;
+the ordered suite, statement, manifest, and relation-plan public-input roles;
+six release-consumed domains and four frozen checkpoint-binding domains whose
+runtime consumers remain test-only; relation schema; all response semantic
+roles, value kinds, query sources, and padding; wire and Merkle geometry; the
+exact CFW configuration; and both WHIR epoch configurations, folds, and unique-
+decoding radii. A separate default-compiled WHIR verifier-geometry owner derives
+both epoch shapes and security query budgets from the CFW cross-epoch geometry
+and the vendored unique-decoding configuration at the 267-bit protocol target.
+It derives schedules `[6, 4, 4, 4]` and `[7, 4, 4, 4]`, round inverse-rate
+logarithms `[2, 4, 8]`, all query counts, the 399-query mask budget, and the
+`2 x 1` cross-epoch mask shape. Contract decoding exact-compares every
+serialized WHIR field to this owner before chronology and response derivation;
+correlated alternate geometries refuse. The record does not serialize the
+relation-plan variant hash,
+ring-vector count, ring degree, global commitment or query-group counts, or
+checkpoint-schedule digest. The decoder independently rederives those facts
+from the selected relation, exact 82-step chronology, and checkpoint schedule,
+including 45 total commitments, 26 distinct query groups, and the checkpoint
+digest. The chronology identifies 42 commitments as internal construction
+commitments. Its canonical 27,778-byte version-three
+`compact_proof_contract.generated.bin` record has raw SHA-512
+`48514bef844ef68793128c3145890efb2a0e65b7584788b7b03d1bf5ab1287c9a029b6da68720d350a13e0c6162f234a3318dd1558dd8c091f65f00e7d924298`.
+Schema `0x2200` version-eight `ProofProfileSet` binds the typed contract only
+through its canonical-source `Hash512` under
+`sealed-lattice/bgv/compact-public-key-proof-contract/source/v1`; it has no
+separate contract-length item. That framed, domain-separated value is distinct
+from the raw file SHA-512 above. Verification decodes the release-embedded
+contract and recomputes the canonical-source hash; the binding does not make the
+still-refused foundation suite selectable.
+It is checked in, included directly by release Rust, decoded and canonically
+re-encoded, and independently regenerated byte-for-byte from the production
+source adapter in its identity test. The decoder derives proof, public-input,
+and transport byte lengths and the 82-response checkpoint schedule from the
+bound geometry; the record carries no provisional WASM, scratch, or
+2,677-boundary planning estimates. The semantic theorem, prover, complete
+CFW/WHIR verifier, response-tree executor, and retained end-to-end workbench
+remain test-only. The `primitive-measurement-evidence` feature contains only
+bounded measurement owners and the operative ring-native arithmetic they
+measure. These owners cover a standalone public-key-share development slice;
+foundation suite selection remains fail-closed, and no participant-facing API
+exposes a complete compact prover or verifier.
 
 Within that test-only workbench, the factor-one source-level semantic owner is
 substantive and complete for its narrow scope. It executes the selected decoder,
@@ -120,12 +165,15 @@ remain separate unproved claims. Production code never reprograms SHAKE.
 
 ### Emitted-byte and QROM boundary
 
-Canonical compact codecs, fixed verifier-message decoding, Merkle response
-writing, frontier scanning, and opening verification are executable. The
+The typed compact contract decoder and its geometry, schema, and domain owners
+are default-compiled internal primitives. Canonical proof and public-input
+codecs, fixed verifier-message decoding, transcript derivation, Merkle response
+writing, frontier scanning, opening verification, and the external response-
+tree transaction executor remain test-only. The
 byte-to-consumer owner, however, derives static or maximum regions; counted
 frontier regions remain parameterized until bytes exist. Its transported-byte
-test is one small response fixture. The all-factor query-schedule test uses
-zero-valued public inputs and deterministic roots and salts. A separate
+test is one small response fixture. The current factor-one schedule has 45
+commitments in total, including 42 internal construction commitments. A separate
 ring-degree-2,048 CFW-plus-two-WHIR envelope has useful hostile mutation
 coverage, but the entire chain is test-only and uses reduced deterministic
 authority and randomness.
@@ -185,12 +233,14 @@ the snapshot is the newest state.
   flow, or local newest-snapshot proof. Lost or unauthenticated state retires
   that participant from the action.
 - `SEC-004`: The default selected proof backend is the operationally rejected
-  row-code/WHIR path. The compact semantic, prover, transport, and hostile-
-  verifier workbench is test-only; the measurement feature contains only
-  bounded measurement owners and their ring-native arithmetic. The compact
-  successor is unselected and lacks a production-size proof and complete
-  participant runtime. No proof backend is currently mobile-feasible or suite-
-  selectable.
+  row-code/WHIR path. The compact typed contract decoder and its geometry,
+  schema, and domain owners are default-compiled internal primitives. Proof and
+  public-input codecs, transcript and fixed-message derivation, Merkle opening
+  verification, response checkpoints, the semantic theorem, prover, complete
+  CFW/WHIR verifier, response-tree executor, and end-to-end workbench remain
+  test-only. The compact successor lacks a
+  production-size proof and complete participant runtime. No proof backend is
+  currently mobile-feasible or suite-selectable.
 - `SEC-005`: The compact standalone semantic owner is source-level evidence
   only. Complete production masking, ideal simulation, the KMAC quantum-PRF
   reduction, emitted-byte correspondence, salted-Merkle privacy, root and
@@ -231,11 +281,13 @@ the snapshot is the newest state.
   reduction remain open, and it cannot authorize or mint a capability. Proof,
   checkpoint, runtime, and package evidence is not one reconciled exact-ten
   authority.
-- `SEC-019`: The canonical scalar WASM and SDK package bytes reproduce at
-  `91e5a2c5d26f9f98a7e0afa797948769c1a648f84622a78b115e7b86edc47524`, and the
-  ordinary desktop-browser graph passes. The release build still omits compact
-  proof generation and verification, so this is not selected-size compact-proof
-  browser qualification. Compact checkpoint publication remains reduced kernel
+- `SEC-019`: The current scalar release WASM and SDK byte copy are byte-identical and have normalized loader SHA-256
+  `9f7a6cb8d4182cffb5c4a62052d499d7f3892e1530f23526a87288c2511b84a8`.
+  This is release-build and byte-copy development evidence only, and the
+  retained ordinary desktop-browser graph remains historical. The release build
+  still omits compact proof generation and verification, so this is not
+  selected-size compact-proof browser or physical-phone qualification. Compact
+  checkpoint publication remains reduced kernel
   groundwork, not browser-custody or selected-size durable resume.
 - `SEC-020`: Pollable source preparation, transpose, Merkle, codec, and reduced
   CFW/WHIR lifecycle owners provide development evidence only. Selected-size

@@ -214,8 +214,6 @@ pub(super) struct PackingTranscriptChronology {
     pub(super) fixed_query_candidate_slot_count: u64,
     commitment_count: u64,
     minimum_verifier_message_bit_length: u64,
-    retry_attempt_domain_is_bound: bool,
-    retry_uses_fresh_commitment_roots: bool,
 }
 
 impl PackingTranscriptChronology {
@@ -225,7 +223,7 @@ impl PackingTranscriptChronology {
         cfw_reduction: &CfwReductionCatalog,
     ) -> Result<Self, CompactStaticCatalogError> {
         let chronology = derive_catalog(pre_challenge_whir, main_whir, cfw_reduction)?;
-        chronology.check(pre_challenge_whir, main_whir, cfw_reduction)?;
+        chronology.check()?;
         Ok(chronology)
     }
 
@@ -242,32 +240,36 @@ impl PackingTranscriptChronology {
         self.commitment_count
     }
 
-    fn check(
-        &self,
-        pre_challenge_whir: &WhirStaticLedger,
-        main_whir: &WhirStaticLedger,
-        cfw_reduction: &CfwReductionCatalog,
-    ) -> Result<(), CompactStaticCatalogError> {
-        let expected = derive_catalog(pre_challenge_whir, main_whir, cfw_reduction)?;
-        if self != &expected
-            || self.verifier_moves.is_empty()
+    fn check(&self) -> Result<(), CompactStaticCatalogError> {
+        if self.verifier_moves.is_empty()
             || self.commitment_count != 45
             || self.distinct_query_group_count != 26
             || self.minimum_verifier_message_bit_length != 319
-            || self.retry_attempt_domain_is_bound
-            || self.retry_uses_fresh_commitment_roots
         {
             return Err(CompactStaticCatalogError::InvalidGeometry);
         }
+        let mut previous_response_ordinal = None;
+        let mut previous_commitment_count = None;
         for (ordinal, verifier_move) in self.verifier_moves.iter().enumerate() {
             if usize::try_from(verifier_move.ordinal).ok() != Some(ordinal)
                 || verifier_move.roles.is_empty()
                 || verifier_move.preceding_prover_response_ordinal == 0
                 || verifier_move.preceding_commitment_count == 0
+                || verifier_move.preceding_commitment_count > self.commitment_count
+                || previous_response_ordinal.is_some_and(|previous| {
+                    verifier_move.preceding_prover_response_ordinal <= previous
+                })
+                || previous_commitment_count
+                    .is_some_and(|previous| verifier_move.preceding_commitment_count < previous)
                 || verifier_move.challenge_space.cardinality()? <= BigUint::one()
             {
                 return Err(CompactStaticCatalogError::InvalidGeometry);
             }
+            previous_response_ordinal = Some(verifier_move.preceding_prover_response_ordinal);
+            previous_commitment_count = Some(verifier_move.preceding_commitment_count);
+        }
+        if previous_commitment_count != Some(self.commitment_count) {
+            return Err(CompactStaticCatalogError::InvalidGeometry);
         }
         Ok(())
     }
@@ -414,8 +416,6 @@ fn finish_catalog(
         fixed_query_candidate_slot_count,
         commitment_count: builder.commitment_count,
         minimum_verifier_message_bit_length,
-        retry_attempt_domain_is_bound: false,
-        retry_uses_fresh_commitment_roots: false,
     })
 }
 
@@ -627,57 +627,36 @@ mod tests {
     use crate::bgv::proof_suite::compact_public_key_static_catalog::CompactPublicKeyStaticCatalog;
 
     #[test]
-    fn every_packing_has_a_complete_two_epoch_predecessor_catalog() {
+    fn factor_one_has_a_complete_two_epoch_predecessor_catalog() {
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
-        let expected_round_counts = [82, 80, 78, 76];
-        let expected_candidate_slot_counts = [1_322_752, 1_338_880, 1_310_464, 1_342_464];
-        for ((factor, expected_round_count), expected_candidate_slot_count) in catalog
-            .factor_catalogs
-            .iter()
-            .zip(expected_round_counts)
-            .zip(expected_candidate_slot_counts)
-        {
-            let chronology = &factor.transcript_chronology;
-            assert_eq!(chronology.verifier_moves.len(), expected_round_count);
-            assert_eq!(chronology.commitment_count, 45);
-            assert_eq!(chronology.distinct_query_group_count, 26);
-            assert_eq!(
-                chronology.fixed_query_candidate_slot_count,
-                expected_candidate_slot_count
-            );
-            assert_eq!(chronology.minimum_verifier_message_bit_length, 319);
-            assert!(!chronology.retry_attempt_domain_is_bound);
-            assert!(!chronology.retry_uses_fresh_commitment_roots);
-        }
+        let chronology = &catalog.selected.transcript_chronology;
+        assert_eq!(chronology.verifier_moves.len(), 82);
+        assert_eq!(chronology.commitment_count, 45);
+        assert_eq!(chronology.distinct_query_group_count, 26);
+        assert_eq!(chronology.fixed_query_candidate_slot_count, 1_322_752);
+        assert_eq!(chronology.minimum_verifier_message_bit_length, 319);
     }
 
     #[test]
-    fn chronology_rejects_changed_predecessors_and_premature_retry_claims() {
+    fn chronology_rejects_nonmonotonic_predecessors() {
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
-        let factor = &catalog.factor_catalogs[3];
+        let selected = &catalog.selected;
 
-        let mut wrong_predecessor = factor.transcript_chronology.clone();
-        wrong_predecessor.verifier_moves[1].preceding_commitment_count -= 1;
+        let mut wrong_response_predecessor = selected.transcript_chronology.clone();
+        wrong_response_predecessor.verifier_moves[2].preceding_prover_response_ordinal =
+            wrong_response_predecessor.verifier_moves[1].preceding_prover_response_ordinal;
         assert_eq!(
-            wrong_predecessor.check(
-                &factor.pre_challenge_whir,
-                &factor.main_whir,
-                &catalog.cfw_reduction,
-            ),
+            wrong_response_predecessor.check(),
             Err(CompactStaticCatalogError::InvalidGeometry)
         );
 
-        let mut premature_retry_claim = factor.transcript_chronology.clone();
-        premature_retry_claim.retry_attempt_domain_is_bound = true;
-        premature_retry_claim.retry_uses_fresh_commitment_roots = true;
+        let mut wrong_commitment_predecessor = selected.transcript_chronology.clone();
+        wrong_commitment_predecessor.verifier_moves[2].preceding_commitment_count =
+            wrong_commitment_predecessor.verifier_moves[1].preceding_commitment_count - 1;
         assert_eq!(
-            premature_retry_claim.check(
-                &factor.pre_challenge_whir,
-                &factor.main_whir,
-                &catalog.cfw_reduction,
-            ),
+            wrong_commitment_predecessor.check(),
             Err(CompactStaticCatalogError::InvalidGeometry)
         );
     }
@@ -686,7 +665,7 @@ mod tests {
     fn cfw_mask_roots_precede_every_cfw_challenge() {
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
-        let chronology = &catalog.factor_catalogs[3].transcript_chronology;
+        let chronology = &catalog.selected.transcript_chronology;
         let cfw_moves = chronology.verifier_moves.iter().filter(|verifier_move| {
             verifier_move.roles.iter().any(|role| {
                 matches!(
@@ -710,43 +689,42 @@ mod tests {
     fn every_whir_round_samples_queries_and_combination_in_one_verifier_move() {
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
-        for factor in &catalog.factor_catalogs {
-            for epoch in [TranscriptEpoch::PreChallenge, TranscriptEpoch::Main] {
-                let round_moves = factor
-                    .transcript_chronology
-                    .verifier_moves
-                    .iter()
-                    .filter(|verifier_move| {
-                        verifier_move.roles.iter().any(|role| {
-                            matches!(
-                                role,
-                                VerifierMoveRole::WhirRoundQueryAndCombination {
-                                    epoch: move_epoch,
-                                    ..
-                                } if *move_epoch == epoch
-                            )
-                        })
-                    })
-                    .collect::<Vec<_>>();
-                assert_eq!(round_moves.len(), super::super::WHIR_ROUND_COUNT);
-                for (round_ordinal, verifier_move) in round_moves.into_iter().enumerate() {
-                    assert!(verifier_move.roles.iter().any(|role| {
+        let selected = &catalog.selected;
+        for epoch in [TranscriptEpoch::PreChallenge, TranscriptEpoch::Main] {
+            let round_moves = selected
+                .transcript_chronology
+                .verifier_moves
+                .iter()
+                .filter(|verifier_move| {
+                    verifier_move.roles.iter().any(|role| {
                         matches!(
                             role,
                             VerifierMoveRole::WhirRoundQueryAndCombination {
-                                round_ordinal: move_round_ordinal,
+                                epoch: move_epoch,
                                 ..
-                            } if usize::from(*move_round_ordinal) == round_ordinal
+                            } if *move_epoch == epoch
                         )
-                    }));
-                    assert!(matches!(
-                        verifier_move.challenge_space,
-                        ExactChallengeSpace::BaseElementExtensionVectorAndDistinctQueries {
-                            extension_element_count: 1,
-                            ref groups,
-                        } if groups.len() == 1
-                    ));
-                }
+                    })
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(round_moves.len(), super::super::WHIR_ROUND_COUNT);
+            for (round_ordinal, verifier_move) in round_moves.into_iter().enumerate() {
+                assert!(verifier_move.roles.iter().any(|role| {
+                    matches!(
+                        role,
+                        VerifierMoveRole::WhirRoundQueryAndCombination {
+                            round_ordinal: move_round_ordinal,
+                            ..
+                        } if usize::from(*move_round_ordinal) == round_ordinal
+                    )
+                }));
+                assert!(matches!(
+                    verifier_move.challenge_space,
+                    ExactChallengeSpace::BaseElementExtensionVectorAndDistinctQueries {
+                        extension_element_count: 1,
+                        ref groups,
+                    } if groups.len() == 1
+                ));
             }
         }
     }
@@ -755,48 +733,47 @@ mod tests {
     fn challenges_without_an_intervening_response_share_one_verifier_move() {
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
-        for factor in &catalog.factor_catalogs {
-            let combined_moves = factor
-                .transcript_chronology
-                .verifier_moves
-                .iter()
-                .filter(|verifier_move| verifier_move.roles.len() == 2)
-                .collect::<Vec<_>>();
-            assert_eq!(combined_moves.len(), 2);
-            assert_eq!(
-                combined_moves[0].roles,
-                vec![
-                    VerifierMoveRole::CfwJointConstraint,
-                    VerifierMoveRole::WhirOpeningBatching {
-                        epoch: TranscriptEpoch::PreChallenge,
-                    },
-                ]
-            );
-            assert!(matches!(
-                combined_moves[0].challenge_space,
-                ExactChallengeSpace::ExtensionVector {
-                    element_count: 2,
-                    excluded_element_count: 0,
-                }
-            ));
-            assert_eq!(
-                combined_moves[1].roles,
-                vec![
-                    VerifierMoveRole::WhirFinalQueries {
-                        epoch: TranscriptEpoch::PreChallenge,
-                    },
-                    VerifierMoveRole::WhirOpeningBatching {
-                        epoch: TranscriptEpoch::Main,
-                    },
-                ]
-            );
-            assert!(matches!(
-                combined_moves[1].challenge_space,
-                ExactChallengeSpace::ExtensionVectorAndDistinctQueries {
-                    extension_element_count: 1,
-                    ref groups,
-                } if groups.len() == 9
-            ));
-        }
+        let selected = &catalog.selected;
+        let combined_moves = selected
+            .transcript_chronology
+            .verifier_moves
+            .iter()
+            .filter(|verifier_move| verifier_move.roles.len() == 2)
+            .collect::<Vec<_>>();
+        assert_eq!(combined_moves.len(), 2);
+        assert_eq!(
+            combined_moves[0].roles,
+            vec![
+                VerifierMoveRole::CfwJointConstraint,
+                VerifierMoveRole::WhirOpeningBatching {
+                    epoch: TranscriptEpoch::PreChallenge,
+                },
+            ]
+        );
+        assert!(matches!(
+            combined_moves[0].challenge_space,
+            ExactChallengeSpace::ExtensionVector {
+                element_count: 2,
+                excluded_element_count: 0,
+            }
+        ));
+        assert_eq!(
+            combined_moves[1].roles,
+            vec![
+                VerifierMoveRole::WhirFinalQueries {
+                    epoch: TranscriptEpoch::PreChallenge,
+                },
+                VerifierMoveRole::WhirOpeningBatching {
+                    epoch: TranscriptEpoch::Main,
+                },
+            ]
+        );
+        assert!(matches!(
+            combined_moves[1].challenge_space,
+            ExactChallengeSpace::ExtensionVectorAndDistinctQueries {
+                extension_element_count: 1,
+                ref groups,
+            } if groups.len() == 9
+        ));
     }
 }

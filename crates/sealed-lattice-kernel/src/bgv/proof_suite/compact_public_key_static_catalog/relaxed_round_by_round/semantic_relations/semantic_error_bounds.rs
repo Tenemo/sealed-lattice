@@ -982,11 +982,7 @@ mod tests {
                 .expect("selected relation derives");
         let catalog =
             CompactPublicKeyStaticCatalog::derive().expect("compact public-key catalog derives");
-        let factor_one = catalog
-            .factor_catalogs
-            .iter()
-            .find(|factor| factor.packing_factor == 1)
-            .expect("factor one exists");
+        let factor_one = &catalog.selected;
         let theorem = derive_factor_one_semantic_error_theorem(
             &factor_one.relaxed_round_by_round,
             &relation,

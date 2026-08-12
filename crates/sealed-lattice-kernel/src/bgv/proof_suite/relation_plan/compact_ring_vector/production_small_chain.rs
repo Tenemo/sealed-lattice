@@ -1416,7 +1416,7 @@ fn small_chain_proof_wire_geometry(
         FixedUniformVerifierMessageGeometry::new(1, 0, 0, Vec::new())
             .expect("CFW final verifier message geometry"),
     ));
-    CompactProofWireGeometry::new(1, responses).expect("small-chain proof wire geometry")
+    CompactProofWireGeometry::new(responses).expect("small-chain proof wire geometry")
 }
 
 const SMALL_CHAIN_SOURCE_DESCRIPTOR_BINDING_DOMAIN: &str =
@@ -1603,7 +1603,7 @@ impl AuthenticatedProductionSourceProvider {
             SMALL_CHAIN_SOURCE_CATALOG_BINDING_DOMAIN,
             &[
                 &request_context.stable_generation_binding_hash(),
-                relation.relation_plan_hash().as_slice(),
+                relation.relation_plan_variant_hash().as_slice(),
                 &catalog_material,
             ],
         );
@@ -1920,7 +1920,7 @@ fn reduced_production_coefficient_source(
         .map_err(|_| CommonProofProverError::CountOverflow)?;
     let public_setup_seed = hash_framed_parts_512(
         "sealed-lattice/compact-small-chain/public-setup-seed/v1",
-        &[&fixture.relation.relation_plan_hash()],
+        &[&fixture.relation.relation_plan_variant_hash()],
     );
     let common_secret_coefficients = Zeroizing::new(
         (0..ring_degree)
@@ -2060,7 +2060,7 @@ fn request_context(
         ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
         [3_u8; 64],
         [4_u8; 64],
-        relation.relation_plan_hash(),
+        relation.relation_plan_variant_hash(),
         None,
         None,
     )
@@ -2467,7 +2467,6 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
             .expect("cross-epoch point length fits usize"),
     );
     let public_input_wire_geometry = CompactPublicInputWireGeometry::new(
-        1,
         relation.public_input_ring_vector_count(),
         relation.ring_degree(),
     )
@@ -2484,7 +2483,7 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         Hash512::from_bytes([0x21_u8; 64]),
         Hash512::from_bytes([0x22_u8; 64]),
         Hash512::from_bytes([0x23_u8; 64]),
-        Hash512::from_bytes(relation.relation_plan_hash()),
+        Hash512::from_bytes(relation.relation_plan_variant_hash()),
     );
     let canonical_public_input_bytes = encode_compact_public_input(
         public_input_wire_geometry,
@@ -2621,7 +2620,7 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
                 "sealed-lattice/test/production-small-chain-proof-header/v1",
                 &[&canonical_public_input_bytes],
             ),
-            relation.relation_plan_hash(),
+            relation.relation_plan_variant_hash(),
             relation_plan_variant
                 .canonical_hash()
                 .expect("the reduced relation variant hashes canonically"),
@@ -2985,7 +2984,7 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         "sealed-lattice/test/production-small-chain-assignment/v1",
         &[
             &source_replay_binding,
-            &relation.relation_plan_hash(),
+            &relation.relation_plan_variant_hash(),
             &lookup_challenge_bytes,
         ],
     );
@@ -3436,12 +3435,8 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         .finish()
         .expect("small-chain incremental proof assembly finishes");
     assert_eq!(canonical_proof_bytes, monolithic_canonical_proof_bytes);
-    let decoded_proof = decode_compact_proof_wire(
-        &proof_wire_geometry,
-        &canonical_proof_bytes,
-        canonical_proof_bytes.len(),
-    )
-    .expect("fresh small-chain proof decoder accepts transported bytes");
+    let decoded_proof = decode_compact_proof_wire(&proof_wire_geometry, &canonical_proof_bytes)
+        .expect("fresh small-chain proof decoder accepts transported bytes");
     verify_small_chain_commitment_bindings(
         &decoded_proof,
         &canonical_proof_bytes,
@@ -3864,7 +3859,6 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
     let transported_cfw_proof = decode_compact_proof_wire(
         &proof_wire_geometry,
         &decoded_small_chain_proof.canonical_cfw_proof_bytes,
-        decoded_small_chain_proof.canonical_cfw_proof_bytes.len(),
     )
     .expect("the CFW section remains independently canonical after transport");
     for (response_ordinal, ((built_response, wire_geometry), decoded_response)) in built_responses
@@ -3943,7 +3937,6 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
             let transported_cfw_proof = decode_compact_proof_wire(
                 &proof_wire_geometry,
                 &transported.canonical_cfw_proof_bytes,
-                transported.canonical_cfw_proof_bytes.len(),
             )?;
             verify_small_chain_commitment_bindings(
                 &transported_cfw_proof,
@@ -4431,7 +4424,6 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
     let mutated_outer_cfw_proof = decode_compact_proof_wire(
         &proof_wire_geometry,
         &decoded_mutated_outer_cfw.canonical_cfw_proof_bytes,
-        decoded_mutated_outer_cfw.canonical_cfw_proof_bytes.len(),
     )
     .expect("the embedded CFW decoder accepts the mutated root bytes");
     assert!(
@@ -4470,20 +4462,12 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         decode_compact_proof_wire(
             &proof_wire_geometry,
             &canonical_proof_bytes[..canonical_proof_bytes.len() - 1],
-            canonical_proof_bytes.len() - 1,
         )
         .is_err()
     );
     let mut trailing_proof_bytes = canonical_proof_bytes.clone();
     trailing_proof_bytes.push(0);
-    assert!(
-        decode_compact_proof_wire(
-            &proof_wire_geometry,
-            &trailing_proof_bytes,
-            trailing_proof_bytes.len(),
-        )
-        .is_err()
-    );
+    assert!(decode_compact_proof_wire(&proof_wire_geometry, &trailing_proof_bytes).is_err());
     let mut wrong_public_input_binding = canonical_public_input_bytes.clone();
     wrong_public_input_binding[10] ^= 1;
     assert!(

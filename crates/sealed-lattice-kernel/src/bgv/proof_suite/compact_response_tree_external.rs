@@ -1358,10 +1358,10 @@ mod tests {
     #[test]
     fn retention_driver_keeps_delayed_trees_through_live_prefix_last_use() {
         let (merkle_geometries, wire_geometries) = retained_response_geometries();
-        let proof_geometry = CompactProofWireGeometry::new(1, wire_geometries)
-            .expect("retained-tree proof geometry");
-        let public_input_geometry = CompactPublicInputWireGeometry::new(1, 1, 1)
-            .expect("retained-tree public-input geometry");
+        let proof_geometry =
+            CompactProofWireGeometry::new(wire_geometries).expect("retained-tree proof geometry");
+        let public_input_geometry =
+            CompactPublicInputWireGeometry::new(1, 1).expect("retained-tree public-input geometry");
         let public_input_bindings = CompactPublicInputBindings::new(
             Hash512::from_bytes([0x71; Hash512::BYTE_LENGTH]),
             Hash512::from_bytes([0x72; Hash512::BYTE_LENGTH]),

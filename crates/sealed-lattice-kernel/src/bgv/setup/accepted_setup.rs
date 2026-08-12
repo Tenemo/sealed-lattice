@@ -99,7 +99,6 @@ pub(in crate::bgv) use self::generation_authority::{
 #[cfg(test)]
 pub(in crate::bgv) use self::generation_authority::{
     SetupGenerationCompactPublicKeyDevelopmentAuthority,
-    selected_setup_generation_compact_public_key_development_retained_payload_byte_length,
     setup_generation_compact_public_key_development_retained_payload_byte_length,
     with_setup_generation_compact_public_key_development_relation_reentry,
 };

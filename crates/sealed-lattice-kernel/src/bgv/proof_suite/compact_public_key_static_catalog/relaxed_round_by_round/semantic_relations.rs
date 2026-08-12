@@ -618,6 +618,12 @@ impl From<CompactCfwError> for SemanticCfwError {
     }
 }
 
+impl From<crate::bgv::proof_suite::compact_cfw::CompactCfwGeometryError> for SemanticCfwError {
+    fn from(error: crate::bgv::proof_suite::compact_cfw::CompactCfwGeometryError) -> Self {
+        Self::CompactCfw(error.into())
+    }
+}
+
 impl From<SemanticRelationError> for SemanticCfwError {
     fn from(error: SemanticRelationError) -> Self {
         Self::Relation(error)
@@ -2075,7 +2081,7 @@ mod tests {
     fn production_cfw_output_descriptor_equals_the_main_whir_input_relation() {
         let catalog = super::super::super::CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static catalog derives");
-        let factor_one = &catalog.factor_catalogs[0];
+        let factor_one = &catalog.selected;
         let main_whir = &factor_one.main_whir;
         let source = committed_code_relation(
             main_whir.source_message_lengths[0],

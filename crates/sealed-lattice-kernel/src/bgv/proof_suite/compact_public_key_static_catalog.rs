@@ -4,13 +4,11 @@
 //! zero-knowledge WHIR executions, the logical transcript chronology, one
 //! response commitment per logical response, exact interactive and conditional
 //! non-interactive soundness arithmetic, bounded query sampling, and the
-//! factor-one through factor-eight comparisons. It feeds the independently
-//! derived response geometry into the canonical wire codec and accounts for
-//! the production transcript's complete prefixes. Emitted-proof integration
-//! and the concrete QROM correspondence remain open, so this ledger cannot
-//! select a packing or authorize proof generation. It contains
-//! no producer-supplied acceptance field; [`CompactPublicKeyStaticCatalog::check`]
-//! independently reconstructs every value from the checked relation owner.
+//! selected factor-one packing. It feeds the independently derived response
+//! geometry into the canonical wire codec and accounts for the production
+//! transcript's complete prefixes. Emitted-proof integration and the concrete
+//! QROM correspondence remain open, so this ledger does not authorize proof
+//! generation. It contains no producer-supplied acceptance field.
 
 use num_bigint::BigUint;
 use num_traits::One;
@@ -22,17 +20,19 @@ use p3_whir::{FoldingFactor, ProtocolParameters, SecurityAssumption, ZkParameter
 
 use super::PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT;
 use super::compact_generation_checkpoint::CompactResponseCheckpointSchedule;
+use super::compact_proof_contract::{
+    CompactProofContractGenerationInput, CompactResponseComponentRoleContract,
+    CompactVerifierMoveContractInput, CompactVerifierRoleCoordinate, CompactWhirEpochContractInput,
+    CompactWhirFoldContractInput, CompactWhirMaskGroupContractInput,
+    encode_generated_contract_source,
+};
 use super::compact_proof_wire::{
-    CompactProofWireAssemblerHeapGeometry, CompactProofWireError, CompactProofWireGeometry,
-    CompactPublicInputWireGeometry,
+    CompactProofWireError, CompactProofWireGeometry, CompactPublicInputWireGeometry,
 };
-use super::compact_response_merkle::{
-    CompactResponseFrontierScannerHeapGeometry, CompactResponsePostorderWriterHeapGeometry,
-};
-use super::compact_response_tree_external::CompactResponseTreeExternalMemoryGeometry;
 use super::merkle::maximum_minimal_frontier_node_count;
 use super::relation_plan::{
-    CompactPublicKeyRelationCatalog, selected_compact_public_key_relation_catalog,
+    CompactPublicKeyRelationCatalog, compact_structured_witness_covector_geometry,
+    selected_compact_public_key_relation_catalog,
 };
 
 mod canonical_reed_solomon;
@@ -46,15 +46,12 @@ mod lifecycle;
 mod masking_leakage;
 mod non_interactive_soundness;
 mod relaxed_round_by_round;
-mod resource_overlap;
 mod response_commitment;
-mod response_commitment_lifecycle;
 mod row_source_lifecycle;
 mod soundness;
 mod transcript_binding;
 mod transcript_chronology;
 mod uniform_verifier_randomness;
-mod witness_covector;
 
 const GOLDILOCKS_BASE_FIELD_MODULUS: u64 = 0xffff_ffff_0000_0001;
 const QUINTIC_EXTENSION_DEGREE: u64 = 5;
@@ -64,7 +61,6 @@ const EXTENSION_FIELD_ELEMENT_BYTE_LENGTH: u64 =
 const MERKLE_DIGEST_BYTE_LENGTH: u64 = 64;
 const MERKLE_FRONTIER_COUNT_BYTE_LENGTH: u64 = 4;
 const PRIVATE_LEAF_SALT_BYTE_LENGTH: u64 = 128;
-const SHAKE256_STATE_BYTE_LENGTH: u64 = 200;
 const INTERACTIVE_VERIFIER_MOVE_SECURITY_LEVEL: u32 = 266;
 const WHIR_PROTOCOL_SECURITY_LEVEL: u32 = INTERACTIVE_VERIFIER_MOVE_SECURITY_LEVEL + 1;
 const MAIN_CODE_LOG_INVERSE_RATE: u32 = 2;
@@ -83,9 +79,7 @@ const CROSS_EPOCH_MASK_WIDTH: u64 = 2;
 const CROSS_EPOCH_MASK_MESSAGE_LENGTH: u64 = 1;
 const CANONICAL_WHIR_PROOF_FRAME_BYTE_LENGTH: u64 = 32;
 const TRANSPORT_CHUNK_BYTE_LENGTH: u64 = 1_048_576;
-const WASM_HARD_BOUND_BYTE_LENGTH: u64 = 671_088_640;
 const PROOF_ALLOCATION_BOUND_BYTE_LENGTH: u64 = 268_435_456;
-const SCRATCH_BOUND_BYTE_LENGTH: u64 = 1_073_741_824;
 
 type ChallengeField = BinomialExtensionField<Goldilocks, 5>;
 
@@ -1195,41 +1189,27 @@ struct WhirExternalMaskInput {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct PackingStaticCatalog {
-    packing_factor: u64,
+struct SelectedStaticCatalog {
     pre_challenge_whir: WhirStaticLedger,
     main_whir: WhirStaticLedger,
     transcript_chronology: transcript_chronology::PackingTranscriptChronology,
     uniform_verifier_randomness: uniform_verifier_randomness::PackingUniformVerifierRandomness,
     response_commitments: response_commitment::PackingResponseCommitmentCatalog,
-    response_commitment_lifecycle:
-        response_commitment_lifecycle::PackingResponseCommitmentLifecycle,
     query_sampling_lifecycle: lifecycle::PackingQuerySamplingLifecycle,
     masking_leakage: masking_leakage::PackingMaskingLeakageCorrespondence,
     interactive_soundness: soundness::PackingInteractiveSoundness,
     relaxed_round_by_round: relaxed_round_by_round::RelaxedRoundByRoundCatalog,
-    emitted_byte_correspondence: emitted_byte_correspondence::PackingEmittedByteCorrespondence,
+    decoded_challenge_consumers: emitted_byte_correspondence::DecodedChallengeConsumers,
     non_interactive_soundness: non_interactive_soundness::PackingNonInteractiveSoundness,
     proof_wire_geometry: CompactProofWireGeometry,
     response_checkpoint_schedule: CompactResponseCheckpointSchedule,
-    proof_assembler_heap_geometry: CompactProofWireAssemblerHeapGeometry,
-    response_postorder_writer_heap_geometry: CompactResponsePostorderWriterHeapGeometry,
-    response_frontier_scanner_heap_geometry: CompactResponseFrontierScannerHeapGeometry,
-    response_external_memory_geometry: CompactResponseTreeExternalMemoryGeometry,
-    maximum_response_query_schedule_heap_byte_length: u64,
-    maximum_response_input_heap_payload_byte_length: u64,
-    maximum_response_tree_kernel_heap_byte_length: u64,
     public_input_wire_geometry: CompactPublicInputWireGeometry,
     transcript_binding: transcript_binding::PackingTranscriptBindingLedger,
     maximum_proof_byte_length: u64,
     public_input_byte_length: u64,
     transport_byte_length: u64,
     transport_chunk_count: u64,
-    commitment_peak_byte_length: u64,
     cfw_to_whir_retained_payload_byte_length: u64,
-    wasm_peak_byte_length: u64,
-    scratch_byte_length: u64,
-    proof_allocation_byte_length: u64,
     base_coordinate_butterfly_count: u64,
     committed_leaf_count: u64,
     commitment_leaf_hash_query_count: u64,
@@ -1242,73 +1222,37 @@ struct PackingStaticCatalog {
 }
 
 #[derive(Clone, Copy)]
-struct PackingStaticCatalogInput<'catalog> {
+struct SelectedStaticCatalogInput<'catalog> {
     relation: &'catalog CompactPublicKeyRelationCatalog,
     cfw_reduction: &'catalog cfw_reduction::CfwReductionCatalog,
     cfw_to_whir_handoff: &'catalog cfw_to_whir_handoff::CfwToWhirHandoffCatalog,
     cfw_lifecycle: &'catalog cfw_lifecycle::CfwLifecycleCatalog,
     row_source_lifecycle: &'catalog row_source_lifecycle::RowSourceLifecycleCatalog,
-    resource_overlap: &'catalog resource_overlap::CompactPublicKeyResourceOverlapCatalog,
-    witness_covector: &'catalog witness_covector::WitnessCovectorCatalog,
 }
 
-impl PackingStaticCatalog {
-    fn derive(
-        input: PackingStaticCatalogInput<'_>,
-        packing_factor: u64,
-    ) -> Result<Self, CompactStaticCatalogError> {
-        let PackingStaticCatalogInput {
+impl SelectedStaticCatalog {
+    fn derive(input: SelectedStaticCatalogInput<'_>) -> Result<Self, CompactStaticCatalogError> {
+        let SelectedStaticCatalogInput {
             relation,
             cfw_reduction,
             cfw_to_whir_handoff,
             cfw_lifecycle,
             row_source_lifecycle,
-            resource_overlap,
-            witness_covector,
         } = input;
-        if !matches!(packing_factor, 1 | 2 | 4 | 8) {
-            return Err(CompactStaticCatalogError::InvalidGeometry);
-        }
-        let packing_logarithm = packing_factor.ilog2();
         let main_component_count = relation
             .padded_witness_element_count()
-            .checked_div(
-                relation
-                    .ring_degree()
-                    .checked_mul(packing_factor)
-                    .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?,
-            )
+            .checked_div(relation.ring_degree())
             .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
         if !main_component_count.is_power_of_two() {
             return Err(CompactStaticCatalogError::InvalidGeometry);
         }
         let main_first_folding_factor = main_component_count.ilog2();
-        let pre_challenge_component_count = PRE_CHALLENGE_PADDED_RING_VECTOR_COUNT
-            .checked_div(packing_factor)
-            .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
+        let pre_challenge_component_count = PRE_CHALLENGE_PADDED_RING_VECTOR_COUNT;
         let pre_challenge_first_folding_factor = pre_challenge_component_count.ilog2();
-        let round_log_inverse_rates = [
-            2,
-            match packing_factor {
-                1 => 4,
-                2 | 4 => 3,
-                8 => 2,
-                _ => return Err(CompactStaticCatalogError::InvalidGeometry),
-            },
-            8_u32
-                .checked_sub(packing_logarithm)
-                .ok_or(CompactStaticCatalogError::InvalidGeometry)?,
-        ];
+        let round_log_inverse_rates = [2, 4, 8];
         cfw_reduction.check(relation)?;
-        cfw_lifecycle.check(relation, cfw_reduction)?;
-        row_source_lifecycle.check(relation)?;
-        resource_overlap.check(relation, row_source_lifecycle)?;
-        witness_covector.check(relation)?;
-        if row_source_lifecycle.deterministic_preparation_poll_count() == 0
-            || row_source_lifecycle.maximum_uninterrupted_elementwise_work_unit_count() == 0
-        {
-            return Err(CompactStaticCatalogError::IncompleteLifecycle);
-        }
+        let witness_covector_geometry = compact_structured_witness_covector_geometry(relation)
+            .map_err(|_| CompactStaticCatalogError::InvalidGeometry)?;
         let cfw_mask_group_specifications = cfw_reduction.mask_group_specifications().to_vec();
         let preliminary_cross_epoch_mask_specification = MaskGroupStaticSpecification {
             role: MaskGroupRole::CrossEpochOpening,
@@ -1416,22 +1360,6 @@ impl PackingStaticCatalog {
             &main_whir,
             cfw_reduction,
         )?;
-        let response_commitment_lifecycle =
-            response_commitment_lifecycle::PackingResponseCommitmentLifecycle::derive(
-                &response_commitments,
-            )?;
-        let response_postorder_writer_heap_geometry =
-            response_commitments.maximum_postorder_writer_heap_geometry()?;
-        let response_frontier_scanner_heap_geometry =
-            response_commitments.maximum_frontier_scanner_heap_geometry()?;
-        let response_external_memory_geometry =
-            response_commitments.maximum_external_memory_geometry()?;
-        let maximum_response_query_schedule_heap_byte_length =
-            response_commitments.maximum_response_query_schedule_heap_byte_length()?;
-        let maximum_response_input_heap_payload_byte_length =
-            response_commitments.maximum_response_input_heap_payload_byte_length()?;
-        let maximum_response_tree_kernel_heap_byte_length =
-            response_commitments.maximum_response_tree_kernel_heap_byte_length()?;
         let query_sampling_lifecycle =
             lifecycle::PackingQuerySamplingLifecycle::derive(&pre_challenge_whir, &main_whir)?;
         let masking_leakage = masking_leakage::PackingMaskingLeakageCorrespondence::derive(
@@ -1457,14 +1385,12 @@ impl PackingStaticCatalog {
             &transcript_chronology,
             &interactive_soundness,
         )?;
-        if packing_factor == 1 {
-            relaxed_round_by_round.check_factor_one_semantic_error_theorem(
-                relation,
-                cfw_reduction,
-                &pre_challenge_whir,
-                &main_whir,
-            )?;
-        }
+        relaxed_round_by_round.check_factor_one_semantic_error_theorem(
+            relation,
+            cfw_reduction,
+            &pre_challenge_whir,
+            &main_whir,
+        )?;
         if transcript_chronology.distinct_query_group_count
             != query_sampling_lifecycle.query_group_count
             || transcript_chronology.fixed_query_candidate_slot_count
@@ -1473,10 +1399,7 @@ impl PackingStaticCatalog {
             return Err(CompactStaticCatalogError::InvalidGeometry);
         }
 
-        let packing_factor_u16 = u16::try_from(packing_factor)
-            .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?;
         let proof_wire_geometry = CompactProofWireGeometry::new(
-            packing_factor_u16,
             response_commitments.production_wire_geometries(&uniform_verifier_randomness)?,
         )
         .map_err(map_production_wire_error)?;
@@ -1486,18 +1409,13 @@ impl PackingStaticCatalog {
         )
         .map_err(|_| CompactStaticCatalogError::InvalidGeometry)?;
         let public_input_wire_geometry = CompactPublicInputWireGeometry::new(
-            packing_factor_u16,
             relation.public_input_ring_vector_count(),
             relation.ring_degree(),
         )
         .map_err(map_production_wire_error)?;
-        let proof_assembler_heap_geometry =
-            CompactProofWireAssemblerHeapGeometry::derive(&proof_wire_geometry)
-                .map_err(map_production_wire_error)?;
-        if proof_wire_geometry.packing_factor() != packing_factor_u16
-            || u64::try_from(proof_wire_geometry.responses().len())
-                .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?
-                != response_commitments.bcs_response_root_count()
+        if u64::try_from(proof_wire_geometry.responses().len())
+            .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?
+            != response_commitments.bcs_response_root_count()
             || response_checkpoint_schedule.total_response_count()
                 != proof_wire_geometry.responses().len()
             || response_checkpoint_schedule.lagging_checkpoint_count() == 0
@@ -1511,25 +1429,17 @@ impl PackingStaticCatalog {
                     relation.public_input_ring_vector_count(),
                     relation.ring_degree(),
                 ])?
-            || proof_assembler_heap_geometry.maximum_canonical_proof_byte_length()
-                != u64::try_from(proof_wire_geometry.maximum_canonical_byte_length())
-                    .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?
         {
             return Err(CompactStaticCatalogError::InvalidGeometry);
         }
         let transcript_binding = transcript_binding::PackingTranscriptBindingLedger::derive(
             &proof_wire_geometry,
-            public_input_wire_geometry,
             &uniform_verifier_randomness,
         )?;
-        let emitted_byte_correspondence =
-            emitted_byte_correspondence::PackingEmittedByteCorrespondence::derive(
+        let decoded_challenge_consumers =
+            emitted_byte_correspondence::DecodedChallengeConsumers::derive(
                 &transcript_chronology,
                 &uniform_verifier_randomness,
-                &response_commitments,
-                &proof_wire_geometry,
-                public_input_wire_geometry,
-                &transcript_binding,
                 cfw_reduction,
             )?;
         let non_interactive_soundness =
@@ -1539,7 +1449,6 @@ impl PackingStaticCatalog {
                 &response_commitments,
                 &transcript_binding,
                 &relaxed_round_by_round,
-                &emitted_byte_correspondence,
             )?;
         let maximum_proof_byte_length =
             u64::try_from(proof_wire_geometry.maximum_canonical_byte_length())
@@ -1553,93 +1462,18 @@ impl PackingStaticCatalog {
 
         let encoded_row_count = relation
             .ring_degree()
-            .checked_mul(packing_factor)
-            .and_then(|message_length| message_length.checked_add(main_whir.query_counts[0]))
+            .checked_add(main_whir.query_counts[0])
             .and_then(|populated| populated.checked_mul(2))
             .and_then(u64::checked_next_power_of_two)
             .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
         if encoded_row_count != main_whir.oracle_heights[0] {
             return Err(CompactStaticCatalogError::InvalidGeometry);
         }
-        let transform_batch_component_count = (8 / packing_factor).max(1);
-        let transform_batch_matrix_byte_length = checked_product(&[
-            transform_batch_component_count,
-            encoded_row_count,
-            EXTENSION_FIELD_ELEMENT_BYTE_LENGTH,
-        ])?;
-        let replay_column_byte_length =
-            checked_product(&[encoded_row_count, EXTENSION_FIELD_ELEMENT_BYTE_LENGTH])?;
-        let hash_state_byte_length =
-            checked_product(&[encoded_row_count, SHAKE256_STATE_BYTE_LENGTH])?;
-        let twiddle_byte_length =
-            checked_product(&[encoded_row_count - 1, 2, BASE_FIELD_ELEMENT_BYTE_LENGTH])?;
-        let commitment_peak_byte_length = [
-            transform_batch_matrix_byte_length,
-            replay_column_byte_length,
-            hash_state_byte_length,
-            twiddle_byte_length,
-        ]
-        .into_iter()
-        .try_fold(0_u64, checked_add)?;
-        let whir_wasm_peak_byte_length = [
-            commitment_peak_byte_length,
-            resource_overlap.ready_row_source_peak_byte_length(),
-            cfw_to_whir_handoff.retained_combined_relation_payload_byte_length(),
-            proof_assembler_heap_geometry.maximum_owned_heap_byte_length(),
-            maximum_response_tree_kernel_heap_byte_length,
-            public_input_byte_length,
-            TRANSPORT_CHUNK_BYTE_LENGTH,
-        ]
-        .into_iter()
-        .try_fold(0_u64, checked_add)?;
-        let cfw_transcript_handoff_byte_length = checked_product(&[
-            checked_add(
-                cfw_reduction.non_oracle_extension_element_count(),
-                u64::from(cfw_reduction.joint_constraint_randomness_element_count()),
-            )?,
-            EXTENSION_FIELD_ELEMENT_BYTE_LENGTH,
-        ])?;
-        let cfw_wasm_peak_byte_length = cfw_lifecycle.maximum_wasm_live_byte_length(
-            resource_overlap.ready_row_source_peak_byte_length(),
-            proof_assembler_heap_geometry.maximum_owned_heap_byte_length(),
-            maximum_response_tree_kernel_heap_byte_length,
-            public_input_byte_length,
-            TRANSPORT_CHUNK_BYTE_LENGTH,
-            checked_add(
-                cfw_transcript_handoff_byte_length,
-                checked_add(
-                    cfw_to_whir_handoff.transition_payload_byte_length(),
-                    witness_covector.maximum_transient_field_payload_byte_length(),
-                )?,
-            )?,
-        )?;
-        let wasm_peak_byte_length = whir_wasm_peak_byte_length
-            .max(cfw_wasm_peak_byte_length)
-            .max(resource_overlap.maximum_preproof_peak_byte_length());
-        let checkpoint_staging_byte_length = checked_add(
-            maximum_proof_byte_length,
-            checked_add(public_input_byte_length, 2 * TRANSPORT_CHUNK_BYTE_LENGTH)?,
-        )?;
-        let whir_scratch_byte_length =
-            checked_add(whir_wasm_peak_byte_length, checkpoint_staging_byte_length).and_then(
-                |byte_length| {
-                    checked_add(
-                        byte_length,
-                        response_commitment_lifecycle.maximum_tree_storage_byte_length(),
-                    )
-                },
-            )?;
-        let cfw_scratch_byte_length = checked_add(
-            cfw_lifecycle.maximum_scratch_byte_length()?,
-            response_commitment_lifecycle.maximum_tree_storage_byte_length(),
-        )?;
-        let scratch_byte_length = whir_scratch_byte_length.max(cfw_scratch_byte_length);
-        let proof_allocation_byte_length = maximum_proof_byte_length;
-
+        let transform_batch_component_count = 8;
         let base_coordinate_butterfly_count = [
             pre_challenge_whir.base_coordinate_butterfly_count,
             main_whir.base_coordinate_butterfly_count,
-            witness_covector.transform_butterfly_count(),
+            witness_covector_geometry.transform_butterfly_count(),
         ]
         .into_iter()
         .try_fold(0_u64, checked_add)?;
@@ -1696,40 +1530,27 @@ impl PackingStaticCatalog {
             1_u64.max(cfw_lifecycle.maximum_phase_recomputation_count());
 
         let catalog = Self {
-            packing_factor,
             pre_challenge_whir,
             main_whir,
             transcript_chronology,
             uniform_verifier_randomness,
             response_commitments,
-            response_commitment_lifecycle,
             query_sampling_lifecycle,
             masking_leakage,
             interactive_soundness,
             relaxed_round_by_round,
-            emitted_byte_correspondence,
+            decoded_challenge_consumers,
             non_interactive_soundness,
             proof_wire_geometry,
             response_checkpoint_schedule,
-            proof_assembler_heap_geometry,
-            response_postorder_writer_heap_geometry,
-            response_frontier_scanner_heap_geometry,
-            response_external_memory_geometry,
-            maximum_response_query_schedule_heap_byte_length,
-            maximum_response_input_heap_payload_byte_length,
-            maximum_response_tree_kernel_heap_byte_length,
             public_input_wire_geometry,
             transcript_binding,
             maximum_proof_byte_length,
             public_input_byte_length,
             transport_byte_length,
             transport_chunk_count,
-            commitment_peak_byte_length,
             cfw_to_whir_retained_payload_byte_length: cfw_to_whir_handoff
                 .retained_combined_relation_payload_byte_length(),
-            wasm_peak_byte_length,
-            scratch_byte_length,
-            proof_allocation_byte_length,
             base_coordinate_butterfly_count,
             committed_leaf_count,
             commitment_leaf_hash_query_count,
@@ -1773,10 +1594,7 @@ struct CompactPublicKeyStaticCatalog {
     cfw_to_whir_handoff: cfw_to_whir_handoff::CfwToWhirHandoffCatalog,
     cfw_lifecycle: cfw_lifecycle::CfwLifecycleCatalog,
     row_source_lifecycle: row_source_lifecycle::RowSourceLifecycleCatalog,
-    resource_overlap: resource_overlap::CompactPublicKeyResourceOverlapCatalog,
-    witness_covector: witness_covector::WitnessCovectorCatalog,
-    factor_catalogs: Vec<PackingStaticCatalog>,
-    selected_packing_factor: Option<u64>,
+    selected: SelectedStaticCatalog,
 }
 
 impl CompactPublicKeyStaticCatalog {
@@ -1792,30 +1610,20 @@ impl CompactPublicKeyStaticCatalog {
         let cfw_lifecycle = cfw_lifecycle::CfwLifecycleCatalog::derive(&relation, &cfw_reduction)?;
         let row_source_lifecycle =
             row_source_lifecycle::RowSourceLifecycleCatalog::derive(&relation)?;
-        let resource_overlap = resource_overlap::CompactPublicKeyResourceOverlapCatalog::derive(
-            &relation,
-            &row_source_lifecycle,
-        )?;
-        let witness_covector = witness_covector::WitnessCovectorCatalog::derive(&relation)?;
-        let packing_input = PackingStaticCatalogInput {
+        let selected_input = SelectedStaticCatalogInput {
             relation: &relation,
             cfw_reduction: &cfw_reduction,
             cfw_to_whir_handoff: &cfw_to_whir_handoff,
             cfw_lifecycle: &cfw_lifecycle,
             row_source_lifecycle: &row_source_lifecycle,
-            resource_overlap: &resource_overlap,
-            witness_covector: &witness_covector,
         };
-        let factor_catalogs = [1_u64, 2, 4, 8]
-            .into_iter()
-            .map(|factor| PackingStaticCatalog::derive(packing_input, factor))
-            .collect::<Result<Vec<_>, _>>()?;
+        let selected = SelectedStaticCatalog::derive(selected_input)?;
         let field_order = BigUint::from(GOLDILOCKS_BASE_FIELD_MODULUS).pow(
             u32::try_from(QUINTIC_EXTENSION_DEGREE)
                 .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
         );
-        let catalog = Self {
-            relation_plan_hash: relation.relation_plan_hash(),
+        Ok(Self {
+            relation_plan_hash: relation.relation_plan_variant_hash(),
             relation_padded_witness_element_count: relation.padded_witness_element_count(),
             relation_operative_constraint_count: relation.operative_constraint_count(),
             pre_challenge_ring_vector_count: PRE_CHALLENGE_RING_VECTOR_COUNT,
@@ -1830,77 +1638,241 @@ impl CompactPublicKeyStaticCatalog {
             cfw_to_whir_handoff,
             cfw_lifecycle,
             row_source_lifecycle,
-            resource_overlap,
-            witness_covector,
-            factor_catalogs,
-            selected_packing_factor: None,
-        };
-        catalog.check()?;
-        Ok(catalog)
-    }
-
-    fn check(&self) -> Result<(), CompactStaticCatalogError> {
-        let expected = Self::derive_without_recursive_check()?;
-        if self != &expected {
-            return Err(CompactStaticCatalogError::InvalidGeometry);
-        }
-        Ok(())
-    }
-
-    fn derive_without_recursive_check() -> Result<Self, CompactStaticCatalogError> {
-        let relation = selected_compact_public_key_relation_catalog()
-            .map_err(|_| CompactStaticCatalogError::InvalidGeometry)?;
-        let cfw_reduction = cfw_reduction::CfwReductionCatalog::derive(&relation)?;
-        let cfw_to_whir_handoff = cfw_to_whir_handoff::CfwToWhirHandoffCatalog::derive(
-            &relation,
-            &cfw_reduction,
-            CROSS_EPOCH_EXPLICIT_OPENING_COUNT,
-        )?;
-        let cfw_lifecycle = cfw_lifecycle::CfwLifecycleCatalog::derive(&relation, &cfw_reduction)?;
-        let row_source_lifecycle =
-            row_source_lifecycle::RowSourceLifecycleCatalog::derive(&relation)?;
-        let resource_overlap = resource_overlap::CompactPublicKeyResourceOverlapCatalog::derive(
-            &relation,
-            &row_source_lifecycle,
-        )?;
-        let witness_covector = witness_covector::WitnessCovectorCatalog::derive(&relation)?;
-        let packing_input = PackingStaticCatalogInput {
-            relation: &relation,
-            cfw_reduction: &cfw_reduction,
-            cfw_to_whir_handoff: &cfw_to_whir_handoff,
-            cfw_lifecycle: &cfw_lifecycle,
-            row_source_lifecycle: &row_source_lifecycle,
-            resource_overlap: &resource_overlap,
-            witness_covector: &witness_covector,
-        };
-        let factor_catalogs = [1_u64, 2, 4, 8]
-            .into_iter()
-            .map(|factor| PackingStaticCatalog::derive(packing_input, factor))
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(Self {
-            relation_plan_hash: relation.relation_plan_hash(),
-            relation_padded_witness_element_count: relation.padded_witness_element_count(),
-            relation_operative_constraint_count: relation.operative_constraint_count(),
-            pre_challenge_ring_vector_count: PRE_CHALLENGE_RING_VECTOR_COUNT,
-            cross_epoch_point_coordinate_count: CROSS_EPOCH_POINT_COORDINATE_COUNT,
-            cross_epoch_binding_error_numerator: u64::from(CROSS_EPOCH_POINT_COORDINATE_COUNT),
-            cross_epoch_explicit_opening_count: CROSS_EPOCH_EXPLICIT_OPENING_COUNT,
-            lookup_challenge_field_order: BigUint::from(GOLDILOCKS_BASE_FIELD_MODULUS).pow(
-                u32::try_from(QUINTIC_EXTENSION_DEGREE)
-                    .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
-            ),
-            lookup_challenge_excluded_subfield_order: BigUint::from(GOLDILOCKS_BASE_FIELD_MODULUS),
-            maximum_fiat_shamir_candidate_draws:
-                PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
-            cfw_reduction,
-            cfw_to_whir_handoff,
-            cfw_lifecycle,
-            row_source_lifecycle,
-            resource_overlap,
-            witness_covector,
-            factor_catalogs,
-            selected_packing_factor: None,
+            selected,
         })
+    }
+}
+
+pub(super) fn generated_factor_one_contract_source_bytes() -> Vec<u8> {
+    let catalog = CompactPublicKeyStaticCatalog::derive()
+        .expect("factor-one contract source geometry derives");
+    let selected = &catalog.selected;
+    let relation = selected_compact_public_key_relation_catalog()
+        .expect("factor-one contract relation derives");
+    let response_merkle_geometries = selected
+        .response_commitments
+        .production_merkle_geometries()
+        .expect("factor-one response Merkle geometries derive");
+    let response_component_roles = selected
+        .response_commitments
+        .responses()
+        .iter()
+        .map(|response| {
+            response
+                .components
+                .iter()
+                .map(|component| {
+                    let (role_tag, epoch, batch_ordinal, round_ordinal) =
+                        component.role.contract_coordinates();
+                    CompactResponseComponentRoleContract::new(
+                        role_tag,
+                        epoch,
+                        batch_ordinal,
+                        round_ordinal,
+                    )
+                })
+                .collect()
+        })
+        .collect();
+    let verifier_moves = selected
+        .transcript_chronology
+        .verifier_moves()
+        .iter()
+        .enumerate()
+        .map(|(move_index, verifier_move)| {
+            let decoded_consumers = selected
+                .decoded_challenge_consumers
+                .for_move(move_index)
+                .expect("factor-one decoded challenge consumers derive");
+            assert_eq!(decoded_consumers.len(), verifier_move.roles().len());
+            CompactVerifierMoveContractInput {
+                ordinal: verifier_move.ordinal(),
+                preceding_prover_response_ordinal: verifier_move
+                    .preceding_prover_response_ordinal(),
+                preceding_commitment_count: u32::try_from(
+                    verifier_move.preceding_commitment_count(),
+                )
+                .expect("commitment count fits u32"),
+                role_coordinates: verifier_move
+                    .roles()
+                    .iter()
+                    .copied()
+                    .zip(decoded_consumers)
+                    .map(|(role, consumer)| {
+                        assert_eq!(consumer.role, role);
+                        contract_role_coordinate(
+                            role,
+                            [
+                                [
+                                    consumer.extension_output_range.start,
+                                    consumer.extension_output_range.end,
+                                ],
+                                [
+                                    consumer.base_field_output_range.start,
+                                    consumer.base_field_output_range.end,
+                                ],
+                                [
+                                    consumer.distinct_query_group_range.start,
+                                    consumer.distinct_query_group_range.end,
+                                ],
+                            ],
+                        )
+                    })
+                    .collect(),
+                message_geometry: selected
+                    .uniform_verifier_randomness
+                    .fixed_message_geometry(move_index)
+                    .expect("factor-one verifier-message geometry derives"),
+            }
+        })
+        .collect();
+    let whir_ledgers = [
+        (1_u8, &selected.pre_challenge_whir),
+        (2_u8, &selected.main_whir),
+    ];
+    let whir_epochs = whir_ledgers
+        .into_iter()
+        .map(|(epoch, whir)| CompactWhirEpochContractInput {
+            epoch,
+            polynomial_variable_count: whir.polynomial_variable_count,
+            folding_schedule: whir.folding_schedule,
+            final_variable_count: whir.final_variable_count,
+            round_log_inverse_rates: whir.round_log_inverse_rates,
+            mask_query_count: whir.mask_query_count,
+            internal_mask_groups: whir
+                .internal_mask_groups
+                .iter()
+                .copied()
+                .map(contract_whir_mask_group)
+                .collect(),
+            external_mask_groups: whir
+                .external_mask_groups
+                .iter()
+                .copied()
+                .map(contract_whir_mask_group)
+                .collect(),
+        })
+        .collect();
+    let whir_folds = whir_ledgers
+        .into_iter()
+        .flat_map(|(epoch, whir)| {
+            (0..WHIR_FOLD_BATCH_COUNT).map(move |batch_ordinal| CompactWhirFoldContractInput {
+                epoch,
+                batch_ordinal: u8::try_from(batch_ordinal).expect("fold ordinal fits u8"),
+                message_length: whir.source_message_lengths[batch_ordinal],
+                hiding_randomness_length: whir.query_counts[batch_ordinal],
+                block_length: whir.oracle_heights[batch_ordinal],
+                oracle_width: whir.oracle_widths[batch_ordinal],
+                query_count: whir.query_counts[batch_ordinal],
+            })
+        })
+        .collect();
+    encode_generated_contract_source(CompactProofContractGenerationInput {
+        relation_schema_digest: relation
+            .canonical_schema_digest()
+            .expect("factor-one relation schema digest derives"),
+        commitment_count: u32::try_from(selected.transcript_chronology.commitment_count())
+            .expect("commitment count fits u32"),
+        distinct_query_group_count: u32::try_from(
+            selected.transcript_chronology.distinct_query_group_count,
+        )
+        .expect("query-group count fits u32"),
+        public_input_wire_geometry: selected.public_input_wire_geometry,
+        proof_wire_geometry: selected.proof_wire_geometry.clone(),
+        response_merkle_geometries,
+        response_component_roles,
+        checkpoint_schedule: selected.response_checkpoint_schedule.clone(),
+        verifier_moves,
+        whir_epochs,
+        whir_folds,
+    })
+    .expect("factor-one contract source bytes encode and decode")
+}
+
+fn contract_whir_mask_group(group: MaskGroupStaticLedger) -> CompactWhirMaskGroupContractInput {
+    let (role_tag, coordinate) = match group.role {
+        MaskGroupRole::CrossEpochOpening => (1, 0),
+        MaskGroupRole::CfwInner => (2, 0),
+        MaskGroupRole::CfwOuter => (3, 0),
+        MaskGroupRole::WhirSumcheck { batch_ordinal } => (4, batch_ordinal),
+        MaskGroupRole::WhirCodeSwitch { round_ordinal } => (5, round_ordinal),
+    };
+    let committed_encoding_source = match group.committed_encoding_source {
+        MaskCommittedEncodingSource::OwnedByThisEpoch => 1,
+        MaskCommittedEncodingSource::ReusedFromPreChallenge => 2,
+    };
+    CompactWhirMaskGroupContractInput {
+        role_tag,
+        coordinate,
+        width: group.width,
+        message_length: group.message_length,
+        randomness_length: group.randomness_length,
+        domain_size: group.domain_size,
+        committed_encoding_source,
+    }
+}
+
+fn contract_role_coordinate(
+    role: transcript_chronology::VerifierMoveRole,
+    ranges: [[u64; 2]; 3],
+) -> CompactVerifierRoleCoordinate {
+    use transcript_chronology::VerifierMoveRole;
+
+    match role {
+        VerifierMoveRole::LookupChallenge => CompactVerifierRoleCoordinate::non_epoch(1, 0, ranges),
+        VerifierMoveRole::CrossEpochPoint => CompactVerifierRoleCoordinate::non_epoch(2, 0, ranges),
+        VerifierMoveRole::CfwInitialRandomness => {
+            CompactVerifierRoleCoordinate::non_epoch(3, 0, ranges)
+        }
+        VerifierMoveRole::CfwSumcheckRound { round_ordinal } => {
+            CompactVerifierRoleCoordinate::non_epoch(4, round_ordinal, ranges)
+        }
+        VerifierMoveRole::CfwJointConstraint => {
+            CompactVerifierRoleCoordinate::non_epoch(5, 0, ranges)
+        }
+        VerifierMoveRole::WhirOpeningBatching { epoch } => {
+            CompactVerifierRoleCoordinate::epoch(6, contract_epoch(epoch), 0, 0, ranges)
+        }
+        VerifierMoveRole::WhirMaskedSumcheckCombination {
+            epoch,
+            batch_ordinal,
+        } => {
+            CompactVerifierRoleCoordinate::epoch(7, contract_epoch(epoch), batch_ordinal, 0, ranges)
+        }
+        VerifierMoveRole::WhirFolding {
+            epoch,
+            batch_ordinal,
+            round_ordinal,
+        } => CompactVerifierRoleCoordinate::epoch(
+            8,
+            contract_epoch(epoch),
+            batch_ordinal,
+            u32::from(round_ordinal),
+            ranges,
+        ),
+        VerifierMoveRole::WhirRoundQueryAndCombination {
+            epoch,
+            round_ordinal,
+        } => CompactVerifierRoleCoordinate::epoch(
+            9,
+            contract_epoch(epoch),
+            0,
+            u32::from(round_ordinal),
+            ranges,
+        ),
+        VerifierMoveRole::WhirBaseCombination { epoch } => {
+            CompactVerifierRoleCoordinate::epoch(10, contract_epoch(epoch), 0, 0, ranges)
+        }
+        VerifierMoveRole::WhirFinalQueries { epoch } => {
+            CompactVerifierRoleCoordinate::epoch(11, contract_epoch(epoch), 0, 0, ranges)
+        }
+    }
+}
+
+const fn contract_epoch(epoch: transcript_chronology::TranscriptEpoch) -> u8 {
+    match epoch {
+        transcript_chronology::TranscriptEpoch::PreChallenge => 1,
+        transcript_chronology::TranscriptEpoch::Main => 2,
     }
 }
 
@@ -2153,18 +2125,14 @@ mod tests {
     use super::*;
 
     #[derive(Debug, PartialEq, Eq)]
-    struct PackingResourceCeilingSnapshot {
-        packing_factor: u64,
+    struct SelectedResourceCeilingSnapshot {
         pre_challenge_proof_byte_length: u64,
         main_proof_byte_length: u64,
         maximum_proof_byte_length: u64,
         public_input_byte_length: u64,
         transport_byte_length: u64,
         transport_chunk_count: u64,
-        commitment_peak_byte_length: u64,
         cfw_to_whir_retained_payload_byte_length: u64,
-        wasm_peak_byte_length: u64,
-        scratch_byte_length: u64,
         base_coordinate_butterfly_count: u64,
         committed_leaf_count: u64,
         commitment_leaf_hash_query_count: u64,
@@ -2202,37 +2170,37 @@ mod tests {
         }
     }
 
-    impl From<&PackingStaticCatalog> for PackingResourceCeilingSnapshot {
-        fn from(factor: &PackingStaticCatalog) -> Self {
+    impl From<&SelectedStaticCatalog> for SelectedResourceCeilingSnapshot {
+        fn from(selected: &SelectedStaticCatalog) -> Self {
             Self {
-                packing_factor: factor.packing_factor,
-                pre_challenge_proof_byte_length: factor.pre_challenge_whir.proof_byte_length,
-                main_proof_byte_length: factor.main_whir.proof_byte_length,
-                maximum_proof_byte_length: factor.maximum_proof_byte_length,
-                public_input_byte_length: factor.public_input_byte_length,
-                transport_byte_length: factor.transport_byte_length,
-                transport_chunk_count: factor.transport_chunk_count,
-                commitment_peak_byte_length: factor.commitment_peak_byte_length,
-                cfw_to_whir_retained_payload_byte_length: factor
+                pre_challenge_proof_byte_length: selected.pre_challenge_whir.proof_byte_length,
+                main_proof_byte_length: selected.main_whir.proof_byte_length,
+                maximum_proof_byte_length: selected.maximum_proof_byte_length,
+                public_input_byte_length: selected.public_input_byte_length,
+                transport_byte_length: selected.transport_byte_length,
+                transport_chunk_count: selected.transport_chunk_count,
+                cfw_to_whir_retained_payload_byte_length: selected
                     .cfw_to_whir_retained_payload_byte_length,
-                wasm_peak_byte_length: factor.wasm_peak_byte_length,
-                scratch_byte_length: factor.scratch_byte_length,
-                base_coordinate_butterfly_count: factor.base_coordinate_butterfly_count,
-                committed_leaf_count: factor.committed_leaf_count,
-                commitment_leaf_hash_query_count: factor.commitment_leaf_hash_query_count,
-                commitment_parent_hash_query_count: factor.commitment_parent_hash_query_count,
-                verifier_opened_leaf_hash_query_count: factor.verifier_opened_leaf_hash_query_count,
-                maximum_uninterrupted_butterfly_count: factor.maximum_uninterrupted_butterfly_count,
-                maximum_uninterrupted_leaf_hash_count: factor.maximum_uninterrupted_leaf_hash_count,
-                deterministic_checkpoint_count: factor.deterministic_checkpoint_count,
+                base_coordinate_butterfly_count: selected.base_coordinate_butterfly_count,
+                committed_leaf_count: selected.committed_leaf_count,
+                commitment_leaf_hash_query_count: selected.commitment_leaf_hash_query_count,
+                commitment_parent_hash_query_count: selected.commitment_parent_hash_query_count,
+                verifier_opened_leaf_hash_query_count: selected
+                    .verifier_opened_leaf_hash_query_count,
+                maximum_uninterrupted_butterfly_count: selected
+                    .maximum_uninterrupted_butterfly_count,
+                maximum_uninterrupted_leaf_hash_count: selected
+                    .maximum_uninterrupted_leaf_hash_count,
+                deterministic_checkpoint_count: selected.deterministic_checkpoint_count,
             }
         }
     }
 
     #[test]
-    fn public_key_static_packing_ledger_derives_every_factor_without_selecting_one() {
+    fn public_key_static_catalog_derives_the_factor_one_production_contract() {
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
+        let selected = &catalog.selected;
 
         assert_eq!(catalog.relation_padded_witness_element_count, 4_194_304);
         assert_eq!(catalog.relation_operative_constraint_count, 2_686_977);
@@ -2241,26 +2209,7 @@ mod tests {
         assert_eq!(catalog.cross_epoch_binding_error_numerator, 21);
         assert_eq!(catalog.cross_epoch_explicit_opening_count, 2);
         assert_eq!(catalog.lookup_challenge_field_order.bits(), 320);
-        assert_eq!(catalog.factor_catalogs.len(), 4);
-        assert_eq!(
-            catalog
-                .factor_catalogs
-                .iter()
-                .map(|factor| factor.packing_factor)
-                .collect::<Vec<_>>(),
-            vec![1, 2, 4, 8]
-        );
-        assert_eq!(catalog.selected_packing_factor, None);
-        assert!(catalog.factor_catalogs.iter().all(|factor| {
-            factor.maximum_proof_byte_length < PROOF_ALLOCATION_BOUND_BYTE_LENGTH
-                && factor.wasm_peak_byte_length < WASM_HARD_BOUND_BYTE_LENGTH
-        }));
-        assert!(
-            catalog
-                .factor_catalogs
-                .iter()
-                .any(|factor| factor.scratch_byte_length >= SCRATCH_BOUND_BYTE_LENGTH)
-        );
+        assert!(selected.maximum_proof_byte_length < PROOF_ALLOCATION_BOUND_BYTE_LENGTH);
     }
 
     #[test]
@@ -2289,379 +2238,169 @@ mod tests {
         .chain(expected_whir_roles.iter().copied())
         .collect::<Vec<_>>();
 
-        for factor in &catalog.factor_catalogs {
-            assert_eq!(
-                factor
-                    .pre_challenge_whir
-                    .mask_groups_in_commitment_order()
-                    .map(|group| group.role)
-                    .collect::<Vec<_>>(),
-                expected_pre_challenge_roles
-            );
-            assert_eq!(
-                factor
-                    .main_whir
-                    .mask_groups_in_commitment_order()
-                    .map(|group| group.role)
-                    .collect::<Vec<_>>(),
-                expected_main_roles
-            );
-
-            let cfw_inner_group = factor
-                .main_whir
-                .external_mask_groups
-                .first()
-                .expect("CFW inner mask group");
-            assert_eq!(cfw_inner_group.role, MaskGroupRole::CfwInner);
-            assert_eq!(cfw_inner_group.width, 69);
-            assert_eq!(cfw_inner_group.message_length, 4);
-            assert_eq!(cfw_inner_group.randomness_length, 399);
-            assert_eq!(
-                cfw_inner_group.committed_encoding_source,
-                MaskCommittedEncodingSource::OwnedByThisEpoch
-            );
-
-            let cfw_outer_group = factor
-                .main_whir
-                .external_mask_groups
-                .get(1)
-                .expect("CFW outer mask group");
-            assert_eq!(cfw_outer_group.role, MaskGroupRole::CfwOuter);
-            assert_eq!(cfw_outer_group.width, 23);
-            assert_eq!(cfw_outer_group.message_length, 8);
-            assert_eq!(cfw_outer_group.randomness_length, 399);
-            assert_eq!(
-                cfw_outer_group.committed_encoding_source,
-                MaskCommittedEncodingSource::OwnedByThisEpoch
-            );
-
-            let pre_challenge_cross_epoch_group = factor
-                .pre_challenge_whir
-                .external_mask_groups
-                .first()
-                .expect("pre-challenge cross-epoch mask group");
-            let main_cross_epoch_group = factor
-                .main_whir
-                .external_mask_groups
-                .get(2)
-                .expect("main cross-epoch mask group");
-            assert_eq!(
-                pre_challenge_cross_epoch_group.role,
-                MaskGroupRole::CrossEpochOpening
-            );
-            assert_eq!(pre_challenge_cross_epoch_group.width, 2);
-            assert_eq!(pre_challenge_cross_epoch_group.message_length, 1);
-            assert_eq!(pre_challenge_cross_epoch_group.randomness_length, 798);
-            assert_eq!(
-                pre_challenge_cross_epoch_group.committed_encoding_source,
-                MaskCommittedEncodingSource::OwnedByThisEpoch
-            );
-            assert_eq!(
-                main_cross_epoch_group,
-                &MaskGroupStaticLedger {
-                    committed_encoding_source: MaskCommittedEncodingSource::ReusedFromPreChallenge,
-                    ..*pre_challenge_cross_epoch_group
-                }
-            );
-
-            // Definition 11.1 has one global claim, two claims per inner
-            // mask, and one per outer mask. The two explicit cross-epoch
-            // openings join those 162 CFW claims under the same batching
-            // challenge.
-            assert_eq!(factor.pre_challenge_whir.opening_evaluation_count, 1);
-            assert_eq!(factor.pre_challenge_whir.opening_batching_claim_count, 1);
-            assert_eq!(factor.main_whir.opening_evaluation_count, 2);
-            assert_eq!(factor.main_whir.opening_batching_claim_count, 164);
-        }
-
-        let mut wrong_role = catalog.clone();
-        wrong_role.factor_catalogs[0].main_whir.external_mask_groups[0].role =
-            MaskGroupRole::CfwOuter;
+        let selected = &catalog.selected;
         assert_eq!(
-            wrong_role.check(),
-            Err(CompactStaticCatalogError::InvalidGeometry)
+            selected
+                .pre_challenge_whir
+                .mask_groups_in_commitment_order()
+                .map(|group| group.role)
+                .collect::<Vec<_>>(),
+            expected_pre_challenge_roles
+        );
+        assert_eq!(
+            selected
+                .main_whir
+                .mask_groups_in_commitment_order()
+                .map(|group| group.role)
+                .collect::<Vec<_>>(),
+            expected_main_roles
         );
 
-        let mut wrong_order = catalog.clone();
-        wrong_order.factor_catalogs[0]
+        let cfw_inner_group = selected
             .main_whir
             .external_mask_groups
-            .swap(0, 1);
+            .first()
+            .expect("CFW inner mask group");
+        assert_eq!(cfw_inner_group.role, MaskGroupRole::CfwInner);
+        assert_eq!(cfw_inner_group.width, 69);
+        assert_eq!(cfw_inner_group.message_length, 4);
+        assert_eq!(cfw_inner_group.randomness_length, 399);
         assert_eq!(
-            wrong_order.check(),
-            Err(CompactStaticCatalogError::InvalidGeometry)
+            cfw_inner_group.committed_encoding_source,
+            MaskCommittedEncodingSource::OwnedByThisEpoch
         );
+
+        let cfw_outer_group = selected
+            .main_whir
+            .external_mask_groups
+            .get(1)
+            .expect("CFW outer mask group");
+        assert_eq!(cfw_outer_group.role, MaskGroupRole::CfwOuter);
+        assert_eq!(cfw_outer_group.width, 23);
+        assert_eq!(cfw_outer_group.message_length, 8);
+        assert_eq!(cfw_outer_group.randomness_length, 399);
+        assert_eq!(
+            cfw_outer_group.committed_encoding_source,
+            MaskCommittedEncodingSource::OwnedByThisEpoch
+        );
+
+        let pre_challenge_cross_epoch_group = selected
+            .pre_challenge_whir
+            .external_mask_groups
+            .first()
+            .expect("pre-challenge cross-epoch mask group");
+        let main_cross_epoch_group = selected
+            .main_whir
+            .external_mask_groups
+            .get(2)
+            .expect("main cross-epoch mask group");
+        assert_eq!(
+            pre_challenge_cross_epoch_group.role,
+            MaskGroupRole::CrossEpochOpening
+        );
+        assert_eq!(pre_challenge_cross_epoch_group.width, 2);
+        assert_eq!(pre_challenge_cross_epoch_group.message_length, 1);
+        assert_eq!(pre_challenge_cross_epoch_group.randomness_length, 798);
+        assert_eq!(
+            pre_challenge_cross_epoch_group.committed_encoding_source,
+            MaskCommittedEncodingSource::OwnedByThisEpoch
+        );
+        assert_eq!(
+            main_cross_epoch_group,
+            &MaskGroupStaticLedger {
+                committed_encoding_source: MaskCommittedEncodingSource::ReusedFromPreChallenge,
+                ..*pre_challenge_cross_epoch_group
+            }
+        );
+
+        // Definition 11.1 has one global claim, two claims per inner
+        // mask, and one per outer mask. The two explicit cross-epoch
+        // openings join those 162 CFW claims under the same batching
+        // challenge.
+        assert_eq!(selected.pre_challenge_whir.opening_evaluation_count, 1);
+        assert_eq!(selected.pre_challenge_whir.opening_batching_claim_count, 1);
+        assert_eq!(selected.main_whir.opening_evaluation_count, 2);
+        assert_eq!(selected.main_whir.opening_batching_claim_count, 164);
     }
 
     #[test]
     fn private_randomness_ledgers_count_every_independent_mask_coin_once() {
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
-        let pre_challenge_snapshots = catalog
-            .factor_catalogs
-            .iter()
-            .map(|factor| WhirPrivateRandomnessSnapshot::from(&factor.pre_challenge_whir))
-            .collect::<Vec<_>>();
-        let main_snapshots = catalog
-            .factor_catalogs
-            .iter()
-            .map(|factor| WhirPrivateRandomnessSnapshot::from(&factor.main_whir))
-            .collect::<Vec<_>>();
+        let selected = &catalog.selected;
+        let pre_challenge_snapshot =
+            WhirPrivateRandomnessSnapshot::from(&selected.pre_challenge_whir);
+        let main_snapshot = WhirPrivateRandomnessSnapshot::from(&selected.main_whir);
 
         assert_eq!(
-            pre_challenge_snapshots,
-            vec![
-                WhirPrivateRandomnessSnapshot {
-                    source_oracle_encoding: 44_224,
-                    carried_mask_messages: 56,
-                    carried_mask_encoding: 9_975,
-                    fresh_mirror_messages: 1_284,
-                    fresh_mirror_encoding: 9_975,
-                    fresh_source_message: 8,
-                    fresh_source_encoding: 348,
-                    total: 65_870,
-                },
-                WhirPrivateRandomnessSnapshot {
-                    source_oracle_encoding: 32_544,
-                    carried_mask_messages: 53,
-                    carried_mask_encoding: 9_576,
-                    fresh_mirror_messages: 1_341,
-                    fresh_mirror_encoding: 9_576,
-                    fresh_source_message: 16,
-                    fresh_source_encoding: 351,
-                    total: 53_457,
-                },
-                WhirPrivateRandomnessSnapshot {
-                    source_oracle_encoding: 24_448,
-                    carried_mask_messages: 50,
-                    carried_mask_encoding: 9_177,
-                    fresh_mirror_messages: 1_221,
-                    fresh_mirror_encoding: 9_177,
-                    fresh_source_message: 32,
-                    fresh_source_encoding: 357,
-                    total: 44_462,
-                },
-                WhirPrivateRandomnessSnapshot {
-                    source_oracle_encoding: 23_288,
-                    carried_mask_messages: 47,
-                    carried_mask_encoding: 8_778,
-                    fresh_mirror_messages: 1_329,
-                    fresh_mirror_encoding: 8_778,
-                    fresh_source_message: 64,
-                    fresh_source_encoding: 371,
-                    total: 42_655,
-                },
-            ]
+            pre_challenge_snapshot,
+            WhirPrivateRandomnessSnapshot {
+                source_oracle_encoding: 44_224,
+                carried_mask_messages: 56,
+                carried_mask_encoding: 9_975,
+                fresh_mirror_messages: 1_284,
+                fresh_mirror_encoding: 9_975,
+                fresh_source_message: 8,
+                fresh_source_encoding: 348,
+                total: 65_870,
+            }
         );
         assert_eq!(
-            main_snapshots,
-            vec![
-                WhirPrivateRandomnessSnapshot {
-                    source_oracle_encoding: 69_568,
-                    carried_mask_messages: 379,
-                    carried_mask_encoding: 45_486,
-                    fresh_mirror_messages: 1_747,
-                    fresh_mirror_encoding: 47_082,
-                    fresh_source_message: 8,
-                    fresh_source_encoding: 348,
-                    total: 164_618,
-                },
-                WhirPrivateRandomnessSnapshot {
-                    source_oracle_encoding: 45_184,
-                    carried_mask_messages: 376,
-                    carried_mask_encoding: 45_087,
-                    fresh_mirror_messages: 1_804,
-                    fresh_mirror_encoding: 46_683,
-                    fresh_source_message: 16,
-                    fresh_source_encoding: 351,
-                    total: 139_501,
-                },
-                WhirPrivateRandomnessSnapshot {
-                    source_oracle_encoding: 30_768,
-                    carried_mask_messages: 373,
-                    carried_mask_encoding: 44_688,
-                    fresh_mirror_messages: 1_684,
-                    fresh_mirror_encoding: 46_284,
-                    fresh_source_message: 32,
-                    fresh_source_encoding: 357,
-                    total: 124_186,
-                },
-                WhirPrivateRandomnessSnapshot {
-                    source_oracle_encoding: 26_448,
-                    carried_mask_messages: 370,
-                    carried_mask_encoding: 44_289,
-                    fresh_mirror_messages: 1_792,
-                    fresh_mirror_encoding: 45_885,
-                    fresh_source_message: 64,
-                    fresh_source_encoding: 371,
-                    total: 119_219,
-                },
-            ]
+            main_snapshot,
+            WhirPrivateRandomnessSnapshot {
+                source_oracle_encoding: 69_568,
+                carried_mask_messages: 379,
+                carried_mask_encoding: 45_486,
+                fresh_mirror_messages: 1_747,
+                fresh_mirror_encoding: 47_082,
+                fresh_source_message: 8,
+                fresh_source_encoding: 348,
+                total: 164_618,
+            }
         );
 
         assert_eq!(
             catalog.cfw_reduction.fresh_mask_randomness_element_count(),
             322
         );
-        assert!(catalog.factor_catalogs.iter().all(|factor| {
-            factor
+        assert_eq!(
+            selected
                 .pre_challenge_whir
-                .external_carried_mask_message_randomness_element_count
-                == 2
-                && factor
-                    .main_whir
-                    .external_carried_mask_message_randomness_element_count
-                    == 322
-        }));
-    }
-
-    #[test]
-    fn canonical_wire_resource_ceiling_vectors_are_exact_and_cannot_select_a_factor() {
-        let catalog = CompactPublicKeyStaticCatalog::derive()
-            .expect("compact public-key static packing ledger");
-        let snapshots = catalog
-            .factor_catalogs
-            .iter()
-            .map(PackingResourceCeilingSnapshot::from)
-            .collect::<Vec<_>>();
-        assert_eq!(
-            snapshots,
-            vec![
-                PackingResourceCeilingSnapshot {
-                    packing_factor: 1,
-                    pre_challenge_proof_byte_length: 4_868_556,
-                    main_proof_byte_length: 11_602_452,
-                    maximum_proof_byte_length: 26_927_670,
-                    public_input_byte_length: 15_991_062,
-                    transport_byte_length: 42_918_732,
-                    transport_chunk_count: 41,
-                    commitment_peak_byte_length: 75_497_456,
-                    cfw_to_whir_retained_payload_byte_length: 167_790_680,
-                    wasm_peak_byte_length: 385_505_540,
-                    scratch_byte_length: 640_811_508,
-                    base_coordinate_butterfly_count: 916_598_784,
-                    committed_leaf_count: 1_032_486,
-                    commitment_leaf_hash_query_count: 27_590_950,
-                    commitment_parent_hash_query_count: 1_032_359,
-                    verifier_opened_leaf_hash_query_count: 510_301,
-                    maximum_uninterrupted_butterfly_count: 44_564_480,
-                    maximum_uninterrupted_leaf_hash_count: 131_072,
-                    deterministic_checkpoint_count: 2_677,
-                },
-                PackingResourceCeilingSnapshot {
-                    packing_factor: 2,
-                    pre_challenge_proof_byte_length: 4_824_140,
-                    main_proof_byte_length: 10_643_348,
-                    maximum_proof_byte_length: 26_064_742,
-                    public_input_byte_length: 15_991_062,
-                    transport_byte_length: 42_055_804,
-                    transport_chunk_count: 41,
-                    commitment_peak_byte_length: 109_051_888,
-                    cfw_to_whir_retained_payload_byte_length: 167_790_680,
-                    wasm_peak_byte_length: 418_112_804,
-                    scratch_byte_length: 693_240_308,
-                    base_coordinate_butterfly_count: 972_341_248,
-                    committed_leaf_count: 1_736_994,
-                    commitment_leaf_hash_query_count: 28_827_938,
-                    commitment_parent_hash_query_count: 1_736_869,
-                    verifier_opened_leaf_hash_query_count: 476_727,
-                    maximum_uninterrupted_butterfly_count: 47_185_920,
-                    maximum_uninterrupted_leaf_hash_count: 262_144,
-                    deterministic_checkpoint_count: 2_677,
-                },
-                PackingResourceCeilingSnapshot {
-                    packing_factor: 4,
-                    pre_challenge_proof_byte_length: 4_703_956,
-                    main_proof_byte_length: 10_068_124,
-                    maximum_proof_byte_length: 25_415_814,
-                    public_input_byte_length: 15_991_062,
-                    transport_byte_length: 41_406_876,
-                    transport_chunk_count: 40,
-                    commitment_peak_byte_length: 176_160_752,
-                    cfw_to_whir_retained_payload_byte_length: 167_790_680,
-                    wasm_peak_byte_length: 484_445_268,
-                    scratch_byte_length: 798_097_908,
-                    base_coordinate_butterfly_count: 1_041_354_752,
-                    committed_leaf_count: 3_150_110,
-                    commitment_leaf_hash_query_count: 31_383_838,
-                    commitment_parent_hash_query_count: 3_149_987,
-                    verifier_opened_leaf_hash_query_count: 454_319,
-                    maximum_uninterrupted_butterfly_count: 49_807_360,
-                    maximum_uninterrupted_leaf_hash_count: 524_288,
-                    deterministic_checkpoint_count: 2_677,
-                },
-                PackingResourceCeilingSnapshot {
-                    packing_factor: 8,
-                    pre_challenge_proof_byte_length: 4_801_020,
-                    main_proof_byte_length: 9_937_668,
-                    maximum_proof_byte_length: 25_526_102,
-                    public_input_byte_length: 15_991_062,
-                    transport_byte_length: 41_517_164,
-                    transport_chunk_count: 40,
-                    commitment_peak_byte_length: 310_378_480,
-                    cfw_to_whir_retained_payload_byte_length: 167_790_680,
-                    wasm_peak_byte_length: 618_845_620,
-                    scratch_byte_length: 1_082_414_368,
-                    base_coordinate_butterfly_count: 1_131_831_296,
-                    committed_leaf_count: 5_968_154,
-                    commitment_leaf_hash_query_count: 36_356_378,
-                    commitment_parent_hash_query_count: 5_968_033,
-                    verifier_opened_leaf_hash_query_count: 452_379,
-                    maximum_uninterrupted_butterfly_count: 52_428_800,
-                    maximum_uninterrupted_leaf_hash_count: 1_048_576,
-                    deterministic_checkpoint_count: 2_677,
-                },
-            ]
+                .external_carried_mask_message_randomness_element_count,
+            2
         );
-        assert_eq!(catalog.selected_packing_factor, None);
         assert_eq!(
-            catalog
-                .factor_catalogs
-                .iter()
-                .map(|factor| {
-                    (
-                        factor.packing_factor,
-                        factor.proof_allocation_byte_length < PROOF_ALLOCATION_BOUND_BYTE_LENGTH,
-                        factor.wasm_peak_byte_length < WASM_HARD_BOUND_BYTE_LENGTH,
-                        factor.scratch_byte_length < SCRATCH_BOUND_BYTE_LENGTH,
-                    )
-                })
-                .collect::<Vec<_>>(),
-            vec![
-                (1, true, true, true),
-                (2, true, true, true),
-                (4, true, true, true),
-                (8, true, true, false),
-            ]
+            selected
+                .main_whir
+                .external_carried_mask_message_randomness_element_count,
+            322
         );
     }
 
     #[test]
-    fn incremental_proof_assembly_heap_is_exact_for_every_factor() {
+    fn canonical_wire_resource_ceiling_is_exact_for_factor_one() {
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
-        let heap_snapshots = catalog
-            .factor_catalogs
-            .iter()
-            .map(|factor| {
-                let heap = factor.proof_assembler_heap_geometry;
-                (
-                    factor.packing_factor,
-                    heap.maximum_canonical_proof_byte_length(),
-                    heap.leaf_salt_registry_byte_length(),
-                    heap.maximum_frontier_dictionary_byte_length(),
-                    heap.maximum_owned_heap_byte_length(),
-                )
-            })
-            .collect::<Vec<_>>();
+        let selected = &catalog.selected;
         assert_eq!(
-            heap_snapshots,
-            vec![
-                (1, 26_927_670, 10_151_680, 1_046_464, 38_125_814),
-                (2, 26_064_742, 10_083_328, 1_067_648, 37_215_718),
-                (4, 25_415_814, 9_928_704, 1_150_464, 36_494_982),
-                (8, 25_526_102, 9_901_056, 1_277_888, 36_705_046),
-            ]
+            SelectedResourceCeilingSnapshot::from(selected),
+            SelectedResourceCeilingSnapshot {
+                pre_challenge_proof_byte_length: 4_868_556,
+                main_proof_byte_length: 11_602_452,
+                maximum_proof_byte_length: 26_927_670,
+                public_input_byte_length: 15_991_062,
+                transport_byte_length: 42_918_732,
+                transport_chunk_count: 41,
+                cfw_to_whir_retained_payload_byte_length: 167_790_680,
+                base_coordinate_butterfly_count: 916_598_784,
+                committed_leaf_count: 1_032_486,
+                commitment_leaf_hash_query_count: 27_590_950,
+                commitment_parent_hash_query_count: 1_032_359,
+                verifier_opened_leaf_hash_query_count: 510_301,
+                maximum_uninterrupted_butterfly_count: 44_564_480,
+                maximum_uninterrupted_leaf_hash_count: 131_072,
+                deterministic_checkpoint_count: 2_677,
+            }
         );
     }
 
@@ -2669,77 +2408,18 @@ mod tests {
     fn production_response_checkpoint_schedule_preserves_canonical_section_order() {
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
-        let snapshots = catalog
-            .factor_catalogs
-            .iter()
-            .map(|factor| {
-                (
-                    factor.packing_factor,
-                    factor.response_checkpoint_schedule.total_response_count(),
-                    factor
-                        .response_checkpoint_schedule
-                        .lagging_checkpoint_count(),
-                    factor
-                        .response_checkpoint_schedule
-                        .maximum_pending_proof_response_count(),
-                )
-            })
-            .collect::<Vec<_>>();
+        let selected = &catalog.selected;
         assert_eq!(
-            snapshots,
-            vec![
-                (1, 82, 81, 80),
-                (2, 80, 79, 78),
-                (4, 78, 77, 76),
-                (8, 76, 75, 74)
-            ]
-        );
-    }
-
-    #[test]
-    fn response_tree_kernel_heap_is_exact_for_every_factor() {
-        let catalog = CompactPublicKeyStaticCatalog::derive()
-            .expect("compact public-key static packing ledger");
-        let heap_snapshots = catalog
-            .factor_catalogs
-            .iter()
-            .map(|factor| {
-                (
-                    factor.packing_factor,
-                    factor
-                        .response_postorder_writer_heap_geometry
-                        .maximum_owned_heap_byte_length(),
-                    factor
-                        .response_frontier_scanner_heap_geometry
-                        .maximum_owned_heap_byte_length(),
-                    factor
-                        .response_external_memory_geometry
-                        .driver_inline_byte_length(),
-                    factor
-                        .response_external_memory_geometry
-                        .executor_owned_heap_byte_length(),
-                    factor.maximum_response_query_schedule_heap_byte_length,
-                    factor.maximum_response_input_heap_payload_byte_length,
-                    factor.maximum_response_tree_kernel_heap_byte_length,
-                )
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            heap_snapshots,
-            vec![
-                (
-                    1, 1_050_944, 1_308_080, 368, 64, 393_480, 9_703_024, 9_703_024
-                ),
-                (
-                    2, 1_051_072, 1_334_560, 368, 64, 390_832, 9_665_952, 9_665_952
-                ),
-                (
-                    4, 1_051_200, 1_438_080, 368, 64, 386_856, 9_610_288, 9_610_288
-                ),
-                (
-                    8, 1_051_328, 1_597_360, 368, 64, 384_896, 9_582_848, 9_582_848
-                ),
-            ]
+            (
+                selected.response_checkpoint_schedule.total_response_count(),
+                selected
+                    .response_checkpoint_schedule
+                    .lagging_checkpoint_count(),
+                selected
+                    .response_checkpoint_schedule
+                    .maximum_pending_proof_response_count(),
+            ),
+            (82, 81, 80)
         );
     }
 
@@ -2759,34 +2439,21 @@ mod tests {
 
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
-        let expected_round_rates = [[2, 4, 8], [2, 3, 7], [2, 3, 6], [2, 2, 5]];
-        let expected_full_dimension_query_counts = [
-            [396, 432, 400, 348],
-            [395, 412, 481, 351],
-            [395, 403, 373, 357],
-            [395, 398, 489, 371],
-        ];
-        for ((factor, expected_rates), expected_query_counts) in catalog
-            .factor_catalogs
-            .iter()
-            .zip(expected_round_rates)
-            .zip(expected_full_dimension_query_counts)
-        {
-            assert_eq!(factor.main_whir.round_log_inverse_rates, expected_rates);
-            assert_eq!(
-                factor.pre_challenge_whir.round_log_inverse_rates,
-                expected_rates
-            );
-            assert_eq!(factor.main_whir.query_counts, expected_query_counts);
-            assert_eq!(
-                factor.pre_challenge_whir.query_counts,
-                expected_query_counts
-            );
-            assert_eq!(factor.pre_challenge_whir.mask_query_count, 399);
-            assert_eq!(factor.main_whir.mask_query_count, 399);
-            assert_eq!(factor.pre_challenge_whir.mask_query_union_branch_count, 9);
-            assert_eq!(factor.main_whir.mask_query_union_branch_count, 11);
-        }
+        let selected = &catalog.selected;
+        assert_eq!(selected.main_whir.round_log_inverse_rates, [2, 4, 8]);
+        assert_eq!(
+            selected.pre_challenge_whir.round_log_inverse_rates,
+            [2, 4, 8]
+        );
+        assert_eq!(selected.main_whir.query_counts, [396, 432, 400, 348]);
+        assert_eq!(
+            selected.pre_challenge_whir.query_counts,
+            [396, 432, 400, 348]
+        );
+        assert_eq!(selected.pre_challenge_whir.mask_query_count, 399);
+        assert_eq!(selected.main_whir.mask_query_count, 399);
+        assert_eq!(selected.pre_challenge_whir.mask_query_union_branch_count, 9);
+        assert_eq!(selected.main_whir.mask_query_union_branch_count, 11);
     }
 
     #[test]
@@ -2794,27 +2461,47 @@ mod tests {
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
 
-        for factor in &catalog.factor_catalogs {
-            for whir in [&factor.pre_challenge_whir, &factor.main_whir] {
-                let mut literal_path_byte_length = 0_u64;
-                for round_ordinal in 0..WHIR_ROUND_COUNT {
-                    literal_path_byte_length = checked_add(
-                        literal_path_byte_length,
-                        checked_add(
-                            MERKLE_FRONTIER_COUNT_BYTE_LENGTH,
-                            checked_product(&[
-                                whir.query_counts[round_ordinal],
-                                u64::from(whir.oracle_heights[round_ordinal].ilog2()),
-                                MERKLE_DIGEST_BYTE_LENGTH,
-                            ])
-                            .expect("literal path bytes"),
-                        )
-                        .expect("framed literal path bytes"),
+        let selected = &catalog.selected;
+        for whir in [&selected.pre_challenge_whir, &selected.main_whir] {
+            let mut literal_path_byte_length = 0_u64;
+            for round_ordinal in 0..WHIR_ROUND_COUNT {
+                literal_path_byte_length = checked_add(
+                    literal_path_byte_length,
+                    checked_add(
+                        MERKLE_FRONTIER_COUNT_BYTE_LENGTH,
+                        checked_product(&[
+                            whir.query_counts[round_ordinal],
+                            u64::from(whir.oracle_heights[round_ordinal].ilog2()),
+                            MERKLE_DIGEST_BYTE_LENGTH,
+                        ])
+                        .expect("literal path bytes"),
                     )
-                    .expect("accumulated literal path bytes");
-                }
+                    .expect("framed literal path bytes"),
+                )
+                .expect("accumulated literal path bytes");
+            }
 
-                let final_query_count = whir.query_counts[WHIR_ROUND_COUNT];
+            let final_query_count = whir.query_counts[WHIR_ROUND_COUNT];
+            literal_path_byte_length = checked_add(
+                literal_path_byte_length,
+                checked_product(&[
+                    2,
+                    checked_add(
+                        MERKLE_FRONTIER_COUNT_BYTE_LENGTH,
+                        checked_product(&[
+                            final_query_count,
+                            u64::from(whir.oracle_heights[WHIR_ROUND_COUNT].ilog2()),
+                            MERKLE_DIGEST_BYTE_LENGTH,
+                        ])
+                        .expect("final literal path bytes"),
+                    )
+                    .expect("framed final literal path bytes"),
+                ])
+                .expect("both final literal path batches"),
+            )
+            .expect("accumulated final literal path bytes");
+
+            for group in whir.mask_groups_in_commitment_order() {
                 literal_path_byte_length = checked_add(
                     literal_path_byte_length,
                     checked_product(&[
@@ -2822,90 +2509,26 @@ mod tests {
                         checked_add(
                             MERKLE_FRONTIER_COUNT_BYTE_LENGTH,
                             checked_product(&[
-                                final_query_count,
-                                u64::from(whir.oracle_heights[WHIR_ROUND_COUNT].ilog2()),
+                                whir.mask_query_count,
+                                u64::from(group.domain_size.ilog2()),
                                 MERKLE_DIGEST_BYTE_LENGTH,
                             ])
-                            .expect("final literal path bytes"),
+                            .expect("mask literal path bytes"),
                         )
-                        .expect("framed final literal path bytes"),
+                        .expect("framed mask literal path bytes"),
                     ])
-                    .expect("both final literal path batches"),
+                    .expect("paired mask literal path batches"),
                 )
-                .expect("accumulated final literal path bytes");
-
-                for group in whir.mask_groups_in_commitment_order() {
-                    literal_path_byte_length = checked_add(
-                        literal_path_byte_length,
-                        checked_product(&[
-                            2,
-                            checked_add(
-                                MERKLE_FRONTIER_COUNT_BYTE_LENGTH,
-                                checked_product(&[
-                                    whir.mask_query_count,
-                                    u64::from(group.domain_size.ilog2()),
-                                    MERKLE_DIGEST_BYTE_LENGTH,
-                                ])
-                                .expect("mask literal path bytes"),
-                            )
-                            .expect("framed mask literal path bytes"),
-                        ])
-                        .expect("paired mask literal path batches"),
-                    )
-                    .expect("accumulated mask literal path bytes");
-                }
-
-                assert!(whir.authentication_frontier_byte_length > 0);
-                assert!(whir.authentication_frontier_byte_length < literal_path_byte_length);
-                assert!(whir.merkle_parent_hash_count > 0);
-                assert!(whir.merkle_parent_hash_count < whir.committed_leaf_count);
-                assert!(whir.commitment_parent_hash_query_count < whir.committed_leaf_count);
-                assert!(whir.commitment_leaf_hash_query_count > whir.committed_leaf_count);
-                assert!(whir.verifier_opened_leaf_hash_query_count > whir.merkle_opening_count);
+                .expect("accumulated mask literal path bytes");
             }
+
+            assert!(whir.authentication_frontier_byte_length > 0);
+            assert!(whir.authentication_frontier_byte_length < literal_path_byte_length);
+            assert!(whir.merkle_parent_hash_count > 0);
+            assert!(whir.merkle_parent_hash_count < whir.committed_leaf_count);
+            assert!(whir.commitment_parent_hash_query_count < whir.committed_leaf_count);
+            assert!(whir.commitment_leaf_hash_query_count > whir.committed_leaf_count);
+            assert!(whir.verifier_opened_leaf_hash_query_count > whir.merkle_opening_count);
         }
-    }
-
-    #[test]
-    fn static_catalog_rejects_mutated_packing_and_lifecycle_values() {
-        let catalog = CompactPublicKeyStaticCatalog::derive()
-            .expect("compact public-key static packing ledger");
-
-        let mut wrong_relation = catalog.clone();
-        wrong_relation.relation_plan_hash[0] ^= 1;
-        assert_eq!(
-            wrong_relation.check(),
-            Err(CompactStaticCatalogError::InvalidGeometry)
-        );
-
-        let mut wrong_proof_length = catalog.clone();
-        wrong_proof_length.factor_catalogs[0].maximum_proof_byte_length += 1;
-        assert_eq!(
-            wrong_proof_length.check(),
-            Err(CompactStaticCatalogError::InvalidGeometry)
-        );
-
-        let mut missing_checkpoint = catalog.clone();
-        missing_checkpoint.factor_catalogs[0].deterministic_checkpoint_count = 0;
-        assert_eq!(
-            missing_checkpoint.check(),
-            Err(CompactStaticCatalogError::InvalidGeometry)
-        );
-
-        let mut missing_cfw_batching_claim = catalog.clone();
-        missing_cfw_batching_claim.factor_catalogs[0]
-            .main_whir
-            .opening_batching_claim_count -= 1;
-        assert_eq!(
-            missing_cfw_batching_claim.check(),
-            Err(CompactStaticCatalogError::InvalidGeometry)
-        );
-
-        let mut wrong_selection = catalog.clone();
-        wrong_selection.selected_packing_factor = Some(8);
-        assert_eq!(
-            wrong_selection.check(),
-            Err(CompactStaticCatalogError::InvalidGeometry)
-        );
     }
 }

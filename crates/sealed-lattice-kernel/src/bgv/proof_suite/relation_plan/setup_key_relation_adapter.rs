@@ -1182,26 +1182,6 @@ pub(crate) fn public_key_share_source_provider_memory_accounting(
     )
 }
 
-#[cfg(test)]
-pub(crate) fn compact_public_key_assignment_source_provider_memory_accounting(
-    relation_plan_variant: &RelationPlanVariant,
-    relation_context: &RelationPlanCheckContext,
-    ring_degree: u64,
-    source_layout: &PublicKeyShareSourceLayout,
-    canonical_application_statement_byte_length: usize,
-) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
-    let requested_column_ordinals =
-        compact_public_key_assignment_source_column_ordinals(relation_plan_variant, source_layout)?;
-    public_key_share_source_provider_memory_accounting_for_requested_columns(
-        relation_plan_variant,
-        relation_context,
-        ring_degree,
-        source_layout,
-        canonical_application_statement_byte_length,
-        &requested_column_ordinals,
-    )
-}
-
 fn public_key_share_source_provider_memory_accounting_for_requested_columns(
     relation_plan_variant: &RelationPlanVariant,
     relation_context: &RelationPlanCheckContext,

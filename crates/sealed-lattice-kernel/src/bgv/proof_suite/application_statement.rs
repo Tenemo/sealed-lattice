@@ -10,7 +10,8 @@ use crate::{
     foundation::{
         CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
         FOUNDATION_PROFILE, Hash512, ProofApplicationSlotCeilings, StreamDescriptor,
-        selected_sharing_data_prime_coordinates, selected_target_data_prime_coordinates,
+        hash_foundation_tuple_512, selected_sharing_data_prime_coordinates,
+        selected_target_data_prime_coordinates,
     },
 };
 
@@ -20,6 +21,8 @@ const GALOIS_KEY_SHARE_ENTRY_SCHEMA_IDENTIFIER: u16 = 0x121d;
 const APPLICATION_STATEMENT_SCHEMA_VERSION: u16 = 1;
 const GALOIS_KEY_SHARE_STATEMENT_SCHEMA_VERSION: u16 = 2;
 const SELECTED_GALOIS_KEY_SHARE_BATCH_SCHEDULE_POSITION: u32 = 0;
+const PUBLIC_KEY_SHARE_STATEMENT_LAYOUT_HASH_DOMAIN: &str =
+    "sealed-lattice/proof/public-key-share-statement-layout/v1";
 
 const fn selected_application_statement_schema_version(schema_identifier: u16) -> u16 {
     if schema_identifier
@@ -51,6 +54,127 @@ pub(crate) enum SelectedApplicationStatementError {
     WrongValue,
     InvalidProfile,
     CountOverflow,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SelectedPublicKeyShareStatementField {
+    SetupProofContextHash512,
+    ParticipantIdentityHash512,
+    RosterPositionUnsigned16,
+    AnchorCommitmentRootHash512List { item_count: u16 },
+    PublicKeyShareRootHash512,
+}
+
+impl SelectedPublicKeyShareStatementField {
+    pub(crate) const fn item_type(self) -> CanonicalItemType {
+        match self {
+            Self::SetupProofContextHash512 | Self::PublicKeyShareRootHash512 => {
+                CanonicalItemType::Hash512
+            }
+            Self::ParticipantIdentityHash512 => CanonicalItemType::ParticipantIdentity,
+            Self::RosterPositionUnsigned16 => CanonicalItemType::Unsigned16,
+            Self::AnchorCommitmentRootHash512List { .. } => CanonicalItemType::HomogeneousList,
+        }
+    }
+
+    pub(crate) const fn exact_payload_byte_length(self) -> Option<u32> {
+        match self {
+            Self::SetupProofContextHash512
+            | Self::ParticipantIdentityHash512
+            | Self::PublicKeyShareRootHash512 => Some(Hash512::BYTE_LENGTH as u32),
+            Self::RosterPositionUnsigned16 => Some(u16::BITS / u8::BITS),
+            Self::AnchorCommitmentRootHash512List { .. } => None,
+        }
+    }
+
+    pub(crate) const fn list_item_type(self) -> Option<CanonicalItemType> {
+        match self {
+            Self::AnchorCommitmentRootHash512List { .. } => Some(CanonicalItemType::Hash512),
+            _ => None,
+        }
+    }
+
+    pub(crate) const fn list_item_count(self) -> Option<u16> {
+        match self {
+            Self::AnchorCommitmentRootHash512List { item_count } => Some(item_count),
+            _ => None,
+        }
+    }
+
+    const fn role_code(self) -> u16 {
+        match self {
+            Self::SetupProofContextHash512 => 1,
+            Self::ParticipantIdentityHash512 => 2,
+            Self::RosterPositionUnsigned16 => 3,
+            Self::AnchorCommitmentRootHash512List { .. } => 4,
+            Self::PublicKeyShareRootHash512 => 5,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SelectedPublicKeyShareStatementLayout {
+    schema_identifier: u16,
+    schema_version: u16,
+    fields: [SelectedPublicKeyShareStatementField; 5],
+}
+
+impl SelectedPublicKeyShareStatementLayout {
+    pub(crate) const fn schema_identifier(self) -> u16 {
+        self.schema_identifier
+    }
+
+    pub(crate) const fn schema_version(self) -> u16 {
+        self.schema_version
+    }
+
+    pub(crate) const fn field_count(self) -> u16 {
+        self.fields.len() as u16
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn fields(&self) -> &[SelectedPublicKeyShareStatementField; 5] {
+        &self.fields
+    }
+
+    pub(crate) fn canonical_layout_digest(
+        self,
+    ) -> Result<[u8; Hash512::BYTE_LENGTH], SelectedApplicationStatementError> {
+        let mut items = Vec::with_capacity(3 + self.fields.len() * 6);
+        items.push(CanonicalItem::unsigned16(self.schema_identifier));
+        items.push(CanonicalItem::unsigned16(self.schema_version));
+        items.push(CanonicalItem::unsigned16(self.field_count()));
+        for (ordinal, field) in self.fields.into_iter().enumerate() {
+            items
+                .push(CanonicalItem::unsigned16(u16::try_from(ordinal).map_err(
+                    |_| SelectedApplicationStatementError::CountOverflow,
+                )?));
+            items.push(CanonicalItem::unsigned16(field.role_code()));
+            items.push(CanonicalItem::unsigned16(
+                field.item_type().canonical_code(),
+            ));
+            items.push(CanonicalItem::unsigned32(
+                field.exact_payload_byte_length().unwrap_or(0),
+            ));
+            items.push(CanonicalItem::unsigned16(
+                field
+                    .list_item_type()
+                    .map(CanonicalItemType::canonical_code)
+                    .unwrap_or(0),
+            ));
+            items.push(CanonicalItem::unsigned16(
+                field.list_item_count().unwrap_or(0),
+            ));
+        }
+        hash_foundation_tuple_512(PUBLIC_KEY_SHARE_STATEMENT_LAYOUT_HASH_DOMAIN, &items)
+            .map(Hash512::into_bytes)
+            .map_err(|_| SelectedApplicationStatementError::CanonicalEncoding)
+    }
+}
+
+pub(crate) fn selected_public_key_share_statement_layout()
+-> Result<SelectedPublicKeyShareStatementLayout, SelectedApplicationStatementError> {
+    derive_selected_public_key_share_statement_layout()
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1703,6 +1827,50 @@ fn selected_statement_field_shapes(
     Ok(fields)
 }
 
+fn derive_selected_public_key_share_statement_layout()
+-> Result<SelectedPublicKeyShareStatementLayout, SelectedApplicationStatementError> {
+    let fields = selected_statement_field_shapes(
+        ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+        SelectedApplicationStatementContext::new(
+            FOUNDATION_PROFILE.protocol_version,
+            [0; Hash512::BYTE_LENGTH],
+            None,
+            None,
+        ),
+    )?;
+    let anchor_root_count = match fields.as_slice() {
+        [
+            StatementFieldShape::Hash,
+            StatementFieldShape::ParticipantIdentity,
+            StatementFieldShape::RosterPosition,
+            StatementFieldShape::HashList(anchor_root_count),
+            StatementFieldShape::Hash,
+        ] => u16::try_from(*anchor_root_count)
+            .map_err(|_| SelectedApplicationStatementError::CountOverflow)?,
+        _ => return Err(SelectedApplicationStatementError::WrongTypeOrLength),
+    };
+    let schema_version = selected_application_statement_schema_version(
+        ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+    );
+    if schema_version != APPLICATION_STATEMENT_SCHEMA_VERSION {
+        return Err(SelectedApplicationStatementError::WrongSchema);
+    }
+    Ok(SelectedPublicKeyShareStatementLayout {
+        schema_identifier:
+            ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+        schema_version,
+        fields: [
+            SelectedPublicKeyShareStatementField::SetupProofContextHash512,
+            SelectedPublicKeyShareStatementField::ParticipantIdentityHash512,
+            SelectedPublicKeyShareStatementField::RosterPositionUnsigned16,
+            SelectedPublicKeyShareStatementField::AnchorCommitmentRootHash512List {
+                item_count: anchor_root_count,
+            },
+            SelectedPublicKeyShareStatementField::PublicKeyShareRootHash512,
+        ],
+    })
+}
+
 pub(crate) fn selected_evaluator_entry_positions(
     top_count: u16,
 ) -> Result<Vec<SelectedEvaluatorEntryPosition>, SelectedApplicationStatementError> {
@@ -2393,6 +2561,59 @@ fn encoded_tuple_byte_length(bytes: &[u8]) -> Result<usize, SelectedApplicationS
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn public_key_share_statement_layout_is_stable_and_source_derived() {
+        let layout = selected_public_key_share_statement_layout()
+            .expect("selected public-key-share layout derives");
+        assert_eq!(
+            layout.schema_identifier(),
+            ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+        );
+        assert_eq!(layout.schema_version(), 1);
+        assert_eq!(layout.field_count(), 5);
+
+        let fields = layout.fields();
+        assert_eq!(
+            *fields,
+            [
+                SelectedPublicKeyShareStatementField::SetupProofContextHash512,
+                SelectedPublicKeyShareStatementField::ParticipantIdentityHash512,
+                SelectedPublicKeyShareStatementField::RosterPositionUnsigned16,
+                SelectedPublicKeyShareStatementField::AnchorCommitmentRootHash512List {
+                    item_count: 3,
+                },
+                SelectedPublicKeyShareStatementField::PublicKeyShareRootHash512,
+            ]
+        );
+        assert_eq!(
+            (*fields).map(|field| field.item_type()),
+            [
+                CanonicalItemType::Hash512,
+                CanonicalItemType::ParticipantIdentity,
+                CanonicalItemType::Unsigned16,
+                CanonicalItemType::HomogeneousList,
+                CanonicalItemType::Hash512,
+            ]
+        );
+        assert_eq!(
+            (*fields).map(|field| field.exact_payload_byte_length()),
+            [Some(64), Some(64), Some(2), None, Some(64),]
+        );
+        assert_eq!(fields[3].list_item_type(), Some(CanonicalItemType::Hash512));
+        assert_eq!(fields[3].list_item_count(), Some(3));
+
+        assert_eq!(
+            Hash512::from_bytes(
+                layout
+                    .canonical_layout_digest()
+                    .expect("selected layout has a canonical digest")
+            )
+            .to_lowercase_hex(),
+            "15528891f2f267b314a2526e79a1471492a98d9924ce1e70d28d8a499999160b1\
+             c9dd9d180b019a9305c1bcd5b6b93e755a3a5c592aa5c8607fc45f2bf54779d"
+        );
+    }
 
     fn target_partial_descriptor(seed: u8, total_byte_length: u64) -> StreamDescriptor {
         let chunk_byte_length = FOUNDATION_PROFILE.stream_chunk_byte_length as u64;

@@ -18,7 +18,6 @@ use crate::foundation::{
 use crate::{
     bgv::evaluator::candidate_evidence::EvaluatorCandidateInput,
     bgv::setup::SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
-    foundation::{ArtifactKind, ArtifactReference},
 };
 
 #[cfg(test)]
@@ -48,6 +47,7 @@ use super::transcript::{
     TRANSCRIPT_RESPONSE_BINDING_DOMAIN_BYTES, TRANSCRIPT_RESPONSE_ROOT_DOMAIN_BYTES,
 };
 
+use super::compact_proof_contract::selected_compact_public_key_proof_contract;
 use super::field::PROOF_CHALLENGE_EXTENSION_POLYNOMIAL_COEFFICIENTS;
 use super::{
     CompiledRelationPlan, PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR, PROOF_BASE_FIELD_MODULUS,
@@ -76,7 +76,7 @@ const PROOF_FAMILY_PROFILE_SCHEMA_VERSION: u16 = 2;
 const ROW_CODE_WHIR_CONSTRUCTION_PROFILE_SCHEMA_VERSION: u16 = 3;
 const ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_SCHEMA_VERSION: u16 = 2;
 const ROW_CODE_WHIR_HASH_PROFILE_SCHEMA_VERSION: u16 = 4;
-const PROOF_PROFILE_SET_VERSION: u16 = 7;
+const PROOF_PROFILE_SET_VERSION: u16 = 8;
 const SELECTED_ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_COUNT: usize =
     FIRST_PROFILE_APPLICATION_FAMILIES.len() - 1 + FOUNDATION_PROFILE.option_count as usize;
 const ROW_CODE_WHIR_HASH_ALGORITHM_IDENTIFIER: &str = "SHAKE256";
@@ -764,7 +764,7 @@ pub(crate) fn verify_canonical_proof_profile_set(
         &tuple,
         PROOF_PROFILE_SET_SCHEMA_IDENTIFIER,
         PROOF_PROFILE_SET_VERSION,
-        5,
+        6,
     )?;
 
     verify_proof_fields(&profile_nested_tuples(&tuple.items[0], &limits, 1)?)?;
@@ -784,6 +784,7 @@ pub(crate) fn verify_canonical_proof_profile_set(
     )?;
     let construction_profile = profile_nested_tuple(&tuple.items[4], &limits)?;
     verify_row_code_whir_construction_profile(&construction_profile, &limits)?;
+    verify_selected_compact_public_key_proof_contract_hash(&tuple.items[5])?;
 
     let reencoded = tuple
         .encode_with_limits(&limits)
@@ -792,6 +793,46 @@ pub(crate) fn verify_canonical_proof_profile_set(
         return Err(ProofProfileError::CanonicalEncoding);
     }
     Ok(())
+}
+
+fn selected_compact_public_key_proof_contract_hash() -> Result<[u8; 64], ProofProfileError> {
+    selected_compact_public_key_proof_contract()
+        .and_then(|contract| contract.verifier_inputs().canonical_source_hash())
+        .map(|hash| hash.into_bytes())
+        .map_err(|_| ProofProfileError::InvalidSchedule)
+}
+
+fn verify_selected_compact_public_key_proof_contract_hash(
+    item: &CanonicalItem,
+) -> Result<(), ProofProfileError> {
+    if profile_hash(item)? != selected_compact_public_key_proof_contract_hash()? {
+        return Err(ProofProfileError::InvalidSchedule);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod compact_contract_binding_tests {
+    use super::*;
+
+    #[test]
+    fn compact_contract_hash_is_recomputed_and_mutations_refuse() {
+        let selected_hash = selected_compact_public_key_proof_contract_hash()
+            .expect("selected compact contract hash derives");
+        verify_selected_compact_public_key_proof_contract_hash(&CanonicalItem::hash512(
+            selected_hash,
+        ))
+        .expect("selected compact contract hash verifies");
+
+        let mut wrong_hash = selected_hash;
+        wrong_hash[0] ^= 1;
+        assert_eq!(
+            verify_selected_compact_public_key_proof_contract_hash(&CanonicalItem::hash512(
+                wrong_hash,
+            )),
+            Err(ProofProfileError::InvalidSchedule),
+        );
+    }
 }
 
 fn verify_proof_fields(fields: &[CanonicalTuple]) -> Result<(), ProofProfileError> {
@@ -2099,6 +2140,7 @@ mod canonical_profile_artifact {
 
         pub(crate) fn canonical_bytes(&self) -> Result<Vec<u8>, ProofProfileError> {
             self.validate()?;
+            let compact_contract_hash = selected_compact_public_key_proof_contract_hash()?;
             let tuple = CanonicalTuple::new(
                 PROOF_PROFILE_SET_SCHEMA_IDENTIFIER,
                 PROOF_PROFILE_SET_VERSION,
@@ -2133,6 +2175,7 @@ mod canonical_profile_artifact {
                             .canonical_tuple(&self.relation_plans)?,
                     )
                     .map_err(canonical_encoding_error)?,
+                    CanonicalItem::hash512(compact_contract_hash),
                 ],
             );
             encode_generated_tuple(&tuple)
@@ -2151,7 +2194,6 @@ mod canonical_profile_artifact {
             let baseline_bytes = self
                 .canonical_bytes()
                 .expect("selected proof-profile artifact encodes");
-            let baseline_reference = proof_profile_artifact_reference(&baseline_bytes);
 
             let original_plan_byte_length = self.relation_plans[0].canonical_plan_byte_length;
             self.relation_plans[0].canonical_plan_byte_length = original_plan_byte_length + 1;
@@ -2159,10 +2201,6 @@ mod canonical_profile_artifact {
                 .canonical_bytes()
                 .expect("a mutated positive plan length remains structurally canonical");
             assert_ne!(wrong_plan_length_bytes, baseline_bytes);
-            assert_ne!(
-                proof_profile_artifact_reference(&wrong_plan_length_bytes).artifact_hash(),
-                baseline_reference.artifact_hash()
-            );
             self.relation_plans[0].canonical_plan_byte_length = original_plan_byte_length;
 
             self.relation_plans[0].canonical_plan_hash[0] ^= 1;
@@ -2170,10 +2208,6 @@ mod canonical_profile_artifact {
                 .canonical_bytes()
                 .expect("a mutated plan hash remains structurally canonical");
             assert_ne!(wrong_plan_hash_bytes, baseline_bytes);
-            assert_ne!(
-                proof_profile_artifact_reference(&wrong_plan_hash_bytes).artifact_hash(),
-                baseline_reference.artifact_hash()
-            );
             self.relation_plans[0].canonical_plan_hash[0] ^= 1;
 
             self.relation_plans.swap(0, 1);
@@ -2269,10 +2303,6 @@ mod canonical_profile_artifact {
                 .canonical_bytes()
                 .expect("a mutated positive construction length remains structurally canonical");
             assert_ne!(wrong_construction_length_bytes, baseline_bytes);
-            assert_ne!(
-                proof_profile_artifact_reference(&wrong_construction_length_bytes).artifact_hash(),
-                baseline_reference.artifact_hash()
-            );
             self.row_code_whir_construction_profile.ordered_references[0]
                 .canonical_identity_byte_length -= 1;
 
@@ -2282,10 +2312,6 @@ mod canonical_profile_artifact {
                 .canonical_bytes()
                 .expect("a mutated construction hash remains structurally canonical");
             assert_ne!(wrong_construction_hash_bytes, baseline_bytes);
-            assert_ne!(
-                proof_profile_artifact_reference(&wrong_construction_hash_bytes).artifact_hash(),
-                baseline_reference.artifact_hash()
-            );
             self.row_code_whir_construction_profile.ordered_references[0]
                 .canonical_identity_hash[0] ^= 1;
 
@@ -2378,27 +2404,6 @@ mod canonical_profile_artifact {
                 baseline_bytes
             );
         }
-    }
-
-    #[cfg(test)]
-    fn proof_profile_artifact_reference(bytes: &[u8]) -> ArtifactReference {
-        let cumulative_limit = bytes
-            .len()
-            .checked_mul(64)
-            .expect("generated profile decode limit fits usize");
-        ArtifactReference::from_canonical_artifact_bytes(
-            ArtifactKind::ProofProfileSet,
-            bytes,
-            &CanonicalDecodeLimits {
-                maximum_tuple_byte_length: bytes.len(),
-                maximum_item_count: 100_000,
-                maximum_item_byte_length: bytes.len(),
-                maximum_nesting_depth: 32,
-                maximum_cumulative_work_byte_length: cumulative_limit,
-                maximum_cumulative_allocation_byte_length: cumulative_limit,
-            },
-        )
-        .expect("generated proof-profile artifact reference derives")
     }
 
     #[derive(Clone, Debug, PartialEq, Eq)]

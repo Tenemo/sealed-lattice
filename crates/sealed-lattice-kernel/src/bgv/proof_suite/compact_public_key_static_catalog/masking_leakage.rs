@@ -2224,14 +2224,14 @@ mod tests {
     fn factor_one_reconciles_the_current_masking_catalog_without_closing_the_gate() {
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
-        let factor_one = &catalog.factor_catalogs[0];
-        let masking = &factor_one.masking_leakage;
+        let selected = &catalog.selected;
+        let masking = &selected.masking_leakage;
         masking
             .check(
-                &factor_one.pre_challenge_whir,
-                &factor_one.main_whir,
-                &factor_one.transcript_chronology,
-                &factor_one.query_sampling_lifecycle,
+                &selected.pre_challenge_whir,
+                &selected.main_whir,
+                &selected.transcript_chronology,
+                &selected.query_sampling_lifecycle,
                 &catalog.cfw_reduction,
             )
             .expect("factor-one construction masking correspondence");
@@ -2356,23 +2356,18 @@ mod tests {
     fn sumcheck_constant_minor_covers_every_production_folding_width() {
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
-        let mut widths = catalog
-            .factor_catalogs
-            .iter()
-            .flat_map(|factor| {
-                [&factor.pre_challenge_whir, &factor.main_whir]
-                    .into_iter()
-                    .flat_map(|whir| {
-                        whir.internal_mask_groups.iter().filter_map(|group| {
-                            matches!(group.role, MaskGroupRole::WhirSumcheck { .. })
-                                .then_some(group.width)
-                        })
-                    })
+        let selected = &catalog.selected;
+        let mut widths = [&selected.pre_challenge_whir, &selected.main_whir]
+            .into_iter()
+            .flat_map(|whir| {
+                whir.internal_mask_groups.iter().filter_map(|group| {
+                    matches!(group.role, MaskGroupRole::WhirSumcheck { .. }).then_some(group.width)
+                })
             })
             .collect::<Vec<_>>();
         widths.sort_unstable();
         widths.dedup();
-        assert_eq!(widths, vec![3, 4, 5, 6, 7]);
+        assert_eq!(widths, vec![4, 6, 7]);
         for width in widths {
             check_sumcheck_constant_minor(width)
                 .expect("the exact sumcheck map has its constant minor");
@@ -2412,18 +2407,18 @@ mod tests {
 
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
-        let factor_one = &catalog.factor_catalogs[0];
-        let mut mutated = factor_one.masking_leakage.clone();
+        let selected = &catalog.selected;
+        let mut mutated = selected.masking_leakage.clone();
         mutated
             .commitment_and_opening_topology
             .shared_cross_epoch
             .original_root_count = 2;
         assert_eq!(
             mutated.check(
-                &factor_one.pre_challenge_whir,
-                &factor_one.main_whir,
-                &factor_one.transcript_chronology,
-                &factor_one.query_sampling_lifecycle,
+                &selected.pre_challenge_whir,
+                &selected.main_whir,
+                &selected.transcript_chronology,
+                &selected.query_sampling_lifecycle,
                 &catalog.cfw_reduction,
             ),
             Err(CompactStaticCatalogError::InvalidGeometry)

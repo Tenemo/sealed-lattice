@@ -12,28 +12,39 @@
 //! SHAKE256 graph still needs its separate emitted-byte QROM correspondence;
 //! this module does not equate the graph with one ideal variable-output call.
 
+#[cfg(test)]
 use std::mem::size_of;
 
+#[cfg(test)]
 use super::compact_proof_wire::COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH;
+#[cfg(test)]
+use super::compact_proof_wire::decode_compact_proof_wire_prefix;
+#[cfg(test)]
 use super::compact_proof_wire::{
-    CompactProofWireError, CompactProofWireGeometry, DecodedCompactProofWire,
-    DecodedCompactPublicInput, decode_compact_proof_wire_prefix,
+    COMPACT_PACKING_FACTOR, CompactProofWireError, CompactProofWireGeometry,
+    DecodedCompactProofWire, DecodedCompactPublicInput,
 };
+#[cfg(test)]
 use super::fixed_uniform_verifier_message::{
     DecodedFixedUniformVerifierMessage, FixedUniformVerifierMessageError,
     derive_fixed_uniform_verifier_message,
 };
+#[cfg(test)]
 use crate::foundation::{
     CanonicalItem, Hash512, StreamingFoundationHashError, StreamingFoundationTupleHash512,
 };
 
 pub(crate) const COMPACT_FIAT_SHAMIR_PREFIX_DOMAIN: &str =
     "sealed-lattice/proof/compact-fiat-shamir-prefix/v1";
-const COMPACT_FIAT_SHAMIR_PREFIX_VERSION: u16 = 1;
+pub(crate) const COMPACT_FIAT_SHAMIR_PREFIX_VERSION: u16 = 1;
+#[cfg(test)]
 const COMMITMENT_PREFIX_ENTRY_BYTE_LENGTH: usize =
     size_of::<u32>() + Hash512::BYTE_LENGTH + COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH;
+#[cfg(test)]
 const COMPACT_TRANSCRIPT_CHECKPOINT_CURSOR_MAGIC: [u8; 8] = *b"SLCTCP01";
+#[cfg(test)]
 const COMPACT_TRANSCRIPT_CHECKPOINT_CURSOR_VERSION: u16 = 1;
+#[cfg(test)]
 const COMPACT_TRANSCRIPT_CHECKPOINT_CURSOR_HEADER_BYTE_LENGTH: usize = 8
     + 2 * size_of::<u16>()
     + size_of::<u32>()
@@ -41,8 +52,10 @@ const COMPACT_TRANSCRIPT_CHECKPOINT_CURSOR_HEADER_BYTE_LENGTH: usize = 8
     + 2 * size_of::<u32>()
     + size_of::<u64>()
     + 2 * Hash512::BYTE_LENGTH;
+#[cfg(test)]
 const COMPACT_TRANSCRIPT_CHECKPOINT_CURSOR_ENTRY_BYTE_LENGTH: usize =
     size_of::<u32>() + Hash512::BYTE_LENGTH + COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH;
+#[cfg(test)]
 pub(crate) const MAXIMUM_COMPACT_TRANSCRIPT_CHECKPOINT_CURSOR_BYTE_LENGTH: usize = 16 * 1_024;
 const COMPACT_TRANSCRIPT_CHECKPOINT_CURSOR_DIGEST_DOMAIN: &str =
     "sealed-lattice/proof/compact-transcript-checkpoint-cursor/v1";
@@ -50,33 +63,54 @@ const COMPACT_TRANSCRIPT_CHECKPOINT_PUBLIC_INPUT_DIGEST_DOMAIN: &str =
     "sealed-lattice/proof/compact-transcript-checkpoint-public-input/v1";
 const COMPACT_PROOF_WIRE_GEOMETRY_DIGEST_DOMAIN: &str =
     "sealed-lattice/proof/compact-proof-wire-geometry/v1";
+#[cfg(test)]
 const COMPACT_PROOF_WIRE_GEOMETRY_DIGEST_VERSION: u16 = 1;
+
+pub(crate) const fn compact_transcript_binding_domains() -> [&'static str; 4] {
+    [
+        COMPACT_FIAT_SHAMIR_PREFIX_DOMAIN,
+        COMPACT_TRANSCRIPT_CHECKPOINT_CURSOR_DIGEST_DOMAIN,
+        COMPACT_TRANSCRIPT_CHECKPOINT_PUBLIC_INPUT_DIGEST_DOMAIN,
+        COMPACT_PROOF_WIRE_GEOMETRY_DIGEST_DOMAIN,
+    ]
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CompactTranscriptError {
+    #[cfg(test)]
     InvalidGeometry,
     LengthOverflow,
+    #[cfg(test)]
     AllocationLimitExceeded,
+    #[cfg(test)]
     WrongProverPhase,
+    #[cfg(test)]
     WrongCheckpointCursor,
+    #[cfg(test)]
     CheckpointCursorDigestMismatch,
+    #[cfg(test)]
     Wire(CompactProofWireError),
+    #[cfg(test)]
     FoundationHash(StreamingFoundationHashError),
+    #[cfg(test)]
     VerifierMessage(FixedUniformVerifierMessageError),
 }
 
+#[cfg(test)]
 impl From<CompactProofWireError> for CompactTranscriptError {
     fn from(error: CompactProofWireError) -> Self {
         Self::Wire(error)
     }
 }
 
+#[cfg(test)]
 impl From<StreamingFoundationHashError> for CompactTranscriptError {
     fn from(error: StreamingFoundationHashError) -> Self {
         Self::FoundationHash(error)
     }
 }
 
+#[cfg(test)]
 impl From<FixedUniformVerifierMessageError> for CompactTranscriptError {
     fn from(error: FixedUniformVerifierMessageError) -> Self {
         Self::VerifierMessage(error)
@@ -93,6 +127,7 @@ pub(crate) fn compact_vector_commitment_oracle_identifier(
 }
 
 /// Exact raw payload absorbed by the round-prefix hash.
+#[cfg(test)]
 pub(crate) fn compact_fiat_shamir_prefix_payload_byte_length(
     canonical_public_input_byte_length: usize,
     prefix_response_count: usize,
@@ -110,6 +145,7 @@ pub(crate) fn compact_fiat_shamir_prefix_payload_byte_length(
         .ok_or(CompactTranscriptError::LengthOverflow)
 }
 
+#[cfg(test)]
 pub(crate) fn compact_fiat_shamir_round_prefix_digest(
     geometry: &CompactProofWireGeometry,
     decoded_proof: &DecodedCompactProofWire,
@@ -154,12 +190,14 @@ pub(crate) fn compact_fiat_shamir_round_prefix_digest(
     )
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct CompactTranscriptCommitmentEntry {
     root: [u8; Hash512::BYTE_LENGTH],
     fiat_shamir_round_salt: [u8; COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH],
 }
 
+#[cfg(test)]
 fn compact_fiat_shamir_prefix_digest_from_entries(
     geometry: &CompactProofWireGeometry,
     canonical_public_input_bytes: &[u8],
@@ -187,7 +225,7 @@ fn compact_fiat_shamir_prefix_digest_from_entries(
         COMPACT_FIAT_SHAMIR_PREFIX_DOMAIN,
         &[
             CanonicalItem::unsigned16(COMPACT_FIAT_SHAMIR_PREFIX_VERSION),
-            CanonicalItem::unsigned16(geometry.packing_factor()),
+            CanonicalItem::unsigned16(COMPACT_PACKING_FACTOR),
             CanonicalItem::unsigned32(logical_verifier_move_ordinal),
             CanonicalItem::unsigned32(
                 u32::try_from(prefix_response_count)
@@ -232,6 +270,7 @@ fn compact_fiat_shamir_prefix_digest_from_entries(
 /// once before the next response can be recorded. Response contents and proof
 /// openings remain owned by the proof assembler; this state retains only the
 /// bytes that the challenge prefix actually absorbs.
+#[cfg(test)]
 pub(crate) struct CompactProverTranscript<'input> {
     geometry: &'input CompactProofWireGeometry,
     canonical_public_input_bytes: &'input [u8],
@@ -239,19 +278,14 @@ pub(crate) struct CompactProverTranscript<'input> {
     verifier_message_pending: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct CompactProverTranscriptNativeMemoryGeometry {
-    state_inline_byte_length: u64,
-    commitment_entry_heap_byte_length: u64,
-    resident_owned_byte_length: u64,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg(test)]
 pub(crate) struct CompactTranscriptCheckpointCursor {
     canonical_bytes: Vec<u8>,
     digest: [u8; Hash512::BYTE_LENGTH],
 }
 
+#[cfg(test)]
 impl CompactTranscriptCheckpointCursor {
     pub(crate) fn canonical_bytes(&self) -> &[u8] {
         &self.canonical_bytes
@@ -266,6 +300,7 @@ impl CompactTranscriptCheckpointCursor {
     }
 }
 
+#[cfg(test)]
 fn compact_proof_wire_geometry_digest(
     geometry: &CompactProofWireGeometry,
 ) -> Result<Hash512, CompactTranscriptError> {
@@ -297,7 +332,7 @@ fn compact_proof_wire_geometry_digest(
         COMPACT_PROOF_WIRE_GEOMETRY_DIGEST_DOMAIN,
         &[
             CanonicalItem::unsigned16(COMPACT_PROOF_WIRE_GEOMETRY_DIGEST_VERSION),
-            CanonicalItem::unsigned16(geometry.packing_factor()),
+            CanonicalItem::unsigned16(COMPACT_PACKING_FACTOR),
             CanonicalItem::unsigned32(
                 u32::try_from(geometry.responses().len())
                     .map_err(|_| CompactTranscriptError::LengthOverflow)?,
@@ -339,6 +374,7 @@ fn compact_proof_wire_geometry_digest(
     hasher.finalize().map_err(Into::into)
 }
 
+#[cfg(test)]
 fn compact_transcript_checkpoint_public_input_digest(
     canonical_public_input_bytes: &[u8],
 ) -> [u8; Hash512::BYTE_LENGTH] {
@@ -348,6 +384,7 @@ fn compact_transcript_checkpoint_public_input_digest(
     )
 }
 
+#[cfg(test)]
 fn compact_transcript_checkpoint_cursor_digest(
     canonical_cursor_bytes: &[u8],
 ) -> [u8; Hash512::BYTE_LENGTH] {
@@ -357,46 +394,7 @@ fn compact_transcript_checkpoint_cursor_digest(
     )
 }
 
-impl CompactProverTranscriptNativeMemoryGeometry {
-    pub(crate) fn derive(
-        geometry: &CompactProofWireGeometry,
-    ) -> Result<Self, CompactTranscriptError> {
-        if geometry.responses().is_empty() {
-            return Err(CompactTranscriptError::InvalidGeometry);
-        }
-        let state_inline_byte_length = u64::try_from(size_of::<CompactProverTranscript<'static>>())
-            .map_err(|_| CompactTranscriptError::LengthOverflow)?;
-        let commitment_entry_heap_byte_length = u64::try_from(geometry.responses().len())
-            .ok()
-            .and_then(|entry_count| {
-                u64::try_from(size_of::<CompactTranscriptCommitmentEntry>())
-                    .ok()
-                    .and_then(|entry_byte_length| entry_count.checked_mul(entry_byte_length))
-            })
-            .ok_or(CompactTranscriptError::LengthOverflow)?;
-        let resident_owned_byte_length = state_inline_byte_length
-            .checked_add(commitment_entry_heap_byte_length)
-            .ok_or(CompactTranscriptError::LengthOverflow)?;
-        Ok(Self {
-            state_inline_byte_length,
-            commitment_entry_heap_byte_length,
-            resident_owned_byte_length,
-        })
-    }
-
-    pub(crate) const fn state_inline_byte_length(self) -> u64 {
-        self.state_inline_byte_length
-    }
-
-    pub(crate) const fn commitment_entry_heap_byte_length(self) -> u64 {
-        self.commitment_entry_heap_byte_length
-    }
-
-    pub(crate) const fn resident_owned_byte_length(self) -> u64 {
-        self.resident_owned_byte_length
-    }
-}
-
+#[cfg(test)]
 impl<'input> CompactProverTranscript<'input> {
     pub(crate) fn new(
         geometry: &'input CompactProofWireGeometry,
@@ -466,7 +464,7 @@ impl<'input> CompactProverTranscript<'input> {
                 .map_err(|_| CompactTranscriptError::LengthOverflow)?
                 .to_le_bytes(),
         );
-        canonical_bytes.extend_from_slice(&self.geometry.packing_factor().to_le_bytes());
+        canonical_bytes.extend_from_slice(&COMPACT_PACKING_FACTOR.to_le_bytes());
         canonical_bytes.extend_from_slice(&0_u16.to_le_bytes());
         canonical_bytes.extend_from_slice(
             &u32::try_from(self.geometry.responses().len())
@@ -551,7 +549,7 @@ impl<'input> CompactProverTranscript<'input> {
         if declared_total_byte_length != canonical_cursor_bytes.len()
             || expected_total_byte_length != canonical_cursor_bytes.len()
             || reserved != 0
-            || packing_factor != geometry.packing_factor()
+            || packing_factor != COMPACT_PACKING_FACTOR
             || total_response_count != geometry.responses().len()
             || completed_response_count == 0
             || completed_response_count > total_response_count
@@ -701,11 +699,13 @@ impl<'input> CompactProverTranscript<'input> {
     }
 }
 
+#[cfg(test)]
 struct CompactTranscriptCheckpointCursorReader<'bytes> {
     bytes: &'bytes [u8],
     offset: usize,
 }
 
+#[cfg(test)]
 impl<'bytes> CompactTranscriptCheckpointCursorReader<'bytes> {
     const fn new(bytes: &'bytes [u8]) -> Self {
         Self { bytes, offset: 0 }
@@ -749,6 +749,7 @@ impl<'bytes> CompactTranscriptCheckpointCursorReader<'bytes> {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn derive_compact_fiat_shamir_verifier_message(
     geometry: &CompactProofWireGeometry,
     decoded_proof: &DecodedCompactProofWire,
@@ -805,15 +806,12 @@ mod tests {
     }
 
     fn proof_geometry() -> CompactProofWireGeometry {
-        CompactProofWireGeometry::new(
-            4,
-            vec![
-                CompactProofResponseWireGeometry::new(0, 1, 0, 1, 1, verifier_message_geometry())
-                    .expect("first response geometry"),
-                CompactProofResponseWireGeometry::new(1, 0, 1, 1, 1, verifier_message_geometry())
-                    .expect("second response geometry"),
-            ],
-        )
+        CompactProofWireGeometry::new(vec![
+            CompactProofResponseWireGeometry::new(0, 1, 0, 1, 1, verifier_message_geometry())
+                .expect("first response geometry"),
+            CompactProofResponseWireGeometry::new(1, 0, 1, 1, 1, verifier_message_geometry())
+                .expect("second response geometry"),
+        ])
         .expect("proof geometry")
     }
 
@@ -867,7 +865,7 @@ mod tests {
         CompactPublicInputBindings,
         Vec<u8>,
     ) {
-        let geometry = CompactPublicInputWireGeometry::new(4, 1, 1).expect("public geometry");
+        let geometry = CompactPublicInputWireGeometry::new(1, 1).expect("public geometry");
         let bindings = CompactPublicInputBindings::new(
             Hash512::from_bytes([0x51; Hash512::BYTE_LENGTH]),
             Hash512::from_bytes([0x52; Hash512::BYTE_LENGTH]),
@@ -892,8 +890,7 @@ mod tests {
         let proof_bytes =
             encode_compact_proof_wire(proof_geometry, proof_input).expect("proof bytes");
         let decoded_proof =
-            decode_compact_proof_wire(proof_geometry, &proof_bytes, proof_bytes.len())
-                .expect("decoded proof");
+            decode_compact_proof_wire(proof_geometry, &proof_bytes).expect("decoded proof");
         let (public_geometry, bindings, public_bytes) = public_input(public_field_value);
         let decoded_public = decode_compact_public_input(public_geometry, bindings, &public_bytes)
             .expect("decoded public input");
@@ -952,8 +949,8 @@ mod tests {
         let geometry = proof_geometry();
         let input = proof_input(0x11, 0x21, 0x12, 0x22);
         let proof_bytes = encode_compact_proof_wire(&geometry, &input).expect("proof bytes");
-        let decoded_proof = decode_compact_proof_wire(&geometry, &proof_bytes, proof_bytes.len())
-            .expect("decoded proof");
+        let decoded_proof =
+            decode_compact_proof_wire(&geometry, &proof_bytes).expect("decoded proof");
         let (public_geometry, bindings, public_bytes) = public_input(13);
         let decoded_public = decode_compact_public_input(public_geometry, bindings, &public_bytes)
             .expect("decoded public input");
@@ -1184,7 +1181,7 @@ mod tests {
     }
 
     #[test]
-    fn prover_transcript_refuses_incomplete_chronology_and_has_exact_native_storage() {
+    fn prover_transcript_refuses_incomplete_chronology() {
         let geometry = proof_geometry();
         let (public_geometry, bindings, public_bytes) = public_input(13);
         let decoded_public = decode_compact_public_input(public_geometry, bindings, &public_bytes)
@@ -1208,17 +1205,6 @@ mod tests {
             incomplete.finish(),
             Err(CompactTranscriptError::WrongProverPhase)
         );
-
-        let memory = CompactProverTranscriptNativeMemoryGeometry::derive(&geometry)
-            .expect("native transcript memory geometry");
-        assert_eq!(
-            memory.commitment_entry_heap_byte_length(),
-            2 * u64::try_from(size_of::<CompactTranscriptCommitmentEntry>()).expect("entry size")
-        );
-        assert_eq!(
-            memory.resident_owned_byte_length(),
-            memory.state_inline_byte_length() + memory.commitment_entry_heap_byte_length()
-        );
     }
 
     #[test]
@@ -1226,8 +1212,8 @@ mod tests {
         let geometry = proof_geometry();
         let input = proof_input(0x11, 0x21, 0x12, 0x22);
         let proof_bytes = encode_compact_proof_wire(&geometry, &input).expect("proof bytes");
-        let decoded_proof = decode_compact_proof_wire(&geometry, &proof_bytes, proof_bytes.len())
-            .expect("decoded proof");
+        let decoded_proof =
+            decode_compact_proof_wire(&geometry, &proof_bytes).expect("decoded proof");
         let (public_geometry, bindings, public_bytes) = public_input(13);
         let decoded_public = decode_compact_public_input(public_geometry, bindings, &public_bytes)
             .expect("decoded public input");

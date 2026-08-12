@@ -9,19 +9,21 @@
 //! construction. The decoder validates the complete authenticated transport
 //! length before proportional work or allocation.
 
+#[cfg(test)]
 use std::ops::Range;
 
 #[cfg(test)]
 use super::field::PROOF_BASE_FIELD_MODULUS;
-use super::field::{
-    PROOF_CHALLENGE_EXTENSION_DEGREE, ProofBaseFieldElement, ProofChallengeExtensionElement,
-};
+use super::field::PROOF_CHALLENGE_EXTENSION_DEGREE;
+#[cfg(test)]
+use super::field::{ProofBaseFieldElement, ProofChallengeExtensionElement};
 use super::fixed_uniform_verifier_message::FixedUniformVerifierMessageGeometry;
 use super::{COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_BYTE_LENGTH};
 use crate::foundation::Hash512;
 
 pub(crate) const COMPACT_PROOF_WIRE_MAGIC: [u8; 8] = *b"SLCPRF01";
 pub(crate) const COMPACT_PUBLIC_INPUT_WIRE_MAGIC: [u8; 8] = *b"SLCPUB01";
+pub(crate) const COMPACT_PACKING_FACTOR: u16 = 1;
 const MERKLE_DIGEST_BYTE_LENGTH: usize = Hash512::BYTE_LENGTH;
 /// CDHZ exposes the Fiat-Shamir salt size as a construction parameter. The
 /// compact construction fixes it to the existing 512-bit transcript width.
@@ -38,6 +40,25 @@ pub(crate) const PUBLIC_INPUT_FIXED_HEADER_BYTE_LENGTH: usize = COMPACT_PUBLIC_I
     + PUBLIC_INPUT_BINDING_COUNT * Hash512::BYTE_LENGTH
     + 3 * size_of::<u32>();
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub(crate) enum CompactPublicInputBindingRole {
+    SuiteIdentifier = 1,
+    ApplicationStatementHash = 2,
+    ManifestHash = 3,
+    RelationPlanHash = 4,
+}
+
+pub(crate) const fn compact_public_input_binding_roles()
+-> [CompactPublicInputBindingRole; PUBLIC_INPUT_BINDING_COUNT] {
+    [
+        CompactPublicInputBindingRole::SuiteIdentifier,
+        CompactPublicInputBindingRole::ApplicationStatementHash,
+        CompactPublicInputBindingRole::ManifestHash,
+        CompactPublicInputBindingRole::RelationPlanHash,
+    ]
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CompactProofResponseWireGeometry {
     ordinal: u32,
@@ -52,6 +73,7 @@ pub(crate) struct CompactProofResponseWireGeometry {
 }
 
 impl CompactProofResponseWireGeometry {
+    #[cfg(test)]
     pub(crate) fn new(
         ordinal: u32,
         queried_base_field_element_count: u64,
@@ -104,14 +126,17 @@ impl CompactProofResponseWireGeometry {
         self.ordinal
     }
 
+    #[cfg(test)]
     pub(crate) const fn queried_base_field_element_count(&self) -> u64 {
         self.maximum_queried_base_field_element_count
     }
 
+    #[cfg(test)]
     pub(crate) const fn queried_extension_field_element_count(&self) -> u64 {
         self.maximum_queried_extension_field_element_count
     }
 
+    #[cfg(test)]
     pub(crate) const fn queried_leaf_count(&self) -> u64 {
         self.maximum_queried_leaf_count
     }
@@ -220,17 +245,15 @@ impl CompactProofResponseWireGeometry {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CompactProofWireGeometry {
-    packing_factor: u16,
     responses: Vec<CompactProofResponseWireGeometry>,
     maximum_canonical_byte_length: usize,
 }
 
 impl CompactProofWireGeometry {
     pub(crate) fn new(
-        packing_factor: u16,
         responses: Vec<CompactProofResponseWireGeometry>,
     ) -> Result<Self, CompactProofWireError> {
-        if !matches!(packing_factor, 1 | 2 | 4 | 8) || responses.is_empty() {
+        if responses.is_empty() {
             return Err(CompactProofWireError::InvalidGeometry);
         }
         let maximum_canonical_byte_length = responses.iter().enumerate().try_fold(
@@ -246,43 +269,31 @@ impl CompactProofWireGeometry {
             return Err(CompactProofWireError::ProofByteCeilingExceeded);
         }
         Ok(Self {
-            packing_factor,
             responses,
             maximum_canonical_byte_length,
         })
-    }
-
-    pub(crate) const fn packing_factor(&self) -> u16 {
-        self.packing_factor
     }
 
     pub(crate) fn responses(&self) -> &[CompactProofResponseWireGeometry] {
         &self.responses
     }
 
+    #[cfg(test)]
     pub(crate) const fn maximum_canonical_byte_length(&self) -> usize {
         self.maximum_canonical_byte_length
     }
 
+    #[cfg(test)]
     fn total_queried_leaf_count(&self) -> Result<usize, CompactProofWireError> {
         self.responses.iter().try_fold(0_usize, |count, response| {
             checked_usize(response.queried_leaf_count())
                 .and_then(|response_count| checked_usize_add(count, response_count))
         })
     }
-
-    fn maximum_frontier_node_count(&self) -> Result<usize, CompactProofWireError> {
-        self.responses
-            .iter()
-            .map(|response| checked_usize(response.maximum_frontier_node_count()))
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .max()
-            .ok_or(CompactProofWireError::InvalidGeometry)
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg(test)]
 pub(crate) struct CompactProofResponseWireInput {
     root: [u8; MERKLE_DIGEST_BYTE_LENGTH],
     fiat_shamir_round_salt: [u8; COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH],
@@ -292,6 +303,7 @@ pub(crate) struct CompactProofResponseWireInput {
     frontier: Vec<[u8; MERKLE_DIGEST_BYTE_LENGTH]>,
 }
 
+#[cfg(test)]
 impl CompactProofResponseWireInput {
     pub(crate) fn new(
         root: [u8; MERKLE_DIGEST_BYTE_LENGTH],
@@ -313,78 +325,15 @@ impl CompactProofResponseWireInput {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg(test)]
 pub(crate) struct CompactProofWireInput {
     responses: Vec<CompactProofResponseWireInput>,
 }
 
+#[cfg(test)]
 impl CompactProofWireInput {
     pub(crate) fn new(responses: Vec<CompactProofResponseWireInput>) -> Self {
         Self { responses }
-    }
-}
-
-/// Target-independent heap payload retained by the incremental proof assembler.
-///
-/// The caller-owned current response is excluded. The dictionary payload is a
-/// transient sorted copy of that response's frontier, while the canonical
-/// proof and global salt registry remain resident until `finish`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct CompactProofWireAssemblerHeapGeometry {
-    maximum_canonical_proof_byte_length: u64,
-    leaf_salt_registry_byte_length: u64,
-    maximum_frontier_dictionary_byte_length: u64,
-    maximum_owned_heap_byte_length: u64,
-}
-
-impl CompactProofWireAssemblerHeapGeometry {
-    pub(crate) fn derive(
-        geometry: &CompactProofWireGeometry,
-    ) -> Result<Self, CompactProofWireError> {
-        let maximum_canonical_proof_byte_length =
-            u64::try_from(geometry.maximum_canonical_byte_length())
-                .map_err(|_| CompactProofWireError::LengthOverflow)?;
-        let leaf_salt_registry_byte_length = u64::try_from(geometry.total_queried_leaf_count()?)
-            .ok()
-            .and_then(|leaf_count| {
-                leaf_count
-                    .checked_mul(u64::try_from(COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH).ok()?)
-            })
-            .ok_or(CompactProofWireError::LengthOverflow)?;
-        let maximum_frontier_dictionary_byte_length =
-            u64::try_from(geometry.maximum_frontier_node_count()?)
-                .ok()
-                .and_then(|node_count| {
-                    node_count.checked_mul(u64::try_from(MERKLE_DIGEST_BYTE_LENGTH).ok()?)
-                })
-                .ok_or(CompactProofWireError::LengthOverflow)?;
-        let maximum_owned_heap_byte_length = maximum_canonical_proof_byte_length
-            .checked_add(leaf_salt_registry_byte_length)
-            .and_then(|byte_length| {
-                byte_length.checked_add(maximum_frontier_dictionary_byte_length)
-            })
-            .ok_or(CompactProofWireError::LengthOverflow)?;
-        Ok(Self {
-            maximum_canonical_proof_byte_length,
-            leaf_salt_registry_byte_length,
-            maximum_frontier_dictionary_byte_length,
-            maximum_owned_heap_byte_length,
-        })
-    }
-
-    pub(crate) const fn maximum_canonical_proof_byte_length(self) -> u64 {
-        self.maximum_canonical_proof_byte_length
-    }
-
-    pub(crate) const fn leaf_salt_registry_byte_length(self) -> u64 {
-        self.leaf_salt_registry_byte_length
-    }
-
-    pub(crate) const fn maximum_frontier_dictionary_byte_length(self) -> u64 {
-        self.maximum_frontier_dictionary_byte_length
-    }
-
-    pub(crate) const fn maximum_owned_heap_byte_length(self) -> u64 {
-        self.maximum_owned_heap_byte_length
     }
 }
 
@@ -393,6 +342,7 @@ impl CompactProofWireAssemblerHeapGeometry {
 /// This state lets the prover discard each response input after its bytes have
 /// been appended. Global leaf-salt uniqueness is checked before any completed
 /// proof bytes are returned.
+#[cfg(test)]
 pub(crate) struct CompactProofWireAssembler<'geometry> {
     geometry: &'geometry CompactProofWireGeometry,
     canonical: Vec<u8>,
@@ -400,6 +350,7 @@ pub(crate) struct CompactProofWireAssembler<'geometry> {
     next_response_index: usize,
 }
 
+#[cfg(test)]
 impl<'geometry> CompactProofWireAssembler<'geometry> {
     pub(crate) fn new(
         geometry: &'geometry CompactProofWireGeometry,
@@ -409,7 +360,7 @@ impl<'geometry> CompactProofWireAssembler<'geometry> {
             .try_reserve_exact(geometry.maximum_canonical_byte_length())
             .map_err(|_| CompactProofWireError::LengthOverflow)?;
         canonical.extend_from_slice(&COMPACT_PROOF_WIRE_MAGIC);
-        canonical.extend_from_slice(&geometry.packing_factor.to_le_bytes());
+        canonical.extend_from_slice(&COMPACT_PACKING_FACTOR.to_le_bytes());
         canonical.extend_from_slice(
             &u32::try_from(geometry.responses.len())
                 .map_err(|_| CompactProofWireError::LengthOverflow)?
@@ -576,6 +527,7 @@ impl<'geometry> CompactProofWireAssembler<'geometry> {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DecodedCompactProofResponse {
     ordinal: u32,
@@ -593,6 +545,7 @@ pub(crate) struct DecodedCompactProofResponse {
     frontier_node_count: usize,
 }
 
+#[cfg(test)]
 impl DecodedCompactProofResponse {
     pub(crate) const fn ordinal(&self) -> u32 {
         self.ordinal
@@ -696,12 +649,14 @@ impl DecodedCompactProofResponse {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DecodedCompactProofWire {
     canonical_byte_length: usize,
     responses: Vec<DecodedCompactProofResponse>,
 }
 
+#[cfg(test)]
 impl DecodedCompactProofWire {
     pub(crate) const fn canonical_byte_length(&self) -> usize {
         self.canonical_byte_length
@@ -712,6 +667,7 @@ impl DecodedCompactProofWire {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CompactPublicInputBindings {
     suite_identifier: Hash512,
@@ -720,6 +676,7 @@ pub(crate) struct CompactPublicInputBindings {
     relation_plan_hash: Hash512,
 }
 
+#[cfg(test)]
 impl CompactPublicInputBindings {
     pub(crate) const fn new(
         suite_identifier: Hash512,
@@ -747,7 +704,6 @@ impl CompactPublicInputBindings {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CompactPublicInputWireGeometry {
-    packing_factor: u16,
     ring_vector_count: u32,
     ring_degree: u32,
     field_element_count: u32,
@@ -756,11 +712,10 @@ pub(crate) struct CompactPublicInputWireGeometry {
 
 impl CompactPublicInputWireGeometry {
     pub(crate) fn new(
-        packing_factor: u16,
         ring_vector_count: u64,
         ring_degree: u64,
     ) -> Result<Self, CompactProofWireError> {
-        if !matches!(packing_factor, 1 | 2 | 4 | 8) || ring_vector_count == 0 || ring_degree == 0 {
+        if ring_vector_count == 0 || ring_degree == 0 {
             return Err(CompactProofWireError::InvalidGeometry);
         }
         let ring_vector_count =
@@ -779,7 +734,6 @@ impl CompactPublicInputWireGeometry {
             ])?,
         )?;
         Ok(Self {
-            packing_factor,
             ring_vector_count,
             ring_degree,
             field_element_count,
@@ -787,27 +741,18 @@ impl CompactPublicInputWireGeometry {
         })
     }
 
+    #[cfg(test)]
     pub(crate) const fn exact_canonical_byte_length(self) -> usize {
         self.exact_canonical_byte_length
     }
 
-    pub(crate) const fn packing_factor(self) -> u16 {
-        self.packing_factor
-    }
-
-    pub(crate) const fn ring_vector_count(self) -> u32 {
-        self.ring_vector_count
-    }
-
-    pub(crate) const fn ring_degree(self) -> u32 {
-        self.ring_degree
-    }
-
+    #[cfg(test)]
     pub(crate) const fn field_element_count(self) -> u32 {
         self.field_element_count
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DecodedCompactPublicInput {
     canonical_byte_length: usize,
@@ -815,6 +760,7 @@ pub(crate) struct DecodedCompactPublicInput {
     field_element_count: usize,
 }
 
+#[cfg(test)]
 impl DecodedCompactPublicInput {
     pub(crate) const fn canonical_byte_length(&self) -> usize {
         self.canonical_byte_length
@@ -840,24 +786,41 @@ pub(crate) enum CompactProofWireError {
     InvalidGeometry,
     LengthOverflow,
     ProofByteCeilingExceeded,
-    DeclaredLengthMismatch,
+    #[cfg(test)]
     GeometryBoundExceeded,
+    #[cfg(test)]
     Truncated,
+    #[cfg(test)]
     TrailingBytes,
+    #[cfg(test)]
     WrongProofMagic,
+    #[cfg(test)]
     WrongPublicInputMagic,
+    #[cfg(test)]
     WrongPackingFactor,
+    #[cfg(test)]
     WrongResponseCount,
+    #[cfg(test)]
     WrongResponseOrdinal,
+    #[cfg(test)]
     WrongPublicInputBinding,
+    #[cfg(test)]
     WrongPublicInputCount,
+    #[cfg(test)]
     NonCanonicalBaseFieldElement,
+    #[cfg(test)]
     NonCanonicalExtensionFieldElement,
+    #[cfg(test)]
     DuplicateLeafSalt,
+    #[cfg(test)]
     OversizedFrontierDictionary,
+    #[cfg(test)]
     DuplicateOrUnsortedFrontierDictionary,
+    #[cfg(test)]
     OversizedFrontier,
+    #[cfg(test)]
     InvalidFrontierDictionaryReference,
+    #[cfg(test)]
     UnusedFrontierDictionaryEntry,
 }
 
@@ -876,6 +839,7 @@ impl From<super::fixed_uniform_verifier_message::FixedUniformVerifierMessageErro
     }
 }
 
+#[cfg(test)]
 pub(crate) fn encode_compact_proof_wire(
     geometry: &CompactProofWireGeometry,
     input: &CompactProofWireInput,
@@ -890,17 +854,12 @@ pub(crate) fn encode_compact_proof_wire(
     assembler.finish()
 }
 
+#[cfg(test)]
 pub(crate) fn decode_compact_proof_wire(
     geometry: &CompactProofWireGeometry,
     canonical_proof_bytes: &[u8],
-    declared_proof_byte_length: usize,
 ) -> Result<DecodedCompactProofWire, CompactProofWireError> {
-    if declared_proof_byte_length > MAXIMUM_COMMON_PROOF_BYTE_LENGTH {
-        return Err(CompactProofWireError::ProofByteCeilingExceeded);
-    }
-    if canonical_proof_bytes.len() != declared_proof_byte_length {
-        return Err(CompactProofWireError::DeclaredLengthMismatch);
-    }
+    enforce_compact_proof_byte_ceiling(canonical_proof_bytes.len())?;
     let decoded = decode_compact_proof_wire_prefix(
         geometry,
         canonical_proof_bytes,
@@ -912,11 +871,23 @@ pub(crate) fn decode_compact_proof_wire(
     })
 }
 
+#[cfg(test)]
+fn enforce_compact_proof_byte_ceiling(
+    canonical_proof_byte_length: usize,
+) -> Result<(), CompactProofWireError> {
+    if canonical_proof_byte_length > MAXIMUM_COMMON_PROOF_BYTE_LENGTH {
+        return Err(CompactProofWireError::ProofByteCeilingExceeded);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
 struct DecodedCompactProofWirePrefix {
     responses: Vec<DecodedCompactProofResponse>,
     accepted_leaf_salts: Vec<[u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH]>,
 }
 
+#[cfg(test)]
 pub(crate) fn decode_compact_proof_wire_prefix(
     geometry: &CompactProofWireGeometry,
     canonical_prefix_bytes: &[u8],
@@ -933,6 +904,7 @@ pub(crate) fn decode_compact_proof_wire_prefix(
     })
 }
 
+#[cfg(test)]
 fn decode_compact_proof_wire_prefix_with_leaf_salts(
     geometry: &CompactProofWireGeometry,
     canonical_prefix_bytes: &[u8],
@@ -949,7 +921,7 @@ fn decode_compact_proof_wire_prefix_with_leaf_salts(
     if reader.read_array::<8>()? != COMPACT_PROOF_WIRE_MAGIC {
         return Err(CompactProofWireError::WrongProofMagic);
     }
-    if reader.read_u16()? != geometry.packing_factor {
+    if reader.read_u16()? != COMPACT_PACKING_FACTOR {
         return Err(CompactProofWireError::WrongPackingFactor);
     }
     if usize::try_from(reader.read_u32()?).ok() != Some(geometry.responses.len()) {
@@ -1060,6 +1032,7 @@ fn decode_compact_proof_wire_prefix_with_leaf_salts(
     })
 }
 
+#[cfg(test)]
 pub(crate) fn encode_compact_public_input(
     geometry: CompactPublicInputWireGeometry,
     bindings: CompactPublicInputBindings,
@@ -1076,7 +1049,7 @@ pub(crate) fn encode_compact_public_input(
         .try_reserve_exact(geometry.exact_canonical_byte_length)
         .map_err(|_| CompactProofWireError::LengthOverflow)?;
     canonical.extend_from_slice(&COMPACT_PUBLIC_INPUT_WIRE_MAGIC);
-    canonical.extend_from_slice(&geometry.packing_factor.to_le_bytes());
+    canonical.extend_from_slice(&COMPACT_PACKING_FACTOR.to_le_bytes());
     for binding in bindings.ordered_hashes() {
         canonical.extend_from_slice(binding.as_bytes());
     }
@@ -1092,6 +1065,7 @@ pub(crate) fn encode_compact_public_input(
     Ok(canonical)
 }
 
+#[cfg(test)]
 pub(crate) fn decode_compact_public_input(
     geometry: CompactPublicInputWireGeometry,
     expected_bindings: CompactPublicInputBindings,
@@ -1107,7 +1081,7 @@ pub(crate) fn decode_compact_public_input(
     if reader.read_array::<8>()? != COMPACT_PUBLIC_INPUT_WIRE_MAGIC {
         return Err(CompactProofWireError::WrongPublicInputMagic);
     }
-    if reader.read_u16()? != geometry.packing_factor {
+    if reader.read_u16()? != COMPACT_PACKING_FACTOR {
         return Err(CompactProofWireError::WrongPackingFactor);
     }
     for expected_binding in expected_bindings.ordered_hashes() {
@@ -1134,6 +1108,7 @@ pub(crate) fn decode_compact_public_input(
     })
 }
 
+#[cfg(test)]
 fn validate_response_input(
     geometry: &CompactProofResponseWireGeometry,
     response: &CompactProofResponseWireInput,
@@ -1150,6 +1125,7 @@ fn validate_response_input(
     Ok(())
 }
 
+#[cfg(test)]
 fn validate_response_counts(
     geometry: &CompactProofResponseWireGeometry,
     queried_base_field_element_count: usize,
@@ -1177,11 +1153,13 @@ fn validate_response_counts(
     Ok(())
 }
 
+#[cfg(test)]
 struct CompactWireReader<'bytes> {
     bytes: &'bytes [u8],
     offset: usize,
 }
 
+#[cfg(test)]
 impl<'bytes> CompactWireReader<'bytes> {
     const fn new(bytes: &'bytes [u8]) -> Self {
         Self { bytes, offset: 0 }
@@ -1322,6 +1300,7 @@ fn checked_usize_product(values: &[usize]) -> Result<usize, CompactProofWireErro
     })
 }
 
+#[cfg(test)]
 fn indexed_offset(
     range: &Range<usize>,
     ordinal: usize,
@@ -1340,6 +1319,7 @@ fn indexed_offset(
     Ok(offset)
 }
 
+#[cfg(test)]
 fn read_array_at<const BYTE_LENGTH: usize>(
     bytes: &[u8],
     offset: usize,
@@ -1354,14 +1334,17 @@ fn read_array_at<const BYTE_LENGTH: usize>(
         .map_err(|_| CompactProofWireError::Truncated)
 }
 
+#[cfg(test)]
 fn read_u32_at(bytes: &[u8], offset: usize) -> Result<u32, CompactProofWireError> {
     Ok(u32::from_le_bytes(read_array_at(bytes, offset)?))
 }
 
+#[cfg(test)]
 fn read_u64_at(bytes: &[u8], offset: usize) -> Result<u64, CompactProofWireError> {
     Ok(u64::from_le_bytes(read_array_at(bytes, offset)?))
 }
 
+#[cfg(test)]
 fn read_extension_at(
     bytes: &[u8],
     offset: usize,
@@ -1394,15 +1377,12 @@ mod tests {
     }
 
     fn proof_geometry() -> CompactProofWireGeometry {
-        CompactProofWireGeometry::new(
-            4,
-            vec![
-                CompactProofResponseWireGeometry::new(0, 3, 0, 2, 4, verifier_message_geometry())
-                    .unwrap(),
-                CompactProofResponseWireGeometry::new(1, 0, 2, 2, 2, verifier_message_geometry())
-                    .unwrap(),
-            ],
-        )
+        CompactProofWireGeometry::new(vec![
+            CompactProofResponseWireGeometry::new(0, 3, 0, 2, 4, verifier_message_geometry())
+                .unwrap(),
+            CompactProofResponseWireGeometry::new(1, 0, 2, 2, 2, verifier_message_geometry())
+                .unwrap(),
+        ])
         .unwrap()
     }
 
@@ -1451,7 +1431,7 @@ mod tests {
         let geometry = proof_geometry();
         let input = proof_input();
         let canonical = encode_compact_proof_wire(&geometry, &input).unwrap();
-        let decoded = decode_compact_proof_wire(&geometry, &canonical, canonical.len()).unwrap();
+        let decoded = decode_compact_proof_wire(&geometry, &canonical).unwrap();
         assert_eq!(decoded.canonical_byte_length(), canonical.len());
         assert!(canonical.len() < geometry.maximum_canonical_byte_length());
         assert_eq!(decoded.responses().len(), 2);
@@ -1500,7 +1480,7 @@ mod tests {
     }
 
     #[test]
-    fn incremental_proof_assembler_matches_batch_encoding_and_bounds_owned_heap() {
+    fn incremental_proof_assembler_matches_batch_encoding() {
         let geometry = proof_geometry();
         let input = proof_input();
         let expected = encode_compact_proof_wire(&geometry, &input).unwrap();
@@ -1509,26 +1489,6 @@ mod tests {
         assembler.append_response(&input.responses[0]).unwrap();
         assembler.append_response(&input.responses[1]).unwrap();
         assert_eq!(assembler.finish().unwrap(), expected);
-
-        let heap = CompactProofWireAssemblerHeapGeometry::derive(&geometry).unwrap();
-        assert_eq!(
-            heap.maximum_canonical_proof_byte_length(),
-            geometry.maximum_canonical_byte_length() as u64
-        );
-        assert_eq!(
-            heap.leaf_salt_registry_byte_length(),
-            4 * COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH as u64
-        );
-        assert_eq!(
-            heap.maximum_frontier_dictionary_byte_length(),
-            4 * MERKLE_DIGEST_BYTE_LENGTH as u64
-        );
-        assert_eq!(
-            heap.maximum_owned_heap_byte_length(),
-            heap.maximum_canonical_proof_byte_length()
-                + heap.leaf_salt_registry_byte_length()
-                + heap.maximum_frontier_dictionary_byte_length()
-        );
     }
 
     #[test]
@@ -1653,13 +1613,13 @@ mod tests {
         let mut wrong_magic = canonical.clone();
         wrong_magic[0] ^= 1;
         assert_eq!(
-            decode_compact_proof_wire(&geometry, &wrong_magic, wrong_magic.len()),
+            decode_compact_proof_wire(&geometry, &wrong_magic),
             Err(CompactProofWireError::WrongProofMagic)
         );
         let mut wrong_factor = canonical.clone();
         wrong_factor[COMPACT_PROOF_WIRE_MAGIC.len()] ^= 1;
         assert_eq!(
-            decode_compact_proof_wire(&geometry, &wrong_factor, wrong_factor.len()),
+            decode_compact_proof_wire(&geometry, &wrong_factor),
             Err(CompactProofWireError::WrongPackingFactor)
         );
         let response_count_offset = COMPACT_PROOF_WIRE_MAGIC.len() + size_of::<u16>();
@@ -1667,7 +1627,7 @@ mod tests {
         wrong_count[response_count_offset..response_count_offset + size_of::<u32>()]
             .copy_from_slice(&3_u32.to_le_bytes());
         assert_eq!(
-            decode_compact_proof_wire(&geometry, &wrong_count, wrong_count.len()),
+            decode_compact_proof_wire(&geometry, &wrong_count),
             Err(CompactProofWireError::WrongResponseCount)
         );
         let mut wrong_ordinal = canonical.clone();
@@ -1675,29 +1635,21 @@ mod tests {
             [PROOF_FIXED_HEADER_BYTE_LENGTH..PROOF_FIXED_HEADER_BYTE_LENGTH + size_of::<u32>()]
             .copy_from_slice(&1_u32.to_le_bytes());
         assert_eq!(
-            decode_compact_proof_wire(&geometry, &wrong_ordinal, wrong_ordinal.len()),
+            decode_compact_proof_wire(&geometry, &wrong_ordinal),
             Err(CompactProofWireError::WrongResponseOrdinal)
         );
         assert_eq!(
-            decode_compact_proof_wire(
-                &geometry,
-                &canonical[..canonical.len() - 1],
-                canonical.len()
-            ),
-            Err(CompactProofWireError::DeclaredLengthMismatch)
+            decode_compact_proof_wire(&geometry, &canonical[..canonical.len() - 1]),
+            Err(CompactProofWireError::Truncated)
         );
         assert_eq!(
-            decode_compact_proof_wire(&geometry, &canonical, canonical.len() - 1),
-            Err(CompactProofWireError::DeclaredLengthMismatch)
-        );
-        assert_eq!(
-            decode_compact_proof_wire(&geometry, &canonical, MAXIMUM_COMMON_PROOF_BYTE_LENGTH + 1,),
+            enforce_compact_proof_byte_ceiling(MAXIMUM_COMMON_PROOF_BYTE_LENGTH + 1),
             Err(CompactProofWireError::ProofByteCeilingExceeded)
         );
         let mut trailing = canonical;
         trailing.push(0);
         assert_eq!(
-            decode_compact_proof_wire(&geometry, &trailing, trailing.len()),
+            decode_compact_proof_wire(&geometry, &trailing),
             Err(CompactProofWireError::TrailingBytes)
         );
     }
@@ -1706,14 +1658,14 @@ mod tests {
     fn proof_decoder_refuses_noncanonical_fields_and_duplicate_salts() {
         let geometry = proof_geometry();
         let canonical = encode_compact_proof_wire(&geometry, &proof_input()).unwrap();
-        let decoded = decode_compact_proof_wire(&geometry, &canonical, canonical.len()).unwrap();
+        let decoded = decode_compact_proof_wire(&geometry, &canonical).unwrap();
 
         let mut noncanonical_base = canonical.clone();
         let base_offset = decoded.responses[0].base_field_value_bytes.start;
         noncanonical_base[base_offset..base_offset + size_of::<u64>()]
             .copy_from_slice(&PROOF_BASE_FIELD_MODULUS.to_le_bytes());
         assert_eq!(
-            decode_compact_proof_wire(&geometry, &noncanonical_base, noncanonical_base.len()),
+            decode_compact_proof_wire(&geometry, &noncanonical_base),
             Err(CompactProofWireError::NonCanonicalBaseFieldElement)
         );
 
@@ -1722,11 +1674,7 @@ mod tests {
         noncanonical_extension[extension_offset..extension_offset + size_of::<u64>()]
             .copy_from_slice(&PROOF_BASE_FIELD_MODULUS.to_le_bytes());
         assert_eq!(
-            decode_compact_proof_wire(
-                &geometry,
-                &noncanonical_extension,
-                noncanonical_extension.len(),
-            ),
+            decode_compact_proof_wire(&geometry, &noncanonical_extension),
             Err(CompactProofWireError::NonCanonicalExtensionFieldElement)
         );
 
@@ -1739,7 +1687,7 @@ mod tests {
         duplicate_salt[second_salt..second_salt + COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH]
             .copy_from_slice(&copied);
         assert_eq!(
-            decode_compact_proof_wire(&geometry, &duplicate_salt, duplicate_salt.len()),
+            decode_compact_proof_wire(&geometry, &duplicate_salt),
             Err(CompactProofWireError::DuplicateLeafSalt)
         );
     }
@@ -1748,7 +1696,7 @@ mod tests {
     fn proof_decoder_refuses_hostile_frontier_dictionaries_and_references() {
         let geometry = proof_geometry();
         let canonical = encode_compact_proof_wire(&geometry, &proof_input()).unwrap();
-        let decoded = decode_compact_proof_wire(&geometry, &canonical, canonical.len()).unwrap();
+        let decoded = decode_compact_proof_wire(&geometry, &canonical).unwrap();
         let response = &decoded.responses[0];
 
         let mut reordered_dictionary = canonical.clone();
@@ -1765,7 +1713,7 @@ mod tests {
             ..dictionary_start + 2 * MERKLE_DIGEST_BYTE_LENGTH]
             .copy_from_slice(&first);
         assert_eq!(
-            decode_compact_proof_wire(&geometry, &reordered_dictionary, reordered_dictionary.len(),),
+            decode_compact_proof_wire(&geometry, &reordered_dictionary),
             Err(CompactProofWireError::DuplicateOrUnsortedFrontierDictionary)
         );
 
@@ -1774,7 +1722,7 @@ mod tests {
         invalid_reference[reference_start..reference_start + size_of::<u32>()]
             .copy_from_slice(&2_u32.to_le_bytes());
         assert_eq!(
-            decode_compact_proof_wire(&geometry, &invalid_reference, invalid_reference.len()),
+            decode_compact_proof_wire(&geometry, &invalid_reference),
             Err(CompactProofWireError::InvalidFrontierDictionaryReference)
         );
 
@@ -1785,18 +1733,14 @@ mod tests {
             reference.copy_from_slice(&0_u32.to_le_bytes());
         }
         assert_eq!(
-            decode_compact_proof_wire(
-                &geometry,
-                &unused_dictionary_entry,
-                unused_dictionary_entry.len(),
-            ),
+            decode_compact_proof_wire(&geometry, &unused_dictionary_entry),
             Err(CompactProofWireError::UnusedFrontierDictionaryEntry)
         );
     }
 
     #[test]
     fn public_input_wire_binds_every_context_and_refuses_noncanonical_values() {
-        let geometry = CompactPublicInputWireGeometry::new(4, 2, 3).unwrap();
+        let geometry = CompactPublicInputWireGeometry::new(2, 3).unwrap();
         let bindings = CompactPublicInputBindings::new(
             Hash512::from_bytes([0x11; 64]),
             Hash512::from_bytes([0x22; 64]),
@@ -1813,6 +1757,12 @@ mod tests {
         assert_eq!(decoded.field_element_count(), 6);
         assert_eq!(decoded.field_element(&canonical, 4).unwrap().canonical(), 8);
 
+        let mut wrong_factor = canonical.clone();
+        wrong_factor[COMPACT_PUBLIC_INPUT_WIRE_MAGIC.len()] ^= 1;
+        assert_eq!(
+            decode_compact_public_input(geometry, bindings, &wrong_factor),
+            Err(CompactProofWireError::WrongPackingFactor)
+        );
         let mut wrong_binding = canonical.clone();
         wrong_binding[COMPACT_PUBLIC_INPUT_WIRE_MAGIC.len() + size_of::<u16>()] ^= 1;
         assert_eq!(
@@ -1852,7 +1802,7 @@ mod tests {
     #[test]
     fn wire_geometry_rejects_invalid_order_counts_and_absolute_overflow() {
         assert_eq!(
-            CompactProofWireGeometry::new(3, Vec::new()),
+            CompactProofWireGeometry::new(Vec::new()),
             Err(CompactProofWireError::InvalidGeometry)
         );
         assert_eq!(
@@ -1864,11 +1814,11 @@ mod tests {
                 .unwrap(),
         ];
         assert_eq!(
-            CompactProofWireGeometry::new(1, reordered),
+            CompactProofWireGeometry::new(reordered),
             Err(CompactProofWireError::InvalidGeometry)
         );
         assert_eq!(
-            CompactPublicInputWireGeometry::new(8, u64::from(u32::MAX), 2),
+            CompactPublicInputWireGeometry::new(u64::from(u32::MAX), 2),
             Err(CompactProofWireError::LengthOverflow)
         );
     }

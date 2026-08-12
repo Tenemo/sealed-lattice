@@ -294,27 +294,17 @@ mod tests {
     use crate::bgv::proof_suite::compact_public_key_static_catalog::CompactPublicKeyStaticCatalog;
 
     #[test]
-    fn every_factor_has_twenty_six_fixed_output_query_groups() {
+    fn factor_one_has_twenty_six_fixed_output_query_groups() {
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
-        let expected_candidate_slot_counts = [1_322_752, 1_338_880, 1_310_464, 1_342_464];
-        for (factor, expected_candidate_slot_count) in catalog
-            .factor_catalogs
-            .iter()
-            .zip(expected_candidate_slot_counts)
-        {
-            let lifecycle = &factor.query_sampling_lifecycle;
-            assert_eq!(lifecycle.query_group_count, 26);
-            assert_eq!(
-                lifecycle.fixed_candidate_slot_count,
-                expected_candidate_slot_count
-            );
-            assert_eq!(
-                lifecycle.fixed_candidate_byte_length,
-                expected_candidate_slot_count * QUERY_CANDIDATE_BYTE_LENGTH
-            );
-            assert_eq!(lifecycle.maximum_attempt_count, 1);
-        }
+        let lifecycle = &catalog.selected.query_sampling_lifecycle;
+        assert_eq!(lifecycle.query_group_count, 26);
+        assert_eq!(lifecycle.fixed_candidate_slot_count, 1_322_752);
+        assert_eq!(
+            lifecycle.fixed_candidate_byte_length,
+            1_322_752 * QUERY_CANDIDATE_BYTE_LENGTH
+        );
+        assert_eq!(lifecycle.maximum_attempt_count, 1);
     }
 
     #[test]
@@ -346,76 +336,56 @@ mod tests {
         .chain(expected_whir_mask_roles.iter().copied())
         .collect::<Vec<_>>();
 
-        for factor in &catalog.factor_catalogs {
-            assert_eq!(
-                factor.query_sampling_lifecycle.pre_challenge.groups[..4]
-                    .iter()
-                    .map(|group| group.role)
-                    .collect::<Vec<_>>(),
-                expected_source_roles
-            );
-            assert_eq!(
-                factor.query_sampling_lifecycle.main.groups[..4]
-                    .iter()
-                    .map(|group| group.role)
-                    .collect::<Vec<_>>(),
-                expected_source_roles
-            );
-            assert_eq!(
-                factor.query_sampling_lifecycle.pre_challenge.groups[4..]
-                    .iter()
-                    .enumerate()
-                    .map(|(group_ordinal, group)| {
-                        let QuerySamplingGroupRole::Mask {
-                            group_ordinal: encoded_group_ordinal,
-                            mask_role,
-                        } = group.role
-                        else {
-                            panic!("pre-challenge mask query group role");
-                        };
-                        assert_eq!(usize::from(encoded_group_ordinal), group_ordinal);
-                        mask_role
-                    })
-                    .collect::<Vec<_>>(),
-                expected_pre_challenge_mask_roles
-            );
-            assert_eq!(
-                factor.query_sampling_lifecycle.main.groups[4..]
-                    .iter()
-                    .enumerate()
-                    .map(|(group_ordinal, group)| {
-                        let QuerySamplingGroupRole::Mask {
-                            group_ordinal: encoded_group_ordinal,
-                            mask_role,
-                        } = group.role
-                        else {
-                            panic!("main mask query group role");
-                        };
-                        assert_eq!(usize::from(encoded_group_ordinal), group_ordinal);
-                        mask_role
-                    })
-                    .collect::<Vec<_>>(),
-                expected_main_mask_roles
-            );
-        }
-    }
-
-    #[test]
-    fn factor_eight_one_attempt_exhaustion_is_between_two_hundred_ninety_seven_and_two_hundred_ninety_eight_bits()
-     {
-        let catalog = CompactPublicKeyStaticCatalog::derive()
-            .expect("compact public-key static packing ledger");
-        let factor_eight = &catalog.factor_catalogs[3].query_sampling_lifecycle;
-
-        assert!(
-            factor_eight
-                .union_bound_exhaustion_probability_per_attempt
-                .is_at_most_inverse_power_of_two(297)
+        let selected = &catalog.selected;
+        assert_eq!(
+            selected.query_sampling_lifecycle.pre_challenge.groups[..4]
+                .iter()
+                .map(|group| group.role)
+                .collect::<Vec<_>>(),
+            expected_source_roles
         );
-        assert!(
-            !factor_eight
-                .union_bound_exhaustion_probability_per_attempt
-                .is_at_most_inverse_power_of_two(298)
+        assert_eq!(
+            selected.query_sampling_lifecycle.main.groups[..4]
+                .iter()
+                .map(|group| group.role)
+                .collect::<Vec<_>>(),
+            expected_source_roles
+        );
+        assert_eq!(
+            selected.query_sampling_lifecycle.pre_challenge.groups[4..]
+                .iter()
+                .enumerate()
+                .map(|(group_ordinal, group)| {
+                    let QuerySamplingGroupRole::Mask {
+                        group_ordinal: encoded_group_ordinal,
+                        mask_role,
+                    } = group.role
+                    else {
+                        panic!("pre-challenge mask query group role");
+                    };
+                    assert_eq!(usize::from(encoded_group_ordinal), group_ordinal);
+                    mask_role
+                })
+                .collect::<Vec<_>>(),
+            expected_pre_challenge_mask_roles
+        );
+        assert_eq!(
+            selected.query_sampling_lifecycle.main.groups[4..]
+                .iter()
+                .enumerate()
+                .map(|(group_ordinal, group)| {
+                    let QuerySamplingGroupRole::Mask {
+                        group_ordinal: encoded_group_ordinal,
+                        mask_role,
+                    } = group.role
+                    else {
+                        panic!("main mask query group role");
+                    };
+                    assert_eq!(usize::from(encoded_group_ordinal), group_ordinal);
+                    mask_role
+                })
+                .collect::<Vec<_>>(),
+            expected_main_mask_roles
         );
     }
 }

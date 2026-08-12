@@ -84,46 +84,13 @@ impl ExactBoundedFieldRejectionFormula {
 struct UniformVerifierMoveLedger {
     ordinal: u32,
     fixed_message_geometry: FixedUniformVerifierMessageGeometry,
-    extension_output_count: u64,
-    excluded_extension_prefix_cardinality: u64,
-    base_field_output_count: u64,
     extension_rejection_formula: Option<ExactBoundedFieldRejectionFormula>,
     base_field_rejection_formula: Option<ExactBoundedFieldRejectionFormula>,
-    distinct_query_groups: Vec<DistinctQueryGeometry>,
     fixed_candidate_slot_count: u64,
     uniform_message_byte_length: u64,
     uniform_message_bit_length: u64,
     concrete_challenge_stream_hash_query_count: u64,
-    accepted_challenge_cardinality: BigUint,
     field_sampling_exhaustion_security_bit_floor: u64,
-}
-
-impl UniformVerifierMoveLedger {
-    fn derive(
-        ordinal: u32,
-        challenge_space: &ExactChallengeSpace,
-    ) -> Result<Self, CompactStaticCatalogError> {
-        let ledger = derive_move_without_check(ordinal, challenge_space)?;
-        ledger.check(challenge_space)?;
-        Ok(ledger)
-    }
-
-    fn check(
-        &self,
-        challenge_space: &ExactChallengeSpace,
-    ) -> Result<(), CompactStaticCatalogError> {
-        let expected = derive_move_without_check(self.ordinal, challenge_space)?;
-        if self != &expected
-            || self.fixed_candidate_slot_count == 0
-            || self.uniform_message_byte_length == 0
-            || self.uniform_message_bit_length != self.uniform_message_byte_length * 8
-            || self.concrete_challenge_stream_hash_query_count == 0
-            || self.accepted_challenge_cardinality <= BigUint::one()
-        {
-            return Err(CompactStaticCatalogError::InvalidGeometry);
-        }
-        Ok(())
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -143,16 +110,9 @@ impl PackingUniformVerifierRandomness {
         let moves = chronology
             .verifier_moves
             .iter()
-            .map(|verifier_move| {
-                UniformVerifierMoveLedger::derive(
-                    verifier_move.ordinal,
-                    &verifier_move.challenge_space,
-                )
-            })
+            .map(|verifier_move| derive_move(verifier_move.ordinal, &verifier_move.challenge_space))
             .collect::<Result<Vec<_>, _>>()?;
-        let ledger = derive_catalog_without_check(moves)?;
-        ledger.check(chronology)?;
-        Ok(ledger)
+        derive_catalog(moves)
     }
 
     pub(super) const fn minimum_uniform_verifier_message_bit_length(&self) -> u64 {
@@ -180,41 +140,9 @@ impl PackingUniformVerifierRandomness {
     pub(super) const fn move_count(&self) -> usize {
         self.moves.len()
     }
-
-    fn check(
-        &self,
-        chronology: &PackingTranscriptChronology,
-    ) -> Result<(), CompactStaticCatalogError> {
-        let expected_moves = chronology
-            .verifier_moves
-            .iter()
-            .map(|verifier_move| {
-                UniformVerifierMoveLedger::derive(
-                    verifier_move.ordinal,
-                    &verifier_move.challenge_space,
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let expected = derive_catalog_without_check(expected_moves)?;
-        if self != &expected
-            || self.moves.len() != chronology.verifier_moves.len()
-            || self.total_fixed_candidate_slot_count == 0
-            || self.total_uniform_message_byte_length == 0
-            || self.minimum_uniform_verifier_message_bit_length == 0
-            || self.concrete_challenge_stream_hash_query_count == 0
-            || self.moves.iter().zip(&chronology.verifier_moves).any(
-                |(move_ledger, verifier_move)| {
-                    move_ledger.check(&verifier_move.challenge_space).is_err()
-                },
-            )
-        {
-            return Err(CompactStaticCatalogError::InvalidGeometry);
-        }
-        Ok(())
-    }
 }
 
-fn derive_move_without_check(
+fn derive_move(
     ordinal: u32,
     challenge_space: &ExactChallengeSpace,
 ) -> Result<UniformVerifierMoveLedger, CompactStaticCatalogError> {
@@ -278,12 +206,8 @@ fn derive_move_without_check(
     Ok(UniformVerifierMoveLedger {
         ordinal,
         fixed_message_geometry,
-        extension_output_count,
-        excluded_extension_prefix_cardinality,
-        base_field_output_count,
         extension_rejection_formula,
         base_field_rejection_formula,
-        distinct_query_groups,
         fixed_candidate_slot_count,
         uniform_message_byte_length,
         uniform_message_bit_length: checked_product(&[
@@ -291,12 +215,11 @@ fn derive_move_without_check(
             u64::from(u8::BITS),
         ])?,
         concrete_challenge_stream_hash_query_count,
-        accepted_challenge_cardinality: challenge_space.cardinality()?,
         field_sampling_exhaustion_security_bit_floor,
     })
 }
 
-fn derive_catalog_without_check(
+fn derive_catalog(
     moves: Vec<UniformVerifierMoveLedger>,
 ) -> Result<PackingUniformVerifierRandomness, CompactStaticCatalogError> {
     let total_fixed_candidate_slot_count = moves.iter().try_fold(0_u64, |count, move_ledger| {
@@ -444,7 +367,6 @@ mod tests {
 
     #[derive(Debug, PartialEq, Eq)]
     struct UniformRandomnessSnapshot {
-        packing_factor: u64,
         total_fixed_candidate_slot_count: u64,
         total_uniform_message_byte_length: u64,
         concrete_challenge_stream_hash_query_count: u64,
@@ -455,74 +377,41 @@ mod tests {
     fn every_logical_move_has_one_fixed_uniform_bit_string() {
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
-
-        for factor in &catalog.factor_catalogs {
-            let randomness = &factor.uniform_verifier_randomness;
-            assert_eq!(
-                randomness.moves.len(),
-                factor.transcript_chronology.verifier_moves.len()
-            );
-            assert_eq!(
-                randomness.minimum_uniform_verifier_message_bit_length,
-                65_536
-            );
-            assert!(randomness.total_fixed_candidate_slot_count > 0);
-            assert!(randomness.total_uniform_message_byte_length > 0);
-            assert!(randomness.concrete_challenge_stream_hash_query_count > 0);
-            assert!(randomness.field_sampling_exhaustion_security_bit_floor_per_attempt >= 4_000);
-        }
-
-        let snapshots = catalog
-            .factor_catalogs
-            .iter()
-            .map(|factor| UniformRandomnessSnapshot {
-                packing_factor: factor.packing_factor,
-                total_fixed_candidate_slot_count: factor
+        let selected = &catalog.selected;
+        let randomness = &selected.uniform_verifier_randomness;
+        assert_eq!(
+            randomness.moves.len(),
+            selected.transcript_chronology.verifier_moves.len()
+        );
+        assert_eq!(
+            randomness.minimum_uniform_verifier_message_bit_length,
+            65_536
+        );
+        assert!(randomness.total_fixed_candidate_slot_count > 0);
+        assert!(randomness.total_uniform_message_byte_length > 0);
+        assert!(randomness.concrete_challenge_stream_hash_query_count > 0);
+        assert!(randomness.field_sampling_exhaustion_security_bit_floor_per_attempt >= 4_000);
+        assert_eq!(
+            UniformRandomnessSnapshot {
+                total_fixed_candidate_slot_count: selected
                     .uniform_verifier_randomness
                     .total_fixed_candidate_slot_count,
-                total_uniform_message_byte_length: factor
+                total_uniform_message_byte_length: selected
                     .uniform_verifier_randomness
                     .total_uniform_message_byte_length,
-                concrete_challenge_stream_hash_query_count: factor
+                concrete_challenge_stream_hash_query_count: selected
                     .uniform_verifier_randomness
                     .concrete_challenge_stream_hash_query_count,
-                field_sampling_exhaustion_security_bit_floor_per_attempt: factor
+                field_sampling_exhaustion_security_bit_floor_per_attempt: selected
                     .uniform_verifier_randomness
                     .field_sampling_exhaustion_security_bit_floor_per_attempt,
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            snapshots,
-            vec![
-                UniformRandomnessSnapshot {
-                    packing_factor: 1,
-                    total_fixed_candidate_slot_count: 1_339_520,
-                    total_uniform_message_byte_length: 11_612_160,
-                    concrete_challenge_stream_hash_query_count: 181_522,
-                    field_sampling_exhaustion_security_bit_floor_per_attempt: 4_088,
-                },
-                UniformRandomnessSnapshot {
-                    packing_factor: 2,
-                    total_fixed_candidate_slot_count: 1_355_392,
-                    total_uniform_message_byte_length: 11_724_800,
-                    concrete_challenge_stream_hash_query_count: 183_280,
-                    field_sampling_exhaustion_security_bit_floor_per_attempt: 4_088,
-                },
-                UniformRandomnessSnapshot {
-                    packing_factor: 4,
-                    total_fixed_candidate_slot_count: 1_326_720,
-                    total_uniform_message_byte_length: 11_481_088,
-                    concrete_challenge_stream_hash_query_count: 179_470,
-                    field_sampling_exhaustion_security_bit_floor_per_attempt: 4_088,
-                },
-                UniformRandomnessSnapshot {
-                    packing_factor: 8,
-                    total_fixed_candidate_slot_count: 1_358_464,
-                    total_uniform_message_byte_length: 11_720_704,
-                    concrete_challenge_stream_hash_query_count: 183_212,
-                    field_sampling_exhaustion_security_bit_floor_per_attempt: 4_088,
-                },
-            ]
+            },
+            UniformRandomnessSnapshot {
+                total_fixed_candidate_slot_count: 1_339_520,
+                total_uniform_message_byte_length: 11_612_160,
+                concrete_challenge_stream_hash_query_count: 181_522,
+                field_sampling_exhaustion_security_bit_floor_per_attempt: 4_088,
+            }
         );
     }
 

@@ -8,20 +8,15 @@
 //! through both the matrix description and an independent relation
 //! interpreter.
 
+#[cfg(test)]
 mod witness_covector;
 
 #[cfg(test)]
 #[path = "production_small_chain.rs"]
 mod production_small_chain;
 
-pub(crate) use witness_covector::{
-    COMPACT_STRUCTURED_WITNESS_COVECTOR_ELEMENT_CHUNK_COUNT,
-    CompactStructuredWitnessCovectorGeometry, CompactStructuredWitnessCovectorHostMemoryGeometry,
-    CompactStructuredWitnessCovectorLifecycleGeometry,
-    compact_structured_witness_covector_geometry,
-    compact_structured_witness_covector_host_memory_geometry,
-    compact_structured_witness_covector_lifecycle_geometry,
-};
+#[cfg(test)]
+pub(crate) use witness_covector::compact_structured_witness_covector_geometry;
 
 #[cfg(test)]
 use witness_covector::{
@@ -31,9 +26,12 @@ use witness_covector::{
 #[cfg(test)]
 use std::collections::{BTreeMap, BTreeSet};
 
+#[cfg(test)]
 use p3_field::PrimeCharacteristicRing;
+#[cfg(test)]
 use zeroize::Zeroizing;
 
+#[cfg(test)]
 use crate::bgv::proof_suite::{
     PROOF_BASE_FIELD_MODULUS, ProofBaseFieldElement, ProofChallengeExtensionElement,
     ProofEvaluationDomain,
@@ -45,8 +43,8 @@ use crate::bgv::proof_suite::{
     prover::CommonProofProverError,
 };
 
-use super::super::expressions::{checked_resident_payload_add, resident_vec_storage_byte_length};
 use super::super::key_relation::MODULAR_QUOTIENT_ENCODING_OFFSET;
+#[cfg(test)]
 use super::authenticated_assignment::CompactPublicKeyAssignment;
 use super::{
     CompactPublicKeyRelationCatalog, CompactR1csConstraintKind, CompactRingVectorReference,
@@ -138,17 +136,20 @@ struct CompactNegacyclicProductAddress {
     centered_offset: u64,
 }
 
+#[cfg(test)]
 type PreparedCompactNegacyclicProduct = (
     CompactNegacyclicProductAddress,
     Zeroizing<Vec<ProofBaseFieldElement>>,
 );
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct CompactCenteredPrivateVectorAddress {
     private_vector_first_column_ordinal: u64,
     centered_offset: u64,
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct CompactStructuredR1csRowEvaluation {
     pub(super) left: ProofChallengeExtensionElement,
@@ -156,6 +157,7 @@ pub(super) struct CompactStructuredR1csRowEvaluation {
     pub(super) output: ProofChallengeExtensionElement,
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CompactStructuredR1csRowSourceGeometry {
     ring_degree: u64,
@@ -167,21 +169,15 @@ pub(crate) struct CompactStructuredR1csRowSourceGeometry {
     transform_butterfly_count: u64,
     pointwise_multiplication_count: u64,
     negacyclic_fold_subtraction_count: u64,
-    product_cache_payload_byte_length: u64,
-    product_cache_catalog_byte_length: u64,
-    product_cache_resident_owned_byte_length: u64,
-    peak_additional_payload_byte_length: u64,
-    peak_additional_resident_owned_byte_length: u64,
-    ready_row_source_control_byte_length: u64,
     lookup_inverse_element_count: u64,
     lookup_table_value_count: u64,
     lookup_table_batch_extension_multiplication_count: u64,
 }
 
+#[cfg(test)]
 impl CompactStructuredR1csRowSourceGeometry {
     fn derive(
         relation: &CompactPublicKeyRelationCatalog,
-        matrix_catalog: &CompactStructuredR1csCatalog,
         ordered_product_addresses: &[CompactNegacyclicProductAddress],
     ) -> Result<Self, CommonProofProverError> {
         let mut distinct_centered_private_vectors = Vec::new();
@@ -230,110 +226,6 @@ impl CompactStructuredR1csRowSourceGeometry {
         let negacyclic_fold_subtraction_count = negacyclic_product_count
             .checked_mul(relation.ring_degree)
             .ok_or(CommonProofProverError::CountOverflow)?;
-        let base_field_element_byte_length =
-            u64::try_from(core::mem::size_of::<ProofBaseFieldElement>())
-                .map_err(|_| CommonProofProverError::CountOverflow)?;
-        let extension_element_byte_length =
-            u64::try_from(core::mem::size_of::<ProofChallengeExtensionElement>())
-                .map_err(|_| CommonProofProverError::CountOverflow)?;
-        let product_cache_payload_byte_length = negacyclic_product_count
-            .checked_mul(relation.ring_degree)
-            .and_then(|count| count.checked_mul(base_field_element_byte_length))
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        let product_cache_catalog_byte_length = negacyclic_product_count
-            .checked_mul(
-                u64::try_from(core::mem::size_of::<PreparedCompactNegacyclicProduct>())
-                    .map_err(|_| CommonProofProverError::CountOverflow)?,
-            )
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        let product_cache_resident_owned_byte_length = product_cache_payload_byte_length
-            .checked_add(product_cache_catalog_byte_length)
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        let transform_peak_element_count = negacyclic_product_count
-            .checked_add(4)
-            .and_then(|count| count.checked_mul(relation.ring_degree))
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        let transform_peak_payload_byte_length = transform_peak_element_count
-            .checked_mul(base_field_element_byte_length)
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        let lookup_table_prefix_payload_byte_length = relation
-            .quotient_lookup_table_value_count
-            .checked_mul(extension_element_byte_length)
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        let lookup_summary_payload_byte_length = extension_element_byte_length
-            .checked_mul(2)
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        let first_private_transform_payload_byte_length = relation
-            .ring_degree
-            .checked_mul(base_field_element_byte_length)
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        let temporary_private_address_catalog_byte_length = negacyclic_product_count
-            .checked_mul(
-                u64::try_from(core::mem::size_of::<CompactCenteredPrivateVectorAddress>())
-                    .map_err(|_| CommonProofProverError::CountOverflow)?,
-            )
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        let lookup_construction_payload_byte_length = [
-            lookup_table_prefix_payload_byte_length,
-            first_private_transform_payload_byte_length,
-            product_cache_catalog_byte_length,
-            temporary_private_address_catalog_byte_length,
-        ]
-        .into_iter()
-        .try_fold(0_u64, |total, byte_length| {
-            total
-                .checked_add(byte_length)
-                .ok_or(CommonProofProverError::CountOverflow)
-        })?;
-        let product_phase_payload_byte_length = transform_peak_payload_byte_length
-            .checked_add(product_cache_catalog_byte_length)
-            .ok_or(CommonProofProverError::CountOverflow)?
-            .checked_add(lookup_summary_payload_byte_length)
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        let peak_additional_payload_byte_length =
-            lookup_construction_payload_byte_length.max(product_phase_payload_byte_length);
-        let matrix_catalog_heap_byte_length = matrix_catalog
-            .resident_owned_heap_byte_length()
-            .map_err(CommonProofProverError::Relation)?;
-        let ordered_product_address_catalog_byte_length = negacyclic_product_count
-            .checked_mul(
-                u64::try_from(core::mem::size_of::<CompactNegacyclicProductAddress>())
-                    .map_err(|_| CommonProofProverError::CountOverflow)?,
-            )
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        let product_group_catalog_byte_length = distinct_centered_private_vector_count
-            .checked_mul(
-                u64::try_from(core::mem::size_of::<CompactNegacyclicProductPreparationGroup>())
-                    .map_err(|_| CommonProofProverError::CountOverflow)?,
-            )
-            .and_then(|outer_catalog| {
-                outer_catalog.checked_add(ordered_product_address_catalog_byte_length)
-            })
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        let preparation_control_byte_length = [
-            u64::try_from(core::mem::size_of::<
-                CompactStructuredR1csRowSourcePreparation<'static, CompactPublicKeyAssignment>,
-            >())
-            .map_err(|_| CommonProofProverError::CountOverflow)?,
-            matrix_catalog_heap_byte_length,
-            ordered_product_address_catalog_byte_length,
-            product_group_catalog_byte_length,
-        ]
-        .into_iter()
-        .try_fold(0_u64, |total, byte_length| {
-            total
-                .checked_add(byte_length)
-                .ok_or(CommonProofProverError::CountOverflow)
-        })?;
-        let peak_additional_resident_owned_byte_length = preparation_control_byte_length
-            .checked_add(peak_additional_payload_byte_length)
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        let ready_row_source_control_byte_length = u64::try_from(core::mem::size_of::<
-            CompactStructuredR1csRowSource<'static, CompactPublicKeyAssignment>,
-        >())
-        .map_err(|_| CommonProofProverError::CountOverflow)?
-        .checked_add(matrix_catalog_heap_byte_length)
-        .ok_or(CommonProofProverError::CountOverflow)?;
         let lookup_inverse_element_count = u64::try_from(relation.ordered_relations.len())
             .map_err(|_| CommonProofProverError::CountOverflow)?
             .checked_mul(relation.ring_degree)
@@ -353,12 +245,6 @@ impl CompactStructuredR1csRowSourceGeometry {
             transform_butterfly_count,
             pointwise_multiplication_count,
             negacyclic_fold_subtraction_count,
-            product_cache_payload_byte_length,
-            product_cache_catalog_byte_length,
-            product_cache_resident_owned_byte_length,
-            peak_additional_payload_byte_length,
-            peak_additional_resident_owned_byte_length,
-            ready_row_source_control_byte_length,
             lookup_inverse_element_count,
             lookup_table_value_count: relation.quotient_lookup_table_value_count,
             lookup_table_batch_extension_multiplication_count,
@@ -401,30 +287,6 @@ impl CompactStructuredR1csRowSourceGeometry {
         self.negacyclic_fold_subtraction_count
     }
 
-    pub(crate) const fn product_cache_payload_byte_length(self) -> u64 {
-        self.product_cache_payload_byte_length
-    }
-
-    pub(crate) const fn product_cache_catalog_byte_length(self) -> u64 {
-        self.product_cache_catalog_byte_length
-    }
-
-    pub(crate) const fn product_cache_resident_owned_byte_length(self) -> u64 {
-        self.product_cache_resident_owned_byte_length
-    }
-
-    pub(crate) const fn peak_additional_payload_byte_length(self) -> u64 {
-        self.peak_additional_payload_byte_length
-    }
-
-    pub(crate) const fn peak_additional_resident_owned_byte_length(self) -> u64 {
-        self.peak_additional_resident_owned_byte_length
-    }
-
-    pub(crate) const fn ready_row_source_control_byte_length(self) -> u64 {
-        self.ready_row_source_control_byte_length
-    }
-
     pub(crate) const fn lookup_inverse_element_count(self) -> u64 {
         self.lookup_inverse_element_count
     }
@@ -438,15 +300,16 @@ impl CompactStructuredR1csRowSourceGeometry {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn compact_structured_r1cs_row_source_geometry(
     relation: &CompactPublicKeyRelationCatalog,
 ) -> Result<CompactStructuredR1csRowSourceGeometry, CommonProofProverError> {
     let matrices = CompactStructuredR1csCatalog::derive(relation)?;
     let ordered_product_addresses = matrices.ordered_negacyclic_product_addresses(relation)?;
-    CompactStructuredR1csRowSourceGeometry::derive(relation, &matrices, &ordered_product_addresses)
+    CompactStructuredR1csRowSourceGeometry::derive(relation, &ordered_product_addresses)
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub(super) struct CompactStructuredR1csCatalog {
     public_input_length: u64,
     witness_length: u64,
@@ -459,24 +322,6 @@ pub(super) struct CompactStructuredR1csCatalog {
 
 impl CompactStructuredR1csCatalog {
     pub(super) fn derive(
-        relation: &CompactPublicKeyRelationCatalog,
-    ) -> Result<Self, RelationPlanError> {
-        let catalog = Self::derive_without_check(relation)?;
-        catalog.check(relation)?;
-        Ok(catalog)
-    }
-
-    fn resident_owned_heap_byte_length(&self) -> Result<u64, RelationPlanError> {
-        [
-            resident_vec_storage_byte_length(&self.public_vector_ordinals)?,
-            resident_vec_storage_byte_length(&self.private_small_vector_addresses)?,
-            resident_vec_storage_byte_length(&self.witness_segment_addresses)?,
-        ]
-        .into_iter()
-        .try_fold(0_u64, checked_resident_payload_add)
-    }
-
-    fn derive_without_check(
         relation: &CompactPublicKeyRelationCatalog,
     ) -> Result<Self, RelationPlanError> {
         let mut public_vector_ordinals = Vec::new();
@@ -560,7 +405,7 @@ impl CompactStructuredR1csCatalog {
             .padded_public_input_element_count
             .checked_add(relation.padded_witness_element_count)
             .ok_or(RelationPlanError::CountOverflow)?;
-        Ok(Self {
+        let catalog = Self {
             public_input_length: relation.padded_public_input_element_count,
             witness_length: relation.padded_witness_element_count,
             matrix_dimension,
@@ -568,15 +413,16 @@ impl CompactStructuredR1csCatalog {
             public_vector_ordinals,
             private_small_vector_addresses,
             witness_segment_addresses,
-        })
+        };
+        catalog.validate_relation(relation)?;
+        Ok(catalog)
     }
 
-    pub(super) fn check(
+    fn validate_relation(
         &self,
         relation: &CompactPublicKeyRelationCatalog,
     ) -> Result<(), RelationPlanError> {
-        if self != &Self::derive_without_check(relation)?
-            || self.public_input_length != self.witness_length
+        if self.public_input_length != self.witness_length
             || self.matrix_dimension != self.row_count
             || self.matrix_dimension
                 != self
@@ -1273,6 +1119,7 @@ impl CompactStructuredR1csCatalog {
     }
 }
 
+#[cfg(test)]
 pub(super) trait CompactStructuredAssignmentSource {
     fn padded_public_input_element_count(&self) -> u64;
 
@@ -1305,6 +1152,7 @@ pub(super) trait CompactStructuredAssignmentSource {
     }
 }
 
+#[cfg(test)]
 impl CompactStructuredAssignmentSource for CompactPublicKeyAssignment {
     fn padded_public_input_element_count(&self) -> u64 {
         self.memory_geometry().padded_public_input_element_count()
@@ -1347,6 +1195,7 @@ impl CompactStructuredAssignmentSource for CompactPublicKeyAssignment {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct CompactLookupLogDerivativeEvaluationCache {
     inverse_first_column_ordinal: u64,
@@ -1357,6 +1206,7 @@ struct CompactLookupLogDerivativeEvaluationCache {
     negated_weighted_table_reciprocal_sum: ProofChallengeExtensionElement,
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum CompactStructuredR1csRowSourcePreparationStep {
     LookupInverseSum,
@@ -1372,6 +1222,7 @@ pub(super) enum CompactStructuredR1csRowSourcePreparationStep {
     NegacyclicProductFold,
 }
 
+#[cfg(test)]
 pub(super) enum CompactStructuredR1csRowSourcePreparationPoll<
     'source,
     Assignment: CompactStructuredAssignmentSource + ?Sized,
@@ -1383,6 +1234,7 @@ pub(super) enum CompactStructuredR1csRowSourcePreparationPoll<
     Complete(Box<CompactStructuredR1csRowSource<'source, Assignment>>),
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CompactLookupLogDerivativePreparationPhase {
     InverseSum {
@@ -1404,6 +1256,7 @@ enum CompactLookupLogDerivativePreparationPhase {
     Complete,
 }
 
+#[cfg(test)]
 struct CompactLookupLogDerivativeEvaluationCachePreparation {
     inverse_first_column_ordinal: u64,
     inverse_first_witness_element: u64,
@@ -1418,6 +1271,7 @@ struct CompactLookupLogDerivativeEvaluationCachePreparation {
     phase: CompactLookupLogDerivativePreparationPhase,
 }
 
+#[cfg(test)]
 impl CompactLookupLogDerivativeEvaluationCachePreparation {
     fn new<Assignment: CompactStructuredAssignmentSource + ?Sized>(
         relation: &CompactPublicKeyRelationCatalog,
@@ -1670,6 +1524,7 @@ impl CompactLookupLogDerivativeEvaluationCachePreparation {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CompactNegacyclicProductPreparationPhase {
     FillPrivatePolynomial { next_coefficient_ordinal: u64 },
@@ -1682,12 +1537,14 @@ enum CompactNegacyclicProductPreparationPhase {
     Complete,
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct CompactNegacyclicProductPreparationGroup {
     private_address: CompactCenteredPrivateVectorAddress,
     ordered_product_addresses: Vec<CompactNegacyclicProductAddress>,
 }
 
+#[cfg(test)]
 struct CompactNegacyclicProductPreparation {
     ordered_groups: Vec<CompactNegacyclicProductPreparationGroup>,
     next_group_ordinal: usize,
@@ -1699,6 +1556,7 @@ struct CompactNegacyclicProductPreparation {
     phase: CompactNegacyclicProductPreparationPhase,
 }
 
+#[cfg(test)]
 impl CompactNegacyclicProductPreparation {
     fn new(
         relation: &CompactPublicKeyRelationCatalog,
@@ -2128,6 +1986,7 @@ impl CompactNegacyclicProductPreparation {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CompactStructuredR1csRowSourcePreparationPhase {
     LookupLogDerivative,
@@ -2135,6 +1994,7 @@ enum CompactStructuredR1csRowSourcePreparationPhase {
     Complete,
 }
 
+#[cfg(test)]
 pub(super) struct CompactStructuredR1csRowSourcePreparation<
     'source,
     Assignment: CompactStructuredAssignmentSource + ?Sized,
@@ -2151,6 +2011,7 @@ pub(super) struct CompactStructuredR1csRowSourcePreparation<
     phase: CompactStructuredR1csRowSourcePreparationPhase,
 }
 
+#[cfg(test)]
 impl<'source, Assignment: CompactStructuredAssignmentSource + ?Sized>
     CompactStructuredR1csRowSourcePreparation<'source, Assignment>
 {
@@ -2165,11 +2026,8 @@ impl<'source, Assignment: CompactStructuredAssignmentSource + ?Sized>
             return Err(CommonProofProverError::InvalidInput);
         }
         let ordered_product_addresses = matrices.ordered_negacyclic_product_addresses(relation)?;
-        let geometry = CompactStructuredR1csRowSourceGeometry::derive(
-            relation,
-            &matrices,
-            &ordered_product_addresses,
-        )?;
+        let geometry =
+            CompactStructuredR1csRowSourceGeometry::derive(relation, &ordered_product_addresses)?;
         let lookup_preparation = Some(CompactLookupLogDerivativeEvaluationCachePreparation::new(
             relation, &matrices, assignment,
         )?);
@@ -2290,6 +2148,7 @@ impl<'source, Assignment: CompactStructuredAssignmentSource + ?Sized>
     }
 }
 
+#[cfg(test)]
 pub(super) struct CompactStructuredR1csRowSource<
     'source,
     Assignment: CompactStructuredAssignmentSource + ?Sized,
@@ -2302,6 +2161,7 @@ pub(super) struct CompactStructuredR1csRowSource<
     geometry: CompactStructuredR1csRowSourceGeometry,
 }
 
+#[cfg(test)]
 impl<'source, Assignment: CompactStructuredAssignmentSource + ?Sized>
     CompactStructuredR1csRowSource<'source, Assignment>
 {
@@ -2469,6 +2329,7 @@ impl<'source, Assignment: CompactStructuredAssignmentSource + ?Sized>
 /// CFW caller. This distinction is load-bearing for knowledge extraction: a
 /// candidate witness must be checked against the production matrices rather
 /// than against the assignment that happened to prepare the row source.
+#[cfg(test)]
 pub(crate) struct CompactPublicKeyCfwMatrices<'source, 'assignment, 'public_input> {
     row_source: &'source CompactStructuredR1csRowSource<'assignment, CompactPublicKeyAssignment>,
     canonical_public_input: &'public_input [CompactChallengeField],
@@ -2478,6 +2339,7 @@ pub(crate) struct CompactPublicKeyCfwMatrices<'source, 'assignment, 'public_inpu
     lookup_challenge: CompactChallengeField,
 }
 
+#[cfg(test)]
 impl<'source, 'assignment, 'public_input>
     CompactPublicKeyCfwMatrices<'source, 'assignment, 'public_input>
 {
@@ -3003,6 +2865,7 @@ impl<'source, 'assignment, 'public_input>
     }
 }
 
+#[cfg(test)]
 impl CompactCfwR1csMatrices for CompactPublicKeyCfwMatrices<'_, '_, '_> {
     fn witness_length(&self) -> usize {
         self.witness_length
@@ -3111,6 +2974,7 @@ impl CompactCfwR1csMatrices for CompactPublicKeyCfwMatrices<'_, '_, '_> {
     }
 }
 
+#[cfg(test)]
 fn compact_signed_integer(value: i128) -> Result<CompactChallengeField, CompactCfwError> {
     base_element_from_signed_integer(value)
         .map(ProofChallengeExtensionElement::from_base)
@@ -3118,6 +2982,7 @@ fn compact_signed_integer(value: i128) -> Result<CompactChallengeField, CompactC
         .map_err(|_| CompactCfwError::InvalidMatrixSource)
 }
 
+#[cfg(test)]
 fn add_compact_witness_covector_entry(
     destination: &mut [CompactChallengeField],
     public_input_length: u64,
@@ -3136,6 +3001,7 @@ fn add_compact_witness_covector_entry(
     Ok(())
 }
 
+#[cfg(test)]
 impl<Assignment: CompactStructuredAssignmentSource + ?Sized> CompactCfwExternalRowSource
     for CompactStructuredR1csRowSource<'_, Assignment>
 {
@@ -3167,6 +3033,7 @@ impl<Assignment: CompactStructuredAssignmentSource + ?Sized> CompactCfwExternalR
     }
 }
 
+#[cfg(test)]
 fn extension_base_value(
     value: ProofChallengeExtensionElement,
 ) -> Result<ProofBaseFieldElement, CommonProofProverError> {
@@ -3177,6 +3044,7 @@ fn extension_base_value(
     ProofBaseFieldElement::from_canonical(coordinates[0]).map_err(Into::into)
 }
 
+#[cfg(test)]
 fn base_element_from_signed_integer(
     value: i128,
 ) -> Result<ProofBaseFieldElement, CommonProofProverError> {
@@ -3185,6 +3053,7 @@ fn base_element_from_signed_integer(
     ProofBaseFieldElement::from_canonical(canonical_value).map_err(Into::into)
 }
 
+#[cfg(test)]
 fn fallible_base_vector(
     capacity: u64,
 ) -> Result<Zeroizing<Vec<ProofBaseFieldElement>>, CommonProofProverError> {
@@ -3197,6 +3066,7 @@ fn fallible_base_vector(
     Ok(Zeroizing::new(values))
 }
 
+#[cfg(test)]
 fn fallible_extension_vector(
     capacity: u64,
 ) -> Result<Zeroizing<Vec<ProofChallengeExtensionElement>>, CommonProofProverError> {
@@ -4347,12 +4217,6 @@ mod tests {
         let assignment = lookup_materializer
             .finish()
             .expect("bounded lookup materialization finishes");
-        assert_eq!(
-            assignment
-                .memory_geometry()
-                .completed_assignment_payload_byte_length(),
-            68_943_880
-        );
         println!(
             "compact public-key focused owner phase complete: materialize lookup inverses elapsed_milliseconds={}",
             phase_started_at.elapsed().as_millis()
@@ -4388,10 +4252,6 @@ mod tests {
             }
         };
         assert_eq!(row_source_preparation_poll_count, 760);
-        assert_eq!(
-            row_source.geometry().product_cache_payload_byte_length(),
-            8_388_608
-        );
         println!(
             "compact public-key focused owner phase complete: prepare structured row source elapsed_milliseconds={}",
             phase_started_at.elapsed().as_millis()
@@ -4649,18 +4509,6 @@ mod tests {
         assert_eq!(geometry.transform_butterfly_count(), 37_224_448);
         assert_eq!(geometry.pointwise_multiplication_count(), 2_097_152);
         assert_eq!(geometry.negacyclic_fold_subtraction_count(), 1_048_576);
-        assert_eq!(geometry.product_cache_payload_byte_length(), 8_388_608);
-        assert_eq!(geometry.product_cache_catalog_byte_length(), 1_536);
-        assert_eq!(
-            geometry.product_cache_resident_owned_byte_length(),
-            8_390_144
-        );
-        assert_eq!(geometry.peak_additional_payload_byte_length(), 9_438_800);
-        assert_eq!(
-            geometry.peak_additional_resident_owned_byte_length(),
-            9_442_984
-        );
-        assert_eq!(geometry.ready_row_source_control_byte_length(), 1_872);
         assert_eq!(geometry.lookup_inverse_element_count(), 950_272);
         assert_eq!(geometry.lookup_table_value_count(), 131_072);
         assert_eq!(

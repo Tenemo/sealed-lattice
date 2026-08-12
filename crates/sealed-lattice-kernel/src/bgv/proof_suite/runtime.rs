@@ -1039,8 +1039,6 @@ pub(crate) use generation_worker::{
     CommonProofGenerationTestCheckpointAuthority,
     MAXIMUM_COMMON_PROOF_GENERATION_CURSOR_MANIFEST_BYTE_LENGTH,
 };
-#[cfg(test)]
-pub(crate) use storage_transport::CommonProofStorageTransactionMemoryGeometry;
 pub(crate) use storage_transport::{
     CommonProofStorageTransactionRuntime, PollableCommonProofByteSink,
     PollableCommonProofByteSinkError, ResidentCommonProofByteSource, ResidentCommonProofInputChunk,

@@ -6,11 +6,15 @@
 //! derives that lag from verifier-owned Merkle geometry and binds the exact
 //! transcript cursor and exact encoded proof prefix at every response move.
 
-use super::compact_proof_wire::{CompactProofWireAssembler, CompactProofWireGeometry};
+#[cfg(test)]
+use super::compact_proof_wire::CompactProofWireAssembler;
+use super::compact_proof_wire::CompactProofWireGeometry;
 use super::compact_response_merkle::{
     CompactResponseMerkleError, CompactResponseMerkleGeometry, CompactResponseQuerySchedule,
 };
+#[cfg(test)]
 use super::compact_transcript::{CompactProverTranscript, CompactTranscriptError};
+#[cfg(test)]
 use super::prover::CommonProofGenerationCheckpointBoundary;
 use crate::foundation::Hash512;
 use crate::hashing::StreamingHash512;
@@ -19,17 +23,30 @@ const COMPACT_RESPONSE_CHECKPOINT_SCHEDULE_DIGEST_DOMAIN: &str =
     "sealed-lattice/proof/compact-response-checkpoint-schedule/v1";
 const COMPACT_RESPONSE_CHECKPOINT_COMMITTED_STATE_DIGEST_DOMAIN: &str =
     "sealed-lattice/proof/compact-response-checkpoint-committed-state/v2";
+#[cfg(test)]
 const COMPACT_RESPONSE_CHECKPOINT_POSITION_VERSION: u8 = 1;
+#[cfg(test)]
 const COMPACT_RESPONSE_CHECKPOINT_POSITION_STAGE: u8 = 1;
+#[cfg(test)]
 const MAXIMUM_COMPACT_CONSTRUCTION_PRIVATE_RANDOMNESS_CURSOR_BYTE_LENGTH: usize = 16 * 1_024;
+
+pub(crate) const fn compact_checkpoint_binding_domains() -> [&'static str; 2] {
+    [
+        COMPACT_RESPONSE_CHECKPOINT_SCHEDULE_DIGEST_DOMAIN,
+        COMPACT_RESPONSE_CHECKPOINT_COMMITTED_STATE_DIGEST_DOMAIN,
+    ]
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CompactGenerationCheckpointError {
     InvalidGeometry,
+    #[cfg(test)]
     InvalidPrivateRandomnessCursor,
     LengthOverflow,
+    #[cfg(test)]
     WrongResponseBoundary,
     ResponseMerkle(CompactResponseMerkleError),
+    #[cfg(test)]
     Transcript(CompactTranscriptError),
 }
 
@@ -39,6 +56,7 @@ impl From<CompactResponseMerkleError> for CompactGenerationCheckpointError {
     }
 }
 
+#[cfg(test)]
 impl From<CompactTranscriptError> for CompactGenerationCheckpointError {
     fn from(error: CompactTranscriptError) -> Self {
         Self::Transcript(error)
@@ -142,10 +160,16 @@ impl CompactResponseCheckpointSchedule {
         self.completed_proof_response_counts.len()
     }
 
+    #[cfg(test)]
     pub(crate) const fn checkpoint_schedule_digest(&self) -> Hash512 {
         Hash512::from_bytes(self.dependency_digest)
     }
 
+    pub(crate) fn completed_proof_response_counts(&self) -> &[u32] {
+        &self.completed_proof_response_counts
+    }
+
+    #[cfg(test)]
     pub(crate) fn lagging_checkpoint_count(&self) -> usize {
         self.completed_proof_response_counts
             .iter()
@@ -157,6 +181,7 @@ impl CompactResponseCheckpointSchedule {
             .count()
     }
 
+    #[cfg(test)]
     pub(crate) fn maximum_pending_proof_response_count(&self) -> usize {
         self.completed_proof_response_counts
             .iter()
@@ -170,6 +195,7 @@ impl CompactResponseCheckpointSchedule {
             .unwrap_or(0)
     }
 
+    #[cfg(test)]
     pub(crate) fn completed_proof_response_count(
         &self,
         completed_transcript_response_count: usize,
@@ -193,6 +219,7 @@ impl CompactResponseCheckpointSchedule {
 /// common private-coin source. The host separately binds the suite and action
 /// context, proof attempt and source authority, the common private-coin cursor
 /// manifest, external object identities and digests, and deletion state.
+#[cfg(test)]
 pub(crate) fn compact_response_generation_checkpoint_boundary(
     checkpoint_schedule: &CompactResponseCheckpointSchedule,
     prover_transcript: &CompactProverTranscript<'_>,
@@ -295,7 +322,6 @@ mod tests {
 
     fn proof_wire_geometry() -> CompactProofWireGeometry {
         CompactProofWireGeometry::new(
-            1,
             (0_u32..u32::try_from(RESPONSE_COUNT).expect("small response count"))
                 .map(|response_ordinal| {
                     CompactProofResponseWireGeometry::new(
@@ -387,7 +413,7 @@ mod tests {
         Vec<u8>,
     ) {
         let geometry =
-            CompactPublicInputWireGeometry::new(1, 1, 1).expect("small public-input geometry");
+            CompactPublicInputWireGeometry::new(1, 1).expect("small public-input geometry");
         let bindings = CompactPublicInputBindings::new(
             Hash512::from_bytes([0x51; Hash512::BYTE_LENGTH]),
             Hash512::from_bytes([0x52; Hash512::BYTE_LENGTH]),
@@ -603,15 +629,10 @@ mod tests {
             vec![FixedUniformDistinctQueryGeometry::new(2, 1)],
         )
         .unwrap();
-        let proof_geometry = CompactProofWireGeometry::new(
-            1,
-            vec![
-                CompactProofResponseWireGeometry::new(0, 1, 0, 1, 1, first_message_geometry)
-                    .unwrap(),
-                CompactProofResponseWireGeometry::new(1, 1, 0, 1, 0, second_message_geometry)
-                    .unwrap(),
-            ],
-        )
+        let proof_geometry = CompactProofWireGeometry::new(vec![
+            CompactProofResponseWireGeometry::new(0, 1, 0, 1, 1, first_message_geometry).unwrap(),
+            CompactProofResponseWireGeometry::new(1, 1, 0, 1, 0, second_message_geometry).unwrap(),
+        ])
         .unwrap();
         let merkle_geometries = vec![
             CompactResponseMerkleGeometry::new(
